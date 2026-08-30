@@ -271,6 +271,11 @@ version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "RustCrypto/dalek AEAD+X25519 stack pulled in by the opt-in, publish=false sparq-e2ee-ng crate (XChaCha20-Poly1305 + X25519 wrap); no trusted-import audit available upstream. [SONNET-4.6]"
 
+[[exemptions.chacha20]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+notes = "Advisory-clearing patch upgrade; the prior 0.10.0 release is covered by the imported ISRG audit. [GPT-5.6]"
+
 [[exemptions.chacha20poly1305]]
 version = "0.10.1"
 criteria = "safe-to-deploy"
@@ -672,7 +677,7 @@ criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge feature (p256 path); no upstream audit covers this exact version [OPUS-4.8]"
 
 [[exemptions.h2]]
-version = "0.4.15"
+version = "0.4.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.h3]]
