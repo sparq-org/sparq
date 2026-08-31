@@ -1416,12 +1416,8 @@ jobs:
           files: README.md AGENTS.md CONTRIBUTING.md SECURITY.md skills docs crates
           separator: " "
           fail_on_error: false
-          # Preserve the v2 reviewdog engine while adopting the v3 action bundle; the v3 default
-          # exits 1 in this local-reporter lane even though Vale findings remain advisory.
-          reviewdog_version: 0.17.0
-          # `local` reporter prints to the job log — no PR-annotation write scope
-          # needed (top-level permissions stay read-only). Advisory anyway.
-          reporter: local
+          # [GPT-5] The v3 default (`github-pr-annotations`) reports through the runner log, so
+          # this advisory lane keeps the workflow's read-only permissions and needs no PR writes.
           token: ${{ github.token }}
 
       # ---- former job: external-links (lychee online, advisory) ----
