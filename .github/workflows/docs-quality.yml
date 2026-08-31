@@ -1413,8 +1413,7 @@ jobs:
         uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3.0.0
         with:
           version: 3.9.1
-          files: README.md AGENTS.md CONTRIBUTING.md SECURITY.md skills docs crates
-          separator: " "
+          files: '["README.md","AGENTS.md","CONTRIBUTING.md","SECURITY.md","skills","docs","crates"]'
           fail_on_error: false
           # [GPT-5] The v3 default (`github-pr-annotations`) reports through the runner log, so
           # this advisory lane keeps the workflow's read-only permissions and needs no PR writes.
