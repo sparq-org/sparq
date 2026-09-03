@@ -10,6 +10,11 @@
 > schedules are now explicitly best-effort; broker recovery is level-triggered; App
 > installation permission is separated from runtime-token authority; and removal of the
 > resident waiter requires a merge-independent, already-on-main recovery transport.
+> Hardened once more after protocol review on 2026-09-03 `[GPT-5.6-SOL]`: every
+> gating-affecting transition now advances a durable timeline epoch; worker launch uses a
+> fenced outbox plus worker-side claims; broad Actions authority is isolated outside Actions;
+> the liveness claim is conditional on a measured capacity envelope; and post-cleanup recovery
+> requires an independent data path and a distinct enforceable publisher identity.
 > The operative mitigation today remains the sq-90cv4 *adaptive saturation budget* in
 > `scripts/ci_summary_gate.py`.
 
@@ -50,7 +55,7 @@ verdict honesty, but it leaves throughput on the table.
 
 The 2026-07 version of this record recommended re-publishing the verdict as a **commit
 status** and **migrating branch protection** to that context, listing the migration as
-design risk #1. Seven corrections now constrain any implementation:
+design risk #1. Eleven corrections now constrain any implementation:
 
 1. **The context name stays fixed, but its integration must migrate.** sq-6vshe.19
    constrains the required check name to remain exactly `gate`, which forecloses the old
@@ -79,9 +84,29 @@ design risk #1. Seven corrections now constrain any implementation:
 6. **App installation eligibility is not runtime authority.** The installation carries
    the permissions GitHub requires to publish checks and be selected as an expected source;
    each runtime token is reduced to this repository and `checks: write` only (§4, §7.2).
-7. **A rollback commit is not a recovery mechanism.** Cleanup may remove the active waiter
-   only after an inert App-15368 recovery transport is already on `main` and proven able to
-   recover exact heads without merging through the component being recovered (§9).
+7. **A rollback commit is not a recovery mechanism, and App 15368 is not a recovery
+   provenance boundary.** The same App/name pair cannot distinguish the reviewed recovery
+   producer from a target-controlled collision. Cleanup may remove the active waiter only
+   after an independent recovery state/launch/report/verdict path and a distinct recovery App
+   (or another source identity branch protection can enforce) are provisioned and drilled.
+   The inert App-15368 transport may remain on `main` for emergency diagnostics, but admission
+   stays paused and its result is never credited toward reopening (§9).
+8. **A SHA is not a gating generation.** Label, readiness, queue-membership, rerun, and
+   operator transitions can move A→B→A without changing the head or final snapshot. A durable
+   monotonic gating epoch and immutable timeline high-watermark are part of every desired
+   digest, and are advanced before or atomically with every broker-origin mutation (§6.3).
+9. **A dispatch response is not a durable launch record.** GitHub can accept a dispatch just
+   before the broker loses the response. A fenced dispatch outbox and worker-side claim make
+   retries safe and let a later sweep repair both stranded and duplicate launches (§6.3,
+   §7.1).
+10. **`actions: write` is broad.** It authorizes more than dispatch: the credential can also
+    rerun, cancel, enable, and disable workflows. No Actions job receives it. A separately
+    authenticated launch service holds that broad repository-scoped credential behind a
+    fixed-workflow, fixed-ref API and a fenced audit/outbox contract (§7.2).
+11. **Bounded liveness is conditional on a supported envelope.** Phase 5 must derive and
+    publish limits for target count, due backlog, pagination, API budget/backoff, lease wait,
+    dispatch backlog, and isolated compute. Admission pauses outside that measured envelope;
+    the design does not promise a deadline it has not proved (§7.4).
 
 The original §4 claim still holds and is the reason this is tractable at all: the verdict
 brain (`render_verdict`, `forgive_superseded`, `failfast_failures`, `is_advisory`, …) is
@@ -140,8 +165,10 @@ pool, or capacity that is separately isolated and proven available under full po
 saturation. It runs the same reviewed broker/evaluator core described in §7, pins its code
 and target repository, executes no target-controlled content, and has an explicit
 `LIVENESS_SLO`, fixed at no more than five minutes from a due deadline to the terminal
-publisher update. A genuine hang must become RED no later than its wall-clock deadline plus
-that SLO.
+publisher update within the measured supported-capacity envelope in §7.4. A genuine hang must
+become RED no later than its wall-clock deadline plus that SLO while the target population,
+backlog, API budget/backoff, and isolated capacity remain inside the envelope; an overrun pauses
+admission and makes no unsupported deadline claim.
 The Actions schedule remains an opportunistic reconciliation path for ordinary missed
 events, but is never credited toward this bound. If the independent path, isolated
 capacity, out-of-band alarm, and saturation evidence cannot be provided, the cutover is a
@@ -180,9 +207,12 @@ There are two deliberately different permission surfaces:
   dedicated-App token for the Sparq repository id alone and reduces it to `checks: write`;
   it does not carry `statuses: write` or organization/repository administration. Actions
   adapters request fenced mutations from that service and never receive the App token or
-  minting credential. Separate workflow-dispatch credentials remain independently
-  least-privileged. GitHub documents repository and permission narrowing for installation
-  tokens here:
+  minting credential. They likewise receive no `actions: write` token: dispatch requests go
+  through the authenticated external launch service in §7.2. That service's repository-scoped
+  credential is still broad at GitHub's permission boundary — it can dispatch and rerun work,
+  and cancel, enable, or disable workflows — so its reviewed API exposes only the fixed
+  default-branch worker launch operation and every use is fenced and audited. GitHub documents
+  repository and permission narrowing for installation tokens here:
   <https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app>.
 
 Phase 4 must prove both surfaces independently: a checks-only runtime token can create and
@@ -228,18 +258,30 @@ This is a constraint derived from the invariant, not a stylistic preference.
 
 ## 6. Finding D — the state store and its write race
 
-State that must survive between invocations is small (well under 1 KB of JSON): the settle
-counter, the completed-count history, the fail-fast suspect set, the unsatisfiable-hold
+Evaluator state that must survive between invocations is small (well under 1 KB of JSON): the
+settle counter, the completed-count history, the fail-fast suspect set, the unsatisfiable-hold
 counter, consecutive fetch failures, `extension_started`, and the new start timestamp.
 
-**Where:** the evaluator-owned check-run on the head SHA. Its `external_id` is a short,
-versioned identity (`sparq-gate:v1:<phase>:<repository-id>:<head-sha>`); its `output.text`
-carries a versioned machine envelope containing the same phase, repository id, head SHA,
-schema version, and JSON state. Before loading state, the evaluator validates all of those
-fields, the check-run's exact phase name (`gate-shadow` before cutover, `gate` after it),
-and the dedicated publisher App id. The codec rejects a mismatched identity or unsupported
-schema version, preserves the human verdict summary separately, and tolerates unknown
-fields within a supported version for forward compatibility.
+**Normal-mode mirror:** the evaluator-owned check-run on the head SHA. Its `external_id` is a
+short, versioned identity (`sparq-gate:v1:<phase>:<repository-id>:<head-sha>`); its
+`output.text` carries a versioned machine envelope containing the same phase, repository id,
+head SHA, schema version, gating epoch, sealed-manifest digest, and JSON evaluator state.
+Before loading state, the evaluator validates all of those fields, the check-run's exact phase
+name (`gate-shadow` before cutover, `gate` after it), and the dedicated publisher App id. The
+codec rejects a mismatched identity or unsupported schema version, preserves the human verdict
+summary separately, and tolerates unknown fields within a supported version for forward
+compatibility.
+
+The check-run is not the only copy needed for recovery. The isolated control plane keeps an
+append-only, durably replicated per-target journal of immutable timeline receipts, the
+monotonic gating epoch, desired intent, sealed manifests, evaluator checkpoints, dispatch
+outbox rows, worker claims, and every requested/published transition. A journal entry is
+committed before its corresponding GitHub side effect; the normal publisher envelope mirrors
+the committed checkpoint digest. Normal evaluation requires the mirror and journal to agree.
+A missing or mismatched side is fail-closed and reconciled from authoritative GitHub state,
+never silently selected as the winner. The separate recovery plane in §7.5 may retain this
+journal as audit evidence, but it rebuilds its own state from authoritative sources and cannot
+require either the primary journal or failed publisher to remain available.
 
 The shared mutation lease is deliberately not stored in the check-run it protects. The
 isolated control plane provides a durable per-head lease with monotonically increasing
@@ -248,13 +290,17 @@ check-run writes pass through the publisher-mutation service that exclusively ho
 reduced App token. It atomically rejects a request whose fencing token is no longer current
 before issuing the serialized GitHub mutation, so an expired caller cannot resume and
 overwrite newer state. Merely copying a token into `output.text` would not fence the GitHub
-API and is explicitly insufficient. Verdict state remains in the check-run envelope; the
-lease store contains coordination metadata and the mutation service may publish only a
-request already authorized by the broker/evaluator state machine. Its API accepts no
-free-form GitHub payload: it authenticates the reviewed caller and revalidates repository,
+API and is explicitly insufficient. Normal-mode verdict state is committed in the independent
+journal and mirrored in the check-run envelope; the lease namespace remains separate from both,
+and the mutation service may publish only a request already authorized by the broker/evaluator
+state machine. Its API accepts no free-form GitHub payload: it authenticates the reviewed caller
+and revalidates repository,
 head SHA, check id/name/App, expected prior-state digest, desired-generation intent, fencing
 token, and requested state transition. A mismatch or an evaluator request for success
-without the complete sealed-generation proof is durably failed closed.
+without the complete sealed-generation proof is durably failed closed. The service commits
+the new evaluator checkpoint and publication intent to the independent journal before the
+GitHub PATCH, then records and GET-verifies the observed result. A retry with the same
+transition id is idempotent; a different transition under an old fence is rejected.
 
 ### 6.1 The publisher check is transport state, never verdict input
 
@@ -419,55 +465,133 @@ Every automated mechanism that can create or rerun a target-SHA gating row uses 
 trusted generation broker. Native target-code workflows no longer publish their own
 target-SHA gating rows; the broker creates pending sibling rows and launches unprivileged
 workers, and trusted reporters update only the broker-created rows. A doorbell payload is
-never the generation intent. On every invocation the broker re-reads authoritative current
-PR/merge-group state plus the committed launch inventory and computes a deterministic
-desired-generation digest. The publisher envelope durably records that intent, its nonce,
-and `manifest_complete: false` before any worker side effect. A later reconciliation can
-therefore reconstruct and finish the desired generation without the triggering event.
+never the generation intent.
+
+Current state alone is also insufficient: on one unchanged SHA, readiness or labels can move
+A→B→A and leave the same final snapshot behind a now-stale green result. The independent
+control-plane journal therefore maintains, for every target, a monotonically increasing
+`gating_epoch` and a high-watermark vector over immutable, ordered receipts for every
+transition that can change admission, the required lane set, or the validity of existing
+evidence. Those transitions include readiness, gating-label, reopen/close, enqueue/dequeue,
+explicit rerun, launch-inventory revision, and protected operator commands. The broker
+paginates and records
+all new authoritative timeline and Actions-attempt receipts on every sweep, even when their
+net effect returns to the prior state. A gap, truncation, unsupported mutation channel, or
+unprovable ordering durably neutralizes prior success and pauses admission.
+
+A committed source map assigns each transition class either to the broker's write-ahead
+request stream or to a live-proven GitHub event/timeline/attempt stream with a stable immutable
+id, source-specific cursor, complete-pagination rule, and replay horizon. A both-direction
+repository test inventories every gating-affecting trigger and writer and rejects an unmapped
+class or an unused source-map entry. Phase 5 must prove replay after dropped deliveries for
+every mapped GitHub source. If the platform exposes no total, replayable receipt source for a
+transition that an untrusted actor can use to affect admission, that transition cannot be
+supported and cutover is a no-go; polling the final snapshot is not an alternative.
+
+Every automated gating-affecting GitHub mutation enters through the broker. Under a fresh
+fence, it first atomically appends the immutable request receipt and advances `gating_epoch`,
+then reopens the publisher and only then performs the requested GitHub mutation. Platform- or
+user-originated state changes are treated as untrusted proposals, not as immediately effective
+gating transitions: a later webhook alone is insufficient. The independent ingress must first
+durably receive the immutable source receipt, and the broker must advance the epoch and reopen
+the publisher before the admission controller may reflect that state in its manifest,
+auto-merge, or queue decision. If GitHub would make a supported transition merge-effective
+before that interlock, cutover is a no-go. A trusted operator who can bypass the admission
+interlock must first de-arm the target and request the transition through the broker; if
+repository policy cannot enforce or accept that administrator boundary, cutover is rejected.
+
+The write-ahead request remains a mutation-outbox row until an authoritative readback proves
+the exact effect. A crash before or after the GitHub call retries the same receipt id under a
+fresh fence; the epoch never rolls back, and failure to obtain the intended readback leaves the
+publisher non-successful and admission paused. This makes the epoch ordering itself
+level-triggered rather than dependent on the mutating request's response.
+
+On every invocation the broker re-reads the receipts, authoritative current PR/merge-group
+state, Actions attempts, and committed launch inventory. It computes
+`H(schema, repository, target identity, head SHA, gating_epoch, timeline high-watermark vector,
+admission state, inventory revision, required lanes)` as the desired-generation digest. The
+independent journal records that intent, its monotonic generation nonce, and
+`manifest_complete: false` before any GitHub or worker-launch side effect; the publisher
+envelope mirrors the committed digest. A later reconciliation can therefore reconstruct and
+finish the desired generation without the triggering event or the publisher as its sole copy.
 
 Under the shared fenced per-head mutation lease, the broker:
 
-1. validates current target membership and the unique publisher using the complete raw
-   enumeration contract in §6.1;
-2. compares the authoritative desired-generation digest with the durable intent and sealed
-   manifest; if they already match, reconciles any missing reporter/worker state rather than
-   starting a duplicate generation;
-3. otherwise updates the publisher to `in_progress`, clears its terminal conclusion,
-   records the desired-generation digest and a monotonically increasing generation nonce,
-   and marks the manifest incomplete;
-4. GETs the publisher again and verifies its id, repository/head/App identity, intent,
-   nonce, fencing token, and non-terminal state;
+1. exhaustively ingests and journals every new gating-affecting receipt, validates the
+   high-watermark, current target/admission state, and publisher ownership/collision set using
+   §6.1, and rejects a stale fence or incomplete source enumeration;
+2. compares the epoch-bound desired digest with the durable intent and sealed manifest; if
+   they already match, it reconciles the durable launch outbox, worker claims, reporters, and
+   evaluator checkpoint rather than starting a duplicate generation;
+3. otherwise commits an incomplete intent with the current `gating_epoch` and a monotonically
+   increasing generation nonce to the independent journal, then requests the mutation service
+   to create or set the publisher `in_progress`, clear any terminal conclusion, and mirror that
+   intent;
+4. GETs the publisher again and verifies its id, repository/head/App identity, epoch, intent,
+   nonce, fencing token, checkpoint digest, and non-terminal state;
 5. before the integration cutover, requests a fresh authenticated resident attempt and
    GET-verifies that the App-15368 `gate` is non-terminal; if that cannot be proved, the
    target must already be de-armed or admission must be globally paused;
-6. creates or reuses exactly the pending sibling rows required by the intent, records each
-   worker/reporter idempotency key, seals the complete generation manifest, and GET-verifies
-   it; and only then
-7. revalidates target/admission state and dispatches or reattaches exactly one worker per
-   manifest lane with authenticated generation/run correlation.
+6. creates or reuses exactly the pending sibling rows required by the intent and, in one
+   durable transaction, seals the complete generation manifest and creates one pending launch
+   outbox row per lane; it then mirrors and GET-verifies the sealed manifest; and only then
+7. re-ingests the timeline, revalidates the epoch, target/admission state, and manifest, and
+   asks the external launch service to pump due outbox rows. No worker can claim work until all
+   those checks remain current.
 
 Step 5 is the pre-cutover stale-green interlock: reopening a non-required shadow publisher
 alone is not credited with revoking the resident required result. The resident sees the
 new incomplete manifest and its active bootstrap guard holds while the broker builds the
-generation. No automated same-SHA label or state mutation that changes the gating manifest
-may occur outside this transaction. If a target merges or leaves admission before the
-final revalidation, the broker aborts without launching work.
+generation. No automated same-SHA mutation that can change admission, the gating manifest, or
+evidence validity may occur outside the epoch transaction. If a target merges, leaves
+admission, or gains an unreceipted transition before the final revalidation, the broker aborts
+without launching work and the next sweep reconciles the newer epoch.
+
+Each outbox row has a stable
+`launch_key = H(repository, target kind, head SHA, gating_epoch, generation nonce, lane)` and a
+state machine `pending → dispatching → claimed → running → reported → terminal`. The launch
+service records an attempt under the current fence before calling the fixed default-branch
+`workflow_dispatch`. GitHub does not offer an idempotency key for that call, so a successful
+HTTP response is not the exactly-once boundary. Every worker first authenticates to the
+control plane with its GitHub OIDC job/run identity and attempts a compare-and-swap claim on
+the stable `launch_key`. The claim service verifies the repository id, exact allowlisted
+default-branch `job_workflow_ref`, reviewed execution SHA, run id/attempt, environment, and
+matching pending outbox attempt against the GitHub API; knowledge of a launch key or an OIDC
+token from a target-defined workflow is insufficient. Exactly one current run receives a
+monotonically fenced claim token; duplicate runs receive no target data and terminate without
+executing the lane. Reporters must present that claim token as well as the sealed
+epoch/generation/lane identity.
+
+If the service crashes after GitHub accepts a dispatch but before the response is recorded,
+the outbox remains unresolved. A later sweep correlates any observed run or worker claim and,
+after the configured no-claim deadline, may retry the same `launch_key`. The worker-side claim
+makes a duplicate dispatch safe, while retry makes an accepted-but-never-started dispatch
+non-stranding. If a claimed worker dies, expiry creates a higher claim fence for a replacement;
+the old worker's late report is rejected. Outbox completion requires a verified terminal
+sibling row and journaled reporter receipt, not merely a dispatch response or run conclusion.
+Dispatch attempts, claim reassignments, and terminalization are all level-triggered and
+idempotent under the shared per-head fence.
 
 For a genuinely new head with no publisher, the missing dedicated-App required context is
 already fail-closed; the broker creates it pending before any target row. Until that first
-publisher exists, current target membership plus the committed launch inventory is the
-durable, reconstructible source of desired intent: both sweep paths rediscover it without a
-doorbell. If a SHA has been seen before — including reopen, re-arm, or reuse by another PR
-— the broker treats it as a same-SHA generation and reopens the existing publisher before
-launching work. Initial and replacement generations therefore use one ordering rule rather
-than assuming a SHA is novel from an event type.
+publisher exists, authoritative target membership, journaled timeline receipts, and the
+committed launch inventory are the durable, reconstructible source of desired intent: both
+sweep paths rediscover it without a doorbell. If a SHA has been seen before — including
+reopen, re-arm, or reuse by another PR — the broker requires a later `gating_epoch` and reopens
+the existing publisher before launching work. A final state equal to an earlier snapshot can
+never reuse its green because the epoch and high-watermark remain different. Initial and
+replacement generations therefore use one ordering rule rather than assuming a SHA is novel
+from an event type.
 
 The evaluator may return success only after a final §6.1 re-read proves that every gating
-row belongs to the sealed manifest and is terminal. Any unknown, unsealed, future, or
-mixed-generation row fails closed. Native `pull_request`, `merge_group`, label, readiness,
-and reporter launch paths are machine-inventoried and may only ring a non-gating doorbell;
-every target-row launch goes through the broker. Inventory alone is not credited with
-ordering — the create/reopen verification and complete pending manifest precede dispatch.
+row belongs to the sealed manifest and is terminal, every outbox row is terminal, and the
+timeline high-watermark and `gating_epoch` still match the independent journal. Any unknown,
+unsealed, future, or mixed-generation row, unclaimed launch, late timeline receipt, or journal
+mismatch fails closed. Native `pull_request`, `merge_group`, label, readiness, and reporter
+launch paths are machine-inventoried and may only ring a non-gating doorbell or authenticated
+external ingress; every target-row launch goes through the broker. Inventory alone is not
+credited with ordering — the epoch receipt, publisher reopen verification, complete pending
+manifest, and durable outbox precede dispatch.
 
 GitHub write-permission holders can still invoke Actions reruns or gating label/state
 changes directly, so they are an explicit trusted-operator boundary. The runbook forbids
@@ -477,15 +601,21 @@ generation. If the deployment threat model requires technical enforcement agains
 repository write administrators, this platform route cannot provide it and cutover is
 rejected.
 
-An adversarial integration test pauses the broker between the verified publisher reopen
-and replacement dispatch for both a PR and a merge group. During shadow trials the targets
-remain de-armed and the test proves the ordering directly. A pre-cutover prior-green case
-proves the fresh resident attempt is non-terminal before any replacement row is created;
-after the dedicated integration becomes required, a canary proves `gate` is already
-pending throughout that window and the target cannot merge until the new generation
-finishes. Companion tests reject direct/unsealed reruns, late reporters, mixed generations,
-and a publisher that changes between PATCH and verification. Latency samples are useful
-operational evidence but do not substitute for this ordering proof.
+Adversarial integration tests pause the broker between the epoch receipt, verified publisher
+reopen, manifest seal, outbox commit, dispatch call, claim, and replacement report for both a
+PR and a merge group. During shadow trials the targets remain de-armed and the tests prove the
+ordering directly. A pre-cutover prior-green case proves the fresh resident attempt is
+non-terminal before any replacement row is created; after the dedicated integration becomes
+required, a canary proves `gate` is already pending throughout that window and the target
+cannot merge until the new generation finishes. A same-SHA A→B→A case drops both doorbells:
+the later sweep must ingest both immutable receipts, advance the epoch twice, reject the old
+reporter, and keep the prior green unusable even though the final snapshot matches. Dispatch
+cases crash immediately before and after GitHub accepts the request, start duplicate workers,
+expire a winning claim, and deliver both old and replacement reports; they must show no
+stranded lane, at most one active claimant, and acceptance only from the newest claim fence.
+Companion tests reject direct/unsealed reruns, missing timeline pages, late reporters, mixed
+generations, and a publisher that changes between PATCH and verification. Latency samples are
+useful operational evidence but do not substitute for these ordering proofs.
 
 **The race:** N siblings completing at once means N concurrent evaluations
 read-modify-writing the same state. The original §3.5 advised `cancel-in-progress: true`
@@ -507,7 +637,13 @@ not share a replaceable pending queue:
   application lease `gate-mutate:v1:<repository-id>:<target-kind>:<head-sha>`. The
   isolated liveness service uses this lease too, so it cannot race an Actions invocation.
   Only the mutation service can PATCH with the App token, and it rejects a stale fencing
-  token before the serialized write.
+  token before the serialized write; and
+- worker launch uses a per-lane durable CAS record keyed by
+  `gate-launch:v1:<repository-id>:<target-kind>:<head-sha>:<gating-epoch>:<lane>`, not an
+  Actions concurrency group. Dispatch retry may create more than one Actions run, but only
+  one current claimant receives the initial target data and only the newest claim fence may
+  report. A superseded claimant may finish already-started local compute after its lease is
+  lost, but it has no credentialed side effect and its report is rejected.
 
 Actions concurrency may replace one pending run with another. That is acceptable only
 within a role because the retained broker invocation fully reconciles the desired generation
@@ -515,27 +651,30 @@ and the retained evaluator fully re-reads the world. An evaluator event can neve
 only pending broker. Correctness does **not** depend on the number, ordering, replacement,
 or retention of evaluator events, and liveness does not depend on retention of a particular
 broker event because both sweep paths rediscover every eligible target and enqueue broker
-reconciliation. No invocation applies an event as an incremental delta.
+reconciliation. No invocation applies an event as an incremental delta, and no replaced
+Actions run can delete a journaled epoch, manifest, outbox row, or worker claim.
 
-Evaluator-level coalescing is an idempotent fast path in the persisted state: record a
-digest of the validated, transport-filtered observation plus the next wall-clock deadline.
-A serialized invocation that sees the same digest and no deadline due exits without
-advancing counters or writing the publisher. If the observation changed, or a deadline is
-due, it evaluates and stores the new digest atomically with the state update. Extra queued
-invocations are therefore harmless fast no-ops rather than a correctness assumption about
-platform queueing. The concurrency primitive's role is documented by GitHub's concurrency
-contract:
+Evaluator-level coalescing is an idempotent fast path in the persisted state: record a digest
+of the validated, transport-filtered observation, `gating_epoch`, timeline high-watermark,
+sealed-manifest/outbox state, and next wall-clock deadline. A serialized invocation may exit
+without advancing counters or writing the publisher only when that entire digest is unchanged,
+all authoritative receipt sources were exhaustively read, and no deadline is due. If any part
+changed, or a deadline is due, it evaluates and stores the new checkpoint in the independent
+journal before mirroring it to the publisher. Extra queued invocations are therefore harmless
+fast no-ops rather than a correctness assumption about platform queueing. The concurrency
+primitive's role is documented by GitHub's concurrency contract:
 <https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency>.
 
 Creation must also be idempotent. Under the shared fenced lease the broker/evaluator applies
 the identity and collision rules in §6.1, creates one publisher only when there is no
 collision, and never silently picks a winner from duplicate required contexts. The
 evaluator refuses success when the durable desired intent is absent, differs from current
-authoritative target state, is incomplete, or names any missing worker/reporter. Publisher
-reopen and sibling launch follow the generation-sealing protocol above; observing an
-asynchronous event is never used to claim that stale success was revoked in time. The
-Checks update contract permits the App-owned run's status to be updated, and the broker's
-PATCH/GET ordering is covered by the adversarial tests in §6.3.
+authoritative target state or journaled epoch, is incomplete, has a non-terminal outbox/claim,
+or names any missing worker/reporter. Publisher reopen and sibling launch follow the
+generation-sealing protocol above; observing an asynchronous event is never used to claim that
+stale success was revoked in time. The Checks update contract permits the App-owned run's
+status to be updated, and the broker's journal/PATCH/GET ordering is covered by the adversarial
+tests in §6.3.
 
 ## 7. Recommended architecture
 
@@ -548,15 +687,25 @@ merge ref receives the dedicated App credential or dispatch privilege.
 
 A small PR doorbell runs on `pull_request_target`, so GitHub takes its definition from the
 default branch. It never checks out a ref, restores a cache, downloads an artifact, or
-executes a repository script. Its token has narrowly scoped dispatch permission and no
-contents/checks/PR write; its only operation invokes the generation broker at the exact
-default-branch ref, passing event kind and PR head SHA as untrusted data through environment
-variables. Same-SHA label, readiness, reopen, and manual automation events ring this
-doorbell rather than launching target work themselves.
+executes a repository script. Its repository token is read-only; the only elevated permission
+is `id-token: write` so it can call the authenticated external broker ingress with a fixed
+audience. The ingress verifies repository id, workflow identity, exact default-branch
+`job_workflow_ref`, protected environment, and nonce before treating the call as a wake-up.
+Event kind and PR head SHA remain untrusted data. No doorbell receives `actions: write`,
+`checks: write`, or a publisher/launch credential. Same-SHA label, readiness, reopen, and
+manual automation events ring this doorbell rather than launching target work themselves.
 
 For merge groups, the existing default-branch doorbell invokes the same broker on
 enqueue/dequeue. It is the only native `merge_group` target trigger. There is no
 target-ref-defined writer or dispatcher whose definition could come from the combined ref.
+
+Separately from those Actions wake-ups, the control plane terminates the GitHub App webhook
+sources named by the committed transition map and journals each immutable delivery/event id
+before acknowledging it. Its reconciliation reader also paginates the live-proven GitHub
+timeline/attempt sources from their stored cursors. Thus a lost Actions doorbell does not lose
+the epoch receipt, and a delayed or duplicate webhook is only another idempotent reconciliation
+input; a source whose delivery log cannot be replayed and cross-checked remains a cutover
+blocker under §6.3.
 
 Neither doorbell can publish or update a verdict, and neither is a durable queue. They are
 latency hints only. If one is absent, fails, or its pending Actions run is replaced, the
@@ -564,18 +713,21 @@ Actions sweep and independent liveness path both rediscover the target from auth
 GitHub state and invoke the same broker reconciliation. An implementation that requires the
 original event payload to finish a generation is rejected.
 
-The broker is a level-triggered reconciler, not an event handler. It validates the target,
-computes and durably records the desired-generation intent, acquires the shared fenced
-lease, and follows the idempotent transaction in §6.3. Re-entry after any interruption —
-publisher reopen, partial sibling creation, manifest seal, or partial worker dispatch —
-must converge on exactly one sealed generation and one worker/reporter identity per lane.
-Once sealed, it invokes worker jobs whose workflow definitions come from the reviewed
-default branch and enqueues evaluation. A worker checks out the target SHA with persisted
-credentials disabled and receives no dedicated-App credential, repository write token, or
-untrusted cache restore. Its result is data returned to a separate trusted reporter, which
-matches broker-run id, worker job id, lane, repository, head SHA, and generation nonce
-against the sealed manifest before submitting a fenced update for that one sibling row to
-the publisher-mutation service.
+The broker is a level-triggered reconciler, not an event handler. It validates the target and
+timeline high-watermark, computes and durably records the epoch-bound desired intent, acquires
+the shared fenced lease, and follows the idempotent transaction in §6.3. Re-entry after any
+interruption — epoch receipt, publisher reopen, partial sibling creation, manifest seal,
+outbox commit, dispatch ambiguity, worker claim, or reporting — converges on exactly one sealed
+generation and at most one active claimant per lane. Once sealed, it asks the external launch
+service to pump journaled outbox rows for worker workflows whose definitions come from the
+reviewed default branch. A worker authenticates and claims its stable launch key before it
+receives target data; a duplicate or stale claimant exits without checking out the target.
+The winner checks out the target SHA with persisted credentials disabled and receives no
+dedicated-App credential, repository write token, Actions launch token, or untrusted cache
+restore. Its result is data returned to a separate trusted reporter, which matches worker run
+id, claim fence, lane, repository, head SHA, gating epoch, and generation nonce against the
+sealed manifest before submitting a fenced update for that one sibling row to the
+publisher-mutation service.
 
 Except for the authenticated resident `ci-summary / gate` migration anchor in §6.2, all
 gating workers lose native `pull_request`, `merge_group`, `labeled`, `unlabeled`,
@@ -592,8 +744,8 @@ has **no** `pull_request` or `merge_group` trigger. Its privileged job runs only
 
 - `workflow_run` with `types: [requested, in_progress, completed]` and an explicit
   `workflows:` list;
-- `workflow_dispatch` with a target SHA, dispatched at the exact default-branch ref by
-  the sweeper or a trusted reporter.
+- `workflow_dispatch` with a target SHA and checkpoint correlation, dispatched at the exact
+  default-branch ref only by the external launch service from a journaled evaluator outbox row.
 
 GitHub can deliver `workflow_run` without a `workflows:` filter, but this privileged design
 deliberately requires an explicit list: it constrains the wake-up surface, makes the list
@@ -617,10 +769,11 @@ directions by a drift test:
    `ci-gate-eval.yml`;
 3. every default-branch reporter that creates check-runs on another head SHA routes its
    launch through the generation broker, which opens the publisher before the first write,
-   and explicitly dispatches the evaluator after its last write;
+   and records an evaluator outbox wake-up after its last write;
 4. `pr-area-label` remains an unconditional manifest row for every PR and merge-group
-   target; the two default-branch doorbells' no-checkout, no-check-write, dispatch-only
-   posture and the resident gate's sole-native exception/bootstrap guard are pinned.
+   target; the two default-branch doorbells' no-checkout, no-check-write, fixed-audience
+   OIDC-ingress-only posture and the resident gate's sole-native exception/bootstrap guard
+   are pinned.
 
 An unknown workflow therefore fails the routing self-test; it cannot silently disappear
 from the wake-up set. The inventory controls **when to wake**, not what the verdict sees:
@@ -637,33 +790,50 @@ syntax, repository, current PR/merge-group membership, and target kind before an
 Event fields reach scripts through environment variables or JSON files, never shell
 interpolation.
 
-The workflow token keeps only the current read set and the narrowly bounded
-`actions: write` operations used by the broker/re-dispatch path. The protected
-publisher-mutation service issues to itself a short-lived installation token scoped to the
-Sparq repository id with `checks: write` only; the installation-level `statuses: write`
-eligibility permission is not included. The Actions job receives neither token nor minting
-key. It uses the evaluator coalescing key and then the shared fenced mutation lease from
-§6.3, validates/loads state, removes exactly the trusted publisher row per §6.1, performs
-one `step()`, repeats the complete identity, authoritative desired-intent, and generation
+The evaluator workflow token keeps only the current read set plus `id-token: write` for the
+fixed-audience control-plane API. The protected publisher-mutation service issues to itself a
+short-lived installation token scoped to the Sparq repository id with `checks: write` only;
+the installation-level `statuses: write` eligibility permission is not included. The Actions
+job receives neither token nor minting key. It uses the evaluator coalescing key and then the
+shared fenced mutation lease from §6.3, validates/loads the independent checkpoint, removes
+exactly the trusted publisher row per §6.1, performs one `step()`, repeats the complete
+identity, timeline high-watermark, epoch-bound desired intent, manifest/outbox, and generation
 read before success, and submits the fenced `gate-shadow` or (only after cutover) `gate`
 mutation to that service.
+
+Workflow dispatch is isolated in a different external launch service. Its short-lived,
+repository-scoped GitHub credential has `actions: write`, which GitHub also permits to rerun or
+cancel runs and enable or disable workflows; describing it as dispatch-only would be false.
+The service is therefore treated as a high-privilege component even though its own API accepts
+only a versioned launch key naming an allowlisted worker/evaluator workflow id, exact reviewed
+default-branch ref, sealed epoch/generation, current fence, and pending outbox row. It has no
+free-form repository, ref, workflow, run-control, or enable/disable endpoint. It writes an
+append-only audit record before and after every GitHub call, refuses target-controlled claims,
+and is the only holder of the launch credential. No repository Actions job — doorbell,
+sweeper, evaluator, worker, or reporter — has `actions: write` or can mint that token.
+GitHub's workflow and workflow-run endpoint contracts are the authority for that permission
+surface:
+<https://docs.github.com/en/rest/actions/workflows>
+and <https://docs.github.com/en/rest/actions/workflow-runs>.
 
 ### 7.3 Default-branch sweep
 
 `ci-gate-sweep.yml` runs at GitHub's minimum supported schedule interval and on manual
 dispatch. The schedule is explicitly best-effort: configured cadence makes no promise about
-start time or eventual delivery. The workflow holds read permissions plus only the
-permission needed to dispatch the broker; it does **not** hold `checks: write` or the App
-minting credential.
+start time or eventual delivery. The workflow holds read permissions plus `id-token: write`
+for the fixed external broker ingress; it does **not** hold `actions: write`, `checks: write`,
+the launch token, the App token, or either minting credential.
 
 Each sweep enumerates **all** current non-draft PR heads and active merge-group heads,
 including targets with no publisher, then dispatches broker reconciliation at the exact
-default-branch ref once per repository + target kind + SHA. It also enumerates non-terminal
-publishers and same-name identity failures. An identity failure raises an alert and remains
+default-branch revision once per repository + target kind + SHA through that ingress. It also
+enumerates non-terminal publishers and same-name identity failures. An identity failure raises
+an alert and remains
 a broker target so the durable neutralization rules in §6.1 run; it is never silently
-skipped. The broker performs a full desired-state read, finishes or repairs the generation,
-and dispatches evaluation only after the manifest is sealed. Broker and evaluator use the
-distinct concurrency keys and shared lease from §6.3.
+skipped. The broker exhaustively advances timeline receipts, performs a full desired-state
+read, repairs the journal/epoch/generation/outbox/claims, and requests evaluation only after
+the manifest is sealed. Broker and evaluator use the distinct concurrency keys and shared
+lease from §6.3; launch workers use the separate outbox CAS rather than either Actions queue.
 
 `pr-area-label` is the one unconditional expected source workflow per target. The
 evaluator records the target discovery time and refuses a stable-empty success until that
@@ -681,20 +851,82 @@ hosted-runner queue; alternatively, the compute may use separately reserved capa
 after a saturation test proves the same isolation. The service runs a pinned build of the
 same reviewed broker/evaluator core, validates that the build belongs to reviewed
 default-branch history, and never checks out or executes a target ref. It uses the shared
-publisher-mutation service; only that component obtains the repository-scoped checks-only
-runtime token described in §4.
+publisher-mutation and external launch services; only the former obtains the
+repository-scoped checks-only runtime token described in §4, and only the latter obtains the
+broad Actions token described in §7.2.
 
-At least once per declared `LIVENESS_SLO`, it enumerates the same complete target set as
-§7.3, performs broker reconciliation, and evaluates every due wall-clock deadline under the
-shared fenced lease. Duplicate, reordered, or simultaneous Actions/control-plane ticks are
-idempotent. If the service misses its SLO, cannot acquire fresh target state, loses App
-authentication, or cannot durably update a publisher, an out-of-band monitor pages and
-admission pauses; it never converts its own outage into success.
+The scheduler starts cycles at a measured maximum interval chosen so worst-case start jitter
+plus one full supported-envelope sweep fits inside `LIVENESS_SLO`. Each cycle enumerates the
+same complete target set as §7.3, advances every timeline high-watermark, repairs due
+outbox/claim state, performs broker reconciliation, and evaluates every due wall-clock deadline
+under the shared fenced lease. Duplicate, reordered, or simultaneous Actions/control-plane
+ticks are idempotent. If the service misses its start bound or SLO, cannot acquire fresh target
+state, loses publisher/launch authentication, cannot reconcile due outbox/claims, or cannot
+durably update a publisher, an out-of-band monitor pages and admission pauses; it never converts
+its own outage into success.
+
+That bound is valid only inside a versioned **supported-capacity envelope** generated from
+Phase-5 structured load evidence. The envelope records, without copying benchmark values into
+this design record, the maximum eligible-target population, targets due in one cycle,
+check-run and timeline pages per target, API calls per reconciliation, primary-rate budget
+floor, bounded secondary-rate-limit backoff, per-head lease wait, pending outbox/claim backlog,
+isolated control-plane concurrency, cold-start bound, and publisher latency. The proof artifact
+must show, at those maxima, that one independent sweep satisfies
+`T_start_jitter + T_discovery + T_due_reconciliation + T_lease_wait + T_outbox_repair +
+T_publish ≤ LIVENESS_SLO`, with each term derived from the same structured trial rather than
+an optimistic average.
+
+Before accepting a new target, and again at the start and end of every sweep, the admission
+controller compares live target/backlog counts, pagination, isolated capacity, and GitHub's
+primary/secondary rate state with that signed envelope. Reaching an enumeration cap, dropping
+below the reserved API budget, exceeding the bounded backoff, or placing even one target beyond
+the supported backlog pauses new admission and pages out of band. Existing targets remain
+fail-closed; the system explicitly makes no bounded-liveness claim outside the envelope. It may
+resume only after a complete in-envelope sweep and fresh exact-head evaluation, never merely
+because the backlog counter later falls.
 
 Phase 5 must demonstrate this path while `workflow_run` and Actions schedules are suppressed
-and the hosted-runner pool is saturated. A genuine hang must become RED by its semantic
-deadline plus `LIVENESS_SLO`. Failure of that test is a cutover no-go, not a reason to relax
-the deadline or branch protection.
+and the hosted-runner pool is saturated. Tests exercise every dimension exactly at its derived
+boundary, then one unit beyond it; exhaust the reserved primary budget, inject the maximum and
+over-maximum secondary backoff, fill the due/outbox backlog, and cold-start the isolated
+service. At the boundary one sweep must reconcile every due target and a genuine hang must
+become RED by its semantic deadline plus `LIVENESS_SLO`; every over-boundary case must pause
+admission and refuse success. Failure is a cutover no-go, not a reason to relax the deadline,
+capacity envelope, or branch protection.
+
+### 7.5 Independent emergency recovery plane
+
+Removing the resident waiter also requires a recovery plane that survives loss or revocation
+of the dedicated publisher App and its mutation service. A workflow merely left inert on
+`main`, or a copy of the failed publisher's check-run envelope, is not sufficient. Before
+cleanup, a separately deployed recovery controller must have its own durable target journal,
+timeline cursor and gating epoch, sealed manifest/outbox/claim state, worker-launch and result
+reporting path, evaluator checkpoint, minting boundary, and **distinct recovery App
+integration** (or another source identity the ruleset can enforce). It may reuse the reviewed
+pure verdict code by pinned artifact digest, but it may not depend on the primary App,
+publisher-mutation service, primary journal availability, or historical primary `gate` rows.
+The recovery installation follows the same permission split as §4: installation eligibility
+has `checks: write` plus `statuses: write` only if live source selection requires it, each
+publisher runtime token is repository-scoped and `checks: write` only, and any recovery
+worker-launch token with technically broad `actions: write`
+authority is confined to its own external allowlisted launch service rather than an Actions
+job.
+
+When activated under a protected out-of-band switch, the recovery controller keeps ordinary
+admission paused, enumerates authoritative current PR heads from scratch, and creates a fresh
+recovery epoch and generation for each. It launches and claims every required lane through its
+own fenced outbox, accepts only recovery-generation reporter receipts, computes the verdict
+from freshly enumerated evidence, and publishes a new exact-head `gate` with the distinct
+recovery integration. A fresh merge-group canary likewise starts with newly discovered target
+state and a new recovery generation; it cannot assume that the primary broker ever sealed one.
+Only after all current heads and that canary are freshly terminal may a full ruleset projection
+select the recovery integration and a tightly controlled canary admission reopen.
+
+If no distinct recovery integration or enforceable equivalent exists, the on-`main`
+App-15368 transport is emergency diagnostic machinery only. Because any target-controlled
+Actions job shares App 15368, its same-name result cannot prove provenance strongly enough to
+satisfy the recovered rule. It may collect evidence while admission remains paused, but it may
+not authorize a ruleset switch, merge, or reopening. That condition is a Phase-7 no-go.
 
 ## 8. Honest payoff analysis — peak concurrency, not billable minutes
 
@@ -733,47 +965,56 @@ adaptive saturation budget stays the operative mitigation.
    cadence equivalent;
    add the fail-closed state codec, observation digest, transport-owned publisher filter,
    legacy-transport validator, exhaustive raw-check pagination, reserved-name/credential
-   inventory gate, durable collision handling, fenced per-head mutation lease, the resident
-   sealed-manifest bootstrap guard in dormant observe-only mode, and multi-invocation
-   adversarial tests (§6). Provision the dedicated publisher App, the exclusive fenced
-   publisher-mutation/minting service, installation-level `checks: write` plus
-   source-selection `statuses: write`, and repository-scoped checks-only runtime tokens.
+   inventory gate, durable collision handling, the independent append-only target journal,
+   fenced per-head mutation lease, the resident sealed-manifest bootstrap guard in dormant
+   observe-only mode, and multi-invocation adversarial tests (§6). Provision the dedicated
+   publisher App, the exclusive fenced publisher-mutation/minting service,
+   installation-level `checks: write` plus source-selection `statuses: write`, and
+   repository-scoped checks-only runtime tokens.
    Preserve the resident driver's existing `SELF_RUN_ID` ordering and tests unchanged
    outside the dormant guard.
 4. **Phase 3 — broker the launch topology.** Add the generated wake-up/launch inventory,
-   its both-direction drift test, the default-branch PR and merge-group doorbells, sealed
-   sibling manifests and durable desired-generation digests, distinct broker/evaluator
-   concurrency keys, level-triggered reconciliation, unprivileged worker execution, and
-   trusted result reporters (§6.3–§7.3), initially on de-armed canaries while old sibling
-   triggers remain. Inject lost doorbells, replaced pending brokers, and crashes at every
-   transaction boundary; every later sweep must converge without duplicate work. Once that
-   path is verified, seed every eligible head, request and verify fresh non-terminal
-   resident attempts, and activate the bootstrap guard. Only then remove every native
-   target trigger from gating workers, including same-SHA label/readiness and rerun helpers,
-   except the exact authenticated resident gate. That guarded resident remains authoritative
-   while this large migration is exercised; failure to achieve complete broker ownership
-   chooses defer/reject rather than partial cutover.
+   its both-direction drift test, the default-branch PR and merge-group OIDC doorbells,
+   monotonic gating epochs and timeline receipts, sealed sibling manifests, epoch-bound
+   desired digests, durable dispatch/evaluator outboxes, worker-side fenced claims, distinct
+   broker/evaluator concurrency keys, level-triggered reconciliation, unprivileged worker
+   execution, and trusted result reporters (§6.3–§7.3). Provision the authenticated external
+   launch service; record that its repository-scoped `actions: write` credential can dispatch,
+   rerun, cancel, enable, and disable workflows, expose only the allowlisted fixed-ref launch
+   API, and prove no Actions job can obtain it. Exercise all of this first on de-armed canaries
+   while old sibling triggers remain. Inject lost doorbells, A→B→A same-SHA history, replaced
+   pending brokers, dispatch-response loss, duplicate workers, expired claims, and crashes at
+   every journal/GitHub boundary; every later sweep must converge with no stranded lane and at
+   most one active worker/reporter claim. Once that path is verified, seed every eligible
+   head, request and verify fresh non-terminal resident attempts, and activate the bootstrap
+   guard. Only then remove every native target trigger from gating workers, including same-SHA
+   label/readiness and rerun helpers, except the exact authenticated resident gate. That
+   guarded resident remains authoritative while this large migration is exercised; failure
+   to achieve complete broker ownership chooses defer/reject rather than partial cutover.
 5. **Phase 4 — shadow transport.** First merge and verify the resident driver's strict
    dedicated-App transport exclusion under both `gate-shadow` and migration `gate` names;
    only then activate the evaluator, best-effort Actions sweep, and independently scheduled
    isolated-capacity liveness driver. The dedicated App publishes the non-required
    `gate-shadow` context, excludes authenticated legacy gate transports, and exercises PR,
    fork, initial run, broker-sealed rerun, no-leg, cancellation, genuine-hang, late
-   reporter, merge-group, publisher reopen, wrong-App/name collision,
-   pagination/truncation, and duplicate-publisher cases.
+   reporter, merge-group, same-SHA epoch replacement, publisher reopen, outbox/claim recovery,
+   wrong-App/name collision, pagination/truncation, and duplicate-publisher cases.
 6. **Phase 5 — evidence gate.** Compare every terminal shadow verdict with the resident
    verdict and measure wake/terminal latency. Audit the complete reserved-name and
-   credential inventory; read back installation permissions, reduced runtime-token scope,
-   and ruleset source selection; prove generation sealing and that the two transports never
-   observe one another. Suppress `workflow_run` and Actions schedules, saturate the hosted
-   pool, and prove the isolated path still reconciles a lost initial doorbell and turns a
-   genuine hang RED within `LIVENESS_SLO`. Kill that path and prove an out-of-band alarm
-   pauses admission without publishing success. Then, while the resident Actions `gate`
-   remains required, migrate each non-draft PR head's dedicated-App publisher from
-   `gate-shadow` to `gate` using the single-row protocol in §6.2 and repeat parity collection
-   by check id/App. Any unexplained mismatch, duplicate, missing target, stale-success
-   window, writer drift, dependency cycle, liveness miss, or permission failure blocks
-   cutover.
+   credential inventory; read back installation permissions, checks-only publisher tokens,
+   broad-but-isolated launch-token authority, and ruleset source selection; prove generation
+   sealing, timeline-epoch ABA resistance, outbox/claim crash recovery, and that the two
+   transports never observe one another. Generate the signed supported-capacity envelope from
+   structured trials. Suppress `workflow_run` and Actions schedules, saturate the hosted pool,
+   and prove one isolated sweep reconciles every due target at each exact envelope boundary,
+   including a lost initial doorbell and genuine hang, within `LIVENESS_SLO`. Exercise one
+   unit over every target/backlog/pagination/API-budget/backoff/lease/outbox/cold-start bound
+   and prove admission pauses without success. Kill the isolated path and prove the same
+   out-of-band response. Then, while the resident Actions `gate` remains required, migrate
+   each non-draft PR head's dedicated-App publisher from `gate-shadow` to `gate` using the
+   single-row protocol in §6.2 and repeat parity collection by check id/App. Any unexplained
+   mismatch, duplicate, missing target, stale-success window, writer drift, dependency cycle,
+   envelope overrun, liveness miss, or permission failure blocks cutover.
 7. **Phase 6 — controlled integration cutover.** Drain the merge queue and pause admission.
    Prove every eligible PR head has exactly one current successful dedicated-App `gate`
    and one authenticated resident result. With explicit administrator authorisation,
@@ -781,38 +1022,47 @@ adaptive saturation budget stays the operative mitigation.
    GitHub Actions App 15368 to the dedicated publisher App; the required context name and
    every other rule remain unchanged. No branch-protection bypass or code commit is needed.
    Evaluate a canary PR and fresh merge-group head before reopening admission. If the
-   dedicated integration cannot be selected, the runtime token can write statuses, broker
-   recovery or the isolated liveness SLO is unproven, or the fenced lease is unavailable,
-   stop: the App-15368 design is not safe to cut over.
-8. **Phase 7 — cleanup.** Cleanup is forbidden until a reviewed, inert App-15368 recovery
-   transport is already merged on `main` and a no-bypass drill proves it can be activated
-   without a code commit or the dedicated publisher App. While dormant it emits no check
-   named `gate` and occupies no resident polling slot; its activation control and exact-head
-   publisher path are unavailable to target code. Exercise it on PR, fork, same-SHA
-   replacement, and fresh merge-group canaries, including rejection of historical green.
-   Only then remove the active resident polling transport and update `ci-summary.yml`'s
-   doctrine header and `docs/branch-protection.md`. An off-main rollback commit does not
-   satisfy this precondition.
+   dedicated integration cannot be selected, the runtime token can write statuses, the
+   launch credential is reachable from Actions, broker/outbox recovery or the measured
+   in-envelope liveness SLO is unproven, or the fenced lease is unavailable, stop: the design
+   is not safe to cut over.
+8. **Phase 7 — cleanup.** Cleanup is forbidden until the independent recovery plane in §7.5
+   is deployed and a no-bypass drill proves its own journal, epoch, worker-launch outbox,
+   claims, reporting, evaluator, and distinct recovery App/integration work after the primary
+   App and mutation service are disabled. Its reviewed activation adapter and the inert
+   App-15368 emergency diagnostic transport must already be merged on `main`; while dormant
+   neither emits a check named `gate` or occupies a resident polling slot, and their controls
+   are unavailable to target code. Without consulting the primary publisher or journal,
+   exercise fresh recovery generations on PR, fork, same-SHA replacement, and a newly created
+   merge-group canary, including rejection of historical green. Only the distinct recovery
+   integration may support a ruleset switch or canary admission; App 15368 remains diagnostic
+   and admission-paused. If that identity or independent data path is absent, cleanup is a no-go.
+   Only after the drill may the active resident polling transport be removed and
+   `ci-summary.yml`'s doctrine header and `docs/branch-protection.md` updated. An off-main
+   rollback commit does not satisfy this precondition.
 
 **Rollback.** Before Phase 6, disabling the shadow has no merge effect. During the Phase-6
-canary window the resident Actions gate stays live. A pre-cleanup rollback pauses
-admission, drains active merge groups, and first proves a fresh authenticated resident
-result for the current sealed generation of every eligible head; only then may the
-captured full ruleset projection restore App 15368. Historical green rows are never valid
-rollback evidence.
+canary window the resident Actions gate stays live for comparison, but its App-15368/name pair
+is not promoted as safe recovery provenance. A cutover failure pauses admission and drains
+active merge groups. The primary dedicated path is repaired in place, or the already-proven
+distinct recovery plane is activated; absent either, admission remains paused. Restoring App
+15368 may aid emergency diagnosis but cannot justify a merge or reopening because branch
+protection cannot distinguish it from a target-controlled same-App/name row.
 
-After Phase 7, rollback never begins with a merge through the component being recovered.
-Pause admission and drain active merge groups, then activate the already-on-main recovery
-transport through its protected repository/control-plane switch. It produces and
-GET-verifies a fresh exact-head App-15368 `gate` for the current sealed generation of every
-eligible PR, fork, and newly created merge-group canary; historical green or a
-target-controlled producer is never accepted. Only then may the captured full ruleset
-projection restore App 15368, changing no other field. A missing current result, an
-undrained group, a failed recovery canary, or an unexpected ruleset diff blocks the switch.
-Dedicated publication remains enabled until the restored rule and a fresh canary are
-verified. The recovery transport may then carry the protected path while a permanent
-resident repair is reviewed normally; it is never necessary to bypass branch protection
-or land that repair first.
+After Phase 7, recovery never begins with a merge through the component being recovered.
+Keep admission paused and drain active merge groups, then disable/revoke the primary path and
+activate the already-on-main adapter plus independent recovery controller through their
+protected out-of-band switch. The controller enumerates targets without primary state, creates
+fresh recovery epochs, manifests, outbox rows, claims, reporter receipts, and evaluator
+checkpoints, and GET-verifies an exact-head `gate` from the distinct recovery integration for
+every eligible PR and fork. It then admits only a designated fresh merge-group canary and
+builds that target's recovery generation from scratch. Historical primary/recovery green,
+App-15368 results, and target-controlled producers are never accepted. Only after those fresh
+results may a captured full ruleset projection change solely the required integration from
+the primary App to the distinct recovery App. A missing current result, undrained group,
+failed recovery canary, dependency on primary state, or unexpected ruleset diff blocks the
+switch. App 15368 remains diagnostic with admission paused; it is never the recovered trust
+anchor. No branch-protection bypass or recovery commit is required.
 
 ## 10. Decisions and live questions
 
@@ -823,7 +1073,14 @@ Resolved by this revision:
 - every wake-up is idempotent and keyed by repository + target kind + head SHA; broker
   reconciliation is level-triggered and cannot be evicted by evaluator coalescing;
 - Actions schedules are best-effort reconciliation only; the hang-to-RED bound belongs to
-  an independently scheduled path on isolated capacity, with failure as a cutover no-go;
+  an independently scheduled path on isolated capacity and is conditional on a measured,
+  signed supported-capacity envelope, with failure or overload as a cutover no-go;
+- every gating-affecting transition has an immutable journal receipt and advances a monotonic
+  epoch that is part of the desired digest, so an unchanged SHA and A→B→A snapshot cannot
+  reuse an earlier green;
+- worker launch uses a durable fenced outbox and worker-side claim; an ambiguous dispatch may
+  be retried, but only the current claimant receives work and only the newest fence can report;
+  every stranded lane is rediscovered by a sweep;
 - the unique fully validated publisher is excluded before any verdict transformation,
   while every identity mismatch or duplicate fails closed;
 - App/external-id matching is not treated as authorization: a dedicated publisher App and
@@ -831,17 +1088,24 @@ Resolved by this revision:
   trust boundary;
 - installation eligibility (`checks: write` plus source-selection `statuses: write`) is
   distinct from repository-scoped runtime authority (`checks: write` only);
+- `actions: write` is accurately treated as authority to dispatch, rerun, cancel, enable, and
+  disable workflows; only the external allowlisted launch service holds it, never an Actions
+  job;
 - resident and shadow transports are mutually excluded and compared out of band;
 - replacement work is generation-sealed only after the required publisher has been
   reopened and GET-verified; before integration cutover a fresh resident attempt is also
   verified non-terminal, and asynchronous events provide liveness, not ordering;
 - shadow publication precedes any required-context change;
 - initial registration and a missing seed have explicit fail-closed behaviour and are
-  repaired by both level-triggered sweep paths; and
-- Phase-7 cleanup retains an inert, already-on-main App-15368 recovery transport, so
-  recovery never requires a merge through the failed publisher.
+  repaired by both level-triggered sweep paths;
+- Phase-7 cleanup retains an inert, already-on-main App-15368 emergency diagnostic transport,
+  but its same-App/name result is never recovery provenance or a reason to reopen admission;
+  and
+- post-cleanup recovery owns independent state, launch, reporting, evaluation, and a distinct
+  enforceable publisher integration, so it can build fresh PR and merge-group generations
+  without the failed primary path or a recovery commit.
 
-Phases 4–5 must answer with live evidence, not maintainer guesswork:
+Phases 4–7 must answer with live evidence, not maintainer guesswork:
 
 1. Does `workflow_run` deliver both requested/completed wake-ups for merge-group-triggered
    source workflows, with the merge-group head SHA?
@@ -854,13 +1118,18 @@ Phases 4–5 must answer with live evidence, not maintainer guesswork:
    `workflow_run.head_sha` is the default-branch SHA rather than the head they annotate?
 4. Is peak concurrency or total slot time the binding constraint after the label-router
    and merge batching changes land?
-5. Does the independent liveness driver meet `LIVENESS_SLO` with Actions schedules
-   suppressed and the hosted-runner pool saturated, and does its own failure page and pause
+5. Does one independent sweep meet `LIVENESS_SLO` at every exact target/backlog/pagination/
+   API-budget/backoff/lease/outbox/cold-start envelope boundary with Actions suppressed and
+   hosted runners saturated, and does every over-boundary or driver failure page and pause
    admission without publishing success?
-6. Does a missed doorbell, replaced pending broker, or crash at each broker transaction
-   boundary converge from a later sweep with one sealed generation and no duplicate worker?
-7. Can the dormant App-15368 recovery transport restore fresh exact-head results and the
-   captured ruleset projection without a commit, publisher-App dependency, or bypass?
+6. Does a missed doorbell, same-SHA A→B→A sequence, replaced pending broker, dispatch-response
+   loss, duplicate worker, expired claim, or crash at each broker transaction boundary
+   converge from a later sweep with a later epoch, one sealed generation, no stranded lane,
+   and at most one active claimant?
+7. After the primary App, journal, and mutation service are unavailable, can the distinct
+   recovery plane discover targets from scratch, create fresh PR and merge-group generations,
+   publish exact-head results under its own integration, and apply the captured ruleset
+   projection without a commit or bypass while App 15368 remains diagnostic-only?
 
 ## 11. Verification status
 
@@ -881,28 +1150,44 @@ Every implementation PR must add machine assertions for the corresponding phase.
 the complete chain, those assertions must prove:
 
 - **Liveness:** with `workflow_run` and Actions cron suppressed and hosted capacity fully
-  occupied, the isolated driver evaluates a fake-clock deadline within `LIVENESS_SLO`; a
-  stopped driver raises the out-of-band incident and cannot publish success.
-- **Reconciliation:** dropped doorbells, pending-run replacement, duplicate/reordered
-  wake-ups, and crashes after publisher reopen, partial row creation, manifest seal, and
-  partial dispatch all converge from a later sweep. The evaluator cannot succeed before the
-  authoritative desired intent is sealed, and no lane is launched twice.
+  occupied, one isolated sweep drains every due target at each exact structured-envelope
+  boundary and evaluates a fake-clock deadline within `LIVENESS_SLO`. A one-unit overload,
+  exhausted reserved API budget, excess secondary backoff, or stopped driver raises the
+  out-of-band incident, pauses admission, and cannot publish success.
+- **Epoch safety:** for every supported readiness/label/state/queue/rerun/inventory mutation,
+  the durable receipt and epoch advance precede or are atomic with a broker-origin GitHub
+  effect, and precede the admission-visible effect of an external proposal. With both doorbells
+  dropped, an A→B→A same-SHA history still advances the epoch twice, reopens prior success, and
+  rejects the old reporter; a receipt gap or truncated timeline fails closed.
+- **Reconciliation:** dropped doorbells, pending-run replacement, duplicate/reordered wake-ups,
+  and crashes after epoch receipt, publisher reopen, partial row creation, manifest seal,
+  outbox commit, accepted dispatch, claim, and report all converge from a later sweep. The
+  evaluator cannot succeed before the epoch-bound intent is sealed and every outbox row is
+  terminal. Ambiguous dispatch retries leave no lane stranded, concurrent duplicate workers
+  receive no target data, and a superseded claim cannot report.
 - **Authority:** live installation readback contains the source-selection permissions; a
   repository-id-scoped checks-only token can create/update a check but receives a denial for
   commit-status write; the mutation service is the only holder, and no Actions adapter, PR,
-  merge-ref worker, or target artifact can reach the App token or minting authority. The
-  service rejects a stale fence, arbitrary check name, wrong repository/head/check id,
-  illegal transition, and success without a complete sealed-generation proof.
-- **Recovery:** after disabling or revoking the dedicated publisher, the already-on-main
-  App-15368 transport restores fresh results for same-repository, fork, same-SHA replacement,
-  and merge-group heads without a commit or bypass. Normal mode emits no accepted
-  App-15368 `gate` and consumes no resident polling slot; the ruleset rollback changes only
-  the required integration and rejects historical green.
+  merge-ref worker, or target artifact can reach the App token or minting authority. No Actions
+  job has `actions: write`; live denial tests prove its OIDC identity cannot invoke arbitrary
+  launch-service operations, while the service audit shows its technically broad token is used
+  only for allowlisted fixed-ref launches. The services reject a stale fence, arbitrary check
+  or workflow name, wrong repository/head/check id, run-control/enable/disable request, illegal
+  transition, and success without a complete sealed-generation proof.
+- **Recovery:** after disabling or revoking the primary publisher and withholding its journal,
+  the independent recovery plane builds fresh state, epochs, manifests, outbox/claims,
+  reporter receipts, and verdicts for same-repository, fork, same-SHA replacement, and a newly
+  discovered merge-group canary. Only its distinct integration can become required; historical
+  green and every App-15368 result are rejected for recovery admission. Normal mode emits no
+  recovery `gate`, consumes no resident polling slot, and the ruleset switch changes only the
+  required integration without a commit or bypass.
 
-Still not verified: dedicated-App installation and ruleset selection, reduced runtime-token
-scope, merge-group wake-up payloads, fenced-lease behaviour, loss-recovering broker
-reconciliation, independent-path latency under saturation, recovery-transport activation,
-required-check registration and generation-sealing timing, exhaustive check-run enumeration
-at live scale, and shadow/live verdict equivalence. Phases 4–5 exist specifically to turn
-those platform assumptions into evidence before the required integration changes; Phase 7
-adds the recovery drill before active resident cleanup.
+Still not verified: dedicated/recovery-App installation and ruleset selection, reduced
+publisher-token scope, isolation of the broad launch token, merge-group wake-up payloads,
+timeline-receipt completeness, fenced-lease/outbox/claim behaviour, loss-recovering broker
+reconciliation, the supported-capacity envelope and independent-path latency under saturation,
+recovery-plane activation from no primary state, required-check registration and
+generation-sealing timing, exhaustive check-run enumeration at live scale, and shadow/live
+verdict equivalence. Phases 4–5 turn the primary-path assumptions into evidence before the
+required integration changes; Phase 7 adds the independent recovery drill before active
+resident cleanup.
