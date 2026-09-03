@@ -1,0 +1,314 @@
+{
+  "_template_warning": "NOT EVIDENCE. The publisher omits this warning field, replaces every null/hash/token from analyzer outputs, sets canonical=true only after --require-canonical validation, and writes the immutable run-specific envelope below bench/canonical-competitor-results/ac-sparql/<run-id>/paper-summary.json.",
+  "schema_version": 1,
+  "canonical": false,
+  "study_id": "access-controlled-sparql-pod-scaling",
+  "run_id": "REPLACE_WITH_RUN_ID",
+  "collected_at_utc": "REPLACE_WITH_UTC_TIMESTAMP",
+  "source": {
+    "git_commit": "REPLACE_WITH_40_HEX_COMMIT",
+    "tree_clean": true
+  },
+  "environment": {
+    "class": "controlled-single-process-ec2",
+    "host_label": "AWS EC2 r7g.xlarge, eu-west-2, Linux/aarch64, one pinned logical CPU",
+    "tenancy": "shared",
+    "noise_limitation": "AWS shared tenancy does not exclude noisy-neighbour or host-level interference; randomised blocks and uncertainty intervals mitigate but cannot eliminate it.",
+    "provider": "aws",
+    "region": "eu-west-2",
+    "instance_type": "r7g.xlarge",
+    "architecture": "aarch64",
+    "os": "linux",
+    "kernel": "REPLACE_FROM_RAW_ENVELOPE",
+    "cpu_model": "REPLACE_FROM_RAW_ENVELOPE",
+    "cpu_affinity": "REPLACE_WITH_SINGLE_CPU_ID",
+    "rayon_threads": 1,
+    "allocator": "mimalloc"
+  },
+  "workload": {
+    "label": "WAC-scoped SPARQL Pod-scaling campaign; social and compact-health domains; routed feasibility composition and native in-process handler lanes",
+    "dataset": "Deterministically generated, count-calibrated social and compact-health Pod corpora; not a sample of deployed Solid Pods",
+    "query_scope": "Eight predeclared SPARQL query families q1-point through q8-graph-scan for the primary intervention; point and graph-scan queries for sensitivity lanes",
+    "protocol": {
+      "path": "bench/ac/scaling/ANALYSIS-PROTOCOL.md",
+      "version": "1.30",
+      "sha256": "REPLACE_WITH_64_HEX_HASH"
+    },
+    "pod_counts": [1, 8, 64, 512, 2048],
+    "domains": ["health", "social"],
+    "lanes": ["materialized-routed", "native-http-assembly"],
+    "query_ids": [
+      "q1-point",
+      "q2-star",
+      "q3-join",
+      "q4-optional",
+      "q5-not-exists",
+      "q6-bounded-path",
+      "q7-aggregate",
+      "q8-graph-scan"
+    ],
+    "process_blocks": 5,
+    "timing_warmups": 10,
+    "timing_repetitions": 30,
+    "instrumentation_warmups": 1,
+    "instrumentation_repetitions": 1
+  },
+  "analysis": {
+    "git_commit": "REPLACE_WITH_POST_RUN_ANALYSIS_40_HEX_COMMIT",
+    "tree_clean": true,
+    "canonical_validation_passed": true,
+    "script": {
+      "path": "bench/ac/scaling/analyze.py",
+      "sha256": "REPLACE_WITH_64_HEX_HASH"
+    },
+    "publisher": {
+      "path": "bench/ac/scaling/export_publication.py",
+      "sha256": "REPLACE_WITH_64_HEX_HASH"
+    },
+    "bootstrap_draws": 10000,
+    "bootstrap_seed": 20260903,
+    "input_files": [
+      {
+        "path": "raw-relative-path-recorded-for-reproduction.jsonl",
+        "sha256": "REPLACE_WITH_64_HEX_HASH",
+        "archive_member": "inputs/raw-relative-path-recorded-for-reproduction.jsonl"
+      }
+    ],
+    "output_files": [
+      { "name": "summary.csv", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "paired-overhead.csv", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "construction.csv", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "h2.json", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "pod-scaling-latency.svg", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "http-backend-operations.svg", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 },
+      { "name": "guarded-stack-content-reference.svg", "sha256": "REPLACE_WITH_64_HEX_HASH", "bytes": 1 }
+    ],
+    "result_bindings": {
+      "/results/construction/social_count_anchor/content_triples": [
+        {
+          "artifact": "construction.csv",
+          "sha256": "REPLACE_WITH_64_HEX_HASH",
+          "locator": "domain=social; field=content_triples"
+        }
+      ],
+      "/results/construction/social_count_anchor/documents": [
+        {
+          "artifact": "construction.csv",
+          "sha256": "REPLACE_WITH_64_HEX_HASH",
+          "locator": "domain=social; field=documents"
+        }
+      ],
+      "/results/construction/social_count_anchor/pods": [
+        {
+          "artifact": "construction.csv",
+          "sha256": "REPLACE_WITH_64_HEX_HASH",
+          "locator": "domain=social; field=pods"
+        }
+      ]
+    },
+    "raw_archive": {
+      "path": "bench/canonical-competitor-results/ac-sparql/REPLACE_WITH_RUN_ID/raw-sanitized.tar.zst",
+      "sha256": "REPLACE_WITH_64_HEX_ARCHIVE_HASH",
+      "bytes": 1
+    },
+    "raw_archive_verification": {
+      "manifest_member": "manifest.json",
+      "manifest": {
+        "sha256": "REPLACE_WITH_64_HEX_MANIFEST_HASH",
+        "bytes": 1,
+        "entry_count": 1
+      },
+      "regular_members": 2,
+      "all_members_rehashed": true,
+      "exact_member_set": true,
+      "sanitization_scan_passed": true,
+      "deterministic_tar_headers": true,
+      "zstd": {
+        "version": "REPLACE_WITH_ZSTD_VERSION",
+        "executable_sha256": "REPLACE_WITH_64_HEX_ZSTD_EXECUTABLE_HASH"
+      }
+    }
+  },
+  "correctness": {
+    "passed": true,
+    "records": 288,
+    "oracle_comparisons": 5760,
+    "materialized_oracle_comparisons": 4608
+  },
+  "results": {
+    "h2": {
+      "materialized-routed": {
+        "social": {
+          "q1-point": {
+            "wall": {
+              "median_ratio": null,
+              "ratio_ci95": { "low": null, "high": null },
+              "pod_elasticity": null,
+              "elasticity_ci95": { "low": null, "high": null }
+            },
+            "process_cpu": {
+              "median_ratio": null,
+              "ratio_ci95": { "low": null, "high": null },
+              "pod_elasticity": null,
+              "elasticity_ci95": { "low": null, "high": null }
+            },
+            "meets_h2_scaling_criterion": null
+          }
+        }
+      },
+      "native-http-assembly": {
+        "social": {
+          "q1-point": {
+            "wall": {
+              "median_ratio": null,
+              "ratio_ci95": { "low": null, "high": null },
+              "pod_elasticity": null,
+              "elasticity_ci95": { "low": null, "high": null }
+            },
+            "process_cpu": {
+              "median_ratio": null,
+              "ratio_ci95": { "low": null, "high": null },
+              "pod_elasticity": null,
+              "elasticity_ci95": { "low": null, "high": null }
+            },
+            "meets_h2_scaling_criterion": null
+          }
+        }
+      }
+    },
+    "guarded_stack_content_reference": {
+      "pod-scaling": {
+        "materialized-routed": {
+          "social": {
+            "q1-point": {
+              "pods-1": {
+                "pairs": null,
+                "process_blocks": null,
+                "pairs_per_process_block": null,
+                "latency_ratio_median": null,
+                "latency_ratio_p95": null,
+                "latency_ratio_ci95_low": null,
+                "latency_ratio_ci95_high": null,
+                "latency_difference_median_ms": null,
+                "latency_difference_p95_ms": null,
+                "latency_difference_ci95_low_ms": null,
+                "latency_difference_ci95_high_ms": null,
+                "cpu_ratio_median": null,
+                "cpu_ratio_ci95_low": null,
+                "cpu_ratio_ci95_high": null,
+                "cpu_difference_median_ms": null,
+                "cpu_difference_ci95_low_ms": null,
+                "cpu_difference_ci95_high_ms": null
+              }
+            }
+          }
+        }
+      }
+    },
+    "backend_operations": {
+      "native-http-assembly": {
+        "social": {
+          "q1-point": {
+            "pods_1_median_operations": null,
+            "pods_2048_median_operations": null
+          }
+        }
+      }
+    },
+    "construction": {
+      "social_count_anchor": {
+        "pods": 1531,
+        "documents": 157693,
+        "content_triples": 3469246,
+        "peak_rss_bytes": null
+      }
+    },
+    "sensitivity": {},
+    "scenarios": {}
+  },
+  "figures": {
+    "pod_scaling_latency": {
+      "path": "site/papers/figures/canonical-timing/access-controlled-sparql-pod-scale/REPLACE_WITH_RUN_ID/pod-scaling-latency.svg",
+      "sha256": "REPLACE_WITH_64_HEX_HASH",
+      "media_type": "image/svg+xml",
+      "output_name": "pod-scaling-latency.svg"
+    },
+    "http_backend_operations": {
+      "path": "site/papers/figures/canonical-timing/access-controlled-sparql-pod-scale/REPLACE_WITH_RUN_ID/http-backend-operations.svg",
+      "sha256": "REPLACE_WITH_64_HEX_HASH",
+      "media_type": "image/svg+xml",
+      "output_name": "http-backend-operations.svg"
+    },
+    "guarded_stack_content_reference": {
+      "path": "site/papers/figures/canonical-timing/access-controlled-sparql-pod-scale/REPLACE_WITH_RUN_ID/guarded-stack-content-reference.svg",
+      "sha256": "REPLACE_WITH_64_HEX_HASH",
+      "media_type": "image/svg+xml",
+      "output_name": "guarded-stack-content-reference.svg"
+    }
+  },
+  "paper_evidence": {
+    "ac_sparql.h2.materialized_routed.social.q1.wall_ratio": {
+      "pointer": "/results/h2/materialized-routed/social/q1-point/wall/median_ratio",
+      "unit": "ratio",
+      "estimator": "median(P=2048) / median(P=1), block-cluster bootstrap",
+      "note": "Primary unrelated-Pod wall-time scaling estimand for the routed social point-query cell.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.h2.materialized_routed.social.q1.wall_ratio_ci95_high": {
+      "pointer": "/results/h2/materialized-routed/social/q1-point/wall/ratio_ci95/high",
+      "unit": "ratio",
+      "estimator": "upper endpoint of prospective ninety-five-percent block-cluster bootstrap interval",
+      "note": "Upper uncertainty endpoint used by the frozen H2 scaling decision rule.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.h2.materialized_routed.social.q1.cpu_ratio": {
+      "pointer": "/results/h2/materialized-routed/social/q1-point/process_cpu/median_ratio",
+      "unit": "ratio",
+      "estimator": "median(P=2048) / median(P=1), block-cluster bootstrap",
+      "note": "Primary unrelated-Pod process-CPU scaling estimand for the routed social point-query cell.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.h2.materialized_routed.social.q1.verdict": {
+      "pointer": "/results/h2/materialized-routed/social/q1-point/meets_h2_scaling_criterion",
+      "unit": "boolean",
+      "estimator": "conjunction of the four frozen upper-confidence-bound decision rules",
+      "hypothesis": "H2",
+      "note": "Mechanical H2 verdict; timing_verdict renders the paper's prose choice with the same forced run provenance as numeric timings.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.guarded_stack_content_reference.pod_scaling.materialized_routed.social.q1.pods_1.latency_ratio_median": {
+      "pointer": "/results/guarded_stack_content_reference/pod-scaling/materialized-routed/social/q1-point/pods-1/latency_ratio_median",
+      "unit": "ratio",
+      "estimator": "paired guarded-stack/content-reference wall-time ratio",
+      "note": "Descriptive RQ4 guarded-stack/content-reference contrast. The content-only reference is query-answer-equivalent for the eight frozen query templates; guarded execution may include structural and control graphs. This is not a pure authorization or interface effect and not an otherwise-identical same-dataset counterfactual.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.construction.social_count_anchor.peak_rss_bytes": {
+      "pointer": "/results/construction/social_count_anchor/peak_rss_bytes",
+      "unit": "bytes",
+      "estimator": "whole-process high-water resident set",
+      "note": "Conservative capacity indicator whose scope includes fixture generation and the physical reference oracle as stated in the protocol.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    }
+  },
+  "paper_figures": {
+    "ac_sparql.figure.pod_scaling_latency": {
+      "figure": "pod_scaling_latency",
+      "alt": "Faceted line plots of median wall time and process CPU time by Pod count, lane, domain, and query family, with cluster-bootstrap uncertainty intervals.",
+      "note": "Primary Pod-scaling timing figure generated by the committed analyzer from the canonical run inputs.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.figure.http_backend_operations": {
+      "figure": "http_backend_operations",
+      "alt": "Backend operations by Pod count for the native in-process handler lane, separated by domain and query family.",
+      "note": "Native-HTTP amplification figure generated by the committed analyzer from the canonical run inputs.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    },
+    "ac_sparql.guarded_stack_content_reference.figure": {
+      "figure": "guarded_stack_content_reference",
+      "alt": "Paired guarded-stack/content-reference ratios for the eight frozen query templates, shown descriptively with uncertainty intervals.",
+      "note": "Descriptive H4/RQ4 guarded-stack/content-reference contrast. The content-only reference is query-answer-equivalent only for the eight frozen templates, while guarded execution may include structural and control graphs; this is not a pure authorization or interface effect.",
+      "papers": ["access-controlled-sparql-pod-scale"]
+    }
+  }
+}

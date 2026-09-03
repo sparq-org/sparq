@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "study_id": "access-controlled-sparql-pod-scaling",
+  "run_id": "REPLACE_WITH_CANONICAL_RUN_ID",
+  "collected_at_utc": "REPLACE_WITH_FINISHED_AT_UTC",
+  "source": {
+    "git_commit": "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX",
+    "tree_clean": true
+  },
+  "analysis": {
+    "git_commit": "REPLACE_WITH_POST_RUN_ANALYSIS_40_HEX",
+    "tree_clean": true,
+    "analyzer_path": "bench/ac/scaling/analyze.py",
+    "protocol_path": "bench/ac/scaling/ANALYSIS-PROTOCOL.md",
+    "publisher_path": "bench/ac/scaling/export_publication.py",
+    "invocation": [
+      "python3",
+      "bench/ac/scaling/analyze.py",
+      "/path/to/verified/canonical-run/raw",
+      "--out",
+      "/path/to/verified/canonical-run/derived",
+      "--bootstrap-draws",
+      "10000",
+      "--bootstrap-seed",
+      "REPLACE_WITH_RECORDED_INTEGER_SEED",
+      "--require-canonical",
+      "--expected-commit",
+      "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX"
+    ]
+  },
+  "environment": {
+    "instance_id": "REPLACE_FROM_ENVIRONMENT_TXT",
+    "instance_type": "r7g.xlarge",
+    "region": "eu-west-2",
+    "architecture": "aarch64",
+    "kernel": "REPLACE_EXACT_KERNEL_LINE",
+    "cpu_model": "REPLACE_EXACT_LSCPU_MODEL_VALUE",
+    "cpu_affinity": "REPLACE_SINGLE_CPU_ID",
+    "allocator": "mimalloc",
+    "host_label": "AWS EC2 r7g.xlarge, eu-west-2, Linux/aarch64, one pinned logical CPU",
+    "noise_limitation": "Shared tenancy cannot exclude noisy-neighbour or host-level interference; randomized blocks and uncertainty intervals mitigate but cannot eliminate it."
+  },
+  "raw_run": {
+    "run_root": "/path/to/verified/canonical-run",
+    "manifest": {
+      "path": "/path/to/verified/canonical-run/MANIFEST.sha256",
+      "sha256": "REPLACE_WITH_FINAL_LOCAL_MANIFEST_64_HEX",
+      "bytes": 1
+    },
+    "manifest_archive_member": "REPLACE_WITH_CANONICAL_RUN_ID/MANIFEST.sha256",
+    "archive": {
+      "path": "bench/canonical-competitor-results/ac-sparql/REPLACE_WITH_CANONICAL_RUN_ID/raw-sanitized.tar.zst",
+      "sha256": "REPLACE_WITH_ARCHIVE_64_HEX",
+      "bytes": 1
+    }
+  },
+  "cost_report": {
+    "path": "/path/to/cost-report.json",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "bytes": 1
+  },
+  "correctness_report": {
+    "path": "/path/to/correctness-report.json",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "bytes": 1
+  },
+  "exclusion_report": {
+    "path": "/path/to/exclusion-report.json",
+    "sha256": "REPLACE_WITH_64_HEX",
+    "bytes": 1
+  },
+  "release": {
+    "baseline_commit": "8ad990e679cf11018d5fc6a3860741db9e897034",
+    "doi": "REPLACE_WITH_ARTIFACT_DOI_OR_EXPLICIT_PENDING_IDENTIFIER",
+    "license": "REPLACE_WITH_SPDX_LICENSE"
+  }
+}

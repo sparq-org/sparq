@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "currency": "USD",
+  "status": "final-accounted",
+  "accounting_method": "duration-times-official-rate-plus-ebs-ipv4",
+  "estimated": true,
+  "canonical_host_duration_seconds": 1,
+  "components_usd": {
+    "canonical_compute": "0.00",
+    "canonical_storage": "0.00",
+    "canonical_public_ipv4": "0.00",
+    "prior_valid_and_invalid_attempts": "0.00",
+    "other": "0.00"
+  },
+  "study_total_usd": "0.00",
+  "canonical_run_usd": "0.00",
+  "basis": "Accounted direct-resource estimate from recorded duration multiplied by the official regional on-demand rate, plus EBS and public-IPv4 charges, at REPLACE_WITH_CUTOFF. This is not a metered invoice."
+}

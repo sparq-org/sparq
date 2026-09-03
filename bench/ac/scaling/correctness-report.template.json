@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "source_commit": "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX",
+  "note": "Annotations only. Gate counts, comparisons, exact-result pass status, and named-probe status are independently derived from checksummed run-root evidence.",
+  "suite_attestations": [
+    {
+      "command": ["cargo", "test", "--locked", "-p", "sparq-acbench", "--test", "deployment"],
+      "source_commit": "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX",
+      "exit_status": 0,
+      "log": {
+        "path": "correctness/suite-logs/sparq-acbench-deployment.log",
+        "sha256": "REPLACE_WITH_64_HEX",
+        "bytes": 1
+      }
+    },
+    {
+      "command": ["cargo", "test", "--locked", "-p", "sparq-solid", "--test", "acbench_deployment"],
+      "source_commit": "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX",
+      "exit_status": 0,
+      "log": {
+        "path": "correctness/suite-logs/sparq-solid-acbench-deployment.log",
+        "sha256": "REPLACE_WITH_64_HEX",
+        "bytes": 1
+      }
+    },
+    {
+      "command": ["cargo", "test", "--locked", "-p", "sparq-lws-core", "--features", "sparql-endpoint", "--test", "sparql_endpoint"],
+      "source_commit": "REPLACE_WITH_BENCHMARK_SOURCE_40_HEX",
+      "exit_status": 0,
+      "log": {
+        "path": "correctness/suite-logs/sparq-lws-core-sparql-endpoint.log",
+        "sha256": "REPLACE_WITH_64_HEX",
+        "bytes": 1
+      }
+    }
+  ]
+}

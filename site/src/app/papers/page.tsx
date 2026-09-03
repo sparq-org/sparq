@@ -25,7 +25,7 @@ import { withBasePath } from "@/lib/base-path";
 export const metadata: Metadata = {
   title: "Papers",
   description:
-    "Academic papers generated from sparq contributions — each authored once in Typst, bound to live evidence, and built into both an in-site render and a downloadable PDF. Numbers are gated to deterministic, machine-independent evidence.",
+    "Academic papers generated from sparq contributions — each authored once in Typst, bound to verified deterministic or provenance-complete canonical timing evidence, and built into both an in-site render and a downloadable PDF.",
 };
 
 // basePath-aware PDF asset link. [OPUS-4.8] sq-9vw5 — env-switched (was hardcoded `/sparq`)
@@ -62,11 +62,11 @@ export default function PapersIndexPage() {
         <p>
           Each paper is authored once as a Typst source and built into both the in-site render
           below and a downloadable PDF, fed the same paper-bound evidence so the two cannot
-          disagree. Every number is gated to{" "}
-          <strong className="text-foreground">deterministic, machine-independent</strong>{" "}
-          evidence (recall floors, answer-safety invariants); a build-time honesty gate blocks
-          any indicative work-box measurement from a headline result. No wall-clock latency is
-          claimed until the canonical performance runner is operational.
+          disagree. Headline evidence has two explicit classes: deterministic, machine-independent
+          invariants and fixed artifact facts; or controlled, machine-dependent canonical timing
+          whose host, source commit, protocol, run ID, and collection time remain attached to the
+          rendered value. A build-time honesty gate blocks indicative work-box measurements from
+          headline results and admits timing SVGs only through a digest-bound provenance helper.
         </p>
       </section>
 

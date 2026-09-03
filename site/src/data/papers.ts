@@ -29,6 +29,8 @@ export interface Paper {
   family: PaperFamily;
   /** What the headline evidence is — surfaced on the card so the framing is honest up front. */
   evidence: string;
+  /** Evidence-key namespaces shown in this paper's page-level provenance stamp. */
+  evidencePrefixes?: readonly string[];
 }
 
 export const STATUS_LABEL: Record<PaperStatus, string> = {

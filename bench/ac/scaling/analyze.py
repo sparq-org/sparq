@@ -25,6 +25,8 @@ from typing import Any, Iterable, Sequence
 
 SCHEMA_VERSION = 6
 BOOTSTRAP_SEED = 20260903
+MIN_CANONICAL_BOOTSTRAP_DRAWS = 10_000
+H4_BOOTSTRAP_METHOD = "resample-corpus-process-blocks-then-intact-pairs"
 GUARDED_OPERATION = {
     "materialized-routed": "guarded-query-as",
     "native-http-assembly": "native-http-request",
@@ -199,6 +201,27 @@ def discover(inputs: Sequence[Path]) -> tuple[Path, ...]:
     return selected
 
 
+def sha256_file(path: Path) -> str:
+    """Hash a file without loading a potentially large raw stream into memory."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stable_seed(base_seed: int, namespace: str, key: Sequence[Any]) -> int:
+    """Derive an input-order-independent RNG seed with an explicit algorithm."""
+
+    material = json.dumps(
+        [base_seed, namespace, list(key)],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(material).digest(), "big")
+
+
 def verify_checksum(path: Path, *, required: bool = False) -> None:
     sidecar = Path(f"{path}.sha256")
     if not sidecar.exists():
@@ -206,7 +229,7 @@ def verify_checksum(path: Path, *, required: bool = False) -> None:
             raise AnalysisError(f"canonical input has no checksum sidecar: {path}")
         return
     expected = sidecar.read_text(encoding="utf-8").split()[0].lower()
-    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    actual = sha256_file(path)
     if actual != expected:
         raise AnalysisError(f"checksum mismatch for {path}: {actual} != {expected}")
 
@@ -583,6 +606,9 @@ def validate_canonical_campaign(
     if set(instrument_runs) - construction_runs:
         raise AnalysisError("canonical instrumentation fixtures lack construction records")
 
+    validate_primary_causal_invariants(
+        (*primary, *instrumented), constructions, expected_pods
+    )
     validate_secondary_campaigns(observations, constructions)
     validate_profile_matching(observations)
 
@@ -923,6 +949,8 @@ def validate_profile_matching(observations: Sequence[dict[str, Any]]) -> None:
     match_fields = (
         "corpus_hash_sha256",
         "query_hash_sha256",
+        "result_hash_sha256",
+        "result_rows",
         "pods",
         "documents_per_pod",
         "triples_per_document",
@@ -950,6 +978,96 @@ def validate_profile_matching(observations: Sequence[dict[str, Any]]) -> None:
         if mismatched:
             raise AnalysisError(
                 f"canonical timing/instrumentation cell {key} differs in {mismatched}"
+            )
+
+
+def validate_primary_causal_invariants(
+    observations: Sequence[dict[str, Any]],
+    constructions: Sequence[dict[str, Any]],
+    expected_pods: set[int],
+) -> None:
+    """Require the primary unrelated-Pod intervention to hold its target work fixed.
+
+    The canonical primary cells use the Pod-0 owner with an all-private corpus. Hence
+    adding Pods may change the full corpus hash and stored-state counts, but it may not
+    change the query, answer multiset, or readable-document count for evaluation. Keep
+    lanes, domains, profiles, queries, and seed/process blocks separate because their
+    IRIs, vocabularies, execution paths, and generated target slices may differ.
+    """
+
+    query_groups = group_by(
+        observations,
+        ("measurement_profile", "lane", "domain", "query_id", "process_block"),
+    )
+    for key, records in query_groups.items():
+        pods = {int(record["pods"]) for record in records}
+        if pods != expected_pods:
+            raise AnalysisError(
+                f"primary causal query group {key} has Pod counts "
+                f"{sorted(pods)}, expected {sorted(expected_pods)}"
+            )
+        query_hashes = {str(record["query_hash_sha256"]) for record in records}
+        if len(query_hashes) != 1:
+            raise AnalysisError(
+                f"primary causal query group {key} changes query hash across Pod counts"
+            )
+        outcomes = {
+            (str(record["result_hash_sha256"]), int(record["result_rows"]))
+            for record in records
+        }
+        if len(outcomes) != 1:
+            raise AnalysisError(
+                f"primary causal query group {key} changes result across Pod counts"
+            )
+
+    construction_by_run = {
+        str(record["run_uuid"]): record for record in constructions
+    }
+    run_representatives: dict[str, dict[str, Any]] = {}
+    for record in observations:
+        run_representatives.setdefault(str(record["run_uuid"]), record)
+
+    primary_constructions: list[dict[str, Any]] = []
+    for run_uuid, observation in run_representatives.items():
+        construction = construction_by_run.get(run_uuid)
+        if construction is None:
+            raise AnalysisError(
+                f"primary causal fixture {run_uuid} lacks a construction record"
+            )
+        expected_readable = int(observation["documents_per_pod"])
+        readable = (
+            int(construction["target_readable_documents"]),
+            int(construction["evaluation_readable_documents"]),
+        )
+        if readable != (expected_readable, expected_readable):
+            raise AnalysisError(
+                f"primary all-private owner fixture {run_uuid} has readable counts "
+                f"{readable}, expected {(expected_readable, expected_readable)}"
+            )
+        primary_constructions.append(construction)
+
+    construction_groups = group_by(
+        primary_constructions,
+        ("measurement_profile", "lane", "domain", "process_block"),
+    )
+    for key, records in construction_groups.items():
+        pods = {int(record["pods"]) for record in records}
+        if pods != expected_pods:
+            raise AnalysisError(
+                f"primary causal construction group {key} has Pod counts "
+                f"{sorted(pods)}, expected {sorted(expected_pods)}"
+            )
+        readable_counts = {
+            (
+                int(record["target_readable_documents"]),
+                int(record["evaluation_readable_documents"]),
+            )
+            for record in records
+        }
+        if len(readable_counts) != 1:
+            raise AnalysisError(
+                f"primary causal construction group {key} changes readable counts "
+                "across Pod counts"
             )
 
 
@@ -1103,6 +1221,10 @@ def validate_pairs(observations: Sequence[dict[str, Any]]) -> None:
         lane = records[0]["lane"]
         if any(record["lane"] != lane for record in records):
             raise AnalysisError(f"cross-lane pair {pair}")
+        pair_fields = ("query_id", "query_family", "query_hash_sha256", "repetition")
+        baseline = tuple(records[0][field] for field in pair_fields)
+        if any(tuple(record[field] for field in pair_fields) != baseline for record in records[1:]):
+            raise AnalysisError(f"paired request metadata disagreement in {pair}")
         expected = {GUARDED_OPERATION[lane], PLAIN_OPERATION[lane]}
         operations = {record["operation"] for record in records}
         if operations != expected:
@@ -1114,6 +1236,9 @@ def validate_pairs(observations: Sequence[dict[str, Any]]) -> None:
         orders = {record["order_in_pair"] for record in records}
         if orders != {0, 1}:
             raise AnalysisError(f"invalid pair order in {pair}: {orders}")
+        cpu_presence = {record.get("process_cpu_ns") is not None for record in records}
+        if len(cpu_presence) != 1:
+            raise AnalysisError(f"paired CPU-time availability disagreement in {pair}")
 
 
 def percentile(values: Sequence[float], probability: float) -> float:
@@ -1233,77 +1358,237 @@ def write_summary(path: Path, observations: Sequence[dict[str, Any]]) -> None:
     write_csv(path, rows)
 
 
-def write_overhead(path: Path, observations: Sequence[dict[str, Any]]) -> None:
-    pairs = group_by(observations, ("run_uuid", "pair_id"))
-    by_cell: dict[tuple[Any, ...], list[dict[str, float | None]]] = defaultdict(list)
-    cell_keys = (
-        "campaign",
-        "measurement_profile",
-        "cell_label",
-        "lane",
-        "domain",
-        "pods",
-        "documents_per_pod",
-        "triples_per_document",
-        "principal",
-        "query_id",
-        "query_family",
-    )
-    for records in pairs.values():
+H4_CELL_KEYS = SUMMARY_KEYS[:-1]
+
+
+def h4_paired_effects(
+    observations: Sequence[dict[str, Any]],
+) -> dict[tuple[Any, ...], list[dict[str, Any]]]:
+    """Form one effect per intact guarded/plain pair from timing-profile records."""
+
+    timing = [record for record in observations if record["measurement_profile"] == "timing"]
+    if not timing:
+        raise AnalysisError("H4 has no timing-profile observations")
+    validate_pairs(timing)
+    pairs = group_by(timing, ("run_uuid", "pair_id"))
+    by_cell: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for pair_key, records in sorted(pairs.items()):
         lane = records[0]["lane"]
-        guarded = next(record for record in records if record["operation"] == GUARDED_OPERATION[lane])
-        plain = next(record for record in records if record["operation"] == PLAIN_OPERATION[lane])
-        ratio = guarded["wall_ns"] / plain["wall_ns"]
-        difference_ms = (guarded["wall_ns"] - plain["wall_ns"]) / 1_000_000
+        guarded = next(
+            record for record in records if record["operation"] == GUARDED_OPERATION[lane]
+        )
+        plain = next(
+            record for record in records if record["operation"] == PLAIN_OPERATION[lane]
+        )
+        guarded_wall = float(guarded["wall_ns"])
+        plain_wall = float(plain["wall_ns"])
+        if guarded_wall <= 0 or plain_wall <= 0:
+            raise AnalysisError(f"H4 pair {pair_key} has non-positive wall time")
         guarded_cpu = guarded.get("process_cpu_ns")
         plain_cpu = plain.get("process_cpu_ns")
-        cpu_ratio = None
-        cpu_difference_ms = None
-        if guarded_cpu is not None and plain_cpu is not None:
-            cpu_difference_ms = (guarded_cpu - plain_cpu) / 1_000_000
-            if plain_cpu > 0:
-                cpu_ratio = guarded_cpu / plain_cpu
-        by_cell[tuple(guarded[key] for key in cell_keys)].append(
-            {
-                "latency_ratio": ratio,
-                "latency_difference_ms": difference_ms,
-                "cpu_ratio": cpu_ratio,
-                "cpu_difference_ms": cpu_difference_ms,
-            }
+        if (guarded_cpu is None) != (plain_cpu is None):
+            raise AnalysisError(f"H4 pair {pair_key} has inconsistent CPU-time availability")
+        if guarded_cpu is not None and (float(guarded_cpu) <= 0 or float(plain_cpu) <= 0):
+            raise AnalysisError(f"H4 pair {pair_key} has non-positive CPU time")
+        effect = {
+            "cluster": (int(guarded["corpus_seed"]), int(guarded["process_block"])),
+            "run_uuid": str(guarded["run_uuid"]),
+            "pair_id": str(guarded["pair_id"]),
+            "repetition": int(guarded["repetition"]),
+            "latency_ratio": guarded_wall / plain_wall,
+            "latency_difference_ms": (guarded_wall - plain_wall) / 1_000_000,
+            "cpu_ratio": (
+                float(guarded_cpu) / float(plain_cpu) if guarded_cpu is not None else None
+            ),
+            "cpu_difference_ms": (
+                (float(guarded_cpu) - float(plain_cpu)) / 1_000_000
+                if guarded_cpu is not None
+                else None
+            ),
+        }
+        by_cell[tuple(guarded[key] for key in H4_CELL_KEYS)].append(effect)
+    return by_cell
+
+
+def validate_h4_clusters(
+    cell_key: tuple[Any, ...], effects: Sequence[dict[str, Any]]
+) -> dict[tuple[int, int], list[dict[str, Any]]]:
+    """Require balanced, independently rebuilt blocks with complete repetition indices."""
+
+    clusters: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+    for effect in effects:
+        clusters[effect["cluster"]].append(effect)
+    counts = {len(values) for values in clusters.values()}
+    if len(counts) != 1:
+        raise AnalysisError(f"H4 cell {cell_key} has unbalanced pair counts by block")
+    repetitions = next(iter(counts))
+    expected_repetitions = set(range(repetitions))
+    ordered: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for cluster, values in sorted(clusters.items()):
+        run_uuids = {value["run_uuid"] for value in values}
+        if len(run_uuids) != 1:
+            raise AnalysisError(f"H4 cell {cell_key} block {cluster} spans multiple runs")
+        observed_repetitions = {value["repetition"] for value in values}
+        if observed_repetitions != expected_repetitions:
+            raise AnalysisError(
+                f"H4 cell {cell_key} block {cluster} repetition indices "
+                f"{sorted(observed_repetitions)} != 0..{repetitions - 1}"
+            )
+        ordered[cluster] = sorted(
+            values, key=lambda value: (value["repetition"], value["pair_id"])
         )
-    rows = []
-    for key, values in sorted(by_cell.items()):
-        ratio = descriptive([float(value["latency_ratio"]) for value in values])
-        difference = descriptive(
-            [float(value["latency_difference_ms"]) for value in values]
+    return ordered
+
+
+def bootstrap_paired_medians(
+    clusters: dict[tuple[int, int], list[dict[str, Any]]],
+    metrics: Sequence[str],
+    draws: int,
+    rng: random.Random,
+) -> dict[str, tuple[float, float]]:
+    """Resample each paired-effect vector once and return marginal median intervals."""
+
+    if draws < 100:
+        raise AnalysisError("H4 bootstrap requires at least 100 draws")
+    cluster_keys = sorted(clusters)
+    if len(cluster_keys) < 2:
+        raise AnalysisError("H4 bootstrap requires at least two corpus/process blocks")
+    estimates: dict[str, list[float]] = {metric: [] for metric in metrics}
+    for _ in range(draws):
+        sample: list[dict[str, Any]] = []
+        for selected_key in rng.choices(cluster_keys, k=len(cluster_keys)):
+            selected = clusters[selected_key]
+            sample.extend(rng.choices(selected, k=len(selected)))
+        for metric in metrics:
+            estimates[metric].append(
+                float(statistics.median(float(effect[metric]) for effect in sample))
+            )
+    return {
+        metric: (percentile(values, 0.025), percentile(values, 0.975))
+        for metric, values in estimates.items()
+    }
+
+
+def summarize_h4_metric(
+    clusters: dict[tuple[int, int], list[dict[str, Any]]],
+    metric: str,
+    interval: tuple[float, float] | None,
+) -> dict[str, float | None]:
+    numeric_values = [
+        float(effect[metric]) for effects in clusters.values() for effect in effects
+    ]
+    return {
+        "median": float(statistics.median(numeric_values)),
+        "p95": percentile(numeric_values, 0.95),
+        "ci95_low": interval[0] if interval else None,
+        "ci95_high": interval[1] if interval else None,
+    }
+
+
+def analyze_h4(
+    observations: Sequence[dict[str, Any]],
+    draws: int,
+    seed: int,
+    *,
+    require_complete_blocks: bool = False,
+) -> list[dict[str, Any]]:
+    """Estimate H4 paired medians and hierarchical percentile intervals by timing cell."""
+
+    cells = h4_paired_effects(observations)
+    rows: list[dict[str, Any]] = []
+    campaign_clusters: dict[str, set[tuple[int, int]]] = {}
+    for key, effects in sorted(cells.items()):
+        clusters = validate_h4_clusters(key, effects)
+        campaign = str(key[0])
+        observed_clusters = set(clusters)
+        if (
+            require_complete_blocks
+            and campaign in campaign_clusters
+            and campaign_clusters[campaign] != observed_clusters
+        ):
+            raise AnalysisError(f"H4 campaign {campaign} does not have complete common blocks")
+        campaign_clusters.setdefault(campaign, observed_clusters)
+        cpu_presence = {
+            effect["cpu_ratio"] is not None
+            for effects in clusters.values()
+            for effect in effects
+        }
+        if len(cpu_presence) != 1:
+            raise AnalysisError(f"H4 CPU time is missing for only part of cell {key}")
+        metrics = ["latency_ratio", "latency_difference_ms"]
+        if cpu_presence == {True}:
+            metrics.extend(("cpu_ratio", "cpu_difference_ms"))
+        inferential = len(clusters) >= 2
+        intervals: dict[str, tuple[float, float] | None]
+        if inferential:
+            intervals = bootstrap_paired_medians(
+                clusters,
+                metrics,
+                draws,
+                random.Random(stable_seed(seed, "h4:paired-effect-vector", key)),
+            )
+        else:
+            intervals = {metric: None for metric in metrics}
+        latency_ratio = summarize_h4_metric(
+            clusters, "latency_ratio", intervals["latency_ratio"]
         )
-        cpu_ratios = [
-            float(value["cpu_ratio"])
-            for value in values
-            if value["cpu_ratio"] is not None
-        ]
-        cpu_differences = [
-            float(value["cpu_difference_ms"])
-            for value in values
-            if value["cpu_difference_ms"] is not None
-        ]
-        row = dict(zip(cell_keys, key, strict=True))
+        latency_difference = summarize_h4_metric(
+            clusters, "latency_difference_ms", intervals["latency_difference_ms"]
+        )
+        cpu_ratio = (
+            summarize_h4_metric(clusters, "cpu_ratio", intervals["cpu_ratio"])
+            if "cpu_ratio" in intervals
+            else None
+        )
+        cpu_difference = (
+            summarize_h4_metric(
+                clusters, "cpu_difference_ms", intervals["cpu_difference_ms"]
+            )
+            if "cpu_difference_ms" in intervals
+            else None
+        )
+        pairs_per_block = len(next(iter(clusters.values())))
+        row = dict(zip(H4_CELL_KEYS, key, strict=True))
         row.update(
             {
-                "pairs": len(values),
-                "latency_ratio_median": ratio["median"],
-                "latency_ratio_p95": ratio["p95"],
-                "latency_difference_median_ms": difference["median"],
-                "latency_difference_p95_ms": difference["p95"],
-                "cpu_ratio_median": (
-                    statistics.median(cpu_ratios) if cpu_ratios else ""
+                "pairs": len(effects),
+                "process_blocks": len(clusters),
+                "pairs_per_process_block": pairs_per_block,
+                "inference_status": (
+                    "hierarchical-cluster-bootstrap"
+                    if inferential
+                    else "descriptive-only-insufficient-blocks"
                 ),
+                "bootstrap_draws": draws if inferential else 0,
+                "bootstrap_seed": seed if inferential else "",
+                "bootstrap_method": H4_BOOTSTRAP_METHOD if inferential else "",
+                "latency_ratio_median": latency_ratio["median"],
+                "latency_ratio_p95": latency_ratio["p95"],
+                "latency_ratio_ci95_low": latency_ratio["ci95_low"],
+                "latency_ratio_ci95_high": latency_ratio["ci95_high"],
+                "latency_difference_median_ms": latency_difference["median"],
+                "latency_difference_p95_ms": latency_difference["p95"],
+                "latency_difference_ci95_low_ms": latency_difference["ci95_low"],
+                "latency_difference_ci95_high_ms": latency_difference["ci95_high"],
+                "cpu_ratio_median": cpu_ratio["median"] if cpu_ratio else "",
+                "cpu_ratio_ci95_low": cpu_ratio["ci95_low"] if cpu_ratio else "",
+                "cpu_ratio_ci95_high": cpu_ratio["ci95_high"] if cpu_ratio else "",
                 "cpu_difference_median_ms": (
-                    statistics.median(cpu_differences) if cpu_differences else ""
+                    cpu_difference["median"] if cpu_difference else ""
+                ),
+                "cpu_difference_ci95_low_ms": (
+                    cpu_difference["ci95_low"] if cpu_difference else ""
+                ),
+                "cpu_difference_ci95_high_ms": (
+                    cpu_difference["ci95_high"] if cpu_difference else ""
                 ),
             }
         )
         rows.append(row)
+    return rows
+
+
+def write_overhead(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     write_csv(path, rows)
 
 
@@ -1637,10 +1922,10 @@ def scaling_series(
     return series
 
 
-def write_scaling_svg(path: Path, observations: Sequence[dict[str, Any]]) -> None:
+def write_scaling_svg(path: Path, observations: Sequence[dict[str, Any]]) -> bool:
     series = scaling_series(observations, {"q1-point", "q8-graph-scan"})
     if not series:
-        return
+        return False
     width, height = 980, 460
     margin_left, margin_top, panel_width, panel_height = 75, 55, 395, 320
     gap = 80
@@ -1650,7 +1935,7 @@ def write_scaling_svg(path: Path, observations: Sequence[dict[str, Any]]) -> Non
     all_pods = sorted({pod for values in series.values() for pod, _ in values})
     all_ms = [milliseconds for values in series.values() for _, milliseconds in values]
     if len(all_pods) < 2 or not all_ms:
-        return
+        return False
     x_min, x_max = math.log2(min(all_pods)), math.log2(max(all_pods))
     positive = [value for value in all_ms if value > 0]
     y_min = math.floor(math.log10(min(positive)))
@@ -1711,9 +1996,10 @@ def write_scaling_svg(path: Path, observations: Sequence[dict[str, Any]]) -> Non
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(svg) + "\n", encoding="utf-8")
+    return True
 
 
-def write_backend_svg(path: Path, observations: Sequence[dict[str, Any]]) -> None:
+def write_backend_svg(path: Path, observations: Sequence[dict[str, Any]]) -> bool:
     records = [
         record
         for record in pod_scaling_instrumentation_observations(observations)
@@ -1730,13 +2016,13 @@ def write_backend_svg(path: Path, observations: Sequence[dict[str, Any]]) -> Non
     for values in series.values():
         values.sort()
     if not series:
-        return
+        return False
     width, height = 620, 410
     left, top, plot_width, plot_height = 75, 45, 500, 285
     pods = sorted({pod for values in series.values() for pod, _ in values})
     operations = [value for values in series.values() for _, value in values]
     if len(pods) < 2:
-        return
+        return False
     x0, x1 = math.log2(min(pods)), math.log2(max(pods))
     y0, y1 = math.floor(math.log10(min(operations))), math.ceil(math.log10(max(operations)))
     if y0 == y1:
@@ -1780,12 +2066,40 @@ def write_backend_svg(path: Path, observations: Sequence[dict[str, Any]]) -> Non
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(svg) + "\n", encoding="utf-8")
+    return True
+
+
+def output_artifacts(output_dir: Path, names: Sequence[str]) -> list[dict[str, Any]]:
+    """Register byte length and SHA-256 for every output produced by this invocation."""
+
+    artifacts = []
+    for name in names:
+        path = output_dir / name
+        if not path.is_file():
+            raise AnalysisError(f"declared analysis output does not exist: {path}")
+        artifacts.append(
+            {
+                "path": name,
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
+    return artifacts
+
+
+def validate_bootstrap_draws(draws: int, require_canonical: bool) -> None:
+    if draws < 100:
+        raise AnalysisError("bootstrap-draws must be at least 100")
+    if require_canonical and draws < MIN_CANONICAL_BOOTSTRAP_DRAWS:
+        raise AnalysisError(
+            "canonical bootstrap-draws must be at least "
+            f"{MIN_CANONICAL_BOOTSTRAP_DRAWS}"
+        )
 
 
 def main() -> int:
     args = arguments()
-    if args.bootstrap_draws < 100:
-        raise AnalysisError("bootstrap-draws must be at least 100")
+    validate_bootstrap_draws(args.bootstrap_draws, args.require_canonical)
     if args.require_canonical:
         if args.expected_commit is None:
             raise AnalysisError("--expected-commit is required with --require-canonical")
@@ -1799,32 +2113,47 @@ def main() -> int:
     )
     args.out.mkdir(parents=True, exist_ok=True)
     write_summary(args.out / "summary.csv", loaded.observations)
-    write_overhead(args.out / "paired-overhead.csv", loaded.observations)
+    h4 = analyze_h4(
+        loaded.observations,
+        args.bootstrap_draws,
+        args.bootstrap_seed,
+        require_complete_blocks=args.require_canonical,
+    )
+    write_overhead(args.out / "paired-overhead.csv", h4)
     write_construction(args.out / "construction.csv", loaded.constructions)
     h2 = analyze_h2(loaded.observations, args.bootstrap_draws, args.bootstrap_seed)
     write_h2(args.out / "h2.json", h2, loaded.files)
-    write_scaling_svg(args.out / "pod-scaling-latency.svg", loaded.observations)
-    write_backend_svg(args.out / "http-backend-operations.svg", loaded.observations)
+    scaling_written = write_scaling_svg(
+        args.out / "pod-scaling-latency.svg", loaded.observations
+    )
+    backend_written = write_backend_svg(
+        args.out / "http-backend-operations.svg", loaded.observations
+    )
     output_names = [
         "summary.csv",
         "paired-overhead.csv",
         "construction.csv",
         "h2.json",
-        "pod-scaling-latency.svg",
-        "http-backend-operations.svg",
     ]
+    if scaling_written:
+        output_names.append("pod-scaling-latency.svg")
+    if backend_written:
+        output_names.append("http-backend-operations.svg")
+    if args.require_canonical and not (scaling_written and backend_written):
+        raise AnalysisError("canonical analysis did not produce both declared SVG figures")
+    artifacts = output_artifacts(args.out, output_names)
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "input_files": [
             {
                 "path": str(path),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": sha256_file(path),
             }
             for path in loaded.files
         ],
         "analysis_script": {
             "path": str(Path(__file__).resolve()),
-            "sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "sha256": sha256_file(Path(__file__)),
         },
         "canonical_required": args.require_canonical,
         "expected_commit": args.expected_commit,
@@ -1834,7 +2163,8 @@ def main() -> int:
         "applicability_records": len(loaded.applicability),
         "bootstrap_draws": args.bootstrap_draws,
         "bootstrap_seed": args.bootstrap_seed,
-        "outputs": [name for name in output_names if (args.out / name).exists()],
+        "outputs": output_names,
+        "output_artifacts": artifacts,
     }
     (args.out / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

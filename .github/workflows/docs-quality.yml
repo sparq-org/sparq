@@ -834,6 +834,12 @@ jobs:
         run: shellcheck scripts/tests/test_build_papers_honesty_boundary.sh
       - name: Self-test the build-papers.mjs build-boundary honesty assertion (sq-mraf)
         run: bash scripts/tests/test_build_papers_honesty_boundary.sh
+      - name: Canonical paper-timing sync and envelope unit tests
+        run: |
+          node site/scripts/sync-canonical-timing.mjs --check
+          node --test site/test/canonical-timing.test.mjs site/test/canonical-timing-usage.test.mjs site/test/canonical-timing-provenance-ui.test.mjs
+      - name: Canonical paper-timing verifier supplement tests
+        run: python3 scripts/tests/test_verify_paper_evidence_timing.py
       # [OPUS-4.8] sq-gum8.13 (epic sq-gum8, paper factory F1): the fail-closed EVIDENCE-BINDING
       # verifier (scripts/verify-paper-evidence.py) upgrades every paper-evidence number's
       # source-trace from ASSERTED to MACHINE-VERIFIED — a canonical record's value must still

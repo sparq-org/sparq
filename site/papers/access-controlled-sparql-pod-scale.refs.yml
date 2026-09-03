@@ -1,0 +1,434 @@
+# Bibliography for the access-controlled SPARQL many-Pod paper.
+# Entries follow the primary-source evidence ledger frozen on 2026-09-03.
+
+solid-protocol:
+  type: reference
+  title: "Solid Protocol"
+  date: 2024-05-12
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/2024/protocol-20240512
+  note: "Version 0.11.0, Draft Community Group Report"
+
+wac:
+  type: reference
+  title: "Web Access Control"
+  date: 2024-05-12
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/2024/wac-20240512
+  note: "Version 1.0.0, Draft Community Group Report"
+
+acp:
+  type: reference
+  title: "Access Control Policy"
+  date: 2022-05-18
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/acp
+  note: "Version 0.9.0, Editor's Draft"
+
+sparql11-query:
+  type: reference
+  title: "SPARQL 1.1 Query Language"
+  author:
+    - Harris, Steve
+    - Seaborne, Andy
+  date: 2013-03-21
+  publisher: W3C
+  url: https://www.w3.org/TR/sparql11-query/
+  note: "W3C Recommendation"
+
+sparql11-protocol:
+  type: reference
+  title: "SPARQL 1.1 Protocol"
+  author:
+    - Feigenbaum, Lee
+    - Williams, Gregory Todd
+    - Clark, Kendall Grant
+    - Torres, Elias
+  date: 2013-03-21
+  publisher: W3C
+  url: https://www.w3.org/TR/sparql11-protocol/
+  note: "W3C Recommendation"
+
+perez-tods:
+  type: article
+  title: "Semantics and Complexity of SPARQL"
+  author:
+    - Pérez, Jorge
+    - Arenas, Marcelo
+    - Gutierrez, Claudio
+  date: 2009
+  parent:
+    type: periodical
+    title: "ACM Transactions on Database Systems"
+    volume: 34
+    issue: 3
+  url: https://doi.org/10.1145/1567274.1567278
+  note: "Article 16"
+
+sparql-view-rewriting:
+  type: article
+  title: "Rewriting Queries on SPARQL Views"
+  author:
+    - Le, Wangchao
+    - Duan, Songyun
+    - Kementsietsidis, Anastasios
+    - Li, Feifei
+    - Wang, Min
+  date: 2011
+  parent:
+    type: proceedings
+    title: "Proceedings of the 20th International Conference on World Wide Web"
+  url: https://doi.org/10.1145/1963405.1963497
+  note: "Pages 655--664"
+
+kirrane-query-ac:
+  type: report
+  title: "Query Based Access Control for Linked Data"
+  author:
+    - Kirrane, Sabrina
+    - Mileo, Alessandra
+    - Polleres, Axel
+    - Decker, Stefan
+  date: 2020
+  url: https://arxiv.org/abs/2007.00461
+  note: "arXiv:2007.00461"
+
+safe:
+  type: article
+  title: "SAFE: SPARQL Federation over RDF Data Cubes with Access Control"
+  author:
+    - Khan, Yasar
+    - Saleem, Muhammad
+    - Mehdi, Muntazir
+    - Hogan, Aidan
+    - Mehmood, Qaiser
+    - Rebholz-Schuhmann, Dietrich
+    - Sahay, Ratnesh
+  date: 2017
+  parent:
+    type: periodical
+    title: "Journal of Biomedical Semantics"
+    volume: 8
+  url: https://doi.org/10.1186/s13326-017-0112-6
+  note: "Volume 8, issue 1, article 5"
+
+solidbench:
+  type: article
+  title: "Link Traversal Query Processing over Decentralized Environments with Structural Assumptions"
+  author:
+    - Taelman, Ruben
+    - Verborgh, Ruben
+  date: 2023
+  parent:
+    type: proceedings
+    title: "The Semantic Web -- ISWC 2023"
+  url: https://doi.org/10.1007/978-3-031-47240-4_1
+  note: "Pages 3--22; article and SolidBench artefact: https://comunica.github.io/Article-ISWC2023-SolidQuery/"
+
+ldbc-snb:
+  type: article
+  title: "The LDBC Social Network Benchmark: Interactive Workload"
+  author:
+    - Erling, Orri
+    - Averbuch, Alex
+    - Larriba-Pey, Josep
+    - Chafi, Hassan
+    - Gubichev, Andrey
+    - Prat, Arnau
+    - Pham, Minh-Duc
+    - Boncz, Peter
+  date: 2015
+  parent:
+    type: proceedings
+    title: "Proceedings of the 2015 ACM SIGMOD International Conference on Management of Data"
+  url: https://doi.org/10.1145/2723372.2742786
+
+tidal:
+  type: article
+  title: "ciTIzen-centric DAta pLatform (TIDAL): Sharing Distributed Personal Data in a Privacy-Preserving Manner for Health Research"
+  author:
+    - Sun, Chang
+    - Gallofré Ocaña, Marc
+    - van Soest, Johan
+    - Dumontier, Michel
+  date: 2023
+  parent:
+    type: periodical
+    title: "Semantic Web"
+    volume: 14
+    issue: 5
+  url: https://doi.org/10.3233/SW-223220
+  note: "Pages 977--996"
+
+synthea:
+  type: article
+  title: "Synthea: An Approach, Method, and Software Mechanism for Generating Synthetic Patients and the Synthetic Electronic Health Care Record"
+  author:
+    - Walonoski, Jason
+    - Kramer, Mark
+    - Nichols, Joseph
+    - Quina, Andre
+    - Moesel, Chris
+    - Hall, Dylan
+    - Duffett, Carlton
+    - Dube, Kudakwashe
+    - Gallagher, Thomas
+    - McLachlan, Scott
+  date: 2018
+  parent:
+    type: periodical
+    title: "Journal of the American Medical Informatics Association"
+    volume: 25
+    issue: 3
+  url: https://doi.org/10.1093/jamia/ocx079
+  note: "Pages 230--238"
+
+espresso:
+  type: article
+  title: "Decentralized Search over Personal Online Datastores: Architecture and Performance Evaluation"
+  author:
+    - Ragab, Mohamed
+    - Savateev, Yury
+    - Oliver, Helen
+    - Tiropanis, Thanassis
+    - Poulovassilis, Alexandra
+    - Chapman, Adriane
+    - Taelman, Ruben
+    - Roussos, George
+  date: 2024
+  parent:
+    type: proceedings
+    title: "Web Engineering -- ICWE 2024"
+  url: https://doi.org/10.1007/978-3-031-62362-2_4
+  note: "Pages 49--64"
+
+mytkowicz:
+  type: article
+  title: "Producing Wrong Data Without Doing Anything Obviously Wrong!"
+  author:
+    - Mytkowicz, Todd
+    - Diwan, Amer
+    - Hauswirth, Matthias
+    - Sweeney, Peter F.
+  date: 2009
+  parent:
+    type: proceedings
+    title: "Proceedings of the 14th International Conference on Architectural Support for Programming Languages and Operating Systems"
+  url: https://doi.org/10.1145/1508244.1508275
+  note: "Pages 265--276"
+
+kalibera-jones:
+  type: article
+  title: "Rigorous Benchmarking in Reasonable Time"
+  author:
+    - Kalibera, Tomas
+    - Jones, Richard E.
+  date: 2013
+  parent:
+    type: proceedings
+    title: "Proceedings of the 2013 International Symposium on Memory Management"
+  url: https://doi.org/10.1145/2464157.2464160
+  note: "Pages 63--74"
+
+papadopoulos-cloud:
+  type: article
+  title: "Methodological Principles for Reproducible Performance Evaluation in Cloud Computing"
+  author:
+    - Papadopoulos, Alessandro Vittorio
+    - Versluis, Laurens
+    - Bauer, André
+    - Herbst, Nikolas
+    - von Kistowski, Jörg
+    - Ali-Eldin, Ahmed
+    - Abad, Cristina L.
+    - Amaral, José Nelson
+    - Tůma, Petr
+    - Iosup, Alexandru
+  date: 2021
+  parent:
+    type: periodical
+    title: "IEEE Transactions on Software Engineering"
+    volume: 47
+    issue: 8
+  url: https://doi.org/10.1109/TSE.2019.2927908
+  note: "Pages 1528--1543"
+
+solid-www-demo:
+  type: article
+  title: "A Demonstration of the Solid Platform for Social Web Applications"
+  author:
+    - Mansour, Essam
+    - Sambra, Andrei Vlad
+    - Hawke, Sandro
+    - Zereba, Maged
+    - Capadisli, Sarven
+    - Ghanem, Abdurrahman
+    - Aboulnaga, Ashraf
+    - Berners-Lee, Tim
+  date: 2016
+  parent:
+    type: proceedings
+    title: "Proceedings of the 25th International Conference Companion on World Wide Web"
+  url: https://doi.org/10.1145/2872518.2890529
+  note: "Pages 223--226"
+
+solid-platform-report:
+  type: report
+  title: "Solid: A Platform for Decentralized Social Applications Based on Linked Data"
+  author:
+    - Sambra, Andrei Vlad
+    - Mansour, Essam
+    - Hawke, Sandro
+    - Zereba, Maged
+    - Greco, Nicola
+    - Ghanem, Abdurrahman
+    - Zagidulin, Dmitri
+    - Aboulnaga, Ashraf
+    - Berners-Lee, Tim
+  date: 2016
+  publisher: "MIT CSAIL and Qatar Computing Research Institute"
+  url: https://cs.brown.edu/courses/csci2390/2021/readings/solid.pdf
+  note: "Technical report"
+
+whats-in-a-pod:
+  type: article
+  title: "What's in a Pod? A Knowledge Graph Interpretation for the Solid Ecosystem"
+  author:
+    - Dedecker, Ruben
+    - Slabbinck, Wout
+    - Wright, Jesse
+    - Hochstenbach, Patrick
+    - Colpaert, Pieter
+    - Verborgh, Ruben
+  date: 2022
+  parent:
+    type: proceedings
+    title: "QuWeDa 2022: 6th Workshop on Storing, Querying and Benchmarking Knowledge Graphs"
+  url: https://ceur-ws.org/Vol-3279/paper6.pdf
+  note: "CEUR Workshop Proceedings 3279, pages 81--96"
+
+consolid:
+  type: article
+  title: "ConSolid: A Federated Ecosystem for Heterogeneous Multi-Stakeholder Projects"
+  author:
+    - Werbrouck, Jeroen
+    - Pauwels, Pieter
+    - Beetz, Jakob
+    - Verborgh, Ruben
+    - Mannens, Erik
+  date: 2024
+  parent:
+    type: periodical
+    title: "Semantic Web"
+    volume: 15
+    issue: 2
+  url: https://doi.org/10.3233/SW-233396
+  note: "Pages 429--460"
+
+solid-ivm:
+  type: article
+  title: "A Methodological Approach to Incremental View Maintenance for Optimizing SPARQL Queries in Solid"
+  author:
+    - Staquet, Dore
+    - Buelens, Bart
+    - Van den Bussche, Jan
+  date: 2024
+  parent:
+    type: proceedings
+    title: "Solid Symposium 2024 Posters and Privacy Session"
+  url: https://ceur-ws.org/Vol-3947/short5.pdf
+  note: "CEUR Workshop Proceedings 3947, pages 31--37"
+
+rdf-access-control-survey:
+  type: article
+  title: "Access Control and the Resource Description Framework: A Survey"
+  author:
+    - Kirrane, Sabrina
+    - Mileo, Alessandra
+    - Decker, Stefan
+  date: 2016
+  parent:
+    type: periodical
+    title: "Semantic Web"
+    volume: 8
+    issue: 2
+  url: https://doi.org/10.3233/SW-160236
+  note: "Pages 311--352; first published online 2016-08-04"
+
+authorization-proxy:
+  type: article
+  title: "Authorization Proxy for SPARQL Endpoints"
+  author:
+    - Stojanov, Riste
+    - Jovanovik, Milos
+  date: 2017
+  parent:
+    type: proceedings
+    title: "ICT Innovations 2017: Data-Driven Innovation"
+  url: https://doi.org/10.1007/978-3-319-67597-8_20
+  note: "Pages 205--218"
+
+pod-query:
+  type: article
+  title: "POD-QUERY: Schema Mapping and Query Rewriting for Solid Pods"
+  author:
+    - Vandenbrande, Maarten
+    - Jakubowski, Maxime
+    - Bonte, Pieter
+    - Buelens, Bart
+    - Ongenae, Femke
+    - Van den Bussche, Jan
+  date: 2023
+  parent:
+    type: proceedings
+    title: "Posters, Demos, and Industry Tracks at ISWC 2023"
+  url: https://ceur-ws.org/Vol-3632/ISWC2023_paper_447.pdf
+  note: "CEUR Workshop Proceedings 3632, paper 447"
+
+solid-ltqp-demo:
+  type: article
+  title: "Demonstration of Link Traversal SPARQL Query Processing over the Decentralized Solid Environment"
+  author:
+    - Taelman, Ruben
+    - Verborgh, Ruben
+  date: 2024
+  parent:
+    type: proceedings
+    title: "Proceedings of the 27th International Conference on Extending Database Technology"
+  url: https://doi.org/10.48786/edbt.2024.70
+  note: "Pages 786--789"
+
+espresso-framework:
+  type: article
+  title: "ESPRESSO: A Framework to Empower Search on the Decentralized Web"
+  author:
+    - Ragab, Mohamed
+    - Savateev, Yury
+    - Oliver, Helen
+    - Tiropanis, Thanassis
+    - Poulovassilis, Alexandra
+    - Chapman, Adriane
+    - Roussos, George
+  date: 2024
+  parent:
+    type: periodical
+    title: "Data Science and Engineering"
+    volume: 9
+  url: https://doi.org/10.1007/s41019-024-00263-w
+  note: "Pages 431--448"
+
+espresso-privacy:
+  type: report
+  title: "Implementation and Privacy Guarantees for Scalable Keyword Search on SOLID-based Decentralized Data with Granular Visibility Constraints"
+  author:
+    - Ragab, Mohamed
+    - Ferooz, Faria
+    - Bahrani, Mohammad
+    - Oliver, Helen
+    - Tiropanis, Thanassis
+    - Poulovassilis, Alexandra
+    - Chapman, Adriane
+    - Roussos, George
+  date: 2026
+  url: https://arxiv.org/abs/2604.22100
+  note: "arXiv:2604.22100, preprint"

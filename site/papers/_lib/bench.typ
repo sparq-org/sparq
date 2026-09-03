@@ -1,7 +1,7 @@
 // [OPUS-4.8] sq-gum8 — shared paper-factory helpers. ONE source of numbers.
 //
-// The build (site/scripts/build-papers.mjs / the typst CLI) injects the paper-bound
-// evidence JSON via `--input data=...`. Every paper reads it through `ev(...)` below and
+// The build writes one ignored merged ledger and injects its paper-bound path via
+// `--input data=...`. Every paper reads it through the accessors below and
 // NEVER hard-codes a number — so the PDF and the in-site HTML cannot disagree, and a paper
 // auto-updates when the evidence refreshes.
 //
@@ -9,23 +9,34 @@
 // `headline(key)` is the ONLY accessor allowed inside a headline result table/figure. It
 // REFUSES to render a record whose `environment` is not "canonical" — so a non-canonical
 // (work-box / indicative) number can never appear as a paper's headline evidence. Use the
-// plain `ev(key)` accessor (no gate) only for clearly-labelled "indicative" callouts.
+// plain `ev(key)` accessor only for clearly-labelled "indicative" callouts. Canonical machine
+// timings use timing.typ, whose helpers make the value and its acquisition provenance inseparable.
 
-#let evidence = json(bytes(sys.inputs.data))
+#let _evidence = json(sys.inputs.data)
 #let anon = sys.inputs.at("anon", default: "false") == "true"
 
 // Raw record lookup (panics loudly if the key is missing — a typo must fail the build,
 // never silently render an empty string).
 #let _rec(key) = {
-  let r = evidence.records.at(key, default: none)
+  let r = _evidence.records.at(key, default: none)
   if r == none {
     panic("paper-factory: unknown evidence key '" + key + "' — add it to site/src/data/paper-evidence.json")
   }
   r
 }
 
-// Plain value accessor — NOT gated. Only for explicitly-"indicative"-labelled callouts.
-#let ev(key) = _rec(key).value
+// Plain values are available only for non-timing records. A timing value cannot be separated
+// from its acquisition provenance by choosing the legacy accessor.
+#let ev(key) = {
+  let r = _rec(key)
+  if r.environment == "canonical-timing" {
+    panic(
+      "paper-factory: ev('" + key + "') cannot expose canonical timing without provenance; " +
+      "import timing.typ and use headline_timing(...) instead",
+    )
+  }
+  r.value
+}
 
 // HEADLINE accessor — the honesty gate. Returns the value ONLY if the record is canonical.
 #let headline(key) = {
@@ -46,6 +57,12 @@
 // (raw content does not interpolate); use #raw(r.source) so the actual source renders.
 #let provenance(key) = {
   let r = _rec(key)
+  if r.environment == "canonical-timing" {
+    panic(
+      "paper-factory: provenance('" + key + "') is incomplete for canonical timing; " +
+      "import timing.typ and use timing_provenance(...) instead",
+    )
+  }
   text(size: 0.85em, fill: gray)[evidence: #raw(r.source) (environment: #r.environment)]
 }
 

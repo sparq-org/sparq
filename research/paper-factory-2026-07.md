@@ -46,9 +46,11 @@ Source classes across the 57 records (measured): 36 point at Rust tests/consts u
 `render_scoreboard()` emits markdown only), 15 at `bench/` artifacts (machine-readable JSON,
 just unbound), the rest at `research/` audit records and `compliance/` evidence docs.
 
-**Second gap (capability, not soundness):** canonical measurement envelopes from the dedicated
-quiet EC2 protocol exist and are committed (`bench/canonical-competitor-results/<date>/*.json`,
-each self-describing: `"canonical": true`, full git commit, host/dataset/methodology note), but
+**Second gap (capability, not soundness):** canonical measurement envelopes from a controlled
+single-process EC2 protocol exist and are committed
+(`bench/canonical-competitor-results/<study-key>/<run>/paper-summary.json`, where the directory is
+a stable repository namespace and may be shorter than the envelope's descriptive `study_id`; each self-describing:
+`"canonical": true`, full git commit, shared tenancy, host/dataset/methodology note), but
 the evidence schema has no class for them. Papers therefore cannot cite ANY measured wall-clock
 result — even provenance-complete canonical ones — leaving e.g. the engine-systems paper's
 evaluation section weaker than the data the project already has. (Work-box timings are
@@ -99,12 +101,15 @@ already uses, e.g. `served-conformance.generated.json` via
   headline mechanism and must not become one (work-box numbers are non-canonical).
 - **(c) A third evidence class `canonical-timing`** — **chosen.** Bound EXCLUSIVELY to
   committed envelopes under `bench/canonical-competitor-results/**` that self-declare
-  `"canonical": true` (the dedicated quiet-EC2 protocol). Values are **auto-derived** by a new
-  sync script (never hand-typed), and papers can render them ONLY through a new
-  `headline_timing()` accessor (new `site/papers/_lib/timing.typ`) that unconditionally emits
-  the provenance footnote (host class, git commit, date, dataset/query) alongside the value —
-  there is deliberately no raw-value accessor for this class. The sync refuses any envelope
-  not declaring `canonical: true`, so work-box numbers cannot enter by construction.
+  `"canonical": true` under a controlled single-process protocol and declared host tenancy.
+  AWS Shared tenancy is never described as dedicated: its noisy-neighbour limitation is rendered
+  with every run. Values are **auto-derived** by a sync script (never hand-typed), and papers can
+  render them only through the provenance-forced helpers in `site/papers/_lib/timing.typ`; there
+  is deliberately no raw-value or raw-figure-path accessor for this class. The sync re-hashes a
+  committed sanitized archive container and publisher, while archive-member re-hashing,
+  exact-set, sanitization, and deterministic-header checks remain explicitly publisher-recorded.
+  It refuses any envelope not declaring `canonical: true`, so work-box numbers cannot enter by
+  construction.
 
 This is a *policy extension* (papers may now headline measured timings under strict
 provenance). Per the standing proceed-and-document rule it is decided here and flagged to the

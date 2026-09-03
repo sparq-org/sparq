@@ -9,6 +9,8 @@
     "sync-wasm": "node scripts/sync-wasm.mjs",
     "bundle-wasm-esm": "node scripts/bundle-wasm-esm.mjs",
     "sync-benchmarks": "node scripts/sync-benchmarks.mjs",
+    "sync-canonical-timing": "node scripts/sync-canonical-timing.mjs --write",
+    "check-canonical-timing": "node scripts/sync-canonical-timing.mjs --check",
     "sync-zk-catalog": "node scripts/sync-zk-catalog.mjs",
     "build-papers": "node scripts/build-papers.mjs",
     "build-specs": "node scripts/build-specs.mjs",

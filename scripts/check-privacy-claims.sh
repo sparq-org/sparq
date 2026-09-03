@@ -58,7 +58,7 @@ _phrases_field() {  # _phrases_field <jsonpath-key>
 _phrases_array() {  # _phrases_array <jsonpath-key> -> writes \0-joined items to stdout
   python3 -c 'import json,sys
 items = json.load(open(sys.argv[1]))[sys.argv[2]]
-sys.stdout.write("\0".join(items))' "$PHRASES_JSON" "$1"
+sys.stdout.write("".join(item + "\0" for item in items))' "$PHRASES_JSON" "$1"
 }
 
 ALLOW_MARKER="$(_phrases_field allowMarker)"
@@ -89,7 +89,13 @@ ALLOW_MARKER="$(_phrases_field allowMarker)"
 #                      canonical hedged verdict "SOUND as landed for the … threat
 #                      model" all still PASS.
 # Loaded from the shared list (`absoluteForbiddenPatterns`) — see sq-mraf note above.
-mapfile -d '' -t PATTERNS < <(_phrases_array absoluteForbiddenPatterns)
+# macOS still ships Bash 3.2, which has no `mapfile`. A trailing NUL from
+# `_phrases_array` ensures the final pattern is not dropped; `read -d ''` preserves
+# every other character in each regex.
+PATTERNS=()
+while IFS= read -r -d '' item; do
+  PATTERNS+=("$item")
+done < <(_phrases_array absoluteForbiddenPatterns)
 
 # [OPUS-4.8] Predicate-form soundness overclaim, subject-anchored on a ZK/MPC artifact
 # noun + copula + "sound" (e.g. "the verifier is sound", "the proofs are sound", "the
@@ -155,12 +161,16 @@ NEGATOR_HEDGE_RE="$(_phrases_field negatorHedge)"
 # the inline `privacy-claims-allow:` marker just like any other line. The accessor-driven
 # numeric values are NOT prose and are unaffected. (The perf-number half of the
 # evidence-prose scan lives in scripts/check-no-perf-numbers.py, its natural home.)
-mapfile -t FILES < <(
+FILES=()
+while IFS= read -r item; do
+  FILES+=("$item")
+done < <(
   git ls-files \
     '*.md' '*.mdx' '*.tsx' '*.ts' \
     'site/papers/*.typ' 'site/papers/**/*.typ' \
     'site/specs/*.typ' 'site/specs/**/*.typ' \
     'site/src/data/paper-evidence.json' \
+    'site/src/data/paper-evidence.canonical-timing.generated.json' \
     ':!:research/**' \
     ':!:**/*audit*.md' \
     ':!:.claude/agents/**' \

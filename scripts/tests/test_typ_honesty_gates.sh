@@ -65,18 +65,37 @@ code=$?
 set -e
 expect_exit 1 "perf: planted '12× faster' in .typ prose => fail" "$code"
 
-# 1b. The SAME number in a Typst comment + an accessor-driven value must NOT trip (exit 0):
-#     this is the narrow/accessor-aware net — results flow through #headline()/#ev().
+# 1b. The SAME number in a Typst comment + accessor-driven values must NOT trip (exit 0).
+#     Include every timing helper: their first string argument is an evidence key, not prose.
 cat > "${TMP}/perf/site/papers/clean.typ" <<'TYP'
 // dev note: an earlier draft said 12× faster — do not bake that in.
 The recall floor is #headline("ann.recall_at_10_floor") over 50,000 × 32 vectors.
 The crossover is #ev("filtered_ann.prefilter_crossover") of the store.
+The median is #headline_timing("ac_sparql.12us-result", digits: 2, suffix: [µs/query]).
+#timing_verdict("ac_sparql.h2_verdict", yes: [meets], no: [does not meet])
+#timing_table("ac_sparql.12us-result", caption: [H2 results.], header: ([Metric], [Value]), rows: (([ratio], "ac_sparql.result"),))
+#timing_provenance("ac_sparql.12us-result")
+#timing_figure("ac_sparql.figure.12us-result", caption: [Pod-scaling results.])
 TYP
 set +e
 python3 "$PERF_GATE" --enforce "${TMP}/perf/site/papers/clean.typ" >/dev/null 2>&1
 code=$?
 set -e
 expect_exit 0 "perf: comment + accessor + setup-counts in .typ => clean" "$code"
+
+# 1c. Only the accessor name + first string key are stripped. Free-typed optional arguments
+#     remain prose and must still be scanned; otherwise a timing figure caption is an escape hatch.
+cat > "${TMP}/perf/site/papers/accessor-caption-violation.typ" <<'TYP'
+#timing_figure(
+  "ac_sparql.figure.scaling",
+  caption: [The guarded engine is 12× faster than the baseline.],
+)
+TYP
+set +e
+python3 "$PERF_GATE" --enforce "${TMP}/perf/site/papers/accessor-caption-violation.typ" >/dev/null 2>&1
+code=$?
+set -e
+expect_exit 1 "perf: hard-coded timing_figure caption remains scanned => fail" "$code"
 
 echo "== 2. check-privacy-claims gate scans paper .typ sources =="
 
@@ -157,7 +176,46 @@ code=$?
 set -e
 expect_exit 0 "perf: bare setup counts in an evidence note => clean" "$code"
 
-# 3c. PRIVACY: an unqualified ZK/MPC claim in a record `note` must FAIL the privacy gate. Reuse
+# 3c. The generated canonical-timing supplement uses the same field-aware prose scan.
+cat > "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" <<'JSON'
+{ "records": { "ac.timing": {
+  "value": 1.0, "environment": "canonical-timing", "source": "bench/ac/canonical/run.json",
+  "note": "The guarded query is 12× faster than the baseline." } } }
+JSON
+set +e
+python3 "$PERF_GATE" --enforce \
+  "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" >/dev/null 2>&1
+code=$?
+set -e
+expect_exit 1 "perf: generated timing-evidence note is scanned => fail" "$code"
+
+# 3d/3e. Figure alt text and run-description fields are also rendered into PDF/HTML or the paper
+#     provenance UI. Test each independently so dropping either field cannot leave this green.
+cat > "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" <<'JSON'
+{ "records": { "ac.figure": {
+  "value": "deadbeef", "environment": "canonical-timing", "source": "bench/ac/canonical/run.json",
+  "figure": { "alt": "A plot claiming 12× faster guarded queries." } } } }
+JSON
+set +e
+python3 "$PERF_GATE" --enforce \
+  "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" >/dev/null 2>&1
+code=$?
+set -e
+expect_exit 1 "perf: generated timing figure alt text is scanned => fail" "$code"
+
+cat > "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" <<'JSON'
+{ "records": { "ac.timing": {
+  "value": 1.0, "environment": "canonical-timing", "source": "bench/ac/canonical/run.json",
+  "timing_provenance": { "workload": "A 9× speedup workload claim." } } } }
+JSON
+set +e
+python3 "$PERF_GATE" --enforce \
+  "${TMP}/ev/site/src/data/paper-evidence.canonical-timing.generated.json" >/dev/null 2>&1
+code=$?
+set -e
+expect_exit 1 "perf: generated timing run-description prose is scanned => fail" "$code"
+
+# 3f. PRIVACY: an unqualified ZK/MPC claim in a record `note` must FAIL the privacy gate. Reuse
 #     the throwaway repo (the privacy gate enumerates with git ls-files; paper-evidence.json is
 #     on its surface — bead sq-4hga).
 cat > "${REPO}/site/src/data/paper-evidence.json" <<'JSON'
@@ -167,13 +225,30 @@ JSON
 code="$(run_priv)"
 expect_exit 1 "privacy: planted 'verifier is sound' + 'privacy-preserving' in an evidence note => fail" "$code"
 
-# 3d. PRIVACY: the same mentions HEDGED + ALLOW-MARKED in a note must PASS (exit 0).
+# 3g. PRIVACY: the same mentions HEDGED + ALLOW-MARKED in a note must PASS (exit 0).
 cat > "${REPO}/site/src/data/paper-evidence.json" <<'JSON'
 { "records": { "x.foo": {
   "note": "The verifier is NOT yet sound pending external audit; privacy-claims-allow: hedged note." } } }
 JSON
 code="$(run_priv)"
 expect_exit 0 "privacy: hedged + allow-marked claim in an evidence note => clean" "$code"
+
+# 3h/3i. The generated timing supplement is an equal published-prose surface for the privacy
+# gate. Pin both the planted failure and the hedged/allow-marked path so adding a second ledger
+# cannot accidentally create a claims-scan bypass.
+cat > "${REPO}/site/src/data/paper-evidence.canonical-timing.generated.json" <<'JSON'
+{ "records": { "ac.timing": {
+  "note": "The verifier is sound and the construction is privacy-preserving." } } }
+JSON
+code="$(run_priv)"
+expect_exit 1 "privacy: generated timing-evidence note with unqualified claim => fail" "$code"
+
+cat > "${REPO}/site/src/data/paper-evidence.canonical-timing.generated.json" <<'JSON'
+{ "records": { "ac.timing": {
+  "note": "The verifier is NOT yet sound; privacy-claims-allow: hedged generated note." } } }
+JSON
+code="$(run_priv)"
+expect_exit 0 "privacy: hedged generated timing-evidence note => clean" "$code"
 
 # [OPUS-4.8] bead sq-rvgr2.5 — the /specs spec-factory sources (site/specs/**/*.typ) are the
 # NEXT outward claim surface: the ZK/MPC spec CONTENT (zkSPARQL / MPC-SPARQL) lands there. Pin
@@ -222,6 +297,7 @@ expect_exit 0 "perf: comment + bare setup count in a site/specs/*.typ (whole-tre
 #     gate's git-ls-files surface now includes site/specs/**/*.typ. Reuse the throwaway $REPO;
 #     remove the section-3 evidence fixture first so the verdict is attributable to the spec.
 rm -f "${REPO}/site/src/data/paper-evidence.json"
+rm -f "${REPO}/site/src/data/paper-evidence.canonical-timing.generated.json"
 mkdir -p "${REPO}/site/specs"
 cat > "${REPO}/site/specs/planted.typ" <<'TYP'
 = Security considerations

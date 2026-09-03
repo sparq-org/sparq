@@ -23,9 +23,10 @@ import {
   STATUS_LABEL,
   STATUS_VARIANT,
   FAMILY_LABEL,
+  type Paper,
 } from "@/data/papers";
-import { LATEST, GENERATED_AT } from "@/data/benchmarks";
-import evidence from "@/data/paper-evidence.json";
+import baseEvidence from "@/data/paper-evidence.json";
+import timingEvidence from "@/data/paper-evidence.canonical-timing.generated.json";
 import { withBasePath } from "@/lib/base-path";
 
 export function generateStaticParams() {
@@ -58,16 +59,106 @@ function readPaperHtml(slug: string): string {
   }
 }
 
-function provenanceFor(): Provenance {
-  const records = Object.values(
-    (evidence as { records: Record<string, { environment: string }> }).records,
-  );
-  const canonical = records.filter((r) => r.environment === "canonical").length;
+interface EvidenceRecord {
+  environment: string;
+  kind?: string;
+  papers?: string[];
+  timing_provenance?: {
+    study_id: string;
+    run_id: string;
+    collected_at_utc: string;
+    source_git_commit: string;
+    analysis_git_commit: string;
+    host_class: string;
+    host_label: string;
+    tenancy: string;
+    noise_limitation: string;
+    workload: string;
+    dataset: string;
+    query_scope: string;
+    protocol: string;
+    publisher_path: string;
+    publisher_sha256: string;
+    input_file_count: number;
+    raw_archive_kind: "committed" | "external";
+    raw_archive_location: string;
+    raw_archive_public_url: string;
+    raw_archive_sha256: string;
+    raw_archive_bytes: number;
+    raw_archive_build_verification: "local-rehash" | "descriptor-only";
+    raw_archive_member_verification_authority: "publisher-recorded";
+    raw_archive_manifest_member: string;
+    raw_archive_manifest_sha256: string;
+    raw_archive_manifest_bytes: number;
+    raw_archive_manifest_entry_count: number;
+    raw_archive_regular_members: number;
+    raw_archive_all_members_rehashed: true;
+    raw_archive_exact_member_set: true;
+    raw_archive_sanitization_scan_passed: true;
+    raw_archive_deterministic_tar_headers: true;
+    raw_archive_zstd_version: string;
+    raw_archive_zstd_executable_sha256: string;
+  };
+}
+
+function provenanceFor(paper: Paper): Provenance {
+  const records = {
+    ...(baseEvidence as { records: Record<string, EvidenceRecord> }).records,
+    ...(timingEvidence as { records: Record<string, EvidenceRecord> }).records,
+  };
+  const prefixes = paper.evidencePrefixes;
+  const scoped = Object.entries(records).filter(([key, record]) => {
+    const prefixMatch = !prefixes?.length || prefixes.some((prefix) => key.startsWith(prefix));
+    if (!prefixMatch) return false;
+    return record.environment !== "canonical-timing" || record.papers?.includes(paper.slug) === true;
+  });
+  const timingRuns = new Map<string, Provenance["timingRuns"][number]>();
+  for (const [, record] of scoped) {
+    const run = record.timing_provenance;
+    if (record.environment !== "canonical-timing" || !run) continue;
+    const id = `${run.study_id}:${run.run_id}:${run.source_git_commit}:${run.analysis_git_commit}`;
+    timingRuns.set(id, {
+      studyId: run.study_id,
+      runId: run.run_id,
+      collectedAt: run.collected_at_utc,
+      sourceCommit: run.source_git_commit,
+      analysisCommit: run.analysis_git_commit,
+      host: `${run.host_class}: ${run.host_label}; tenancy ${run.tenancy}`,
+      noiseLimitation: run.noise_limitation,
+      workload: run.workload,
+      dataset: run.dataset,
+      queryScope: run.query_scope,
+      protocol: run.protocol,
+      publisherPath: run.publisher_path,
+      publisherSha256: run.publisher_sha256,
+      inputFileCount: run.input_file_count,
+      rawArchiveKind: run.raw_archive_kind,
+      rawArchiveLocation: run.raw_archive_location,
+      rawArchivePublicUrl: run.raw_archive_public_url,
+      rawArchiveSha256: run.raw_archive_sha256,
+      rawArchiveBytes: run.raw_archive_bytes,
+      rawArchiveVerification: run.raw_archive_build_verification,
+      rawArchiveMemberVerificationAuthority: run.raw_archive_member_verification_authority,
+      rawArchiveManifestMember: run.raw_archive_manifest_member,
+      rawArchiveManifestSha256: run.raw_archive_manifest_sha256,
+      rawArchiveManifestBytes: run.raw_archive_manifest_bytes,
+      rawArchiveManifestEntryCount: run.raw_archive_manifest_entry_count,
+      rawArchiveRegularMembers: run.raw_archive_regular_members,
+      rawArchiveAllMembersRehashed: run.raw_archive_all_members_rehashed,
+      rawArchiveExactMemberSet: run.raw_archive_exact_member_set,
+      rawArchiveSanitizationScanPassed: run.raw_archive_sanitization_scan_passed,
+      rawArchiveDeterministicTarHeaders: run.raw_archive_deterministic_tar_headers,
+      rawArchiveZstdVersion: run.raw_archive_zstd_version,
+      rawArchiveZstdExecutableSha256: run.raw_archive_zstd_executable_sha256,
+    });
+  }
   return {
-    commit: LATEST.commit ? LATEST.commit.slice(0, 8) : "unknown",
-    generatedAt: GENERATED_AT ?? "",
-    canonical,
-    indicative: records.length - canonical,
+    scope: prefixes?.length ? "paper-namespace" : "factory",
+    deterministicCanonical: scoped.filter(([, r]) => r.environment === "canonical").length,
+    canonicalTiming: scoped.filter(([, r]) => r.environment === "canonical-timing").length,
+    timingFigures: scoped.filter(([, r]) => r.kind === "canonical-timing-figure").length,
+    indicative: scoped.filter(([, r]) => r.environment === "indicative").length,
+    timingRuns: [...timingRuns.values()].sort((a, b) => a.runId.localeCompare(b.runId)),
   };
 }
 
@@ -95,7 +186,7 @@ export default async function PaperPage({
   if (!paper) notFound();
 
   const html = readPaperHtml(slug);
-  const prov = provenanceFor();
+  const prov = provenanceFor(paper);
 
   return (
     <div className="space-y-6">
@@ -157,9 +248,10 @@ export default async function PaperPage({
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           The PDF and the in-site render below compile from the same single Typst source, fed the
-          same paper-bound evidence, so the two cannot disagree. Every headline number traces to a
-          named test or dataset, gated to deterministic, machine-independent evidence — see the
-          provenance stamp at the foot of the page.
+          same merged paper-bound evidence, so the two cannot disagree. A headline is either a
+          deterministic canonical fact or a controlled canonical timing measurement with its run
+          provenance attached. Indicative work-box values cannot use a headline accessor. See the
+          paper-scoped provenance stamp at the foot of the page.
         </p>
       </section>
 

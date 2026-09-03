@@ -1,12 +1,13 @@
 // [OPUS-4.8] sq-gum8 — the paper-factory build step.
 //
 // For every paper registered in src/data/papers.ts, this:
-//   1. runs the build-time HONESTY GATE on src/data/paper-evidence.json (schema + the
-//      canonical/indicative invariant), then
+//   1. checks/synchronizes the committed canonical-timing ledger, merges it with
+//      src/data/paper-evidence.json, and runs the build-time HONESTY GATE, then
 //   2. compiles the paper's .typ to BOTH a PDF (public/papers/<slug>.pdf — the download)
 //      and a semantic HTML fragment (src/generated/papers/<slug>.html — the in-site render),
-//      injecting the SAME evidence JSON via `--input data=...` so the two artifacts cannot
-//      show different numbers.
+//      passing the SAME generated merged-evidence path via `--input data=...` so the two
+//      artifacts cannot show different numbers. A path avoids Linux's per-argument size limit
+//      when a dense timing study declares hundreds of paper values.
 //
 // It is wired into `prebuild` (after sync-benchmarks) so `next build` always regenerates the
 // papers against fresh data, and into `dev`. The typst binary is resolved from PATH or
@@ -25,9 +26,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE = resolve(__dirname, "..");
 const REPO_ROOT = resolve(SITE, ".."); // [OPUS-4.8] sq-mraf: to invoke the shared gates.
 const EVIDENCE_PATH = join(SITE, "src", "data", "paper-evidence.json");
+const TIMING_EVIDENCE_PATH = join(
+  SITE,
+  "src",
+  "data",
+  "paper-evidence.canonical-timing.generated.json",
+);
+const TIMING_SYNC = join(SITE, "scripts", "sync-canonical-timing.mjs");
+const TIMING_GENERATOR = "site/scripts/sync-canonical-timing.mjs";
 const PAPERS_DIR = join(SITE, "papers");
 const PDF_OUT_DIR = join(SITE, "public", "papers");
 const HTML_OUT_DIR = join(SITE, "src", "generated", "papers");
+const MERGED_EVIDENCE_OUT = join(HTML_OUT_DIR, "_paper-evidence.merged.json");
+const MERGED_EVIDENCE_TYPST_PATH = "/src/generated/papers/_paper-evidence.merged.json";
 
 // [OPUS-4.8] sq-d8or — anti-drift "GENERATED at build time" header for the build-copied
 // HTML fragments under src/generated/papers/. The fragment is the in-site render compiled
@@ -82,15 +93,48 @@ function readRegistry() {
 // headline cites a non-canonical record. This is the data-layer guard that runs FIRST so the
 // failure is a clear, early, build-level message rather than a Typst stack trace, and so the
 // evidence file itself is validated even before any paper references a given key.
-function runHonestyGate() {
-  const raw = JSON.parse(readFileSync(EVIDENCE_PATH, "utf8"));
+function readMergedEvidence() {
+  const base = JSON.parse(readFileSync(EVIDENCE_PATH, "utf8"));
+  const timing = JSON.parse(readFileSync(TIMING_EVIDENCE_PATH, "utf8"));
+  const baseRecords = base.records || {};
+  const timingRecords = timing.records || {};
+  const duplicates = Object.keys(timingRecords).filter((key) => Object.hasOwn(baseRecords, key));
+  if (duplicates.length) {
+    throw new Error(`paper evidence key collision: ${duplicates.sort().join(", ")}`);
+  }
+  return {
+    ...base,
+    records: { ...baseRecords, ...timingRecords },
+  };
+}
+
+function runCanonicalTimingSyncCheck() {
+  if (!existsSync(TIMING_SYNC)) {
+    throw new Error(`canonical timing sync missing: ${TIMING_SYNC}`);
+  }
+  // Publication is read-only: deriving values is an explicit maintainer action. A build only
+  // proves that the tracked generated ledger is byte-identical to every registered envelope.
+  execFileSync(process.execPath, [TIMING_SYNC, "--check"], {
+    cwd: REPO_ROOT,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+}
+
+function runHonestyGate(raw, papers) {
   const records = raw.records || {};
-  const VALID_ENV = new Set(["canonical", "indicative"]);
+  const VALID_ENV = new Set(["canonical", "canonical-timing", "indicative"]);
+  const TIMING_KINDS = new Set([
+    "canonical-timing",
+    "canonical-timing-verdict",
+    "canonical-timing-figure",
+  ]);
+  const paperSlugs = new Set(papers.map((paper) => paper.slug));
   const problems = [];
   for (const [key, r] of Object.entries(records)) {
     if (!VALID_ENV.has(r.environment)) {
       problems.push(
-        `record '${key}' has environment='${r.environment}' — must be 'canonical' or 'indicative'`,
+        `record '${key}' has environment='${r.environment}' — must be ` +
+          "'canonical', 'canonical-timing', or 'indicative'",
       );
     }
     if (!r.source || typeof r.source !== "string") {
@@ -99,16 +143,62 @@ function runHonestyGate() {
     if (r.value === undefined) {
       problems.push(`record '${key}' is missing a 'value'`);
     }
+    if (r.environment === "canonical-timing") {
+      if (!TIMING_KINDS.has(r.kind)) {
+        problems.push(`record '${key}' has invalid canonical timing kind '${r.kind}'`);
+      }
+      if (r.binding?.kind !== "json-pointer") {
+        problems.push(`record '${key}' canonical timing must use a json-pointer binding`);
+      }
+      if (!r.timing_provenance || typeof r.timing_provenance !== "object") {
+        problems.push(`record '${key}' canonical timing lacks timing_provenance`);
+      }
+      if (r._generated_by !== TIMING_GENERATOR) {
+        problems.push(`record '${key}' canonical timing was not generated by the sync`);
+      }
+      if (
+        !Array.isArray(r.papers) ||
+        r.papers.length === 0 ||
+        r.papers.some((slug) => typeof slug !== "string" || !paperSlugs.has(slug))
+      ) {
+        problems.push(`record '${key}' canonical timing has an empty or unknown paper slug`);
+      }
+      if (r.kind === "canonical-timing-figure") {
+        if (!/^[0-9a-f]{64}$/.test(r.value) || r.unit !== "sha256") {
+          problems.push(`record '${key}' timing figure value must be a SHA-256 digest`);
+        }
+        if (
+          r.figure?.media_type !== "image/svg+xml" ||
+          !r.figure?.typst_path?.startsWith("/papers/figures/canonical-timing/")
+        ) {
+          problems.push(`record '${key}' timing figure must use the reserved SVG tree`);
+        }
+      } else if (r.kind === "canonical-timing-verdict") {
+        if (
+          typeof r.value !== "boolean" ||
+          r.unit !== "boolean" ||
+          !["H1", "H2"].includes(r.hypothesis)
+        ) {
+          problems.push(
+            `record '${key}' timing verdict must be boolean, unit='boolean', and scoped to H1/H2`,
+          );
+        }
+      } else if (typeof r.value !== "number" || !Number.isFinite(r.value)) {
+        problems.push(`record '${key}' canonical timing value must be finite numeric`);
+      }
+    }
   }
   if (problems.length) {
     console.error("\n[paper-factory] HONESTY GATE FAILED:\n  - " + problems.join("\n  - ") + "\n");
     process.exit(1);
   }
   const nCanonical = Object.values(records).filter((r) => r.environment === "canonical").length;
-  const nIndicative = Object.values(records).length - nCanonical;
+  const nTiming = Object.values(records).filter((r) => r.environment === "canonical-timing").length;
+  const nIndicative = Object.values(records).filter((r) => r.environment === "indicative").length;
   console.log(
     `[paper-factory] honesty gate passed: ${Object.keys(records).length} evidence records ` +
-      `(${nCanonical} canonical, ${nIndicative} indicative).`,
+      `(${nCanonical} deterministic canonical, ${nTiming} canonical timing, ` +
+      `${nIndicative} indicative).`,
   );
 }
 
@@ -164,7 +254,13 @@ function runBuildBoundaryHonestyScan(papers) {
   };
 
   // Perf gate over the exact paper sources + the evidence file (explicit paths => --enforce).
-  run("no-perf-numbers", "python3", [perfGate, "--enforce", ...typPaths, EVIDENCE_PATH]);
+  run("no-perf-numbers", "python3", [
+    perfGate,
+    "--enforce",
+    ...typPaths,
+    EVIDENCE_PATH,
+    TIMING_EVIDENCE_PATH,
+  ]);
   // Privacy gate (whole-tree; already covers the paper surface + the evidence file).
   run("privacy-claims", "bash", [privacyGate]);
 
@@ -199,7 +295,10 @@ function runEvidenceBindingVerifier() {
   try {
     // Runs against the committed evidence file + allowlist, resolving sources under the repo
     // root (the verifier's defaults). The gate self-reports any drift/missing-anchor to stderr.
-    execFileSync("python3", [verifier], { cwd: REPO_ROOT, stdio: ["ignore", "inherit", "inherit"] });
+    execFileSync("python3", [verifier, "--supplement", TIMING_EVIDENCE_PATH], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
   } catch (e) {
     const code = typeof e.status === "number" ? e.status : 1;
     console.error(
@@ -217,15 +316,158 @@ function runEvidenceBindingVerifier() {
   );
 }
 
+// ---- canonical-timing accessor discipline ------------------------------------------------
+// The Typst helpers enforce provenance at render time. This source-level check closes the two
+// accidental bypasses that matter in review: dynamically choosing a timing key, and embedding a
+// digest-bound SVG by path instead of through timing_figure(). This is not a hostile-code sandbox;
+// it is a fail-closed paper-factory lint backed by the runtime checks in timing.typ.
+export function stripTypstComments(source) {
+  let out = "";
+  let block = false;
+  let line = false;
+  let string = false;
+  let escaped = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+    if (line) {
+      if (char === "\n") {
+        line = false;
+        out += char;
+      }
+      continue;
+    }
+    if (block) {
+      if (char === "*" && next === "/") {
+        block = false;
+        i += 1;
+      } else if (char === "\n") {
+        out += char;
+      }
+      continue;
+    }
+    if (string) {
+      out += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') string = false;
+      continue;
+    }
+    if (char === '"') {
+      string = true;
+      out += char;
+    } else if (char === "/" && next === "/") {
+      line = true;
+      i += 1;
+    } else if (char === "/" && next === "*") {
+      block = true;
+      i += 1;
+    } else {
+      out += char;
+    }
+  }
+  return out;
+}
+
+export function validateCanonicalTimingUsage(papers, evidence, papersDir = PAPERS_DIR) {
+  const timingRecords = Object.fromEntries(
+    Object.entries(evidence.records || {}).filter(([, record]) =>
+      record.environment === "canonical-timing",
+    ),
+  );
+  const anyCall = /\b(headline_timing|timing_verdict|timing_table|timing_provenance|timing_figure)\s*\(/g;
+  const literalCall = /\b(headline_timing|timing_verdict|timing_table|timing_provenance|timing_figure)\s*\(\s*"((?:\\.|[^"\\])*)"/g;
+  const problems = [];
+
+  for (const paper of papers) {
+    const path = join(papersDir, paper.source);
+    if (!existsSync(path)) continue;
+    const source = stripTypstComments(readFileSync(path, "utf8"));
+    const calls = [...source.matchAll(anyCall)];
+    const literalCalls = [...source.matchAll(literalCall)];
+    if (calls.length !== literalCalls.length) {
+      problems.push(
+        `${paper.source}: every canonical timing helper requires a literal first-argument key`,
+      );
+    }
+    for (const match of literalCalls) {
+      const [, helper, key] = match;
+      const record = timingRecords[key];
+      if (!record) {
+        problems.push(`${paper.source}: ${helper} names unknown canonical timing key '${key}'`);
+        continue;
+      }
+      if (!Array.isArray(record.papers) || !record.papers.includes(paper.slug)) {
+        problems.push(`${paper.source}: timing key '${key}' is not declared for '${paper.slug}'`);
+      }
+      if (helper === "headline_timing" && record.kind !== "canonical-timing") {
+        problems.push(`${paper.source}: headline_timing('${key}') does not name a numeric record`);
+      }
+      if (helper === "timing_verdict" && record.kind !== "canonical-timing-verdict") {
+        problems.push(`${paper.source}: timing_verdict('${key}') does not name a boolean verdict`);
+      }
+      if (helper === "timing_table" && record.kind === "canonical-timing-figure") {
+        problems.push(`${paper.source}: timing_table('${key}') cannot use a figure as its anchor`);
+      }
+      if (helper === "timing_figure" && record.kind !== "canonical-timing-figure") {
+        problems.push(`${paper.source}: timing_figure('${key}') does not name a figure record`);
+      }
+    }
+    // Typst modules do not make underscore-prefixed definitions private: an author can import
+    // them explicitly. Keep the paper surface on the supported API by refusing both direct access
+    // to the injected path and references to timing/ledger implementation names. The helper
+    // modules themselves are outside `papers`, so their intentional uses are unaffected.
+    if (/\bsys\.inputs(?:\.data|\.at\(\s*"data")/.test(source)) {
+      problems.push(`${paper.source}: paper source may not access the injected evidence ledger directly`);
+    }
+    if (
+      /\b(?:_evidence|_rec|_timing_rec|_provenance_text|_render_number|_timing_fingerprint|_table_spec_record|_render_table_spec)\b/.test(
+        source,
+      )
+    ) {
+      problems.push(
+        `${paper.source}: paper source may not import or call canonical timing implementation internals`,
+      );
+    }
+    if (
+      /(?:json|read|bytes)\s*\(\s*"[^"]*(?:_?paper-evidence)[^"]*\.json"/.test(
+        source,
+      )
+    ) {
+      problems.push(`${paper.source}: paper source may not read an evidence-ledger path directly`);
+    }
+    if (source.includes("figures/canonical-timing/")) {
+      problems.push(
+        `${paper.source}: direct path into the reserved canonical timing SVG tree is forbidden; ` +
+          "use timing_figure(key) so digest verification and provenance are inseparable",
+      );
+    }
+  }
+  if (problems.length) {
+    throw new Error(`canonical timing accessor gate failed:\n  - ${problems.join("\n  - ")}`);
+  }
+}
+
 // ---- compile one paper to PDF + HTML ------------------------------------------------------
-function compilePaper(typst, paper, evidenceJson) {
+export function typstCommonArgs(paper, evidencePath, siteRoot = SITE) {
+  return [
+    "--root",
+    siteRoot,
+    "--input",
+    `data=${evidencePath}`,
+    "--input",
+    `paper=${paper.slug}`,
+  ];
+}
+
+function compilePaper(typst, paper, evidencePath) {
   const typPath = join(PAPERS_DIR, paper.source);
   if (!existsSync(typPath)) {
     throw new Error(`build-papers: paper source not found: ${typPath}`);
   }
   const pdfOut = join(PDF_OUT_DIR, `${paper.slug}.pdf`);
   const htmlOut = join(HTML_OUT_DIR, `${paper.slug}.html`);
-  const common = ["--root", SITE, "--input", `data=${evidenceJson}`];
+  const common = typstCommonArgs(paper, evidencePath);
 
   // PDF (the download). A headline() gate violation panics here and aborts the build.
   execFileSync(typst, ["compile", typPath, pdfOut, ...common], { stdio: ["ignore", "ignore", "inherit"] });
@@ -250,7 +492,10 @@ function compilePaper(typst, paper, evidenceJson) {
 
 // ---- main ---------------------------------------------------------------------------------
 function main() {
-  runHonestyGate();
+  runCanonicalTimingSyncCheck();
+  const evidence = readMergedEvidence();
+  const papers = readRegistry();
+  runHonestyGate(evidence, papers);
 
   // [OPUS-4.8] sq-gum8.13 (paper factory F1): fail-closed evidence-BINDING verify — every
   // canonical record's value must still MATCH its committed source (or sit on the shrink-only
@@ -259,7 +504,7 @@ function main() {
   runEvidenceBindingVerifier();
 
   const typst = resolveTypst();
-  const papers = readRegistry();
+  validateCanonicalTimingUsage(papers, evidence);
 
   // [OPUS-4.8] sq-mraf: build-boundary honesty assertion — re-run the two shared honesty
   // gates over the exact paper sources + evidence file BEFORE any compile/placeholder is
@@ -290,10 +535,13 @@ function main() {
     return;
   }
 
-  const evidenceJson = readFileSync(EVIDENCE_PATH, "utf8");
-  for (const p of papers) compilePaper(typst, p, evidenceJson);
+  const evidenceJson = `${JSON.stringify(evidence, null, 2)}\n`;
+  writeFileSync(MERGED_EVIDENCE_OUT, evidenceJson, "utf8");
+  for (const p of papers) compilePaper(typst, p, MERGED_EVIDENCE_TYPST_PATH);
 
   console.log(`[paper-factory] done: ${papers.length} paper(s).`);
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

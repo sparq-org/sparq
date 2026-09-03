@@ -171,6 +171,12 @@ def write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
 
 
 class AnalyzeTests(unittest.TestCase):
+    def test_canonical_analysis_requires_ten_thousand_bootstrap_draws(self) -> None:
+        ANALYZE.validate_bootstrap_draws(10_000, True)
+        ANALYZE.validate_bootstrap_draws(100, False)
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "at least 10000"):
+            ANALYZE.validate_bootstrap_draws(9_999, True)
+
     def test_canonical_campaign_profile_labels_fail_closed(self) -> None:
         observations = [
             {"campaign": campaign, "measurement_profile": profile}
@@ -275,6 +281,123 @@ class AnalyzeTests(unittest.TestCase):
         with self.assertRaisesRegex(ANALYZE.AnalysisError, "corpus_hash_sha256"):
             ANALYZE.validate_profile_matching([timing, instrumented])
 
+    def test_profile_matching_rejects_a_different_result(self) -> None:
+        timing = next(
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+            and record["operation"] == "guarded-query-as"
+        )
+        instrumented = dict(timing)
+        instrumented.update(
+            {
+                "campaign": "pod-scaling-instrumentation",
+                "measurement_profile": "instrumentation",
+                "result_hash_sha256": "c" * 64,
+            }
+        )
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "result_hash_sha256"):
+            ANALYZE.validate_profile_matching([timing, instrumented])
+
+    def test_primary_causal_invariants_cover_query_and_readable_state(self) -> None:
+        records = fixture_records()
+        observations = [
+            record
+            for record in records
+            if record["record_type"] == "observation"
+            and record["operation"] == "guarded-query-as"
+        ]
+        constructions = [
+            record for record in records if record["record_type"] == "construction"
+        ]
+        ANALYZE.validate_primary_causal_invariants(
+            observations, constructions, {1, 8}
+        )
+
+        changed_result = [dict(record) for record in observations]
+        for record in changed_result:
+            if record["pods"] == 8:
+                record["result_hash_sha256"] = "c" * 64
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "changes result"):
+            ANALYZE.validate_primary_causal_invariants(
+                changed_result, constructions, {1, 8}
+            )
+
+        changed_rows = [dict(record) for record in observations]
+        for record in changed_rows:
+            if record["pods"] == 8:
+                record["result_rows"] = 2
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "changes result"):
+            ANALYZE.validate_primary_causal_invariants(
+                changed_rows, constructions, {1, 8}
+            )
+
+        changed_query = [dict(record) for record in observations]
+        for record in changed_query:
+            if record["pods"] == 8:
+                record["query_hash_sha256"] = "c" * 64
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "changes query hash"):
+            ANALYZE.validate_primary_causal_invariants(
+                changed_query, constructions, {1, 8}
+            )
+
+        missing_level = [record for record in observations if record["pods"] == 1]
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "Pod counts"):
+            ANALYZE.validate_primary_causal_invariants(
+                missing_level, constructions, {1, 8}
+            )
+
+        changed_construction = [dict(record) for record in constructions]
+        for record in changed_construction:
+            if record["pods"] == 8:
+                record["evaluation_readable_documents"] = 15
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "readable counts"):
+            ANALYZE.validate_primary_causal_invariants(
+                observations, changed_construction, {1, 8}
+            )
+
+    def test_primary_causal_invariants_keep_recorded_dimensions_separate(self) -> None:
+        observations = []
+        constructions = []
+        for profile in ("timing", "instrumentation"):
+            for lane in ("materialized-routed", "native-http-assembly"):
+                for domain in ("social", "health"):
+                    for block in (0, 1):
+                        for pods in (1, 8):
+                            run_uuid = f"{profile}:{lane}:{domain}:{block}:{pods}"
+                            construction = {
+                                "run_uuid": run_uuid,
+                                "measurement_profile": profile,
+                                "lane": lane,
+                                "domain": domain,
+                                "process_block": block,
+                                "pods": pods,
+                                "target_readable_documents": 16,
+                                "evaluation_readable_documents": 16,
+                            }
+                            constructions.append(construction)
+                            for query_id in ("q1-point", "q8-graph-scan"):
+                                identity = f"{profile}:{lane}:{domain}:{query_id}:{block}"
+                                observations.append(
+                                    {
+                                        "run_uuid": run_uuid,
+                                        "measurement_profile": profile,
+                                        "lane": lane,
+                                        "domain": domain,
+                                        "query_id": query_id,
+                                        "process_block": block,
+                                        "pods": pods,
+                                        "documents_per_pod": 16,
+                                        "query_hash_sha256": f"query:{identity}",
+                                        "result_hash_sha256": f"result:{identity}",
+                                        "result_rows": block + 1,
+                                    }
+                                )
+
+        ANALYZE.validate_primary_causal_invariants(
+            observations, constructions, {1, 8}
+        )
+
     def test_valid_fixture_produces_h2_and_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -292,10 +415,13 @@ class AnalyzeTests(unittest.TestCase):
             self.assertLess(results[0]["median_process_cpu_ratio"], 1.10)
             self.assertIsInstance(results[0]["minimal_latency_scaling"], bool)
             self.assertIsInstance(results[0]["minimal_cpu_scaling"], bool)
+            h4 = ANALYZE.analyze_h4(loaded.observations, 100, 7)
+            self.assertEqual(len(h4), 2)
+            self.assertTrue(all(row["process_blocks"] == 2 for row in h4))
 
             output = root / "derived"
             ANALYZE.write_summary(output / "summary.csv", loaded.observations)
-            ANALYZE.write_overhead(output / "paired-overhead.csv", loaded.observations)
+            ANALYZE.write_overhead(output / "paired-overhead.csv", h4)
             ANALYZE.write_construction(output / "construction.csv", loaded.constructions)
             ANALYZE.write_h2(output / "h2.json", results, loaded.files)
             ANALYZE.write_scaling_svg(output / "scaling.svg", loaded.observations)
@@ -306,6 +432,12 @@ class AnalyzeTests(unittest.TestCase):
             with (output / "summary.csv").open(newline="", encoding="utf-8") as source:
                 summary = list(csv.DictReader(source))
             self.assertTrue(all(row["process_cpu_median_ms"] for row in summary))
+            with (output / "paired-overhead.csv").open(
+                newline="", encoding="utf-8"
+            ) as source:
+                overhead = list(csv.DictReader(source))
+            self.assertTrue(all(row["latency_ratio_ci95_low"] for row in overhead))
+            self.assertTrue(all(row["latency_ratio_ci95_high"] for row in overhead))
 
     def test_summaries_do_not_pool_distinct_campaigns(self) -> None:
         records = [
@@ -474,6 +606,161 @@ class AnalyzeTests(unittest.TestCase):
             write_jsonl(source, [observation])
             with self.assertRaisesRegex(ANALYZE.AnalysisError, "timing profile reports"):
                 ANALYZE.load([source], None, False)
+
+    def test_h4_is_deterministic_under_input_reordering(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+        ]
+        forward = ANALYZE.analyze_h4(observations, 250, 19)
+        reverse = ANALYZE.analyze_h4(list(reversed(observations)), 250, 19)
+        self.assertEqual(forward, reverse)
+        self.assertEqual(
+            {row["bootstrap_method"] for row in forward},
+            {ANALYZE.H4_BOOTSTRAP_METHOD},
+        )
+
+    def test_h4_rejects_unbalanced_block_repetitions(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+            and not (
+                record["process_block"] == 1
+                and record["pods"] == 1
+                and record["repetition"] == 1
+            )
+        ]
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "unbalanced pair counts"):
+            ANALYZE.analyze_h4(observations, 100, 7)
+
+    def test_one_block_pilot_is_descriptive_without_interval(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation" and record["process_block"] == 0
+        ]
+        rows = ANALYZE.analyze_h4(observations, 100, 7)
+        self.assertTrue(
+            all(
+                row["inference_status"] == "descriptive-only-insufficient-blocks"
+                for row in rows
+            )
+        )
+        self.assertTrue(all(row["bootstrap_draws"] == 0 for row in rows))
+        self.assertTrue(all(row["latency_ratio_ci95_low"] is None for row in rows))
+        self.assertTrue(all(row["latency_ratio_ci95_high"] is None for row in rows))
+
+    def test_common_campaign_blocks_are_required_only_for_canonical_output(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+            and not (record["process_block"] == 1 and record["pods"] == 1)
+        ]
+        rows = ANALYZE.analyze_h4(observations, 100, 7)
+        self.assertEqual(
+            {row["inference_status"] for row in rows},
+            {
+                "descriptive-only-insufficient-blocks",
+                "hierarchical-cluster-bootstrap",
+            },
+        )
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "complete common blocks"):
+            ANALYZE.analyze_h4(
+                observations,
+                100,
+                7,
+                require_complete_blocks=True,
+            )
+
+    def test_pair_metadata_disagreement_is_rejected(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+        ]
+        plain = next(
+            record
+            for record in observations
+            if record["operation"] == "plain-engine-reference"
+        )
+        plain["repetition"] = 99
+        with self.assertRaisesRegex(ANALYZE.AnalysisError, "metadata disagreement"):
+            ANALYZE.validate_pairs(observations)
+
+    def test_h4_ignores_instrumentation_profile_times(self) -> None:
+        observations = [
+            record
+            for record in fixture_records()
+            if record["record_type"] == "observation"
+        ]
+        expected = ANALYZE.analyze_h4(observations, 100, 23)
+        instrumentation = []
+        for record in observations:
+            copied = dict(record)
+            copied["measurement_profile"] = "instrumentation"
+            copied["campaign"] = f"{record['campaign']}-instrumentation"
+            copied["wall_ns"] = int(record["wall_ns"]) * 1000
+            copied["process_cpu_ns"] = int(record["process_cpu_ns"]) * 1000
+            instrumentation.append(copied)
+        self.assertEqual(
+            ANALYZE.analyze_h4([*observations, *instrumentation], 100, 23),
+            expected,
+        )
+
+    def test_output_artifacts_register_svg_bytes_and_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            svg = output / "figure.svg"
+            svg.write_text("<svg/>\n", encoding="utf-8")
+            artifacts = ANALYZE.output_artifacts(output, [svg.name])
+            self.assertEqual(
+                artifacts,
+                [
+                    {
+                        "path": "figure.svg",
+                        "bytes": len(b"<svg/>\n"),
+                        "sha256": hashlib.sha256(b"<svg/>\n").hexdigest(),
+                    }
+                ],
+            )
+
+    def test_output_artifacts_fail_closed_for_missing_declared_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ANALYZE.AnalysisError, "does not exist"):
+                ANALYZE.output_artifacts(Path(directory), ["missing.svg"])
+
+    def test_main_manifest_registers_generated_svg_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "raw.jsonl"
+            output = root / "derived"
+            write_jsonl(source, fixture_records())
+            saved_argv = sys.argv
+            try:
+                sys.argv = [
+                    "analyze.py",
+                    str(source),
+                    "--out",
+                    str(output),
+                    "--bootstrap-draws",
+                    "100",
+                    "--bootstrap-seed",
+                    "31",
+                ]
+                self.assertEqual(ANALYZE.main(), 0)
+            finally:
+                sys.argv = saved_argv
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            artifacts = {
+                artifact["path"]: artifact for artifact in manifest["output_artifacts"]
+            }
+            self.assertIn("pod-scaling-latency.svg", artifacts)
+            svg = output / "pod-scaling-latency.svg"
+            self.assertEqual(artifacts[svg.name]["bytes"], svg.stat().st_size)
+            self.assertEqual(artifacts[svg.name]["sha256"], ANALYZE.sha256_file(svg))
 
 
 if __name__ == "__main__":

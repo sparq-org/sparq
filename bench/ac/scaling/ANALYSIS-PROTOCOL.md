@@ -687,3 +687,211 @@ during source upload; the study service was never created, no benchmark ran, and
 instance cleanup completed. This bounded transport hardening changes neither the host,
 benchmark, security-group scope, measurements, nor estimands, and preceded any valid
 canonical outcome.
+
+### 1.29 — 2026-09-03: make H4 uncertainty block-aware and register derived-artifact digests
+
+During a blinded audit of the frozen protocol and analysis source, while canonical data
+acquisition was still in progress and before any canonical timing or CPU outcome was
+opened or inspected, we found that `paired-overhead.csv` reported the preregistered H4
+paired medians but did not compute their confidence intervals. The omission conflicted
+with Sections 2 and 7, which require paired effect sizes and intervals and identify the
+corpus/process block—not an individual repeated request—as the independent unit. The gap
+was identified from program structure alone; no observed effect estimate, interval, or
+figure informed this amendment.
+
+This amendment changes post-run validation and analysis only. It changes no corpus,
+policy, query, implementation path, request order, stopping rule, raw record, exclusion,
+or H4 estimand. For every timing-profile cell, H4 continues to report separately the
+median of the within-pair guarded-minus-plain wall-time differences and the median of the
+within-pair guarded/plain wall-time ratios. The same two estimands are reported for
+positive process CPU time when the platform supplies it. Instrumentation-profile wall
+and CPU measurements remain diagnostic and are excluded from H4 inference.
+
+For each cell and metric, the 95% interval is now the percentile interval from the
+hierarchical cluster bootstrap already prescribed in Section 7. Let the five
+corpus/process blocks be the top-level clusters and let each recorded repetition provide
+one intact guarded/plain pair effect. In each bootstrap draw, sample five complete block
+identifiers with replacement; within each selected block occurrence, sample its paired
+request effects with replacement to the block's original repetition count; pool the
+sampled effects and take their median. Repeat this procedure at least 10,000 times and
+take the 2.5th and 97.5th percentiles. Each pair is resampled once as a vector so wall and
+CPU effects share a coherent bootstrap replicate. A SHA-256-derived cell sub-seed from the
+recorded base bootstrap seed makes results independent of input-file and record order.
+The analyzer rejects incomplete guarded/plain pairs, pair-metadata disagreement,
+non-positive ratio denominators, unequal repetition counts across blocks, non-consecutive
+repetition indices, and a cell spanning more than one process fixture per block. An
+ordinary one-block pilot remains analyzable, but is explicitly marked descriptive-only
+and has blank interval fields; the bootstrap is not run. The common campaign block-set
+check is applied in canonical mode, where the patched argument validator also rejects
+fewer than 10,000 draws and the existing data validator requires all five frozen blocks.
+
+H4 retains no binary threshold and no null-hypothesis significance test. The intervals
+are marginal, cell-wise uncertainty summaries; they are not simultaneous confidence
+bands over queries or cells. With only five independent blocks, their finite-sample
+coverage may be imperfect and this limitation must be stated with the results.
+
+Finally, the analysis manifest now records the byte length and SHA-256 digest of every
+derived artifact produced by that invocation, including each generated SVG figure, while
+retaining the existing filename list for compatibility. `manifest.json` does not digest
+itself, avoiding a recursive digest definition. This provenance addition does not alter
+any numerical estimand.
+
+### 1.30 — 2026-09-03: fail-closed causal checks and source-faithful publication claims
+
+After canonical acquisition completed and the retrieved archive and manifest had been
+verified, but before any canonical timing, CPU, allocation, backend-counter, construction,
+RSS, derived-summary, or result-figure content was opened or inspected, an outcome-blind
+peer review and a second bound-by-bound source audit were completed against frozen source
+commit `b1c05c08d2279885d63a50f5208a943ad4b942b2`. They identified a missing validation of
+the primary causal intervention, publication questions that exceeded the recorded
+measures, one incorrect specialization of the native construction bound, and several
+missing qualifications in the analytical model. This amendment records conservative
+analysis and wording corrections before any empirical outcome is computed or bound.
+
+This amendment changes no raw campaign, corpus, policy, query, principal, implementation
+path, factor cell, request order, repetition, measurement, stopping rule, exclusion, H2
+estimand, H2 decision margin, H4 point estimand, H4 bootstrap estimator, bootstrap seed, or
+minimum draw count. It adds fail-closed pre-analysis validation and constrains the claims
+that may be made from the frozen records and implementation.
+
+#### Fail-closed validation of the unrelated-Pod intervention
+
+For both the `pod-scaling` timing profile and the
+`pod-scaling-instrumentation` profile, the analyzer groups guarded observations by
+`(measurement_profile, lane, domain, query_id, process_block)`. Every group must contain
+the complete Pod grid `{1, 8, 64, 512, 2048}`, one `query_hash_sha256`, and one
+`(result_hash_sha256, result_rows)` identity across the grid. Lanes, domains, queries,
+profiles, and process blocks remain separate because their URI topology, vocabulary,
+query, instrumentation, or generated target slice may legitimately differ. Full corpus
+hashes and stored-state counts are not cross-P invariants and are expected to change.
+
+Each primary fixture is joined to exactly its construction record by `run_uuid`, with
+request repetitions deduplicated at that fixture boundary. Construction records are then
+grouped by `(measurement_profile, lane, domain, process_block)` and must cover the same
+complete Pod grid with one `(target_readable_documents,
+evaluation_readable_documents)` pair. All primary cells use the Pod-0 owner over an
+all-private audience, so both counts must equal `documents_per_pod` (16 in the frozen
+matrix). This expectation applies to both the origin-per-Pod routed composition and the
+shared-origin native-handler composition: the owner reads every target-Pod content
+document and no background-Pod content document.
+
+The timing/instrumentation logical-fixture matcher additionally requires equal
+`result_hash_sha256` and `result_rows`, as well as the existing corpus and query identity.
+Any missing Pod level or drift in query, result multiset identity, result cardinality, or
+readable-document count aborts canonical analysis before an estimate is emitted. Tests
+cover acceptance of legitimate profile/lane/domain/query/block differences and rejection
+of each protected cross-P drift class. The raw schema has no target-Pod byte hash, so exact
+byte-level prefix invariance still rests on the frozen generator implementation and tests,
+not on a per-record byte attestation.
+
+#### Publication estimands and status of H3--H5
+
+RQ3 is limited to theoretical source-derived decomposition and the measured scaling of
+total uninstrumented wall/CPU cost, instrumentation-profile allocation totals, aggregate
+backend-operation classes, and recorded cold-construction phase durations. The request
+records have no stage-specific clocks. Backend operations and allocations are work-volume
+proxies; they cannot identify elapsed-time or CPU shares for authentication, containment,
+WAC planning or matching, RDF parsing, N-Quads rebuilding, query evaluation, or result
+serialization. Publication text must not say that one such stage “dominates,” “accounts
+for” a percentage, or was empirically timed unless a corresponding stage clock exists.
+
+RQ4 reports, within each frozen campaign/lane/domain/query/Pod/block cell, the paired wall
+and CPU difference and ratio between guarded execution and its content-only physical
+reference. The reference is query-answer-equivalent for the eight generated templates,
+but is not physically dataset-identical: a guarded dataset may additionally contain
+authorized structural/container and control graphs. Their parse, index, membership, and
+graph-enumeration work can enter the contrast. It is therefore a
+“guarded-stack/content-reference contrast,” not pure WAC cost, a same-dataset comparison,
+or isolated access-control overhead.
+
+The preregistered labels H3, H4, and H5 remain in the audit trail but are published as
+exploratory expectations E3, E4, and E5. E3 reports the recorded total and proxy measures
+by frozen factor cell. E4 reports the paired difference and ratio by frozen cell relative
+to the answer-equivalent content reference. E5 reports cold phase durations and
+whole-process current/peak RSS by frozen scenario and cell. H3 and H5 had no operational
+threshold; H4 neither operationalized “non-trivial query evaluation” nor specified a
+cross-query ordering, and fixed query order was not randomized. The new per-cell intervals
+do not create that missing cross-query estimand. E3--E5 therefore receive estimates and
+descriptive interpretation only, never supported/rejected, pass/fail, or confirmatory
+verdicts. H1 remains a correctness gate and H2 retains its frozen four-part decision rule.
+
+#### Implementation, oracle, and prior-work boundaries
+
+The materialized lane is a benchmark-composed Pod-routed feasibility design built from
+production `sparq_solid::PodStore` components; it is not the current native endpoint's
+request path. The native lane invokes the current Axum router and handler in process with
+`tower::ServiceExt::oneshot`. It includes middleware, server-side authentication, handler
+logic, authorized-dataset assembly, evaluation, serialization, and body buffering, but
+excludes sockets, TLS, reverse proxies, kernel network transport, and client-side token or
+proof construction. Publication wording must therefore use “routed feasibility
+composition” and “native in-process handler lane,” not “two production paths,” “network
+HTTP latency,” or “full server stack.” Absolute cross-lane latency is not a causal speedup
+comparison.
+
+The direct audience predicate selects readable content without either authorization
+implementation, but expected and actual answers share the SPARQ evaluator and much of the
+canonicalization/serialization path. H1 validates authorization-layer physical selection
+for the generated WAC subset and query corpus; it is not an independent SPARQL conformance
+or evaluator-correctness test. Live revocation claims must cite the named, checksummed
+cross-layer test evidence rather than infer a particular probe from an aggregate
+`correctness=true` row.
+
+Novelty claims must acknowledge Dedecker et al.'s graph-centric Pod/SPARQL interfaces,
+Werbrouck et al.'s ConSolid permissioned CSS/Fuseki/Express SPARQL satellite using ACL
+lookup and `FROM`/`FROM NAMED` rewriting, and Staquet et al.'s proposed incrementally
+maintained SPARQL views for Solid agents/aggregators. The defensible novelty is the
+controlled marginal intervention on unreadable co-tenants, the comparison of physical
+enforcement boundaries, and the correctness-gated, uncertainty-aware benchmark—not
+access-controlled SPARQL over Pods, query rewriting, or authorization views themselves.
+
+#### Source-faithful cost-model corrections
+
+The native construction expression already retained
+`sum_c k_c^2 ell`, but its linear-in-P specialization was false for the actual shared-root
+fixture. Every Pod root is inserted beneath `https://pod.example/`, and the in-memory
+metadata store de-duplicates a child by linearly scanning that root's growing vector.
+Consequently root insertion performs `Theta(P^2)` string-equality calls, giving
+`Omega(P^2)` work and an `O(P^2 ell)` lexical upper bound even though fixed per-Pod state
+makes `N_0,B_0=Theta(P)`. A linear specialization would require bounded fan-out or an
+indexed child set. This is an implementation/topology-specific construction effect, not
+an inherent WAC, Solid, or remote-backend cost; native construction results remain
+descriptive.
+
+The native request decomposition must distinguish backend read planning, post-plan ACL
+resolution/cache work, local WAC matching, snapshot-lock acquisition, and output
+serialization. A parsed-ACL cache hit still performs live metadata confirmation and clones
+the parsed triple vector. A miss reads, parses, and inserts the ACL and may scan the
+fixed-capacity LRU for eviction. The local matcher remains worst-case `O(a_r^2 ell)`. Blank-node
+scoping and aggregate N-Quads formatting/writing belong to the N-Quads rebuild term.
+
+Routed named-graph analysis uses the query-time named-slot count `g_p`, not source graph
+count `n_p`. A denied concrete `GRAPH <g>` short-circuits after visibility checking; a
+visible concrete target then reaches the named-vector search. The lower bound
+`Omega(g_p+Y)` applies to unrestricted unbound `GRAPH ?g` enumeration without the
+implementation's recognized `STRSTARTS(STR(?g),prefix)` range restriction, not to every
+GRAPH query. Routed `QueryResult` materialization is `O(Y ell)`. Native response
+serialization remains symbolic generally with lower bound `Omega(Z)` and specializes to
+`Theta(Z)` only for the benchmark's fixed-width, bounded-term templates.
+
+The conditional native `O(P log P)` upper additionally requires aggregate containment
+listing `sum C_list(c)=O((N+E)ell)`, `E=O(N)`, and bounded per-candidate plan, ACL
+resolution, and policy work; `E=O(N)` alone cannot bound an arbitrary backend's listing
+cost. Materialized construction retains lexical factors on graph, ancestor, fact, and
+installed-view terms outside the bounded-term intervention. Session-cache space includes
+dirty-origin strings and bounded recency-queue key copies as well as live entries.
+
+For comparable simultaneous reads, aggregate request-local transient memory is an
+`O(c S_http)` upper bound. The snapshot read guard is constant space per request, but lock
+acquisition may wait under contention; the guard covers assembly through serialization
+and blocks only matching handler-mediated mutations within the same `LdpState`, not direct
+store writers or other server instances. The necessary CPU-capacity condition
+`lambda E[S_cpu] < c` assumes stationary work, CPU seconds per request, and `c` available
+core-seconds per second; it is not sufficient for queue stability.
+
+Finally, the benchmark oracle lemma is retained with corrected premises: materialized
+container graphs carry structural vocabulary, native seeded container RDF bodies are
+empty, and ACL graphs carry WAC vocabulary. None contains the generated mandatory social
+or health classes, so removal of those graphs cannot change the eight template answers.
+All three propositions remain intact with the conditions above. These analytical changes
+were selected from frozen source structure, not from an observed effect direction or
+magnitude.

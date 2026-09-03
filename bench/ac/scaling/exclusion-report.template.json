@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "note": "Annotations only. The exporter discovers every retained failures/**/FAILED.json sentinel and derives the exact excluded-attempt count.",
+  "entries": [
+    {
+      "attempt_id": "REPLACE_WITH_INVALID_ATTEMPT_ID",
+      "reason_code": "REPLACE_WITH_SENTINEL_REASON_CODE",
+      "note": "REPLACE_WITH_OPTIONAL_NON_NUMERIC_CONTEXT",
+      "sentinel": {
+        "path": "failures/REPLACE_WITH_INVALID_ATTEMPT_ID/FAILED.json",
+        "sha256": "REPLACE_WITH_64_HEX",
+        "bytes": 1
+      },
+      "stderr": {
+        "path": "failures/REPLACE_WITH_INVALID_ATTEMPT_ID/stderr.txt",
+        "sha256": "REPLACE_WITH_64_HEX",
+        "bytes": 1
+      },
+      "partial_inputs": []
+    }
+  ]
+}

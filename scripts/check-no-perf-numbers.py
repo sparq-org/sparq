@@ -190,10 +190,14 @@ def scan_file(path: str) -> list[tuple[int, str, str]]:
 # overclaim phrased without a result-shaped unit is NOT caught here — that remains
 # Stage-5 human review (and the build-time headline() canonical gate in bench.typ).
 
-# Accessor calls whose (string-key) argument span must be removed before scanning, so a
-# unit-like substring inside a legitimate evidence KEY can never be read as a perf claim.
+# Accessor call PREFIXES whose first (string-key) argument must be removed before scanning,
+# so a unit-like substring inside a legitimate evidence KEY can never be read as a perf claim.
+# Deliberately do NOT remove the whole call: optional caption/suffix content remains published
+# prose and must still be scanned (especially timing_figure(..., caption: [...])).
 TYPST_ACCESSOR_CALL_RE = re.compile(
-    r"#(?:headline|ev|provenance)\s*\([^)]*\)", re.I
+    r"#(?:headline_timing|timing_verdict|timing_table|timing_provenance|timing_figure|headline|ev|provenance)"
+    r'\s*\(\s*"(?:\\.|[^"\\])*"',
+    re.I,
 )
 
 
@@ -277,8 +281,24 @@ def scan_typst_file(path: str) -> list[tuple[int, str, str]]:
 # perf-number class only; a subtle semantic overclaim in a note remains Stage-5 human review
 # (and the privacy-phrase half of the note scan is covered by check-privacy-claims.sh).
 EVIDENCE_PATH = "site/src/data/paper-evidence.json"
-# Only these string fields are PROSE; every other string (and all numbers) is structured data.
-EVIDENCE_PROSE_FIELDS = frozenset({"note", "_comment"})
+TIMING_EVIDENCE_PATH = "site/src/data/paper-evidence.canonical-timing.generated.json"
+EVIDENCE_PATHS = (EVIDENCE_PATH, TIMING_EVIDENCE_PATH)
+# Only these string fields are author/publisher prose rendered into a paper, its image
+# accessibility text, or its website provenance stamp. Every other string (and all numbers) is
+# structured identity data. Canonical-timing adds run-description fields and figure `alt` text;
+# scanning only `note` would leave those outward claim surfaces unchecked.
+EVIDENCE_PROSE_FIELDS = frozenset({
+    "_comment",
+    "alt",
+    "dataset",
+    "estimator",
+    "host_label",
+    "noise_limitation",
+    "note",
+    "protocol",
+    "query_scope",
+    "workload",
+})
 
 # [OPUS-5] sparq-org/sparq#4145. PUBLISHED prose that does not live in a `*.md`/`*.typ` file.
 # `orchestration/start-here.toml` is the curated source of the maintainer front door (#1135):
@@ -293,10 +313,11 @@ EXTRA_SCAN_PATHS = ("orchestration/start-here.toml",)
 
 
 def scan_evidence_json(path: str) -> list[tuple[int, str, str]]:
-    """Scan the prose (`note`/`_comment`) fields of paper-evidence.json (bead sq-4hga).
+    """Scan outward prose fields in a paper-evidence ledger (bead sq-4hga).
 
-    Reports the 1-based line number of the offending prose field within the file, so a CI
-    reader can jump straight to it (the JSON is pretty-printed, one field per line).
+    This includes notes/comments plus canonical-timing figure alt text and rendered run
+    descriptions. Reports the 1-based line number of the offending field within the file, so a
+    CI reader can jump straight to it (the JSON is pretty-printed, one field per line).
     """
     findings: list[tuple[int, str, str]] = []
     try:
@@ -374,8 +395,8 @@ def main() -> int:
     # prose fields. Added explicitly because the file is *.json (not in SCAN_GLOBS) and its
     # scan is field-aware, not line-shaped. An explicit-paths invocation that names the file
     # gets the same field-aware dispatch below.
-    if not args.paths and os.path.exists(EVIDENCE_PATH) and EVIDENCE_PATH not in files:
-        files = [*files, EVIDENCE_PATH]
+    if not args.paths:
+        files = [*files, *(p for p in EVIDENCE_PATHS if os.path.exists(p) and p not in files)]
     # [OPUS-5] #4145: published prose outside SCAN_GLOBS — see EXTRA_SCAN_PATHS.
     if not args.paths:
         files = [*files, *(p for p in EXTRA_SCAN_PATHS
@@ -398,7 +419,9 @@ def main() -> int:
             # [OPUS-4.8] sq-mkza: `.typ` paper sources use the accessor-aware,
             # result-shaped-only scan; sq-4hga: the evidence JSON uses the field-aware
             # prose scan; everything else uses the markdown scan.
-            if path.endswith("paper-evidence.json"):
+            if path in EVIDENCE_PATHS or path.endswith(
+                ("paper-evidence.json", "paper-evidence.canonical-timing.generated.json")
+            ):
                 file_findings = scan_evidence_json(path)
             elif path.endswith(".typ"):
                 file_findings = scan_typst_file(path)

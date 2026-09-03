@@ -1,0 +1,389 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sparq.jeswr.org/schema/canonical-timing-envelope-v1.json",
+  "title": "SPARQ canonical paper-timing envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "canonical",
+    "study_id",
+    "run_id",
+    "collected_at_utc",
+    "source",
+    "environment",
+    "workload",
+    "analysis",
+    "correctness",
+    "results",
+    "figures",
+    "paper_evidence",
+    "paper_figures"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "canonical": { "const": true },
+    "study_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "collected_at_utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "tree_clean"],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tree_clean": { "const": true }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "class",
+        "host_label",
+        "tenancy",
+        "noise_limitation",
+        "os",
+        "cpu_affinity",
+        "rayon_threads"
+      ],
+      "properties": {
+        "class": { "enum": ["controlled-single-process-ec2", "dedicated-bare-metal"] },
+        "host_label": { "type": "string", "minLength": 1 },
+        "tenancy": { "type": "string", "minLength": 1 },
+        "noise_limitation": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "region": { "type": "string" },
+        "instance_type": { "type": "string" },
+        "architecture": { "type": "string" },
+        "os": { "const": "linux" },
+        "kernel": { "type": "string" },
+        "cpu_model": { "type": "string" },
+        "cpu_affinity": { "type": "string", "pattern": "^[0-9]+$" },
+        "rayon_threads": { "const": 1 },
+        "allocator": { "type": "string" }
+      }
+      ,
+      "allOf": [
+        {
+          "if": { "properties": { "class": { "const": "controlled-single-process-ec2" } } },
+          "then": { "properties": { "tenancy": { "const": "shared" } } }
+        }
+      ]
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["label", "dataset", "query_scope", "protocol"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "dataset": { "type": "string", "minLength": 1 },
+        "query_scope": { "type": "string", "minLength": 1 },
+        "protocol": { "$ref": "#/$defs/versionedHashedFile" }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "git_commit",
+        "tree_clean",
+        "canonical_validation_passed",
+        "script",
+        "publisher",
+        "bootstrap_draws",
+        "bootstrap_seed",
+        "input_files",
+        "output_files",
+        "result_bindings",
+        "raw_archive",
+        "raw_archive_verification"
+      ],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tree_clean": { "const": true },
+        "canonical_validation_passed": { "const": true },
+        "script": { "$ref": "#/$defs/hashedFile" },
+        "publisher": {
+          "$ref": "#/$defs/strictHashedFile",
+          "description": "The committed envelope/archive publisher. Sync/build re-hash this file locally; its digest does not replace analysis.git_commit."
+        },
+        "bootstrap_draws": { "type": "integer", "minimum": 100 },
+        "bootstrap_seed": { "type": "integer", "minimum": 0 },
+        "input_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/archivedInputFile" }
+        },
+        "output_files": {
+          "type": "array",
+          "minItems": 1,
+          "description": "SHA-256 digests computed after final serialization by the blinded analysis commit. Non-figure entries are syntax-validated descriptors at paper-build time; every admitted figure is additionally byte-rehashed and byte-counted through the figures object.",
+          "items": { "$ref": "#/$defs/derivedOutput" }
+        },
+        "result_bindings": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Lexically serialized, exact coverage map from every finite numeric/Boolean /results JSON pointer to one or more hashed source-artifact locators. Only the manuscript-used subset is copied into generated paper-evidence records.",
+          "propertyNames": { "pattern": "^/results/" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/resultBinding" }
+          }
+        },
+        "raw_archive": {
+          "description": "Content-addressed sanitized raw-input archive. Prefer a committed repository-relative .tar.zst beside its run envelope, whose bytes sync/build re-hash. The external descriptor-only variant is a labelled fallback when committing the archive is impractical.",
+          "oneOf": [
+            { "$ref": "#/$defs/committedRawArchive" },
+            { "$ref": "#/$defs/externalRawArchive" }
+          ]
+        },
+        "raw_archive_verification": {
+          "$ref": "#/$defs/rawArchiveVerification",
+          "description": "Publisher-recorded member verification. Sync/build validate this attestation and re-hash the publisher file, but do not independently decompress and re-hash archive members."
+        }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["passed", "records"],
+      "properties": {
+        "passed": { "const": true },
+        "records": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "results": {
+      "type": "object",
+      "description": "Object-keyed derived results. Arrays may occur only for intrinsically ordered values such as CI endpoints, never to identify a lane/domain/query cell."
+    },
+    "figures": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/svgFile" }
+    },
+    "paper_evidence": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/paperEvidenceDeclaration" }
+    },
+    "paper_figures": {
+      "type": "object",
+      "description": "Paper-facing declarations for digest-bound SVGs. The generated timing_figure accessor supplies both the path and forced run provenance.",
+      "additionalProperties": { "$ref": "#/$defs/paperFigureDeclaration" }
+    }
+  },
+  "$defs": {
+    "hashedFile": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "strictHashedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "archivedInputFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "archive_member"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "archive_member": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact safe relative member name in raw_archive; the publisher records member re-hashing and exact-set validation."
+        }
+      }
+    },
+    "versionedHashedFile": {
+      "allOf": [
+        { "$ref": "#/$defs/hashedFile" },
+        {
+          "type": "object",
+          "required": ["version"],
+          "properties": { "version": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "derivedOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "bytes"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "resultBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "sha256", "locator"],
+      "properties": {
+        "artifact": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact analysis.output_files[].name or analysis.input_files[].path."
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable source-local row, field, or JSON-pointer locator interpreted by the publisher."
+        }
+      }
+    },
+    "committedRawArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^bench/canonical-competitor-results/.+\\.tar\\.zst$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "public_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://.*\\.tar\\.zst(?:\\?.*)?$",
+          "description": "Optional later mirror (for example a release or repository URL); publication never requires inventing one."
+        }
+      }
+    },
+    "externalRawArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "bytes", "build_verification"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://.*\\.tar\\.zst(?:\\?.*)?$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "build_verification": { "const": "descriptor-only" }
+      }
+    },
+    "rawArchiveVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_member",
+        "manifest",
+        "regular_members",
+        "all_members_rehashed",
+        "exact_member_set",
+        "sanitization_scan_passed",
+        "deterministic_tar_headers",
+        "zstd"
+      ],
+      "properties": {
+        "manifest_member": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact safe relative path of the manifest inside raw_archive."
+        },
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha256", "bytes", "entry_count"],
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer", "minimum": 1 },
+            "entry_count": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "regular_members": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "Must equal manifest.entry_count + 1; the additional regular member is the manifest itself."
+        },
+        "all_members_rehashed": { "const": true },
+        "exact_member_set": { "const": true },
+        "sanitization_scan_passed": { "const": true },
+        "deterministic_tar_headers": { "const": true },
+        "zstd": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "executable_sha256"],
+          "properties": {
+            "version": { "type": "string", "minLength": 1 },
+            "executable_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "svgFile": {
+      "allOf": [
+        { "$ref": "#/$defs/hashedFile" },
+        {
+          "type": "object",
+          "required": ["media_type", "output_name"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^site/papers/figures/canonical-timing/.+\\.svg$"
+            },
+            "media_type": { "const": "image/svg+xml" },
+            "output_name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact unique name in analysis.output_files; sync requires its digest and byte length to match the committed SVG and requires it to equal the SVG basename."
+            }
+          }
+        }
+      ]
+    },
+    "paperEvidenceDeclaration": {
+      "type": "object",
+      "description": "Declares a finite numeric result or a derived boolean verdict. Free-form result strings are refused by the sync; prose remains in the manuscript and provenance metadata remains in timing_provenance().",
+      "additionalProperties": false,
+      "required": ["pointer", "unit", "note", "papers"],
+      "properties": {
+        "pointer": { "type": "string", "pattern": "^/results/" },
+        "unit": { "type": "string", "minLength": 1 },
+        "estimator": { "type": "string" },
+        "hypothesis": {
+          "enum": ["H1", "H2"],
+          "description": "Required by sync for a boolean mechanical verdict. H3-H5 and RQ4 remain numeric/descriptive and cannot declare verdicts."
+        },
+        "note": { "type": "string", "minLength": 1 },
+        "papers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "paperFigureDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["figure", "alt", "note", "papers"],
+      "properties": {
+        "figure": { "type": "string", "minLength": 1 },
+        "alt": { "type": "string", "minLength": 1 },
+        "note": { "type": "string", "minLength": 1 },
+        "papers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

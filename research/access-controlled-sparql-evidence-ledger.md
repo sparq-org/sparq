@@ -17,7 +17,8 @@ calibration point, not evidence that it is representative of a future Pod popula
 | Solid and WAC status/semantics | Published Solid CG reports; WAC v1.0.0 and Solid Protocol v0.11.0, both dated 2024-05-12 | High | Community Group drafts, not W3C Recommendations | Cite exact status; do not call either a W3C Standard |
 | Authorized query dataset | Paper's local draft specification plus implementation/conformance tests | High for SPARQ; low for ecosystem adoption | No ratified Solid server-side SPARQL surface | Label the query interface and one-resource/one-graph mapping as this work |
 | SPARQL evaluation complexity | Pérez, Arenas, and Gutierrez, ACM TODS 2009 | High | Results concern the formal graph-pattern language, not a concrete engine's runtime | Keep worst-case combined/data complexity separate from implementation cost |
-| Access-controlled SPARQL precedent | SAFE (2017); Kirrane et al. (2020) | High | SAFE is federated clinical cubes; Kirrane et al. study query rewriting; neither is WAC over co-hosted Pods | Position contributions by deployment and enforcement boundary, not as the first access-controlled SPARQL system |
+| Access-controlled SPARQL precedent | SAFE (2017); Kirrane et al. (2020); Dedecker et al. (2022); ConSolid (2024); Staquet et al. (2024) | High | Prior work covers graph-level policy, query rewriting, Pod query interfaces, WAC-aware SPARQL, and incremental views | Position contributions by deployment boundary and controlled scaling question, never as the first access-controlled SPARQL or Solid query system |
+| Unreadable co-tenant isolation | Targeted review of the closest Solid/SPARQL systems and benchmarks | Medium-high for the reviewed corpus | An absence claim cannot exclude every unpublished or differently described system | Qualify novelty as: among the reviewed literature, no experiment independently varies unreadable unrelated co-resident Pods while holding the target data, policy, query, and answer fixed |
 | Social Pod counts | SolidBench article and artefact: 1,531 vaults, 158,233 RDF files, 3,556,159 triples | High | Generated from LDBC SNB; not observations of deployed Pods | Call matching settings count-calibrated, not SolidBench-derived or population-representative |
 | Compact health counts | TIDAL: 256 participant Pods, each with one RDF/Turtle file containing 128 generated clinical variables/values | Medium-high | The mandatory corpus matches participant/file counts only; its `T=128` means triples, not variables, and is not TIDAL-derived | Call it a participant/file anchor; do not equate variables and triples or generalize to typical patient records |
 | Structurally rich health data | Synthea generates synthetic longitudinal EHRs in FHIR/CSV and other formats | High | Not used by the mandatory controlled benchmark; realism is model-dependent | If added, report conversion code and realized distributions; otherwise state as future/supplementary work |
@@ -49,7 +50,7 @@ calibration point, not evidence that it is representative of a future Pod popula
 4. Harris, S., and Seaborne, A. **SPARQL 1.1 Query Language**, W3C Recommendation,
    2013-03-21. <https://www.w3.org/TR/sparql11-query/>
    - Supports RDF-dataset, default-graph, named-graph, and query-language semantics.
-5. Clark, K. G., Feigenbaum, L., and Torres, E. **SPARQL 1.1 Protocol**, W3C
+5. Feigenbaum, L., Williams, G. T., Clark, K. G., and Torres, E. **SPARQL 1.1 Protocol**, W3C
    Recommendation, 2013-03-21. <https://www.w3.org/TR/sparql11-protocol/>
    - Supports the standardized HTTP query operation used by the draft interface.
 
@@ -73,34 +74,59 @@ calibration point, not evidence that it is representative of a future Pod popula
    - Establishes graph-level, policy-aware SPARQL federation over clinical/statistical
      RDF data cubes. It is not Solid/WAC and does not study co-hosted-Pod isolation.
 
+### Closest Solid query systems
+
+9. Dedecker, R., Slabbinck, W., Wright, J., Hochstenbach, P., Colpaert, P., and
+   Verborgh, R. **What's in a Pod? A Knowledge Graph Interpretation for the Solid
+   Ecosystem**, in *QuWeDa 2022*, CEUR Workshop Proceedings 3279, pp. 81--96, 2022.
+   <https://ceur-ws.org/Vol-3279/paper6.pdf>
+   - Motivates graph-centric interpretations and query interfaces for Pod contents,
+     including SPARQL and Triple Pattern Fragments. It does not measure WAC enforcement
+     cost while independently varying unrelated co-resident Pods.
+10. Werbrouck, J., Pauwels, P., Beetz, J., Verborgh, R., and Mannens, E.
+    **ConSolid: A Federated Ecosystem for Heterogeneous Multi-Stakeholder Projects**,
+    *Semantic Web* 15(2), 429--460, 2024.
+    <https://doi.org/10.3233/SW-233396>
+    - Implements a permission-aware SPARQL satellite around Community Solid Server and
+      Apache Jena Fuseki, including ACL queries and dataset-clause rewriting. Its reported
+      experiment is a valuable order-of-magnitude comparison, but it does not isolate
+      unreadable co-tenant growth or report the present study's uncertainty design.
+11. Staquet, D., Buelens, B., and Van den Bussche, J. **A Methodological Approach to
+    Incremental View Maintenance for Optimizing SPARQL Queries in Solid**, in *Solid
+    Symposium 2024 Posters and Privacy Session*, CEUR Workshop Proceedings 3947,
+    pp. 31--37, 2024. <https://ceur-ws.org/Vol-3947/short5.pdf>
+    - Proposes an incremental-view methodology for Solid query optimization. It motivates
+      view maintenance as a separate systems cost and leaves a co-tenant scaling benchmark
+      to future implementation work.
+
 ### Workload calibration
 
-9. Taelman, R., and Verborgh, R. **Link Traversal Query Processing over Decentralized
+12. Taelman, R., and Verborgh, R. **Link Traversal Query Processing over Decentralized
    Environments with Structural Assumptions**, in *ISWC 2023*, pp. 3--22.
    <https://doi.org/10.1007/978-3-031-47240-4_1>
    Canonical article: <https://comunica.github.io/Article-ISWC2023-SolidQuery/>
    - Reports SolidBench's default 1,531 vaults, 158,233 RDF files, and 3,556,159
      triples; data and query templates derive from LDBC SNB.
-10. Erling, O., Averbuch, A., Larriba-Pey, J., Chafi, H., Gubichev, A., Prat, A.,
+13. Erling, O., Averbuch, A., Larriba-Pey, J., Chafi, H., Gubichev, A., Prat, A.,
     Pham, M.-D., and Boncz, P. **The LDBC Social Network Benchmark: Interactive Workload**,
     *SIGMOD 2015*. <https://doi.org/10.1145/2723372.2742786>
     - Establishes the social-network workload underlying SolidBench; it does not
       establish deployed Solid Pod distributions.
-11. Sun, C., Gallofré Ocaña, M., van Soest, J., Dumontier, M., et al. **ciTIzen-centric
+14. Sun, C., Gallofré Ocaña, M., van Soest, J., and Dumontier, M. **ciTIzen-centric
     DAta pLatform (TIDAL): Sharing distributed personal data in a privacy-preserving
-    manner for health research**, *Semantic Web* 14(3), 2023.
+    manner for health research**, *Semantic Web* 14(5), 977--996, 2023.
     <https://doi.org/10.3233/SW-223220>
     - Evaluates up to 256 participant Pods and 128 requested variables across three Pod
       providers; supports a participant/file-count calibration point, not a mapping from
       each reported variable to one generated RDF triple.
-12. Walonoski, J., Kramer, M., Nichols, J., Quina, A., Moesel, C., Hall, D., Duffett,
+15. Walonoski, J., Kramer, M., Nichols, J., Quina, A., Moesel, C., Hall, D., Duffett,
     C., Dube, K., Gallagher, T., and McLachlan, S. **Synthea: An approach, method, and
     software mechanism for generating synthetic patients and the synthetic electronic
     health care record**, *JAMIA* 25(3), 230--238, 2018.
     <https://doi.org/10.1093/jamia/ocx079>
     - Supports Synthea as a synthetic longitudinal EHR generator, not a claim that its
       output reproduces any particular future Pod population.
-13. Ragab, M., Savateev, Y., Oliver, H., Tiropanis, T., Poulovassilis, A., Chapman, A.,
+16. Ragab, M., Savateev, Y., Oliver, H., Tiropanis, T., Poulovassilis, A., Chapman, A.,
     Taelman, R., and Roussos, G. **Decentralized Search over Personal Online Datastores:
     Architecture and Performance Evaluation**, in *ICWE 2024*, pp. 49--64.
     <https://doi.org/10.1007/978-3-031-62362-2_4>
@@ -109,17 +135,17 @@ calibration point, not evidence that it is representative of a future Pod popula
 
 ### Experimental method
 
-14. Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. **Producing Wrong Data
+17. Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. **Producing Wrong Data
     Without Doing Anything Obviously Wrong!**, *ASPLOS 2009*, pp. 265--276.
     <https://doi.org/10.1145/1508244.1508275>
     - Demonstrates measurement bias from innocuous setup changes and motivates complete
       configuration randomization.
-15. Kalibera, T., and Jones, R. E. **Rigorous Benchmarking in Reasonable Time**,
+18. Kalibera, T., and Jones, R. E. **Rigorous Benchmarking in Reasonable Time**,
     *ISMM 2013*, pp. 63--74. <https://doi.org/10.1145/2464157.2464160>
     - Motivates hierarchical experimental units, deliberate repetition at influential
       levels, and effect-size confidence intervals. The paper's median/block bootstrap is
       a stated adaptation, not an implementation of their exact estimator.
-16. Papadopoulos, A. V., Versluis, L., Bauer, A., Herbst, N., von Kistowski, J.,
+19. Papadopoulos, A. V., Versluis, L., Bauer, A., Herbst, N., von Kistowski, J.,
     Ali-Eldin, A., Abad, C., Amaral, J. N., Tůma, P., and Iosup, A.
     **Methodological Principles for Reproducible Performance Evaluation in Cloud
     Computing**, *IEEE Transactions on Software Engineering* 47(8), 1528--1543, 2021.
@@ -140,8 +166,14 @@ calibration point, not evidence that it is representative of a future Pod popula
 ## Search stopping record
 
 Discovery covered official Solid/WAC/ACP and SPARQL reports, the original SPARQL
-complexity paper, access-controlled SPARQL precedents, Solid social/health/stress
-benchmarks, a synthetic-EHR generator, and systems/cloud measurement methodology.
-Targeted follow-up resolved exact versions, workload denominators, and complexity
-qualifiers. Further broad search is unlikely to change the experimental design; the only
-material open evidence is the study's own canonical measurement campaign.
+complexity paper, access-controlled SPARQL precedents, Pod query-interface proposals,
+ConSolid's WAC-aware SPARQL implementation, Solid incremental-view work, Solid
+social/health/stress benchmarks, a synthetic-EHR generator, and systems/cloud measurement
+methodology. Targeted follow-up combined title/abstract and backward/forward citation
+searches for `Solid`, `Pod`, `SPARQL`, `WAC`, `ACL`, `query`, `view`, `benchmark`,
+`performance`, `scaling`, and `multi-tenant`, and resolved exact versions, workload
+denominators, and complexity qualifiers. No reviewed experiment independently varied
+unreadable unrelated co-resident Pods while fixing the target slice, policy, query, and
+answer. That statement is deliberately bounded to the reviewed literature; further broad
+search is unlikely to change the experimental design, while differently named or
+unpublished work could still qualify the novelty claim.
