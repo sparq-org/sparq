@@ -6,6 +6,10 @@
 > constraint that invalidates the original recommendation. §2 records the corrections.
 > Hardened 2026-09-03 `[GPT-5.6-SOL]` after round-two review to make transport-row
 > ownership, exclusion order, and shadow/resident independence explicit.
+> Corrected again after independent review on 2026-09-03 `[GPT-5.6-SOL]`: Actions
+> schedules are now explicitly best-effort; broker recovery is level-triggered; App
+> installation permission is separated from runtime-token authority; and removal of the
+> resident waiter requires a merge-independent, already-on-main recovery transport.
 > The operative mitigation today remains the sq-90cv4 *adaptive saturation budget* in
 > `scripts/ci_summary_gate.py`.
 
@@ -46,7 +50,7 @@ verdict honesty, but it leaves throughput on the table.
 
 The 2026-07 version of this record recommended re-publishing the verdict as a **commit
 status** and **migrating branch protection** to that context, listing the migration as
-design risk #1. Three corrections, each verified against the checkout:
+design risk #1. Seven corrections now constrain any implementation:
 
 1. **The context name stays fixed, but its integration must migrate.** sq-6vshe.19
    constrains the required check name to remain exactly `gate`, which forecloses the old
@@ -63,6 +67,21 @@ design risk #1. Three corrections, each verified against the checkout:
    concurrency group with `cancel-in-progress: true`. Applied to an evaluator, that
    cancels evaluations — including, potentially, the one that would observe the final
    all-terminal set — and hangs the gate (§6).
+4. **GitHub Actions cron is not a clock.** Scheduled workflows may be delayed or dropped
+   during load, and they consume the same hosted-runner capacity this design is meant to
+   relieve. Actions cron remains a reconciliation hint; an independently scheduled,
+   isolated-capacity control-plane path is required for a bounded hang-to-RED claim (§3,
+   §7.4).
+5. **Doorbells are not durable generation requests.** A failed doorbell or a replaced
+   pending Actions run must not strand a target. Every sweep performs idempotent,
+   level-triggered broker reconciliation from authoritative target state before evaluation
+   (§6.3, §7.1, §7.3).
+6. **App installation eligibility is not runtime authority.** The installation carries
+   the permissions GitHub requires to publish checks and be selected as an expected source;
+   each runtime token is reduced to this repository and `checks: write` only (§4, §7.2).
+7. **A rollback commit is not a recovery mechanism.** Cleanup may remove the active waiter
+   only after an inert App-15368 recovery transport is already on `main` and proven able to
+   recover exact heads without merging through the component being recovered (§9).
 
 The original §4 claim still holds and is the reason this is tractable at all: the verdict
 brain (`render_verdict`, `forgive_superseded`, `failfast_failures`, `is_advisory`, …) is
@@ -96,10 +115,16 @@ ci-summary's *completion*) never rings; the merge-queue entry sits until the que
 timeout.
 
 **Therefore:** the counters must be re-expressed as **wall-clock deadlines** anchored to a
-persisted start timestamp, *and* a mechanism must guarantee a minimum invocation rate.
-Only a scheduled lane provides the latter. This repo already operates sub-hourly cron
-sweepers, so the primitive is proven here rather than hypothetical — though note the
-finest cadence in use is 5 minutes, on exactly one lane:
+persisted start timestamp, *and* a mechanism independent of the affected Actions queue must
+provide a measured maximum interval between evaluations. A GitHub Actions `schedule` does
+not provide that guarantee: GitHub documents that scheduled runs can be delayed under load
+and some queued jobs can be dropped, while this repository has also observed long gaps in
+sub-hourly schedules during saturation. The Actions troubleshooting contract is the
+authority here:
+<https://docs.github.com/en/actions/how-tos/troubleshoot-workflows>.
+
+The existing cron lanes below remain useful **best-effort reconciliation signals**, not
+minimum-rate clocks. Their configured cadence is not an execution SLO:
 
 | Lane | `cron` | Cadence |
 | --- | --- | --- |
@@ -108,6 +133,19 @@ finest cadence in use is 5 minutes, on exactly one lane:
 | `promote-on-approval.yml` | `*/10 * * * *` | 10 min |
 | `batch-merge.yml` | `7,22,37,52 * * * *` | 15 min |
 | `ci-latency-alarm.yml` | `26 * * * *` | hourly |
+
+Before shadow activation, the implementation must provision an independently scheduled
+liveness driver whose evaluation compute does not consume the account-wide hosted-runner
+pool, or capacity that is separately isolated and proven available under full pool
+saturation. It runs the same reviewed broker/evaluator core described in §7, pins its code
+and target repository, executes no target-controlled content, and has an explicit
+`LIVENESS_SLO`, fixed at no more than five minutes from a due deadline to the terminal
+publisher update. A genuine hang must become RED no later than its wall-clock deadline plus
+that SLO.
+The Actions schedule remains an opportunistic reconciliation path for ordinary missed
+events, but is never credited toward this bound. If the independent path, isolated
+capacity, out-of-band alarm, and saturation evidence cannot be provided, the cutover is a
+no-go and the resident waiter remains authoritative.
 
 ## 4. Finding B — context identity requires a dedicated publisher App
 
@@ -129,6 +167,28 @@ to that integration. Phase 4 must prove its create/update identity and repositor
 installation behaviour on same-repository, fork, and merge-group heads. Cutover is
 forbidden if that distinct identity is absent, if its credential is reachable from target
 code, or if administrators will not approve the ruleset integration migration.
+
+There are two deliberately different permission surfaces:
+
+- **Installation eligibility.** The App installation has `checks: write` so it can create
+  and update check-runs and, where GitHub's required-check source-selection contract
+  requires it, `statuses: write` so the App can appear as an expected source. This is
+  verified against the live installation and ruleset API rather than inferred from the
+  manifest. GitHub documents the expected-source requirement here:
+  <https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets>.
+- **Runtime-token authority.** The protected publisher-mutation service mints each
+  dedicated-App token for the Sparq repository id alone and reduces it to `checks: write`;
+  it does not carry `statuses: write` or organization/repository administration. Actions
+  adapters request fenced mutations from that service and never receive the App token or
+  minting credential. Separate workflow-dispatch credentials remain independently
+  least-privileged. GitHub documents repository and permission narrowing for installation
+  tokens here:
+  <https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app>.
+
+Phase 4 must prove both surfaces independently: a checks-only runtime token can create and
+update the App-owned check, cannot write a commit status, and the live ruleset readback can
+select exactly that App for `gate`. A permission mismatch, an over-broad runtime token, or
+an unprotected minting path is a cutover blocker.
 
 Two more consequences must be designed for, not assumed away:
 
@@ -181,6 +241,21 @@ and the dedicated publisher App id. The codec rejects a mismatched identity or u
 schema version, preserves the human verdict summary separately, and tolerates unknown
 fields within a supported version for forward compatibility.
 
+The shared mutation lease is deliberately not stored in the check-run it protects. The
+isolated control plane provides a durable per-head lease with monotonically increasing
+fencing tokens; both Actions adapters and the independent driver use it. All dedicated-App
+check-run writes pass through the publisher-mutation service that exclusively holds the
+reduced App token. It atomically rejects a request whose fencing token is no longer current
+before issuing the serialized GitHub mutation, so an expired caller cannot resume and
+overwrite newer state. Merely copying a token into `output.text` would not fence the GitHub
+API and is explicitly insufficient. Verdict state remains in the check-run envelope; the
+lease store contains coordination metadata and the mutation service may publish only a
+request already authorized by the broker/evaluator state machine. Its API accepts no
+free-form GitHub payload: it authenticates the reviewed caller and revalidates repository,
+head SHA, check id/name/App, expected prior-state digest, desired-generation intent, fencing
+token, and requested state transition. A mismatch or an evaluator request for success
+without the complete sealed-generation proof is durably failed closed.
+
 ### 6.1 The publisher check is transport state, never verdict input
 
 The persistent API-created publisher is not a sibling result. It therefore needs a
@@ -195,21 +270,22 @@ token permission. An untrusted PR/merge-ref workflow can therefore emit a job na
 Branch protection matches the context name and integration; it does not authenticate the
 envelope. A scanner or inventory cannot close that registration race.
 
-Cutover consequently requires a **dedicated publisher GitHub App** whose installation
-credential is available only to the protected default-branch broker/evaluator. The
-ruleset must pin `gate` to that App's integration. If that integration migration is not
-approved or cannot be made, the slotless transport is rejected and the trusted resident
-gate remains required. App id identifies the GitHub App, not a particular installation;
-repository-scoped lookup, validated target identity, and exclusive control of that
-repository installation's credential provide the rest of the provenance boundary.
+Cutover consequently requires a **dedicated publisher GitHub App** whose token-minting
+credential is available only to the protected control plane. The ruleset must pin `gate`
+to that App's integration. If that integration migration is not approved or cannot be
+made, the slotless transport is rejected and the trusted resident gate remains required.
+App id identifies the GitHub App, not a particular installation; repository-scoped lookup,
+validated target identity, reduced runtime tokens, and exclusive control of that repository
+installation's minting credential provide the rest of the provenance boundary.
 
 Before shadow activation, a machine gate pins the repository's default token posture and
 inventories every reserved-name producer: automatic Actions job checks (including
 expression-, matrix-, and reusable-workflow-derived names), API check writers, and every
-job or environment able to obtain the dedicated App credential. Only reviewed
-default-branch code may receive that credential, and it may not execute or interpolate
-PR/merge-ref content. Any unlisted producer, secret/environment grant, dynamic-name gap,
-or privilege/trigger/checkout drift fails the gate.
+job, service, or environment able to obtain a reduced dedicated-App token or its stronger
+minting credential. Only reviewed default-branch or pinned control-plane code may receive
+either, and it may not execute or interpolate PR/merge-ref content. Any unlisted producer,
+secret/environment grant, dynamic-name gap, over-broad token, or
+privilege/trigger/checkout drift fails the gate.
 
 Each evaluation first fetches the raw check-runs for the target SHA with `filter=all`,
 paginates every page, and validates the publisher candidates **before** converting any
@@ -340,26 +416,37 @@ guarantee that a terminal-success publisher is reopened before a sibling rerun,
 replacement, or late reporter becomes pending.
 
 Every automated mechanism that can create or rerun a target-SHA gating row uses one
-trusted default-branch generation broker. Native target-code workflows no longer publish
-their own target-SHA gating rows; the broker creates pending sibling rows and launches
-unprivileged workers, and trusted reporters update only the broker-created rows. Under the
-same per-head lock, the broker:
+trusted generation broker. Native target-code workflows no longer publish their own
+target-SHA gating rows; the broker creates pending sibling rows and launches unprivileged
+workers, and trusted reporters update only the broker-created rows. A doorbell payload is
+never the generation intent. On every invocation the broker re-reads authoritative current
+PR/merge-group state plus the committed launch inventory and computes a deterministic
+desired-generation digest. The publisher envelope durably records that intent, its nonce,
+and `manifest_complete: false` before any worker side effect. A later reconciliation can
+therefore reconstruct and finish the desired generation without the triggering event.
+
+Under the shared fenced per-head mutation lease, the broker:
 
 1. validates current target membership and the unique publisher using the complete raw
    enumeration contract in §6.1;
-2. updates the publisher to `in_progress`, clears its terminal conclusion, records a
-   monotonically increasing generation nonce, and marks the manifest incomplete;
-3. GETs the publisher again and verifies its id, repository/head/App identity, nonce, and
-   non-terminal state;
-4. before the integration cutover, requests a fresh authenticated resident attempt and
+2. compares the authoritative desired-generation digest with the durable intent and sealed
+   manifest; if they already match, reconciles any missing reporter/worker state rather than
+   starting a duplicate generation;
+3. otherwise updates the publisher to `in_progress`, clears its terminal conclusion,
+   records the desired-generation digest and a monotonically increasing generation nonce,
+   and marks the manifest incomplete;
+4. GETs the publisher again and verifies its id, repository/head/App identity, intent,
+   nonce, fencing token, and non-terminal state;
+5. before the integration cutover, requests a fresh authenticated resident attempt and
    GET-verifies that the App-15368 `gate` is non-terminal; if that cannot be proved, the
    target must already be de-armed or admission must be globally paused;
-5. creates every pending sibling row, seals the complete generation manifest, and
-   GET-verifies it; and only then
-6. revalidates target/admission state and dispatches or reruns the unprivileged work with
-   authenticated generation/run correlation.
+6. creates or reuses exactly the pending sibling rows required by the intent, records each
+   worker/reporter idempotency key, seals the complete generation manifest, and GET-verifies
+   it; and only then
+7. revalidates target/admission state and dispatches or reattaches exactly one worker per
+   manifest lane with authenticated generation/run correlation.
 
-Step 4 is the pre-cutover stale-green interlock: reopening a non-required shadow publisher
+Step 5 is the pre-cutover stale-green interlock: reopening a non-required shadow publisher
 alone is not credited with revoking the resident required result. The resident sees the
 new incomplete manifest and its active bootstrap guard holds while the broker builds the
 generation. No automated same-SHA label or state mutation that changes the gating manifest
@@ -367,11 +454,13 @@ may occur outside this transaction. If a target merges or leaves admission befor
 final revalidation, the broker aborts without launching work.
 
 For a genuinely new head with no publisher, the missing dedicated-App required context is
-already fail-closed; the broker creates it pending before any target row. If a SHA has been
-seen before — including reopen, re-arm, or reuse by another PR — the broker treats it as a
-same-SHA generation and reopens the existing publisher before launching work. Initial and
-replacement generations therefore use one ordering rule rather than assuming a SHA is
-novel from an event type.
+already fail-closed; the broker creates it pending before any target row. Until that first
+publisher exists, current target membership plus the committed launch inventory is the
+durable, reconstructible source of desired intent: both sweep paths rediscover it without a
+doorbell. If a SHA has been seen before — including reopen, re-arm, or reuse by another PR
+— the broker treats it as a same-SHA generation and reopens the existing publisher before
+launching work. Initial and replacement generations therefore use one ordering rule rather
+than assuming a SHA is novel from an event type.
 
 The evaluator may return success only after a final §6.1 re-read proves that every gating
 row belongs to the sealed manifest and is terminal. Any unknown, unsealed, future, or
@@ -406,14 +495,29 @@ to debounce. That is wrong in a way that matters:
 - Worse, if the cancelled invocation is the one carrying the *final* sibling's completion,
   no further event ever arrives and the gate hangs forever.
 
-**Correct:** every event and sweep dispatch enters the **same** per-head-SHA concurrency
-group with `cancel-in-progress: false`. The design uses that group only to prevent two
-evaluators from mutating one publisher concurrently; it does **not** depend on the number,
-ordering, replacement, or retention of pending runs. Each invocation performs a **full
-re-read of the world** (`fetch_runs()` re-fetches every check-run from scratch), never
-applies the event as an incremental delta, and the sweep guarantees a later evaluation.
+**Correct:** mutation-critical broker reconciliation and disposable evaluator wake-ups do
+not share a replaceable pending queue:
 
-Application-level coalescing is an idempotent fast path in the persisted state: record a
+- broker requests use `gate-gen:v1:<repository-id>:<target-kind>:<head-sha>` with
+  `cancel-in-progress: false`;
+- evaluator wake-ups use the distinct coalescing key
+  `gate-eval:v1:<repository-id>:<target-kind>:<head-sha>`, also with
+  `cancel-in-progress: false`; and
+- before requesting a publisher mutation, either role obtains the same durable, fenced
+  application lease `gate-mutate:v1:<repository-id>:<target-kind>:<head-sha>`. The
+  isolated liveness service uses this lease too, so it cannot race an Actions invocation.
+  Only the mutation service can PATCH with the App token, and it rejects a stale fencing
+  token before the serialized write.
+
+Actions concurrency may replace one pending run with another. That is acceptable only
+within a role because the retained broker invocation fully reconciles the desired generation
+and the retained evaluator fully re-reads the world. An evaluator event can never evict the
+only pending broker. Correctness does **not** depend on the number, ordering, replacement,
+or retention of evaluator events, and liveness does not depend on retention of a particular
+broker event because both sweep paths rediscover every eligible target and enqueue broker
+reconciliation. No invocation applies an event as an incremental delta.
+
+Evaluator-level coalescing is an idempotent fast path in the persisted state: record a
 digest of the validated, transport-filtered observation plus the next wall-clock deadline.
 A serialized invocation that sees the same digest and no deadline due exits without
 advancing counters or writing the publisher. If the observation changed, or a deadline is
@@ -423,10 +527,12 @@ platform queueing. The concurrency primitive's role is documented by GitHub's co
 contract:
 <https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency>.
 
-Creation must also be idempotent. Under the concurrency lock the evaluator applies the
-identity and collision rules in §6.1, creates one publisher only when there is no
-collision, and never silently picks a winner from duplicate required contexts. Publisher
-reopen and sibling launch follow the generation-sealing protocol in §6.3; observing an
+Creation must also be idempotent. Under the shared fenced lease the broker/evaluator applies
+the identity and collision rules in §6.1, creates one publisher only when there is no
+collision, and never silently picks a winner from duplicate required contexts. The
+evaluator refuses success when the durable desired intent is absent, differs from current
+authoritative target state, is incomplete, or names any missing worker/reporter. Publisher
+reopen and sibling launch follow the generation-sealing protocol above; observing an
 asynchronous event is never used to claim that stale success was revoked in time. The
 Checks update contract permits the App-owned run's status to be updated, and the broker's
 PATCH/GET ordering is covered by the adversarial tests in §6.3.
@@ -434,8 +540,9 @@ PATCH/GET ordering is covered by the adversarial tests in §6.3.
 ## 7. Recommended architecture
 
 The design separates unprivileged target work, non-verdict doorbells, the privileged
-generation broker/evaluator, and the sweep. No workflow that executes a PR or merge ref
-receives the dedicated App credential or dispatch privilege.
+generation broker/evaluator, best-effort Actions reconciliation, and an independently
+scheduled liveness path on isolated capacity. No workflow or service that executes a PR or
+merge ref receives the dedicated App credential or dispatch privilege.
 
 ### 7.1 Non-verdict doorbells and broker-launched workers
 
@@ -451,17 +558,24 @@ For merge groups, the existing default-branch doorbell invokes the same broker o
 enqueue/dequeue. It is the only native `merge_group` target trigger. There is no
 target-ref-defined writer or dispatcher whose definition could come from the combined ref.
 
-Neither doorbell can publish or update a verdict. If one is absent or fails, the required
-context remains absent and the scheduled sweep below is the backstop.
+Neither doorbell can publish or update a verdict, and neither is a durable queue. They are
+latency hints only. If one is absent, fails, or its pending Actions run is replaced, the
+Actions sweep and independent liveness path both rediscover the target from authoritative
+GitHub state and invoke the same broker reconciliation. An implementation that requires the
+original event payload to finish a generation is rejected.
 
-The broker validates the target, acquires the per-head lock, registers or reopens the
-publisher, and creates the complete set of pending sibling check-runs for the new
-generation before it starts compute. It then invokes worker jobs whose workflow definitions
-come from the reviewed default branch. A worker checks out the target SHA with persisted
+The broker is a level-triggered reconciler, not an event handler. It validates the target,
+computes and durably records the desired-generation intent, acquires the shared fenced
+lease, and follows the idempotent transaction in §6.3. Re-entry after any interruption —
+publisher reopen, partial sibling creation, manifest seal, or partial worker dispatch —
+must converge on exactly one sealed generation and one worker/reporter identity per lane.
+Once sealed, it invokes worker jobs whose workflow definitions come from the reviewed
+default branch and enqueues evaluation. A worker checks out the target SHA with persisted
 credentials disabled and receives no dedicated-App credential, repository write token, or
 untrusted cache restore. Its result is data returned to a separate trusted reporter, which
 matches broker-run id, worker job id, lane, repository, head SHA, and generation nonce
-against the sealed manifest before updating that one sibling row.
+against the sealed manifest before submitting a fenced update for that one sibling row to
+the publisher-mutation service.
 
 Except for the authenticated resident `ci-summary / gate` migration anchor in §6.2, all
 gating workers lose native `pull_request`, `merge_group`, `labeled`, `unlabeled`,
@@ -473,8 +587,8 @@ prerequisite, not an optimization.
 
 ### 7.2 Default-branch evaluator
 
-`ci-gate-eval.yml` has **no** `pull_request` or `merge_group` trigger. Its privileged job
-runs only on:
+`ci-gate-eval.yml` is the best-effort Actions adapter around the shared evaluator core. It
+has **no** `pull_request` or `merge_group` trigger. Its privileged job runs only on:
 
 - `workflow_run` with `types: [requested, in_progress, completed]` and an explicit
   `workflows:` list;
@@ -524,29 +638,63 @@ Event fields reach scripts through environment variables or JSON files, never sh
 interpolation.
 
 The workflow token keeps only the current read set and the narrowly bounded
-`actions: write` operations used by the broker/re-dispatch path. A short-lived installation
-token from the dedicated App holds `checks: write` only for the publisher repository. The
-job enters the per-SHA concurrency group from §6, validates/loads state, removes exactly
-the trusted publisher row per §6.1, performs one `step()`, repeats the complete identity
-and generation read before success, and updates either `gate-shadow` or (only after
-cutover) `gate`.
+`actions: write` operations used by the broker/re-dispatch path. The protected
+publisher-mutation service issues to itself a short-lived installation token scoped to the
+Sparq repository id with `checks: write` only; the installation-level `statuses: write`
+eligibility permission is not included. The Actions job receives neither token nor minting
+key. It uses the evaluator coalescing key and then the shared fenced mutation lease from
+§6.3, validates/loads state, removes exactly the trusted publisher row per §6.1, performs
+one `step()`, repeats the complete identity, authoritative desired-intent, and generation
+read before success, and submits the fenced `gate-shadow` or (only after cutover) `gate`
+mutation to that service.
 
 ### 7.3 Default-branch sweep
 
 `ci-gate-sweep.yml` runs at GitHub's minimum supported schedule interval and on manual
-dispatch. It holds read permissions plus only the permission needed to dispatch the
-evaluator; it does **not** hold `checks: write`. It enumerates current non-draft PR heads,
-active merge-group heads, and non-terminal publishers that pass the same repository/head/
-App/external-id/schema identity checks from §6.1, then dispatches `ci-gate-eval.yml` at the
-exact default-branch ref once per SHA. A same-name row that fails those checks is an alert,
-not a sweep target. The dispatched runs join the same concurrency groups as event wake-ups.
+dispatch. The schedule is explicitly best-effort: configured cadence makes no promise about
+start time or eventual delivery. The workflow holds read permissions plus only the
+permission needed to dispatch the broker; it does **not** hold `checks: write` or the App
+minting credential.
+
+Each sweep enumerates **all** current non-draft PR heads and active merge-group heads,
+including targets with no publisher, then dispatches broker reconciliation at the exact
+default-branch ref once per repository + target kind + SHA. It also enumerates non-terminal
+publishers and same-name identity failures. An identity failure raises an alert and remains
+a broker target so the durable neutralization rules in §6.1 run; it is never silently
+skipped. The broker performs a full desired-state read, finishes or repairs the generation,
+and dispatches evaluation only after the manifest is sealed. Broker and evaluator use the
+distinct concurrency keys and shared lease from §6.3.
 
 `pr-area-label` is the one unconditional expected source workflow per target. The
 evaluator records the target discovery time and refuses a stable-empty success until that
 run is observed successful and the existing startup/settle semantics are satisfied. If
 it never registers or never becomes terminal by the corresponding wall-clock deadline,
-the sweep drives `gate-shadow`/`gate` to a terminal failure. A total Actions outage may
-delay that diagnostic, but the missing required context remains fail-closed throughout.
+either reconciliation path drives `gate-shadow`/`gate` to a terminal failure. A total
+Actions outage may suppress this best-effort sweep, but the missing required context remains
+fail-closed and the independent path below still owns the bounded diagnostic.
+
+### 7.4 Independent bounded-liveness driver
+
+The wall-clock guarantee is implemented by a separately scheduled control-plane service,
+not `ci-gate-sweep.yml`. Its scheduler and compute do not depend on the affected repository's
+hosted-runner queue; alternatively, the compute may use separately reserved capacity only
+after a saturation test proves the same isolation. The service runs a pinned build of the
+same reviewed broker/evaluator core, validates that the build belongs to reviewed
+default-branch history, and never checks out or executes a target ref. It uses the shared
+publisher-mutation service; only that component obtains the repository-scoped checks-only
+runtime token described in §4.
+
+At least once per declared `LIVENESS_SLO`, it enumerates the same complete target set as
+§7.3, performs broker reconciliation, and evaluates every due wall-clock deadline under the
+shared fenced lease. Duplicate, reordered, or simultaneous Actions/control-plane ticks are
+idempotent. If the service misses its SLO, cannot acquire fresh target state, loses App
+authentication, or cannot durably update a publisher, an out-of-band monitor pages and
+admission pauses; it never converts its own outage into success.
+
+Phase 5 must demonstrate this path while `workflow_run` and Actions schedules are suppressed
+and the hosted-runner pool is saturated. A genuine hang must become RED by its semantic
+deadline plus `LIVENESS_SLO`. Failure of that test is a cutover no-go, not a reason to relax
+the deadline or branch protection.
 
 ## 8. Honest payoff analysis — peak concurrency, not billable minutes
 
@@ -560,6 +708,10 @@ This is where the bead's estimate needs qualifying.
   that the resident waiter pays exactly once. `docs/branch-protection.md` enumerates on
   the order of dozens of aggregated lanes per head, so the sum of those overheads is
   plausibly comparable to the resident wait it replaces.
+- **The isolated control plane has real cost and operational surface.** Its scheduler,
+  fenced lease, credential broker, monitoring, and recovery transport belong in the
+  measurement. They are correctness dependencies, not optional optimizations that may be
+  removed to improve the headline saving.
 
 So sq-6vshe.19's "frees 3–6 runner slots" is a **peak-concurrency** claim and must not be
 restated as a billable-minutes saving. **This is also the decision point for the bead's
@@ -581,48 +733,66 @@ adaptive saturation budget stays the operative mitigation.
    cadence equivalent;
    add the fail-closed state codec, observation digest, transport-owned publisher filter,
    legacy-transport validator, exhaustive raw-check pagination, reserved-name/credential
-   inventory gate, durable collision handling, the resident sealed-manifest bootstrap guard
-   in dormant observe-only mode, and multi-invocation adversarial tests (§6). Provisioning
-   a dedicated publisher App and its protected environment is a hard prerequisite. Preserve
-   the resident driver's existing `SELF_RUN_ID` ordering and tests unchanged outside the
-   dormant guard.
+   inventory gate, durable collision handling, fenced per-head mutation lease, the resident
+   sealed-manifest bootstrap guard in dormant observe-only mode, and multi-invocation
+   adversarial tests (§6). Provision the dedicated publisher App, the exclusive fenced
+   publisher-mutation/minting service, installation-level `checks: write` plus
+   source-selection `statuses: write`, and repository-scoped checks-only runtime tokens.
+   Preserve the resident driver's existing `SELF_RUN_ID` ordering and tests unchanged
+   outside the dormant guard.
 4. **Phase 3 — broker the launch topology.** Add the generated wake-up/launch inventory,
    its both-direction drift test, the default-branch PR and merge-group doorbells, sealed
-   sibling manifests, unprivileged worker execution, and trusted result reporters
-   (§6.3–§7.2), initially on de-armed canaries while old sibling triggers remain. Once that
+   sibling manifests and durable desired-generation digests, distinct broker/evaluator
+   concurrency keys, level-triggered reconciliation, unprivileged worker execution, and
+   trusted result reporters (§6.3–§7.3), initially on de-armed canaries while old sibling
+   triggers remain. Inject lost doorbells, replaced pending brokers, and crashes at every
+   transaction boundary; every later sweep must converge without duplicate work. Once that
    path is verified, seed every eligible head, request and verify fresh non-terminal
    resident attempts, and activate the bootstrap guard. Only then remove every native
    target trigger from gating workers, including same-SHA label/readiness and rerun helpers,
-   except the exact authenticated resident gate. That guarded resident remains
-   authoritative while this large migration is exercised; failure to achieve complete
-   broker ownership chooses defer/reject rather than partial cutover.
+   except the exact authenticated resident gate. That guarded resident remains authoritative
+   while this large migration is exercised; failure to achieve complete broker ownership
+   chooses defer/reject rather than partial cutover.
 5. **Phase 4 — shadow transport.** First merge and verify the resident driver's strict
    dedicated-App transport exclusion under both `gate-shadow` and migration `gate` names;
-   only then activate the evaluator and sweeper. The
-   dedicated App publishes the non-required `gate-shadow` context, excludes authenticated
-   legacy gate transports, and exercises PR, fork, initial run, broker-sealed rerun,
-   no-leg, cancellation, genuine-hang, late reporter, merge-group, publisher reopen,
-   wrong-App/name collision, pagination/truncation, and duplicate-publisher cases.
+   only then activate the evaluator, best-effort Actions sweep, and independently scheduled
+   isolated-capacity liveness driver. The dedicated App publishes the non-required
+   `gate-shadow` context, excludes authenticated legacy gate transports, and exercises PR,
+   fork, initial run, broker-sealed rerun, no-leg, cancellation, genuine-hang, late
+   reporter, merge-group, publisher reopen, wrong-App/name collision,
+   pagination/truncation, and duplicate-publisher cases.
 6. **Phase 5 — evidence gate.** Compare every terminal shadow verdict with the resident
    verdict and measure wake/terminal latency. Audit the complete reserved-name and
-   credential inventory, prove generation sealing, and prove the two transports never
-   observe one another. Then, while the resident Actions `gate` remains required, migrate
-   each non-draft PR head's dedicated-App publisher from `gate-shadow` to `gate` using the
-   single-row protocol in §6.2 and repeat parity collection by check id/App. Any unexplained
-   mismatch, duplicate, missing target, stale-success window, writer drift, dependency
-   cycle, or permission failure blocks cutover.
+   credential inventory; read back installation permissions, reduced runtime-token scope,
+   and ruleset source selection; prove generation sealing and that the two transports never
+   observe one another. Suppress `workflow_run` and Actions schedules, saturate the hosted
+   pool, and prove the isolated path still reconciles a lost initial doorbell and turns a
+   genuine hang RED within `LIVENESS_SLO`. Kill that path and prove an out-of-band alarm
+   pauses admission without publishing success. Then, while the resident Actions `gate`
+   remains required, migrate each non-draft PR head's dedicated-App publisher from
+   `gate-shadow` to `gate` using the single-row protocol in §6.2 and repeat parity collection
+   by check id/App. Any unexplained mismatch, duplicate, missing target, stale-success
+   window, writer drift, dependency cycle, liveness miss, or permission failure blocks
+   cutover.
 7. **Phase 6 — controlled integration cutover.** Drain the merge queue and pause admission.
    Prove every eligible PR head has exactly one current successful dedicated-App `gate`
    and one authenticated resident result. With explicit administrator authorisation,
    apply a full ruleset projection that changes only the required `gate` integration from
    GitHub Actions App 15368 to the dedicated publisher App; the required context name and
    every other rule remain unchanged. No branch-protection bypass or code commit is needed.
-   Evaluate a canary PR and fresh merge-group head before reopening admission. If a
-   dedicated integration cannot be selected, stop: the App-15368 design is not safe to
-   cut over.
-8. **Phase 7 — cleanup.** Remove the resident polling transport, keep the rollback commit
-   prepared, and update `ci-summary.yml`'s doctrine header and
-   `docs/branch-protection.md`.
+   Evaluate a canary PR and fresh merge-group head before reopening admission. If the
+   dedicated integration cannot be selected, the runtime token can write statuses, broker
+   recovery or the isolated liveness SLO is unproven, or the fenced lease is unavailable,
+   stop: the App-15368 design is not safe to cut over.
+8. **Phase 7 — cleanup.** Cleanup is forbidden until a reviewed, inert App-15368 recovery
+   transport is already merged on `main` and a no-bypass drill proves it can be activated
+   without a code commit or the dedicated publisher App. While dormant it emits no check
+   named `gate` and occupies no resident polling slot; its activation control and exact-head
+   publisher path are unavailable to target code. Exercise it on PR, fork, same-SHA
+   replacement, and fresh merge-group canaries, including rejection of historical green.
+   Only then remove the active resident polling transport and update `ci-summary.yml`'s
+   doctrine header and `docs/branch-protection.md`. An off-main rollback commit does not
+   satisfy this precondition.
 
 **Rollback.** Before Phase 6, disabling the shadow has no merge effect. During the Phase-6
 canary window the resident Actions gate stays live. A pre-cleanup rollback pauses
@@ -631,14 +801,18 @@ result for the current sealed generation of every eligible head; only then may t
 captured full ruleset projection restore App 15368. Historical green rows are never valid
 rollback evidence.
 
-After Phase 7, rollback is a two-stage recovery while the dedicated integration remains
-required: land the reviewed resident implementation again through the normal protected
-path, then refresh every eligible PR head (or use an equally reviewed trusted trigger) so
-the restored native workflow emits a new App-15368 `gate`. With admission still paused,
-authenticate and verify those current resident results and drain all merge groups before
-atomically restoring the old integration projection. A missing or stale resident result
-blocks the switch. Dedicated publication is disabled only after the restored rule and a
-fresh canary are verified.
+After Phase 7, rollback never begins with a merge through the component being recovered.
+Pause admission and drain active merge groups, then activate the already-on-main recovery
+transport through its protected repository/control-plane switch. It produces and
+GET-verifies a fresh exact-head App-15368 `gate` for the current sealed generation of every
+eligible PR, fork, and newly created merge-group canary; historical green or a
+target-controlled producer is never accepted. Only then may the captured full ruleset
+projection restore App 15368, changing no other field. A missing current result, an
+undrained group, a failed recovery canary, or an unexpected ruleset diff blocks the switch.
+Dedicated publication remains enabled until the restored rule and a fresh canary are
+verified. The recovery transport may then carry the protected path while a permanent
+resident repair is reviewed normally; it is never necessary to bypass branch protection
+or land that repair first.
 
 ## 10. Decisions and live questions
 
@@ -646,32 +820,47 @@ Resolved by this revision:
 
 - `workflow_run` uses a complete explicit workflow list; no wildcard is assumed.
 - PR/merge-ref execution is unprivileged and separate from the default-branch evaluator.
-- every wake-up is idempotent and keyed by repository + head SHA;
+- every wake-up is idempotent and keyed by repository + target kind + head SHA; broker
+  reconciliation is level-triggered and cannot be evicted by evaluator coalescing;
+- Actions schedules are best-effort reconciliation only; the hang-to-RED bound belongs to
+  an independently scheduled path on isolated capacity, with failure as a cutover no-go;
 - the unique fully validated publisher is excluded before any verdict transformation,
   while every identity mismatch or duplicate fails closed;
 - App/external-id matching is not treated as authorization: a dedicated publisher App and
   a machine-pinned inventory of every reserved-name and credential path are part of the
   trust boundary;
+- installation eligibility (`checks: write` plus source-selection `statuses: write`) is
+  distinct from repository-scoped runtime authority (`checks: write` only);
 - resident and shadow transports are mutually excluded and compared out of band;
 - replacement work is generation-sealed only after the required publisher has been
   reopened and GET-verified; before integration cutover a fresh resident attempt is also
   verified non-terminal, and asynchronous events provide liveness, not ordering;
 - shadow publication precedes any required-context change;
-- initial registration and a missing seed have explicit fail-closed behaviour.
+- initial registration and a missing seed have explicit fail-closed behaviour and are
+  repaired by both level-triggered sweep paths; and
+- Phase-7 cleanup retains an inert, already-on-main App-15368 recovery transport, so
+  recovery never requires a merge through the failed publisher.
 
-Phase 4 must answer with live evidence, not maintainer guesswork:
+Phases 4–5 must answer with live evidence, not maintainer guesswork:
 
 1. Does `workflow_run` deliver both requested/completed wake-ups for merge-group-triggered
    source workflows, with the merge-group head SHA?
-2. Can the dedicated publisher App be selected as the required-check integration for
-   same-repository, fork, and merge-group heads, and does its installation token remain
-   unavailable to all target-controlled workflows?
+2. Can the dedicated publisher App installation, with the separately documented
+   source-selection permission, be selected as the required-check integration for
+   same-repository, fork, and merge-group heads; is each runtime token demonstrably
+   repository-scoped and checks-only; and is minting authority unavailable to all
+   target-controlled workflows?
 3. Which default-branch reporters need an explicit evaluator doorbell because their own
    `workflow_run.head_sha` is the default-branch SHA rather than the head they annotate?
 4. Is peak concurrency or total slot time the binding constraint after the label-router
    and merge batching changes land?
-5. Does scheduled hang detection remain timely under the same saturation it is intended
-   to diagnose?
+5. Does the independent liveness driver meet `LIVENESS_SLO` with Actions schedules
+   suppressed and the hosted-runner pool saturated, and does its own failure page and pause
+   admission without publishing success?
+6. Does a missed doorbell, replaced pending broker, or crash at each broker transaction
+   boundary converge from a later sweep with one sealed generation and no duplicate worker?
+7. Can the dormant App-15368 recovery transport restore fresh exact-head results and the
+   captured ruleset projection without a commit, publisher-App dependency, or bypass?
 
 ## 11. Verification status
 
@@ -688,8 +877,32 @@ serialization, and the Checks REST documentation for App-only writes. A live Act
 snapshot linked in this PR's discussion confirmed that resident `ci-summary` waiters and
 queued build work coexist under saturation.
 
-Still not verified: dedicated-App installation and ruleset selection, merge-group wake-up
-payloads, required-check registration and generation-sealing timing, exhaustive check-run
-enumeration at live scale, and shadow/live verdict equivalence. Phases 4–5 exist
-specifically to turn those platform assumptions into evidence before the required
-integration changes.
+Every implementation PR must add machine assertions for the corresponding phase. Across
+the complete chain, those assertions must prove:
+
+- **Liveness:** with `workflow_run` and Actions cron suppressed and hosted capacity fully
+  occupied, the isolated driver evaluates a fake-clock deadline within `LIVENESS_SLO`; a
+  stopped driver raises the out-of-band incident and cannot publish success.
+- **Reconciliation:** dropped doorbells, pending-run replacement, duplicate/reordered
+  wake-ups, and crashes after publisher reopen, partial row creation, manifest seal, and
+  partial dispatch all converge from a later sweep. The evaluator cannot succeed before the
+  authoritative desired intent is sealed, and no lane is launched twice.
+- **Authority:** live installation readback contains the source-selection permissions; a
+  repository-id-scoped checks-only token can create/update a check but receives a denial for
+  commit-status write; the mutation service is the only holder, and no Actions adapter, PR,
+  merge-ref worker, or target artifact can reach the App token or minting authority. The
+  service rejects a stale fence, arbitrary check name, wrong repository/head/check id,
+  illegal transition, and success without a complete sealed-generation proof.
+- **Recovery:** after disabling or revoking the dedicated publisher, the already-on-main
+  App-15368 transport restores fresh results for same-repository, fork, same-SHA replacement,
+  and merge-group heads without a commit or bypass. Normal mode emits no accepted
+  App-15368 `gate` and consumes no resident polling slot; the ruleset rollback changes only
+  the required integration and rejects historical green.
+
+Still not verified: dedicated-App installation and ruleset selection, reduced runtime-token
+scope, merge-group wake-up payloads, fenced-lease behaviour, loss-recovering broker
+reconciliation, independent-path latency under saturation, recovery-transport activation,
+required-check registration and generation-sealing timing, exhaustive check-run enumeration
+at live scale, and shadow/live verdict equivalence. Phases 4–5 exist specifically to turn
+those platform assumptions into evidence before the required integration changes; Phase 7
+adds the recovery drill before active resident cleanup.
