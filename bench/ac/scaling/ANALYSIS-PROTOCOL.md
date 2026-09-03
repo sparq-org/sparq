@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.28
+**Protocol version:** 1.31
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -895,3 +895,34 @@ or health classes, so removal of those graphs cannot change the eight template a
 All three propositions remain intact with the conditions above. These analytical changes
 were selected from frozen source structure, not from an observed effect direction or
 magnitude.
+
+### 1.31 — 2026-09-03: correctness-file structure and serialized principal labels
+
+After the canonical run and archive verification had completed, but before any timing,
+CPU, allocation, construction-duration, RSS, backend-counter, derived-summary, or result-
+figure value had been opened or interpreted, an outcome-blind publisher integration check
+identified two structural assumptions that disagreed with the frozen emitter. This
+amendment corrects only the publication validator. It changes no raw record, acquisition,
+analyzer, experimental factor, oracle, estimand, decision rule, exclusion rule, or
+reporting choice.
+
+First, each of the 288 checksummed correctness JSONL files is a complete one-repetition
+run containing 26 records, not a one-record file: exactly eight `applicability` records,
+one `correctness-gate`, one `construction`, and sixteen `observation` records (one paired
+guarded/content-reference observation for each of the eight frozen query templates). The
+publisher must extract exactly one gate from each file while also failing closed on an
+unknown record type; a missing, extra, or duplicate record; a changed exact record schema;
+mixed common run metadata; an incomplete or repeated applicability query; or an incomplete
+or repeated query-by-operation observation pair. Performance, construction-time, RSS,
+backend-counter, CPU, and allocation values in those files remain opaque to this
+publisher-only structural check. The previously frozen totals remain 288 gate records,
+5,760 exact result-bag comparisons overall, and 4,608 materialized-lane comparisons.
+
+Second, the runner's command-line principal values `recipient` and `stranger` are labels
+accepted by argument parsing and retained in filenames and cell labels; the serialized
+`principal` field uses `named-recipient` and `authenticated-stranger`. The complete
+serialized principal set is therefore exactly `{owner, named-recipient,
+authenticated-stranger, anonymous}` for both lanes. The publisher validates that set and
+the corresponding abbreviated cell labels rather than treating filename abbreviations as
+record values. These corrections were derived from record types, schemas, and the frozen
+source emitter before outcome interpretation.

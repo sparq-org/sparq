@@ -96,7 +96,7 @@ class Fixture:
         self.publisher.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SOURCE, self.publisher)
         self.analyzer.write_text("# fixture blinded analyzer\n", encoding="utf-8")
-        self.protocol.write_text("**Protocol version:** 1.30\n\n# Fixture protocol\n", encoding="utf-8")
+        self.protocol.write_text("**Protocol version:** 1.31\n\n# Fixture protocol\n", encoding="utf-8")
         self.mod = load_module(self.publisher)
         self.configs = self.mod.all_configs()
         self.input_files = [
@@ -404,7 +404,7 @@ class Fixture:
         gate_index = 0
         for lane in self.mod.LANES:
             for domain in self.mod.DOMAINS:
-                for principal in ("owner", "recipient", "stranger", "anonymous"):
+                for principal in self.mod.CORRECTNESS_PRINCIPALS:
                     for coverage in (100, 1000):
                         for seed in (17, 42, 101):
                             for pods in (1, 8, 32):
@@ -414,26 +414,174 @@ class Fixture:
                                 else:
                                     gate = "primary principal through real HTTP route against physically filtered reference"
                                     principals_checked, queries_checked = 1, 8
-                                record = {
+                                cli_principal = self.mod.CORRECTNESS_PRINCIPAL_CLI_LABEL[principal]
+                                run_id = (
+                                    f"correctness-{self.mod.LANE_SHORT[lane]}-{domain}-"
+                                    f"{cli_principal}-p{pods}-a{coverage}-s{seed}"
+                                )
+                                common = {
                                     "schema_version": self.mod.ANALYZER_SCHEMA_VERSION,
-                                    "record_type": "correctness-gate",
+                                    "run_id": run_id,
+                                    "run_uuid": f"correctness-fixture-{gate_index:03d}",
                                     "source_commit": self.source_commit,
                                     "source_dirty": False,
+                                    "host": "fixture-host",
+                                    "instance_id": "i-fixture",
+                                    "instance_type": "r7g.xlarge",
+                                    "cloud_region": "eu-west-2",
+                                    "os": "linux",
+                                    "architecture": "aarch64",
+                                    "rustc": "rustc fixture",
+                                    "profile": "release",
+                                    "features": "sparq-lws-core/default; sparq-solid/default",
+                                    "measurement_profile": "timing",
+                                    "campaign": "correctness",
+                                    "cell_label": f"{cli_principal}-{coverage}",
                                     "lane": lane,
                                     "domain": domain,
+                                    "topology": self.mod.TOPOLOGY[lane],
                                     "principal": principal,
                                     "own_acl_coverage_per_mille": coverage,
                                     "corpus_seed": seed,
                                     "pods": pods,
                                     "documents_per_pod": 8,
                                     "triples_per_document": 8,
+                                    "container_depth": 3,
+                                    "public_per_mille": 300,
+                                    "private_per_mille": 400,
+                                    "shared_per_mille": 300,
+                                    "corpus_hash_sha256": hashlib.sha256(
+                                        f"corpus:{lane}:{domain}:{principal}:{coverage}:{seed}:{pods}".encode()
+                                    ).hexdigest(),
+                                    "process_block": 0,
+                                    "configuration_order": None,
+                                    "configuration_order_seed": None,
+                                    "warmups_configured": 0,
+                                    "repetitions_configured": 1,
+                                    "concurrency": 1,
+                                    "rayon_threads": "1",
+                                    "cpu_affinity": "1",
+                                }
+                                query_hashes = {
+                                    query: hashlib.sha256(
+                                        f"query:{domain}:{query}".encode()
+                                    ).hexdigest()
+                                    for query in self.mod.QUERIES
+                                }
+                                records = []
+                                for query in self.mod.QUERIES:
+                                    family, minimum = self.mod.CORRECTNESS_QUERY_METADATA[query]
+                                    records.append({
+                                        **common,
+                                        "record_type": "applicability",
+                                        "utc_unix_ns": gate_index * 100 + len(records) + 1,
+                                        "query_id": query,
+                                        "query_family": family,
+                                        "query_hash_sha256": query_hashes[query],
+                                        "minimum_triples_per_document": minimum,
+                                        "applicable": True,
+                                        "selected": True,
+                                        "reason": None,
+                                    })
+                                records.append({
+                                    **common,
+                                    "record_type": "correctness-gate",
+                                    "utc_unix_ns": gate_index * 100 + len(records) + 1,
                                     "gate": gate,
                                     "principals_checked": principals_checked,
                                     "queries_checked": queries_checked,
                                     "exact_result_bags": True,
+                                })
+                                content_documents = pods * 8
+                                container_graphs = pods * 4
+                                control_documents = pods * 5
+                                construction = {
+                                    **common,
+                                    "record_type": "construction",
+                                    "utc_unix_ns": gate_index * 100 + len(records) + 1,
+                                    "content_documents": content_documents,
+                                    "content_triples": content_documents * 8,
+                                    "container_graphs": container_graphs,
+                                    "control_documents": control_documents,
+                                    "control_triples": control_documents * 5,
+                                    "total_source_graphs": (
+                                        content_documents + container_graphs + control_documents
+                                    ),
+                                    "target_readable_documents": 8,
+                                    "evaluation_readable_documents": 8,
+                                    "corpus_generation_ns": 1,
+                                    "graph_load_ns": 1 if lane == "materialized-routed" else None,
+                                    "wac_materialization_ns": (
+                                        1 if lane == "materialized-routed" else None
+                                    ),
+                                    "route_index_ns": 1 if lane == "materialized-routed" else None,
+                                    "lws_seed_ns": 1 if lane == "native-http-assembly" else None,
+                                    "auth_triples_total": (
+                                        1 if lane == "materialized-routed" else None
+                                    ),
+                                    "http_store_max_total_bytes": (
+                                        1024 if lane == "native-http-assembly" else None
+                                    ),
+                                    "http_store_max_resource_count": (
+                                        content_documents + container_graphs + control_documents + 1
+                                        if lane == "native-http-assembly" else None
+                                    ),
+                                    "construction_allocations": None,
+                                    "construction_allocated_bytes": None,
+                                    "resident_bytes": 1024,
+                                    "peak_resident_bytes": 2048,
                                 }
+                                records.append(construction)
+                                for query_index, query in enumerate(self.mod.QUERIES):
+                                    family, _minimum = self.mod.CORRECTNESS_QUERY_METADATA[query]
+                                    result_hash = hashlib.sha256(
+                                        f"result:{lane}:{domain}:{principal}:{query}".encode()
+                                    ).hexdigest()
+                                    ordered_operations = list(self.mod.OPERATIONS[lane])
+                                    if query_index % 2:
+                                        ordered_operations.reverse()
+                                    for order_in_pair, operation in enumerate(ordered_operations):
+                                        records.append({
+                                            **common,
+                                            "record_type": "observation",
+                                            "utc_unix_ns": gate_index * 100 + len(records) + 1,
+                                            "query_id": query,
+                                            "query_family": family,
+                                            "query_hash_sha256": query_hashes[query],
+                                            "operation": operation,
+                                            "pair_id": f"{run_id}:0:{query}:0",
+                                            "repetition": 0,
+                                            "warmup": False,
+                                            "order_in_pair": order_in_pair,
+                                            "wall_ns": 1,
+                                            "process_cpu_ns": 1,
+                                            "allocation_operations": None,
+                                            "allocated_bytes": None,
+                                            "response_bytes": (
+                                                64 if lane == "native-http-assembly" else None
+                                            ),
+                                            "result_rows": 1,
+                                            "result_hash_sha256": result_hash,
+                                            "correctness": True,
+                                            "http_status": (
+                                                200 if operation == "native-http-request" else None
+                                            ),
+                                            "backend_sparql_queries": None,
+                                            "backend_sparql_updates": None,
+                                            "backend_blob_gets": None,
+                                            "backend_blob_puts": None,
+                                            "backend_blob_other": None,
+                                            "backend_total_operations": None,
+                                            "backend_max_in_flight": None,
+                                        })
+                                if len(records) != 26:
+                                    raise AssertionError("correctness fixture composition drift")
                                 (correctness_root / f"gate-{gate_index:03d}.jsonl").write_text(
-                                    json.dumps(record, sort_keys=True) + "\n", encoding="utf-8"
+                                    "".join(
+                                        json.dumps(record, sort_keys=True) + "\n"
+                                        for record in records
+                                    ),
+                                    encoding="utf-8",
                                 )
                                 gate_index += 1
         suite_root = correctness_root / "suite-logs"
@@ -701,6 +849,69 @@ class PublicationExporterTests(unittest.TestCase):
             # Four metrics x four lane/domain facets x eight queries x five Pod counts.
             self.assertEqual(svg.count('r="2.4"'), 4 * 4 * 8 * 5)
             self.assertIn("not pooled", svg)
+
+    def test_realistic_correctness_file_has_frozen_26_record_composition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            path = sorted((fx.run / "correctness").glob("*.jsonl"))[0]
+            records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 26)
+            self.assertEqual(
+                {
+                    kind: sum(record["record_type"] == kind for record in records)
+                    for kind in fx.mod.CORRECTNESS_RECORD_COUNTS
+                },
+                fx.mod.CORRECTNESS_RECORD_COUNTS,
+            )
+            gate = fx.mod.validate_correctness_file_records(
+                records, path, fx.source_commit
+            )
+            self.assertEqual(gate["record_type"], "correctness-gate")
+
+    def test_correctness_file_rejects_unknown_duplicate_and_cli_principal_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            path = sorted((fx.run / "correctness").glob("*.jsonl"))[0]
+            original = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+            unknown = json.loads(json.dumps(original))
+            unknown[-1]["record_type"] = "unexpected-record"
+            with self.assertRaisesRegex(fx.mod.PublicationError, "unknown record_type"):
+                fx.mod.validate_correctness_file_records(unknown, path, fx.source_commit)
+
+            duplicate_gate = json.loads(json.dumps(original))
+            gate = next(record for record in duplicate_gate if record["record_type"] == "correctness-gate")
+            construction_index = next(
+                index for index, record in enumerate(duplicate_gate)
+                if record["record_type"] == "construction"
+            )
+            duplicate_gate[construction_index] = dict(gate)
+            with self.assertRaisesRegex(fx.mod.PublicationError, "record composition changed"):
+                fx.mod.validate_correctness_file_records(
+                    duplicate_gate, path, fx.source_commit
+                )
+
+            duplicate_observation = json.loads(json.dumps(original))
+            observation_indices = [
+                index for index, record in enumerate(duplicate_observation)
+                if record["record_type"] == "observation"
+            ]
+            duplicate_observation[observation_indices[-1]] = dict(
+                duplicate_observation[observation_indices[-2]]
+            )
+            with self.assertRaisesRegex(fx.mod.PublicationError, "repeats observation"):
+                fx.mod.validate_correctness_file_records(
+                    duplicate_observation, path, fx.source_commit
+                )
+
+            cli_principal = json.loads(json.dumps(original))
+            for record in cli_principal:
+                record["principal"] = "recipient"
+                record["cell_label"] = "recipient-100"
+            with self.assertRaisesRegex(fx.mod.PublicationError, "unknown serialized principal"):
+                fx.mod.validate_correctness_file_records(
+                    cli_principal, path, fx.source_commit
+                )
 
     def test_missing_summary_cell_fails_before_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

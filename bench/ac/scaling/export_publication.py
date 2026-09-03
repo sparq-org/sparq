@@ -73,6 +73,76 @@ OPERATIONS = {
     "native-http-assembly": ("native-http-request", "plain-engine-json-reference"),
 }
 GUARDED = {lane: operations[0] for lane, operations in OPERATIONS.items()}
+CORRECTNESS_PRINCIPALS = (
+    "owner",
+    "named-recipient",
+    "authenticated-stranger",
+    "anonymous",
+)
+CORRECTNESS_PRINCIPAL_CLI_LABEL = {
+    "owner": "owner",
+    "named-recipient": "recipient",
+    "authenticated-stranger": "stranger",
+    "anonymous": "anonymous",
+}
+CORRECTNESS_QUERY_METADATA = {
+    "q1-point": ("graph-bound point lookup", 1),
+    "q2-star": ("selective star pattern", 3),
+    "q3-join": ("multiway join", 8),
+    "q4-optional": ("OPTIONAL", 5),
+    "q5-not-exists": ("NOT EXISTS", 5),
+    "q6-path": ("bounded property path", 8),
+    "q7-aggregate": ("aggregate/grouping", 2),
+    "q8-graph-scan": ("unbound GRAPH scan", 1),
+}
+CORRECTNESS_COMMON_FIELDS = frozenset({
+    "schema_version", "run_id", "run_uuid", "source_commit", "source_dirty",
+    "host", "instance_id", "instance_type", "cloud_region", "os",
+    "architecture", "rustc", "profile", "features", "measurement_profile",
+    "campaign", "cell_label", "lane", "domain", "topology", "pods",
+    "documents_per_pod", "triples_per_document", "container_depth",
+    "own_acl_coverage_per_mille", "public_per_mille", "private_per_mille",
+    "shared_per_mille", "principal", "corpus_seed", "corpus_hash_sha256",
+    "process_block", "configuration_order", "configuration_order_seed",
+    "warmups_configured", "repetitions_configured", "concurrency",
+    "rayon_threads", "cpu_affinity",
+})
+CORRECTNESS_FIELDS_BY_KIND = {
+    "applicability": frozenset({
+        "record_type", "utc_unix_ns", "query_id", "query_family",
+        "query_hash_sha256", "minimum_triples_per_document", "applicable",
+        "selected", "reason",
+    }),
+    "correctness-gate": frozenset({
+        "record_type", "utc_unix_ns", "gate", "principals_checked",
+        "queries_checked", "exact_result_bags",
+    }),
+    "construction": frozenset({
+        "record_type", "utc_unix_ns", "content_documents", "content_triples",
+        "container_graphs", "control_documents", "control_triples",
+        "total_source_graphs", "target_readable_documents",
+        "evaluation_readable_documents", "corpus_generation_ns", "graph_load_ns",
+        "wac_materialization_ns", "route_index_ns", "lws_seed_ns",
+        "auth_triples_total", "http_store_max_total_bytes",
+        "http_store_max_resource_count", "construction_allocations",
+        "construction_allocated_bytes", "resident_bytes", "peak_resident_bytes",
+    }),
+    "observation": frozenset({
+        "record_type", "utc_unix_ns", "query_id", "query_family",
+        "query_hash_sha256", "operation", "pair_id", "repetition", "warmup",
+        "order_in_pair", "wall_ns", "process_cpu_ns", "allocation_operations",
+        "allocated_bytes", "response_bytes", "result_rows", "result_hash_sha256",
+        "correctness", "http_status", "backend_sparql_queries",
+        "backend_sparql_updates", "backend_blob_gets", "backend_blob_puts",
+        "backend_blob_other", "backend_total_operations", "backend_max_in_flight",
+    }),
+}
+CORRECTNESS_RECORD_COUNTS = {
+    "applicability": 8,
+    "correctness-gate": 1,
+    "construction": 1,
+    "observation": 16,
+}
 PROFILES = {
     "pod-scaling": "timing",
     "pod-scaling-instrumentation": "instrumentation",
@@ -1251,6 +1321,169 @@ def validate_environment(metadata: Mapping[str, Any], metadata_dir: Path) -> tup
     return result, duration
 
 
+def validate_correctness_file_records(
+    records: Sequence[dict[str, Any]], path: Path, source_commit: str
+) -> dict[str, Any]:
+    """Validate one frozen correctness run without reading performance outcomes.
+
+    A correctness JSONL file is a complete one-repetition benchmark run, not a
+    one-line gate file.  Timing, CPU, allocation, RSS, and backend-counter values are
+    deliberately opaque here: their fields must be present, but this publisher-only
+    check validates only the frozen record schema, run identity, applicability set,
+    and paired-record composition before extracting the single gate.
+    """
+
+    expected_total = sum(CORRECTNESS_RECORD_COUNTS.values())
+    if len(records) != expected_total:
+        fail(f"correctness file must contain exactly {expected_total} records: {path}")
+    by_kind: dict[str, list[dict[str, Any]]] = {
+        kind: [] for kind in CORRECTNESS_RECORD_COUNTS
+    }
+    for index, record in enumerate(records, 1):
+        kind = record.get("record_type")
+        if kind not in CORRECTNESS_FIELDS_BY_KIND:
+            fail(f"correctness file has unknown record_type {kind!r}: {path}:{index}")
+        expected_fields = CORRECTNESS_COMMON_FIELDS | CORRECTNESS_FIELDS_BY_KIND[kind]
+        fields = set(record)
+        if fields != expected_fields:
+            fail(
+                f"correctness {kind} schema changed at {path}:{index}: "
+                f"missing={sorted(expected_fields - fields)}, "
+                f"extra={sorted(fields - expected_fields)}"
+            )
+        if record.get("schema_version") != ANALYZER_SCHEMA_VERSION:
+            fail(
+                f"correctness record lacks frozen schema version "
+                f"{ANALYZER_SCHEMA_VERSION}: {path}:{index}"
+            )
+        if record.get("source_commit") != source_commit:
+            fail(f"correctness record source commit mismatch: {path}:{index}")
+        by_kind[kind].append(record)
+    actual_counts = {kind: len(kind_records) for kind, kind_records in by_kind.items()}
+    if actual_counts != CORRECTNESS_RECORD_COUNTS:
+        fail(
+            f"correctness file record composition changed: {path}: "
+            f"expected={CORRECTNESS_RECORD_COUNTS}, actual={actual_counts}"
+        )
+
+    common_order = sorted(CORRECTNESS_COMMON_FIELDS)
+    baseline = tuple(records[0][field] for field in common_order)
+    if any(tuple(record[field] for field in common_order) != baseline for record in records[1:]):
+        fail(f"correctness file changes common run metadata: {path}")
+    common = records[0]
+    lane = require_string(common.get("lane"), f"{path}.lane")
+    domain = require_string(common.get("domain"), f"{path}.domain")
+    principal = require_string(common.get("principal"), f"{path}.principal")
+    coverage = require_int(
+        common.get("own_acl_coverage_per_mille"), f"{path}.coverage", 0
+    )
+    seed = require_int(common.get("corpus_seed"), f"{path}.seed", 0)
+    pods = require_int(common.get("pods"), f"{path}.pods", 1)
+    if lane not in LANES or domain not in DOMAINS:
+        fail(f"correctness file has an unknown lane/domain: {path}")
+    if principal not in CORRECTNESS_PRINCIPALS:
+        fail(f"correctness file has an unknown serialized principal {principal!r}: {path}")
+    expected_cell_label = f"{CORRECTNESS_PRINCIPAL_CLI_LABEL[principal]}-{coverage}"
+    expected_common = {
+        "source_dirty": False,
+        "profile": "release",
+        "measurement_profile": "timing",
+        "campaign": "correctness",
+        "cell_label": expected_cell_label,
+        "topology": TOPOLOGY[lane],
+        "documents_per_pod": 8,
+        "triples_per_document": 8,
+        "container_depth": 3,
+        "public_per_mille": 300,
+        "private_per_mille": 400,
+        "shared_per_mille": 300,
+        "process_block": 0,
+        "configuration_order": None,
+        "configuration_order_seed": None,
+        "warmups_configured": 0,
+        "repetitions_configured": 1,
+        "concurrency": 1,
+        "rayon_threads": "1",
+    }
+    changed_common = [
+        field for field, expected in expected_common.items() if common.get(field) != expected
+    ]
+    if changed_common:
+        fail(f"correctness file changes frozen run metadata {changed_common}: {path}")
+    if coverage not in (100, 1000) or seed not in (17, 42, 101) or pods not in (1, 8, 32):
+        fail(f"correctness file is outside the frozen factor matrix: {path}")
+    require_string(common.get("run_id"), f"{path}.run_id")
+    require_string(common.get("run_uuid"), f"{path}.run_uuid")
+    corpus_hash = require_string(common.get("corpus_hash_sha256"), f"{path}.corpus_hash_sha256")
+    if not HEX64.fullmatch(corpus_hash):
+        fail(f"correctness file corpus hash is not lowercase SHA-256: {path}")
+    cpu_affinity = require_string(common.get("cpu_affinity"), f"{path}.cpu_affinity")
+    if not re.fullmatch(r"[0-9]+", cpu_affinity):
+        fail(f"correctness file is not pinned to one logical CPU: {path}")
+
+    applicability_by_query: dict[str, dict[str, Any]] = {}
+    for record in by_kind["applicability"]:
+        query = require_string(record.get("query_id"), f"{path}.applicability.query_id")
+        if query in applicability_by_query:
+            fail(f"correctness file repeats applicability for {query}: {path}")
+        expected_metadata = CORRECTNESS_QUERY_METADATA.get(query)
+        if expected_metadata is None:
+            fail(f"correctness file has unknown applicability query {query!r}: {path}")
+        family, minimum_triples = expected_metadata
+        if (
+            record.get("query_family") != family
+            or record.get("minimum_triples_per_document") != minimum_triples
+            or record.get("applicable") is not True
+            or record.get("selected") is not True
+            or record.get("reason") is not None
+        ):
+            fail(f"correctness applicability metadata changed for {query}: {path}")
+        query_hash = record.get("query_hash_sha256")
+        if not isinstance(query_hash, str) or not HEX64.fullmatch(query_hash):
+            fail(f"correctness applicability query hash is invalid for {query}: {path}")
+        applicability_by_query[query] = record
+    if set(applicability_by_query) != set(QUERIES):
+        fail(f"correctness applicability query matrix is incomplete: {path}")
+
+    observations: dict[tuple[str, str], dict[str, Any]] = {}
+    observations_by_query: dict[str, list[dict[str, Any]]] = {query: [] for query in QUERIES}
+    for record in by_kind["observation"]:
+        query = require_string(record.get("query_id"), f"{path}.observation.query_id")
+        operation = require_string(record.get("operation"), f"{path}.observation.operation")
+        key = (query, operation)
+        if query not in applicability_by_query or operation not in OPERATIONS[lane]:
+            fail(f"correctness file has an off-matrix observation {key}: {path}")
+        if key in observations:
+            fail(f"correctness file repeats observation {key}: {path}")
+        applicability = applicability_by_query[query]
+        if (
+            record.get("query_family") != applicability["query_family"]
+            or record.get("query_hash_sha256") != applicability["query_hash_sha256"]
+            or record.get("repetition") != 0
+            or record.get("warmup") is not False
+            or record.get("correctness") is not True
+        ):
+            fail(f"correctness observation metadata changed for {key}: {path}")
+        expected_pair_id = f"{common['run_id']}:0:{query}:0"
+        if record.get("pair_id") != expected_pair_id:
+            fail(f"correctness observation pair identifier changed for {key}: {path}")
+        order = record.get("order_in_pair")
+        if isinstance(order, bool) or order not in (0, 1):
+            fail(f"correctness observation pair order is invalid for {key}: {path}")
+        observations[key] = record
+        observations_by_query[query].append(record)
+    expected_observations = {
+        (query, operation) for query in QUERIES for operation in OPERATIONS[lane]
+    }
+    if set(observations) != expected_observations:
+        fail(f"correctness observation matrix is incomplete: {path}")
+    for query, pair in observations_by_query.items():
+        if {record["order_in_pair"] for record in pair} != {0, 1}:
+            fail(f"correctness observation pair order is incomplete for {query}: {path}")
+
+    return by_kind["correctness-gate"][0]
+
+
 def derive_correctness_gates(
     run_root: Path, source_commit: str
 ) -> tuple[dict[str, Any], dict[str, Artifact]]:
@@ -1262,6 +1495,7 @@ def derive_correctness_gates(
     if not files or any(not path.is_file() or path.is_symlink() for path in files):
         fail("checksummed correctness/*.jsonl evidence is missing or non-regular")
     gates: dict[tuple[str, str, str, int, int, int], dict[str, Any]] = {}
+    run_uuids: set[str] = set()
     artifacts: dict[str, Artifact] = {}
     for path in files:
         rel = path.relative_to(run_root).as_posix()
@@ -1277,14 +1511,10 @@ def derive_correctness_gates(
                     record = json.loads(line)
                 except json.JSONDecodeError as error:
                     raise PublicationError(f"invalid correctness JSONL {path}:{line_number}") from error
-                if not isinstance(record, dict) or record.get("schema_version") != ANALYZER_SCHEMA_VERSION:
-                    fail(f"correctness record lacks frozen schema version {ANALYZER_SCHEMA_VERSION}: {path}:{line_number}")
-                if record.get("source_commit") != source_commit:
-                    fail(f"correctness record source commit mismatch: {path}:{line_number}")
+                if not isinstance(record, dict):
+                    fail(f"correctness JSONL record is not an object: {path}:{line_number}")
                 file_records.append(record)
-        if len(file_records) != 1 or file_records[0].get("record_type") != "correctness-gate":
-            fail(f"correctness file must contain exactly one correctness-gate record: {path}")
-        record = file_records[0]
+        record = validate_correctness_file_records(file_records, path, source_commit)
         lane = require_string(record.get("lane"), f"{path}.lane")
         domain = require_string(record.get("domain"), f"{path}.domain")
         principal = require_string(record.get("principal"), f"{path}.principal")
@@ -1294,6 +1524,10 @@ def derive_correctness_gates(
         key = (lane, domain, principal, coverage, seed, pods)
         if key in gates:
             fail(f"correctness matrix repeats {key}")
+        run_uuid = require_string(record.get("run_uuid"), f"{path}.run_uuid")
+        if run_uuid in run_uuids:
+            fail(f"correctness matrix repeats run_uuid {run_uuid!r}")
+        run_uuids.add(run_uuid)
         if record.get("exact_result_bags") is not True:
             fail(f"correctness gate failed exact result bags: {key}")
         if record.get("source_dirty") is not False:
@@ -1319,7 +1553,7 @@ def derive_correctness_gates(
         (lane, domain, principal, coverage, seed, pods)
         for lane in LANES
         for domain in DOMAINS
-        for principal in ("owner", "recipient", "stranger", "anonymous")
+        for principal in CORRECTNESS_PRINCIPALS
         for coverage in (100, 1000)
         for seed in (17, 42, 101)
         for pods in (1, 8, 32)
@@ -2216,7 +2450,7 @@ def build_results(
             sources=sources,
         )
     correctness_gate_sources=tuple(
-        (str(item["path"]), "complete checksummed correctness-gate file")
+        (str(item["path"]), "complete checksummed correctness run file")
         for item in require_list(correctness.get("source_files"), "correctness.source_files")
     )
     correctness_suite_sources=tuple(
@@ -2442,8 +2676,8 @@ def export(
     }
     metadata_hash=sha256_file(metadata_path)
     protocol_hash=sha256_file(protocol_path); analyzer_hash=sha256_file(analyzer_path)
-    if protocol_version(protocol_path) != "1.30":
-        fail("publication requires the outcome-blind protocol amendment 1.30")
+    if protocol_version(protocol_path) != "1.31":
+        fail("publication requires the outcome-blind protocol amendment 1.31")
     input_files=[]
     for item_value in require_list(manifest.get("input_files"),"manifest.input_files"):
         item=require_object(item_value,"input file")

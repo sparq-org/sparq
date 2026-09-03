@@ -739,7 +739,7 @@ estimators, practical-growth margins, resource guards, and publication rules are
 After canonical measurement begins, changes are append-only and disclose their reason and
 what outcomes, if any, had been inspected.
 
-The final protocol is version 1.30. Two pre-result reliability amendments are especially
+The final protocol is version 1.31. Two pre-result reliability amendments are especially
 relevant to interpretation. One canonical attempt reached the primary campaign but was
 invalidated when a study credential expired during a long cell; only the failure evidence
 needed to identify the HTTP 401 was inspected, and every partial timing from that attempt
@@ -750,8 +750,10 @@ SSH ingress rule. Neither amendment changes data, queries, policies, endpoint lo
 measurements, hardware, or estimands. The full amendment log, including diagnostic pilots
 that motivated measurement-boundary corrections, accompanies the artifact. Amendments
 1.29 and 1.30 add block-aware paired intervals, output digests, cross-P causal-invariant
-checks, and source-faithful claim qualifications; both were fixed without inspecting a
-canonical outcome and change no raw observation or H2 decision rule.
+checks, and source-faithful claim qualifications. Amendment 1.31 corrects the publication
+validator to the emitted 26-record correctness-file structure and semantic principal
+labels. All three were fixed without inspecting a canonical performance outcome and
+change no raw observation or H2 decision rule.
 
 Canonical publication evidence must pass the analysis program's fail-closed validator.
 It rejects missing or mismatched checksums, dirty trees, debug builds, wrong campaign
@@ -1633,11 +1635,11 @@ arrivals, saturation, tenant fairness, or horizontal scaling. A completed 1,531-
 2,048-Pod cell means only that the named synthetic configuration fit the measured host;
 it is not a maximum supported user count.
 
-*Protocol and researcher degrees of freedom.* The protocol has reached version 1.30
+*Protocol and researcher degrees of freedom.* The protocol has reached version 1.31
 through an append-only amendment history reflecting issues found during implementation
 and pilots. This history is longer than ideal, but it is visible and
 outcome-inspection status is recorded for every change. The valid canonical analysis
-must use v1.30. The credential-expiry attempt and
+must use v1.31. The credential-expiry attempt and
 setup-transfer failure cannot enter estimates. All mandatory cells, guard-based skips,
 and unfavorable outcomes remain reportable, and the campaign does not stop because an
 effect is favorable or unfavorable.

@@ -32,8 +32,9 @@ The exporter requires the exact frozen matrix and validates:
   profile/lane/domain/query/block group;
 - every H2 wall/CPU ratio and elasticity verdict by recomputing the four prospective
   upper-bound tests, then deriving lane pass/fail/all/none/mixed values over all 16 cells;
-- exactly 288 one-record correctness files and their exact matrix keys, yielding 5,760
-  exact result-bag comparisons (4,608 in the materialized subset), plus source-commit-
+- exactly 288 correctness files, each with the frozen 26-record composition and exactly
+  one correctness gate, yielding 5,760 exact result-bag comparisons (4,608 in the
+  materialized subset), plus source-commit-
   attested logs from the three frozen Cargo suites containing all four named security
   tests;
 - every discovered `failures/**/FAILED.json` sentinel against the exclusion annotations,
@@ -83,7 +84,7 @@ Use these steps only after canonical acquisition has stopped and its original `D
 
 1. Before outcome inspection, verify that the analyzer contains the reviewed
    block-aware paired intervals, derived-output hashes, and primary cross-P invariants,
-   and that the protocol contains Amendments 1.29 and 1.30 with header version `1.30`.
+   and that the protocol contains Amendments 1.29--1.31 with header version `1.31`.
 2. Commit the analysis and publication-tool changes, and record that clean commit as the
    analysis commit. It must differ from the source commit embedded in the raw run.
 3. Rerun the patched analyzer from the clean analysis commit with
