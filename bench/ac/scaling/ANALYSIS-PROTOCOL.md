@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.26
+**Protocol version:** 1.27
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -660,3 +660,18 @@ RSS were inspected (11 minutes 12 seconds and 2,581,172,224 bytes against a
 23,111,131,136-byte cgroup limit); no latency/CPU ratio, elasticity, or hypothesis outcome
 was inspected. This pre-canonical reliability amendment changes neither benchmark
 execution nor the experimental estimands.
+
+### 1.27 — 2026-09-03: keep the study credential valid for the longest cell
+
+The paper runner now gives its cell-local access token a 12-hour validity window, equal
+to the disposable host's hard watchdog, while retaining the production verifier cache's
+independent five-minute validation-freshness bound and minting a fresh DPoP proof before
+every request. The first canonical attempt completed the full correctness gate and then
+failed in the first timing block for the 2,048-Pod native HTTP health cell: successful
+responses continued for more than five minutes, after which query 7 received HTTP 401.
+Inspection was limited to the failure sentinel, stderr, and the final records needed to
+identify credential expiry; the partial cell and all other timings are invalid and will
+not enter analysis. The earlier generic example helper retains its five-minute default,
+and a regression test decodes the study token to assert the extended lifetime exactly.
+This correction removes an unintended wall-duration censoring mechanism; it changes no
+query, dataset, policy, server authorization path, cache policy, outcome, or estimand.

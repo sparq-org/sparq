@@ -207,6 +207,20 @@ pub fn jwks_provider(issuer_key: &BenchKey) -> StaticJwksProvider {
 
 /// Mint an RFC-9068 access token for `webid`, bound to `cnf_jkt`, signed by `issuer_key`.
 pub fn mint_access_token_webid(issuer_key: &BenchKey, cnf_jkt: &str, webid: &str) -> String {
+    mint_access_token_webid_with_ttl(issuer_key, cnf_jkt, webid, 300)
+}
+
+/// Mint an RFC-9068 access token with an explicit lifetime for a long-running benchmark cell.
+///
+/// The ordinary harness token remains five minutes. A scaling cell may deliberately run longer,
+/// so callers can make the credential valid beyond the cell without changing the verifier cache's
+/// independent validation-freshness bound.
+pub fn mint_access_token_webid_with_ttl(
+    issuer_key: &BenchKey,
+    cnf_jkt: &str,
+    webid: &str,
+    ttl_seconds: i64,
+) -> String {
     let header = json!({ "alg": "ES256", "typ": "at+jwt" });
     let iat = unix_now();
     let claims = json!({
@@ -218,7 +232,7 @@ pub fn mint_access_token_webid(issuer_key: &BenchKey, cnf_jkt: &str, webid: &str
         "webid": webid,
         "cnf": { "jkt": cnf_jkt },
         "iat": iat,
-        "exp": iat + 300,
+        "exp": iat.saturating_add(ttl_seconds.max(1)),
     });
     issuer_key.sign(&header, &claims)
 }
@@ -801,4 +815,25 @@ pub fn parse_args() -> std::collections::HashMap<String, String> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    #[test]
+    fn explicit_access_token_lifetime_is_encoded_exactly() {
+        let issuer_key = BenchKey::generate();
+        let token =
+            mint_access_token_webid_with_ttl(&issuer_key, "client-thumbprint", WEBID, 43_200);
+        let payload = token.split('.').nth(1).expect("JWT payload");
+        let payload = URL_SAFE_NO_PAD.decode(payload).expect("base64url payload");
+        let claims: Value = serde_json::from_slice(&payload).expect("JSON claims");
+
+        assert_eq!(
+            claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(),
+            43_200
+        );
+    }
 }

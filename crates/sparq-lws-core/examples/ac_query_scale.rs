@@ -51,6 +51,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const SCHEMA_VERSION: u8 = 6;
 const STRANGER_WEBID: &str = "https://identities.example/stranger#me";
+// One cell can exceed the ordinary five-minute example-token lifetime at the largest
+// shared-origin scale. The disposable canonical host cannot live longer than twelve hours.
+const STUDY_ACCESS_TOKEN_TTL_SECONDS: i64 = 43_200;
 
 const fn measurement_profile() -> &'static str {
     if cfg!(feature = "ac-query-scale-instrumentation") {
@@ -1229,8 +1232,14 @@ fn run_http_with_store<S: Store + 'static>(
 
     let issuer_key = support::BenchKey::generate();
     let client_key = support::BenchKey::generate();
-    let access_token = webid
-        .map(|webid| support::mint_access_token_webid(&issuer_key, &client_key.thumbprint, webid));
+    let access_token = webid.map(|webid| {
+        support::mint_access_token_webid_with_ttl(
+            &issuer_key,
+            &client_key.thumbprint,
+            webid,
+            STUDY_ACCESS_TOKEN_TTL_SECONDS,
+        )
+    });
 
     // Runtime creation and client-side key/token minting are harness work. The counted
     // construction boundary begins when the service is seeded and ends after the LWS
