@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.24
+**Protocol version:** 1.25
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -633,3 +633,14 @@ attempt reached only this pre-provision check: IAM denied `pricing:GetProducts`,
 resource was created, and no benchmark process or outcome existed to inspect. This
 amendment therefore restores an independently documented AWS quote path without changing
 the workload, estimands, hardware, or spending rules.
+
+### 1.25 — 2026-09-03: remove an unsupported transient-unit property
+
+The disposable-host service retains `MemoryMax=70%` and
+`KillMode=control-group`, but no longer passes `MemoryOOMGroup=yes` to
+`systemd-run`; Ubuntu 24.04's systemd rejected that assignment as an unknown
+transient-unit property. The failed pilot had completed bootstrap and source
+verification but the study unit was never created, so no benchmark process or
+outcome existed to inspect. Cleanup verified termination of the tagged instance.
+The cgroup's aggregate 70% memory ceiling, failure sentinel path, supervisor,
+watchdog, and stopping rules are unchanged.

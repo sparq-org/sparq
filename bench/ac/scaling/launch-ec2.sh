@@ -320,7 +320,7 @@ log "starting ${MODE} as a 70%-memory-capped transient service"
 # shellcheck disable=SC2029 # Validated numeric values intentionally expand client-side.
 ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
   "sudo systemd-run --unit=sparq-ac-study --collect \
-    --property=MemoryMax=70% --property=MemoryOOMGroup=yes --property=KillMode=control-group \
+    --property=MemoryMax=70% --property=KillMode=control-group \
     --uid=${REMOTE_UID} --gid=${REMOTE_GID} --working-directory=/var/tmp/sparq-source \
     --setenv=HOME=/home/ubuntu \
     --setenv=PATH=/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
