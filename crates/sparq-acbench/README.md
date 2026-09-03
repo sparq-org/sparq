@@ -38,6 +38,10 @@ assert_eq!(oracle_wac(&request, &[]), Decision::Deny);
 - **Fail-closed harness**: `Decision::Deny` is the default; any mismatch → nonzero exit.
 - **Four use-case generators** (beads `sq-i6du2.2`–`.5`): personal data storage (U1),
   commercial project management (U2), financial services (U3), research consortium (U4).
+- **Independent many-Pod generator** (`deployment`): varies Pod and document counts,
+  triples per document, hierarchy depth, own-ACL placement, audience mix, URI topology,
+  and social/health graph shape without coupling them through one scale factor. It also
+  supplies an independent physical-readability oracle and eight SPARQL query families.
 - **Zero dependency on `sparq-core` / `sparq-engine`**: opt-in crate architecture.
 
 ## 📚 Learn more
@@ -47,6 +51,8 @@ assert_eq!(oracle_wac(&request, &[]), Decision::Deny);
 - Generator beads: `sq-i6du2.2` (U1), `.3` (U2), `.4` (U3), `.5` (U4)
 - Workload engine (W1–W4): `sq-i6du2.6` (`src/workload.rs` / `src/oracle.rs`)
 - Benchmark registration: `sq-i6du2.7` (`bench/ac/`)
+- Many-Pod scaling artefact:
+  [`bench/ac/scaling/README.md`](../../bench/ac/scaling/README.md)
 
 ## License
 

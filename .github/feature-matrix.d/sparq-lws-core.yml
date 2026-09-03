@@ -103,3 +103,12 @@
   crate: "sparq-lws-core"
   features: "odrl-authz"
   test: true
+
+# The paper's allocation/storage instrumentation is deliberately default-off because its
+# counters perturb the wall-clock path.  The benchmark example contains both positive and
+# negative cfg branches for this switch, so keep the opt-in profile compiling, tested, and
+# linted as an explicit feature-matrix leg rather than relying on all-features unification.
+- name: "sparq-lws-core (ac-query-scale-instrumentation)"
+  crate: "sparq-lws-core"
+  features: "ac-query-scale-instrumentation"
+  test: true

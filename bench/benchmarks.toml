@@ -857,6 +857,20 @@ records_to  = "stdout; cross-checked in bench/inference/incremental-bench.md (0.
 featured    = false
 status      = "ok"
 
+[[benchmark]]
+id          = "ac-sparql-pod-scaling"
+name        = "Access-controlled SPARQL over many Solid Pods"
+category    = "scaling"
+measures    = "correctness-gated raw request latency and process CPU time from an uninstrumented production-mimalloc profile; allocations/bytes and native-endpoint backend-operation counts from a separate counting-mimalloc instrumentation profile; construction time/RSS and exact solution-multiset hashes for routed materialized WAC views versus current server-root HTTP assembly"
+invoke      = "bash bench/ac/scaling/run.sh --correctness && bash bench/ac/scaling/run.sh --smoke && bash bench/ac/scaling/run.sh --instrumentation-smoke   # diagnostic local gate; run --pod-scaling/--sensitivity/--scenarios and their -instrumentation counterparts on the pinned canonical host, then analyze.py RESULTS --out DERIVED --require-canonical --expected-commit SHA"
+source      = "bench/ac/scaling/{run.sh,schedule.py,factor_schedule.py,analyze.py,ANALYSIS-PROTOCOL.md,README.md}; crates/sparq-acbench/src/deployment.rs; crates/sparq-lws-core/examples/ac_query_scale.rs; crates/sparq-solid/tests/acbench_deployment.rs"
+dataset     = "seeded synthetic social and compact-health RDF documents with independently parameterized Pod/document/triple/depth/ACL-coverage/audience/topology factors; generated in-process; controlled, count-calibrated, and stress cells are labelled separately"
+quiet_box_sensitive = true
+pinning     = "protocol v1.23; source commit; corpus and query SHA-256; seeds 17/42/101/314/2718; randomized schedule seed/order; recorded warm-up/repetition counts; separate production-mimalloc timing and counting-mimalloc instrumentation profiles; derived bounded HTTP-store quotas; Linux process CPU clock; raw run UUID; rustc/host/instance metadata; canonical RAYON_NUM_THREADS=1, concurrency=1, and one-CPU kernel affinity; JSONL checksums"
+records_to  = "git-ignored bench/ac/scaling/results/*.jsonl plus SHA-256 sidecars; analyze.py writes derived CSV/JSON/SVG with an input manifest"
+featured    = false  # paper artefact and implementation-characterization suite, not a product dashboard card
+status      = "implemented"
+
 # [OPUS-4.8] sq-i6du2.7 (epic sq-i6du2, #1613) — the access-controlled-query benchmark
 # harness. The standalone `ac-bench` driver (bench/ac, its own [workspace] like bench/parse
 # + bench/dict) runs the sparq-acbench (#1627) by-construction WAC/ACP/ODRL oracle over the

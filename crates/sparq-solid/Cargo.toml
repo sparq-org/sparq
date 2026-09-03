@@ -165,6 +165,7 @@ acp-vc = ["dep:sparq-vc"]
 # closure (which is what makes CI test-selection sound for the floor — it replaces the
 # guard test's old runtime read of this file's source).
 sparq-conformance-floors = { path = "../sparq-conformance-floors" }
+sparq-acbench = { path = "../sparq-acbench" }
 serde_json = "1"
 
 # [OPUS-4.8] sq-zgbso.1 MEASURED SPIKE (issue #1582, design record

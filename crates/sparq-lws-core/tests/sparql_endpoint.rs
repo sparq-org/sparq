@@ -5,7 +5,9 @@ mod common;
 
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::{Request, Response, StatusCode};
-use common::{jwks_provider, mint_access_token, mint_dpop_proof, KeyKit, BASE_URL, ISSUER, WEBID};
+use common::{
+    jwks_provider, mint_access_token_for, mint_dpop_proof, KeyKit, BASE_URL, ISSUER, WEBID,
+};
 use serde_json::Value;
 use solid_oidc_verifier::config::VerifierConfig;
 use solid_oidc_verifier::replay::InMemoryReplayStore;
@@ -71,6 +73,8 @@ impl Harness {
                 "https://pod.example/b.acl",
                 &format!(
                     r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>;
+  acl:accessTo <https://pod.example/b>; acl:mode acl:Control.
 <#bob> a acl:Authorization; acl:agent <{BOB}>;
   acl:accessTo <https://pod.example/b>; acl:mode acl:Read."#
                 ),
@@ -121,7 +125,20 @@ impl Harness {
         accept: Option<&str>,
         body: Body,
     ) -> Response<Body> {
-        let access = mint_access_token(&self.issuer_key, &self.client_key.thumbprint);
+        self.request_as(WEBID, method, uri, content_type, accept, body)
+            .await
+    }
+
+    async fn request_as(
+        &self,
+        webid: &str,
+        method: &str,
+        uri: &str,
+        content_type: Option<&str>,
+        accept: Option<&str>,
+        body: Body,
+    ) -> Response<Body> {
+        let access = mint_access_token_for(&self.issuer_key, &self.client_key.thumbprint, webid);
         // The native verifier intentionally binds ordinary DPoP to the request
         // path (query excluded), matching the production auth middleware.
         let path = uri.split('?').next().expect("URI always has a path");
@@ -150,7 +167,12 @@ impl Harness {
     }
 
     async fn direct_query(&self, query: &str) -> Response<Body> {
-        self.request(
+        self.direct_query_as(WEBID, query).await
+    }
+
+    async fn direct_query_as(&self, webid: &str, query: &str) -> Response<Body> {
+        self.request_as(
+            webid,
             "POST",
             "/sparql",
             Some("application/sparql-query"),
@@ -253,6 +275,48 @@ async fn negation_cannot_distinguish_an_unreadable_resource_from_absence() {
     )
     .await;
     assert_eq!(bare["boolean"], true);
+}
+
+#[tokio::test]
+async fn replacing_an_acl_revokes_the_native_query_route_immediately() {
+    let harness = Harness::new(true, false).await;
+    let before = json(
+        harness
+            .direct_query_as(
+                BOB,
+                "SELECT ?s WHERE { GRAPH <https://pod.example/b> { ?s <urn:p> ?o } }",
+            )
+            .await,
+    )
+    .await;
+    assert_eq!(binding_values(&before, "s"), ["urn:b"]);
+
+    let owner_only = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>;
+  acl:accessTo <https://pod.example/b>; acl:mode acl:Read, acl:Control."#
+    );
+    let replaced = harness
+        .request(
+            "PUT",
+            "/b.acl",
+            Some("text/turtle"),
+            None,
+            Body::from(owner_only),
+        )
+        .await;
+    assert_eq!(replaced.status(), StatusCode::NO_CONTENT);
+
+    let after = json(
+        harness
+            .direct_query_as(
+                BOB,
+                "SELECT ?s WHERE { GRAPH <https://pod.example/b> { ?s <urn:p> ?o } }",
+            )
+            .await,
+    )
+    .await;
+    assert!(binding_values(&after, "s").is_empty());
 }
 
 #[tokio::test]

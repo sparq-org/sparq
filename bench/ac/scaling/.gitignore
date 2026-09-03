@@ -1,0 +1,5 @@
+results/
+figures/
+tables/
+derived-local/
+__pycache__/

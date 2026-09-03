@@ -284,6 +284,15 @@ getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 js-sys = "0.3"
 
 [dev-dependencies]
+# Paper artefact: the many-Pod runner compares the native HTTP assembly path with
+# the independently generated corpus and the routed materialized authorization view.
+# These edges are example/test-only and do not enter the server's shipping graph.
+sparq-acbench = { path = "../sparq-acbench" }
+sparq-solid = { path = "../sparq-solid" }
+uuid = { version = "1", features = ["v4"] }
+# High-resolution process-CPU clock for the Linux-only canonical benchmark records.
+# Dev/example-only; `libc` is already pinned in the workspace dependency graph.
+libc.workspace = true
 # Mint test JWS access tokens + DPoP proofs for the auth-middleware unit tests (mirrors the
 # verifier crate's own test helpers — ES256 keys + RFC 7638 thumbprint).
 p256 = { version = "0.13", features = ["ecdsa", "jwk", "pem", "std"] }
@@ -354,6 +363,11 @@ sparq-zk = { path = "../sparq-zk" }
 # in-memory double only — the former default), e.g. for an out-of-workspace consumer that wants
 # no engine dependency.
 default = ["embedded-sparq", "sparql-endpoint"]
+# Paper-only instrumentation switch for `examples/ac_query_scale.rs`. The default example build
+# uses the production mimalloc allocator and uncounted in-memory storage for latency. Enabling this
+# feature wraps that same allocator and the storage doubles with deterministic counters; those
+# observations are analyzed separately because the counters perturb wall time.
+ac-query-scale-instrumentation = []
 # Opt-in: compile the distributed Redis-backed DPoP-`jti` replay store (`src/redis_replay.rs`) + its
 # `redis`/`r2d2` deps. OFF by default so the standard build, tests, and conformance are byte-identical
 # and carry no extra dependency. Enable for a horizontally-scaled deployment that shares one replay set

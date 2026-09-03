@@ -49,12 +49,12 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**92 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
-with its 8 sites confined to two **example benchmark harnesses'** counting allocators, which
-a custom `#[global_allocator]` unavoidably requires; **`sparq-lws-wasm`** (sq-wubkf) is the one
+with its 9 sites confined to **example benchmark harnesses**: eight counting-allocator
+sites and one Linux process-clock FFI call; **`sparq-lws-wasm`** (sq-wubkf) is the one
 crate whose 4 allocator sites are **SHIPPING** — a `#[global_allocator]` is the only way to bound
 wasm32 linear memory, so that crate's root is `deny(unsafe_code)` with a single
 `#[allow(unsafe_code)]` module rather than `forbid` (see each crate's subsection below).
@@ -243,26 +243,30 @@ Miri does not cover it (Miri supplies its own allocator and does not model a
 | `tests/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `tests/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
 
-### `sparq-lws-core` — 8 sites (example-only counting global allocators) [FABLE-5]
+### `sparq-lws-core` — 9 sites (example-only allocators and process clock) [FABLE-5]
 
 (sq-gg0qq.2 — crate imported whole from jeswr/solid-server-rs.) The **library and the
-server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 8 sites
-live entirely in two **example** benchmark harnesses (never the shipped server): the
+server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 9 sites
+live entirely in **example** benchmark harnesses (never the shipped server): the
 deterministic allocation-count microbench `examples/read_response_alloc_microbench.rs`
 (counts `GlobalAlloc::alloc`/`realloc` ops on the GET/HEAD read-response header path) and
 the shared harness module `examples/support/mod.rs` (`#[path]`-included by the
-`bench_harness` + `adversarial_bench` examples; counts allocation ops + bytes). A
+`bench_harness`, `adversarial_bench`, and paper runner; counts allocation ops + bytes),
+plus `ac_query_scale.rs`'s Linux process-CPU clock. A
 `#[global_allocator]` unavoidably requires `unsafe` (the `GlobalAlloc` trait is `unsafe`
 by definition; there is no safe substitute for a deterministic allocation counter) — the
 same class as `sparq-engine`'s test allocator above. **Not** a B5 (untrusted-input)
-surface: every method is a verbatim forward to the process `System` allocator with the
-identical arguments, so `System` discharges all of `GlobalAlloc`'s obligations; the
-wrappers only read `Layout::size()`/`new_size`/an armed flag and bump `Relaxed` atomics —
-no pointer `System` returns is ever dereferenced, retained, or aliased. Bounded by
-**review + the trivial forward-to-`System` argument**, enforced by the file-local
+surface: every method is a verbatim forward to a sound backing allocator with identical
+arguments—`System` in the established examples and mimalloc in the paper's instrumentation
+profile—so the backing allocator discharges all of `GlobalAlloc`'s obligations. The wrappers
+only read `Layout::size()`/`new_size`/an armed flag and bump `Relaxed` atomics; no returned
+pointer is ever dereferenced, retained, or aliased. Bounded by **review + the trivial
+forwarding argument**, enforced by the file-local
 `#![warn(clippy::undocumented_unsafe_blocks)]` in both files (each `unsafe impl` carries a
-`// SAFETY:` comment). Miri does not model a `#[global_allocator]` that calls `System`;
-the examples run on the standard toolchain.
+`// SAFETY:` comment). Miri does not model either backing `#[global_allocator]`;
+the examples run on the standard toolchain. The clock call uses a fully initialized,
+writable `libc::timespec`, checks the return code, and rejects negative or overflowing
+fields before arithmetic.
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
@@ -270,10 +274,11 @@ the examples run on the standard toolchain.
 | `examples/read_response_alloc_microbench.rs:42` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; only the armed counter is touched before the forward. |
 | `examples/read_response_alloc_microbench.rs:48` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `examples/read_response_alloc_microbench.rs:51` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the armed counter is touched before the forward. |
-| `examples/support/mod.rs:77` | `unsafe impl GlobalAlloc for CountingAllocator` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` op/byte counters. EXAMPLE-only harness module; lib + bin stay `forbid(unsafe_code)`. |
-| `examples/support/mod.rs:78` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the byte counter. |
-| `examples/support/mod.rs:83` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
-| `examples/support/mod.rs:86` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; `new_size` is only read into the byte counter. |
+| `examples/support/mod.rs:83` | `unsafe impl GlobalAlloc for CountingAllocator` | forward to the selected sound backing allocator | every method delegates verbatim to `System` for the established harnesses or to the production binary's `mimalloc::MiMalloc` for the paper instrumentation feature; the wrapper adds only `Relaxed` op/byte counters. EXAMPLE-only; lib + bin stay `forbid(unsafe_code)`. |
+| `examples/support/mod.rs:84` | `unsafe fn alloc` | caller's `layout` contract forwarded | the selected allocator receives `layout` unchanged; `layout.size()` is only read into the byte counter. |
+| `examples/support/mod.rs:96` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the same feature-selected allocator used by `alloc`/`realloc` receives `ptr` and `layout` unchanged. |
+| `examples/support/mod.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | the selected allocator receives all arguments unchanged; `new_size` is only read into the byte counter. |
+| `examples/ac_query_scale.rs:530` | `libc::clock_gettime` FFI | valid writable `timespec`; constant clock ID | the initialized stack value is mutably borrowed for exactly the call; Linux defines `CLOCK_PROCESS_CPUTIME_ID`; a nonzero return yields no measurement, while successful signed fields must convert to `u64` and combine without overflow. EXAMPLE-only. |
 
 ### `sparq-lws-wasm` — 4 sites (the SHIPPING bounded `#[global_allocator]`) [SONNET-4.6]
 

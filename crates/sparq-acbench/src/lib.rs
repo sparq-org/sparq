@@ -43,6 +43,7 @@ pub mod financial;
 pub mod consortium;
 pub mod workload;
 pub mod oracle;
+pub mod deployment;
 
 // ── GenParams ───────────────────────────────────────────────────────────────────────
 

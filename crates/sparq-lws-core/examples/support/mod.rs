@@ -22,7 +22,9 @@
 #![warn(clippy::undocumented_unsafe_blocks)] // [FABLE-5] every unsafe site needs a // SAFETY:
 #![allow(dead_code)]
 
-use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(not(feature = "ac-query-scale-instrumentation"))]
+use std::alloc::System;
+use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -64,29 +66,54 @@ pub const CLIENT_ID: &str = "solid-app";
 pub static ALLOC_COUNT: AtomicU64 = AtomicU64::new(0);
 pub static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
 
-/// A `System`-delegating allocator that counts allocation OPS + bytes (Relaxed atomics — cheap).
+/// A backing-allocator wrapper that counts allocation OPS + bytes (Relaxed atomics — cheap).
 /// Each example installs it as its `#[global_allocator]`. During a single-threaded deterministic
 /// probe (no other runtime threads alive) the counter delta around one request is a reproducible,
-/// wall-clock-independent measure of that request's allocation cost.
+/// wall-clock-independent measure of that request's allocation cost. Existing examples delegate to
+/// [`System`]; the paper-only `ac-query-scale-instrumentation` feature delegates to mimalloc, which
+/// is what the production `sparq-lws-core` binary uses. The counters perturb wall time, so paper
+/// timings use an uninstrumented build.
 pub struct CountingAllocator;
 
-// SAFETY: pure pass-through wrapper over `System` (a sound allocator), adding Relaxed atomic
-// counters around it; the pointer/layout contracts are forwarded unchanged and no pointer `System`
-// returns is ever dereferenced, retained, or aliased. Registered in the unsafe-count ratchet:
+// SAFETY: pure pass-through wrapper over a sound backing allocator (`System` for the established
+// harnesses, `mimalloc::MiMalloc` for the paper instrumentation profile), adding Relaxed atomic
+// counters around it; pointer/layout contracts are forwarded unchanged and no returned pointer is
+// dereferenced, retained, or aliased. Registered in the unsafe-count ratchet:
 // compliance/memsafety/unsafe-register.md (sq-gg0qq.2). [FABLE-5]
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
         ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
-        System.alloc(layout)
+        #[cfg(feature = "ac-query-scale-instrumentation")]
+        {
+            mimalloc::MiMalloc.alloc(layout)
+        }
+        #[cfg(not(feature = "ac-query-scale-instrumentation"))]
+        {
+            System.alloc(layout)
+        }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        System.dealloc(ptr, layout)
+        #[cfg(feature = "ac-query-scale-instrumentation")]
+        {
+            mimalloc::MiMalloc.dealloc(ptr, layout);
+        }
+        #[cfg(not(feature = "ac-query-scale-instrumentation"))]
+        {
+            System.dealloc(ptr, layout);
+        }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
         ALLOC_BYTES.fetch_add(new_size as u64, Ordering::Relaxed);
-        System.realloc(ptr, layout, new_size)
+        #[cfg(feature = "ac-query-scale-instrumentation")]
+        {
+            mimalloc::MiMalloc.realloc(ptr, layout, new_size)
+        }
+        #[cfg(not(feature = "ac-query-scale-instrumentation"))]
+        {
+            System.realloc(ptr, layout, new_size)
+        }
     }
 }
 
@@ -320,8 +347,8 @@ pub async fn seed_public_read_acl(store: &BenchStore, resource_iri: &str) {
 
 /// Assemble the router with the verified-token cache ENABLED over the real verifier (production
 /// posture). `cache_capacity` sizes the token cache. The `store` is moved into the LDP state.
-pub fn assemble_app(
-    store: BenchStore,
+pub fn assemble_app<S: Store + 'static>(
+    store: S,
     issuer_key: &BenchKey,
     cache_capacity: usize,
 ) -> axum::Router {
