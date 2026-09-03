@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.25
+**Protocol version:** 1.26
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -644,3 +644,19 @@ verification but the study unit was never created, so no benchmark process or
 outcome existed to inspect. Cleanup verified termination of the tagged instance.
 The cgroup's aggregate 70% memory ceiling, failure sentinel path, supervisor,
 watchdog, and stopping rules are unchanged.
+
+### 1.26 — 2026-09-03: rotate the exact SSH ingress rule when the client IP changes
+
+The launcher now retains the AWS identifier of its one SSH security-group rule and, at
+each supervisor poll, compares that rule with the launching client's current public
+IPv4. If the address changes, `modify-security-group-rules` atomically replaces the old
+`/32`; it never adds a subnet or a second lasting ingress rule, and every rotation is
+logged. During the successful pilot this machine's address changed by one host number,
+causing three SSH polls to time out while the EC2 system and instance reachability checks
+remained healthy. The rule was manually rotated with the new `/32` added before the stale
+one was revoked; supervision recovered, all pilot correctness and capacity stages
+completed, the manifest verified, and cleanup completed. Only pilot duration and peak
+RSS were inspected (11 minutes 12 seconds and 2,581,172,224 bytes against a
+23,111,131,136-byte cgroup limit); no latency/CPU ratio, elasticity, or hypothesis outcome
+was inspected. This pre-canonical reliability amendment changes neither benchmark
+execution nor the experimental estimands.

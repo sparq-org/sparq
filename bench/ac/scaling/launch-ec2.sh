@@ -61,6 +61,8 @@ BUNDLE="${WORK}/sparq.bundle"
 KEY_NAME="${RUN_TOKEN}"
 INSTANCE_ID=""
 SECURITY_GROUP_ID=""
+SSH_RULE_ID=""
+CURRENT_SSH_CIDR=""
 
 cleanup() {
   local original_status=$? cleanup_failed=0
@@ -144,6 +146,43 @@ trap cleanup EXIT
 stage_pull() {
   rsync -az --partial -e "ssh ${SSH_OPTIONS[*]}" \
     "ubuntu@${PUBLIC_IP}:/var/tmp/sparq-ac-study/" "${RESULTS_LOCAL}/" 2>/dev/null || true
+}
+
+valid_ipv4() {
+  local address="$1" octet
+  [[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  for octet in ${address//./ }; do
+    (( 10#${octet} <= 255 )) || return 1
+  done
+}
+
+refresh_ssh_ingress() {
+  local current_ip new_cidr previous_cidr
+  [[ -n "${SECURITY_GROUP_ID}" && -n "${SSH_RULE_ID}" ]] || return 0
+  if ! current_ip="$(curl -4 -fsS --max-time 10 https://checkip.amazonaws.com \
+    | tr -d '[:space:]')"; then
+    log "could not refresh the client public IP; retaining ${CURRENT_SSH_CIDR}"
+    return 0
+  fi
+  if ! valid_ipv4 "${current_ip}"; then
+    log "public-IP refresh returned an invalid address; retaining ${CURRENT_SSH_CIDR}"
+    return 0
+  fi
+  new_cidr="${current_ip}/32"
+  [[ "${new_cidr}" == "${CURRENT_SSH_CIDR}" ]] && return 0
+  previous_cidr="${CURRENT_SSH_CIDR}"
+  log "rotating the single SSH ingress rule from ${previous_cidr} to ${new_cidr}"
+  if ! aws ec2 modify-security-group-rules --profile "${PROFILE}" --region "${REGION}" \
+    --group-id "${SECURITY_GROUP_ID}" \
+    --security-group-rules \
+      "SecurityGroupRuleId=${SSH_RULE_ID},SecurityGroupRule={IpProtocol=tcp,FromPort=22,ToPort=22,CidrIpv4=${new_cidr}}" \
+    >/dev/null; then
+    log "ERROR: could not rotate the exact SSH ingress rule"
+    return 1
+  fi
+  CURRENT_SSH_CIDR="${new_cidr}"
+  printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "${previous_cidr}" "${new_cidr}" \
+    >>"${RESULTS_LOCAL}/ssh-ingress-rotations.tsv"
 }
 
 orphan_preflight() {
@@ -240,6 +279,7 @@ SUBNET="$(aws ec2 describe-subnets --profile "${PROFILE}" --region "${REGION}" \
   --filters Name=vpc-id,Values="${VPC}" Name=default-for-az,Values=true \
   --query 'Subnets[0].SubnetId' --output text)"
 PUBLIC_CIDR="$(curl -4 -fsS https://checkip.amazonaws.com | tr -d '[:space:]')/32"
+valid_ipv4 "${PUBLIC_CIDR%/32}" || die "public-IP lookup returned an invalid IPv4 address"
 
 aws ec2 import-key-pair --profile "${PROFILE}" --region "${REGION}" \
   --key-name "${KEY_NAME}" --public-key-material "fileb://${KEYFILE}.pub" >/dev/null
@@ -247,9 +287,13 @@ SECURITY_GROUP_ID="$(aws ec2 create-security-group --profile "${PROFILE}" \
   --region "${REGION}" --group-name "${KEY_NAME}" \
   --description 'ephemeral SPARQ access-control study' --vpc-id "${VPC}" \
   --query GroupId --output text)"
-aws ec2 authorize-security-group-ingress --profile "${PROFILE}" --region "${REGION}" \
+SSH_RULE_ID="$(aws ec2 authorize-security-group-ingress --profile "${PROFILE}" \
+  --region "${REGION}" \
   --group-id "${SECURITY_GROUP_ID}" --protocol tcp --port 22 \
-  --cidr "${PUBLIC_CIDR}" >/dev/null
+  --cidr "${PUBLIC_CIDR}" --query 'SecurityGroupRules[0].SecurityGroupRuleId' \
+  --output text)"
+[[ "${SSH_RULE_ID}" == sgr-* ]] || die "AWS did not return the SSH security-group rule ID"
+CURRENT_SSH_CIDR="${PUBLIC_CIDR}"
 
 cat >"${WORK}/user-data.sh" <<USERDATA
 #!/bin/bash
@@ -297,8 +341,10 @@ for _ in $(seq 1 60); do
     'test -f /var/tmp/SPARQ_AC_BOOTSTRAP_DONE' 2>/dev/null; then
     break
   fi
+  refresh_ssh_ingress
   sleep 10
 done
+refresh_ssh_ingress
 ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
   'test -f /var/tmp/SPARQ_AC_BOOTSTRAP_DONE' \
   || die "bootstrap did not complete"
@@ -331,6 +377,7 @@ START_EPOCH="$(date +%s)"
 SUCCESS=0
 while (( $(date +%s) - START_EPOCH < POLL_DEADLINE_SECONDS )); do
   sleep "${POLL_INTERVAL_SECONDS}"
+  refresh_ssh_ingress
   stage_pull
   if ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
     'test -f /var/tmp/sparq-ac-study/DONE' 2>/dev/null; then
@@ -356,6 +403,7 @@ while (( $(date +%s) - START_EPOCH < POLL_DEADLINE_SECONDS )); do
   esac
 done
 
+refresh_ssh_ingress
 stage_pull
 ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
   'sudo journalctl -u sparq-ac-study --no-pager' \
