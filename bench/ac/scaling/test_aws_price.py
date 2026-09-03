@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import csv
+import io
 import json
 import sys
 import unittest
@@ -69,6 +71,93 @@ class AwsPriceTests(unittest.TestCase):
                 Decimal("90"),
                 Decimal("80"),
                 Decimal("100"),
+            )
+
+    def test_bulk_csv_selects_exact_linux_shared_on_demand_row(self) -> None:
+        columns = [
+            "SKU",
+            "OfferTermCode",
+            "RateCode",
+            "TermType",
+            "PriceDescription",
+            "Unit",
+            "PricePerUnit",
+            "Currency",
+            "Product Family",
+            "serviceCode",
+            "Location",
+            "Location Type",
+            "Instance Type",
+            "Tenancy",
+            "Operating System",
+            "License Model",
+            "usageType",
+            "operation",
+            "AvailabilityZone",
+            "CapacityStatus",
+            "MarketOption",
+            "Pre Installed S/W",
+            "Region Code",
+        ]
+        selected = [
+            "sku-1",
+            "JRTCKXETXF",
+            "rate-1",
+            "OnDemand",
+            "$0.42 per On Demand Linux r7g.xlarge Instance Hour",
+            "Hrs",
+            "0.4200000000",
+            "USD",
+            "Compute Instance",
+            "AmazonEC2",
+            "EU (London)",
+            "AWS Region",
+            "r7g.xlarge",
+            "Shared",
+            "Linux",
+            "No License required",
+            "EUW2-BoxUsage:r7g.xlarge",
+            "RunInstances",
+            "NA",
+            "Used",
+            "OnDemand",
+            "NA",
+            "eu-west-2",
+        ]
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerows(
+            [
+                ["FormatVersion", "v1.0"],
+                ["Publication Date", "2026-09-03T00:00:00Z"],
+                ["Version", "20260903000000"],
+                ["OfferCode", "AmazonEC2"],
+                columns,
+                selected,
+                [*selected[:13], "Dedicated", *selected[14:]],
+            ]
+        )
+        output.seek(0)
+
+        hourly, evidence = PRICE.bulk_csv_hourly_price(
+            output, "r7g.xlarge", "EU (London)", "eu-west-2"
+        )
+
+        self.assertEqual(hourly, Decimal("0.4200000000"))
+        self.assertEqual(evidence["price_sku"], "sku-1")
+        self.assertEqual(evidence["price_list_version"], "20260903000000")
+
+    def test_bulk_csv_ambiguous_exact_rows_fail_closed(self) -> None:
+        text = """\
+\"FormatVersion\",\"v1.0\"
+\"OfferCode\",\"AmazonEC2\"
+\"SKU\",\"OfferTermCode\",\"TermType\",\"Unit\",\"PricePerUnit\",\"Currency\",\"Product Family\",\"serviceCode\",\"Location\",\"Location Type\",\"Instance Type\",\"Tenancy\",\"Operating System\",\"License Model\",\"usageType\",\"operation\",\"AvailabilityZone\",\"CapacityStatus\",\"MarketOption\",\"Pre Installed S/W\",\"Region Code\"
+\"a\",\"JRTCKXETXF\",\"OnDemand\",\"Hrs\",\"0.4\",\"USD\",\"Compute Instance\",\"AmazonEC2\",\"EU (London)\",\"AWS Region\",\"r7g.xlarge\",\"Shared\",\"Linux\",\"No License required\",\"EUW2-BoxUsage:r7g.xlarge\",\"RunInstances\",\"NA\",\"Used\",\"OnDemand\",\"NA\",\"eu-west-2\"
+\"b\",\"JRTCKXETXF\",\"OnDemand\",\"Hrs\",\"0.4\",\"USD\",\"Compute Instance\",\"AmazonEC2\",\"EU (London)\",\"AWS Region\",\"r7g.xlarge\",\"Shared\",\"Linux\",\"No License required\",\"EUW2-BoxUsage:r7g.xlarge\",\"RunInstances\",\"NA\",\"Used\",\"OnDemand\",\"NA\",\"eu-west-2\"
+"""
+        with self.assertRaises(PRICE.PricingError):
+            PRICE.bulk_csv_hourly_price(
+                io.StringIO(text), "r7g.xlarge", "EU (London)", "eu-west-2"
             )
 
 

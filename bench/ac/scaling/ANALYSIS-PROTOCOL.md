@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.23
+**Protocol version:** 1.24
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -620,3 +620,16 @@ The retention rule now names the actual failure evidence: partial JSONL and stde
 kept with the campaign `FAILED` sentinel and exit status. It no longer implies that each
 possibly interrupted JSONL stream can append its own terminal status record. This
 prose-to-executable correction preceded schema-6 cloud timing.
+
+### 1.24 — 2026-09-03: permit the official bulk price list as an IAM-free quote source
+
+The launcher's exact-instance price check now first attempts the AWS Price List Query
+API and, if that call or its response is unusable, downloads AWS's official public
+regional Price List bulk CSV. The fallback requires exactly one Linux, shared-tenancy,
+on-demand, `Used`-capacity row for the frozen instance type and region; it records the
+offer metadata, selected SKU/rate, source URL, response headers, and full-file SHA-256,
+then applies the unchanged USD 80 per-run and USD 100 study ceilings. The first pilot
+attempt reached only this pre-provision check: IAM denied `pricing:GetProducts`, no EC2
+resource was created, and no benchmark process or outcome existed to inspect. This
+amendment therefore restores an independently documented AWS quote path without changing
+the workload, estimands, hardware, or spending rules.

@@ -59,15 +59,18 @@ AWS_PROFILE=pss SPARQ_AC_PRIOR_AWS_USD="$ACTUAL_PRIOR_COST_USD" \
   bash bench/ac/scaling/launch-ec2.sh canonical
 ```
 
-The launcher refuses a dirty source tree, performs the repository orphan check, resolves
-a current Linux on-demand price through the AWS Price List API, enforces the USD 80
-operating plan and USD 100 study ceiling, and transfers an exact Git bundle rather than
-requiring an unpublished branch to be pushed. Its security group admits SSH only from the
-launching address. A unique idempotency token is also an instance tag, allowing cleanup
-to recover a launch whose AWS response was lost; cleanup re-verifies both that token and
-the exact bench-purpose tag. Both the instance shutdown behavior and an instance-local
-12-hour watchdog terminate the disposable host. Results are pulled incrementally into
-the ignored `results/` directory.
+The launcher refuses a dirty source tree, performs the repository orphan check, and
+resolves a current Linux on-demand price through the AWS Price List Query API. If the
+active role lacks that optional Pricing permission, it streams AWS's official public
+regional Price List bulk CSV and applies the same exact product filter. Both paths fail
+closed on an absent or ambiguous rate and retain source provenance. The launcher then
+enforces the USD 80 operating plan and USD 100 study ceiling and transfers an exact Git
+bundle rather than requiring an unpublished branch to be pushed. Its security group
+admits SSH only from the launching address. A unique idempotency token is also an
+instance tag, allowing cleanup to recover a launch whose AWS response was lost; cleanup
+re-verifies both that token and the exact bench-purpose tag. Both the instance shutdown
+behavior and an instance-local 12-hour watchdog terminate the disposable host. Results
+are pulled incrementally into the ignored `results/` directory.
 The pilot runs the correctness matrix, largest scenario cells in both profiles, and a
 reduced primary endpoint matrix; it is for capacity and duration planning and is never
 accepted by canonical analysis.

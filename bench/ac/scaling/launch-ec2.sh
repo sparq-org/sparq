@@ -47,6 +47,7 @@ command -v git >/dev/null || die "git is unavailable"
 command -v ssh >/dev/null || die "ssh is unavailable"
 command -v scp >/dev/null || die "scp is unavailable"
 command -v rsync >/dev/null || die "rsync is unavailable"
+command -v curl >/dev/null || die "curl is unavailable"
 
 [[ -z "$(git -C "${ROOT}" status --porcelain)" ]] \
   || die "the source tree must be clean before a canonical bundle is made"
@@ -168,7 +169,8 @@ orphan_preflight
 aws sts get-caller-identity --profile "${PROFILE}" --output json \
   >"${RESULTS_LOCAL}/aws-identity.json"
 date -u +%FT%TZ >"${RESULTS_LOCAL}/price-checked-at.txt"
-aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
+PRICE_QUERY_OK=0
+if aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
   --service-code AmazonEC2 \
   --filters \
     "Type=TERM_MATCH,Field=location,Value=EU (London)" \
@@ -177,12 +179,38 @@ aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
     "Type=TERM_MATCH,Field=tenancy,Value=Shared" \
     "Type=TERM_MATCH,Field=preInstalledSw,Value=NA" \
     "Type=TERM_MATCH,Field=capacitystatus,Value=Used" \
-  --max-results 100 --output json >"${WORK}/pricing.json"
-python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.json" \
-  --hours 12 \
-  --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
-  >"${RESULTS_LOCAL}/cost-estimate.json"
-cp "${WORK}/pricing.json" "${RESULTS_LOCAL}/aws-pricing-response.json"
+  --max-results 100 --output json >"${WORK}/pricing.json" \
+  2>"${RESULTS_LOCAL}/aws-pricing-query-error.txt"; then
+  if python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.json" \
+    --hours 12 \
+    --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
+    >"${RESULTS_LOCAL}/cost-estimate.json" \
+    2>"${RESULTS_LOCAL}/aws-pricing-query-parse-error.txt"; then
+    PRICE_QUERY_OK=1
+    cp "${WORK}/pricing.json" "${RESULTS_LOCAL}/aws-pricing-response.json"
+  fi
+fi
+if (( PRICE_QUERY_OK == 0 )); then
+  BULK_PRICE_URL="https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/${REGION}/index.csv"
+  log "signed Price List query unavailable; using the official public regional bulk file"
+  printf '%s\n' "${BULK_PRICE_URL}" >"${RESULTS_LOCAL}/aws-bulk-pricing-url.txt"
+  curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+    --connect-timeout 30 --max-time 600 \
+    --dump-header "${RESULTS_LOCAL}/aws-bulk-pricing-headers.txt" \
+    --output "${WORK}/pricing.csv" "${BULK_PRICE_URL}"
+  if command -v sha256sum >/dev/null; then
+    PRICE_DIGEST="$(sha256sum "${WORK}/pricing.csv")"
+  else
+    PRICE_DIGEST="$(shasum -a 256 "${WORK}/pricing.csv")"
+  fi
+  printf '%s\n' "${PRICE_DIGEST%% *}" \
+    >"${RESULTS_LOCAL}/aws-bulk-pricing.sha256"
+  python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.csv" \
+    --bulk-csv --instance-type "${INSTANCE_TYPE}" \
+    --location 'EU (London)' --region-code "${REGION}" \
+    --hours 12 --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
+    >"${RESULTS_LOCAL}/cost-estimate.json"
+fi
 
 log "creating exact source bundle for ${SOURCE_COMMIT}"
 # Include the review base as an explicitly named prerequisite-free ref. The remote clone
