@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.27
+**Protocol version:** 1.28
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -675,3 +675,15 @@ not enter analysis. The earlier generic example helper retains its five-minute d
 and a regression test decodes the study token to assert the extended lifetime exactly.
 This correction removes an unintended wall-duration censoring mechanism; it changes no
 query, dataset, policy, server authorization path, cache policy, outcome, or estimand.
+
+### 1.28 — 2026-09-03: retry setup transport after exact-ingress synchronization
+
+The disposable-host launcher now retries setup-phase SSH and SCP transport failures up
+to 20 times, refreshing the same single exact `/32` ingress rule before each attempt.
+An SSH session that reaches the host but whose remote command fails is not retried, so
+source verification and service-launch failures remain fail-closed. The launch following
+amendment 1.27 encountered several rapid client egress-address changes and timed out
+during source upload; the study service was never created, no benchmark ran, and tagged
+instance cleanup completed. This bounded transport hardening changes neither the host,
+benchmark, security-group scope, measurements, nor estimands, and preceded any valid
+canonical outcome.

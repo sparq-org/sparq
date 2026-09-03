@@ -185,6 +185,38 @@ refresh_ssh_ingress() {
     >>"${RESULTS_LOCAL}/ssh-ingress-rotations.tsv"
 }
 
+ssh_with_ingress_retry() {
+  local attempt status
+  for attempt in $(seq 1 20); do
+    refresh_ssh_ingress || return 1
+    # shellcheck disable=SC2029 # Callers provide the complete validated remote command.
+    if ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+    # An established remote command failed for a reason other than transport. Preserve that
+    # failure instead of masking a source-verification or service-launch error with retries.
+    (( status == 255 )) || return "${status}"
+    log "SSH transport attempt ${attempt}/20 failed after ingress synchronization"
+    sleep 3
+  done
+  return 255
+}
+
+scp_with_ingress_retry() {
+  local source="$1" destination="$2" attempt
+  for attempt in $(seq 1 20); do
+    refresh_ssh_ingress || return 1
+    if scp "${SSH_OPTIONS[@]}" "${source}" "ubuntu@${PUBLIC_IP}:${destination}"; then
+      return 0
+    fi
+    log "SCP transport attempt ${attempt}/20 failed after ingress synchronization"
+    sleep 3
+  done
+  return 1
+}
+
 orphan_preflight() {
   if (( BASH_VERSINFO[0] >= 4 )); then
     AWS_PROFILE="${PROFILE}" bash "${ROOT}/scripts/orphan-check-bench.sh" --region "${REGION}"
@@ -345,26 +377,26 @@ for _ in $(seq 1 60); do
   sleep 10
 done
 refresh_ssh_ingress
-ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
+ssh_with_ingress_retry \
   'test -f /var/tmp/SPARQ_AC_BOOTSTRAP_DONE' \
   || die "bootstrap did not complete"
 
 log "uploading source bundle and verifying exact commit"
-scp "${SSH_OPTIONS[@]}" "${BUNDLE}" "ubuntu@${PUBLIC_IP}:/var/tmp/sparq.bundle"
+scp_with_ingress_retry "${BUNDLE}" /var/tmp/sparq.bundle
 # shellcheck disable=SC2029 # Validated commit expands locally into the remote assertion.
-ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
+ssh_with_ingress_retry \
   "git clone -q /var/tmp/sparq.bundle /var/tmp/sparq-source \
    && git -C /var/tmp/sparq-source fetch -q origin \
         refs/remotes/origin/main:refs/remotes/origin/main \
    && test \"\$(git -C /var/tmp/sparq-source rev-parse HEAD)\" = '${SOURCE_COMMIT}'"
 
-REMOTE_UID="$(ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" 'id -u')"
-REMOTE_GID="$(ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" 'id -g')"
+REMOTE_UID="$(ssh_with_ingress_retry 'id -u')"
+REMOTE_GID="$(ssh_with_ingress_retry 'id -g')"
 [[ "${REMOTE_UID}" =~ ^[0-9]+$ && "${REMOTE_GID}" =~ ^[0-9]+$ ]] \
   || die "remote uid/gid are not numeric"
 log "starting ${MODE} as a 70%-memory-capped transient service"
 # shellcheck disable=SC2029 # Validated numeric values intentionally expand client-side.
-ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
+ssh_with_ingress_retry \
   "sudo systemd-run --unit=sparq-ac-study --collect \
     --property=MemoryMax=70% --property=KillMode=control-group \
     --uid=${REMOTE_UID} --gid=${REMOTE_GID} --working-directory=/var/tmp/sparq-source \
