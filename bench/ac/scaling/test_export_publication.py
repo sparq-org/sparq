@@ -40,6 +40,15 @@ def write_csv(path: Path, fields: set[str], rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def row_owned_fields(rows: list[dict[str, Any]], label: str) -> set[str]:
+    if not rows:
+        raise AssertionError(f"{label} fixture is empty")
+    fields = set(rows[0])
+    if any(set(row) != fields for row in rows):
+        raise AssertionError(f"{label} fixture rows have inconsistent schemas")
+    return fields
+
+
 def load_module(path: Path):
     module_name = f"fixture_{path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -96,7 +105,7 @@ class Fixture:
         self.publisher.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SOURCE, self.publisher)
         self.analyzer.write_text("# fixture blinded analyzer\n", encoding="utf-8")
-        self.protocol.write_text("**Protocol version:** 1.32\n\n# Fixture protocol\n", encoding="utf-8")
+        self.protocol.write_text("**Protocol version:** 1.33\n\n# Fixture protocol\n", encoding="utf-8")
         self.mod = load_module(self.publisher)
         self.configs = self.mod.all_configs()
         self.input_files = [
@@ -195,7 +204,7 @@ class Fixture:
                 "wac_materialization_ns": "",
                 "route_index_ns": "",
                 "lws_seed_ns": "",
-                "auth_triples_total": config.pods * 20,
+                "auth_triples_total": "",
                 "http_store_max_total_bytes": "",
                 "http_store_max_resource_count": "",
                 "resident_bytes": 50_000_000 + content_triples * 40,
@@ -208,6 +217,7 @@ class Fixture:
                     "graph_load_ns": max(1, content_triples * 20),
                     "wac_materialization_ns": max(1, config.pods * config.coverage + 1),
                     "route_index_ns": max(1, config.pods * 100),
+                    "auth_triples_total": config.pods * 20,
                 })
             else:
                 values.update({
@@ -285,6 +295,7 @@ class Fixture:
                     **self.config_fields(config), "query_id": query,
                     "query_family": f"fixture family {query}", "pairs": 150,
                     "process_blocks": 5, "pairs_per_process_block": 30,
+                    "inference_status": "hierarchical-cluster-bootstrap",
                     "bootstrap_draws": 10000, "bootstrap_seed": 20260903,
                     "bootstrap_method": self.mod.H4_METHOD,
                     "latency_ratio_median": wall_ratio, "latency_ratio_p95": wall_ratio * 1.04,
@@ -353,9 +364,21 @@ class Fixture:
             )
             descriptor["sha256"] = digest(path)
         self.h2["inputs"] = [item["path"] for item in self.input_files]
-        write_csv(self.derived / "summary.csv", self.mod.SUMMARY_FIELDS, self.summary_rows)
-        write_csv(self.derived / "paired-overhead.csv", self.mod.OVERHEAD_FIELDS, self.overhead_rows)
-        write_csv(self.derived / "construction.csv", self.mod.CONSTRUCTION_FIELDS, self.construction_rows)
+        write_csv(
+            self.derived / "summary.csv",
+            row_owned_fields(self.summary_rows, "summary"),
+            self.summary_rows,
+        )
+        write_csv(
+            self.derived / "paired-overhead.csv",
+            row_owned_fields(self.overhead_rows, "paired overhead"),
+            self.overhead_rows,
+        )
+        write_csv(
+            self.derived / "construction.csv",
+            row_owned_fields(self.construction_rows, "construction"),
+            self.construction_rows,
+        )
         write_json(self.derived / "h2.json", self.h2)
         (self.derived / "pod-scaling-latency.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"><text>fixture scaling</text></svg>\n', encoding="utf-8")
         (self.derived / "http-backend-operations.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"><text>fixture backend</text></svg>\n', encoding="utf-8")
@@ -930,6 +953,22 @@ class PublicationExporterTests(unittest.TestCase):
                 fx.publish()
             self.assertFalse(fx.envelope.exists())
 
+    def test_csv_reader_rejects_duplicate_and_malformed_widths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = load_module(SOURCE)
+            cases = (
+                ("duplicate.csv", "a,a\n1,2\n", "contains duplicate columns"),
+                ("overwide.csv", "a,b\n1,2,3\n", "does not match its header width"),
+                ("underwide.csv", "a,b\n1\n", "does not match its header width"),
+            )
+            for name, contents, message in cases:
+                with self.subTest(name=name):
+                    path = root / name
+                    path.write_text(contents, encoding="utf-8")
+                    with self.assertRaisesRegex(module.PublicationError, message):
+                        module.read_csv(path, name, {"a", "b"})
+
     def test_manifest_counts_all_emitted_applicability_records(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fx = Fixture(Path(directory))
@@ -963,6 +1002,90 @@ class PublicationExporterTests(unittest.TestCase):
             manifest = json.loads((fx.derived / "manifest.json").read_text(encoding="utf-8"))
             with self.assertRaisesRegex(fx.mod.PublicationError, "joint verdict"):
                 fx.mod.validate_h2(document, summary, manifest, 10000, 20260903)
+
+    def test_h2_exact_schema_and_query_family_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            summary_rows = fx.mod.read_csv(
+                fx.derived / "summary.csv", "summary.csv", fx.mod.SUMMARY_FIELDS
+            )
+            summary = fx.mod.validate_summary(summary_rows, fx.configs)
+            manifest = json.loads((fx.derived / "manifest.json").read_text(encoding="utf-8"))
+
+            extra_top = json.loads(json.dumps(fx.h2))
+            extra_top["unexpected"] = True
+            with self.assertRaisesRegex(fx.mod.PublicationError, "h2.json fields changed"):
+                fx.mod.validate_h2(extra_top, summary, manifest, 10000, 20260903)
+
+            extra_row = json.loads(json.dumps(fx.h2))
+            extra_row["results"][0]["unexpected"] = True
+            with self.assertRaisesRegex(fx.mod.PublicationError, "fields changed"):
+                fx.mod.validate_h2(extra_row, summary, manifest, 10000, 20260903)
+
+            missing_family = json.loads(json.dumps(fx.h2))
+            del missing_family["results"][0]["query_family"]
+            with self.assertRaisesRegex(fx.mod.PublicationError, "fields changed"):
+                fx.mod.validate_h2(missing_family, summary, manifest, 10000, 20260903)
+
+            changed_family = json.loads(json.dumps(fx.h2))
+            changed_family["results"][0]["query_family"] = "changed family"
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError, "query-family label disagrees with summary.csv"
+            ):
+                fx.mod.validate_h2(changed_family, summary, manifest, 10000, 20260903)
+
+    def test_construction_requires_lane_specific_authorization_totals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            rows = fx.mod.read_csv(
+                fx.derived / "construction.csv",
+                "construction.csv",
+                fx.mod.CONSTRUCTION_FIELDS,
+            )
+
+            materialized = json.loads(json.dumps(rows))
+            next(
+                row for row in materialized if row["lane"] == "materialized-routed"
+            )["auth_triples_total_median"] = ""
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError, "must be positive in the materialized lane"
+            ):
+                fx.mod.validate_construction(materialized, fx.configs)
+
+            native = json.loads(json.dumps(rows))
+            next(
+                row for row in native if row["lane"] == "native-http-assembly"
+            )["auth_triples_total_median"] = "1"
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError, "must be blank in the native lane"
+            ):
+                fx.mod.validate_construction(native, fx.configs)
+
+    def test_paired_overhead_requires_canonical_inference_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            rows = fx.mod.read_csv(
+                fx.derived / "paired-overhead.csv",
+                "paired-overhead.csv",
+                fx.mod.OVERHEAD_FIELDS,
+            )
+            missing_status = dict(rows[0])
+            del missing_status["inference_status"]
+            missing_path = Path(directory) / "paired-overhead-missing-status.csv"
+            write_csv(missing_path, set(missing_status), [missing_status])
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError, r"missing=\['inference_status'\]"
+            ):
+                fx.mod.read_csv(
+                    missing_path, "paired-overhead.csv", fx.mod.OVERHEAD_FIELDS
+                )
+
+            rows[0]["inference_status"] = "descriptive-only-insufficient-blocks"
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError,
+                "inference status is not canonical hierarchical-cluster-bootstrap",
+            ):
+                fx.mod.validate_overhead(rows, fx.configs, 10000, 20260903)
 
     def test_cost_over_budget_is_rejected_even_when_hash_is_updated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

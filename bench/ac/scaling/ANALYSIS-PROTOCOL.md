@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.32
+**Protocol version:** 1.33
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -946,3 +946,39 @@ interpretation, exclusion, cost, figure, or manuscript claim. The two independen
 repeated analysis outputs were byte-identical, and the analyzer bytes are unchanged by
 this correction. Publication metadata records the clean commit containing amendment 1.32
 and the corrected publisher.
+
+### 1.33 — 2026-09-03: derived-output publication schema and lane semantics
+
+After canonical performance outcomes had been inspected and amendment 1.32 had been
+implemented, the next full publication export failed closed because the publisher's
+exact `paired-overhead.csv` column set omitted the analyzer's `inference_status` field.
+That field was added to the analyzer under pre-outcome amendment 1.29 to distinguish
+block-aware inferential rows from rows having too few complete process blocks for
+inference. It is present in every canonical paired row and has the value
+`hierarchical-cluster-bootstrap`, because all canonical timing cells contain five
+complete process blocks. The publisher fixture had been generated from the publisher's
+own field constants, so its synthetic header reproduced the stale omission instead of
+testing the analyzer-to-publisher boundary.
+
+Before attempting another full export, a read-only comparison of every canonical
+derived schema with the publisher found one further semantic mismatch. The analyzer's
+`auth_triples_total_median` is positive in materialized rows but intentionally blank in
+native rows, whose authorization triples remain inside the HTTP store rather than the
+materializer's aggregate counter. The publisher had incorrectly required this value to
+be positive in both lanes. The same audit found no other canonical field mismatch. It
+also identified fail-open schema edges that did not alter admission of these artifacts:
+H2 objects accepted unknown fields and did not bind `query_family` to `summary.csv`, and
+CSV parsing did not reject duplicate headers or rows wider or narrower than their
+header.
+
+The publisher now requires the exact paired inference status, validates the authorization
+total according to lane, enforces exact H2 top-level and row key sets with invariant
+query-family labels, and rejects duplicate or width-inconsistent CSV records. Synthetic
+CSV headers are derived from independently constructed fixture rows rather than publisher
+constants, and positive and negative regression tests exercise each corrected boundary.
+This post-outcome correction changes only the publication validator, its fixture, and the
+protocol-version gate. It changes no raw or derived artifact, analyzer byte, numerical
+result, confidence interval, H1/H2 decision, exploratory interpretation, exclusion,
+cost, figure, or substantive manuscript claim. The two independently repeated analysis outputs
+remain byte-identical; publication metadata will record the clean commit containing
+amendments 1.32 and 1.33 and the corrected publisher.

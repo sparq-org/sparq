@@ -739,7 +739,7 @@ estimators, practical-growth margins, resource guards, and publication rules are
 After canonical measurement begins, changes are append-only and disclose their reason and
 what outcomes, if any, had been inspected.
 
-The final protocol is version 1.32. Two pre-result reliability amendments are especially
+The final protocol is version 1.33. Two pre-result reliability amendments are especially
 relevant to interpretation. One canonical attempt reached the primary campaign but was
 invalidated when a study credential expired during a long cell; only the failure evidence
 needed to identify the HTTP 401 was inspected, and every partial timing from that attempt
@@ -762,6 +762,15 @@ record count is 10,240; the former 3,680 value counted only templates selected f
 observation. The change is confined to the publisher's structural check and version gate.
 It changes no raw or derived artifact, analyzer byte, interval, decision, figure, or
 interpretive claim; the two analysis runs reported here were already byte-identical.
+The next export then exposed a second stale publisher boundary: its exact paired-CSV
+schema omitted the analyzer's pre-existing `inference_status` field. A complete
+derived-schema audit also found that the publisher incorrectly required the
+materializer-specific authorization-triple counter in native rows, where it is
+intentionally blank. Amendment 1.33 makes both checks lane- and schema-faithful, binds
+the H2 query-family labels to the summary, and closes duplicate-header and row-width
+parsing gaps. Synthetic headers are now independent of publisher constants. These
+changes likewise affect only the publisher, fixture, and version gate; they change no
+empirical artifact or interpretation.
 
 Canonical publication evidence must pass the analysis program's fail-closed validator.
 It rejects missing or mismatched checksums, dirty trees, debug builds, wrong campaign
@@ -1672,12 +1681,12 @@ arrivals, saturation, tenant fairness, or horizontal scaling. A completed 1,531-
 2,048-Pod cell means only that the named synthetic configuration fit the measured host;
 it is not a maximum supported user count.
 
-*Protocol and researcher degrees of freedom.* The protocol has reached version 1.32
+*Protocol and researcher degrees of freedom.* The protocol has reached version 1.33
 through an append-only amendment history reflecting issues found during implementation
 and pilots. This history is longer than ideal, but it is visible and
 outcome-inspection status is recorded for every change. The valid canonical analysis
 used the analyzer frozen under v1.31; canonical publication requires the post-outcome,
-publisher-only v1.32 correction described above. The credential-expiry attempt and
+publisher-only v1.32 and v1.33 corrections described above. The credential-expiry attempt and
 setup-transfer failure cannot enter estimates. All mandatory cells, guard-based skips,
 and unfavorable outcomes remain reportable, and the campaign does not stop because an
 effect is favorable or unfavorable.
@@ -1894,10 +1903,13 @@ query non-vacuity, calibration language, resume/checksum validation, live revoca
 cloud pricing, systemd limits, and SSH supervision. For each, the log records whether
 only source/correctness/capacity evidence or any timing outcome had been inspected.
 
-Amendment 1.32 is the sole post-outcome publication correction. It fixes the publisher's
-emitted-applicability cardinality check, which had used the selected-query count, and is
-explicitly non-analytical: the raw inputs, analyzer outputs, H1/H2 decisions, exploratory
-panels, and claims are unchanged.
+Amendments 1.32 and 1.33 are the only post-outcome publication corrections. The first
+fixes an emitted-applicability cardinality check that had used the selected-query count.
+The second follows a complete derived-schema audit: it admits and validates the
+pre-existing paired `inference_status`, treats the authorization-triple construction
+counter according to lane, makes the H2 schema exact, and rejects malformed CSV widths.
+Both are explicitly non-analytical: the raw inputs, analyzer outputs, H1/H2 decisions,
+exploratory panels, and claims are unchanged.
 
 == Appendix E: Implementation Source Audit <app-source-audit>
 

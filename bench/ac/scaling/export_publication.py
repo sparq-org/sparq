@@ -259,7 +259,11 @@ def read_csv(path: Path, label: str, expected_fields: set[str]) -> list[dict[str
     try:
         with path.open(newline="", encoding="utf-8") as source:
             reader = csv.DictReader(source)
-            fields = set(reader.fieldnames or ())
+            fieldnames = reader.fieldnames or []
+            fields = set(fieldnames)
+            duplicates = sorted({field for field in fieldnames if fieldnames.count(field) > 1})
+            if duplicates:
+                fail(f"{label} contains duplicate columns: {duplicates}")
             if fields != expected_fields:
                 fail(
                     f"{label} columns changed: missing={sorted(expected_fields - fields)}, "
@@ -270,6 +274,9 @@ def read_csv(path: Path, label: str, expected_fields: set[str]) -> list[dict[str
         raise PublicationError(f"cannot read {label}: {path}") from error
     if not rows:
         fail(f"{label} is empty")
+    for index, row in enumerate(rows, start=2):
+        if None in row or any(value is None for value in row.values()):
+            fail(f"{label} row {index} does not match its header width")
     return rows
 
 
@@ -519,8 +526,9 @@ OVERHEAD_FIELDS = {
     "pods", "documents_per_pod", "triples_per_document", "container_depth",
     "own_acl_coverage_per_mille", "public_per_mille", "private_per_mille",
     "shared_per_mille", "principal", "query_id", "query_family", "pairs",
-    "process_blocks", "pairs_per_process_block", "bootstrap_draws", "bootstrap_seed",
-    "bootstrap_method", "latency_ratio_median", "latency_ratio_p95",
+    "process_blocks", "pairs_per_process_block", "inference_status",
+    "bootstrap_draws", "bootstrap_seed", "bootstrap_method",
+    "latency_ratio_median", "latency_ratio_p95",
     "latency_ratio_ci95_low", "latency_ratio_ci95_high",
     "latency_difference_median_ms", "latency_difference_p95_ms",
     "latency_difference_ci95_low_ms", "latency_difference_ci95_high_ms",
@@ -545,6 +553,17 @@ CONSTRUCTION_METRICS = (
 )
 CONSTRUCTION_FIELDS = CONSTRUCTION_BASE_FIELDS | {
     f"{field}_median" for field in CONSTRUCTION_METRICS
+}
+
+H2_TOP_FIELDS = {"analysis", "inputs", "results", "schema_version"}
+H2_RESULT_FIELDS = {
+    "bootstrap_draws", "bootstrap_seed", "complete_process_blocks", "corpus_seeds",
+    "domain", "elasticity_ci95", "elasticity_margin", "lane",
+    "median_latency_ratio", "median_process_cpu_ratio", "minimal_cpu_scaling",
+    "minimal_latency_scaling", "minimal_overhead", "p_max", "p_min",
+    "pod_elasticity", "pods", "process_cpu_elasticity_ci95",
+    "process_cpu_pod_elasticity", "process_cpu_ratio_ci95", "query_family",
+    "query_id", "ratio_ci95", "ratio_margin", "requests",
 }
 
 
@@ -676,6 +695,8 @@ def validate_overhead(rows: list[dict[str, str]], configs: Sequence[Config], dra
             fail(f"{label} must contain 150 pairs")
         if csv_int(row, "process_blocks", label, 1) != 5 or csv_int(row, "pairs_per_process_block", label, 1) != 30:
             fail(f"{label} must contain five balanced 30-pair blocks")
+        if row["inference_status"] != "hierarchical-cluster-bootstrap":
+            fail(f"{label} inference status is not canonical hierarchical-cluster-bootstrap")
         if csv_int(row, "bootstrap_draws", label, 10000) != draws or csv_int(row, "bootstrap_seed", label, 0) != seed:
             fail(f"{label} bootstrap controls disagree with analysis manifest")
         if row["bootstrap_method"] != H4_METHOD:
@@ -711,8 +732,7 @@ def validate_construction(rows: list[dict[str, str]], configs: Sequence[Config])
             numeric[metric] = csv_float(row, f"{metric}_median", label, allow_blank=True)
         required_positive = (
             "content_documents", "content_triples", "total_source_graphs",
-            "corpus_generation_ns", "auth_triples_total", "resident_bytes",
-            "peak_resident_bytes",
+            "corpus_generation_ns", "resident_bytes", "peak_resident_bytes",
         )
         for metric in required_positive:
             if (numeric[metric] or 0) <= 0:
@@ -725,6 +745,10 @@ def validate_construction(rows: list[dict[str, str]], configs: Sequence[Config])
         if target is None or evaluation is None or total is None or not 0 <= target <= evaluation <= total:
             fail(f"{label} readable-document counts are invalid")
         materialized = config.lane == "materialized-routed"
+        if materialized and (numeric["auth_triples_total"] or 0) <= 0:
+            fail(f"{label}.auth_triples_total_median must be positive in the materialized lane")
+        if not materialized and numeric["auth_triples_total"] is not None:
+            fail(f"{label}.auth_triples_total_median must be blank in the native lane")
         lane_required = (
             ("graph_load_ns", "wac_materialization_ns", "route_index_ns")
             if materialized else ("lws_seed_ns", "http_store_max_total_bytes", "http_store_max_resource_count")
@@ -750,6 +774,12 @@ def validate_h2(
     document: dict[str, Any], summary: Mapping[tuple[str, ...], Mapping[str, str]],
     manifest: Mapping[str, Any], draws: int, seed: int,
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    if set(document) != H2_TOP_FIELDS:
+        fail(
+            "h2.json fields changed: "
+            f"missing={sorted(H2_TOP_FIELDS - set(document))}, "
+            f"extra={sorted(set(document) - H2_TOP_FIELDS)}"
+        )
     if document.get("schema_version") != ANALYZER_SCHEMA_VERSION:
         fail("h2.json schema version changed")
     if document.get("analysis") != "prospective H2 hierarchical cluster bootstrap":
@@ -761,6 +791,12 @@ def validate_h2(
     indexed: dict[tuple[str, str, str], dict[str, Any]] = {}
     for index, item in enumerate(require_list(document.get("results"), "h2.results")):
         row = require_object(item, f"h2.results[{index}]")
+        if set(row) != H2_RESULT_FIELDS:
+            fail(
+                f"h2.results[{index}] fields changed: "
+                f"missing={sorted(H2_RESULT_FIELDS - set(row))}, "
+                f"extra={sorted(set(row) - H2_RESULT_FIELDS)}"
+            )
         key = (
             require_string(row.get("lane"), f"h2[{index}].lane"),
             require_string(row.get("domain"), f"h2[{index}].domain"),
@@ -816,6 +852,9 @@ def validate_h2(
         lane, domain, query = key
         wall_low = summary[("pod-scaling", "pods-1", lane, domain, query, GUARDED[lane])]
         wall_high = summary[("pod-scaling", "pods-2048", lane, domain, query, GUARDED[lane])]
+        family = require_string(row.get("query_family"), f"{label}.query_family")
+        if family != wall_low["query_family"] or family != wall_high["query_family"]:
+            fail(f"{label} query-family label disagrees with summary.csv")
         expected_wall = float(wall_high["latency_median_ms"]) / float(wall_low["latency_median_ms"])
         expected_cpu = float(wall_high["process_cpu_median_ms"]) / float(wall_low["process_cpu_median_ms"])
         if not math.isclose(float(row["median_latency_ratio"]), expected_wall, rel_tol=1e-12, abs_tol=1e-12):
@@ -2679,8 +2718,8 @@ def export(
     }
     metadata_hash=sha256_file(metadata_path)
     protocol_hash=sha256_file(protocol_path); analyzer_hash=sha256_file(analyzer_path)
-    if protocol_version(protocol_path) != "1.32":
-        fail("publication requires protocol amendment 1.32")
+    if protocol_version(protocol_path) != "1.33":
+        fail("publication requires protocol amendment 1.33")
     input_files=[]
     for item_value in require_list(manifest.get("input_files"),"manifest.input_files"):
         item=require_object(item_value,"input file")
