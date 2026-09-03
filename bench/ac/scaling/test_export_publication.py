@@ -96,7 +96,7 @@ class Fixture:
         self.publisher.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SOURCE, self.publisher)
         self.analyzer.write_text("# fixture blinded analyzer\n", encoding="utf-8")
-        self.protocol.write_text("**Protocol version:** 1.31\n\n# Fixture protocol\n", encoding="utf-8")
+        self.protocol.write_text("**Protocol version:** 1.32\n\n# Fixture protocol\n", encoding="utf-8")
         self.mod = load_module(self.publisher)
         self.configs = self.mod.all_configs()
         self.input_files = [
@@ -365,7 +365,8 @@ class Fixture:
             "analysis_script": {"path": "/var/tmp/source/bench/ac/scaling/analyze.py", "sha256": digest(self.analyzer)},
             "canonical_required": True, "expected_commit": self.source_commit,
             "observations": 114080, "construction_records": 1280,
-            "correctness_records": 1280, "applicability_records": 3680,
+            "correctness_records": 1280,
+            "applicability_records": 1280 * len(self.mod.QUERIES),
             "bootstrap_draws": 10000, "bootstrap_seed": 20260903,
             "outputs": names,
             "output_artifacts": [
@@ -928,6 +929,27 @@ class PublicationExporterTests(unittest.TestCase):
             with self.assertRaisesRegex(fx.mod.PublicationError, "artifact drift"):
                 fx.publish()
             self.assertFalse(fx.envelope.exists())
+
+    def test_manifest_counts_all_emitted_applicability_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fx = Fixture(Path(directory))
+            manifest_path = fx.derived / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["applicability_records"],
+                len(fx.input_files) * len(fx.mod.QUERIES),
+            )
+
+            # This is the selected-query count, which omits the unselected records
+            # nevertheless emitted in sensitivity and scenario raw files.
+            manifest["applicability_records"] = 3680
+            write_json(manifest_path, manifest)
+            metadata = json.loads(fx.metadata.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(
+                fx.mod.PublicationError,
+                "applicability_records is 3680, expected 10240",
+            ):
+                fx.mod.verify_analyzer_manifest(fx.derived, metadata, fx.root)
 
     def test_h2_verdict_is_recomputed_not_trusted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

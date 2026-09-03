@@ -1,6 +1,6 @@
 # Analysis protocol: access-controlled SPARQL over many Solid Pods
 
-**Protocol version:** 1.31
+**Protocol version:** 1.32
 
 **Frozen before canonical timing:** 2026-09-03
 
@@ -926,3 +926,23 @@ authenticated-stranger, anonymous}` for both lanes. The publisher validates that
 the corresponding abbreviated cell labels rather than treating filename abbreviations as
 record values. These corrections were derived from record types, schemas, and the frozen
 source emitter before outcome interpretation.
+
+### 1.32 — 2026-09-03: publication applicability-record cardinality
+
+After the canonical performance outcomes had been inspected and the result narrative had
+been reviewed, the first full publication export failed closed because its manifest
+cardinality check confused two different quantities. The analyzer correctly recorded
+10,240 emitted `applicability` records: every one of the 1,280 raw run files contains one
+record for each of the eight frozen query templates, including templates marked
+`selected=false`. The publisher incorrectly expected 3,680, which is the number of
+selected query instances after applying campaign-specific q1/q8 or q1 selection.
+
+The publisher now derives the expected emitted-record count as 1,280 times the eight-query
+workload and retains the exact 10,240 requirement. A regression test supplies the former
+3,680 selected-query count and requires rejection. This post-outcome correction changes
+only the publication validator and protocol-version gate. It changes no raw or derived
+artifact, analyzer byte, result value, confidence interval, H1/H2 decision, exploratory
+interpretation, exclusion, cost, figure, or manuscript claim. The two independently
+repeated analysis outputs were byte-identical, and the analyzer bytes are unchanged by
+this correction. Publication metadata records the clean commit containing amendment 1.32
+and the corrected publisher.

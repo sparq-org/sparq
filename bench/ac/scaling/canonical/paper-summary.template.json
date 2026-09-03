@@ -31,7 +31,7 @@
     "query_scope": "Eight predeclared SPARQL query families q1-point through q8-graph-scan for the primary intervention; point and graph-scan queries for sensitivity lanes",
     "protocol": {
       "path": "bench/ac/scaling/ANALYSIS-PROTOCOL.md",
-      "version": "1.31",
+      "version": "1.32",
       "sha256": "REPLACE_WITH_64_HEX_HASH"
     },
     "pod_counts": [1, 8, 64, 512, 2048],

@@ -423,7 +423,7 @@ wrapping, and any work over admitted structural/control graphs. The native paire
 evaluates the query directly and serializes JSON over the content-only physical graph, but
 does not perform in-process HTTP authentication and routing, server-wide discovery, WAC
 planning, or temporary authorized-dataset reconstruction. Its difference is therefore a
-*guarded-stack/reference contrast*, not an isolated estimate of WAC rule matching or a
+*guarded-stack/content-reference contrast*, not an isolated estimate of WAC rule matching or a
 dataset-identical access-control overhead.
 Absolute latency across the two lanes is likewise not an apples-to-apples speed ranking;
 their scaling behavior and internal work are the meaningful comparison.
@@ -739,7 +739,7 @@ estimators, practical-growth margins, resource guards, and publication rules are
 After canonical measurement begins, changes are append-only and disclose their reason and
 what outcomes, if any, had been inspected.
 
-The final protocol is version 1.31. Two pre-result reliability amendments are especially
+The final protocol is version 1.32. Two pre-result reliability amendments are especially
 relevant to interpretation. One canonical attempt reached the primary campaign but was
 invalidated when a study credential expired during a long cell; only the failure evidence
 needed to identify the HTTP 401 was inspected, and every partial timing from that attempt
@@ -754,6 +754,14 @@ checks, and source-faithful claim qualifications. Amendment 1.31 corrects the pu
 validator to the emitted 26-record correctness-file structure and semantic principal
 labels. All three were fixed without inspecting a canonical performance outcome and
 change no raw observation or H2 decision rule.
+
+After performance outcomes had been inspected, the first full publication export refused
+an inconsistent manifest-cardinality expectation. Amendment 1.32 records the correction:
+all 1,280 raw files emit applicability metadata for all eight templates, so the emitted
+record count is 10,240; the former 3,680 value counted only templates selected for
+observation. The change is confined to the publisher's structural check and version gate.
+It changes no raw or derived artifact, analyzer byte, interval, decision, figure, or
+interpretive claim; the two analysis runs reported here were already byte-identical.
 
 Canonical publication evidence must pass the analysis program's fail-closed validator.
 It rejects missing or mismatched checksums, dirty trees, debug builds, wrong campaign
@@ -1043,8 +1051,9 @@ materialized-lane comparisons. The complete exact-result gate
   "ac_sparql.correctness.passed",
   yes: [passed for every admitted configuration],
   no: [did not pass for every admitted configuration],
-), and the named negative, anonymous, graph-enumeration, absence, duplicate, and
-live-revocation probes
+). The matrix itself covers positive, negative, and anonymous principals, unbound graph
+enumeration, and duplicate-preserving result bags. The separately source-commit-attested
+no-leak, unreadable-versus-absence, and two live-revocation tests
 #timing_verdict(
   "ac_sparql.correctness.all_required_probes_passed",
   yes: [all passed],
@@ -1094,9 +1103,9 @@ medians; uncertainty and the four-part decision remain in the complete H2 tables
 
 #timing_figure(
   "ac_sparql.figure.pod_scaling_latency",
-  caption: [Warm guarded-query wall time and process CPU from one to 2,048 resident Pods
-  for routed and native in-process lanes, both domains, and the predeclared endpoint query
-  shapes.],
+  caption: [Warm guarded-query wall time from one to 2,048 resident Pods for routed and
+  native in-process lanes, both domains, and the predeclared endpoint query shapes.
+  Process-CPU estimates and uncertainty are reported in the complete H2 tables.],
 ) <fig-scaling>
 
 For the routed composition,
@@ -1235,6 +1244,11 @@ endpoints together with the endpoint ratio:
   separately for social and health. These are mechanism counts, not stage-time shares.],
 ) <fig-backend>
 
+At every resident-Pod level, the social and health q1 backend-count series coincide and
+increase with the hosted resource population. This is direct work-volume evidence for
+root-first native discovery, but it does not assign any share of wall or CPU time to
+discovery or another request stage.
+
 The complete factor-sensitivity panel contains
 #headline_timing("ac_sparql.campaign.sensitivity_guarded_cells", digits: 0)
 guarded cells spanning document count, triples per document, ACL placement and depth, and
@@ -1248,6 +1262,13 @@ and no fitted trend is treated as confirmatory.
   q8, showing timing-profile medians and instrumentation work counts. Panel-local scales
   are descriptive; there is no E3 verdict or stage-time attribution.],
 ) <fig-sensitivity>
+
+Across the complete panel, the document and triple sweeps distinguish the routed
+graph-bound q1 from the enumeration-heavy q8, whereas native q1 and q8 both respond to
+document growth. Native backend resource-operation counts do not respond to triple or
+visibility changes, even where time and allocation medians do. ACL placement/depth has
+no preregistered ordering, and visibility changes the authorized set and q1 result
+cardinality, so the visibility curves are not fixed-answer speedup estimates.
 
 === Paired guarded-stack/content-reference contrast (RQ4 / E4)
 
@@ -1275,6 +1296,13 @@ effect verdicts.
   Pod count. E4 is descriptive and has no cross-query or binary verdict.],
 ) <fig-overhead>
 
+Read separately within each lane, the routed primary contrast curves remain narrowly
+grouped as resident Pod count changes, whereas the native ratios and differences rise
+with Pod count across the displayed domains and queries. Ratio magnitudes are amplified
+by very short content-reference queries and should be read alongside the paired
+differences. These are within-lane descriptive patterns, not the causal effect of
+switching implementations.
+
 For the routed composition the contrast includes routing, authorization lookup, query
 normalization, view membership, API wrapping, and work over any admitted structural or
 control graphs. For the native handler it additionally includes server-side
@@ -1297,6 +1325,10 @@ implementation paths.
   domain. RSS includes the documented harness/oracle scope and is not isolated service
   heap.],
 ) <fig-capacity>
+
+Within each lane and domain, every plotted primary construction-phase median and both
+whole-process RSS measures increase with resident Pod count. Thus the bounded routed
+warm-request result coexists with increasing construction and resident-state cost.
 
 The materialized scenario table keeps graph loading, WAC materialization, and route-index
 construction separate:
@@ -1375,7 +1407,9 @@ collapsing unlike construction paths:
 
 E5 has no binary or linearity verdict. Total state for non-empty resident Pods remains at
 least linear even if warm routed request work is insensitive to unrelated Pods; the native
-fixture also contains the source-derived quadratic shared-root insertion term.
+fixture also contains the source-derived quadratic shared-root insertion term. The
+measured total seeding curve does not establish quadratic growth or dominance of that
+term; no empirical construction exponent or stage dominance is claimed.
 
 === Confirmatory and exploratory summary
 
@@ -1449,7 +1483,10 @@ For the routed materialized path, the predeclared H2 criterion is
     yes: [met by no domain/query cell],
     no: [met by some but not all domain/query cells],
   )],
-). The cost
+). The causal intervention is resident Pod count within each lane. The contrast between
+the two lane-wide outcomes triangulates with the source audit, but it does not identify
+the causal effect of routing or materialization alone: topology, authentication, API and
+serialization boundaries, and admitted structural/control graphs also differ. The cost
 model explains why a logical visibility predicate is not sufficient on its own. A query
 engine may enumerate graph names before the predicate rejects them, and request-time WAC
 planning may discover resources before it knows that they are unreadable. Routing first
@@ -1635,11 +1672,12 @@ arrivals, saturation, tenant fairness, or horizontal scaling. A completed 1,531-
 2,048-Pod cell means only that the named synthetic configuration fit the measured host;
 it is not a maximum supported user count.
 
-*Protocol and researcher degrees of freedom.* The protocol has reached version 1.31
+*Protocol and researcher degrees of freedom.* The protocol has reached version 1.32
 through an append-only amendment history reflecting issues found during implementation
 and pilots. This history is longer than ideal, but it is visible and
 outcome-inspection status is recorded for every change. The valid canonical analysis
-must use v1.31. The credential-expiry attempt and
+used the analyzer frozen under v1.31; canonical publication requires the post-outcome,
+publisher-only v1.32 correction described above. The credential-expiry attempt and
 setup-transfer failure cannot enter estimates. All mandatory cells, guard-based skips,
 and unfavorable outcomes remain reportable, and the campaign does not stop because an
 effect is favorable or unfavorable.
@@ -1650,7 +1688,8 @@ The artifact consists of the paper-specific generator in `sparq-acbench`, cross-
 oracle tests, the `ac_query_scale` runner, deterministic schedule generators, resource
 guard, EC2 launcher/supervisor, raw-schema validator, analysis program, protocol, and
 evidence ledger. The archival provenance records the exact source commit and review
-baseline; the release metadata records the artifact identifier and license.
+baseline; the release metadata records the artifact-identifier status (unassigned for
+this release) and the MIT license.
 
 For every cell, raw JSON Lines and stderr are retained with a SHA-256 sidecar. Records
 contain corpus and query hashes, source and environment identity, schedule position,
@@ -1672,12 +1711,12 @@ Only synthetic data and identities are used; no personal or clinical record is i
 The host launcher refuses a dirty tree or an ambiguous price, records an official AWS
 price source, enforces a study-wide USD 100 ceiling, creates only tagged disposable
 resources, restricts SSH to one exact address, uses delete-on-termination storage, and
-terminates by both local watchdog and independent supervisor. Final study-wide measured
-spend is #headline_timing(
+terminates by both local watchdog and independent supervisor. The final study-wide
+accounted direct-resource estimate is #headline_timing(
   "ac_sparql.artifact.study_cost_usd",
   digits: 2,
   suffix: [ USD],
-); the canonical-run component is #headline_timing(
+); the estimated canonical-run component is #headline_timing(
   "ac_sparql.artifact.canonical_run_cost_usd",
   digits: 2,
   suffix: [ USD],
@@ -1723,8 +1762,12 @@ The correctness matrix
     yes: [met in no cell],
     no: [met in some but not all cells],
   )],
-). E3--E5 disclose the complete predeclared backend-work, guarded-stack/reference, and
-construction/capacity panels descriptively and attach no verdict. These claims remain bounded to the measured
+). Exploratory instrumentation showed Pod-count-invariant routed allocation-count and
+allocated-byte medians within every primary domain/query series, while native backend-
+operation and allocation medians increased with Pod count. Construction phases and
+whole-process resident state also increased with hosted state. E4 reports the complete
+guarded-stack/content-reference contrast but neither isolates WAC nor compares the lanes
+causally; E3--E5 receive no verdict. These claims remain bounded to the measured
 implementation, workload, host, Pod range, and concurrency. No result makes startup,
 resident memory, updates, remote I/O, or concurrent capacity free, and no synthetic count
 anchor predicts a future Solid population. The defensible design lesson is narrower and
@@ -1826,7 +1869,8 @@ evidence boundary independently of shell syntax.
 10. Bind every paper result through a canonical evidence record and JSON pointer; run the
     paper factory's performance-number, privacy, and evidence-binding checks.
 11. Publish the protocol, amendments, raw/derived manifests, skipped-cell ledger, final
-    cost, and persistent artifact identifier with the manuscript.
+    cost, and either a persistent artifact identifier or an explicit unassigned-identifier
+    status with the manuscript.
 
 == Appendix D: Protocol Deviations and Invalid Attempts <app-deviations>
 
@@ -1849,6 +1893,11 @@ high-resolution CPU measurement, profile separation, CPU affinity, lexical hiera
 query non-vacuity, calibration language, resume/checksum validation, live revocation,
 cloud pricing, systemd limits, and SSH supervision. For each, the log records whether
 only source/correctness/capacity evidence or any timing outcome had been inspected.
+
+Amendment 1.32 is the sole post-outcome publication correction. It fixes the publisher's
+emitted-applicability cardinality check, which had used the selected-query count, and is
+explicitly non-analytical: the raw inputs, analyzer outputs, H1/H2 decisions, exploratory
+panels, and claims are unchanged.
 
 == Appendix E: Implementation Source Audit <app-source-audit>
 

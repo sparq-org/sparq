@@ -842,7 +842,10 @@ def verify_analyzer_manifest(derived: Path, metadata: Mapping[str, Any], repo_ro
         "observations": 114080,
         "construction_records": 1280,
         "correctness_records": 1280,
-        "applicability_records": 3680,
+        # Every raw run emits one applicability record for each of the eight frozen
+        # query templates, including templates not selected by sensitivity/scenario
+        # campaigns.  3,680 is the selected-query count, not the emitted-record count.
+        "applicability_records": 1280 * len(QUERIES),
     }
     for field, expected in expected_counts.items():
         if require_int(manifest.get(field), f"manifest.{field}", 1) != expected:
@@ -2676,8 +2679,8 @@ def export(
     }
     metadata_hash=sha256_file(metadata_path)
     protocol_hash=sha256_file(protocol_path); analyzer_hash=sha256_file(analyzer_path)
-    if protocol_version(protocol_path) != "1.31":
-        fail("publication requires the outcome-blind protocol amendment 1.31")
+    if protocol_version(protocol_path) != "1.32":
+        fail("publication requires protocol amendment 1.32")
     input_files=[]
     for item_value in require_list(manifest.get("input_files"),"manifest.input_files"):
         item=require_object(item_value,"input file")

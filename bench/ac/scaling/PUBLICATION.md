@@ -82,14 +82,16 @@ full result binding. See `PUBLICATION-PLACEHOLDER-ROUTING.md` for the prose spli
 Use these steps only after canonical acquisition has stopped and its original `DONE` and
 `MANIFEST.sha256` verify.
 
-1. Before outcome inspection, verify that the analyzer contains the reviewed
-   block-aware paired intervals, derived-output hashes, and primary cross-P invariants,
-   and that the protocol contains Amendments 1.29--1.31 with header version `1.31`.
+1. Verify that the analyzer contains the reviewed block-aware paired intervals,
+   derived-output hashes, and primary cross-P invariants, and that the audit trail retains
+   the pre-outcome Amendments 1.29--1.31 plus the disclosed post-outcome structural
+   Amendment 1.32, with header version `1.32`.
 2. Commit the analysis and publication-tool changes, and record that clean commit as the
    analysis commit. It must differ from the source commit embedded in the raw run.
-3. Rerun the patched analyzer from the clean analysis commit with
-   `--require-canonical`, the exact source commit, at least 10,000 bootstrap draws, and
-   the recorded bootstrap seed.
+3. Run the reviewed analyzer with `--require-canonical`, the exact source commit, at
+   least 10,000 bootstrap draws, and the recorded bootstrap seed. If a later amendment
+   changes only the publisher, the existing outputs remain admissible only when their
+   manifest-bound analyzer hash equals the current analyzer bytes; otherwise rerun it.
 4. Prepare the three annotation reports. From the captured study log/journal, make a
    content-addressed transcript for each Cargo command that records the independently
    established `source_commit=<40-hex>` and includes the relevant test output verbatim;
