@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="460" viewBox="0 0 980 460">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:system-ui,sans-serif;fill:#202124}.axis{stroke:#555;stroke-width:1}.grid{stroke:#ddd;stroke-width:1}.line{fill:none;stroke-width:2.4}.point{stroke:white;stroke-width:1}</style>
+<text x="490" y="24" text-anchor="middle" font-size="17" font-weight="600">Warm access-controlled query latency versus resident Pod count</text>
+<text x="272.5" y="43" text-anchor="middle" font-size="14">materialized-routed</text>
+<line class="grid" x1="75" y1="375.0" x2="470" y2="375.0"/>
+<text x="66" y="379.0" text-anchor="end" font-size="11">0.001</text>
+<line class="grid" x1="75" y1="329.2857142857143" x2="470" y2="329.2857142857143"/>
+<text x="66" y="333.2857142857143" text-anchor="end" font-size="11">0.01</text>
+<line class="grid" x1="75" y1="283.57142857142856" x2="470" y2="283.57142857142856"/>
+<text x="66" y="287.57142857142856" text-anchor="end" font-size="11">0.1</text>
+<line class="grid" x1="75" y1="237.85714285714286" x2="470" y2="237.85714285714286"/>
+<text x="66" y="241.85714285714286" text-anchor="end" font-size="11">1</text>
+<line class="grid" x1="75" y1="192.14285714285717" x2="470" y2="192.14285714285717"/>
+<text x="66" y="196.14285714285717" text-anchor="end" font-size="11">10</text>
+<line class="grid" x1="75" y1="146.42857142857142" x2="470" y2="146.42857142857142"/>
+<text x="66" y="150.42857142857142" text-anchor="end" font-size="11">100</text>
+<line class="grid" x1="75" y1="100.71428571428572" x2="470" y2="100.71428571428572"/>
+<text x="66" y="104.71428571428572" text-anchor="end" font-size="11">1000</text>
+<line class="grid" x1="75" y1="55.0" x2="470" y2="55.0"/>
+<text x="66" y="59.0" text-anchor="end" font-size="11">10000</text>
+<line class="axis" x1="75" y1="55" x2="75" y2="375"/>
+<line class="axis" x1="75" y1="375" x2="470" y2="375"/>
+<text x="75.0" y="394" text-anchor="middle" font-size="10">1</text>
+<text x="182.72727272727272" y="394" text-anchor="middle" font-size="10">8</text>
+<text x="290.45454545454544" y="394" text-anchor="middle" font-size="10">64</text>
+<text x="398.1818181818182" y="394" text-anchor="middle" font-size="10">512</text>
+<text x="470.0" y="394" text-anchor="middle" font-size="10">2048</text>
+<polyline class="line" stroke="#1769aa" stroke-dasharray="6 4" points="75.00,329.66 182.73,329.89 290.45,329.83 398.18,329.87 470.00,329.87"/>
+<circle class="point" fill="#1769aa" cx="75.00" cy="329.66" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="182.73" cy="329.89" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="290.45" cy="329.83" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="398.18" cy="329.87" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="470.00" cy="329.87" r="3.5"/>
+<polyline class="line" stroke="#c65d09" stroke-dasharray="6 4" points="75.00,300.78 182.73,301.38 290.45,301.49 398.18,301.52 470.00,301.47"/>
+<circle class="point" fill="#c65d09" cx="75.00" cy="300.78" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="182.73" cy="301.38" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="290.45" cy="301.49" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="398.18" cy="301.52" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="470.00" cy="301.47" r="3.5"/>
+<polyline class="line" stroke="#1769aa" points="75.00,329.75 182.73,329.84 290.45,329.81 398.18,329.75 470.00,329.75"/>
+<circle class="point" fill="#1769aa" cx="75.00" cy="329.75" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="182.73" cy="329.84" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="290.45" cy="329.81" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="398.18" cy="329.75" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="470.00" cy="329.75" r="3.5"/>
+<polyline class="line" stroke="#c65d09" points="75.00,300.72 182.73,301.25 290.45,301.33 398.18,301.45 470.00,301.41"/>
+<circle class="point" fill="#c65d09" cx="75.00" cy="300.72" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="182.73" cy="301.25" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="290.45" cy="301.33" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="398.18" cy="301.45" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="470.00" cy="301.41" r="3.5"/>
+<text x="747.5" y="43" text-anchor="middle" font-size="14">native-http-assembly</text>
+<line class="grid" x1="550" y1="375.0" x2="945" y2="375.0"/>
+<line class="grid" x1="550" y1="329.2857142857143" x2="945" y2="329.2857142857143"/>
+<line class="grid" x1="550" y1="283.57142857142856" x2="945" y2="283.57142857142856"/>
+<line class="grid" x1="550" y1="237.85714285714286" x2="945" y2="237.85714285714286"/>
+<line class="grid" x1="550" y1="192.14285714285717" x2="945" y2="192.14285714285717"/>
+<line class="grid" x1="550" y1="146.42857142857142" x2="945" y2="146.42857142857142"/>
+<line class="grid" x1="550" y1="100.71428571428572" x2="945" y2="100.71428571428572"/>
+<line class="grid" x1="550" y1="55.0" x2="945" y2="55.0"/>
+<line class="axis" x1="550" y1="55" x2="550" y2="375"/>
+<line class="axis" x1="550" y1="375" x2="945" y2="375"/>
+<text x="550.0" y="394" text-anchor="middle" font-size="10">1</text>
+<text x="657.7272727272727" y="394" text-anchor="middle" font-size="10">8</text>
+<text x="765.4545454545455" y="394" text-anchor="middle" font-size="10">64</text>
+<text x="873.1818181818182" y="394" text-anchor="middle" font-size="10">512</text>
+<text x="945.0" y="394" text-anchor="middle" font-size="10">2048</text>
+<polyline class="line" stroke="#1769aa" stroke-dasharray="6 4" points="550.00,224.92 657.73,214.04 765.45,184.10 873.18,143.05 945.00,98.24"/>
+<circle class="point" fill="#1769aa" cx="550.00" cy="224.92" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="657.73" cy="214.04" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="765.45" cy="184.10" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="873.18" cy="143.05" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="945.00" cy="98.24" r="3.5"/>
+<polyline class="line" stroke="#c65d09" stroke-dasharray="6 4" points="550.00,224.79 657.73,213.82 765.45,183.72 873.18,142.76 945.00,98.14"/>
+<circle class="point" fill="#c65d09" cx="550.00" cy="224.79" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="657.73" cy="213.82" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="765.45" cy="183.72" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="873.18" cy="142.76" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="945.00" cy="98.14" r="3.5"/>
+<polyline class="line" stroke="#1769aa" points="550.00,224.84 657.73,214.09 765.45,184.13 873.18,143.09 945.00,98.22"/>
+<circle class="point" fill="#1769aa" cx="550.00" cy="224.84" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="657.73" cy="214.09" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="765.45" cy="184.13" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="873.18" cy="143.09" r="3.5"/>
+<circle class="point" fill="#1769aa" cx="945.00" cy="98.22" r="3.5"/>
+<polyline class="line" stroke="#c65d09" points="550.00,224.73 657.73,213.75 765.45,183.72 873.18,142.83 945.00,98.14"/>
+<circle class="point" fill="#c65d09" cx="550.00" cy="224.73" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="657.73" cy="213.75" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="765.45" cy="183.72" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="873.18" cy="142.83" r="3.5"/>
+<circle class="point" fill="#c65d09" cx="945.00" cy="98.14" r="3.5"/>
+<text x="20" y="215" transform="rotate(-90 20 215)" text-anchor="middle" font-size="12">median latency (ms, log scale)</text>
+<text x="490" y="430" text-anchor="middle" font-size="12">resident Pods (log2 spacing; Pod 0 working set fixed)</text>
+<line x1="305" y1="447" x2="331" y2="447" stroke="#1769aa" stroke-width="2.4"/><text x="337" y="451" font-size="11">point</text>
+<line x1="400" y1="447" x2="426" y2="447" stroke="#c65d09" stroke-width="2.4"/><text x="432" y="451" font-size="11">GRAPH scan</text>
+<line x1="535" y1="447" x2="561" y2="447" stroke="#444" stroke-width="2.4"/><text x="567" y="451" font-size="11">social</text>
+<line x1="635" y1="447" x2="661" y2="447" stroke="#444" stroke-width="2.4" stroke-dasharray="6 4"/><text x="667" y="451" font-size="11">health</text>
+</svg>

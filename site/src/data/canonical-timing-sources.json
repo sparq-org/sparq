@@ -1,5 +1,7 @@
 {
   "_comment": "Exact committed envelopes below bench/canonical-competitor-results/ whose paper declarations are materialized by site/scripts/sync-canonical-timing.mjs. No globbing and no work-box discovery.",
   "schemaVersion": 1,
-  "envelopes": []
+  "envelopes": [
+    "bench/canonical-competitor-results/ac-sparql/ec2-canonical-20260903t085125z/paper-summary.json"
+  ]
 }

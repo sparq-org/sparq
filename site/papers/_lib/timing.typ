@@ -106,7 +106,7 @@
   if digits == none { str(value) } else { str(calc.round(value, digits: digits)) }
 }
 
-#let _provenance_text(r, include_digest: false) = {
+#let _full_provenance_text(r, include_digest: false) = {
   let p = r.timing_provenance
   [
     Canonical timing evidence: #p.workload; dataset #p.dataset; query scope #p.query_scope;
@@ -147,6 +147,29 @@
     #raw(p.raw_archive_zstd_executable_sha256). These member-level facts are an attestation
     recorded by the publisher; sync/build validates the attestation's shape and publisher bytes
     but does not independently unpack and re-hash archive members.
+  ]
+}
+
+// Inline values carry a compact, record-specific provenance note. Printing every raw
+// artifact/hash/locator triple in every footnote is both redundant and pathological for
+// aggregate correctness records (hundreds of valid bindings can turn one sentence into many
+// pages). The complete bindings remain mandatory in `_timing_rec`, in the generated ledger,
+// and in the immutable envelope; `timing_provenance` renders the full acquisition/archive
+// statement once in the manuscript's artifact section.
+#let _provenance_text(r, include_digest: false) = {
+  let p = r.timing_provenance
+  let source_parts = r.source.split("#")
+  let pointer = if source_parts.len() > 1 { source_parts.last() } else { r.source }
+  let bindings = if r.kind == "canonical-timing-figure" { 0 } else { r.result_bindings.len() }
+  [
+    Canonical #raw(p.run_id): #raw(pointer);
+    #if r.kind != "canonical-timing-figure" [
+      #bindings bound source(s);
+    ]
+    #if include_digest [
+      #raw(r.figure.output_name) SHA-256 #raw(r.value);
+    ]
+    see artifact statement.
   ]
 }
 
@@ -325,5 +348,5 @@
 // A non-numeric block for an artifact/reproducibility section. It never exposes r.value.
 #let timing_provenance(key) = {
   let r = _timing_rec(key)
-  _provenance_text(r, include_digest: r.kind == "canonical-timing-figure")
+  _full_provenance_text(r, include_digest: r.kind == "canonical-timing-figure")
 }

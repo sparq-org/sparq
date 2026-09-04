@@ -56,6 +56,22 @@ export const FAMILY_LABEL: Record<PaperFamily, string> = {
 
 export const PAPERS: Paper[] = [
   {
+    slug: "access-controlled-sparql-pod-scale",
+    source: "access-controlled-sparql-pod-scale.typ",
+    title:
+      "Access-Controlled SPARQL over Co-hosted Solid Pods: A Cost Model and Controlled Scaling Study",
+    blurb:
+      "A source-derived cost model and prospective, correctness-gated scaling study of read-only WAC-scoped SPARQL over many co-hosted Solid Pods. It holds one target Pod's authorized working set fixed while adding unreadable co-tenants, comparing a benchmark-composed Pod-routed materialized feasibility path with the current native in-process handler's server-wide authorized-dataset assembly over deterministic social and health corpora and eight query families. Empirical values, H1/H2 verdicts, and figures enter only through a checksummed canonical envelope; E3-E5 remain descriptive, and the study is an implementation envelope rather than a forecast of future Pod populations.",
+    authors: "Jesse Wright · the sparq project",
+    venue:
+      "ESWC / ISWC research track (systems/integration) — unsubmitted manuscript",
+    status: "publishable-now",
+    family: "B",
+    evidence:
+      "One canonical, prospective, correctness-gated EC2 campaign over deterministic social and health Pod corpora: two enforcement boundaries, eight SPARQL query families, five unrelated-Pod levels (1-2,048), and the predeclared H1/H2 decisions, with E3-E5 reported descriptively. The correctness evidence is independently derived from 288 checksummed run files containing 5,760 exact result-bag comparisons (4,608 in the materialized subset), plus source-commit-attested positive, negative, and revocation test transcripts. Every empirical scalar, Boolean, and figure is bound through the immutable canonical envelope and generated `ac_sparql.*` evidence namespace. The cost report is a conservative accounted direct-resource estimate under the USD 100 cap, not an invoice. The native lane excludes network transport, the routed lane is a benchmark-composed feasibility design, and the content reference is answer-equivalent but not physically dataset-identical; no isolated-WAC-cost, deployed-population, or production-capacity claim is made.",
+    evidencePrefixes: ["ac_sparql."],
+  },
+  {
     // [OPUS-5] sq-gum8.3 REVISION 2 (adversarial PC panel — novelty / rigor / reproducibility
     // / clarity): "pre-registered" corrected to "specified" (no registry deposit exists — the
     // same correction odrl-policy-bridge took under PR #1330); the answer-safety scope

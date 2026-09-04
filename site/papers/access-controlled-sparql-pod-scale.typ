@@ -1,7 +1,7 @@
 // Outcome-blind factory-integrated manuscript. Every empirical scalar and H1/H2 branch
 // enters through the canonical timing accessors; E3--E5 have no generated verdict prose.
 
-#import "_lib/timing.typ": headline_timing, timing_verdict, timing_table, timing_figure
+#import "_lib/timing.typ": headline_timing, timing_verdict, timing_table, timing_figure, timing_provenance
 
 #let anon = sys.inputs.at("anon", default: "false") == "true"
 #let paper_heading_numbering = (..n) => {
@@ -439,31 +439,34 @@ terms are bounded in the Pod-count intervention; where they are not, the lexical
 factor $ell$ remains explicit. Wall-clock time is not equated with operation count.
 Backend operations stay symbolic because the storage trait admits in-memory and remote
 implementations with different costs. The source audit supporting each implementation
-term is listed in Appendix @app-source-audit.
+term is listed in @app-source-audit.
 
+#pagebreak()
 #figure(
-  table(
-    columns: (0.17fr, 0.83fr),
-    align: (left, left),
-    table.header[Symbol][Meaning],
-    [$P$], [resident Pods],
-    [$B_p$], [serialized input bytes loaded for Pod $p$],
-    [$n_p$], [source named graphs in Pod $p$, including content, container, and control graphs],
-    [$g_p$], [named-graph slots in the selected `PodStore` at query time],
-    [$R_p$], [distinct resources and structural containers in Pod $p$],
-    [$F_p$], [policy and structural facts admitted to WAC reasoning],
-    [$d(g)$], [ancestor steps traversed while processing graph $g$],
-    [$J_p$], [reasoner candidate, join, intermediate-row, and insertion work],
-    [$H_p$], [triples installed in Pod $p$'s materialized authorization graph],
-    [$A_s$], [readable graph names for session $s$ in the routed Pod],
-    [$N,E,K$], [native-path reachable resources, returned child occurrences, and candidate set],
-    [$B_A,T_A,G_A$], [admitted RDF bytes, triples, and graph names in the native path],
-    [$ell$], [maximum relevant lexical byte length],
-    [$Q(q,D)$], [implementation query work, including scans and intermediates],
-    [$I(q,D)$], [peak query-intermediate space],
-    [$Y(q,D)$], [produced binding cells for the in-process result],
-    [$Z(q,D)$], [serialized HTTP result bytes],
-  ),
+  text(size: 0.9em)[
+    #table(
+      columns: (0.17fr, 0.83fr),
+      align: (left, left),
+      table.header[Symbol][Meaning],
+      [$P$], [resident Pods],
+      [$B_p$], [serialized input bytes loaded for Pod $p$],
+      [$n_p$], [source named graphs in Pod $p$, including content, container, and control graphs],
+      [$g_p$], [named-graph slots in the selected `PodStore` at query time],
+      [$R_p$], [distinct resources and structural containers in Pod $p$],
+      [$F_p$], [policy and structural facts admitted to WAC reasoning],
+      [$d(g)$], [ancestor steps traversed while processing graph $g$],
+      [$J_p$], [reasoner candidate, join, intermediate-row, and insertion work],
+      [$H_p$], [triples installed in Pod $p$'s materialized authorization graph],
+      [$A_s$], [readable graph names for session $s$ in the routed Pod],
+      [$N,E,K$], [native-path reachable resources, returned child occurrences, and candidate set],
+      [$B_A,T_A,G_A$], [admitted RDF bytes, triples, and graph names in the native path],
+      [$ell$], [maximum relevant lexical byte length],
+      [$Q(q,D)$], [implementation query work, including scans and intermediates],
+      [$I(q,D)$], [peak query-intermediate space],
+      [$Y(q,D)$], [produced binding cells for the in-process result],
+      [$Z(q,D)$], [serialized HTTP result bytes],
+    )
+  ],
   caption: [Cost-model notation. Pod count is not used as a proxy for data, policy,
   visibility, query, or output size.],
 ) <tab-notation>
@@ -522,6 +525,7 @@ Even an empty cache retains fixed locks and containers per Pod. The experiment t
 reports observed whole-process memory and realized authorization triples rather than
 assuming constant bytes per entry or triple.
 
+#linebreak()
 === Routed authorization lookup and warm requests
 
 A cold authorization-set lookup constructs bounded principal keys, unions grant and deny
@@ -1105,7 +1109,7 @@ or a timing non-interference result.
 
 === Warm cost under unrelated-Pod growth (RQ2)
 
-Figure @fig-scaling plots the two endpoint query shapes over the complete Pod-count
+@fig-scaling plots the two endpoint query shapes over the complete Pod-count
 intervention. Pod 0, its sixteen documents, readable graph set, result identity, query,
 principal, and all non-P factors are invariant within each series. Lines are descriptive
 medians; uncertainty and the four-part decision remain in the complete H2 tables.
@@ -1323,7 +1327,7 @@ cross-lane latency is not interpreted as a controlled speedup.
 
 The construction matrix contains
 #headline_timing("ac_sparql.campaign.construction_cells", digits: 0)
-complete lane-specific cells. Figure @fig-capacity reports every primary Pod-count level
+complete lane-specific cells. @fig-capacity reports every primary Pod-count level
 against both resident Pods and realized content triples, retaining both domains and both
 implementation paths.
 
@@ -1339,73 +1343,117 @@ Within each lane and domain, every plotted primary construction-phase median and
 whole-process RSS measures increase with resident Pod count. Thus the bounded routed
 warm-request result coexists with increasing construction and resident-state cost.
 
-The materialized scenario table keeps graph loading, WAC materialization, and route-index
-construction separate:
+The materialized scenario tables keep corpus size, graph loading, WAC materialization,
+route-index construction, and resident indicators separate:
 
 #timing_table(
   "ac_sparql.scenario.social_small.materialized.content_documents",
-  columns: (
-    1.25fr, 0.65fr, 0.85fr, 0.7fr, 0.75fr, 0.8fr, 0.8fr, 0.75fr, 0.85fr, 0.85fr, 0.55fr,
-  ),
+  columns: (1.45fr, 0.82fr, 0.95fr, 0.82fr, 0.95fr, 0.65fr),
   header: (
     [Scenario], [Content docs], [Content triples], [Control docs], [Control triples],
-    [Graph load (ns)], [WAC build (ns)], [Route (ns)], [Current RSS (B)],
-    [Peak RSS (B)], [Blocks],
+    [Blocks],
   ),
   rows: (
     scenario_row([Social small (100 Pods)], "social_small", "materialized", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
-      "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Social anchor (1,531 Pods)], "social_anchor", "materialized", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
-      "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Compact health small (64 Pods)], "health_small", "materialized", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
-      "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Health anchor (256 Pods)], "health_anchor", "materialized", (
       "content_documents", "content_triples", "control_documents", "control_triples",
+      "complete_process_blocks",
+    )),
+  ),
+  label_columns: 1,
+  caption: [Materialized scenario corpus sizes and complete process blocks.],
+) <tab-capacity>
+
+#timing_table(
+  "ac_sparql.scenario.social_small.materialized.graph_load_ns",
+  columns: (1.45fr, 0.88fr, 0.88fr, 0.8fr, 0.95fr, 0.95fr),
+  header: (
+    [Scenario], [Graph load (ns)], [WAC build (ns)], [Route (ns)],
+    [Current RSS (B)], [Peak RSS (B)],
+  ),
+  rows: (
+    scenario_row([Social small (100 Pods)], "social_small", "materialized", (
       "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
-      "peak_resident_bytes", "complete_process_blocks",
+      "peak_resident_bytes",
+    )),
+    scenario_row([Social anchor (1,531 Pods)], "social_anchor", "materialized", (
+      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
+      "peak_resident_bytes",
+    )),
+    scenario_row([Compact health small (64 Pods)], "health_small", "materialized", (
+      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
+      "peak_resident_bytes",
+    )),
+    scenario_row([Health anchor (256 Pods)], "health_anchor", "materialized", (
+      "graph_load_ns", "wac_materialization_ns", "route_index_ns", "resident_bytes",
+      "peak_resident_bytes",
     )),
   ),
   label_columns: 1,
   caption: [Materialized scenario construction and whole-process resident indicators.
   Values are lane-specific medians; completion of a named scenario is not a capacity
   maximum.],
-) <tab-capacity>
+)
 
-The native table reports its in-process service-seeding phase separately rather than
-collapsing unlike construction paths:
+The native tables report their corpus sizes and in-process service-seeding phase
+separately rather than collapsing unlike construction paths:
 
 #timing_table(
   "ac_sparql.scenario.social_small.http.content_documents",
-  columns: (1.35fr, 0.72fr, 0.9fr, 0.72fr, 0.8fr, 0.9fr, 0.9fr, 0.9fr, 0.6fr),
+  columns: (1.45fr, 0.82fr, 0.95fr, 0.82fr, 0.95fr, 0.65fr),
   header: (
     [Scenario], [Content docs], [Content triples], [Control docs], [Control triples],
-    [LWS seed (ns)], [Current RSS (B)], [Peak RSS (B)], [Blocks],
+    [Blocks],
   ),
   rows: (
     scenario_row([Social small (100 Pods)], "social_small", "http", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "lws_seed_ns", "resident_bytes", "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Social anchor (1,531 Pods)], "social_anchor", "http", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "lws_seed_ns", "resident_bytes", "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Compact health small (64 Pods)], "health_small", "http", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "lws_seed_ns", "resident_bytes", "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
     )),
     scenario_row([Health anchor (256 Pods)], "health_anchor", "http", (
       "content_documents", "content_triples", "control_documents", "control_triples",
-      "lws_seed_ns", "resident_bytes", "peak_resident_bytes", "complete_process_blocks",
+      "complete_process_blocks",
+    )),
+  ),
+  label_columns: 1,
+  caption: [Native in-process scenario corpus sizes and complete process blocks.],
+)
+
+#timing_table(
+  "ac_sparql.scenario.social_small.http.lws_seed_ns",
+  columns: (1.55fr, 1fr, 1fr, 1fr),
+  header: ([Scenario], [LWS seed (ns)], [Current RSS (B)], [Peak RSS (B)]),
+  rows: (
+    scenario_row([Social small (100 Pods)], "social_small", "http", (
+      "lws_seed_ns", "resident_bytes", "peak_resident_bytes",
+    )),
+    scenario_row([Social anchor (1,531 Pods)], "social_anchor", "http", (
+      "lws_seed_ns", "resident_bytes", "peak_resident_bytes",
+    )),
+    scenario_row([Compact health small (64 Pods)], "health_small", "http", (
+      "lws_seed_ns", "resident_bytes", "peak_resident_bytes",
+    )),
+    scenario_row([Health anchor (256 Pods)], "health_anchor", "http", (
+      "lws_seed_ns", "resident_bytes", "peak_resident_bytes",
     )),
   ),
   label_columns: 1,
@@ -1414,11 +1462,14 @@ collapsing unlike construction paths:
   cost; completion is not a maximum-user claim.],
 )
 
-E5 has no binary or linearity verdict. Total state for non-empty resident Pods remains at
-least linear even if warm routed request work is insensitive to unrelated Pods; the native
-fixture also contains the source-derived quadratic shared-root insertion term. The
-measured total seeding curve does not establish quadratic growth or dominance of that
-term; no empirical construction exponent or stage dominance is claimed.
+#linebreak()
+#block(above: 0.65em)[
+  E5 has no binary or linearity verdict. Total state for non-empty resident Pods remains at
+  least linear even if warm routed request work is insensitive to unrelated Pods; the native
+  fixture also contains the source-derived quadratic shared-root insertion term. The
+  measured total seeding curve does not establish quadratic growth or dominance of that
+  term; no empirical construction exponent or stage dominance is claimed.
+]
 
 === Confirmatory and exploratory summary
 
@@ -1433,7 +1484,7 @@ term; no empirical construction exponent or stage dominance is claimed.
       yes: [passes],
       no: [does not pass],
     )],
-    [Table @tab-population],
+    [@tab-population],
     [generated WAC subset and exact result bags],
     [H2a],
     [#timing_verdict(
@@ -1445,7 +1496,7 @@ term; no empirical construction exponent or stage dominance is claimed.
         no: [mixed across cells],
       )],
     )],
-    [Table @tab-h2 and companion tables],
+    [@tab-h2 and companion tables],
     [family/domain-specific four-part criterion],
     [H2b],
     [#timing_verdict(
@@ -1457,13 +1508,13 @@ term; no empirical construction exponent or stage dominance is claimed.
         no: [mixed across cells],
       )],
     )],
-    [H2 tables and Fig. @fig-backend],
+    [H2 tables and @fig-backend],
     [current native in-process endpoint only],
-    [E3], [exploratory; no verdict], [Figs. @fig-backend and @fig-sensitivity],
+    [E3], [exploratory; no verdict], [@fig-backend and @fig-sensitivity],
     [complete aggregate work proxies and total costs; no stage-time attribution],
-    [E4], [exploratory; no verdict], [Fig. @fig-overhead],
+    [E4], [exploratory; no verdict], [@fig-overhead],
     [complete primary answer-equivalent stack/reference contrasts; no cross-query test],
-    [E5], [exploratory; no verdict], [Fig. @fig-capacity and scenario tables],
+    [E5], [exploratory; no verdict], [@fig-capacity and scenario tables],
     [whole-process capacity; concurrency one; native root-fan-out caveat],
   ),
   caption: [Only H1 and H2 use generated Boolean branches. E3--E5 are complete,
@@ -1523,7 +1574,7 @@ construction costs, but do not identify a write-heavy break-even point.
 === Correct answers do not eliminate timing disclosure
 
 Corollary 1 gives the result-level property, and H1 tests it for the generated subset:
-unreadable graphs do not influence returned solution bags. Figure @fig-backend reports
+unreadable graphs do not influence returned solution bags. @fig-backend reports
 whether native backend work varies with the hosted population. A deployment whose privacy
 goal includes hiding co-tenancy must treat
 request timing and resource usage as observable channels and consider routing,
@@ -1708,10 +1759,14 @@ configured warm-ups/repetitions, process block, and correctness. The analysis pr
 Paper headline values are not copied into prose: each is bound through a JSON pointer in
 the repository evidence file and is accepted only when marked canonical.
 
+#block(inset: 8pt, stroke: 0.5pt + gray)[
+  #text(size: 0.78em)[#timing_provenance("ac_sparql.artifact.study_cost_usd")]
+]
+
 Reproduction proceeds in four stages: run unit and cross-layer correctness tests; execute
 the full correctness matrix; execute timing and instrumentation campaigns on a pinned
 single-CPU Linux host; and invoke the analyzer with `--require-canonical`, the exact
-40-hex commit, fixed bootstrap seed, and at least 10,000 draws. Appendix @app-reproduce
+40-hex commit, fixed bootstrap seed, and at least 10,000 draws. The reproduction checklist
 lists commands and schema checks. The artifact also retains the append-only amendment log
 and failed-attempt evidence, allowing reviewers to distinguish design corrections from
 outcome-contingent changes.
@@ -1845,7 +1900,7 @@ predefined margins, four component verdicts, joint verdict, bootstrap draws, and
 The publication table may round values for legibility but must preserve the machine record
 and must not replace a family-level failure with an average pass.
 
-The compact cells in Table @tab-h2 are generated from these atomic values:
+The compact cells in @tab-h2 are generated from these atomic values:
 
 ```text
 wall ratio [95% CI]; wall beta [95% CI]
@@ -1881,6 +1936,7 @@ evidence boundary independently of shell syntax.
     cost, and either a persistent artifact identifier or an explicit unassigned-identifier
     status with the manuscript.
 
+#pagebreak()
 == Appendix D: Protocol Deviations and Invalid Attempts <app-deviations>
 
 The protocol's amendment log is normative and must be archived verbatim. The main paper
