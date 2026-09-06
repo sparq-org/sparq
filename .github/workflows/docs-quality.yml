@@ -1193,6 +1193,40 @@ jobs:
         run: python3 scripts/check-advisory-registry.py --self-test
       - name: "Enforce advisory-job registry + gate-intent placement (C2/C3/C4) — GATING"
         run: python3 scripts/check-advisory-registry.py
+      # [OPUS-5] sparq-org/sparq#5371: the same discipline one level DOWN, at the STEP.
+      # The advisory registry above protects the JOB level and the unit suites protect the
+      # inside of the Python modules; the uncovered seam was between them. Deleting
+      # triage-area.yml's pre-apply guard step — or adding `continue-on-error: true` to it
+      # — leaves the job green, the aggregator green and every one of that classifier's
+      # Python mutants still dying, while the half-hourly cron applies unverified `area:`
+      # labels to live issues. #4567's reviewer measured the shape: 18/18 Python mutants
+      # died, and every mutant that SURVIVED lived in a workflow `if:`, a step, or a call
+      # site.
+      #   S1 — every seam in .github/step-seam-registry.json must BIND to a live
+      #        workflow:job:step-name (deletion, rename and re-homing all RED).
+      #   S2 — that step carries NO `continue-on-error` and no `if:` beyond the one its
+      #        entry pins, and neither does its JOB (`if: false` on the job disables the
+      #        step just as completely). Absence, not falsity: `${{ … }}` cannot be shown
+      #        false, and the quoted spellings survived a looser reading in PR #4192.
+      #   S3 — the step still RUNS every `must_run` fragment, comments stripped, so a
+      #        gutted step is caught as well as a deleted one.
+      #   S4 — repo-wide and needing no declaration: no gate-classified step may carry a
+      #        truthy `continue-on-error` unless its job is declared advisory or the step
+      #        is waived. Gate classification is IMPORTED from check-advisory-registry.py
+      #        so the two checkers cannot drift apart on what counts as a gate.
+      #   S5 — anti-vacuity: an empty registry, an unattributable entry, or a sweep that
+      #        matches no gate command anywhere is itself the offence.
+      # The enforce step below is itself a pinned seam, so this gate cannot be un-wired one
+      # level up. Stdlib-only, no deps — placed with the other structural workflow lints.
+      # QUOTED deliberately: a plain YAML scalar ends at the first ` #`, so an unquoted
+      # name ending `— #5371)` renders as `… step parser —` in the check-run. This gate's
+      # own parser reproduces that rule (see _unquote), which is how the wart was found —
+      # a dozen existing step names across this repo's workflows are silently truncated
+      # the same way. Cosmetic, tracked separately; do not add a thirteenth.
+      - name: "Self-test the step-seam checker (mutation table + step parser — #5371)"
+        run: python3 scripts/check-step-seams.py --self-test
+      - name: "Enforce step-level workflow safety seams (S1-S5) — GATING"
+        run: python3 scripts/check-step-seams.py
       # [OPUS-4.8] sparq-org/sparq#3475: the fast-fix ring's ONLY privileged
       # capability is the cross-repo REGISTRY_RING_TOKEN doorbell. Because a
       # `workflow_run` workflow is ALSO delivered for fork / cross-repo triggering
