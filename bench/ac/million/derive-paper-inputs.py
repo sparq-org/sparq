@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """[GPT-6] Derive manuscript inputs without turning assumptions into measurements."""
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -22,6 +23,9 @@ def pointer(document, path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--calibration", type=Path, default=HERE / "corpus-calibration.json")
+    args = parser.parse_args()
     workload_path = HERE / "workload.json"
     workload = json.loads(workload_path.read_text())
     per_active = sum(
@@ -84,6 +88,15 @@ def main():
                    for key, path in bindings.items()},
     }
     (ROOT / "research/solid-pod-scale-baseline.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    if args.calibration.is_file():
+        corpus = {
+            "schema_version": 1,
+            "source": "bench/ac/million/corpus-calibration.json",
+            "source_sha256": digest(args.calibration),
+            "role": "source-backed observations and declared corpus assumptions; not measured server performance",
+            "calibration": json.loads(args.calibration.read_text()),
+        }
+        (ROOT / "research/solid-pod-scale-corpus.json").write_text(json.dumps(corpus, indent=2) + "\n")
 
 
 if __name__ == "__main__":
