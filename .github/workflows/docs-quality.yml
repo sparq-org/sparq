@@ -33,7 +33,10 @@
 #                       .markdownlint-cli2.jsonc, which carries the authoritative globs.
 #     • typos         — high-confidence spelling errors in those same docs (markdown
 #                       only), with a domain allowlist in _typos.toml.
-#     • internal-links — lychee --offline over those docs (incl. book/, issue #5020): every
+#     • internal-links — lychee --offline over the root docs, skills/, docs/, crates/, the
+#                       book/ mdBook sources (issue #5020), and — as of sq-jyhr8 — the
+#                       measurement surface metrics/ + scripts/agent-telemetry/ (research/ +
+#                       zk/ stay markdownlint-only, they are not lychee inputs): every
 #                       relative link AND heading-anchor (#fragment) must resolve.
 #                       Deterministic (no net).
 #     • privacy-claims — greps the OUTWARD claim surface for unqualified ZK/MPC
@@ -242,6 +245,13 @@ jobs:
         with:
           # --offline → no network (deterministic); --include-fragments validates
           # #heading anchors. fail=true makes broken internal links a HARD failure.
+          # [OPUS-5] sq-jyhr8: metrics/ + scripts/agent-telemetry/ joined the HARD
+          # internal-links scope. They were deferred because metrics/README.md links
+          # FORWARD to research/agent-effectiveness-program.md +
+          # research/dogfooding-sparq-knowledge-graph.md (PRs #1064/#1063) — adding them
+          # before those merged would have dangled. Both records are now on main, so the
+          # cross-references the measurement docs make to research/, bench/ and the
+          # harness scripts are gated like the rest of the doc surface.
           # [OPUS-5] issue #5020: './book/**/*.md' added — the mdBook sources were in
           # NEITHER this list nor the markdownlint HARD globs, so a broken intra-book
           # ./*.md link shipped unchecked. No exclusion is needed for the pages'
@@ -254,6 +264,7 @@ jobs:
             --no-progress
             README.md AGENTS.md ASSURANCE.md CONTRIBUTING.md SECURITY.md CHANGELOG.md CLAUDE.md
             './skills/**/*.md' './docs/**/*.md' './crates/**/*.md' './book/**/*.md'
+            './metrics/**/*.md' './scripts/agent-telemetry/**/*.md'
           fail: true
           # Don't post a tracking issue (read-only token; gating is enough).
           jobSummary: true

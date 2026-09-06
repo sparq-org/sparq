@@ -57,11 +57,12 @@
     // here: markdownlint sees them as ordinary text (the `{{#rustdoc_include}}` one
     // sits inside a fenced block), so no rule exemption is needed.
     "book/**/*.md",
-    // [OPUS-4.8] sq-lhwo.1: the metrics-harness README. Added to the HARD
-    // markdownlint (structural) glob. NOT added to the lychee internal-links scope
-    // yet: it links forward to research/agent-effectiveness-program.md +
-    // research/dogfooding-sparq-knowledge-graph.md, which land via PRs #1064/#1063 —
-    // adding it to lychee before those merge would dangle. Add it there once they do.
+    // [OPUS-4.8] sq-lhwo.1: the metrics-harness README, in the HARD markdownlint
+    // (structural) glob. [OPUS-5] sq-jyhr8: the lychee deferral once noted here is
+    // DISCHARGED — research/agent-effectiveness-program.md +
+    // research/dogfooding-sparq-knowledge-graph.md (PRs #1064/#1063) are on main, so
+    // metrics/**/*.md and scripts/agent-telemetry/**/*.md are now in the HARD lychee
+    // internal-links scope too (see docs-quality.yml).
     "metrics/**/*.md"
   ],
   "ignores": [
