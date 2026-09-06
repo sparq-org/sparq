@@ -67,6 +67,16 @@ cargo build -p sparq-cli --features hdt
 
 ## Key APIs
 
+**[GPT-6] Native archive paging:** enable `sparq-core/native-archive` for
+`archive::NativeArchiveWriter::{create, append, finish}` and
+`archive::NativeArchive::{open, len, is_empty, load_dataset}`. This packages the existing
+native codecs in one immutable mapped file, including named graphs. `open` is unsafe:
+all file bytes and length must remain unchanged until every graph/snapshot view is gone.
+`load_dataset` validates native components without RDF parsing or fallback rebuilding;
+prepare and retain all required datasets and authorization state before serving.
+Overlays remain in memory, with no archive WAL. See the
+[complete API, lifecycle and integrity guide](references/native-archive.md).
+
 `sparq_core::Graph` — construction / ingest (all take a `format: &str`):
 
 ```rust

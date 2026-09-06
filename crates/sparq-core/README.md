@@ -67,6 +67,12 @@ assert_eq!(count, 1);
   dependency.
 - **Named graphs & RDF 1.2** — full quad storage and
   [triple terms](https://www.w3.org/TR/rdf12-concepts/).
+- **Opt-in native archive** — [GPT-6] `native-archive` streams datasets and their named
+  graphs into one immutable file, then serves native index/dictionary views through one
+  shared mapping. Load and validate every required dataset before readiness; graph and
+  authorization metadata remain in RAM. Updates use memory overlays and need an application
+  journal or a new archive for durability. The unsafe open API requires immutable file bytes
+  throughout every view's lifetime ([guide](../../skills/data-formats/references/native-archive.md)).
 - **Thread-safe sharing** — `Graph` is `Send + Sync`, so one store serves many server threads;
   the opt-in `shared` feature adds an ergonomic `SharedGraph` handle for axum/actix state.
 

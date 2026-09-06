@@ -3,6 +3,12 @@
 // block. Mechanically enforces the per-site argument the unsafe-register documents.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+#[cfg(feature = "native-archive")]
+pub mod archive;
+#[cfg(feature = "mmap")]
+mod mapped;
+#[cfg(feature = "mmap")]
+mod native_io;
 pub mod compress;
 pub mod dict;
 #[cfg(feature = "dict-spill")]
@@ -192,7 +198,7 @@ enum NumData {
     /// The mmap'd dense cache, plus a small side map for terms APPENDED after open
     /// (delta-overlay updates) — the mmap'd file cannot grow, the dictionary can.
     #[cfg(feature = "mmap")]
-    Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, f64>),
+    Mapped(mapped::MappedBytes, rustc_hash::FxHashMap<Id, f64>),
     Sparse(rustc_hash::FxHashMap<Id, f64>),
     /// A FORKED graph's cache: the base graph's cache SHARED immutably (Arc) plus a
     /// small side map for terms interned after the fork — the in-RAM twin of
@@ -282,6 +288,11 @@ impl NumData {
                 base: std::sync::Arc::new(NumData::Sparse(m.clone())),
                 extra: rustc_hash::FxHashMap::default(),
             },
+            #[cfg(feature = "native-archive")]
+            NumData::Mapped(mapped::MappedBytes::Region { mapping, start, end }, extra) => NumData::Mapped(
+                mapped::MappedBytes::Region { mapping: std::sync::Arc::clone(mapping), start: *start, end: *end },
+                extra.clone(),
+            ),
             #[cfg(feature = "mmap")]
             NumData::Mapped(_, extra) => NumData::Forked {
                 // Materialise the mmap'd dense part (an `Mmap` cannot be cloned);
@@ -395,7 +406,7 @@ enum TempData {
     /// The mmap'd dense cache (`temporals.bin`: `n` little-endian f64 instants then `n`
     /// flag bytes), plus a side map for terms APPENDED after open (delta-overlay growth).
     #[cfg(feature = "mmap")]
-    Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, Temporal>),
+    Mapped(mapped::MappedBytes, rustc_hash::FxHashMap<Id, Temporal>),
     Sparse(rustc_hash::FxHashMap<Id, Temporal>),
     /// A FORKED graph's cache — see [`NumData::Forked`]: shared immutable base + a
     /// per-fork side map for terms interned after the fork.
@@ -452,7 +463,7 @@ impl TempData {
     /// Number of terms covered by a mapped `temporals.bin` (9 bytes per term).
     #[cfg(feature = "mmap")]
     #[inline]
-    fn mapped_len(m: &memmap2::Mmap) -> usize {
+    fn mapped_len(m: &[u8]) -> usize {
         m.len() / 9
     }
 
@@ -502,6 +513,11 @@ impl TempData {
                 base: std::sync::Arc::new(TempData::Sparse(m.clone())),
                 extra: rustc_hash::FxHashMap::default(),
             },
+            #[cfg(feature = "native-archive")]
+            TempData::Mapped(mapped::MappedBytes::Region { mapping, start, end }, extra) => TempData::Mapped(
+                mapped::MappedBytes::Region { mapping: std::sync::Arc::clone(mapping), start: *start, end: *end },
+                extra.clone(),
+            ),
             #[cfg(feature = "mmap")]
             TempData::Mapped(m, extra) => {
                 // Materialise the mmap'd cells (an `Mmap` cannot be cloned).
@@ -1917,7 +1933,7 @@ impl Graph {
         let numerics = match std::fs::File::open(&np) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * std::mem::size_of::<f64>() => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                NumData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                NumData::Mapped(unsafe { memmap2::Mmap::map(&f)? }.into(), rustc_hash::FxHashMap::default())
             }
             _ => NumData::Owned(numerics_of(&dict)),
         };
@@ -1925,7 +1941,7 @@ impl Graph {
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }.into(), rustc_hash::FxHashMap::default())
             }
             // Absent or stale (a graph saved before this cache existed): recompute —
             // backward compatible, like the numerics cache.
@@ -4315,10 +4331,17 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
 #[cfg(feature = "mmap")]
 fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std::io::Result<()> {
     use std::io::Write;
-    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut writer = std::io::BufWriter::new(std::fs::File::create(path)?);
+    stream_write_numerics_to(&mut writer, n, num)?;
+    writer.flush()
+}
+
+// [GPT-6] Same bounded cache encoder for directories and archived byte regions.
+#[cfg(feature = "mmap")]
+fn stream_write_numerics_to<W: std::io::Write>(mut w: W, n: usize, num: &NumData) -> std::io::Result<()> {
     const BLOCK: usize = 1 << 16; // ids per flush (512 KiB of f64)
     let mut buf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
-    let flush = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
+    let flush = |w: &mut W, buf: &mut Vec<f64>| -> std::io::Result<()> {
         // SAFETY: reinterpret the contiguous f64 block as bytes for writing. (sq-7ph8)
         // - `buf` is a live `Vec<f64>` of `buf.len()` initialised elements; `size_of_val(&buf[..])`
         //   = `len * 8` covers exactly that contiguous, fully-initialised region (no over-read).
@@ -4345,7 +4368,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
     if !buf.is_empty() {
         flush(&mut w, &mut buf)?;
     }
-    w.flush()
+    Ok(())
 }
 
 /// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals.bin` (`n` little-endian f64
@@ -4362,12 +4385,19 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
 #[cfg(feature = "mmap")]
 fn stream_write_temporals(path: &std::path::Path, n: usize, temp: &TempData) -> std::io::Result<()> {
     use std::io::Write;
-    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut writer = std::io::BufWriter::new(std::fs::File::create(path)?);
+    stream_write_temporals_to(&mut writer, n, temp)?;
+    writer.flush()
+}
+
+// [GPT-6] Same bounded cache encoder for directories and archived byte regions.
+#[cfg(feature = "mmap")]
+fn stream_write_temporals_to<W: std::io::Write>(mut w: W, n: usize, temp: &TempData) -> std::io::Result<()> {
     const BLOCK: usize = 1 << 16;
     // Pass 1: the f64 instant column (NaN for non-temporal ids — temp_flag 0 carries the
     // "not temporal" decode, so the instant value of a flag-0 cell is irrelevant on read).
     let mut fbuf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
-    let flush_f = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
+    let flush_f = |w: &mut W, buf: &mut Vec<f64>| -> std::io::Result<()> {
         // SAFETY: reinterpret the contiguous f64 instant block as bytes for writing. (sq-7ph8)
         // Same invariants as `stream_write_numerics::flush`: `size_of_val(&buf[..]) = len*8` views
         // exactly the live, initialised `Vec<f64>` region; `u8` has align 1 so no misalignment;
@@ -4401,7 +4431,7 @@ fn stream_write_temporals(path: &std::path::Path, n: usize, temp: &TempData) -> 
     if !gbuf.is_empty() {
         w.write_all(&gbuf)?;
     }
-    w.flush()
+    Ok(())
 }
 
 fn subject_term(s: &oxrdf::NamedOrBlankNode) -> Term {
