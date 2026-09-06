@@ -398,15 +398,21 @@ def keys_conflict(a, b, roots=None):
 # holder PAIRS that share at least one changed file):
 #
 #     area          holder pairs   sharing >=1 file
-#     area:ci            120          6   ( 5%)   -> exempt
-#     area:docs           66          2   ( 3%)   -> exempt
+#     area:ci            435         40   (9.2%)   -> exempt
+#     area:docs          630         30   (4.8%)   -> exempt
 #     area:deps            3          3   (100%)  -> NOT exempt (every pair collides on
 #                                                    Cargo.lock; serialising it is correct)
 #     crate areas          -          -   (57.1%) -> NOT exempt
 #                                                    (research/crate-region-parallelism.md §4)
 #
+# [GPT-5 2026-09-01] HONESTY NOTE: the earlier 120/6 (5%) and 66/2 (3%) table is
+# retracted. Its pair counter dropped PRs whose changed-file list was empty, conflating a failed
+# read with a genuinely empty PR. The corrected measurement keeps genuinely empty PRs as
+# non-colliding participants, excludes and names only failed reads, and has no pair exclusions:
+# each denominator is nCr. The larger corrected rates above are therefore the ones retained.
+#
 # So the reservation on `ci`/`docs` was refusing ~99% of a partition-starved frontier to prevent a
-# 3-5% file collision, while `deps` and the crate areas are serialising real overlap and stay.
+# 4.8-9.2% file collision, while `deps` and the crate areas are serialising real overlap and stay.
 # Measured counterfactual on that same snapshot, through this engine: baseline frontier 1;
 # `ci` non-reserving 2; `ci`+`docs` non-reserving 3; adding `deps` would give 4 (not taken).
 #
