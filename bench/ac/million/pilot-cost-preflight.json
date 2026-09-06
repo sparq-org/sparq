@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "study_id": "solid-pod-scale",
+  "currency": "USD",
+  "ceiling": 100,
+  "planned_ceiling": 80,
+  "contingency": 20,
+  "prior_study_estimate": "1.138526",
+  "prior_basis": "Archived canonical paper-summary.json /analysis/actual_cost; conservative direct-resource estimate, not invoice",
+  "pilot_candidate": {
+    "instance_type": "r7g.xlarge",
+    "root_volume_gib": 80,
+    "lifetime_limit_hours": 12,
+    "compute_hourly_usd": "0.2516",
+    "ancillary_reserve_usd": "5",
+    "maximum_additional_reservation_usd": "8.0192",
+    "accumulated_reservation_usd": "9.157726"
+  },
+  "quote": {
+    "checked_at_utc": "2026-09-06T12:08:11.399250+00:00",
+    "source_url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/eu-west-2/index.csv",
+    "sha256": "164840416566d01521b93f27bfc732688172a1b307772947c9d642183fae82a2",
+    "metadata": {
+      "FormatVersion": "v1.0",
+      "Disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+      "Publication Date": "2026-09-04T23:11:17Z",
+      "Version": "20260904231117",
+      "OfferCode": "AmazonEC2"
+    },
+    "rates": [
+      {
+        "SKU": "CFPF5GTKFPENJQZQ",
+        "PricePerUnit": "0.1258000000",
+        "Unit": "Hrs",
+        "Instance Type": "r7g.large",
+        "Memory": "16 GiB",
+        "vCPU": "2",
+        "usageType": "EUW2-BoxUsage:r7g.large",
+        "PriceDescription": "$0.1258 per On Demand Linux r7g.large Instance Hour",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "MJ9PYUE89BCM5XDZ",
+        "PricePerUnit": "0.0928000000",
+        "Unit": "GB-Mo",
+        "Instance Type": "",
+        "Memory": "",
+        "vCPU": "",
+        "usageType": "EUW2-EBS:VolumeUsage.gp3",
+        "PriceDescription": "$0.0928 per GB-month of General Purpose (gp3) provisioned storage - EU (London)",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "MP267K7XKZVHAUAH",
+        "PricePerUnit": "0.0944000000",
+        "Unit": "Hrs",
+        "Instance Type": "m7g.large",
+        "Memory": "8 GiB",
+        "vCPU": "2",
+        "usageType": "EUW2-BoxUsage:m7g.large",
+        "PriceDescription": "$0.0944 per On Demand Linux m7g.large Instance Hour",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "URJN7Z499DZB27UN",
+        "PricePerUnit": "47.5136000000",
+        "Unit": "GiBps-mo",
+        "Instance Type": "",
+        "Memory": "",
+        "vCPU": "",
+        "usageType": "EUW2-EBS:VolumeP-Throughput.gp3",
+        "PriceDescription": "$0.0464 per provisioned MiBps-month of gp3 - EU (London)",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "VVGAXJC97QRV972T",
+        "PricePerUnit": "0.0058000000",
+        "Unit": "IOPS-Mo",
+        "Instance Type": "",
+        "Memory": "",
+        "vCPU": "",
+        "usageType": "EUW2-EBS:VolumeP-IOPS.gp3",
+        "PriceDescription": "$0.0058 per provisioned IOPS-month of gp3 - EU (London)",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "WVUM4GPGKKHTP4A4",
+        "PricePerUnit": "0.0859000000",
+        "Unit": "Hrs",
+        "Instance Type": "c7g.large",
+        "Memory": "4 GiB",
+        "vCPU": "2",
+        "usageType": "EUW2-BoxUsage:c7g.large",
+        "PriceDescription": "$0.0859 per On Demand Linux c7g.large Instance Hour",
+        "EffectiveDate": "2026-09-01"
+      },
+      {
+        "SKU": "ZFNB2U78U7WYHHBB",
+        "PricePerUnit": "0.2516000000",
+        "Unit": "Hrs",
+        "Instance Type": "r7g.xlarge",
+        "Memory": "32 GiB",
+        "vCPU": "4",
+        "usageType": "EUW2-BoxUsage:r7g.xlarge",
+        "PriceDescription": "$0.2516 per On Demand Linux r7g.xlarge Instance Hour",
+        "EffectiveDate": "2026-09-01"
+      }
+    ]
+  },
+  "launch_status": "not-launched"
+}
