@@ -13,14 +13,15 @@ by `bench/ac/million/derive-paper-inputs.py`, with source hashes and locators.
 | --- | --- | --- |
 | [Google Takeout documentation](https://support.google.com/accounts/answer/3024190?hl=en) | Service categories, contacts export format and separate media metadata | An export schema says nothing about per-person retained volume. |
 | [Open Banking transaction schema](https://openbankinguk.github.io/read-write-api-site3/v4.0.1/resources-and-data-models/aisp/Transactions.html) | Transaction fields and account relationships | Transaction frequency, retention and coverage of a person's finances require additional evidence. |
+| [Federal Reserve payment diary](https://frbservices.org/binaries/content/assets/crsocms/news/research/2026-diary-consumer-payments-choice.pdf) | Observed consumer payment means, used to anchor transaction volume | Rounded U.S. means do not establish retained record counts, the synthetic tail or other countries; the record-per-payment conversion is assumed. |
 | [Geolife user guide](https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/) | A public example of timestamped location histories | Historical volunteer sampling is not a modern population distribution; choosing location summaries also changes volume. |
 | [MovieLens stable dataset](https://grouplens.org/datasets/movielens/1m/) | An empirical marginal distribution of retained rating records | Selected rating-service users, historical collection and minimum participation; cannot stand in for photos, messages or all-service activity. |
 | [Andrews et al.](https://doi.org/10.1371/journal.pone.0139004) | Objective interaction counts and substantial between-person variation | Small historical Android cohort; device interactions are not backend requests. The numeric observation and source locator are in the workload file. |
 | [Ofcom Online Nation](https://www.ofcom.org.uk/media-use-and-attitudes/online-habits/from-apps-to-ai-search-how-the-uk-goes-online-in-2025) | Breadth and heterogeneity of contemporary service use | Online time and app reach do not identify Pod storage volume or requests per second. |
 | [Scaling Memcache at Facebook](https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf) | Why fanout, batching and caching belong in a demand model | Historical cache traffic cannot be transferred as a Solid workload. |
 
-The main corpus combines an observed rating-count marginal with a deliberately
-specified multi-service history model. Its other volumes, shared activity factors,
+The main corpus combines an observed rating-count marginal and payment mean with
+a deliberately specified multi-service history model. Its other volumes, shared activity factors,
 retention and access-control frequencies remain assumptions. Validation reports
 must name the supported marginal and the unvalidated dimensions individually.
 Neither successful schema validation nor a large generated population warrants
@@ -64,3 +65,21 @@ Existing canonical observations remain attached to their original compact WAC
 study and its original implementation. They motivate the new routing and storage
 design and remain a smaller-scale reference. They are not relabeled as measurements
 of the new server, ACP support, real networks or the richer personal corpus.
+
+## Rendering the review manuscript
+
+The standalone source is `site/papers/solid-pod-scale.typ`, with its own
+bibliography. It does not register another publication or modify the earlier
+paper factory's evidence scope. Run `bench/ac/million/derive-paper-inputs.py`
+after combining the corpus and paper changes; the generated corpus snapshot
+records its input checksum. Then compile with the pinned Typst compiler and the
+repository as its root:
+
+```sh
+typst compile --root . site/papers/solid-pod-scale.typ output/pdf/solid-pod-scale.pdf
+```
+
+The source displays a draft status while no admitted expanded campaign artifact
+is supplied. Its compact reference observations and prospective demand targets
+remain distinct. The PDF is a local review artifact, not an automatic site
+publication.

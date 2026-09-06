@@ -1,0 +1,189 @@
+# [GPT-6] Primary sources for the concise Solid Pod capacity manuscript.
+solid:
+  type: reference
+  title: Solid Protocol
+  date: 2024-05-12
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/2024/protocol-20240512
+  note: Version 0.11.0; Draft Community Group Report
+wac:
+  type: reference
+  title: Web Access Control
+  date: 2024-05-12
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/2024/wac-20240512
+  note: Version 1.0.0; Draft Community Group Report
+acp:
+  type: reference
+  title: Access Control Policy
+  publisher: W3C Solid Community Group
+  url: https://solidproject.org/TR/acp
+  note: Editor's Draft; accessed 2026-09-06
+sparql:
+  type: reference
+  title: SPARQL 1.1 Query Language
+  author:
+    - Harris, Steve
+    - Seaborne, Andy
+  date: 2013-03-21
+  publisher: W3C
+  url: https://www.w3.org/TR/sparql11-query/
+solidbench:
+  type: article
+  title: Link Traversal Query Processing over Decentralized Environments with Structural Assumptions
+  author:
+    - Taelman, Ruben
+    - Verborgh, Ruben
+  date: 2023
+  parent:
+    type: proceedings
+    title: The Semantic Web - ISWC 2023
+  url: https://doi.org/10.1007/978-3-031-47240-4_1
+ldbc:
+  type: article
+  title: "The LDBC Social Network Benchmark: Interactive Workload"
+  author:
+    - Erling, Orri
+    - Averbuch, Alex
+    - Larriba-Pey, Josep
+    - Chafi, Hassan
+    - Gubichev, Andrey
+    - Prat, Arnau
+    - Pham, Minh-Duc
+    - Boncz, Peter
+  date: 2015
+  parent:
+    type: proceedings
+    title: Proceedings of the 2015 ACM SIGMOD International Conference on Management of Data
+  url: https://doi.org/10.1145/2723372.2742786
+takeout:
+  type: web
+  title: How to download your Google data
+  author: Google
+  url: https://support.google.com/accounts/answer/3024190?hl=en
+  note: Accessed 2026-09-06
+openbanking:
+  type: reference
+  title: Transactions - Read/Write Data API Specification v4.0.1
+  publisher: Open Banking Limited
+  url: https://openbankinguk.github.io/read-write-api-site3/v4.0.1/resources-and-data-models/aisp/Transactions.html
+geolife:
+  type: report
+  title: GeoLife GPS Trajectories Dataset - User Guide
+  publisher: Microsoft Research
+  date: 2011
+  url: https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/
+movielens:
+  type: repository
+  title: MovieLens 1M Dataset
+  publisher: GroupLens Research
+  date: 2003
+  url: https://grouplens.org/datasets/movielens/1m/
+payments:
+  type: report
+  title: 2026 Findings from the Diary of Consumer Payment Choice
+  author:
+    - O'Brien, Shaun
+    - Phelps, Hailey
+  date: 2026
+  publisher: Federal Reserve Financial Services
+  url: https://frbservices.org/binaries/content/assets/crsocms/news/research/2026-diary-consumer-payments-choice.pdf
+andrews:
+  type: article
+  title: "Beyond Self-Report: Tools to Compare Estimated and Real-World Smartphone Use"
+  author:
+    - Andrews, Sally
+    - Ellis, David A.
+    - Shaw, Heather
+    - Piwek, Lukasz
+  date: 2015-10-28
+  parent:
+    type: periodical
+    title: PLOS ONE
+    volume: 10
+    issue: 10
+  url: https://doi.org/10.1371/journal.pone.0139004
+ofcom:
+  type: report
+  title: "From apps to AI search: how the UK goes online in 2025"
+  author: Ofcom
+  date: 2025-12-10
+  url: https://www.ofcom.org.uk/media-use-and-attitudes/online-habits/from-apps-to-ai-search-how-the-uk-goes-online-in-2025
+memcache:
+  type: article
+  title: Scaling Memcache at Facebook
+  author:
+    - Nishtala, Rajesh
+    - Fugal, Hans
+    - Grimm, Steven
+    - Kwiatkowski, Marc
+    - Lee, Herman
+    - Li, Harry C.
+    - McElroy, Ryan
+    - Paleczny, Mike
+    - Peek, Daniel
+    - Saab, Paul
+    - Stafford, David
+    - Tung, Tony
+    - Venkataramani, Venkateshwaran
+  date: 2013
+  parent:
+    type: proceedings
+    title: 10th USENIX Symposium on Networked Systems Design and Implementation
+  url: https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf
+wrk2:
+  type: repository
+  title: "wrk2: A constant throughput, correct latency recording variant of wrk"
+  author: Tene, Gil
+  url: https://github.com/giltene/wrk2
+sre:
+  type: chapter
+  title: Implementing SLOs
+  parent:
+    type: book
+    title: The Site Reliability Workbook
+    publisher: O'Reilly Media
+    date: 2018
+  url: https://sre.google/workbook/implementing-slos/
+query-ac:
+  type: report
+  title: Query Based Access Control for Linked Data
+  author:
+    - Kirrane, Sabrina
+    - Mileo, Alessandra
+    - Polleres, Axel
+    - Decker, Stefan
+  date: 2020
+  url: https://arxiv.org/abs/2007.00461
+safe:
+  type: article
+  title: "SAFE: SPARQL Federation over RDF Data Cubes with Access Control"
+  author:
+    - Khan, Yasar
+    - Saleem, Muhammad
+    - Mehdi, Muntazir
+    - Hogan, Aidan
+    - Mehmood, Qaiser
+    - Rebholz-Schuhmann, Dietrich
+    - Sahay, Ratnesh
+  date: 2017
+  parent:
+    type: periodical
+    title: Journal of Biomedical Semantics
+    volume: 8
+  url: https://doi.org/10.1186/s13326-017-0112-6
+tidal:
+  type: article
+  title: "ciTIzen-centric DAta pLatform (TIDAL): Sharing Distributed Personal Data in a Privacy-Preserving Manner for Health Research"
+  author:
+    - Sun, Chang
+    - Gallofré Ocaña, Marc
+    - van Soest, Johan
+    - Dumontier, Michel
+  date: 2023
+  parent:
+    type: periodical
+    title: Semantic Web
+    volume: 14
+    issue: 5
+  url: https://doi.org/10.3233/SW-223220
