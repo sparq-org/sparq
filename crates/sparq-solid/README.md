@@ -99,6 +99,9 @@ smoke test (`tests/wasm_materialize.rs`, `wasm-pack test --node`) guards it. Den
   access; the reserved `urn:sparq:` namespace is rejected on input and forged `<urn:sparq:auth>` graphs
   are stripped at load. `ldp:contains` is PSS-written opaque content, never derived from IRI structure or
   read into the reasoner; containment *ancestry* drives ACL inheritance only (`tests/containment_view_ownership.rs`).
+- **Empty ACP matchers.** [GPT-6] A matcher with no supported context attributes is never satisfied
+  ([ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher)). Removing its last attribute revokes
+  dependent grants on rematerialization; an empty `noneOf` matcher cannot suppress a grant.
 
 ## 📚 Learn more
 
