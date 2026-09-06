@@ -60,7 +60,8 @@ provider_model = "claude-opus-5"       # Opus 5 — the SOLE anthropic routing t
                                        # rather than retained as tail fallbacks. Chains that used to
                                        # end at fable/opus now either end at opus5 and DEFER on
                                        # exhaustion (retried next tick) or carry `escalate = true`
-                                       # and park to needs:user — never a silent degrade.
+                                       # and take the bounded machine-park path described below —
+                                       # never a silent degrade.
                                        # Probe-verified live 2026-07-26: `claude --model
                                        # claude-opus-5 -p` -> OK, modelUsage reports canonicalModel
                                        # "claude-opus-5" (1M context). ALWAYS pin the full id: the
@@ -92,40 +93,44 @@ provider_model = "gpt-5.6-luna"        # Second tier of the unified fix ladder o
 credential_format = "codex-auth-json"
 
 [defaults]
-model_chain = ["opus5", "sol"]
+model_chain = ["sol", "opus5"]
 agent = "sparq-rust-impl"
+escalate = true
 
 # ---------------------------------------------------------------------------------------------------
 # SECURITY-LABEL OVERRIDES (first-match; win over role). Soundness surfaces run on Opus 5 ALONE
 # (2026-07-26: the opus-4.8 tail fallback was deprecated, so there is no weaker anthropic rung to
-# degrade to) and, on chain-exhaustion, ESCALATE to a human (needs:user) rather than fall to a
-# weaker/cross-provider model. That is the intended fail-closed behaviour, not a dead end: an opus5
-# capacity outage now parks the item for a human instead of quietly serving it from a retired tier.
+# degrade to). [GPT-5.6] CAPACITY-ESCALATION CONTRACT: for capacity exhaustion, `escalate = true`
+# never writes `needs:user`.
+# Registry CLAIM first keeps the item `status:deferred` during the bounded retry grace, then applies
+# the machine-owned `status:parked` soft hold if zero headroom persists; a successful retry after
+# recovery clears that hold.
+# The executable cross-repo contract lives at stable symbols, not copied prose: this repo's
+# `scripts/route-resolve.py::resolve()` propagates the flag into
+# `scripts/dispatch-plan.py::plan_dispatch()`. The registry revalidates it in
+# `jeswr/agent-account-registry/scripts/policy-resolve.py::resolve()`, then
+# `scripts/dispatch-claim.py::escalate_starved()` and `::escalate_persist_decision()` enforce the
+# zero-headroom observation and bounded grace. Its `::_park_source_issue()` delegates the label
+# transition to `scripts/worker-issue.py::set_status(..., "parked")`; the same function's `"retry"`
+# transition clears both `status:deferred` and `status:parked` when capacity recovers.
+# This keeps the route fail-closed without turning provider capacity into a human-owned terminal.
+# The separate post-review trust/soundness arm remains human-gated.
 [[route]]
 match_labels = ["zk", "mpc", "reasoner", "crypto", "auth", "e2ee"]
 model_chain = ["opus5"]
 agent = "sparq-reviewer"
-escalate = true                        # consumed by dispatch: on chain-exhaustion, label needs:user
+escalate = true                        # capacity contract above; registry _park_source_issue(), never needs:user
 
 # ---------------------------------------------------------------------------------------------------
-# ROLE ROUTES. Implementation chains LEAD WITH OPUS 5 (maintainer directive 2026-07-26: "Opus5
-# should be prioritised over sol on all tasks for which they are both possible implementors;
-# except for GUI work where sol should remain prioritised").
-#
-# WHY THIS CHANGED, because the mechanism matters more than the edit: these chains led with SOL
-# under the 2026-07-18 "credit abundance" directive, taken during a period of high sol
-# availability. Nothing about sol's dominance was adaptive — the registry's account selector walks
-# `model_chain` IN ORDER and claims the first available account (select-and-claim.choose_account),
-# so a sol-first literal simply won every route, every tick, regardless of how availability had
-# since shifted. Measured 2026-07-26: 11 of the 12 most recent orchestrator PRs were
-# openai/sol-implemented. The stale steer was the chain ORDER itself, not a heuristic, so the fix
-# is the order.
-#
-# Cross-provider review flips automatically: opus5-authored implementation receives codex review,
-# and vice versa — so leading with opus5 also moves the review load onto sol, which is where the
-# spare credit actually is.
+# [SPARQ agent] ROLE ROUTES. The 2026-09-02 maintainer protocol separates responsibilities: GPT-5.6
+# Sol is the primary implementation tier, while Opus 5 remains the review/soundness tier and
+# reviews new Sol-authored PRs through the existing cross-provider inversion. Opus stays behind Sol as a
+# continuity fallback for current Anthropic-authored repairs and total Sol unavailability. Each
+# implementation route declares `escalate = true` so capacity exhaustion takes the registry's
+# bounded retry path and then its visible, machine-owned `status:parked` soft hold.
 
-# [OPUS-5] `role:impl` IS OPUS5-ONLY SINCE 2026-07-26 — sol was REMOVED, not demoted.
+# HISTORICAL CONTEXT (superseded by the 2026-09-02 protocol above): `role:impl` was Opus5-only
+# beginning 2026-07-26. The measurements below explain that prior state; they are not current policy.
 #
 # MAINTAINER DECISION 2026-07-26, taken on the measurement in registry #738: "Remove sol from impl
 # fallback." This is a deliberate change from PREFERENCE to EXCLUSION and it applies to `role:impl`
@@ -167,37 +172,33 @@ escalate = true                        # consumed by dispatch: on chain-exhausti
 # steady-state projection.
 [[route]]
 role = "impl"
-model_chain = ["opus5"]
+model_chain = ["sol", "opus5"]
 agent = "sparq-rust-impl"
 escalate = true
 
-# [FABLE-5] UI/front-end ownership (maintainer decision 2026-07-17): GPT-5.6 codex (openai; alias
-# `terra`) implemented the original registry dashboard UI (jeswr/agent-account-registry e4098b9)
-# and is responsible for ALL UI/front-end work, so the site chain LEADS with terra; the previous
-# chain follows as fallback. scripts/triage.py derives role:site for UI-surface labels
-# (area:site/area:gui/surface:frontend/dashboard) so surface-labelled work lands here too.
+# Site/front-end implementation follows the Sol-first implementation protocol. scripts/triage.py
+# derives role:site for UI-surface labels, so surface-labelled work lands here too.
 # Deliberately a ROLE route, not match_labels: the review lane's arm-side security classifier
 # unions ALL match_labels keywords, so UI keywords there would human-arm every UI PR.
 [[route]]
 role = "site"
-model_chain = ["opus5", "sol"]
+model_chain = ["sol", "opus5"]
 agent = "sparq-site"
+escalate = true
 
-# [OPUS-5] THE `area:gui` CARVE-OUT (maintainer directive 2026-07-26): "Opus5 should be prioritised
-# over sol on all tasks for which they are both possible implementors; except for GUI work where
-# sol should remain prioritised". Boundary settled by the maintainer the same day: "Let's just go
-# with area:gui work" — so the carve-out is `area:gui` and NOTHING ELSE. The site* surfaces
-# (area:site, area:site-specs, area:site-papers, …) are NOT GUI: they fall under the opus5-first
-# default above, even though "GUI" reads informally as if it covered them.
+# GUI implementation is Sol-first like every other implementation route. The exact `area:gui`
+# selector and legacy preference declaration remain below for PLAN/CLAIM compatibility with older
+# target revisions; on the current Sol-first chain they are deliberately idempotent.
 #
-# This route PRESERVES the existing UI -> codex/sol original-builder steer (task #331) for the
-# desktop GUI; it is a carve-out from a new default, not a reversal of anything.
+# This also preserves the existing UI -> Codex/Sol original-builder steer (task #331) for the
+# desktop GUI while bringing every other implementation surface onto the same default.
 #
-# WHERE THE CARVE-OUT ACTUALLY BINDS. This route alone is NOT sufficient and must not be mistaken
+# HISTORICAL FAILURE MODE / WHERE THE CARVE-OUT ACTUALLY BINDS. This route alone is NOT sufficient
+# and must not be mistaken
 # for the mechanism: role routes are reached only via a `role:` LABEL, `role:gui` did not exist as a
 # repo label until 2026-07-26, and `triage._role()` returns an EXPLICIT `role:*` before it consults
 # any surface label — so all 35 open `area:gui` issues (33 role:impl, 1 role:perf, 1 role:research)
-# resolved `role:impl` and took the opus5-first default, INVERTING the directive for the whole GUI
+# resolved `role:impl` and took the then-opus5-first default, INVERTING the directive for the GUI
 # backlog. The binding rule therefore lives in scripts/route-resolve.py `gui_carve_out()`: it reads
 # the `area:gui` label the issues ALREADY carry, at plan time, and re-orders whatever chain they
 # resolve to. This route is the declarative statement of the same preference for an issue that does
@@ -208,46 +209,44 @@ agent = "sparq-site"
 # human-arm every GUI PR. scripts/triage.py derives role:gui from `area:gui` alone (it used to
 # fold area:gui into role:site).
 #
-# PREFERENCE, NOT EXCLUSION: opus5 remains the fallback, so GUI work stays dispatchable during a
-# sol/OpenAI outage. The chain is cross-provider and therefore cannot be starved by one provider.
+# Opus 5 is retained behind Sol only as the continuity fallback described above.
 [[route]]
 role = "gui"
 model_chain = ["sol", "opus5"]
 agent = "sparq-site"
+escalate = true
 
-# [FABLE-5] STANDING RULE — frontier-tier CI/infrastructure authorship (maintainer decision
-# 2026-07-17; same standing-rule pattern as the UI→codex route above, PR #3416): ALL CI/
-# infrastructure work — .github/workflows, gate aggregators, orchestration/ + dispatch scripts,
-# the self-draining pipeline itself — is authored by a FRONTIER-tier model only: opus5 (Claude
-# Opus 5, the SOLE anthropic tier since 2026-07-26 — fable was deprecated out of this chain) or
-# sol (GPT-5.6 / codex). Cheaper tiers (sonnet/haiku) no longer author infra;
-# cross-provider review is unchanged (whichever provider's frontier writes, the other reviews).
-# The chain is deliberately FRONTIER-ONLY rather than floor-pinned: the routing schema has no
-# floor/pin marker (the fix-floor pin lives in the registry's review loop, not here), and
-# chain-exhaustion at the registry's claim step already DEFERS the item (no eligible account →
-# no claim → retried next tick) instead of degrading below the chain. NOT `escalate = true`:
-# that flips a starved item to needs:user (human); this rule wants defer+retry.
+# [SPARQ agent] CI/infrastructure is implementation and therefore uses the same Sol-first lane. Opus 5
+# reviews the resulting OpenAI-authored PR through the registry-owned review chain.
+# The chain is deliberately frontier-only rather than floor-pinned. `escalate = true` uses the
+# registry's `dispatch-claim.py::{escalate_starved, escalate_persist_decision,
+# _park_source_issue}` path: retry first, then a visible machine-owned park, never `needs:user`.
+# This is intentional for CI: exhaustion of both providers must not become an unbounded silent
+# defer loop; `status:parked` remains machine-recoverable when capacity returns.
 # scripts/triage.py derives role:ci for infra-surface labels (area:ci/area:ci-fragments/
 # area:orchestration/area:workflows/area:release) so surface-labelled infra work lands here.
-# Security overlap: the match_labels overrides above still WIN over this route (opus + human
-# escalation) — where role:ci and a security surface overlap, the security lane is correct.
+# Security overlap: the match_labels overrides above still WIN over this route (Opus-only review +
+# a separate human post-review arm) — where role:ci and a security surface overlap, that lane wins.
 [[route]]
 role = "ci"
-model_chain = ["opus5", "sol"]
+model_chain = ["sol", "opus5"]
 agent = "sparq-ci-infra"
+escalate = true
 
 [[route]]
 role = "perf"
-model_chain = ["opus5", "sol"]
+model_chain = ["sol", "opus5"]
 agent = "sparq-perf-engineer"
+escalate = true
 
 # [OPUS-5] research was ["opus5", "fable", "opus"] until 2026-07-26. Deprecating the two tail
 # rungs left a ONE-RUNG chain with no `escalate`, i.e. no exit at all: on an opus5 capacity outage
 # the item could only defer, and defer again, forever — a silent permanent stall with no human
 # ever notified. Deprecating a fallback therefore has to come with an exit, so research now
-# escalates like the other single-rung (review/soundness/security) chains: chain exhaustion parks
-# the issue to needs:user. Deliberately NOT solved by adding `sol`: research authorship stays on
-# the anthropic side, and a cross-provider rung would have hidden the stall rather than surfaced it.
+# escalates like the other single-rung (review/soundness/security) chains: chain exhaustion takes
+# the bounded defer -> machine-owned `status:parked` path documented above. Deliberately NOT solved
+# by adding `sol`: research authorship stays on the anthropic side, and a cross-provider rung would
+# have hidden the stall rather than surfaced it.
 [[route]]
 role = "research"
 model_chain = ["opus5"]
@@ -266,9 +265,10 @@ escalate = true
 role = "docs"
 model_chain = ["sol", "terra", "opus5"]
 agent = "sparq-docs"
+escalate = true
 
 # Review / soundness: Opus 5 alone (the opus-4.8 tail fallback was deprecated 2026-07-26);
-# escalate to human on chain-exhaustion (do NOT fall to a weaker model).
+# on chain-exhaustion use the bounded machine-park contract above (do NOT fall to a weaker model).
 [[route]]
 role = "review"
 model_chain = ["opus5"]
@@ -282,10 +282,10 @@ agent = "sparq-reviewer"
 escalate = true
 
 # ---------------------------------------------------------------------------------------------------
-# [OPUS-5] CHAIN-ORDER PREFERENCES — THE CARVE-OUT, DECLARED WHERE **BOTH** RESOLVERS CAN READ IT.
-#
-# The route above is not enough on its own, and the reason is that the dispatch decision is made
-# TWICE, in two repositories:
+# [SPARQ agent] LEGACY CHAIN-ORDER PREFERENCE — retained for PLAN/CLAIM compatibility with older
+# target revisions.
+# The current implementation routes are already Sol-first, so this rule is idempotent today. It
+# remains declared as data because the dispatch decision is made twice, in two repositories:
 #
 #   PLAN   the registry's dispatch.yml clones THIS repo and runs THIS repo's scripts/dispatch-plan.py
 #          -> scripts/route-resolve.py -> gui_carve_out().
@@ -293,13 +293,9 @@ escalate = true
 #          scripts/policy-resolve.py, reading THIS FILE from the protected default-branch tip, and
 #          `_route_matches` then demands EXACT equality of model_chain / agent / escalate.
 #
-# So a chain-order rule expressed ONLY in this repo's Python is not a preference that half-applies:
-# CLAIM re-derives a different chain, raises DispatchError, and the item is counted
-# `route-policy-failed` and skipped. That comparison is a pure function of the issue's labels and
-# this table, so it produces the identical skip on every subsequent tick — the affected issues
-# stop dispatching ENTIRELY, and the only symptom is a defer counter. Measured against this
-# branch's own resolver before this block existed: 34 of the 35 open `area:gui` issues (33
-# `role:impl` + 1 `role:perf`) diverged.
+# A chain-order rule expressed only in target Python would make PLAN and CLAIM disagree. Keeping
+# the declaration preserves exact agreement while older revisions or synthetic tests still carry
+# mixed Sol/Opus implementation chains.
 #
 # CLAIM cannot import this repo's resolver — running target-authored CODE in the privileged claim
 # step is the escalation registry #119 closed. But it already trusts this file, fetched from the
@@ -323,18 +319,11 @@ escalate = true
 #             the EXACT roles for which `lead` may be ADDED to a chain that lacks it, rather than
 #             only re-ordered. Absent => none, i.e. the original re-order-only rule.
 #
-# WHY `inject_roles` IS NOW REQUIRED HERE (registry #738, 2026-07-26). Re-ordering was sufficient
-# only while every affected route still HAD sol in its chain. `role:impl` is now `["opus5"]`, and a
-# `["opus5"]` chain does not contain sol — so the both-implementors condition DECLINES and the
-# carve-out goes INERT for all 33 open `area:gui` + `role:impl` issues, resolving them opus5-only.
-# That is the exact inversion of the maintainer's one stated exception that PR #4211 fixed, and it
-# has NO SYMPTOM: both resolvers agree on the wrong answer, so the PLAN/CLAIM agreement harness
-# reports nothing. `inject_roles = ["impl"]` is what keeps `area:gui` sol-first across that edit.
-#
-# The allow-list is deliberately minimal. `role:perf` / `role:site` / `role:ci` / `role:docs` still
-# contain sol, so they take the RE-ORDER path and are absent here. The registry mechanism REFUSES to
-# parse `research` / `review` / `soundness` in this field (chain_preference.INJECT_FORBIDDEN_ROLES),
-# so the escalating single-provider lanes cannot be made cross-provider even by editing this table.
+# `inject_roles = ["impl"]` is retained solely to reproduce the historical mixed-chain behavior
+# when an older target revision is resolved. The current `role:impl = ["sol", "opus5"]` chain
+# already has Sol in front and therefore does not activate injection. The registry parser still
+# refuses research/review/soundness injection, so this compatibility declaration cannot widen
+# those Opus-only lanes.
 #
 # A SECURITY-override route is exempt on both sides: `area:gui` + `area:sparq-zk` is a ZK issue
 # first, and an implementor preference must never re-order OR extend a soundness chain.
