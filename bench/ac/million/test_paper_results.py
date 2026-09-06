@@ -35,7 +35,7 @@ class PaperResultBindings(unittest.TestCase):
         if inputs is not None:
             (self.directory / "analysis.json").write_text(json.dumps(inputs))
         source = self.directory / "binding.typ"
-        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts\n' + body)
+        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts, model-responses, range-label\n' + body)
         result = subprocess.run([TYPST, "query", "--root", str(ROOT), str(source), "<result>", "--field", "value"],
                                 check=True, text=True, capture_output=True)
         return json.loads(result.stdout)
@@ -76,6 +76,48 @@ class PaperResultBindings(unittest.TestCase):
         self.assertTrue(data["indexed_component_diagnostics"][0]["valid_for_component_inference"])
         result = self.query('#let data = json("analysis.json")\n#main-tables(data)\n#metadata(main-state(data)) <result>', data)
         self.assertEqual(result, ["finalized and reviewed"])
+
+    def test_absolute_ranges_do_not_pool_runs_or_include_invalid_records(self):
+        cells = [
+            {"model": "wac", "local_guard": "pass", "valid_for_inference": True, "requests": {
+                "latency_us": {"successful:scheduled_latency_us": {"p95": 10000}},
+                "deadline_fraction_of_offered": .98, "success_fraction_of_offered": .999}},
+            {"model": "wac", "local_guard": "fail", "valid_for_inference": True, "requests": {
+                "latency_us": {"successful:scheduled_latency_us": {"p95": 300000}},
+                "deadline_fraction_of_offered": .005, "success_fraction_of_offered": .01}},
+            {"model": "wac", "local_guard": "inconclusive", "valid_for_inference": False, "requests": {
+                "latency_us": {"successful:scheduled_latency_us": {"p95": 1}},
+                "deadline_fraction_of_offered": 1, "success_fraction_of_offered": 1}},
+            {"model": "wac", "local_guard": "unmeasured", "valid_for_inference": False},
+        ]
+        result = self.query('#metadata(model-responses(json("analysis.json").cells, "wac")) <result>', {"cells": cells})[0]
+        self.assertEqual(result["planned_runs"], 4)
+        self.assertEqual(result["valid_runs"], 2)
+        self.assertEqual(result["successful_p95_us"], {"n": 2, "lower": 10000, "upper": 300000})
+        self.assertEqual(result["timely_fraction"], {"n": 2, "lower": .005, "upper": .98})
+        self.assertEqual(result["success_fraction"], {"n": 2, "lower": .01, "upper": .999})
+
+    def test_fast_errors_do_not_become_successful_latency_or_missing_zero(self):
+        cells = [
+            {"model": "wac", "local_guard": "fail", "valid_for_inference": True, "requests": {
+                "latency_us": {"successful:scheduled_latency_us": {"p95": None},
+                               "all:scheduled_latency_us": {"p95": 1000}},
+                "deadline_fraction_of_offered": 0, "success_fraction_of_offered": 0}},
+            {"model": "acp", "local_guard": "inconclusive", "valid_for_inference": False, "requests": {
+                "latency_us": {"successful:scheduled_latency_us": {"p95": 1000}},
+                "deadline_fraction_of_offered": 1, "success_fraction_of_offered": 1}},
+        ]
+        result = self.query('''#let cells = json("analysis.json").cells
+#let wac = model-responses(cells, "wac")
+#let acp = model-responses(cells, "acp")
+#metadata((range-label(wac.successful_p95_us, scale: 0.001), range-label(wac.timely_fraction, scale: 100),
+           range-label(wac.success_fraction, scale: 100), range-label(acp.timely_fraction, scale: 100))) <result>
+''', {"cells": cells})
+        self.assertEqual(result, [["—", "0", "0", "—"]])
+
+    def test_percent_range_rounding_does_not_hide_a_small_failure_fraction(self):
+        result = self.query('#metadata(range-label((n: 1, lower: 0.99999, upper: 0.99999), scale: 100)) <result>')
+        self.assertEqual(result, ["99.9–100"])
 
     def test_all_planned_states_are_visible(self):
         result = self.query('''#let cells = ("pass", "fail", "inconclusive", "unmeasured").map(s => (model: "wac", local_guard: s))
