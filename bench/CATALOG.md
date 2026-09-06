@@ -65,7 +65,7 @@ conventions first, then a per-category map that points at the registry, then a
 | **scaling** | parallel thread sweep + cross-commit/hardware tracking | `cli-scaling`, `ci-bench`, `ci-bench-ec2`, `hw-bench`, `wasm-compare`, `graphalytics` |
 | **inference** | N3 / RDFS / OWL closure + incremental maintenance; access-control (WAC/ACP/ODRL) oracle; trust-graph closure | `inference-eye-comparison`, `inference-owl-bench`, `inference-incremental`, `deep-taxonomy`, `owl-sameas`, `solid-wac-bench`, `policy-odrl-eval`, `ac-oracle`, `ac-odrl-overhead`, `trust-graph-closure`, `reason-el-real`, `reason-ql-npd`, `reason-dl-ore`, `materialize-competitors` |
 | **zk** | commitment pipeline, trace seam, circuit gates, prove/verify | `zk-commit-throughput`, `zk-trace-overhead`, `zk-compose-gates`, `zk-compose-prove-verify` |
-| **serve** | canonical loopback HTTP throughput harness; concurrent-serving + memory-tiering research spikes; PSS write-path parity gate | `serve-throughput`, `serve-spikes`, `memtier-spikes`, `pss-update-parity`, `gsp-bench`, `python-bindings-bench` |
+| **serve** | canonical loopback HTTP throughput harness; concurrent-serving + memory-tiering research spikes; PSS write-path parity gate | `serve-throughput`, `serve-spikes`, `memtier-spikes`, `pss-update-parity`, `gsp-bench`, `python-bindings-bench`, `construct-stream` |
 | **conformance** | W3C SPARQL + reasoning suites (correctness, not perf) | `sparql-conformance`, `inference-conformance`, `jsonld-bench`, `canon-bench`, `rif-conformance` |
 | **competitors** | versioned external-engine comparison (Oxigraph / QLever / Fuseki+TDB2 / eye + the SHACL/geo/FTS/vector peers) + version+env capture | `competitor-gather` (registry: [`competitors.json`](./competitors.json)) |
 
@@ -99,6 +99,18 @@ Notes on a few that need care:
   the sent/reference set exactly) runs BEFORE any timing; the driver is loopback-only
   (refuses non-loopback URLs). `bash bench/gsp/run.sh --smoke` is the self-contained
   acceptance run. First-read record: `research/gap-gsp-2026-07.md`. [FABLE-5]
+- **`construct-stream` (`bench/construct-stream`) is a SELF-DIFFERENTIAL harness** — see
+  [`bench/construct-stream/README.md`](./construct-stream/README.md). It measures TTFB and
+  peak RSS for a large CONSTRUCT with the response body **streamed** (`GET`, chunked) against
+  the **buffered** control (`HEAD`, which renders the whole document to one `String` — the
+  pre-`sq-0kq6k` code path), one server process per arm because `VmHWM` is monotonic. Both
+  arms hit the same binary and corpus in the same run, so it is immune to cross-build drift,
+  but wall-clock and RSS are still **NON-CANONICAL on a shared box**. A HARD agreement gate
+  (streamed body length == the buffered `Content-Length`; exact triple count) runs before any
+  timing, with a corrupt-the-body non-vacuity self-check. First read (work box, no numbers
+  transcribed): TTFB moved as hypothesised; **peak RSS did not separate** — the CONSTRUCT
+  result graph is materialised in full before rendering, so it, not the rendering, sets the
+  high-water mark. Read the README before quoting this harness. [FABLE-5]
 - **`sp2b` (SP2Bench) is tiered** — see [`bench/sp2b/README.md`](./sp2b/README.md).
   The per-commit path builds+caches the real Freiburg generator (BSD; sha256-pinned, g++
   `-O2` not `-O3`) and runs 14 sub-second queries on a fixed 250k-triple corpus, emitting

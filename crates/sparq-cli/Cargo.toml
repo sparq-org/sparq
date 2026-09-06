@@ -54,6 +54,13 @@ jsonld = ["sparq-core/jsonld", "serialize-rdf"]
 # Pulled into the default build by `jsonld` (above); a `--no-default-features` build that wants ONLY
 # the Turtle/TriG/N-Quads writers (no JSON-LD parser) can enable `serialize-rdf` on its own.
 serialize-rdf = ["sparq-engine/serialize-rdf"]
+# [FABLE-5] (sq-0kq6k) `streaming-serialization` — `dump <file> <in> turtle|trig` writes STRAIGHT
+# to stdout through the engine's streaming writers instead of building the whole rendered
+# document as one `String` first. Implies `serialize-rdf` (same writer matrix, sink-shaped) and
+# forwards sparq-engine's feature of the same name. OFF by default: the output is byte-identical
+# either way, so this buys a memory shape, not a capability, and the default CLI keeps compiling
+# only the buffered writers.
+streaming-serialization = ["serialize-rdf", "sparq-engine/streaming-serialization"]
 # HDT ingestion (`<file>.hdt[.gz]` / format "hdt") via the opt-in sparq-hdt crate.
 # OFF by default for two deliberate reasons: (1) sparq-hdt's MSRV is 1.87 (the
 # wrapped hdt crate) vs this crate's workspace floor of 1.85 — a default dep

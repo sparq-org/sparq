@@ -408,8 +408,12 @@ opt-in `streaming-serialization` feature adds `write_turtle_streaming(triples, &
 and `write_trig_streaming(&named_graphs, &prefixes, &mut w)` (plus the whole-graph
 `graph_to_turtle_streaming(&g, &prefixes, &mut w)` / `graph_to_trig_streaming`) that render the body
 directly into any `W: std::io::Write`, buffering only **one subject block at a time** (emitting on
-subject change) — so the whole rendered output is never materialised, enabling HTTP chunked
-CONSTRUCT/DESCRIBE responses (first bytes flushed after the first subject, not the last). The
+subject change) — so the whole rendered output is never materialised. <!-- [FABLE-5] sq-0kq6k -->
+These are the writers behind `sparq-cli dump <file> <in> turtle|trig` under the CLI feature of the
+same name. They are **not** what serves an HTTP CONSTRUCT/DESCRIBE: `sparq-server` renders a graph
+response with `oxttl` / `oxrdfxml` (a different writer with a different output shape) and streams
+through *those* serialisers' `io::Write` seam, so its response bytes are unchanged — see
+`skills/http-server/SKILL.md`. The
 streamed bytes are **byte-identical** to the buffered `write_turtle` / `write_trig` for the same
 graph (same used-prefix header, same subject grouping, same ordering): both share the prefix-header
 and per-subject-block rendering, and graph-sourced triples are subject-contiguous (`iter_ids()` walks

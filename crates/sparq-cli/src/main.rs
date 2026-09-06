@@ -1635,6 +1635,17 @@ fn cmd_dump(args: &[String]) {
         })),
     };
     let g = load_quiet(path, in_fmt);
+    // [FABLE-5] (sq-0kq6k) The two out-formats that HAVE a streaming writer go straight to
+    // stdout instead of through the `serialized` String below, so `dump` never holds the whole
+    // rendered document in memory on top of the loaded store. Byte-identical to the buffered
+    // writers (the engine's own `streamed == buffered` tests pin that), so this is a
+    // memory-shape change only. Opt-in: without the `streaming-serialization` feature the
+    // buffered arms below still handle `turtle` / `trig`.
+    #[cfg(feature = "streaming-serialization")]
+    if matches!(out_fmt, "turtle" | "ttl" | "trig") {
+        dump_streaming(&g, out_fmt);
+        return;
+    }
     use sparq_engine::serialize::JsonLdForm;
     let serialized = match out_fmt {
         // [OPUS-4.8] (sq-oy1f.5) FULL W3C JSON-LD 1.1 Compaction against the `--context` file.
@@ -1658,10 +1669,18 @@ fn cmd_dump(args: &[String]) {
                 sparq_engine::serialize::graph_to_jsonld_compact(&g, &ctx)
             }
         }
+        // [FABLE-5] (sq-0kq6k) With `streaming-serialization` on, `turtle` / `ttl` / `trig`
+        // NEVER reach here — `dump_streaming` above returned already. Compiling these arms out
+        // in that feature state keeps ONE live path per format instead of a silent buffered
+        // fallback, so deleting the streaming dispatch is a loud "unknown out-format" (exit 2)
+        // rather than a quiet regression to buffering.
+        #[cfg(not(feature = "streaming-serialization"))]
         "turtle" | "ttl" => sparq_engine::serialize::graph_to_turtle(&g),
-        // [OPUS-4.8] (sq-ixc3.2) idiomatic, deterministic pretty Turtle / TriG.
+        // [OPUS-4.8] (sq-ixc3.2) idiomatic, deterministic pretty Turtle / TriG. The PRETTY
+        // writers sort their output, so they have no streaming counterpart and stay buffered.
         "turtle-pretty" | "ttl-pretty" => sparq_engine::serialize::graph_to_turtle_pretty(&g),
         "trig-pretty" => sparq_engine::serialize::graph_to_trig_pretty(&g),
+        #[cfg(not(feature = "streaming-serialization"))]
         "trig" => sparq_engine::serialize::graph_to_trig(&g),
         "nquads" | "n-quads" => sparq_engine::serialize::graph_to_nquads(&g),
         "jsonld" | "json-ld" | "jsonld-expanded" => {
@@ -1711,6 +1730,41 @@ fn cmd_dump(args: &[String]) {
         }
     };
     print!("{serialized}");
+}
+
+/// [FABLE-5] (sq-0kq6k) Streams a `dump` in Turtle or TriG straight to stdout via the engine's
+/// streaming writers (`graph_to_turtle_streaming` / `graph_to_trig_streaming`), so the whole
+/// rendered document is never materialised — only the loaded store plus one subject block.
+///
+/// The bytes are exactly what the buffered `graph_to_turtle` / `graph_to_trig` would have
+/// printed: both feed the same `default_prefixes()` and the same store walk, and the engine's
+/// `serialize::tests::streaming::*` suite pins streamed-equals-buffered byte equality.
+///
+/// A `BufWriter` around the locked stdout keeps the syscall count the same order as one big
+/// `print!` — the writers emit a subject block at a time, which would otherwise be one `write`
+/// each. A broken pipe (`dump … | head`) is a normal, silent exit; any other write error is
+/// reported and exits 1, rather than the panic `print!` would raise.
+#[cfg(feature = "streaming-serialization")]
+fn dump_streaming(g: &sparq_core::Graph, out_fmt: &str) {
+    use sparq_engine::serialize::{default_prefixes, graph_to_trig_streaming, graph_to_turtle_streaming};
+    use std::io::Write;
+
+    let prefixes = default_prefixes();
+    let stdout = std::io::stdout();
+    let mut w = std::io::BufWriter::new(stdout.lock());
+    let result = match out_fmt {
+        "trig" => graph_to_trig_streaming(g, &prefixes, &mut w),
+        // "turtle" | "ttl" — the caller only routes these three here.
+        _ => graph_to_turtle_streaming(g, &prefixes, &mut w),
+    }
+    .and_then(|()| w.flush());
+    if let Err(e) = result {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            return;
+        }
+        eprintln!("error writing {out_fmt} to stdout: {e}");
+        std::process::exit(1);
+    }
 }
 
 /// [FABLE-5] (sq-8ju74) `to-hdt <data-file[.gz|.bz2|.zst]> <format> <out.hdt[.gz|.zst|.bz2]>` —

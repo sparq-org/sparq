@@ -396,6 +396,28 @@ well-formed, correctly-terminated SHORT `200` is a forbidden outcome** — `--ma
 an honest refusal, never a silent truncation, and hitting it mid-stream drops the closing `]}}`
 rather than emitting a clean short document.
 
+<!-- [FABLE-5] sq-0kq6k -->
+**CONSTRUCT / DESCRIBE bodies stream (TTFB).** The RDF-graph response body is written through a
+chunk sink instead of being rendered into one whole document `String` first, so the first
+subject blocks reach the socket before the last triple is rendered. The two response shapes
+match the SELECT-JSON path: a result that fits **one 64 KiB chunk** is returned buffered with a
+`Content-Length` (unchanged wire shape for every small CONSTRUCT); a larger one streams under
+**chunked transfer-encoding** with **no `Content-Length`**. Turtle, N-Triples and RDF/XML stream
+genuinely; **JSON-LD does not** (a JSON-LD document is node-merged, so its writer still builds
+the whole document before writing). `HEAD` deliberately stays on the buffered path so it can
+keep advertising the `Content-Length` a `GET` would have carried.
+
+Unlike the SELECT stream, the status is **never** committed early: the engine materialises the
+whole result graph before serialisation starts, so a budget / deadline / evaluation failure is
+always known before the first byte and is always a clean `413` / `503` / `500`. A graph result
+cannot be truncated mid-stream the way a streamed SELECT can.
+
+Honest scope: this is a **TTFB and allocation** change, not a measured peak-RSS win. Peak
+process RSS on a large CONSTRUCT is dominated by materialising the result `Vec<Triple>` (and the
+solutions it is instantiated from), which both paths do — see
+[`bench/construct-stream/README.md`](../../bench/construct-stream/README.md) for the harness and
+the first-read finding.
+
 <!-- [OPUS-4.8] sq-7d3dj.34.1 -->
 **Single parse per request (HTTP floor).** The read path parses each request query with
 `spargebra` exactly ONCE — the server parses to classify the form + apply any protocol dataset
