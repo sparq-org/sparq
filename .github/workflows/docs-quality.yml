@@ -1448,14 +1448,13 @@ jobs:
         # check-run concluded failure, would wrongly block on this advisory job. Swallowing
         # at the step makes the job conclude success while the findings still print.
         continue-on-error: true
-        uses: errata-ai/vale-action@85f9f7f2c5f449ac0ae5b66662961bae3f77ca6a # v2.1.2
+        uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3.0.0
         with:
           version: 3.9.1
-          files: README.md AGENTS.md CONTRIBUTING.md SECURITY.md skills docs crates
+          files: '["README.md","AGENTS.md","CONTRIBUTING.md","SECURITY.md","skills","docs","crates"]'
           fail_on_error: false
-          # `local` reporter prints to the job log — no PR-annotation write scope
-          # needed (top-level permissions stay read-only). Advisory anyway.
-          reporter: local
+          # [GPT-5] The v3 default (`github-pr-annotations`) reports through the runner log, so
+          # this advisory lane keeps the workflow's read-only permissions and needs no PR writes.
           token: ${{ github.token }}
 
       # ---- former job: external-links (lychee online, advisory) ----
