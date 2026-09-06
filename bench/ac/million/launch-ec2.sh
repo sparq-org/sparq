@@ -38,6 +38,11 @@ fi
 if [[ ! "${WATCHDOG_SECONDS}" =~ ^[0-9]+$ ]] || (( WATCHDOG_SECONDS > 43200 )); then
   die "watchdog must be at most 43200 seconds"
 fi
+(( WATCHDOG_SECONDS >= 60 )) || die "watchdog must be at least 60 seconds"
+if [[ ! "${POLL_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]] \
+  || (( POLL_INTERVAL_SECONDS < 1 || POLL_INTERVAL_SECONDS > 60 )); then
+  die "poll interval must be between 1 and 60 seconds"
+fi
 if [[ ! "${POLL_DEADLINE_SECONDS}" =~ ^[0-9]+$ ]] \
   || (( POLL_DEADLINE_SECONDS >= WATCHDOG_SECONDS )); then
   die "poll deadline must be shorter than the watchdog"
@@ -49,6 +54,9 @@ command -v ssh >/dev/null || die "ssh is unavailable"
 command -v scp >/dev/null || die "scp is unavailable"
 command -v rsync >/dev/null || die "rsync is unavailable"
 command -v curl >/dev/null || die "curl is unavailable"
+[[ -f "${ROOT}/bench/ac/million/run-instance.sh" \
+   && -r "${ROOT}/bench/ac/million/run-instance.sh" ]] \
+  || die "the populated-Pod instance runner is absent or unreadable"
 
 [[ -z "$(git -C "${ROOT}" status --porcelain)" ]] \
   || die "the source tree must be clean before a canonical bundle is made"
