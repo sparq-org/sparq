@@ -495,7 +495,8 @@ pub(super) fn pack(settings: &Settings) -> Result<()> {
         match settings.text("profile", "smoke").as_str() {
             "smoke" => PopulationConfig::smoke(),
             "history" => PopulationConfig::service_history(),
-            _ => return Err("profile must be smoke or history".into()),
+            "entropy" => PopulationConfig::service_history_entropy(),
+            _ => return Err("profile must be smoke, history or entropy".into()),
         }
     };
     let model = Policy::parse(&settings.text("model", "wac"))?;

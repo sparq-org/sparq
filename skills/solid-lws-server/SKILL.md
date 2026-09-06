@@ -33,6 +33,8 @@ target/release/examples/pod_population_http load --corpus /tmp/pod-wac --auth-di
 All options are `--name value`. `pack --model acp` emits the alternative
 policy encoding. `--profile history` selects the documented service-history
 scenario; `--config-file file.json` supplies an explicit `PopulationConfig`.
+`--profile entropy` retains the central record counts and rights while
+using the declared larger, less compressible text payload scenario.
 The `smoke` profile is a small control fixture and does not justify realistic
 population capacity. `pack` refuses to overwrite existing packed files.
 See the access-control benchmark skill for source evidence and assumptions.
