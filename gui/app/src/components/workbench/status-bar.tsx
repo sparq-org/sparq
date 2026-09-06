@@ -30,6 +30,7 @@ import * as React from "react";
 
 import { useEngine, type IngestState } from "@/lib/engine-context";
 import { useWorkspace } from "@/lib/workspace-context";
+import { formatBytes } from "@/lib/utils";
 
 /**
  * [OPUS-4.8] sq-ixc3.13 — an honest persistence-backend label from the workspace store's
@@ -41,19 +42,6 @@ function backendLabel(backend: "tauri" | "web" | "memory" | null): string {
   if (backend === "web") return "saved in this browser";
   if (backend === "memory") return "this session only";
   return "resolving…";
-}
-
-/** Format a real byte count as a compact human size (KB/MB/GB). Pure presentation of a real value. */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = bytes / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
 /**

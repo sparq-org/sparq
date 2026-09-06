@@ -16,7 +16,7 @@
     "start": "npx --yes serve out",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --import ./test-support/register-ts.mjs --test src/lib/editor-keys.test.ts src/lib/federation.test.ts src/lib/odrl.test.ts src/lib/tauri-fs.test.ts src/lib/import-batch.test.ts src/lib/workspace-actions-visibility.test.ts src/lib/rsp-feed.test.ts src/lib/plan-view.test.ts src/lib/query-monitor.test.ts src/lib/proof-view.test.ts src/lib/inferred-facts.test.ts src/lib/form-render-model.test.ts src/lib/forms-bridge.test.ts src/lib/file-decompress.test.ts src/lib/select-result-graph.test.ts scripts/strip-legacy-polyfills.test.mjs"
+    "test:unit": "node --import ./test-support/register-ts.mjs --test src/lib/editor-keys.test.ts src/lib/federation.test.ts src/lib/odrl.test.ts src/lib/tauri-fs.test.ts src/lib/import-batch.test.ts src/lib/import-url.test.ts src/lib/workspace-sources.test.ts src/lib/workspace-actions-visibility.test.ts src/lib/rsp-feed.test.ts src/lib/plan-view.test.ts src/lib/query-monitor.test.ts src/lib/proof-view.test.ts src/lib/inferred-facts.test.ts src/lib/form-render-model.test.ts src/lib/forms-bridge.test.ts src/lib/file-decompress.test.ts src/lib/select-result-graph.test.ts scripts/strip-legacy-polyfills.test.mjs"
   },
   "dependencies": {
     "buffer": "^6.0.3",

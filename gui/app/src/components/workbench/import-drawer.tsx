@@ -33,6 +33,12 @@
 //   `innerNameForSource` deliberately returns `null` for those extensions. A name alone cannot
 //   fix that; `.tgz` still falls back to Turtle and fails to parse.
 //
+// [OPUS-5] sq-ixc3.13 — the URL tab's fetch → decompress → format-auto-detect → load step moved
+//   into `lib/import-url.ts`, because the left rail's Imports subgroup now offers RE-FETCH on a
+//   recorded `url` source (research/gui-design.md §A.2) and both paths must resolve the format
+//   identically. A re-fetch UPSERTS its workspace source (lib/workspace-sources.ts) rather than
+//   appending a duplicate rail row.
+//
 // Three tabs:
 //   * FILE  — web: browser File upload (incl. compressed .gz/.zip/.zst/.bz2); desktop: native
 //             loader (every format incl. HDT), off the main thread.
@@ -62,7 +68,6 @@ import { useWorkspace } from "@/lib/workspace-context";
 import {
   FORMAT_OPTIONS,
   fileLabel,
-  formatFromContentType,
   guessFormat,
   isCompressed,
   isHdt,
@@ -72,7 +77,9 @@ import { hasNativeLoader, pickRdfFile } from "@/lib/tauri-ipc";
 import { hasDraggedFiles } from "@/lib/file-ingest";
 import type { IngestedFile, RejectedFile } from "@/lib/file-ingest";
 // [SONNET-4.6] sq-1y04h — decompression shim; codec chunks loaded lazily on demand.
-import { fetchRdfDocument, maybeDecompressFile } from "@/lib/file-decompress";
+import { maybeDecompressFile } from "@/lib/file-decompress";
+// [OPUS-5] sq-ixc3.13 — the URL ingest step, shared with the rail's re-fetch action.
+import { importUrlDocument } from "@/lib/import-url";
 import type { WorkspaceSourceMeta } from "@sparq/client";
 
 // ── Open-state context (so the rail / top bar / Cmd-K can open the drawer) ─────────────────────
@@ -378,30 +385,12 @@ function ImportDrawer({
   const onImportUrl = React.useCallback(() => {
     const target = url.trim();
     if (!target) return;
-    void finishImport("url", async () => {
-      // [GPT-5.6] sq-n18o5 — keep compressed response bytes intact until after codec detection.
-      const document = await fetchRdfDocument(target);
-      const format =
-        formatFromContentType(document.contentType) ?? guessFormat(document.effectiveName);
-      const result = await importRdf({
-        kind: "url",
-        mode,
-        preserveGraphs,
-        label: urlLabel(target),
-        format,
-        text: document.text,
-        url: target,
-      });
-      const source: WorkspaceSourceMeta = {
-        kind: "url",
-        label: urlLabel(target),
-        url: target,
-        format: result.format,
-        bytes: result.bytes,
-        importedAt: Date.now(),
-      };
-      return { source, storeSize: result.storeSize, added: result.added };
-    });
+    // [OPUS-5] sq-ixc3.13 — the fetch + decompress + format-auto-detect + load step now lives in
+    // `import-url.ts`, shared with the rail's RE-FETCH of a recorded URL source, so the same URL
+    // can never be parsed one way on import and another way on refresh.
+    void finishImport("url", () =>
+      importUrlDocument(target, { mode, preserveGraphs }, { importRdf }),
+    );
   }, [url, finishImport, importRdf, mode, preserveGraphs]);
 
   // ── PASTE ────────────────────────────────────────────────────────────────────────────────────
