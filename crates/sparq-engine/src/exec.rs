@@ -14400,9 +14400,8 @@ pub(crate) mod expr_program {
                     let cell = std::cell::RefCell::new(&mut *stack);
                     let v = eval_function_inner(f, args.len(), |i| {
                         let mut s = cell.borrow_mut();
-                        run(&args[i], graph, local, b, row, &mut **s)
+                        run(&args[i], graph, local, b, row, &mut s)
                     });
-                    drop(cell);
                     stack.push(v?);
                 }
             }
@@ -14427,8 +14426,11 @@ struct RowEval {
 /// off, so the default build allocates nothing and the call sites need no `cfg`.
 #[cfg(feature = "expr-program")]
 type EvalStack = Vec<Value>;
+// [GPT-6-ASTRA] A zero-sized scratch type keeps feature-OFF bindings lint-clean
+// without suppressing let_unit_value or allocating storage.
 #[cfg(not(feature = "expr-program"))]
-type EvalStack = ();
+#[derive(Default)]
+struct EvalStack;
 
 /// A fresh scratch stack (see [`EvalStack`]).
 #[inline]
