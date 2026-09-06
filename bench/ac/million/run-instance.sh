@@ -9,11 +9,28 @@ results=/var/tmp/sparq-pod-study
 corpora=/var/tmp/sparq-pod-corpus
 auth=/var/tmp/sparq-pod-auth
 mkdir -p "${results}" "${corpora}"
-write_manifest() {
+finalize_artifacts() {
+  local marker="$1" state="$2" artifact manifest_tmp marker_tmp
+  cleanup
+  # Closed raw streams remain evidence even if the run ended before normal compression.
+  for artifact in "${results}"/*-requests.jsonl "${results}"/*-audit.jsonl "${results}"/*-warmup.jsonl; do
+    if [[ -f "${artifact}" ]] && command -v zstd >/dev/null 2>&1; then
+      if ! zstd -q -f --rm "${artifact}"; then
+        printf '%s\n' "Retained uncompressed artifact: ${artifact}" >> "${results}/finalization-warnings.txt"
+      fi
+    fi
+  done
+  printf '%s\n' "${state}" > "${results}/stage.txt"
   date -u +%FT%TZ > "${results}/finished-at.txt"
-  manifest_tmp=$(mktemp /var/tmp/pod-results-manifest.XXXXXX)
-  (cd "${results}" && find . -maxdepth 1 -type f ! -name MANIFEST.sha256 ! -name DONE -print0 | sort -z | xargs -0 sha256sum) > "${manifest_tmp}"
+  manifest_tmp=$(mktemp "${results%/*}/pod-results-manifest.XXXXXX")
+  (cd "${results}" && find . -maxdepth 1 -type f ! -name MANIFEST.sha256 ! -name DONE ! -name FAILED -print0 | sort -z | xargs -0 sha256sum) > "${manifest_tmp}"
   mv "${manifest_tmp}" "${results}/MANIFEST.sha256"
+  marker_tmp=$(mktemp "${results%/*}/pod-results-marker.XXXXXX")
+  if [[ "${marker}" == FAILED ]]; then
+    cat "${results}/failure-detail.txt" > "${marker_tmp}"
+  fi
+  # The collector treats markers as publication: every artifact and hash must precede it.
+  mv "${marker_tmp}" "${results}/${marker}"
 }
 date -u +%FT%TZ > "${results}/started-at.txt"
 printf '%s\n' setup > "${results}/stage.txt"
@@ -22,9 +39,17 @@ cat > "${results}/runner-scope.json" <<'JSON'
 JSON
 server_pid=""
 cleanup() {
-  if [[ -n "${server_pid}" ]]; then kill "${server_pid}" 2>/dev/null || true; fi
+  if [[ -n "${server_pid}" ]]; then
+    kill "${server_pid}" 2>/dev/null || true
+    wait "${server_pid}" 2>/dev/null || true
+    server_pid=""
+  fi
 }
-failure() { printf '%s\n' "run failed at line $1" > "${results}/FAILED"; printf '%s\n' failed > "${results}/stage.txt"; write_manifest; }
+failure() {
+  trap - ERR
+  printf '%s\n' "run failed at line $1" > "${results}/failure-detail.txt"
+  finalize_artifacts FAILED failed
+}
 trap 'failure ${LINENO}' ERR
 trap cleanup EXIT
 cd "${root}"
@@ -52,9 +77,7 @@ binary="${CARGO_TARGET_DIR}/release/examples/pod_population_http"
 "${binary}" auth --auth-dir "${auth}" > "${results}/auth.jsonl"
 
 finish_results() {
-  printf '%s\n' complete > "${results}/stage.txt"
-  write_manifest
-  touch "${results}/DONE"
+  finalize_artifacts DONE complete
 }
 
 if [[ "${mode}" == canonical ]]; then
@@ -79,8 +102,9 @@ for profile in "${profiles[@]}"; do
       free_bytes=$(df -B1 --output=avail /var/tmp | tail -1 | tr -d ' ')
       if (( free_bytes < 26843545600 )); then
         printf '{"record_type":"storage-admission-stop","label":"%s","free_bytes":%s}\n' "${label}" "${free_bytes}" > "${results}/${label}-storage-stop.json"
-        touch "${results}/DONE"
-        exit 0
+        printf '%s\n' "storage admission stopped below the frozen disk floor" > "${results}/failure-detail.txt"
+        finalize_artifacts FAILED storage-admission-stop
+        exit 1
       fi
       "${binary}" pack --corpus "${corpus}" --profile "${profile}" --pods "${count}" --model "${policy}" > "${results}/${label}-pack.jsonl"
       cp "${corpus}/manifest.json" "${results}/${label}-manifest.json"

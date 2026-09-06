@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import time
 import urllib.error
@@ -141,6 +142,21 @@ def reconcile(raw, audit):
             'unknown_outcomes_resolved':resolved,'errors':errors}
 
 
+def stop_process_group(process, grace_seconds=5):
+    """Stop only the session created for this command, including wrapper children."""
+    try:os.killpg(process.pid,signal.SIGTERM)
+    except ProcessLookupError:pass
+    deadline=time.monotonic()+grace_seconds
+    while time.monotonic()<deadline:
+        process.poll()
+        try:os.killpg(process.pid,0)
+        except ProcessLookupError:break
+        time.sleep(.05)
+    try:os.killpg(process.pid,signal.SIGKILL)
+    except ProcessLookupError:pass
+    process.wait(timeout=5)
+
+
 class Campaign:
     def __init__(self, args):
         self.root = Path(__file__).resolve().parents[3]
@@ -176,7 +192,7 @@ class Campaign:
     def run(self, command, log, timeout=None):
         self.guard()
         with log.open('w') as stream:
-            process = subprocess.Popen(command, cwd=self.root, stdout=stream, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(command, cwd=self.root, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
             start = time.monotonic()
             try:
                 while process.poll() is None:
@@ -184,9 +200,7 @@ class Campaign:
                     if timeout is not None and time.monotonic()-start > timeout: raise TimeoutError(str(command[:3]))
                     time.sleep(.5)
             except BaseException:
-                process.terminate()
-                try: process.wait(timeout=10)
-                except subprocess.TimeoutExpired: process.kill(); process.wait()
+                stop_process_group(process)
                 raise
             return process.returncode
 
@@ -302,7 +316,7 @@ class Campaign:
         tolerance=max(stability['allowed_growth_us_floor'],(first or 0)*stability['allowed_growth_fraction_of_first_quarter'])
         result['queue_growth_tolerance_us']=tolerance
         result['queue_stability_passed']=bool(first is not None and last is not None and last<=first+tolerance and result.get('queue_timer_coverage',0)>=stability['required_timer_coverage_fraction_of_offered'])
-        result['passes_local_guard']=bool(result.get('scheduled_coverage_complete',False) and result['correctness_passed'] and result['resource_guard_passed'] and result['queue_stability_passed'] and status==0 and not result['client_limited'] and result['offered']>0 and
+        result['passes_local_guard']=bool(result.get('scheduled_coverage_complete',False) and result['correctness_passed'] and result['resource_guard_passed'] and result['queue_stability_passed'] and status==0 and warm_status==0 and not result['client_limited'] and result['offered']>0 and
             result.get('successful',0)/result['offered']>=self.measurement['success_fraction'] and
             result.get('within_local_deadline',0)/result['offered']>=self.measurement['deadline_fraction_of_all_offered'])
         result['capacity_interpretation']='inconclusive-client-limited' if result['client_limited'] else 'tested local guard only; full claim requires all declared operations/cells'

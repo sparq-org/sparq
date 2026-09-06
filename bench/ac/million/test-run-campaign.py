@@ -2,6 +2,11 @@
 """[GPT-6] Guard against lost arrivals, hidden network delay, and false mutation success."""
 import importlib.util
 import json
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -64,5 +69,24 @@ class SummaryTests(unittest.TestCase):
                   {'pod_id':1000,'bytes':3000,'intensity_numerator':20,'intensity_denominator':1}]
             path.write_text(''.join(json.dumps(row)+'\n' for row in rows))
             self.assertEqual([row['pod'] for row in campaign.representatives(path)],[0,1,999,1000])
+
+    def test_stopping_owned_wrapper_also_kills_term_ignoring_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready=Path(directory)/'ready';heartbeat=Path(directory)/'heartbeat'
+            child="import signal,sys,time;from pathlib import Path;signal.signal(signal.SIGTERM,signal.SIG_IGN);Path(sys.argv[1]).write_text('ready');\nwhile True: Path(sys.argv[2]).write_text(str(time.monotonic_ns()));time.sleep(.01)"
+            wrapper="import subprocess,sys,time;subprocess.Popen([sys.executable,'-c',"+repr(child)+",sys.argv[1],sys.argv[2]]);time.sleep(60)"
+            process=subprocess.Popen([sys.executable,'-c',wrapper,str(ready),str(heartbeat)],start_new_session=True)
+            try:
+                deadline=time.monotonic()+5
+                while not heartbeat.exists() and time.monotonic()<deadline:time.sleep(.01)
+                self.assertTrue(heartbeat.exists(),'child did not start')
+                campaign.stop_process_group(process,grace_seconds=.1)
+                self.assertIsNotNone(process.poll())
+                time.sleep(.1);last=heartbeat.read_text();time.sleep(.15)
+                self.assertEqual(heartbeat.read_text(),last,'wrapper child kept writing after cancellation')
+            finally:
+                try:os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                process.wait(timeout=5)
 
 if __name__=='__main__':unittest.main()
