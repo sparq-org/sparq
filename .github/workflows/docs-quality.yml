@@ -1117,13 +1117,19 @@ jobs:
       # that refuses to mint issues outside CI. Stdlib-only, no gh/git/network.
       - name: Self-test drift-scan.py (all scanner classes + CI guard — sq-1cb6l)
         run: python3 scripts/tests/test_drift_scan.py
-      # test_feature_matrix_tiers.py (50 tests) — the feature-matrix tier
+      # test_feature_matrix_tiers.py (69 tests) — the feature-matrix tier
       # detector (scripts/feature-matrix-tiers.py): cfg expression parser
       # (feature/test/not/any/all/other nodes + balanced-paren error), all
       # acceptance criteria (a)–(i) (gated test file, cfg(not(feature)) src,
       # nested combinators, parse-error fail-closed, unreadable-dir fail-closed,
-      # tier:check enforce, fail-open mutation, non-sensitive), plus extraction +
-      # split helpers. Stdlib-only, no subprocess/network.
+      # tier:check enforce, fail-open mutation, non-sensitive), criterion (j)
+      # (a same-named feature in another crate does not satisfy the guard),
+      # criterion (k) ([OPUS-5] issue #5138 — invariant (3): a DECLARED cargo
+      # feature no leg activates is still classified, plus its written-exemption
+      # hatch, transitive/default activation, and the fail-closed Cargo.toml
+      # read), plus extraction + split helpers. Stdlib-only, no
+      # subprocess/network — the invariant (3) tests build fixture Cargo.tomls
+      # in tmpdirs rather than reading the real crates/.
       - name: Self-test feature-matrix-tiers.py (cfg parser + tier enforcement — sq-1cb6l)
         run: python3 scripts/tests/test_feature_matrix_tiers.py
       # test_check_pypi_name.py (15 tests) — supplements the existing

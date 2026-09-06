@@ -84,7 +84,7 @@
 #       promoted back to `tier: test`.
 #   (2) a SENSITIVE (crate, feature) appears in no `test: true` leg FOR THAT CRATE — the
 #       sq-vya1 guard itself, mechanized. The silent gap now fails the gate instead of
-#       awaiting a reviewer. BOTH invariants key on the (crate, feature) PAIR, never the
+#       awaiting a reviewer. ALL THREE invariants key on the (crate, feature) PAIR, never the
 #       bare feature name: cargo feature names are crate-LOCAL and 15 are shared across
 #       crates today (`arrow`, `service`, `templates`, …), so a `test: true` leg for `F`
 #       in crate A never stands in for a sensitive `F` in crate B. The ONLY exit from (2)
@@ -92,6 +92,23 @@
 #       `cargo test` leg — today exactly one: sparq-py's `arrow`, reachable only through
 #       the pymodule (`[lib] test = false`), whose executor is the gating maturin `arrow`
 #       pytest job in python.yml. Prefer adding the leg to writing a reason.
+#   (3) [OPUS-5] issue #5138 — a cargo feature DECLARED in a legged crate's `Cargo.toml`
+#       is SENSITIVE but NO leg of that crate activates it. (1) and (2) iterate the LEGS,
+#       so a feature with ZERO legs never reached the detector at all: it was INVISIBLE to
+#       the guard rather than sensitive-and-uncovered — precisely the case the guard exists
+#       to catch. Demonstrated: with the `sparq-lws-core (odrl-authz)` leg deleted, the
+#       pre-#5138 `--enforce` still reported OK even though `tests/odrl_gate.rs` is
+#       `#![cfg(all(feature = "odrl-authz", …))]` and so compiles empty everywhere. (3)
+#       iterates the DECLARED features instead, crediting a leg's default + explicit +
+#       transitively-implied feature set (what `cargo test -p <crate> --features <list>`
+#       actually turns on — the leg runner passes no `--no-default-features`). Its only
+#       exit is a written `UNLEGGED_SENSITIVE_EXEMPT` reason in
+#       scripts/feature-matrix-tiers.py, which either NAMES the non-leg executor that runs
+#       the feature or records it as a KNOWN GAP; that table was seeded by the #5138 sweep
+#       so the invariant binds on NEW features immediately rather than after the existing
+#       debt is paid down. Fail-closed: a legged crate whose `Cargo.toml` cannot be read is
+#       a violation, never an empty feature list. Crates named by NO leg are out of (3)'s
+#       scope and stay covered by structural guard C1 + the advisory --report-unlegged.
 # The detector is FAIL-CLOSED: any parse/IO error classifies the leg SENSITIVE (keep the
 # full leg), never a silent demotion. Options (a)/(b) above are still exactly what you DO —
 # what changed is that skipping them is now caught mechanically.
@@ -393,6 +410,11 @@ jobs:
         # PR — the ratchet. Fail-closed: a detector/IO error classifies a leg SENSITIVE (keep
         # the full leg), never a silent demotion. Stdlib + the PyYAML installed above; it
         # scans crates/ (checked out above). At ZERO annotations this is a no-op green.
+        # [OPUS-5] issue #5138: it ALSO reds on invariant (3) — a cargo feature DECLARED in a
+        # legged crate's Cargo.toml that is sensitive and that NO leg of that crate activates
+        # (see this file's header). That is the zero-leg case (1)/(2) structurally could not
+        # see, because they only ever classify features already named by a leg. Needs
+        # tomllib, i.e. the Python 3.11+ this job already pins to 3.12.
         run: python3 scripts/feature-matrix-tiers.py --enforce
       - name: Structural guard C1 — feature-gated test execution (sq-qcnn.31)
         # [SONNET-4.6] sq-qcnn.31: Fail-closed guard — every feature-gated test module or
