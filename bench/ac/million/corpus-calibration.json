@@ -94,7 +94,7 @@
       "evidence_class": "empirical retained-count marginal",
       "source": "https://grouplens.org/datasets/movielens/1m/",
       "summary": "calibration/movielens-1m-summary.json",
-      "cdf": "../../../../crates/sparq-acbench/src/population_ratings_cdf.json",
+      "cdf": "../../../crates/sparq-acbench/src/population_ratings_cdf.json",
       "sampling": "Deterministic inverse empirical CDF; synthetic record values and dates are not source observations.",
       "limitation": "Historical selected users who joined in 2000, supplied demographics and rated at least 20 movies. The observed retained count is independent of the modeled retention horizon and provides no annual arrival-rate estimate."
     }
