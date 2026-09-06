@@ -100,3 +100,12 @@ type or volume overrides that differ from that file. Set `SPARQ_POD_PRIOR_AWS_US
 to the accumulated conservative study spend. The shared benchmark slice and each
 server's cgroup must account for charged page cache as well as application memory.
 Raw request records and Pod inventories are retained with lossless compression.
+
+For a bounded comparison with the engine's existing indexed storage, build the
+`sparq-lws-core` example `indexed_population_preview`. Its `--output-dir` must be
+new; `--profile smoke|history|entropy`, `--model wac|acp`, `--pods` (1–16, default8)
+and `--max-pod-bytes` (default512MiB) define the diagnostic. It retains validation
+and compares exact authorized results through in-memory, raw indexed, and compressed
+indexed graphs. See [`indexed-preview.md`](../../bench/ac/million/indexed-preview.md)
+for phase boundaries, physical storage accounting, descriptor estimates, and the
+uncontrolled-cache limitation. This example is not a million-Pod or HTTP capacity run.
