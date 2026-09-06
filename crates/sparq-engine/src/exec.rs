@@ -8730,15 +8730,17 @@ fn bind_join(
 
     // [GPT-6-ASTRA] Verify metadata candidates without allocating: stale sortedness
     // must not split a key across runs and repeat scans (or accumulate duplicate zk
-    // matches). Unsorted bags keep the existing hash grouping. The identity index
-    // vector keeps the shared, monomorphic slice-based combine API simple while
-    // avoiding a separate Vec allocation for every already-sorted distinct key.
+    // matches). Unsorted bags keep the existing hash grouping. Verified runs carry
+    // contiguous row ranges, avoiding an allocated identity-index vector.
     let nrows = result.rows.len();
     let presorted = result.sorted_by.as_ref().is_some_and(|sv| result.vars.get(rk) == Some(sv))
         && result.rows.windows(2).all(|pair| pair[0][rk] <= pair[1][rk]);
     #[cfg(test)]
     bind_join_run_grouping::observe_strategy(presorted);
-    let order: Vec<usize> = if presorted { (0..nrows).collect() } else { Vec::new() };
+    enum GroupRows {
+        Contiguous(std::ops::Range<usize>),
+        Indexed(Vec<usize>),
+    }
     let mut groups: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
     if !presorted {
         for (ri, row) in result.rows.iter().enumerate() {
@@ -8746,24 +8748,24 @@ fn bind_join(
         }
     }
 
-    debug_assert!(order.is_empty() || groups.is_empty());
-    // Cow lets both strategies share the same scan/filter/budget body without copying
-    // run slices or retaining owned hash-group vectors after their iteration.
+    debug_assert!(!presorted || groups.is_empty());
+    // Both strategies share the scan/filter/budget body. Owned hash-group vectors
+    // still drop after their iteration; contiguous ranges contain only two indices.
     let mut start = 0usize;
     let runs = std::iter::from_fn(|| {
-        if start == order.len() {
+        if !presorted || start == nrows {
             return None;
         }
-        let val = result.rows[order[start]][rk];
+        let val = result.rows[start][rk];
         let mut end = start + 1;
-        while end < order.len() && result.rows[order[end]][rk] == val {
+        while end < nrows && result.rows[end][rk] == val {
             end += 1;
         }
-        let ris = &order[start..end];
+        let range = start..end;
         start = end;
-        Some((val, std::borrow::Cow::Borrowed(ris)))
+        Some((val, GroupRows::Contiguous(range)))
     });
-    let hashed = groups.into_iter().map(|(val, ris)| (val, std::borrow::Cow::Owned(ris)));
+    let hashed = groups.into_iter().map(|(val, ris)| (val, GroupRows::Indexed(ris)));
 
     let mut out_rows: Vec<Row> = Vec::new();
     // zk-trace hook: accumulate the matched triples across all bound rescans
@@ -8796,7 +8798,14 @@ fn bind_join(
             // The per-(result-row, match) combine is the shared substrate's `bind_combine`
             // (sq-hknqs): the scan + filter pushdown above stay engine-private (they own the
             // store + `ScanCmp`); only the id-tuple combine is shared.
-            sjoin::bind_combine(&result.rows, &ris, &new_vals, &mut out_rows);
+            match &ris {
+                GroupRows::Contiguous(range) => {
+                    sjoin::bind_combine_rows(&result.rows[range.clone()], &new_vals, &mut out_rows);
+                }
+                GroupRows::Indexed(indices) => {
+                    sjoin::bind_combine(&result.rows, indices, &new_vals, &mut out_rows);
+                }
+            }
         }
     }
     #[cfg(feature = "zk")]
