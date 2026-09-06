@@ -191,7 +191,8 @@ jobs:
         # still trusts whatever PyPI serves, so --require-hashes verifies every artifact's
         # sha256 against .github/requirements/docs-quality.txt before use. PyYAML has no
         # runtime deps, so that file is the full closure. See its header to bump/regenerate.
-        # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
+        # Consumers here: skill-frontmatter, the ci-scripts selection-wiring inspection,
+        # and the merge-queue cache-posture suite's narrowing-conjunct proof (sq-an4by).
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
@@ -978,7 +979,14 @@ jobs:
       # already-zstd nextest archive on the critical path. Neither reds anything on
       # its own, so both are pinned structurally over every workflow that still
       # triggers on `merge_group`, together with the archive's producer/consumer
-      # content-parity contract. Hermetic + stdlib-only (no PyYAML needed).
+      # content-parity contract. No network, no gh, and stdlib-only for the YAML
+      # walking — but NOT PyYAML-free since [OPUS-5] sq-an4by: a `save-if` narrowed
+      # by an extra `&&` conjunct must carry a non-vacuity proof, and the one
+      # registered proof loads scripts/assemble-feature-matrix.py (which parses the
+      # fragment set with PyYAML) to check every rust-cache shared-key still has
+      # exactly one seeding matrix entry. That proof FAILS rather than skips when
+      # PyYAML is absent, so it depends on the `Install PyYAML` step above; keep
+      # this step ordered after it.
       - name: Merge-queue cache/artifact posture (save-if + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
       # [OPUS-5] issue #5165 — the LANE INVENTORY half of the same problem. The
