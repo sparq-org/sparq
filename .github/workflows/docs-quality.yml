@@ -55,6 +55,19 @@
 #                       from advisory to HARD by sq-8ic6 once the backlog cleared (the last
 #                       stray, skills/cli/SKILL.md's inline ratio, was reworded to cite the
 #                       canonical measured source). Deterministic, grep-only, no network.
+#     • doc-duplication (exact) — content-duplication detection across the published doc
+#                       surface (root *.md + docs/ + book/src/ + skills/ + crates/*/README.md):
+#                       an identical NORMALISED block in two or more of those files FAILS.
+#                       Normalisation strips markdown link TARGETS while keeping link text,
+#                       so a paragraph copied between two mounts is caught even though its
+#                       links were rewritten. Escape hatches are narrow and auditable — an
+#                       inline `<!-- doc-duplication-allow: <why> -->` marker, or a
+#                       digest-pinned pair in scripts/doc-duplication-allowlist.json whose
+#                       entry REDS once it stops suppressing anything. The NEAR tier of the
+#                       same script is advisory below. scripts/check-doc-duplication.py;
+#                       issue #5019 / bead sq-w9sr, spec in
+#                       research/docs-site-single-sourcing-anti-drift.md §4. Deterministic
+#                       (text only), no network, no build; carries a hermetic --self-test.
 #     • no-dyn-dispatch — perf-NEUTRALITY structural gate over the sparq-substrate hot loops
 #                       (the shared zero-overhead eval substrate, epic sq-6tykl/sq-qonbz):
 #                       FAILS if `dyn`/`Box<dyn>`/`&dyn` trait-object dispatch appears in the
@@ -120,6 +133,19 @@
 #                           is what makes the exact half of this lane possible.
 #                         · it sits at the tool's conventional discovery path, so a local bare
 #                           `npx jscpd` reproduces the lane with no flags.
+#     • doc-duplication (near) — the ADVISORY tier of the in-repo gate whose exact tier is
+#                       HARD above (issue #5019). 8-gram Jaccard at or above the script's
+#                       threshold, reported while the near-duplicate backlog measured in
+#                       research/docs-site-single-sourcing-anti-drift.md §3 is open (the
+#                       largest pairs being README.md ↔ crates/sparq-cli/README.md and
+#                       skills/shacl-validation/SKILL.md ↔ crates/sparq-shacl/README.md,
+#                       neither fixable with the guide's `{{#include}}` machinery — they
+#                       need the §5 injection mechanism / §6 tested-example migration).
+#                       Complements, rather than duplicates, the jscpd lane above: jscpd
+#                       measures token clones with a per-class precision problem on prose,
+#                       this measures NORMALISED-block similarity with link targets erased.
+#                       It promotes by MOVING into quick-gates, not by deleting the shared
+#                       job's registry entry.
 #
 # WHY this split: markdownlint/typos/internal-links/no-perf-numbers/readme-template are
 # deterministic and now pass on the scoped doc surface, so they gate. Vale/external-links
@@ -344,6 +370,40 @@ jobs:
       # the build instead of advising. The check is deterministic (grep-only, no network). [OPUS-4.8]
       - name: no-perf-numbers (docs) — GATING
         run: python3 scripts/check-no-perf-numbers.py --enforce
+
+      # ---- doc-duplication, EXACT tier (issue #5019 / bead sq-w9sr) ----
+      # [OPUS-5] The anti-drift mandate in CI form, specified in
+      # research/docs-site-single-sourcing-anti-drift.md §4. The single-sourcing
+      # MECHANISM already existed (mdBook `{{#include}}` / `{{#rustdoc_include}}`), but
+      # nothing DETECTED a hand-copy — and a hand-copy is what drifts, because only one
+      # of the two copies ever gets edited.
+      #
+      # Surface: root *.md + docs/ + book/src/ + skills/ + one README per crate.
+      # research/ (design records legitimately restate context), .claude/ and
+      # AGENTS-worker-core.md (the agent-contract replication is intentional and
+      # single-sourced by its own rule) are off-surface by construction.
+      #
+      # EXACT tier GATES from day one: an identical NORMALISED block in two or more of
+      # those files fails the build. Normalisation strips markdown link TARGETS while
+      # keeping link text — load-bearing, because a paragraph copied between two mounts
+      # usually differs ONLY in repo-relative vs absolute links, which is exactly the
+      # difference the mdbook link-fixup preprocessor exists to erase; a comparator that
+      # kept targets would score such a pair "similar" and let it through. The NEAR tier
+      # runs advisory in quick-advisory below while the measured §3 backlog is open.
+      #
+      # Escape hatches are narrow and auditable: an inline
+      # `<!-- doc-duplication-allow: <why> -->` marker (bare marker = a finding), or a
+      # digest-pinned pair in scripts/doc-duplication-allowlist.json. An allowlist entry
+      # that suppressed nothing REDS as stale, so the allowlist cannot outlive the
+      # duplication it excused. Deterministic (text only), no network, no build.
+      #
+      # The self-test is the both-direction fixture set the record requires (planted
+      # duplicate fires; distinct prose stays quiet) and runs in this same HARD job, so
+      # a coverage regression in the gate also reds ci-summary.
+      - name: Self-test doc-duplication gate (both directions + line-number fidelity)
+        run: python3 scripts/check-doc-duplication.py --self-test
+      - name: "doc-duplication (exact tier) — no hand-copied block on the doc surface — GATING"
+        run: python3 scripts/check-doc-duplication.py
 
       # ---- former job: no-dyn-dispatch (substrate) ----
       # [OPUS-4.8] sq-0ja86 (epic sq-6tykl / sq-qonbz — the shared zero-overhead eval substrate):
@@ -1439,6 +1499,29 @@ jobs:
             console.log("and judge a finding for yourself.");
           ' >> "$GITHUB_STEP_SUMMARY" \
             || echo "⚠️ docs-duplication: summary generation failed — see the step log." >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- doc-duplication, NEAR tier (issue #5019 / bead sq-w9sr) ----
+      # [OPUS-5] The advisory half of the §4 two-tier gate whose EXACT half gates in
+      # quick-gates above. 8-gram Jaccard at or above the script's threshold is
+      # REPORTED, never failed, while the backlog measured in the design record's §3 is
+      # open — landing it gating on day one would mean either failing `main` immediately
+      # or picking a threshold high enough to be decorative.
+      #
+      # This is a STEP, not a job (sq-6vshe.20 consolidated this workflow to two runners
+      # precisely so sub-second lints stop each claiming their own), so it promotes the
+      # way every other step here promotes: by MOVING into quick-gates once the §3 pairs
+      # are single-sourced. The research record's "delete its advisory-registry entry"
+      # phrasing predates that consolidation — the registry entry belongs to the whole
+      # shared job, and its promotion_criteria carries this step's clause.
+      #
+      # `--advisory` makes the script itself exit 0 on findings; the trailing `|| true`
+      # is the same defence-in-depth the sibling advisory steps use, so a crash cannot
+      # red an advisory job's check-run and block the required ci-summary gate. The
+      # script is stdlib-only, so this job needs no setup-python step.
+      # The EXACT tier is deliberately excluded from this tier's output, so the two
+      # never double-report the same pair.
+      - name: doc-duplication (near tier; 8-gram Jaccard over the published doc surface)
+        run: python3 scripts/check-doc-duplication.py --near --advisory || true
 
       # ---- former job: vale (prose, advisory) ----
       - name: vale (prose, advisory) — vendored styles, no network
