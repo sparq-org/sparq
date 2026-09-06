@@ -117,7 +117,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Publish-cadence guard (fail-closed minimum release interval, #2552)
+      - name: "Publish-cadence guard (fail-closed minimum release interval, #2552)"
         env:
           # Via env, never string-interpolated into the shell: a tag name is attacker-
           # controlled text and `run:` interpolation would splice it into the command.
