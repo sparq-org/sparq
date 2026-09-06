@@ -310,9 +310,45 @@ pub(crate) struct ComponentDef {
     pub node_validator: Option<PreparedComponentValidator>,
     /// `sh:propertyValidator` — preferred for property shapes.
     pub property_validator: Option<PreparedComponentValidator>,
+    /// [SONNET-4.6] (sq-ou3) The component's `sh:labelTemplate` literals (SHACL
+    /// §6.1): human-readable renderings of the component *with its parameters
+    /// substituted in*, e.g. `"Value must have at most {$maxLength} characters"`.
+    /// A component may declare several (typically one per language tag), so this
+    /// keeps every value and [`label_template`](Self::label_template) picks one
+    /// deterministically.
+    ///
+    /// `sh:labelTemplate` takes NO part in validation — it never affects whether
+    /// a constraint fires, which results are produced, or `sh:conforms`. It is
+    /// used only to render a result's *fallback* message: when neither the shape
+    /// (`sh:message`) nor the validator (`sh:message`) supplies one, the label —
+    /// which describes the constraint in the author's own words — is a far better
+    /// message than the generic "does not satisfy constraint component <iri>".
+    pub label_templates: Vec<Term>,
 }
 
 impl ComponentDef {
+    /// [SONNET-4.6] (sq-ou3) The `sh:labelTemplate` to render for this component,
+    /// chosen DETERMINISTICALLY (report output must be reproducible) from the
+    /// possibly-several declared values: a plain (language-tag-less) literal
+    /// wins — it is the language-neutral form — otherwise the
+    /// lexicographically-smallest language tag. Non-literal values are ignored
+    /// (ill-formed, and this crate is lenient about ill-formed shapes).
+    ///
+    /// Returns the raw template; `{$param}` / `{?param}` placeholders are
+    /// substituted by the caller against the shape's bound parameter values.
+    pub fn label_template(&self) -> Option<&str> {
+        let literals = self.label_templates.iter().filter_map(|t| match t {
+            Term::Literal(l) => Some(l),
+            _ => None,
+        });
+        // Pick by (has-language, language) so a plain literal sorts first, then
+        // the smallest tag. `min_by_key` keeps the FIRST of equal keys, which for
+        // duplicate plain literals is stable in the shapes graph's own order.
+        literals
+            .min_by_key(|l| (l.language().is_some(), l.language().unwrap_or("")))
+            .map(|l| l.value())
+    }
+
     /// The validator to run for a shape of the given kind: the kind-specific one
     /// if present, else the generic `sh:validator` (SHACL §6.2.2).
     pub fn validator_for(&self, is_property_shape: bool) -> Option<&PreparedComponentValidator> {
@@ -2142,12 +2178,18 @@ fn discover_components(
         if validator.is_none() && node_validator.is_none() && property_validator.is_none() {
             continue; // no usable validator — skip (lenient)
         }
+        // [SONNET-4.6] (sq-ou3) `sh:labelTemplate` (SHACL §6.1) — display only,
+        // never consulted for whether a constraint fires. Collected AFTER the
+        // validator check so a component with no usable validator is still
+        // skipped above (an unrunnable component has no results to label).
+        let label_templates = g.objects(&node, &sh("labelTemplate"));
         out.push(ComponentDef {
             node,
             parameters,
             validator,
             node_validator,
             property_validator,
+            label_templates,
         });
     }
     out
