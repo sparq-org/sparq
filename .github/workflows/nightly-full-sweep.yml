@@ -198,9 +198,13 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -308,9 +312,13 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -425,9 +433,13 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: needs.config.outputs.mode == 'full'
         with:
@@ -540,9 +552,13 @@ jobs:
             ~/.cargo/git
             gui/src-tauri/target
           key: gui-e2e-${{ runner.os }}-${{ hashFiles('gui/src-tauri/Cargo.lock', 'Cargo.lock') }}
+      # [OPUS-5] #5776 — prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f):
+      # a `cargo install` here recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
         if: needs.config.outputs.mode == 'full'
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - name: Build the WASM bundle (shacl,jsonld; the in-tab engine)
         if: needs.config.outputs.mode == 'full'
         working-directory: js

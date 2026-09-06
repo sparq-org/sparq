@@ -1011,7 +1011,11 @@ jobs:
       # [OPUS-5] #5771: it also pins that every lane installing wasm-pack through that
       # action asks for the SAME version — ci.yml's `wasm` job (which RUNS the headless
       # suites) had drifted two minors behind js.yml (which BUILDS the artifact).
-      - name: wasm-pack install posture (prebuilt + pinned + one version — sq-khm3f, #5771)
+      # [OPUS-5] #5776: the no-source-compile half is now REPO-WIDE. The other 15 sites
+      # (gui/nightly-full-sweep/publish/pages/site-e2e-hero/site-visual) were converted
+      # to the same prebuilt action; only release.yml's multi-arch `gui-bundle` is
+      # allowlisted, and that exemption is itself asserted live so it cannot rot.
+      - name: wasm-pack install posture (prebuilt + pinned + one version — sq-khm3f, #5771, #5776)
         run: python3 scripts/tests/test_js_wasm_pack_install.py
       # [OPUS-4.8] sq-va7at: the nightly selection-bug ALARM
       # (scripts/ci_selection_alarm.py, .github/workflows/selection-alarm.yml,

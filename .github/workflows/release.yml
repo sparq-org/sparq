@@ -493,6 +493,20 @@ jobs:
       # (repointed off the marketing site by PR #1003 / sq-ixc3.8). Its `prebuild` hook
       # (gui/app/scripts/sync-wasm.mjs) needs the lean shacl,jsonld wasm bundle present in js/wasm/.
       # Mirror gui.yml's proven-green `gui-app`/`tauri-e2e` jobs: build the wasm bundle FIRST.
+      #
+      # [OPUS-5] #5776 — this is the ONE lane left on the source compile, deliberately.
+      # Every other wasm-pack install in the repo now downloads the prebuilt binary via
+      # jetli/wasm-pack-action (sq-khm3f: `cargo install` rebuilds wasm-pack's whole
+      # chrono/wasm-bindgen tree from crates.io each run, so a transient registry blip
+      # fails the lane — it red-gated PR #1131). Those lanes are all `ubuntu-latest`
+      # x86_64, i.e. the exact runner the action is already proven green on in `js`/`ci`.
+      # THIS job is not: its matrix also spans ubuntu-24.04-arm, macos-14 (arm64),
+      # macos-15-intel and windows-latest, and the action's behaviour on those targets
+      # has NOT been exercised here — it is not asserted to work, and a wrong-arch
+      # download would break a release bundle rather than a PR. Converting it needs a
+      # real matrix run to verify, which is follow-up work, not this change.
+      # scripts/tests/test_js_wasm_pack_install.py allowlists exactly this one site;
+      # any NEW `cargo install wasm-pack` elsewhere reds that test.
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
