@@ -144,6 +144,303 @@ class G1Test(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# G1-npm — a new packages/<x> resolves to a workspace entry AND a CI leg runs its
+# tests (issue #5843). Hermetic: the evaluate_packages() tests inject workspace
+# membership / ships-tests / CI-wiring via *_overrides, and the workflow-scanner
+# tests run against inline YAML fixtures in a tempdir. The one non-fixture test
+# (test_real_repo_packages_are_ci_covered) reads committed files only.
+# --------------------------------------------------------------------------- #
+
+# A workflow wired the way js.yml wires its per-package steps: a job-level
+# default working-directory, overridden per step for each package.
+_WF_STEP_LEVEL_WD = """\
+name: js
+on:
+  pull_request:
+    paths:
+      - "packages/**"
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@abc # v7.0.0
+      - name: Build
+        run: npm run build
+      - name: widget package
+        working-directory: packages/widget
+        run: |
+          npm run build
+          npm test
+"""
+
+# A workflow wired the way gui.yml wires packages/sparq-client: the package is
+# the JOB's `defaults.run.working-directory` and the step is a bare `npm test`.
+_WF_JOB_DEFAULT_WD = """\
+name: gui
+on: [pull_request]
+jobs:
+  shared-client:
+    name: shared TS client typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/widget
+    steps:
+      - name: Install dependencies
+        run: npm install
+      - name: Unit tests
+        run: npm test
+"""
+
+
+def _wf_dir(tmp: Path, files: dict[str, str]) -> Path:
+    d = tmp / "workflows"
+    d.mkdir()
+    for name, text in files.items():
+        (d / name).write_text(text, encoding="utf-8")
+    return d
+
+
+class G1NpmTest(unittest.TestCase):
+    # ---- added-package detection ----
+    def test_added_package_manifest_is_detected(self):
+        _, added = g1.parse_status_lines(
+            _statused(["packages/widget/package.json", "packages/widget/src/i.mjs"])
+        )
+        self.assertEqual(g1.added_packages(added), ["widget"])
+
+    def test_modified_package_manifest_does_not_trigger(self):
+        # Editing an EXISTING package's manifest is not a new package.
+        changed, added = g1.parse_status_lines(
+            _statused([], ["packages/widget/package.json"])
+        )
+        self.assertEqual(g1.added_packages(added), [])
+        self.assertEqual(g1.evaluate_packages(changed, added), [])
+
+    def test_nested_manifest_is_not_a_new_package(self):
+        # packages/<x>/sub/package.json is not a workspace member manifest.
+        _, added = g1.parse_status_lines(
+            _statused(["packages/widget/sub/package.json"])
+        )
+        self.assertEqual(g1.added_packages(added), [])
+
+    # ---- (n1) workspace membership ----
+    def test_workspace_glob_matching(self):
+        globs = ["packages/*", "js", "site"]
+        self.assertTrue(g1.package_is_workspace_member("widget", globs))
+        self.assertFalse(g1.package_is_workspace_member("widget", ["js", "site"]))
+        self.assertFalse(g1.package_is_workspace_member("widget", []))
+
+    def test_package_outside_workspaces_fails(self):
+        changed, added = g1.parse_status_lines(
+            _statused(["packages/widget/package.json"])
+        )
+        violations = g1.evaluate_packages(
+            changed,
+            added,
+            member_overrides={"widget": False},
+            ships_tests_overrides={"widget": True},
+            legs_overrides={"widget": ["js.yml"]},
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0][0], "widget")
+        self.assertEqual(len(violations[0][1]), 1)
+        self.assertIn("workspace", violations[0][1][0])
+
+    # ---- (n2) a CI leg runs the tests ----
+    def test_package_with_tests_but_no_ci_leg_fails(self):
+        # THE ISSUE #5843 CASE: tests ship, nothing ever executes them.
+        changed, added = g1.parse_status_lines(
+            _statused(
+                ["packages/widget/package.json", "packages/widget/test/a.test.mjs"]
+            )
+        )
+        violations = g1.evaluate_packages(
+            changed,
+            added,
+            member_overrides={"widget": True},
+            ships_tests_overrides={"widget": True},
+            legs_overrides={"widget": []},
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertIn("CI leg", violations[0][1][0])
+
+    def test_package_with_tests_and_a_ci_leg_passes(self):
+        changed, added = g1.parse_status_lines(
+            _statused(["packages/widget/package.json"])
+        )
+        self.assertEqual(
+            g1.evaluate_packages(
+                changed,
+                added,
+                member_overrides={"widget": True},
+                ships_tests_overrides={"widget": True},
+                legs_overrides={"widget": ["js.yml"]},
+            ),
+            [],
+        )
+
+    def test_package_shipping_no_tests_is_exempt_from_the_ci_leg_rule(self):
+        # Nothing to invoke → (n2) is vacuous. (Whether a publishable package
+        # must HAVE tests is a separate rule, not this leg's business.)
+        changed, added = g1.parse_status_lines(
+            _statused(["packages/widget/package.json"])
+        )
+        self.assertEqual(
+            g1.evaluate_packages(
+                changed,
+                added,
+                member_overrides={"widget": True},
+                ships_tests_overrides={"widget": False},
+                legs_overrides={"widget": []},
+            ),
+            [],
+        )
+
+    def test_test_file_without_a_test_script_still_counts_as_shipping_tests(self):
+        # The rename bypass: drop the `test` script but keep the suite. The
+        # package has no on-disk manifest here, so only the changed-file limb
+        # of package_ships_tests() can answer — and it must say True.
+        for path in (
+            "packages/widget/test/a.test.mjs",
+            "packages/widget/tests/b.mjs",
+            "packages/widget/__tests__/c.mjs",
+            "packages/widget/src/d.spec.ts",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    g1.package_ships_tests(
+                        "widget", ["packages/widget/package.json", path]
+                    )
+                )
+
+    def test_package_with_no_test_files_does_not_ship_tests(self):
+        self.assertFalse(
+            g1.package_ships_tests(
+                "widget", ["packages/widget/package.json", "packages/widget/src/i.mjs"]
+            )
+        )
+
+    # ---- the workflow scanner ----
+    def test_step_level_working_directory_is_coverage(self):
+        with tempfile.TemporaryDirectory() as d:
+            wf = _wf_dir(Path(d), {"js.yml": _WF_STEP_LEVEL_WD})
+            self.assertEqual(
+                g1.package_ci_test_legs("widget", "@x/widget", workflow_dir=wf),
+                ["js.yml"],
+            )
+
+    def test_job_defaults_working_directory_is_coverage(self):
+        # The packages/sparq-client shape: the wd is the JOB default, and the
+        # `defaults:` -> `run:` mapping must not be mistaken for a run command.
+        with tempfile.TemporaryDirectory() as d:
+            wf = _wf_dir(Path(d), {"gui.yml": _WF_JOB_DEFAULT_WD})
+            self.assertEqual(
+                g1.package_ci_test_legs("widget", "@x/widget", workflow_dir=wf),
+                ["gui.yml"],
+            )
+
+    def test_build_only_step_in_the_package_is_not_coverage(self):
+        # MUTATION GUARD: the same working-directory, but the step BUILDS rather
+        # than tests. If the scanner ever stops requiring a test command this
+        # goes green and the gate becomes vacuous.
+        built_only = _WF_STEP_LEVEL_WD.replace("          npm test\n", "")
+        self.assertNotIn("npm test", built_only)
+        with tempfile.TemporaryDirectory() as d:
+            wf = _wf_dir(Path(d), {"js.yml": built_only})
+            self.assertEqual(
+                g1.package_ci_test_legs("widget", "@x/widget", workflow_dir=wf), []
+            )
+
+    def test_paths_filter_naming_the_package_is_not_coverage(self):
+        # MUTATION GUARD: js.yml's `on.paths` names `packages/**` and the job
+        # runs `npm test` in js/. A file-level "mentions the package AND runs
+        # npm test" heuristic would wrongly call that coverage; only the region
+        # after `jobs:` may count, and only with a matching working-directory.
+        wf_text = _WF_STEP_LEVEL_WD.replace(
+            """      - name: widget package
+        working-directory: packages/widget
+        run: |
+          npm run build
+          npm test
+""",
+            "",
+        )
+        self.assertIn("packages/**", wf_text)  # the paths filter is still there
+        self.assertIn("npm run build", wf_text)  # a job step still exists
+        with tempfile.TemporaryDirectory() as d:
+            wf = _wf_dir(Path(d), {"js.yml": wf_text})
+            self.assertEqual(
+                g1.package_ci_test_legs("widget", "@x/widget", workflow_dir=wf), []
+            )
+
+    def test_workspace_flag_and_cd_forms_are_coverage(self):
+        forms = {
+            "by-path": "npm test -w packages/widget",
+            "by-name": "npm test --workspace=@x/widget",
+            "all-members": "npm test --workspaces",
+            "cd-form": "cd packages/widget && npm test",
+            "run-script": "npm run test:unit -w packages/widget",
+        }
+        for label, cmd in forms.items():
+            with self.subTest(form=label):
+                text = (
+                    "name: w\non: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+                    "    steps:\n      - name: t\n        run: " + cmd + "\n"
+                )
+                with tempfile.TemporaryDirectory() as d:
+                    wf = _wf_dir(Path(d), {"w.yml": text})
+                    self.assertEqual(
+                        g1.package_ci_test_legs("widget", "@x/widget", workflow_dir=wf),
+                        ["w.yml"],
+                        f"{cmd!r} should count as running the package's tests",
+                    )
+
+    def test_another_packages_leg_is_not_coverage(self):
+        # MUTATION GUARD: a sibling package's wiring must not cover this one.
+        with tempfile.TemporaryDirectory() as d:
+            wf = _wf_dir(Path(d), {"js.yml": _WF_STEP_LEVEL_WD})
+            self.assertEqual(
+                g1.package_ci_test_legs("gadget", "@x/gadget", workflow_dir=wf), []
+            )
+
+    def test_workflow_steps_binds_run_blocks_to_the_right_directory(self):
+        steps = g1.workflow_steps(_WF_STEP_LEVEL_WD)
+        self.assertIn(("js", "npm run build"), steps)
+        self.assertIn(("packages/widget", "npm run build\nnpm test"), steps)
+
+    # ---- the committed back-catalogue ----
+    def test_real_repo_packages_are_ci_covered(self):
+        # Every packages/* member on disk today is a workspace member whose
+        # tests some workflow leg runs — i.e. G1-npm can run HARD without
+        # failing the back-catalogue. The bogus-name assertion below is what
+        # keeps this from passing a detector that always says "covered".
+        globs = g1.workspace_globs()
+        self.assertIn("packages/*", globs)
+        pkg_root = REPO_ROOT / "packages"
+        members = sorted(
+            p.name for p in pkg_root.iterdir() if (p / "package.json").is_file()
+        )
+        self.assertTrue(members, "expected at least one packages/* member")
+        for pkg in members:
+            with self.subTest(package=pkg):
+                self.assertTrue(g1.package_is_workspace_member(pkg, globs))
+                name = g1.package_manifest(pkg).get("name")
+                self.assertTrue(
+                    g1.package_ci_test_legs(pkg, name),
+                    f"packages/{pkg} declares tests no workflow leg runs",
+                )
+        self.assertEqual(
+            g1.package_ci_test_legs("definitely-not-a-package", "@x/nope"),
+            [],
+            "a package that does not exist must not resolve to a CI leg",
+        )
+
+
+# --------------------------------------------------------------------------- #
 # G2 — public-api → skill
 # --------------------------------------------------------------------------- #
 class G2Test(unittest.TestCase):
