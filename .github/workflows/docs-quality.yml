@@ -669,6 +669,7 @@ jobs:
           python3 scripts/release_pr_guard.py --self-test
           python3 scripts/release-interval-guard.py --self-test
           python3 scripts/tests/test_release_publish_guard.py
+          python3 scripts/tests/test_published_crate_catalogue.py
       # [OPUS-4.8] sq-ur7o: every SHA-pinned `taiki-e/install-action` step MUST carry an
       # explicit `with: tool:`. install-action picks the tool from its @<tool> git ref; the
       # code-scanning=0 SHA-pin policy DROPS that selector, so without `with: tool:` the

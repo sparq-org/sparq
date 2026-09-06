@@ -466,3 +466,50 @@ export const ALL_SURFACES: Surface[] = GROUPS.flatMap((g) => g.surfaces);
 
 /** Capability surfaces + the /about utility page — the complete navigable surface set. */
 export const ALL_SURFACES_WITH_ABOUT: Surface[] = [...ALL_SURFACES, ABOUT_SURFACE];
+
+/** [GPT-5] issue #6144 — crates.io inventory mapped to the capability catalogue.
+ *
+ * Support crates intentionally share their user-facing capability instead of acquiring a
+ * duplicate marketing page. Keep this exhaustive for workspace packages whose Cargo manifest
+ * does not set `publish = false`. scripts/tests/test_published_crate_catalogue.py validates
+ * both this mapping and the mdBook catalogue against the manifests and known surface slugs.
+ */
+export const PUBLISHED_CRATE_SURFACE = {
+  "sparq-algos": "graph-analytics",
+  "sparq-arrow": "arrow-columnar",
+  "sparq-canon": "rdf-canon",
+  "sparq-cli": "cli",
+  "sparq-core": "sparql",
+  "sparq-engine": "sparql",
+  "sparq-engine-serialize": "sparql",
+  "sparq-engine-service": "federation",
+  "sparq-fedplan": "federation",
+  "sparq-forms": "shacl",
+  "sparq-geo": "geosparql",
+  "sparq-hdt": "data-formats",
+  "sparq-http3": "http-server",
+  "sparq-introspect": "genai",
+  "sparq-jsonld": "data-formats",
+  "sparq-mcp": "mcp-server",
+  "sparq-nlq": "genai",
+  "sparq-policy": "policy",
+  "sparq-reason": "inference",
+  "sparq-reason-el": "inference",
+  "sparq-reason-ql": "inference",
+  "sparq-rsp": "streaming-rsp",
+  "sparq-secprop-vocab": "zk",
+  "sparq-serve": "http-server",
+  "sparq-server": "http-server",
+  "sparq-shacl": "shacl",
+  "sparq-shaclc": "shacl",
+  "sparq-sim": "genai",
+  "sparq-solid": "solid-pairs",
+  "sparq-substrate": "sparql",
+  "sparq-terse": "genai",
+  "sparq-text": "full-text",
+  "sparq-trust": "solid-pairs",
+  "sparq-vc": "zk",
+  "sparq-vectors": "vector",
+  "sparq-wrapper": "sparql",
+  "sparq-zk": "zk",
+} as const;
