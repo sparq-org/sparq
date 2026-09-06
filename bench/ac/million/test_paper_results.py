@@ -35,7 +35,7 @@ class PaperResultBindings(unittest.TestCase):
         if inputs is not None:
             (self.directory / "analysis.json").write_text(json.dumps(inputs))
         source = self.directory / "binding.typ"
-        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts, model-responses, range-label, model-resources, storage-values, storage-number\n' + body)
+        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts, model-responses, range-label, model-resources, storage-values, storage-number, queue-only, summary-verdicts\n' + body)
         result = subprocess.run([TYPST, "query", "--root", str(ROOT), str(source), "<result>", "--field", "value"],
                                 check=True, text=True, capture_output=True)
         return json.loads(result.stdout)
@@ -143,7 +143,7 @@ class PaperResultBindings(unittest.TestCase):
         data["corpora"][0]["storage_inventory_consistent"] = False
         inconsistent = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
         self.assertTrue(all(value is None for value in inconsistent.values()))
-        self.assertEqual(self.query('#metadata((storage-number(none), storage-number(0), storage-number(1, divisor: 1000000, digits: 2))) <result>'), [["—", "0", "<0.01"]])
+        self.assertEqual(self.query('#metadata((storage-number(none), storage-number(0), storage-number(1, divisor: 1000000, digits: 2), storage-number(1234567))) <result>'), [["—", "0", "<0.01", "1,234,567"]])
 
     def test_resources_keep_guard_failures_but_exclude_inconclusive_counters(self):
         cells = []
@@ -161,6 +161,25 @@ class PaperResultBindings(unittest.TestCase):
         missing = self.query('#metadata(model-resources(json("analysis.json").cells, "wac")) <result>', {"cells": cells})[0]
         self.assertEqual(missing["peak_bytes"], {"n": 0, "lower": None, "upper": None})
         self.assertEqual(missing["cpu_us"], {"n": 1, "lower": 9000000, "upper": 9000000})
+
+    def test_main_summary_distinguishes_queue_only_from_delivery_failures(self):
+        data = copy.deepcopy(self.analysis)
+        cells = [copy.deepcopy(data["cells"][0]) for _ in range(3)]
+        for cell in cells:
+            cell["model"] = "wac"
+        cells[1]["local_guard"] = "fail"
+        cells[1]["requests"]["queue"]["passed"] = False
+        cells[2]["local_guard"] = "fail"
+        cells[2]["requests"]["queue"]["passed"] = False
+        cells[2]["requests"]["success_fraction_of_offered"] = 0
+        cells[2]["requests"]["deadline_fraction_of_offered"] = 0
+        cells[2]["requests"]["within_server_production_deadline"] = 0
+        data["cells"] = cells
+        result = self.query('''#let d = json("analysis.json")
+#metadata(summary-verdicts(d.cells, "wac", d.campaign.measurement)) <result>
+''', data)
+        self.assertEqual(result, [[1, 1, 1]])
+        self.query('#main-tables(json("analysis.json"), summary: true)\n#metadata(true) <result>', self.analysis)
 
     def test_all_planned_states_are_visible(self):
         result = self.query('''#let cells = ("pass", "fail", "inconclusive", "unmeasured").map(s => (model: "wac", local_guard: s))
