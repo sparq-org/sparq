@@ -2647,11 +2647,26 @@ class TestWatchdogWorkflowWiring(unittest.TestCase):
         self.assertEqual(concurrency["group"], "merge-group-watchdog")
         self.assertIs(concurrency["cancel-in-progress"], False)
 
-    def test_job_name_is_not_advisory_classified(self):
-        # `advisory`/`informational` are reserved tokens for the ci-summary aggregator
-        # and require an advisory-registry entry; this job is neither.
-        name = self.wf["jobs"]["watch"]["name"]
-        self.assertIsNone(re.search(r"\b(advisory|informational)\b", name), name)
+    def test_every_watchdog_job_is_declared_non_gating(self):
+        # A scheduled/manual run lands on the main head SHA that the push-triggered
+        # ci-summary polls. The registry — not the absence of an advisory name token —
+        # is the only mechanism that prevents queue-infrastructure failures from
+        # gating an unrelated commit (#6269).
+        registry = json.loads(
+            (REPO_ROOT / ".github" / "advisory-registry.json").read_text(encoding="utf-8")
+        )["jobs"]
+        declared = {
+            (entry["workflow"], entry["job_id"]): name
+            for name, entry in registry.items()
+        }
+        for job_id, job in self.wf["jobs"].items():
+            name = job["name"]
+            self.assertIsNone(re.search(r"\b(advisory|informational)\b", name), name)
+            self.assertEqual(
+                declared.get(("merge-group-watchdog.yml", job_id)),
+                name,
+                f"watchdog job {job_id!r} can silently gate main unless declared",
+            )
 
 
 class TestDoorbellIsNotSubscribedToTheEventItInspects(unittest.TestCase):
