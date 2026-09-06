@@ -778,6 +778,15 @@ class TestPhase2LaneScoping(unittest.TestCase):
         # Must NOT reference matrix.* in the job-level if (contexts-availability trap).
         self.assertNotIn("matrix.", cond)
 
+    def test_enforced_cone_report_does_not_write_dead_divergence_log(self):
+        """[GPT-5] #6026: enforced cone runs cannot detect divergences."""
+        steps = self.ci["jobs"]["coverage-measure"]["steps"]
+        report = next(step for step in steps if str(step.get("name", "")).startswith(
+            "Cone coverage report"))
+        self.assertNotIn(
+            "--divergence-log", str(report.get("run", "")),
+            "the enforced coverage lane must not write an always-empty, discarded artifact")
+
     # ---- seed sets are real + mirrored ---------------------------------------------
     def test_lane_seeds_are_real_workspace_members(self):
         for lane, seeds in self.lane_seeds.items():
