@@ -32,10 +32,15 @@ whose Schnorr-over-Baby-JubJub signatures are deliberately non-interoperable.
 `sparq-vc` is an **opt-in, `publish = false`** workspace member — nothing in sparq's
 default build depends on it. Add it as a path dependency:
 
+<!-- [OPUS-5] #6132: GENERATED region — do not hand-edit. The canonical copy is the
+     `path-dep` anchor in crates/sparq-vc/README.md; regenerate with
+     `python3 scripts/gen-doc-inject.py` (docs-quality.yml runs `--check`). -->
+<!-- BEGIN-INJECT: crates/sparq-vc/README.md#path-dep -->
 ```toml
-sparq-vc = { path = "crates/sparq-vc" }                          # did:key + verify/sign
-sparq-vc = { path = "crates/sparq-vc", features = ["did-web"] }  # + did:web resolution
+sparq-vc = { path = "crates/sparq-vc" }                       # did:key + verify/sign
+sparq-vc = { path = "crates/sparq-vc", features = ["did-web"] } # + did:web resolution
 ```
+<!-- END-INJECT -->
 
 No external toolchain is required (unlike the ZK estate's `nargo`/`bb`): Ed25519 is the
 vetted [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) crate.
