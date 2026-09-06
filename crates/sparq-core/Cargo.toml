@@ -74,8 +74,13 @@ elias-fano = []
 # soundness invariant). What `spqcprm2` gates is the *EMITTER*: turning it on lets a build
 # request V2 emission (via `with_emit_format` / `SPARQ_EMIT_FORMAT=v2`) plus the `encode_v2`
 # in-RAM writer and the round-trip/measurement tests. OFF by default so the shipped store
-# keeps *writing* SPQCPRM1 bit-exactly (V2 is NOT defaulted on — a separate decision pending
-# a positive real-data B/triple measurement). Requires `mmap` (the on-disk store is where
+# keeps *writing* SPQCPRM1 bit-exactly. [OPUS-5] sq-sh7be RESOLVED the V2-default flip: NO —
+# V2 stays opt-in. Encoded block length is a pure function of the rows, so the size question
+# is deterministic and host-independent, and it answers BOTH ways: V2 is smaller on a
+# col2-clustered corpus and LARGER on a wide-object one (zigzag doubles the frame offset's
+# magnitude). A shape-dependent trade cannot be a blanket default; see the tests
+# `v2_size_delta_is_shape_dependent_not_a_uniform_win` and
+# `v2_stream_is_byte_identical_when_no_reset_d1`. Requires `mmap` (the on-disk store is where
 # the versioned format lives). See `compress::CompressedPerm::encode_v2` and `EmitFormat`.
 spqcprm2 = ["mmap"]
 # [OPUS-4.8] sq-dvyi: JSON-LD ingest for the in-memory loaders (`load_str` /
