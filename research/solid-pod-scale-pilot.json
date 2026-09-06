@@ -1,0 +1,3749 @@
+{
+  "analysis": "exploratory-pilot",
+  "analysis_script_sha256": "21e47d32c42e9e9ebe809410280f8bcd7c12e0756ec87d2bf421c0c016eb7e3b",
+  "artifact_directory": "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/pod-scale/ec2-pilot-20260906T125000Z",
+  "artifact_integrity": {
+    "errors": [],
+    "manifest_sha256": "01f2f8b11ba9e93972a60b87d5136378ad0a36f9206f59222bd4d3348a9f09ab",
+    "status": "verified",
+    "verified_files": 139
+  },
+  "artifact_status": "complete-checksummed",
+  "canonical": false,
+  "claim_limitations": [
+    "Exploratory owner-only, uniformly selected query templates with replacement writes",
+    "One schedule per configuration; fixed WAC then ACP order; no independent paired inference",
+    "Offered pilot rate is not population-derived service demand or independently established saturation",
+    "Latency percentiles of successful replies exclude failures; all-offered deadline fractions retain them",
+    "No original media binaries; corpus is partially calibrated, not all service data",
+    "No policy-update or minimum-cgroup-memory claim from unexercised operations or absent counters"
+  ],
+  "configurations": [
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-entropy-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 101957632,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 2634072,
+          "index_bytes": 192,
+          "index_sha256": "d9c92e93cb1b80a4c04c4b1cfd1d6e633322f388cce93bfc440d8c3c22ba6182",
+          "maximum_pod_compressed_bytes": 16978874,
+          "maximum_pod_source_bytes": 102451227,
+          "packed_bytes": 101905361,
+          "packed_sha256": "38c2f354326779389a55202be80c61fbe7cd16ce6b17b57c2195c31f62a4a525",
+          "populated": true,
+          "quads": 2570792,
+          "records": 259010,
+          "source_bytes": 613667222
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 16978874,
+          "n": 8,
+          "p50": 8505177,
+          "p95": 16978874,
+          "p99": 16978874
+        },
+        "per_pod_records": {
+          "maximum": 43248,
+          "n": 8,
+          "p50": 21680,
+          "p95": 43248,
+          "p99": 43248
+        },
+        "per_pod_source_bytes": {
+          "maximum": 102451227,
+          "n": 8,
+          "p50": 51262593,
+          "p95": 102451227,
+          "p99": 102451227
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 484474880,
+          "VmRSS": 474316800
+        },
+        "process_io_delta_bytes": {
+          "rchar": 747389523,
+          "read_bytes": 0,
+          "wchar": 225820,
+          "write_bytes": 131072
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 466022400,
+          "Pss": 472758272,
+          "Rss": 474316800
+        }
+      },
+      "label": "pilot-entropy-8-acp",
+      "literal_profile": {
+        "kind": "seeded",
+        "message_text_bytes": 1024,
+        "short_text_bytes": 64
+      },
+      "model": "acp",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.6140350877192983,
+          "hit_scheduled_us": {
+            "maximum": 4995605,
+            "n": 35,
+            "p50": 4272279,
+            "p95": 4982110,
+            "p99": 4995605
+          },
+          "maximum_reported_source_bytes": 409171874,
+          "miss_scheduled_us": {
+            "maximum": 4893710,
+            "n": 22,
+            "p50": 4135879,
+            "p95": 4832307,
+            "p99": 4893710
+          },
+          "successful_rows_with_indicator": 57
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35943747,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 71,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 11,
+                "transport-error": 14
+              },
+              "recorded": 25,
+              "successful": 11
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 20,
+                "transport-error": 15
+              },
+              "recorded": 35,
+              "successful": 20
+            },
+            "query": {
+              "outcomes": {
+                "ok": 26,
+                "transport-error": 42
+              },
+              "recorded": 68,
+              "successful": 26
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 14,
+                "transport-error": 22
+              },
+              "recorded": 36,
+              "successful": 14
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 4
+              },
+              "recorded": 5,
+              "successful": 1
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 4
+              },
+              "recorded": 7,
+              "successful": 3
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 7
+              },
+              "recorded": 8,
+              "successful": 1
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 5,
+                "transport-error": 2
+              },
+              "recorded": 7,
+              "successful": 5
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 3
+              },
+              "recorded": 6,
+              "successful": 3
+            },
+            "q6-filter": {
+              "outcomes": {
+                "transport-error": 3
+              },
+              "recorded": 3,
+              "successful": 0
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 4
+              },
+              "recorded": 7,
+              "successful": 3
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 1
+              },
+              "recorded": 4,
+              "successful": 3
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 6
+              },
+              "recorded": 9,
+              "successful": 3
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 20,
+                "transport-error": 15
+              },
+              "recorded": 35,
+              "successful": 20
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5003987,
+            "n": 128,
+            "p50": 5001768,
+            "p95": 5003587,
+            "p99": 5003972
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4994440,
+            "n": 57,
+            "p50": 4171481,
+            "p95": 4892197,
+            "p99": 4994440
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4995605,
+            "n": 57,
+            "p50": 4172962,
+            "p95": 4893710,
+            "p99": 4995605
+          },
+          "successful_server_response_production": {
+            "maximum": 4993784,
+            "n": 57,
+            "p50": 4171233,
+            "p95": 4891802,
+            "p99": 4993784
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 20,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 15
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 1.5858112956337023,
+        "offered": 128,
+        "outcomes": {
+          "ok": 57,
+          "transport-error": 71
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.4453125,
+        "successful": 57,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 323,
+            "n": 57,
+            "p50": 238,
+            "p95": 267,
+            "p99": 323
+          },
+          "credential_preparation_us": {
+            "maximum": 431,
+            "n": 57,
+            "p50": 411,
+            "p95": 426,
+            "p99": 431
+          },
+          "dispatch_lag_us": {
+            "maximum": 1969,
+            "n": 57,
+            "p50": 1070,
+            "p95": 1739,
+            "p99": 1969
+          },
+          "load_us": {
+            "maximum": 788039,
+            "n": 57,
+            "p50": 0,
+            "p95": 781516,
+            "p99": 788039
+          },
+          "materialize_us": {
+            "maximum": 14677,
+            "n": 57,
+            "p50": 0,
+            "p95": 14323,
+            "p99": 14677
+          },
+          "operation_us": {
+            "maximum": 803355,
+            "n": 57,
+            "p50": 11894,
+            "p95": 798802,
+            "p99": 803355
+          },
+          "queue_us": {
+            "maximum": 4991448,
+            "n": 57,
+            "p50": 3826547,
+            "p95": 4853173,
+            "p99": 4991448
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 71,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-entropy-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 101941248,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 2635821,
+          "index_bytes": 192,
+          "index_sha256": "e03527e52a7365b3704d1f0c5b3f88f3b4304869f6805c43865082eb49573db8",
+          "maximum_pod_compressed_bytes": 16975732,
+          "maximum_pod_source_bytes": 102406224,
+          "packed_bytes": 101889767,
+          "packed_sha256": "b92d4ab3edec01d05c673e9fc8291916b5607a18d7dcd6467a5230c0b5303fd5",
+          "populated": true,
+          "quads": 2569040,
+          "records": 259010,
+          "source_bytes": 613307198
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 16975732,
+          "n": 8,
+          "p50": 8502735,
+          "p95": 16975732,
+          "p99": 16975732
+        },
+        "per_pod_records": {
+          "maximum": 43248,
+          "n": 8,
+          "p50": 21680,
+          "p95": 43248,
+          "p99": 43248
+        },
+        "per_pod_source_bytes": {
+          "maximum": 102406224,
+          "n": 8,
+          "p50": 51217590,
+          "p95": 102406224,
+          "p99": 102406224
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 484368384,
+          "VmRSS": 383545344
+        },
+        "process_io_delta_bytes": {
+          "rchar": 747279172,
+          "read_bytes": 0,
+          "wchar": 226235,
+          "write_bytes": 131072
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 375304192,
+          "Pss": 382031872,
+          "Rss": 383545344
+        }
+      },
+      "label": "pilot-entropy-8-wac",
+      "literal_profile": {
+        "kind": "seeded",
+        "message_text_bytes": 1024,
+        "short_text_bytes": 64
+      },
+      "model": "wac",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.603448275862069,
+          "hit_scheduled_us": {
+            "maximum": 4987940,
+            "n": 35,
+            "p50": 4245111,
+            "p95": 4954950,
+            "p99": 4987940
+          },
+          "maximum_reported_source_bytes": 408991862,
+          "miss_scheduled_us": {
+            "maximum": 4984790,
+            "n": 23,
+            "p50": 4165770,
+            "p95": 4878531,
+            "p99": 4984790
+          },
+          "successful_rows_with_indicator": 58
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35944030,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 70,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 11,
+                "transport-error": 14
+              },
+              "recorded": 25,
+              "successful": 11
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 21,
+                "transport-error": 14
+              },
+              "recorded": 35,
+              "successful": 21
+            },
+            "query": {
+              "outcomes": {
+                "ok": 26,
+                "transport-error": 42
+              },
+              "recorded": 68,
+              "successful": 26
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 14,
+                "transport-error": 22
+              },
+              "recorded": 36,
+              "successful": 14
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 4
+              },
+              "recorded": 5,
+              "successful": 1
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 4
+              },
+              "recorded": 7,
+              "successful": 3
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 7
+              },
+              "recorded": 8,
+              "successful": 1
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 5,
+                "transport-error": 2
+              },
+              "recorded": 7,
+              "successful": 5
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 3
+              },
+              "recorded": 6,
+              "successful": 3
+            },
+            "q6-filter": {
+              "outcomes": {
+                "transport-error": 3
+              },
+              "recorded": 3,
+              "successful": 0
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 4
+              },
+              "recorded": 7,
+              "successful": 3
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 1
+              },
+              "recorded": 4,
+              "successful": 3
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 6
+              },
+              "recorded": 9,
+              "successful": 3
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 21,
+                "transport-error": 14
+              },
+              "recorded": 35,
+              "successful": 21
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5004022,
+            "n": 128,
+            "p50": 5001485,
+            "p95": 5003518,
+            "p99": 5003990
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4986928,
+            "n": 58,
+            "p50": 4164989,
+            "p95": 4953395,
+            "p99": 4986928
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4987940,
+            "n": 58,
+            "p50": 4165770,
+            "p95": 4954950,
+            "p99": 4987940
+          },
+          "successful_server_response_production": {
+            "maximum": 4985851,
+            "n": 58,
+            "p50": 4164718,
+            "p95": 4952996,
+            "p99": 4985851
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 21,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 14
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 1.6136198417372787,
+        "offered": 128,
+        "outcomes": {
+          "ok": 58,
+          "transport-error": 70
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.453125,
+        "successful": 58,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 298,
+            "n": 58,
+            "p50": 238,
+            "p95": 255,
+            "p99": 298
+          },
+          "credential_preparation_us": {
+            "maximum": 450,
+            "n": 58,
+            "p50": 412,
+            "p95": 428,
+            "p99": 450
+          },
+          "dispatch_lag_us": {
+            "maximum": 1761,
+            "n": 58,
+            "p50": 1011,
+            "p95": 1738,
+            "p99": 1761
+          },
+          "load_us": {
+            "maximum": 787093,
+            "n": 58,
+            "p50": 0,
+            "p95": 781742,
+            "p99": 787093
+          },
+          "materialize_us": {
+            "maximum": 12607,
+            "n": 58,
+            "p50": 0,
+            "p95": 12411,
+            "p99": 12607
+          },
+          "operation_us": {
+            "maximum": 803897,
+            "n": 58,
+            "p50": 12632,
+            "p95": 799189,
+            "p99": 803897
+          },
+          "queue_us": {
+            "maximum": 4980634,
+            "n": 58,
+            "p50": 3821744,
+            "p95": 4838202,
+            "p99": 4980634
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 70,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-central-v2",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 258056192,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 28500225,
+          "index_bytes": 1536,
+          "index_sha256": "2402207e8d8a867f1b4c323b1f3760a82490174014a994320ec8518cb13c8bc5",
+          "maximum_pod_compressed_bytes": 35298993,
+          "maximum_pod_source_bytes": 1716871770,
+          "packed_bytes": 257981448,
+          "packed_sha256": "8fe6ffef75ef589ebc467caffab8bbb1bbf70482c1428f348fe99753781e4ac4",
+          "populated": true,
+          "quads": 61645932,
+          "records": 6220055,
+          "source_bytes": 12375715689
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 35298993,
+          "n": 64,
+          "p50": 934130,
+          "p95": 35221240,
+          "p99": 35298993
+        },
+        "per_pod_records": {
+          "maximum": 859831,
+          "n": 64,
+          "p50": 21869,
+          "p95": 859464,
+          "p99": 859831
+        },
+        "per_pod_source_bytes": {
+          "maximum": 1716871770,
+          "n": 64,
+          "p50": 43216576,
+          "p95": 1716244087,
+          "p99": 1716871770
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 824066048,
+          "VmRSS": 512249856
+        },
+        "process_io_delta_bytes": {
+          "rchar": 101795530,
+          "read_bytes": 0,
+          "wchar": 28356,
+          "write_bytes": 73728
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 504025088,
+          "Pss": 510764032,
+          "Rss": 512323584
+        }
+      },
+      "label": "pilot-history-64-acp",
+      "literal_profile": {
+        "kind": "pod_specific"
+      },
+      "model": "acp",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 8,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 4
+      },
+      "pods": 64,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.08333333333333333,
+          "hit_scheduled_us": {
+            "maximum": 4701241,
+            "n": 1,
+            "p50": 4701241,
+            "p95": 4701241,
+            "p99": 4701241
+          },
+          "maximum_reported_source_bytes": 511627106,
+          "miss_scheduled_us": {
+            "maximum": 4964816,
+            "n": 11,
+            "p50": 4086063,
+            "p95": 4964816,
+            "p99": 4964816
+          },
+          "successful_rows_with_indicator": 12
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35944017,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 116,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 2,
+                "transport-error": 23
+              },
+              "recorded": 25,
+              "successful": 2
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 7,
+                "transport-error": 28
+              },
+              "recorded": 35,
+              "successful": 7
+            },
+            "query": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 65
+              },
+              "recorded": 68,
+              "successful": 3
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 2,
+                "transport-error": 34
+              },
+              "recorded": 36,
+              "successful": 2
+            },
+            "q10-path": {
+              "outcomes": {
+                "transport-error": 5
+              },
+              "recorded": 5,
+              "successful": 0
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "transport-error": 7
+              },
+              "recorded": 7,
+              "successful": 0
+            },
+            "q2-count": {
+              "outcomes": {
+                "transport-error": 8
+              },
+              "recorded": 8,
+              "successful": 0
+            },
+            "q3-star": {
+              "outcomes": {
+                "transport-error": 1
+              },
+              "recorded": 1,
+              "successful": 0
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 6
+              },
+              "recorded": 7,
+              "successful": 1
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 5
+              },
+              "recorded": 6,
+              "successful": 1
+            },
+            "q6-filter": {
+              "outcomes": {
+                "transport-error": 3
+              },
+              "recorded": 3,
+              "successful": 0
+            },
+            "q7-optional": {
+              "outcomes": {
+                "transport-error": 7
+              },
+              "recorded": 7,
+              "successful": 0
+            },
+            "q8-union": {
+              "outcomes": {
+                "transport-error": 4
+              },
+              "recorded": 4,
+              "successful": 0
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 8
+              },
+              "recorded": 9,
+              "successful": 1
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 7,
+                "transport-error": 28
+              },
+              "recorded": 35,
+              "successful": 7
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5003866,
+            "n": 128,
+            "p50": 5002318,
+            "p95": 5003532,
+            "p99": 5003826
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4962853,
+            "n": 12,
+            "p50": 4085072,
+            "p95": 4962853,
+            "p99": 4962853
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4964816,
+            "n": 12,
+            "p50": 4086063,
+            "p95": 4964816,
+            "p99": 4964816
+          },
+          "successful_server_response_production": {
+            "maximum": 4962348,
+            "n": 12,
+            "p50": 4084402,
+            "p95": 4962348,
+            "p99": 4962348
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 7,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 28
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 0.33385250179466586,
+        "offered": 128,
+        "outcomes": {
+          "ok": 12,
+          "transport-error": 116
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "64",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.09375,
+        "successful": 12,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 296,
+            "n": 12,
+            "p50": 237,
+            "p95": 296,
+            "p99": 296
+          },
+          "credential_preparation_us": {
+            "maximum": 445,
+            "n": 12,
+            "p50": 410,
+            "p95": 445,
+            "p99": 445
+          },
+          "dispatch_lag_us": {
+            "maximum": 1552,
+            "n": 12,
+            "p50": 1079,
+            "p95": 1552,
+            "p99": 1552
+          },
+          "load_us": {
+            "maximum": 2447560,
+            "n": 12,
+            "p50": 333026,
+            "p95": 2447560,
+            "p99": 2447560
+          },
+          "materialize_us": {
+            "maximum": 13882,
+            "n": 12,
+            "p50": 13073,
+            "p95": 13882,
+            "p99": 13882
+          },
+          "operation_us": {
+            "maximum": 2462351,
+            "n": 12,
+            "p50": 348445,
+            "p95": 2462351,
+            "p99": 2462351
+          },
+          "queue_us": {
+            "maximum": 4696781,
+            "n": 12,
+            "p50": 3738764,
+            "p95": 4696781,
+            "p99": 4696781
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 116,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-central-v2",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 257671168,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 28299371,
+          "index_bytes": 1536,
+          "index_sha256": "cf692f54ab9a63cae4712ffd0bf2dffa8b737603e04c0d32938aa446db02210a",
+          "maximum_pod_compressed_bytes": 35234702,
+          "maximum_pod_source_bytes": 1716826191,
+          "packed_bytes": 257597296,
+          "packed_sha256": "a5d5f823de32900907c012fdb5a708224237365a219137b504cea816d4ce7a21",
+          "populated": true,
+          "quads": 61631916,
+          "records": 6220055,
+          "source_bytes": 12372804393
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 35234702,
+          "n": 64,
+          "p50": 931755,
+          "p95": 35202696,
+          "p99": 35234702
+        },
+        "per_pod_records": {
+          "maximum": 859831,
+          "n": 64,
+          "p50": 21869,
+          "p95": 859464,
+          "p99": 859831
+        },
+        "per_pod_source_bytes": {
+          "maximum": 1716826191,
+          "n": 64,
+          "p50": 43170997,
+          "p95": 1716198508,
+          "p99": 1716826191
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 827969536,
+          "VmRSS": 519184384
+        },
+        "process_io_delta_bytes": {
+          "rchar": 101584958,
+          "read_bytes": 0,
+          "wchar": 28404,
+          "write_bytes": 73728
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 512974848,
+          "Pss": 519708672,
+          "Rss": 521281536
+        }
+      },
+      "label": "pilot-history-64-wac",
+      "literal_profile": {
+        "kind": "pod_specific"
+      },
+      "model": "wac",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 8,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 4
+      },
+      "pods": 64,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.08333333333333333,
+          "hit_scheduled_us": {
+            "maximum": 4685882,
+            "n": 1,
+            "p50": 4685882,
+            "p95": 4685882,
+            "p99": 4685882
+          },
+          "maximum_reported_source_bytes": 511490945,
+          "miss_scheduled_us": {
+            "maximum": 4951763,
+            "n": 11,
+            "p50": 4084902,
+            "p95": 4951763,
+            "p99": 4951763
+          },
+          "successful_rows_with_indicator": 12
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35943391,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 116,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 2,
+                "transport-error": 23
+              },
+              "recorded": 25,
+              "successful": 2
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 7,
+                "transport-error": 28
+              },
+              "recorded": 35,
+              "successful": 7
+            },
+            "query": {
+              "outcomes": {
+                "ok": 3,
+                "transport-error": 65
+              },
+              "recorded": 68,
+              "successful": 3
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 2,
+                "transport-error": 34
+              },
+              "recorded": 36,
+              "successful": 2
+            },
+            "q10-path": {
+              "outcomes": {
+                "transport-error": 5
+              },
+              "recorded": 5,
+              "successful": 0
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "transport-error": 7
+              },
+              "recorded": 7,
+              "successful": 0
+            },
+            "q2-count": {
+              "outcomes": {
+                "transport-error": 8
+              },
+              "recorded": 8,
+              "successful": 0
+            },
+            "q3-star": {
+              "outcomes": {
+                "transport-error": 1
+              },
+              "recorded": 1,
+              "successful": 0
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 6
+              },
+              "recorded": 7,
+              "successful": 1
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 5
+              },
+              "recorded": 6,
+              "successful": 1
+            },
+            "q6-filter": {
+              "outcomes": {
+                "transport-error": 3
+              },
+              "recorded": 3,
+              "successful": 0
+            },
+            "q7-optional": {
+              "outcomes": {
+                "transport-error": 7
+              },
+              "recorded": 7,
+              "successful": 0
+            },
+            "q8-union": {
+              "outcomes": {
+                "transport-error": 4
+              },
+              "recorded": 4,
+              "successful": 0
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 1,
+                "transport-error": 8
+              },
+              "recorded": 9,
+              "successful": 1
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 7,
+                "transport-error": 28
+              },
+              "recorded": 35,
+              "successful": 7
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5003919,
+            "n": 128,
+            "p50": 5002298,
+            "p95": 5003706,
+            "p99": 5003827
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4950299,
+            "n": 12,
+            "p50": 4082497,
+            "p95": 4950299,
+            "p99": 4950299
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4951763,
+            "n": 12,
+            "p50": 4084902,
+            "p95": 4951763,
+            "p99": 4951763
+          },
+          "successful_server_response_production": {
+            "maximum": 4948990,
+            "n": 12,
+            "p50": 4079450,
+            "p95": 4948990,
+            "p99": 4948990
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 7,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 28
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 0.3338583162618129,
+        "offered": 128,
+        "outcomes": {
+          "ok": 12,
+          "transport-error": 116
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "64",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.09375,
+        "successful": 12,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 300,
+            "n": 12,
+            "p50": 239,
+            "p95": 300,
+            "p99": 300
+          },
+          "credential_preparation_us": {
+            "maximum": 427,
+            "n": 12,
+            "p50": 412,
+            "p95": 427,
+            "p99": 427
+          },
+          "dispatch_lag_us": {
+            "maximum": 1996,
+            "n": 12,
+            "p50": 1107,
+            "p95": 1996,
+            "p99": 1996
+          },
+          "load_us": {
+            "maximum": 2448318,
+            "n": 12,
+            "p50": 333045,
+            "p95": 2448318,
+            "p99": 2448318
+          },
+          "materialize_us": {
+            "maximum": 12058,
+            "n": 12,
+            "p50": 11588,
+            "p95": 12058,
+            "p99": 12058
+          },
+          "operation_us": {
+            "maximum": 2462064,
+            "n": 12,
+            "p50": 347214,
+            "p95": 2462064,
+            "p99": 2462064
+          },
+          "queue_us": {
+            "maximum": 4682360,
+            "n": 12,
+            "p50": 3731985,
+            "p95": 4682360,
+            "p99": 4682360
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 116,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-central-v2",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 10993664,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 1165721,
+          "index_bytes": 192,
+          "index_sha256": "0fac5767480a00d84aaec67a5bfeda83741b363105a6688a7c06a79279460703",
+          "maximum_pod_compressed_bytes": 1821709,
+          "maximum_pod_source_bytes": 84750077,
+          "packed_bytes": 10943585,
+          "packed_sha256": "be40a0af6185edad9b675f910f6ae051656d8a4ac89b82ee3f166dbfe4edbd78",
+          "populated": true,
+          "quads": 2570792,
+          "records": 259010,
+          "source_bytes": 507446562
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 1821709,
+          "n": 8,
+          "p50": 922787,
+          "p95": 1821709,
+          "p99": 1821709
+        },
+        "per_pod_records": {
+          "maximum": 43248,
+          "n": 8,
+          "p50": 21680,
+          "p95": 43248,
+          "p99": 43248
+        },
+        "per_pod_source_bytes": {
+          "maximum": 84750077,
+          "n": 8,
+          "p50": 42408578,
+          "p95": 84750077,
+          "p99": 84750077
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 406851584,
+          "VmRSS": 370716672
+        },
+        "process_io_delta_bytes": {
+          "rchar": 97713814,
+          "read_bytes": 0,
+          "wchar": 440246,
+          "write_bytes": 159744
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 362409984,
+          "Pss": 369148928,
+          "Rss": 370716672
+        }
+      },
+      "label": "pilot-history-8-acp",
+      "literal_profile": {
+        "kind": "pod_specific"
+      },
+      "model": "acp",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.4426229508196721,
+          "hit_scheduled_us": {
+            "maximum": 3941934,
+            "n": 54,
+            "p50": 2042860,
+            "p95": 3457430,
+            "p99": 3941934
+          },
+          "maximum_reported_source_bytes": 338367274,
+          "miss_scheduled_us": {
+            "maximum": 4591713,
+            "n": 68,
+            "p50": 2376527,
+            "p95": 3879314,
+            "p99": 4591713
+          },
+          "successful_rows_with_indicator": 122
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35944735,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 6,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 24,
+                "transport-error": 1
+              },
+              "recorded": 25,
+              "successful": 24
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 33,
+                "transport-error": 2
+              },
+              "recorded": 35,
+              "successful": 33
+            },
+            "query": {
+              "outcomes": {
+                "ok": 65,
+                "transport-error": 3
+              },
+              "recorded": 68,
+              "successful": 65
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 35,
+                "transport-error": 1
+              },
+              "recorded": 36,
+              "successful": 35
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 6,
+                "transport-error": 1
+              },
+              "recorded": 7,
+              "successful": 6
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 6,
+                "transport-error": 1
+              },
+              "recorded": 7,
+              "successful": 6
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 8,
+                "transport-error": 1
+              },
+              "recorded": 9,
+              "successful": 8
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 33,
+                "transport-error": 2
+              },
+              "recorded": 35,
+              "successful": 33
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5003258,
+            "n": 128,
+            "p50": 2333841,
+            "p95": 4591713,
+            "p99": 5003060
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4589547,
+            "n": 122,
+            "p50": 2273960,
+            "p95": 3701079,
+            "p99": 4227734
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4591713,
+            "n": 122,
+            "p50": 2276022,
+            "p95": 3702732,
+            "p99": 4228833
+          },
+          "successful_server_response_production": {
+            "maximum": 4588495,
+            "n": 122,
+            "p50": 2272960,
+            "p95": 3700375,
+            "p99": 4227104
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 33,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 2
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 3.394099302721247,
+        "offered": 128,
+        "outcomes": {
+          "ok": 122,
+          "transport-error": 6
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.953125,
+        "successful": 122,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 318,
+            "n": 122,
+            "p50": 236,
+            "p95": 256,
+            "p99": 262
+          },
+          "credential_preparation_us": {
+            "maximum": 475,
+            "n": 122,
+            "p50": 408,
+            "p95": 422,
+            "p99": 434
+          },
+          "dispatch_lag_us": {
+            "maximum": 2049,
+            "n": 122,
+            "p50": 1051,
+            "p95": 1798,
+            "p99": 1940
+          },
+          "load_us": {
+            "maximum": 639275,
+            "n": 122,
+            "p50": 323493,
+            "p95": 634543,
+            "p99": 637595
+          },
+          "materialize_us": {
+            "maximum": 14904,
+            "n": 122,
+            "p50": 13115,
+            "p95": 14379,
+            "p99": 14638
+          },
+          "operation_us": {
+            "maximum": 679025,
+            "n": 122,
+            "p50": 338285,
+            "p95": 654458,
+            "p99": 675740
+          },
+          "queue_us": {
+            "maximum": 3940316,
+            "n": 122,
+            "p50": 1999428,
+            "p95": 3442433,
+            "p99": 3937212
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 6,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "service-history-central-v2",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 10973184,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 1165675,
+          "index_bytes": 192,
+          "index_sha256": "5ce309c12d13298c213173777995ad49970c8030b807dacf89afd029b1fb3f9d",
+          "maximum_pod_compressed_bytes": 1820715,
+          "maximum_pod_source_bytes": 84705074,
+          "packed_bytes": 10922146,
+          "packed_sha256": "bdd29e04f78e2482ba42bde5f7643d22c6390085438ce5cfe2e00995b6aa5fa4",
+          "populated": true,
+          "quads": 2569040,
+          "records": 259010,
+          "source_bytes": 507086538
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 1820715,
+          "n": 8,
+          "p50": 919295,
+          "p95": 1820715,
+          "p99": 1820715
+        },
+        "per_pod_records": {
+          "maximum": 43248,
+          "n": 8,
+          "p50": 21680,
+          "p95": 43248,
+          "p99": 43248
+        },
+        "per_pod_source_bytes": {
+          "maximum": 84705074,
+          "n": 8,
+          "p50": 42363575,
+          "p95": 84705074,
+          "p99": 84705074
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 359960576,
+          "VmRSS": 314769408
+        },
+        "process_io_delta_bytes": {
+          "rchar": 97523190,
+          "read_bytes": 0,
+          "wchar": 440235,
+          "write_bytes": 159744
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 306462720,
+          "Pss": 313201664,
+          "Rss": 314769408
+        }
+      },
+      "label": "pilot-history-8-wac",
+      "literal_profile": {
+        "kind": "pod_specific"
+      },
+      "model": "wac",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.4426229508196721,
+          "hit_scheduled_us": {
+            "maximum": 3851830,
+            "n": 54,
+            "p50": 2024883,
+            "p95": 3432962,
+            "p99": 3851830
+          },
+          "maximum_reported_source_bytes": 338187262,
+          "miss_scheduled_us": {
+            "maximum": 4494791,
+            "n": 68,
+            "p50": 2318001,
+            "p95": 3854642,
+            "p99": 4494791
+          },
+          "successful_rows_with_indicator": 122
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 35944912,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 6,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 24,
+                "transport-error": 1
+              },
+              "recorded": 25,
+              "successful": 24
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 33,
+                "transport-error": 2
+              },
+              "recorded": 35,
+              "successful": 33
+            },
+            "query": {
+              "outcomes": {
+                "ok": 65,
+                "transport-error": 3
+              },
+              "recorded": 68,
+              "successful": 65
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 35,
+                "transport-error": 1
+              },
+              "recorded": 36,
+              "successful": 35
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 6,
+                "transport-error": 1
+              },
+              "recorded": 7,
+              "successful": 6
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 6,
+                "transport-error": 1
+              },
+              "recorded": 7,
+              "successful": 6
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 8,
+                "transport-error": 1
+              },
+              "recorded": 9,
+              "successful": 8
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 33,
+                "transport-error": 2
+              },
+              "recorded": 35,
+              "successful": 33
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 5003436,
+            "n": 128,
+            "p50": 2289819,
+            "p95": 4494791,
+            "p99": 5003249
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 4493293,
+            "n": 122,
+            "p50": 2239374,
+            "p95": 3636916,
+            "p99": 4141030
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 4494791,
+            "n": 122,
+            "p50": 2240942,
+            "p95": 3637869,
+            "p99": 4142845
+          },
+          "successful_server_response_production": {
+            "maximum": 4492195,
+            "n": 122,
+            "p50": 2239099,
+            "p95": 3635505,
+            "p99": 4140741
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 33,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 2
+        },
+        "observed_deadline_completions_per_second": 0.0,
+        "observed_successful_completions_per_second": 3.394082589491386,
+        "offered": 128,
+        "outcomes": {
+          "ok": 122,
+          "transport-error": 6
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 0.953125,
+        "successful": 122,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 300,
+            "n": 122,
+            "p50": 238,
+            "p95": 258,
+            "p99": 263
+          },
+          "credential_preparation_us": {
+            "maximum": 447,
+            "n": 122,
+            "p50": 409,
+            "p95": 422,
+            "p99": 437
+          },
+          "dispatch_lag_us": {
+            "maximum": 1918,
+            "n": 122,
+            "p50": 1067,
+            "p95": 1700,
+            "p99": 1869
+          },
+          "load_us": {
+            "maximum": 640029,
+            "n": 122,
+            "p50": 322150,
+            "p95": 636285,
+            "p99": 639324
+          },
+          "materialize_us": {
+            "maximum": 12950,
+            "n": 122,
+            "p50": 11533,
+            "p95": 12589,
+            "p99": 12753
+          },
+          "operation_us": {
+            "maximum": 669163,
+            "n": 122,
+            "p50": 337679,
+            "p95": 657135,
+            "p99": 667614
+          },
+          "queue_us": {
+            "maximum": 3851847,
+            "n": 122,
+            "p50": 1959110,
+            "p95": 3416841,
+            "p99": 3849970
+          }
+        },
+        "successful_within_scheduled_deadline": 0,
+        "successful_within_server_production_deadline": 0,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 6,
+        "within_scheduled_deadline_fraction_of_offered": 0.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "controlled-smoke-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 409600,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 34186,
+          "index_bytes": 1536,
+          "index_sha256": "8eb5abe027a5186c2fac8a223ba20ffa9a528aff8a8ee71684df907305a8b33f",
+          "maximum_pod_compressed_bytes": 5782,
+          "maximum_pod_source_bytes": 127646,
+          "packed_bytes": 369728,
+          "packed_sha256": "0ec0e1f5f503f9ef60891b8f225c8047846872fd0ae29aeef74a31a059e61c5c",
+          "populated": true,
+          "quads": 43456,
+          "records": 3072,
+          "source_bytes": 8153464
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 5782,
+          "n": 64,
+          "p50": 5778,
+          "p95": 5781,
+          "p99": 5782
+        },
+        "per_pod_records": {
+          "maximum": 48,
+          "n": 64,
+          "p50": 48,
+          "p95": 48,
+          "p99": 48
+        },
+        "per_pod_source_bytes": {
+          "maximum": 127646,
+          "n": 64,
+          "p50": 127646,
+          "p95": 127646,
+          "p99": 127646
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 34938880,
+          "VmRSS": 25169920
+        },
+        "process_io_delta_bytes": {
+          "rchar": 738348,
+          "read_bytes": 0,
+          "wchar": 139297,
+          "write_bytes": 143360
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 16879616,
+          "Pss": 23614464,
+          "Rss": 25169920
+        }
+      },
+      "label": "pilot-smoke-64-acp",
+      "literal_profile": {
+        "kind": "compact"
+      },
+      "model": "acp",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 64,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.046875,
+          "hit_scheduled_us": {
+            "maximum": 7517,
+            "n": 6,
+            "p50": 2439,
+            "p95": 7517,
+            "p99": 7517
+          },
+          "maximum_reported_source_bytes": 510584,
+          "miss_scheduled_us": {
+            "maximum": 14807,
+            "n": 122,
+            "p50": 7596,
+            "p95": 13052,
+            "p99": 13479
+          },
+          "successful_rows_with_indicator": 128
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 30954789,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 0,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 25
+              },
+              "recorded": 25,
+              "successful": 25
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            },
+            "query": {
+              "outcomes": {
+                "ok": 68
+              },
+              "recorded": 68,
+              "successful": 68
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 36
+              },
+              "recorded": 36,
+              "successful": 36
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 9
+              },
+              "recorded": 9,
+              "successful": 9
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 14807,
+            "n": 128,
+            "p50": 7528,
+            "p95": 13052,
+            "p99": 13479
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 12937,
+            "n": 128,
+            "p50": 5888,
+            "p95": 11375,
+            "p99": 11956
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 14807,
+            "n": 128,
+            "p50": 7528,
+            "p95": 13052,
+            "p99": 13479
+          },
+          "successful_server_response_production": {
+            "maximum": 12386,
+            "n": 128,
+            "p50": 5707,
+            "p95": 11196,
+            "p99": 11747
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 35,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 0
+        },
+        "observed_deadline_completions_per_second": 4.135062913851553,
+        "observed_successful_completions_per_second": 4.135062913851553,
+        "offered": 128,
+        "outcomes": {
+          "ok": 128
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "64",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 1.0,
+        "successful": 128,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 297,
+            "n": 128,
+            "p50": 239,
+            "p95": 256,
+            "p99": 264
+          },
+          "credential_preparation_us": {
+            "maximum": 441,
+            "n": 128,
+            "p50": 408,
+            "p95": 420,
+            "p99": 437
+          },
+          "dispatch_lag_us": {
+            "maximum": 2032,
+            "n": 128,
+            "p50": 1140,
+            "p95": 1766,
+            "p99": 1959
+          },
+          "load_us": {
+            "maximum": 2991,
+            "n": 128,
+            "p50": 2576,
+            "p95": 2659,
+            "p99": 2838
+          },
+          "materialize_us": {
+            "maximum": 3439,
+            "n": 128,
+            "p50": 2656,
+            "p95": 2886,
+            "p99": 3007
+          },
+          "operation_us": {
+            "maximum": 12066,
+            "n": 128,
+            "p50": 5449,
+            "p95": 10939,
+            "p99": 11484
+          },
+          "queue_us": {
+            "maximum": 3392,
+            "n": 128,
+            "p50": 16,
+            "p95": 32,
+            "p99": 241
+          }
+        },
+        "successful_within_scheduled_deadline": 128,
+        "successful_within_server_production_deadline": 128,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 0,
+        "within_scheduled_deadline_fraction_of_offered": 1.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "controlled-smoke-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 327680,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 30882,
+          "index_bytes": 1536,
+          "index_sha256": "b71f30d6dec2b91aa1a0c05b66f9fdb4e2a66644e5e3204b4e5caf2135a8ff48",
+          "maximum_pod_compressed_bytes": 4514,
+          "maximum_pod_source_bytes": 110387,
+          "packed_bytes": 288804,
+          "packed_sha256": "a2e19c4797d477acfd7df2e1b01bbbffc14847257ac91c4611ba1e0a5f77a29f",
+          "populated": true,
+          "quads": 38080,
+          "records": 3072,
+          "source_bytes": 7051098
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 4514,
+          "n": 64,
+          "p50": 4513,
+          "p95": 4514,
+          "p99": 4514
+        },
+        "per_pod_records": {
+          "maximum": 48,
+          "n": 64,
+          "p50": 48,
+          "p95": 48,
+          "p99": 48
+        },
+        "per_pod_source_bytes": {
+          "maximum": 110387,
+          "n": 64,
+          "p50": 110387,
+          "p95": 110387,
+          "p99": 110387
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 31285248,
+          "VmRSS": 23957504
+        },
+        "process_io_delta_bytes": {
+          "rchar": 584123,
+          "read_bytes": 0,
+          "wchar": 139234,
+          "write_bytes": 143360
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 15650816,
+          "Pss": 22389760,
+          "Rss": 23957504
+        }
+      },
+      "label": "pilot-smoke-64-wac",
+      "literal_profile": {
+        "kind": "compact"
+      },
+      "model": "wac",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 64,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.046875,
+          "hit_scheduled_us": {
+            "maximum": 8067,
+            "n": 6,
+            "p50": 3124,
+            "p95": 8067,
+            "p99": 8067
+          },
+          "maximum_reported_source_bytes": 441548,
+          "miss_scheduled_us": {
+            "maximum": 13022,
+            "n": 122,
+            "p50": 6068,
+            "p95": 11347,
+            "p99": 11978
+          },
+          "successful_rows_with_indicator": 128
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 30952721,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 0,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 25
+              },
+              "recorded": 25,
+              "successful": 25
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            },
+            "query": {
+              "outcomes": {
+                "ok": 68
+              },
+              "recorded": 68,
+              "successful": 68
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 36
+              },
+              "recorded": 36,
+              "successful": 36
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 9
+              },
+              "recorded": 9,
+              "successful": 9
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 13022,
+            "n": 128,
+            "p50": 6068,
+            "p95": 11347,
+            "p99": 11978
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 11242,
+            "n": 128,
+            "p50": 4381,
+            "p95": 9608,
+            "p99": 10059
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 13022,
+            "n": 128,
+            "p50": 6068,
+            "p95": 11347,
+            "p99": 11978
+          },
+          "successful_server_response_production": {
+            "maximum": 10704,
+            "n": 128,
+            "p50": 4186,
+            "p95": 9419,
+            "p99": 9501
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 35,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 0
+        },
+        "observed_deadline_completions_per_second": 4.1353391839121345,
+        "observed_successful_completions_per_second": 4.1353391839121345,
+        "offered": 128,
+        "outcomes": {
+          "ok": 128
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "64",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 1.0,
+        "successful": 128,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 308,
+            "n": 128,
+            "p50": 240,
+            "p95": 260,
+            "p99": 274
+          },
+          "credential_preparation_us": {
+            "maximum": 428,
+            "n": 128,
+            "p50": 411,
+            "p95": 422,
+            "p99": 425
+          },
+          "dispatch_lag_us": {
+            "maximum": 2015,
+            "n": 128,
+            "p50": 1143,
+            "p95": 1810,
+            "p99": 1923
+          },
+          "load_us": {
+            "maximum": 2910,
+            "n": 128,
+            "p50": 2420,
+            "p95": 2682,
+            "p99": 2827
+          },
+          "materialize_us": {
+            "maximum": 1646,
+            "n": 128,
+            "p50": 1212,
+            "p95": 1397,
+            "p99": 1426
+          },
+          "operation_us": {
+            "maximum": 10372,
+            "n": 128,
+            "p50": 3918,
+            "p95": 9160,
+            "p99": 9224
+          },
+          "queue_us": {
+            "maximum": 1731,
+            "n": 128,
+            "p50": 18,
+            "p95": 28,
+            "p99": 49
+          }
+        },
+        "successful_within_scheduled_deadline": 128,
+        "successful_within_server_production_deadline": 128,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 0,
+        "within_scheduled_deadline_fraction_of_offered": 1.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "controlled-smoke-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 65536,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 13896,
+          "index_bytes": 192,
+          "index_sha256": "fef4abf08a49b586e6584db17daccb73697f2f9d10518598ad3fdc8d8ec3dc8e",
+          "maximum_pod_compressed_bytes": 5768,
+          "maximum_pod_source_bytes": 126058,
+          "packed_bytes": 46143,
+          "packed_sha256": "4e857131f8ea6b27d33bc1b746f4a4f518625cb8c42660833c4d5ae3b09295ec",
+          "populated": true,
+          "quads": 5432,
+          "records": 384,
+          "source_bytes": 1008464
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 5768,
+          "n": 8,
+          "p50": 5768,
+          "p95": 5768,
+          "p99": 5768
+        },
+        "per_pod_records": {
+          "maximum": 48,
+          "n": 8,
+          "p50": 48,
+          "p95": 48,
+          "p99": 48
+        },
+        "per_pod_source_bytes": {
+          "maximum": 126058,
+          "n": 8,
+          "p50": 126058,
+          "p95": 126058,
+          "p99": 126058
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 35442688,
+          "VmRSS": 28004352
+        },
+        "process_io_delta_bytes": {
+          "rchar": 595876,
+          "read_bytes": 0,
+          "wchar": 184618,
+          "write_bytes": 163840
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 19697664,
+          "Pss": 26436608,
+          "Rss": 28004352
+        }
+      },
+      "label": "pilot-smoke-8-acp",
+      "literal_profile": {
+        "kind": "compact"
+      },
+      "model": "acp",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.4375,
+          "hit_scheduled_us": {
+            "maximum": 8814,
+            "n": 56,
+            "p50": 2290,
+            "p95": 8519,
+            "p99": 8814
+          },
+          "maximum_reported_source_bytes": 504232,
+          "miss_scheduled_us": {
+            "maximum": 15007,
+            "n": 72,
+            "p50": 7727,
+            "p95": 13747,
+            "p99": 15007
+          },
+          "successful_rows_with_indicator": 128
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 30955221,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 0,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 25
+              },
+              "recorded": 25,
+              "successful": 25
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            },
+            "query": {
+              "outcomes": {
+                "ok": 68
+              },
+              "recorded": 68,
+              "successful": 68
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 36
+              },
+              "recorded": 36,
+              "successful": 36
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 9
+              },
+              "recorded": 9,
+              "successful": 9
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 15007,
+            "n": 128,
+            "p50": 7206,
+            "p95": 13175,
+            "p99": 14658
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 13646,
+            "n": 128,
+            "p50": 5881,
+            "p95": 11508,
+            "p99": 12868
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 15007,
+            "n": 128,
+            "p50": 7206,
+            "p95": 13175,
+            "p99": 14658
+          },
+          "successful_server_response_production": {
+            "maximum": 13462,
+            "n": 128,
+            "p50": 5718,
+            "p95": 11328,
+            "p99": 12338
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 35,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 0
+        },
+        "observed_deadline_completions_per_second": 4.135005206391516,
+        "observed_successful_completions_per_second": 4.135005206391516,
+        "offered": 128,
+        "outcomes": {
+          "ok": 128
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 1.0,
+        "successful": 128,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 298,
+            "n": 128,
+            "p50": 236,
+            "p95": 257,
+            "p99": 272
+          },
+          "credential_preparation_us": {
+            "maximum": 436,
+            "n": 128,
+            "p50": 408,
+            "p95": 423,
+            "p99": 433
+          },
+          "dispatch_lag_us": {
+            "maximum": 1959,
+            "n": 128,
+            "p50": 1115,
+            "p95": 1744,
+            "p99": 1876
+          },
+          "load_us": {
+            "maximum": 3056,
+            "n": 128,
+            "p50": 2523,
+            "p95": 2630,
+            "p99": 2986
+          },
+          "materialize_us": {
+            "maximum": 3409,
+            "n": 128,
+            "p50": 2672,
+            "p95": 3124,
+            "p99": 3183
+          },
+          "operation_us": {
+            "maximum": 13169,
+            "n": 128,
+            "p50": 5465,
+            "p95": 11073,
+            "p99": 12035
+          },
+          "queue_us": {
+            "maximum": 45,
+            "n": 128,
+            "p50": 18,
+            "p95": 29,
+            "p99": 33
+          }
+        },
+        "successful_within_scheduled_deadline": 128,
+        "successful_within_server_production_deadline": 128,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 0,
+        "within_scheduled_deadline_fraction_of_offered": 1.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    },
+    {
+      "configuration_outcome": null,
+      "corpus_profile": "controlled-smoke-v1",
+      "equivalence_admitted": false,
+      "footprint": {
+        "allocated_corpus_bytes_before_load": 53248,
+        "cgroup_memory_peak_bytes": null,
+        "manifest": {
+          "binary_payloads_included": false,
+          "generation_us": 14842,
+          "index_bytes": 192,
+          "index_sha256": "ad6fd2db37310cc2894e04a7457f649f280774989d4a6442e08f2015fba2efaf",
+          "maximum_pod_compressed_bytes": 4509,
+          "maximum_pod_source_bytes": 109020,
+          "packed_bytes": 36071,
+          "packed_sha256": "fabf3557b04aa9d1ac05dcbdff9972413b3b1d930ed5a9f8ccc0703f6e0ac9c4",
+          "populated": true,
+          "quads": 4760,
+          "records": 384,
+          "source_bytes": 872160
+        },
+        "per_pod_compressed_bytes": {
+          "maximum": 4509,
+          "n": 8,
+          "p50": 4509,
+          "p95": 4509,
+          "p99": 4509
+        },
+        "per_pod_records": {
+          "maximum": 48,
+          "n": 8,
+          "p50": 48,
+          "p95": 48,
+          "p99": 48
+        },
+        "per_pod_source_bytes": {
+          "maximum": 109020,
+          "n": 8,
+          "p50": 109020,
+          "p95": 109020,
+          "p99": 109020
+        },
+        "postload_journal_allocated_bytes": null,
+        "process_after_bytes": {
+          "VmHWM": 29921280,
+          "VmRSS": 26656768
+        },
+        "process_io_delta_bytes": {
+          "rchar": 505217,
+          "read_bytes": 0,
+          "wchar": 184630,
+          "write_bytes": 163840
+        },
+        "scope": "remote persisted pack manifest; pre-load du excludes later journal state; process snapshots do not establish the server cgroup RAM minimum",
+        "smaps_after_bytes": {
+          "Private_Clean": 6631424,
+          "Private_Dirty": 18350080,
+          "Pss": 25085952,
+          "Rss": 26656768
+        }
+      },
+      "label": "pilot-smoke-8-wac",
+      "literal_profile": {
+        "kind": "compact"
+      },
+      "model": "wac",
+      "pod_admission": {
+        "scheduled_requests_targeting_above_limit_pods": 0,
+        "scope": "size comparison only; does not classify a timed-out or generic transport failure as a server rejection",
+        "source_byte_limit": 536870912,
+        "stored_pods_above_limit": 0
+      },
+      "pods": 8,
+      "protocol_capacity_admitted": false,
+      "requests": {
+        "cache": {
+          "hit_fraction": 0.4375,
+          "hit_scheduled_us": {
+            "maximum": 9169,
+            "n": 56,
+            "p50": 2270,
+            "p95": 8234,
+            "p99": 9169
+          },
+          "maximum_reported_source_bytes": 436080,
+          "miss_scheduled_us": {
+            "maximum": 14224,
+            "n": 72,
+            "p50": 6331,
+            "p95": 12777,
+            "p99": 14224
+          },
+          "successful_rows_with_indicator": 128
+        },
+        "complete_record_sequence": true,
+        "content_write_scope": "existing-value replacement; neither net-new ingestion nor expiry was exercised",
+        "data_issues": [],
+        "diagnostic_deadline_us": 200000,
+        "elapsed_including_drain_us": 30954246,
+        "explicit_timeout_count": 0,
+        "failure_durations_at_least_configured_timeout": 0,
+        "groups": {
+          "operation": {
+            "background-read": {
+              "outcomes": {
+                "ok": 25
+              },
+              "recorded": 25,
+              "successful": 25
+            },
+            "content-write": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            },
+            "query": {
+              "outcomes": {
+                "ok": 68
+              },
+              "recorded": 68,
+              "successful": 68
+            }
+          },
+          "query_id": {
+            "q1-point": {
+              "outcomes": {
+                "ok": 36
+              },
+              "recorded": 36,
+              "successful": 36
+            },
+            "q10-path": {
+              "outcomes": {
+                "ok": 5
+              },
+              "recorded": 5,
+              "successful": 5
+            },
+            "q11-graphs": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q2-count": {
+              "outcomes": {
+                "ok": 8
+              },
+              "recorded": 8,
+              "successful": 8
+            },
+            "q3-star": {
+              "outcomes": {
+                "ok": 1
+              },
+              "recorded": 1,
+              "successful": 1
+            },
+            "q4-join": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q5-aggregate": {
+              "outcomes": {
+                "ok": 6
+              },
+              "recorded": 6,
+              "successful": 6
+            },
+            "q6-filter": {
+              "outcomes": {
+                "ok": 3
+              },
+              "recorded": 3,
+              "successful": 3
+            },
+            "q7-optional": {
+              "outcomes": {
+                "ok": 7
+              },
+              "recorded": 7,
+              "successful": 7
+            },
+            "q8-union": {
+              "outcomes": {
+                "ok": 4
+              },
+              "recorded": 4,
+              "successful": 4
+            },
+            "q9-notexists": {
+              "outcomes": {
+                "ok": 9
+              },
+              "recorded": 9,
+              "successful": 9
+            },
+            "replace-one-record-value": {
+              "outcomes": {
+                "ok": 35
+              },
+              "recorded": 35,
+              "successful": 35
+            }
+          }
+        },
+        "latency_us": {
+          "all_recorded_outcomes_from_scheduled_arrival": {
+            "maximum": 14224,
+            "n": 128,
+            "p50": 5888,
+            "p95": 12370,
+            "p99": 13966
+          },
+          "successful_complete_body_from_http_dispatch": {
+            "maximum": 13237,
+            "n": 128,
+            "p50": 4409,
+            "p95": 10549,
+            "p99": 12270
+          },
+          "successful_complete_body_from_scheduled_arrival": {
+            "maximum": 14224,
+            "n": 128,
+            "p50": 5888,
+            "p95": 12370,
+            "p99": 13966
+          },
+          "successful_server_response_production": {
+            "maximum": 12354,
+            "n": 128,
+            "p50": 4217,
+            "p95": 10355,
+            "p99": 12016
+          }
+        },
+        "mutation_commit_evidence": {
+          "acknowledged_success": 35,
+          "reconciled_against_durable_journal": false,
+          "scope": "a failed client receipt does not prove the server rolled back or never committed the write",
+          "transport_or_body_failure_commit_unknown": 0
+        },
+        "observed_deadline_completions_per_second": 4.135135451207566,
+        "observed_successful_completions_per_second": 4.135135451207566,
+        "offered": 128,
+        "outcomes": {
+          "ok": 128
+        },
+        "policy_write_coverage": {
+          "effective_rights_change_verified_by_timing_rows": false,
+          "nonzero_triple_delta": 0,
+          "successful": 0,
+          "unknown_delta": 0,
+          "zero_triple_delta": 0
+        },
+        "recorded": 128,
+        "settings": {
+          "arrival": "poisson",
+          "mix": "population",
+          "pods": "8",
+          "query-set": "population",
+          "rate": "4",
+          "requests": "128",
+          "seed": "2026090601",
+          "selection": "uniform",
+          "timeout-ms": "5000"
+        },
+        "success_fraction": 1.0,
+        "successful": 128,
+        "successful_phase_us": {
+          "auth_us": {
+            "maximum": 302,
+            "n": 128,
+            "p50": 238,
+            "p95": 254,
+            "p99": 287
+          },
+          "credential_preparation_us": {
+            "maximum": 442,
+            "n": 128,
+            "p50": 412,
+            "p95": 430,
+            "p99": 437
+          },
+          "dispatch_lag_us": {
+            "maximum": 1883,
+            "n": 128,
+            "p50": 1128,
+            "p95": 1756,
+            "p99": 1883
+          },
+          "load_us": {
+            "maximum": 2818,
+            "n": 128,
+            "p50": 2372,
+            "p95": 2607,
+            "p99": 2809
+          },
+          "materialize_us": {
+            "maximum": 1712,
+            "n": 128,
+            "p50": 1212,
+            "p95": 1649,
+            "p99": 1712
+          },
+          "operation_us": {
+            "maximum": 12067,
+            "n": 128,
+            "p50": 3965,
+            "p95": 10088,
+            "p99": 11745
+          },
+          "queue_us": {
+            "maximum": 48,
+            "n": 128,
+            "p50": 19,
+            "p95": 32,
+            "p99": 39
+          }
+        },
+        "successful_within_scheduled_deadline": 128,
+        "successful_within_server_production_deadline": 128,
+        "throughput_scope": "observed completions over elapsed time including drain, not sustainable goodput or a saturation limit",
+        "timeout_classification": "generic transport-error rows do not identify the underlying cause; duration is not a timeout classification",
+        "unsuccessful_or_unrecorded": 0,
+        "within_scheduled_deadline_fraction_of_offered": 1.0
+      },
+      "server": {
+        "authentication": "pinned-issuer-es256-dpop",
+        "settings": {
+          "cache-bytes": "536870912",
+          "cache-pods": "4",
+          "max-pod-bytes": "536870912",
+          "queue-capacity": "256"
+        },
+        "workers": 1
+      },
+      "verification": {
+        "authentication": "trusted-session deterministic check; HTTP authentication checked separately",
+        "checks": 352,
+        "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+        "record_type": "verification-complete",
+        "sampled_pods": 8
+      },
+      "verification_scope": "pack/index checksum validation and sampled policy-neutral reference queries; not all canonical admission gates"
+    }
+  ],
+  "data_errors": [],
+  "declared_source_input_sha256": {
+    "Cargo.lock": "2e5d1f702e35d88670d0a75c79f0867a9ead36318c687d227db6d17744eb5476",
+    "bench/ac/million/protocol.json": "0dac072c30d70e4ac759fe450de4c5023f659cd29a1155cfcb2edba7e2bdecb0",
+    "bench/ac/million/workload.json": "0ba6b9fc2d21aa26b36e5b532427efde54588854715e6131d367ab20aef01fa0"
+  },
+  "equivalence_admitted": false,
+  "host_environment": {
+    "Architecture": "aarch64",
+    "CPU(s)": "4",
+    "Core(s) per socket": "4",
+    "Model name": "Neoverse-V1",
+    "Thread(s) per core": "1",
+    "compiler": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "input_sha256": {
+    "DONE": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "MANIFEST.sha256": "01f2f8b11ba9e93972a60b87d5136378ad0a36f9206f59222bd4d3348a9f09ab",
+    "environment.txt": "b19ad32e1dc97990d7f4334d8adfa0ba7dedf04c9fd9795a069216f07b1a953d",
+    "input-hashes.txt": "bde310b42a29118bcd7f22315038d0761857a59971ec411a92390faac27622be",
+    "pilot-entropy-8-acp-disk.txt": "a0709ed25f5add710f66a0c455b323906784b423c51dc76363f33272da779804",
+    "pilot-entropy-8-acp-io-after.txt": "8368b1c37f1c3a0bc99e3a4e3633078c0e0f846737685b3baebd91eb25f07dba",
+    "pilot-entropy-8-acp-io-before.txt": "bcef12e137c423f66e74a66ae244a1420a3965ebd1cbef4749940732ab811692",
+    "pilot-entropy-8-acp-manifest.json": "1d264003830f81121f95bccb9961d7ebf12b3523fc09733e1258b5a9390b1261",
+    "pilot-entropy-8-acp-pod-summaries.jsonl": "eb9426adcd727487df412b2e908c3880931384423b9a16f007cd5bd3a645fc9e",
+    "pilot-entropy-8-acp-requests.jsonl": "c5b1c105310d13ae44840161864bbf5c13618fbb4d0ca73e12f03b20e4728790",
+    "pilot-entropy-8-acp-server.jsonl": "2cfc6487da33195c65b2f95bd1bd61cd00f28542fe3c6b6086b427dfcca4155e",
+    "pilot-entropy-8-acp-smaps.txt": "95fcf61d6afab0014791c2b37612c8c7b12d78fd13599833f358f4932f3880a9",
+    "pilot-entropy-8-acp-status-after.txt": "fc3681f7718c4512d8bd814cd10bb4c8ef8c38579105342e09d2f64862f61412",
+    "pilot-entropy-8-acp-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-entropy-8-wac-disk.txt": "8da0e655c084e32e1fe13e58ac8d6f95e02c4840d6f139890f95bc585380fa17",
+    "pilot-entropy-8-wac-io-after.txt": "eb387ce6e1280a4217df6e8eac1361c1149b873ef326cfe50849b83b8643e82c",
+    "pilot-entropy-8-wac-io-before.txt": "bcef12e137c423f66e74a66ae244a1420a3965ebd1cbef4749940732ab811692",
+    "pilot-entropy-8-wac-manifest.json": "6f9fb9f746a051920c82cd34d5f65a5045e57a2a4beedfc45be07dc6146184d7",
+    "pilot-entropy-8-wac-pod-summaries.jsonl": "0c6b94f55678fe6aa1e51f361f2f915269655b5a50735603b6b607027cb49f67",
+    "pilot-entropy-8-wac-requests.jsonl": "aa1229d255d1886a68c055258261d93c2e811901159d7605a28e009ff1e6b7e0",
+    "pilot-entropy-8-wac-server.jsonl": "b71f86edeb4490f362fe72145cda889721252efe15472756c77fd3a188177bb7",
+    "pilot-entropy-8-wac-smaps.txt": "c06793d4530f5b77b370e3664e69b9d4d8c585968d1eed0ee097df2e0e85dca4",
+    "pilot-entropy-8-wac-status-after.txt": "90328c91d1b49da286f81e95a4fb33857fa1dee1c9af5cb4492f85f088bbc477",
+    "pilot-entropy-8-wac-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-history-64-acp-disk.txt": "65af7bc85784b53187ac86bb5b73e9cb2d7a37395f562df1af5a5ace2dcf02be",
+    "pilot-history-64-acp-io-after.txt": "bcc4e41c7563704b89dfc23c8152a3186d6a410c9260dfda6fd6e5e7e71aa3ee",
+    "pilot-history-64-acp-io-before.txt": "2a60eab21cefe6a938ed0c1b435c27989a125d5321c0621eb56bda589853f1db",
+    "pilot-history-64-acp-manifest.json": "a7f6da399c9d563776f17b60e671aab0486c537c08e4d8759b6a069962e7df5f",
+    "pilot-history-64-acp-pod-summaries.jsonl": "0974b855ec3234c41cecc96f2e4dac588c622254f5ccb1c5b5b6b82a71721c44",
+    "pilot-history-64-acp-requests.jsonl": "dd619b10cfac9a08fa371b9217d5172588afd98d7a4dc63cd4e1b615565a53de",
+    "pilot-history-64-acp-server.jsonl": "fbbfcfba7dec13dcc22d1a8b788b5a738fa6cbc0dcfbfe77df41bd55d24f1dd1",
+    "pilot-history-64-acp-smaps.txt": "4f350346cebe72ce31558bd0473e290d4866507bde67c1a5081d90e07bd25d54",
+    "pilot-history-64-acp-status-after.txt": "48d996c8fc86f1f658222b5ac2918bf3a6bb25e724ed50d0200b32b016b1aec8",
+    "pilot-history-64-acp-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-history-64-wac-disk.txt": "28091e7e122cf227d9d544826e4e2a78b770585cacae7c22c10fb6a419ced289",
+    "pilot-history-64-wac-io-after.txt": "56ad308119d24b2544f0b7bffa9bdea302e8f4c9e2e09a7aeef689daf2f6ace7",
+    "pilot-history-64-wac-io-before.txt": "2a60eab21cefe6a938ed0c1b435c27989a125d5321c0621eb56bda589853f1db",
+    "pilot-history-64-wac-manifest.json": "943f147756d0d4a7a8a3486c6814d9ec6f7246950f2f2760ae0e6803c28a27e0",
+    "pilot-history-64-wac-pod-summaries.jsonl": "febf7f2a06b739066310c526ec8765ddc64c0bc59f50bacfd94e7e35878ae57a",
+    "pilot-history-64-wac-requests.jsonl": "349500eb18bccde83cf1e442fdf18b19420bec19a1f5f312b33c4ac9fdd2601b",
+    "pilot-history-64-wac-server.jsonl": "886ca1b77754ae1c6faf4f2c1c0476b678e762b0c1b45c30cae9eb025dd821da",
+    "pilot-history-64-wac-smaps.txt": "fab5c7970cd9c227d6f3e9db3baef8d14f22d2e728dc56c98a85547fdce78161",
+    "pilot-history-64-wac-status-after.txt": "60f8693fb3c598778746687bbf56065758a9690510b0155b14a7e43276ed91b5",
+    "pilot-history-64-wac-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-history-8-acp-disk.txt": "53f2011383e6ef5e39036fe83dbdee16045f857276edb68c8ef4bfadc499bd84",
+    "pilot-history-8-acp-io-after.txt": "a3e03267c60656b49212ea08f0784ed88a7be6195fd0447c436ab26a39394a95",
+    "pilot-history-8-acp-io-before.txt": "acb1cc12039fb9ae7495a19135030b4accec5542a0db9f120666eab881af6443",
+    "pilot-history-8-acp-manifest.json": "0ecae940cab4d2e57c0fd32b45425ae4356f77317be5668793a685f8b1e1e216",
+    "pilot-history-8-acp-pod-summaries.jsonl": "2efb20abc3faf560b48d7a5fad066ebbb68064b96d42508bb10d1823bf875e74",
+    "pilot-history-8-acp-requests.jsonl": "ba8ce9c494897111de3e9fb54fddc622566636fcf27a34f6ddc958a24dfaa8a9",
+    "pilot-history-8-acp-server.jsonl": "f8ee36380e3d937ff8a199e8571094cd67f8ffa517553bc8d85da8253faaaad2",
+    "pilot-history-8-acp-smaps.txt": "747cd4ed89dbb966de1d11297c54c7a4d38234ab9da85c82952d15a12b5312df",
+    "pilot-history-8-acp-status-after.txt": "a6216a2f6a6de79ebf0378c6a7760b97f4aa55413801e64061522140c129a7fc",
+    "pilot-history-8-acp-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-history-8-wac-disk.txt": "094122f2fceb1e6529bcddf894a301fdd5a484080eb506fbddb64e8a4ca9fe8b",
+    "pilot-history-8-wac-io-after.txt": "90ab753111ad507e38de4dde3d126787ca33bd63f97d0af003263262fc5a04fb",
+    "pilot-history-8-wac-io-before.txt": "acb1cc12039fb9ae7495a19135030b4accec5542a0db9f120666eab881af6443",
+    "pilot-history-8-wac-manifest.json": "9eb159e5c0e78c72f5ac0c0379fd5b54ce6b7d0135170b18e9c1593b219d2469",
+    "pilot-history-8-wac-pod-summaries.jsonl": "a2d9827a65e718a37152c34383fcb52fa7bc64b86f3333c4ac1b2624d9b2b149",
+    "pilot-history-8-wac-requests.jsonl": "73959484dbd5d8ffd186cd0111ee0aa235f35511473d58706eb8719a5f33570b",
+    "pilot-history-8-wac-server.jsonl": "13268b1ddb5752370acf9aec1c081f3c27be445fb412301c54ce072a80485845",
+    "pilot-history-8-wac-smaps.txt": "4ff55469b54728e4d22d6b33bb0d4f18e79f6f7ddb5e58761eca173225a569e7",
+    "pilot-history-8-wac-status-after.txt": "841d5634210cebc14e7decaf65ca032dae996ba07ac879ebb9ca7665daebb294",
+    "pilot-history-8-wac-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-smoke-64-acp-disk.txt": "522a22999cb967694ebf0fe89b4f737159aed05591070ddba8db6113b7b8649b",
+    "pilot-smoke-64-acp-io-after.txt": "6b60ca95e73647f68a93f8b07109e4f52cb740715a80fa4e886220897dc9cc4c",
+    "pilot-smoke-64-acp-io-before.txt": "c6e68c93f8b7b44bd4cbf73a888d553ee547a02dab7c7668a92b10942380261d",
+    "pilot-smoke-64-acp-manifest.json": "0fd97cb9ae38a13512ac7d9b7c77a4bb079b711aae4dcb42932a0a1f6cb6de80",
+    "pilot-smoke-64-acp-pod-summaries.jsonl": "d025f3de3af03a874107bd312cadbf3221d8874017e87e52850fb3e0cb6afa3e",
+    "pilot-smoke-64-acp-requests.jsonl": "1683524856753b23f568d816aa63504353aac94fe30c536e58706fc6e8021043",
+    "pilot-smoke-64-acp-server.jsonl": "8e3ca2df0e8626b2e93993befed9233c6e533ad25d3cf75170eee87d8e4c00ea",
+    "pilot-smoke-64-acp-smaps.txt": "b8a6e3bab32519c7584e26ae3fc4bed3dd90f0a689bf230d2f61725741c7a3c7",
+    "pilot-smoke-64-acp-status-after.txt": "5884bb9b79051912cfa262b7df7c79f84fd7440111e4c4273da75f9dc54525dc",
+    "pilot-smoke-64-acp-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-smoke-64-wac-disk.txt": "428729b2e626cd526048c6f53475b2df569682158382dc5127fe56e980d6f6c2",
+    "pilot-smoke-64-wac-io-after.txt": "4ab7ef91bea5955e3efdd0ae83c7effc6266673d96478b323bd528067a94884e",
+    "pilot-smoke-64-wac-io-before.txt": "c6e68c93f8b7b44bd4cbf73a888d553ee547a02dab7c7668a92b10942380261d",
+    "pilot-smoke-64-wac-manifest.json": "ce7b14d74adf360d9e74598aa66a0527150b7974414a24d248885c0ed89c6c2f",
+    "pilot-smoke-64-wac-pod-summaries.jsonl": "b8c4ee3ccebe17cefd120fdcf4123aebfacfef49919e3065e3dc1e54d7c62f11",
+    "pilot-smoke-64-wac-requests.jsonl": "55b1cfd43c7e4a50f6876f89de0835e6c1a26dd78107ecd8580e1d9f6e46e946",
+    "pilot-smoke-64-wac-server.jsonl": "efc8a2b6e6f2c4f3d46569fc1caaa5998dea043409ec73f72784850ffdf0601d",
+    "pilot-smoke-64-wac-smaps.txt": "1099cc6f3fc5e4caabda69833427fd2c5608bd77f1382244d741125829a2bf38",
+    "pilot-smoke-64-wac-status-after.txt": "17301293af5af464f34050667d27f462220c22d3d885c042ebdb32e489634da8",
+    "pilot-smoke-64-wac-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-smoke-8-acp-disk.txt": "e979a6cc280edae3b0a8a4eb03f48b3b2853aedb5f206bea8a1c7e90d13ed9ab",
+    "pilot-smoke-8-acp-io-after.txt": "b9883fe5631a9751440eeb074d1ff1d0b7daf9092907262169b5a8cdb9fcbdf3",
+    "pilot-smoke-8-acp-io-before.txt": "3eed15dbd3c05f21172bd7661f752699a3f6bafb97b052c17d061aa273e84b87",
+    "pilot-smoke-8-acp-manifest.json": "fd3e3002f70ac1d88590eb1d47001349279348f6646cdb467b6dbc09cc45c1d1",
+    "pilot-smoke-8-acp-pod-summaries.jsonl": "74e0fc7f5f72dcced565d55b0d0021e58125223c4b971c7e18f86c08057f6c61",
+    "pilot-smoke-8-acp-requests.jsonl": "f9328679eb6a78ad9e59a051cdfb1e8fa1da3b0da0b278d27d54cd9fda77fc70",
+    "pilot-smoke-8-acp-server.jsonl": "6e7f79019f82e01f4b24b5b99cf1ba1ee91e8ae12c30dbedbd069d4cd5f7064a",
+    "pilot-smoke-8-acp-smaps.txt": "c735ba30d6fd250caee8890a6e11ed2619ec2d17317657288220c9b73ba8905f",
+    "pilot-smoke-8-acp-status-after.txt": "4783c9d90659d35c656382371dd1b7eb2d85b5790032c2f2f63daefcb4c9fefe",
+    "pilot-smoke-8-acp-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "pilot-smoke-8-wac-disk.txt": "101a1b3a19085b98eb2957a985a1ce6693f25db96919b9562ee44ff972679cb4",
+    "pilot-smoke-8-wac-io-after.txt": "f9f9b5bad52ccbc478a3297578e4f7930ecfd3df4db736f57e56995da20412c3",
+    "pilot-smoke-8-wac-io-before.txt": "98763e555eb6955db67c6e9ff77a25ed604547a7a63b3ac5adce1ea240fc9f8c",
+    "pilot-smoke-8-wac-manifest.json": "9d65be4f9d3b79d247d0e4c0ebdab5cd8999433eae77e2a6372aadf2ba2c8c03",
+    "pilot-smoke-8-wac-pod-summaries.jsonl": "cec9a08bfb4d1a0e1bba49c28eaf5df560610399e940b1b4136ff600a8284d28",
+    "pilot-smoke-8-wac-requests.jsonl": "76004e7f4fe9108b85ed2bfb9b693f251adc572daffaa14057f912bc4f368784",
+    "pilot-smoke-8-wac-server.jsonl": "80d38f07bb66a6fc16e3e10b3261b23b739e23e5a91993911ac9b26937d1bb6e",
+    "pilot-smoke-8-wac-smaps.txt": "36563eb0e73797273e76cfdc56c3ec5b415ecfffd3f97b0d4f4a68c0cf8fc656",
+    "pilot-smoke-8-wac-status-after.txt": "37e3451182b8e7cf8dcbad462c583e6741a87776ed9b7050773df346420ed582",
+    "pilot-smoke-8-wac-verify.jsonl": "88246db060d2da0b348ec0030192b630bb851c436b2a30442275a0b0ad2e2c35",
+    "runner-scope.json": "1ea84cb608c3d6db316357c7757b5eebccf9217930fdbfc809b7a78f57c141a6",
+    "source-commit.txt": "3ecf83b09cf5e4093dcc0ea7c185d6477048a4af2eb222b3dc1cff6b2f7e0c76"
+  },
+  "protocol_capacity_admitted": false,
+  "run_id": "ec2-pilot-20260906T125000Z",
+  "runner_scope": {
+    "content_writes": "replace one existing record value; no added records",
+    "latency": "complete local HTTP response-body latency for conservative local SLO; server header diagnostic only",
+    "memory": "source-byte cache limit, with outer study cgroup; not minimum server RAM tier",
+    "policy_administration": "shared manifest-owner authorization for WAC and ACP; not ACP ACR-edit authorization",
+    "query_templates": "uniform across population templates, not journey-weighted",
+    "record_type": "runner-scope",
+    "requester": "owner",
+    "status": "exploratory-pilot"
+  },
+  "schema_version": 1,
+  "source_commit": "74cd9f90eacb29e747294de3cbb18ff2849f0556",
+  "storage_stops": []
+}
