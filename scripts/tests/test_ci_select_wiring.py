@@ -778,6 +778,85 @@ class TestPhase2LaneScoping(unittest.TestCase):
         # Must NOT reference matrix.* in the job-level if (contexts-availability trap).
         self.assertNotIn("matrix.", cond)
 
+    # ---- the sparq-lws-core dedicated coverage lane (ci.yml) ----------------------
+    # [OPUS-5] #5139. This lane exists SO THAT the crate's line-% floor is enforced
+    # WITHOUT charging every Rust PR for it, so its whole value rests on one guard:
+    # measure iff the PR's affected closure names the crate (or the selection is not
+    # trustworthy). Asserted BEHAVIOURALLY by evaluating the live `if:` — a substring
+    # check would happily let the disjunction rot into "always skip" (floor silently
+    # unenforced) or "always run" (the congestion this placement exists to avoid).
+    def _lws_runs(self, *, mode, affected, event="pull_request", draft=False,
+                  rust_changed="true"):
+        ctx = pr_event(event=event, draft=draft)
+        ctx["needs"] = {
+            "changes": {"outputs": {"rust_changed": rust_changed}},
+            "select": {"outputs": {"mode": mode, "affected": affected}},
+        }
+        return eval_job_if(str(self.ci["jobs"]["coverage-lws-core"].get("if", "")), ctx)
+
+    def test_lws_core_coverage_lane_measures_only_when_its_crate_is_affected(self):
+        # IN the closure => MEASURE. This is the enforcement point for the floor.
+        self.assertTrue(
+            self._lws_runs(mode="selected", affected='["sparq-lws-core","sparq-core"]'),
+            "the lws-core coverage lane MUST measure when the PR's affected closure "
+            "names sparq-lws-core — otherwise the crate's floor is never enforced",
+        )
+        # OUTSIDE the closure => SKIP. That skip is the whole point of the dedicated
+        # placement (a shard would have measured it on every Rust PR), and is sound on
+        # the COVERAGE_CONE argument: nothing the crate depends on changed.
+        self.assertFalse(
+            self._lws_runs(mode="selected", affected='["sparq-geo","sparq-text"]'),
+            "the lws-core coverage lane MUST skip when its crate is outside the "
+            "affected closure — that is the CI-congestion constraint this lane exists "
+            "to satisfy (#2741)",
+        )
+        # Substring safety: a crate whose NAME CONTAINS the token must not be enough,
+        # and the quoted needle is what makes that true.
+        self.assertFalse(
+            self._lws_runs(mode="selected", affected='["sparq-lws-core-extras"]'),
+            "the guard must match the quoted JSON element, not a bare substring",
+        )
+
+    def test_lws_core_coverage_lane_is_fail_open_on_every_untrusted_selection(self):
+        for mode in ("full", "shadow", ""):
+            self.assertTrue(
+                self._lws_runs(mode=mode, affected="[]"),
+                f"select mode={mode!r} is not a trustworthy selection — the lane must "
+                f"MEASURE rather than skip (fail-open, design §4.3)",
+            )
+
+    def test_lws_core_coverage_lane_keeps_the_path_filter_guard(self):
+        cond = str(self.ci["jobs"]["coverage-lws-core"].get("if", ""))
+        self.assertIn(FAIL_CLOSED_DISJUNCT, cond)
+        self.assertIn("needs.changes.outputs.rust_changed == 'true'", cond)
+        self.assertIn("github.event_name != 'schedule'", cond)
+        self.assertFalse(
+            self._lws_runs(mode="full", affected="[]", rust_changed="false"),
+            "a non-Rust PR must not pay for an instrumented lws-core measurement",
+        )
+        needs = self.ci["jobs"]["coverage-lws-core"].get("needs", [])
+        self.assertIn("select", needs)
+        self.assertIn("changes", needs)
+
+    def test_lws_core_is_gated_exactly_once_and_outside_the_shard_matrix(self):
+        """The lane is only a real gate if scripts/coverage.sh agrees the crate is
+        measured THERE and nowhere else: in PER_COMMIT_CRATES (so it is gated at all),
+        in DEDICATED_PIPELINE_CRATES (so --check-shards does not flag it un-gated), and
+        in NO shard group (so it is not silently measured twice, re-introducing the
+        every-PR cost). Read from the script text — it is the file CI runs."""
+        cov = (REPO_ROOT / "scripts" / "coverage.sh").read_text(encoding="utf-8")
+        per_commit = re.search(r"PER_COMMIT_CRATES=\((.*?)\n\)", cov, re.S).group(1)
+        dedicated = re.search(r"DEDICATED_PIPELINE_CRATES=\((.*?)\)", cov, re.S).group(1)
+        shards = re.search(r"SHARD_GROUPS=\((.*?)\n\)", cov, re.S).group(1)
+        shard_crates = [c for line in re.findall(r'"([^"]*)"', shards) for c in line.split()]
+        self.assertIn("sparq-lws-core", per_commit.split(),
+                      "sparq-lws-core must be a PER_COMMIT_CRATES entry or it has no "
+                      "line-% ratchet at all (the #5139 gap)")
+        self.assertIn("sparq-lws-core", dedicated.split())
+        self.assertNotIn("sparq-lws-core", shard_crates,
+                         "sparq-lws-core must NOT be in a SHARD_GROUPS shard — that is "
+                         "exactly the every-Rust-PR cost the dedicated lane avoids")
+
     # ---- seed sets are real + mirrored ---------------------------------------------
     def test_lane_seeds_are_real_workspace_members(self):
         for lane, seeds in self.lane_seeds.items():
@@ -1238,7 +1317,10 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
 
     # The regex the coverage-demoted-filer uses (in ci.yml) to find a FAILED DEMOTED
     # measure leg by job name. Kept in sync with the workflow's `--jq ... test("...")`.
-    _DEMOTED_LEG_RE = re.compile(r"^coverage (ratchet \(shard |engine )")
+    # [OPUS-5] #5139 widened `ratchet \(shard ` to `ratchet \(` so the dedicated
+    # `coverage ratchet (sparq-lws-core)` lane is detected too. The aggregate verdict is
+    # still excluded because it spells "coverage ratchet + test-presence…", not "(".
+    _DEMOTED_LEG_RE = re.compile(r"^coverage (ratchet \(|engine )")
 
     @classmethod
     def setUpClass(cls):
@@ -1246,7 +1328,10 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
         cls.cov_gate = _coverage_gate_module()
 
     # The measure legs whose instrumented run left the queue.
-    DEMOTED_JOBS = ("coverage-measure", "coverage-engine-run")
+    # [OPUS-5] #5139: `coverage-lws-core` is a measure leg like the others — it must carry
+    # the SAME event envelope (no merge_group, no draft, still runs on a PR head and on
+    # push-to-main), because it is now the only place that crate's line-% floor is enforced.
+    DEMOTED_JOBS = ("coverage-measure", "coverage-engine-run", "coverage-lws-core")
 
     # [OPUS-5] issue #5149: the upstream jobs each demoted leg may depend on — FROZEN,
     # because "one more upstream job" is exactly the shape a push-run skip takes. See
@@ -1473,6 +1558,8 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
             for val in self.ci["jobs"][job_id]["strategy"]["matrix"][var]:
                 must_match.append(tmpl.replace("${{ matrix.%s }}" % var, str(val)))
         must_match.append(self.ci["jobs"]["coverage-engine-merge"]["name"])
+        # [OPUS-5] #5139: the dedicated (non-matrix) lws-core measure leg.
+        must_match.append(self.ci["jobs"]["coverage-lws-core"]["name"])
         for real in must_match:
             self.assertRegex(
                 real, self._DEMOTED_LEG_RE,
@@ -1488,7 +1575,7 @@ class TestCoverageMergeGroupDemotion(unittest.TestCase):
         # The regex literal must still be the one the workflow actually runs.
         body = "\n".join(str(s.get("run", ""))
                          for s in self.ci["jobs"]["coverage-demoted-filer"]["steps"])
-        self.assertIn("^coverage (ratchet \\\\(shard |engine )", body,
+        self.assertIn("^coverage (ratchet \\\\(|engine )", body,
                       "the workflow's --jq regex must match the one pinned here")
 
 
@@ -1576,7 +1663,9 @@ class TestDraftTierWiring(unittest.TestCase):
 
     # ---- draft skip guards ---------------------------------------------------
     def test_coverage_jobs_skip_on_draft_heads(self):
-        for job_id in ("coverage-measure", "coverage-engine-run", "coverage"):
+        # [OPUS-5] #5139: the dedicated lws-core measure lane draft-skips like its siblings.
+        for job_id in ("coverage-measure", "coverage-engine-run", "coverage-lws-core",
+                       "coverage"):
             cond = str(self.ci["jobs"][job_id].get("if", ""))
             self.assertIn(self.DRAFT_GUARD, cond,
                           f"ci.yml:{job_id} must skip on draft PR heads with the "
