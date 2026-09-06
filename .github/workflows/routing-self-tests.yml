@@ -325,3 +325,12 @@ jobs:
           # row-dropping bug in its module docstring), or dropping the marker-provenance check
           # each turns this command red.
           python3 scripts/audit-issue-deps.py --self-test
+          # [OPUS-5] sq-2xdg / #3290: the periodic `.beads/issues.jsonl` export-sync
+          # reconciler. It IMPORTS ci-close-merged-beads.py's marker regex, migration label
+          # and closeable-status set rather than re-declaring them, so its self-test is also
+          # the assertion that that import still resolves — a rename of the autoclose script
+          # must red here, not at the next scheduled beads-sync run where the failure would be
+          # a silent staleness rather than a visible break. Hermetic: pure functions only, no
+          # gh, no network, no file writes (pinned by test_selftest_never_writes.py's tree
+          # scan, which covers scripts/**/*.py).
+          python3 scripts/beads-export-sync.py --self-test

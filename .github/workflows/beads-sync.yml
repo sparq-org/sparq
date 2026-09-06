@@ -1,0 +1,171 @@
+# beads-sync — periodic `.beads/issues.jsonl` export-sync (sq-2xdg / issue #3290).
+# [OPUS-5] 🤖 SPARQ agent.
+#
+# WHY. `.beads/issues.jsonl` is the committed bead source-of-record and nothing refreshed it.
+# The sub-agent contract forbids staging `.beads/` (every parallel agent would conflict on one
+# 1.6 MB file), and `bead-autoclose.yml` (#830) is close-only AND deliberately issue-native —
+# it never touches the JSONL because the default GITHUB_TOKEN cannot push to protected `main`.
+# Measured on this tree: the newest `created_at` in the committed file is 2026-07-18, so every
+# bead transition since then exists only in the work box's git-ignored Dolt DB and its
+# uncommitted JSONL. Lose the box, lose the delta.
+#
+# WHAT THIS LANE CAN ACTUALLY RECOVER — the honest boundary, restated in the step summary of
+# every run so a green run is never mistaken for "the mirror is complete":
+#   * RECOVERABLE — a bead whose migrated GitHub issue exists (`<!-- bd-id:sq-… -->` body
+#     marker + the migration-owned `bd-migration` label). Its status drift, or a wholly
+#     missing JSONL line, is reconstructed from the issue.
+#   * NOT RECOVERABLE HERE — a bead created in bd on the box and never migrated to an issue.
+#     There is no self-hosted runner in this repo and the Dolt DB is git-ignored, so no
+#     GitHub-hosted runner can read it. Closing that half needs a box-side `bd export` push,
+#     which is not a CI change and is not attempted here.
+#
+# HOW THE WRITE LANDS. Both obvious routes are already known-dead in this repo:
+#   * a direct push to `main` — the protected-main ruleset rejects GITHUB_TOKEN (GH013;
+#     observed on bead-autoclose.yml run #27828093722 / PR #830), and
+#   * a PR opened BY GITHUB_TOKEN — GITHUB_TOKEN-created events trigger no workflows, so the
+#     required `ci-summary / gate` check never reports and the PR hangs unmergeable forever.
+# So the durable write here is a push to the NON-protected snapshot branch below, which the
+# default token can always land. That alone satisfies "survives box loss": the reconciled file
+# lives on `origin`, not on the box. The PR into `main` is opened only when the optional
+# `BEADS_SYNC_TOKEN` PAT is configured, because only a non-GITHUB_TOKEN identity produces a PR
+# whose checks actually run. Absent the secret the job records a `::notice::` with the compare
+# URL and exits green — the kb-dump.yml graceful-skip pattern — rather than opening a PR that
+# provably cannot merge.
+#
+# NOT A GATE, and deliberately NOT in .github/advisory-registry.json. This is a maintenance
+# lane that is expected to be GREEN: the only conditions that red it are a broken reconciler
+# (which the gating `routing-self-tests` lane catches on the PR that breaks it) or a failed
+# push. It never reds "by design" the way the `*-alarm.yml` detectors do — those are declared
+# advisory precisely because a red is their normal output (sq-huwr8). Every operational
+# non-event here (no drift, no PAT) exits 0.
+name: beads-sync
+
+on:
+  schedule:
+    # 04:37 UTC daily — off the hour so it never queues behind the top-of-hour cron pile-up.
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One reconciler at a time; `cancel-in-progress: true` is safe because the reconcile is
+  # idempotent and always rebuilt from current `main`, so the newest snapshot should win
+  # rather than a queue of stale ones draining one by one.
+  group: beads-sync
+  cancel-in-progress: true
+
+env:
+  # The snapshot branch is NOT protected, so the default token can push it. It is rebuilt from
+  # `main` on every run and force-pushed, so it is always a clean single-commit diff.
+  SNAPSHOT_BRANCH: beads-sync/snapshot
+
+jobs:
+  sync:
+    name: beads export-sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # push the reconciled snapshot to SNAPSHOT_BRANCH (never to main)
+      issues: read # read the `bd-migration` board — the only off-box record of a bead
+      # No `pull-requests: write`: the PR step runs entirely under BEADS_SYNC_TOKEN, and
+      # granting it to GITHUB_TOKEN would buy nothing but a PR that cannot merge.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          # Credentials are supplied explicitly to the one push below, never left in the
+          # checkout config (differential.yml's commit-back pattern).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Self-test the reconciler (hermetic; fail fast on a logic regression)
+        # Runs BEFORE the live read, for the same reason refresh-start-here.yml self-tests its
+        # renderer first: a broken union-merge must fail here, not half-way through rewriting
+        # the committed source-of-record.
+        run: python3 scripts/beads-export-sync.py --self-test
+
+      - name: Reconcile .beads/issues.jsonl against the bd-migration board
+        id: reconcile
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/beads-export-sync.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --jsonl .beads/issues.jsonl \
+            --out .beads/issues.jsonl \
+            --summary-md "$GITHUB_STEP_SUMMARY" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Push the reconciled snapshot (durable off-box copy)
+        if: steps.reconcile.outputs.changed == 'true'
+        env:
+          # Prefer the PAT when it exists: a branch pushed by GITHUB_TOKEN emits no
+          # `synchronize` events, so a PR opened on it would not re-run its checks after a
+          # later refresh. Falls back to the default token, which can still land the branch.
+          PUSH_TOKEN: ${{ secrets.BEADS_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          # Counts flow as DATA through env vars into the message, never interpolated into
+          # the shell source (the same discipline bead-autoclose.yml documents).
+          ADDED: ${{ steps.reconcile.outputs.added }}
+          SYNCED: ${{ steps.reconcile.outputs.status_synced }}
+        run: |
+          set -euo pipefail
+          git config user.email "agent@sparq.dev"
+          git config user.name "SPARQ beads-sync (sq-2xdg)"
+          git checkout -B "$SNAPSHOT_BRANCH"
+          git add .beads/issues.jsonl
+          if git diff --cached --quiet; then
+            echo "::notice::reconciler reported a change but the tree is clean — nothing to push."
+            exit 0
+          fi
+          git commit \
+            -m "chore(beads): export-sync .beads/issues.jsonl from the bd-migration board" \
+            -m "Appended ${ADDED} bead(s) reconstructed from their migrated issue and synced ${SYNCED} status(es) to closed. Union merge: no existing line is dropped, and a line is rewritten only when its mapped issue closed it. Beads never migrated to a GitHub issue are NOT covered — see scripts/beads-export-sync.py." \
+            -m "[skip ci]"
+          # Force-push: the branch is a derived snapshot, always rebuilt from current main.
+          git push --force \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/${SNAPSHOT_BRANCH}"
+          echo "pushed the reconciled snapshot to ${SNAPSHOT_BRANCH}."
+
+      - name: Open or refresh the sync PR
+        if: steps.reconcile.outputs.changed == 'true'
+        env:
+          BEADS_SYNC_TOKEN: ${{ secrets.BEADS_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          COMPARE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${SNAPSHOT_BRANCH}"
+          if [ -z "${BEADS_SYNC_TOKEN}" ]; then
+            echo "::notice title=beads-sync snapshot ready::BEADS_SYNC_TOKEN is not set, so no PR was opened — a PR authored by GITHUB_TOKEN triggers no workflows and would hang unmergeable on the required ci-summary gate. The reconciled snapshot is durably on branch ${SNAPSHOT_BRANCH}; open the PR from ${COMPARE}, or set BEADS_SYNC_TOKEN (a PAT with contents+pull-requests write) to have this lane do it."
+            exit 0
+          fi
+          export GH_TOKEN="${BEADS_SYNC_TOKEN}"
+          # Idempotent: an already-open PR on this head just picked up the force-push.
+          if gh pr list --repo "$GITHUB_REPOSITORY" --head "$SNAPSHOT_BRANCH" \
+               --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            echo "sync PR already open on ${SNAPSHOT_BRANCH} — refreshed by the push above."
+            exit 0
+          fi
+          gh pr create --repo "$GITHUB_REPOSITORY" \
+            --base main --head "$SNAPSHOT_BRANCH" \
+            --title "chore(beads): export-sync .beads/issues.jsonl (sq-2xdg)" \
+            --body "$(cat <<'BODY'
+          > 🤖 SPARQ agent — automated `.beads/issues.jsonl` export-sync (sq-2xdg / #3290).
+
+          `scripts/beads-export-sync.py` reconciled the committed bead source-of-record against
+          the authenticated `bd-migration` issue board (`<!-- bd-id:… -->` marker + label).
+
+          It is a **union merge**: no existing line is dropped, and a line is only rewritten when
+          its mapped issue is closed while the bead is not. Beads that were created on the work
+          box and never migrated to a GitHub issue are invisible to a GitHub-hosted runner and are
+          **not** covered by this sync — see the script header for that boundary.
+
+          Counts for this run are in the workflow run's step summary.
+          BODY
+          )"
