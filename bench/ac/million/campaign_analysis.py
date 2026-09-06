@@ -18,6 +18,8 @@ import sqlite3
 import subprocess
 import tempfile
 
+from indexed_analysis import indexed_component_summary
+
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -252,6 +254,7 @@ class RequestAnalysis:
         self.recorded = self.successful = self.timely = self.server_timely = self.lagged = self.timeouts = 0
         self.explicit_timeout_fields = self.unknown_mutations = self.acknowledged_mutations = 0
         self.receipt_counts, self.policy, self.mutation_errors = Counter(), Counter(), []
+        self.cache = Counter(); self.cache_by_outcome = defaultdict(Counter); self.cache_successful = Counter()
 
     def audit(self, rows):
         for row in rows:
@@ -295,6 +298,11 @@ class RequestAnalysis:
             successful = outcome == "ok" and row.get("status") == 200
             if outcome == "ok" and not successful: self.issues.append("success-status-disagreement")
             self.successful += successful
+            cache_value = row.get("cache_hit")
+            cache_state = ("hit" if cache_value == 1 else "miss") if type(cache_value) is int and cache_value in (0, 1) else ("missing" if cache_value is None else "invalid")
+            self.cache[cache_state] += 1
+            self.cache_by_outcome[outcome][cache_state] += 1
+            if successful: self.cache_successful[cache_state] += 1
             deadline = self.measurement["server_deadline_ms"] * 1000
             self.timely += successful and numeric(row.get("scheduled_latency_us")) and row["scheduled_latency_us"] <= deadline
             self.server_timely += successful and numeric(row.get("server_us")) and row["server_us"] <= deadline
@@ -383,6 +391,12 @@ class RequestAnalysis:
                 "observed_deadline_rps": self.timely * 1e6 / elapsed if numeric(elapsed) and elapsed else None,
                 "rps_scope": "successful completions over elapsed including drain; not sustainable capacity",
                 "latency_us": {k: stats(v) for k, v in sorted(self.values.items())},
+                "cache": {"counts_of_recorded": {k: self.cache[k] for k in ("hit", "miss", "missing", "invalid")},
+                          "successful_response_counts": {k: self.cache_successful[k] for k in ("hit", "miss", "missing", "invalid")},
+                          "by_outcome": {o: dict(v) for o, v in sorted(self.cache_by_outcome.items())},
+                          "classification_coverage_of_offered": (self.cache["hit"] + self.cache["miss"]) / offered if offered else None,
+                          "hit_fraction_of_classified": self.cache["hit"] / (self.cache["hit"] + self.cache["miss"]) if self.cache["hit"] + self.cache["miss"] else None,
+                          "scope": "observed server cache header only; missing responses or headers are not inferred misses; counts retain failed outcomes and do not alter offered denominators"},
                 "issues": sorted(set(self.issues)), "complete_valid_schedule": not self.issues,
                 "schedule_sha256": digest.hexdigest(),
                 "queue": {"passed": queue_pass, "timer_coverage_of_offered": coverage, "first_quarter_p95_us": first,
@@ -593,7 +607,10 @@ def analyze_campaign(root, review_path=None):
     review = json.loads(Path(review_path).read_text()) if review_path else {}
     review_matches = review.get("source_commit") == source_commit and bool(source_commit)
     review_status = review.get("status", "unreviewed") if review_matches else "unreviewed"
+    indexed = [indexed_component_summary(evidence, model, events, stats) for model in ("wac", "acp")]
     global_quarantines = [e for e in events if e.get("record_type") == "correctness-quarantine"]
+    global_quarantines += [{"record_type": "correctness-quarantine", "origin": "independent-indexed-analysis", "model": d["model"],
+                            "reason": "explicit indexed result mismatch"} for d in indexed if d["correctness_failure"]]
     if review_status == "quarantined" or global_quarantines: review_status = "quarantined"
     # A finalized, checksummed failed campaign can still contain valid earlier
     # cells. Execution failure is distinct from source-correctness quarantine.
@@ -685,6 +702,9 @@ def analyze_campaign(root, review_path=None):
             if cell["local_guard"] != "unmeasured": cell["local_guard"] = "inconclusive"
             cell["valid_for_inference"] = False
             cell["issues"] = sorted(set(cell["issues"] + ["artifact-integrity-or-decoding-error"]))
+    for diagnostic in indexed:
+        diagnostic["valid_for_component_inference"] = bool(diagnostic["complete"] and verified_integrity and not evidence.errors and not global_parsing and review_status == "passed")
+        diagnostic["source_status"] = review_status
     margin = 1.10
     pairs = pair_tables(cells, margin)
     brackets = bracket_tables(cells, margin)
@@ -692,6 +712,7 @@ def analyze_campaign(root, review_path=None):
             "campaign_id": campaign["campaign_id"], "artifact_directory": str(Path(root).resolve()),
             "source_commit": source_commit, "runtime": runtime, "campaign": campaign, "declared_source_input_sha256": input_hashes,
             "analysis_script_sha256": sha_file(Path(__file__)),
+            "analysis_sources_sha256": {p.name: sha_file(p) for p in (Path(__file__), Path(__file__).with_name("indexed_analysis.py"))},
             "source_review": {"scope": "benchmark-method and request-accounting review", "status": review_status,
                               "source_binding_matches": review_matches, "review_sha256": sha_file(Path(review_path)) if review_path else None,
                               "record": review, "quarantine_events": global_quarantines},
@@ -699,7 +720,7 @@ def analyze_campaign(root, review_path=None):
                                    "execution_failed_marker": (Path(root) / "FAILED").exists(),
                                    "errors": evidence.errors, "record_parsing_errors": evidence.parse_errors,
                                    "parsed_input_sha256": dict(sorted(evidence.hashes.items()))},
-            "corpora": list(inventories.values()), "dedicated_policy_checks": list(churn.values()), "events": events,
+            "corpora": list(inventories.values()), "indexed_component_diagnostics": indexed, "dedicated_policy_checks": list(churn.values()), "events": events,
             "cells": cells, "paired_comparisons": pairs, "capacity_brackets": brackets,
             "full_service_million_history_admitted": False,
             "full_service_scope": "Local cell passes alone do not admit the requested retained-history million-Pod service. Network journeys, complete required operation/resource/scale coverage and a separate final evidence assessment remain necessary.",

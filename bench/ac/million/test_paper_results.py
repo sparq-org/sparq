@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 from campaign_analysis import analyze_campaign, capacity_bounds
-from test_campaign_analysis import complete_fixture
+from test_campaign_analysis import complete_fixture, write_rows, seal
+from test_indexed_analysis import fixture as indexed_fixture
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -28,6 +29,7 @@ class PaperResultBindings(unittest.TestCase):
         review = self.directory / "review.json"
         review.write_text(json.dumps({"source_commit": "a" * 40, "status": "passed"}))
         self.analysis = analyze_campaign(artifacts, review)
+        self.artifacts, self.review = artifacts, review
 
     def query(self, body, inputs=None):
         if inputs is not None:
@@ -65,6 +67,15 @@ class PaperResultBindings(unittest.TestCase):
 ''', data)
         self.assertEqual(result, [["finalized and reviewed", "[0.25, 4]"]])
         self.assertFalse(data["full_service_million_history_admitted"])
+
+    def test_admitted_component_table_uses_actual_extractor_schema(self):
+        events = indexed_fixture(self.artifacts)
+        write_rows(self.artifacts / "campaign-events.jsonl", events)
+        seal(self.artifacts)
+        data = analyze_campaign(self.artifacts, self.review)
+        self.assertTrue(data["indexed_component_diagnostics"][0]["valid_for_component_inference"])
+        result = self.query('#let data = json("analysis.json")\n#main-tables(data)\n#metadata(main-state(data)) <result>', data)
+        self.assertEqual(result, ["finalized and reviewed"])
 
     def test_all_planned_states_are_visible(self):
         result = self.query('''#let cells = ("pass", "fail", "inconclusive", "unmeasured").map(s => (model: "wac", local_guard: s))
