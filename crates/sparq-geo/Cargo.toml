@@ -87,10 +87,10 @@ epsg_full = ["reproject", "dep:crs-definitions"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 # Behind the `engine` feature (the dependency direction is sparq-geo -> sparq-engine;
 # the engine itself stays geometry-free, and so does the wasm bundle).
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", optional = true }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", optional = true }
 # [OPUS-4.8] sq-9g58: the SPARQL algebra the GeoSPARQL query-rewrite extension
 # (src/rewrite.rs) transforms. Behind the `engine` feature only — the rewrite
 # hands a rewritten `spargebra::Query` to `sparq_engine::PreparedQuery`, so the
@@ -155,13 +155,13 @@ rand = "0.10"
 # the entailment requirements is `sparq-reason`'s rule set, not new geo code, so
 # the dependency is dev-only and the shipped crate is unaffected. `default-features
 # = false` drops the rayon `parallel` feature the closure does not need here.
-sparq-reason = { path = "../sparq-reason", version = "0.1.0", default-features = false }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", default-features = false }
 # [SONNET-4.6] sq-ql2iy: TEST/EXAMPLE-ONLY feature addition. The GeoSPARQL
 # Compliance Benchmark ships its dataset as RDF/XML only, so the
 # `gsb_compliance` example needs `sparq-core`'s opt-in `rdfxml` loader. Declared
 # here rather than on the `[dependencies]` entry so the SHIPPED crate — and the
 # wasm bundle downstream of it — still links no `oxrdfxml`.
-sparq-core = { path = "../sparq-core", version = "0.1.0", features = ["rdfxml"] }
+sparq-core = { path = "../sparq-core", version = "0.1.1", features = ["rdfxml"] }
 
 # [SONNET-4.6] sq-ql2iy — the 206-query GeoSPARQL Compliance Benchmark runner.
 # Needs the opt-in query-rewrite entry point (the QRW requirements R28–R30) and

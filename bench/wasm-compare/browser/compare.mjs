@@ -5,7 +5,7 @@
 //
 // Compares sparq's shipped WASM bundle against the pinned competitor stacks
 // from bench/competitors.json on the SAME deterministic workload:
-//   sparq            — @jeswr/sparq shipped bundle (js/ build:wasm output)
+//   sparq            — @sparq-org/sparq shipped bundle (js/ build:wasm output)
 //   oxigraph         — the official npm WASM package (node.js / web.js builds)
 //   n3js-quadstore   — N3.js + quadstore(memory-level) + quadstore-comunica
 //                      (Node runtime only, per the registry entry)

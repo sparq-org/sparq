@@ -4,7 +4,7 @@
      performance program (research/browser-wasm-perf-assessment-2026-07.md,
      epic sq-3ul2n). Consumed by sq-hmd7l.17 (oxigraph-npm comparison). -->
 
-Per-phase wall-time attribution for the **shipped `@jeswr/sparq` web bundle**
+Per-phase wall-time attribution for the **shipped `@sparq-org/sparq` web bundle**
 (the `js/` `build:wasm` output) across **headless Chromium, Firefox and WebKit**
 (Playwright) plus a **plain-Node baseline** — so a browser-side regression can
 be attributed to a LAYER (download vs compile vs instantiate vs parse vs query

@@ -31,7 +31,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect, gotoAppReady } from "./support";
 
-// [FABLE-5] sq-vw3ax.11.2 — repo renamed jeswr/sparq → sparq-org/sparq; the /download client's
+// [FABLE-5] sq-vw3ax.11.2 — repo renamed sparq-org/sparq → sparq-org/sparq; the /download client's
 // stable-alias hrefs and Releases link now point at the canonical org.
 const LATEST_DL = "https://github.com/sparq-org/sparq/releases/latest/download";
 const RELEASES_URL = "https://github.com/sparq-org/sparq/releases";

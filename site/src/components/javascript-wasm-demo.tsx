@@ -1,7 +1,7 @@
 "use client";
 
 // [OPUS-4.8] sq-5teq — the LIVE /surface/javascript-wasm demo. Four real, in-tab panels
-// that EXERCISE the @jeswr/sparq browser API against one seeded wasm Store (no mocks, no
+// that EXERCISE the @sparq-org/sparq browser API against one seeded wasm Store (no mocks, no
 // server) — each panel calls a distinct binding the page documents:
 //
 //   1. STREAMING CURSOR  — queryCursor(sparql, batchSize): pull self-contained SPARQL-JSON
@@ -133,7 +133,7 @@ export function JavascriptWasmDemo() {
       </div>
       <p className="text-sm text-muted-foreground">
         One seeded <code className="font-mono">Store</code> of six people; each panel
-        below calls a different part of the <code className="font-mono">@jeswr/sparq</code>{" "}
+        below calls a different part of the <code className="font-mono">@sparq-org/sparq</code>{" "}
         surface against it — the real Rust engine, compiled to wasm, running here.
       </p>
 

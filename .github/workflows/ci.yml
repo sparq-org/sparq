@@ -178,12 +178,20 @@ jobs:
   # `scripts/ci_select.py --classify-only` — the IDENTICAL `classify_change()` path the
   # `select` pre-job runs on this event, so the two layers cannot disagree on a resolved
   # diff (no duplicated path lists; ci_select.py stays the single source of truth).
-  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false
-  # (sound: every path in the dorny `rust`/`docker` filter sets classifies `engine`, so
-  # those classes PROVE both filters would be false — same trust model as the PR-level
-  # gate, a pure function of the authoritative diff). Any OTHER class, an unresolvable
-  # SHA pair, or ANY classifier error => true/true (fail-safe = full run, cost never
-  # soundness).
+  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false.
+  # SOUNDNESS: an inert class means every changed path is on an AUDITED inert surface —
+  # the orchestration/deploy allowlists (whose script/workflow entries the inertness tests
+  # in scripts/tests/test_ci_select.py pin by grepping the Rust-CI workflows) or an
+  # ownership-map `safe = true` verdict (re-verified every run by scripts/ci_audit_inputs.py,
+  # which FAILS the moment a crate reads a safe-listed path). THAT is the load-bearing
+  # proof, not the dorny `rust`/`docker` filters, which are a coarser extension-level
+  # proxy: an audited-inert tree may legitimately hold a `.rs`/`Cargo.toml` those filters
+  # would flag — research/hardware/wgpu-spike (no CI lane builds it) and
+  # site/test/fixtures/policy-evaluator (built only by site-e2e.yml, a workflow this
+  # gate does not touch) — while no lane gated here compiles either. Same trust model as
+  # the PR-level gate otherwise: a pure function of the authoritative diff. Any OTHER
+  # class, an unresolvable SHA pair, or ANY classifier error => true/true (fail-safe =
+  # full run, cost never soundness).
   # [OPUS-5] sq-g25hr widened `_INERT_CLASSES` from {docs-only, orchestration-only} to
   # also cover `deploy-only` (deploy/** + the deploy lint workflows) and `inert-mixed`
   # (a diff confined to inert surfaces that SPANS more than one of them — previously
@@ -297,9 +305,11 @@ jobs:
               # (pinned by scripts/tests/test_ci_select_wiring.py so the two cannot drift).
               # deploy-only = deploy/** + the deploy lint workflows; inert-mixed = a diff
               # confined to inert surfaces that SPANS more than one of them (the observed
-              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml).
+              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml);
+              # [OPUS-5] #5249: map-safe = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
-                docs-only|orchestration-only|deploy-only|inert-mixed) rust=false; docker=false ;;
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false; docker=false ;;
                 *) rust=true; docker=true ;;
               esac
             else
@@ -1181,7 +1191,7 @@ jobs:
         with:
           node-version: 20
       # [OPUS-5] #5771: this pin must stay EQUAL to the one the `js` lane
-      # (.github/workflows/js.yml) builds + packs the @jeswr/sparq wasm artifact with.
+      # (.github/workflows/js.yml) builds + packs the @sparq-org/sparq wasm artifact with.
       # It was v0.13.1 here while js.yml pinned v0.15.0, so any wasm-pack/wasm-bindgen
       # behaviour change between those releases was exercised only in that BUILD lane
       # and never here — in the lane that actually RUNS the headless suites. Unified on

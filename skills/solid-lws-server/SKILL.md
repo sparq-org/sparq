@@ -1,10 +1,10 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@jeswr/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq native Solid/LWS server
@@ -203,7 +203,7 @@ exploratory pilots remain noncanonical.
 Use `sparq-lws-core` as an experimental native Solid/LDP server. It is not a
 replacement for the supported TypeScript `prod-solid-server`, and its default
 storage is ephemeral. Use `skills/javascript-wasm/SKILL.md` instead for the
-separate `@jeswr/solid-server` loopback development host.
+separate `@sparq-org/solid-server` loopback development host.
 
 ## Start a local server
 

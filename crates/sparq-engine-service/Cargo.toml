@@ -6,24 +6,22 @@
 # allowlist. `sparq-engine` re-exports its public fns verbatim (`sparq_engine::
 # with_service_egress_allow`, `…::SERVICE_EGRESS_REFUSED_MARKER`, `…::allowlist_entry_permits`,
 # …) so the public API + the `service` feature name are unchanged for external users.
-# `publish = false` marks it an INTERNAL, unstable crate (RFC §5): it is exempt from the
-# new-crate bench + SKILL governance gate (G1, scripts/gate-new-crate.py) exactly like the
-# sibling sparq-engine-serialize / sparq-jsonld / sparq-substrate extractions — depend on
-# the `sparq-engine` facade, never on this crate directly.
+# This remains an implementation crate rather than a supported front door, but it must
+# be published because Cargo registry packages cannot depend on workspace-only crates.
+# Depend on the `sparq-engine` facade, not this crate.
 [package]
 name = "sparq-engine-service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Internal SPARQL 1.1 federated-query (SERVICE) client for sparq-engine — HTTP transport, SPARQL-Results JSON/XML parse, bound-join batching, SSRF egress policy — re-exported through sparq-engine"
+description = "Implementation crate for sparq-engine's SPARQL SERVICE client, re-exported through sparq-engine"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# INTERNAL facade sub-crate: not published to crates.io. See the header note + RFC §5.
-publish = false
+# [GPT-5.6] Published only to satisfy sparq-engine's crates.io dependency closure.
 
 # Render the README as the docs.rs front page and document with all features so the
 # `service` client surface appears (mirrors sparq-engine).
@@ -44,8 +42,8 @@ service = ["dep:serde", "dep:serde_json", "dep:quick-xml", "dep:ureq", "dep:rust
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
-# (kept for parity even though this crate is publish = false).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+# (the path is used locally and the version is used on crates.io).
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # oxrdf terms (Term / Variable / NamedNode / Literal / …) are the SERVICE result vocabulary
 # the parsers build and the caller interns; already in the engine's dep tree.
 oxrdf.workspace = true
@@ -74,6 +72,6 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 [dev-dependencies]
 # The SRJ/SRX round-trip and egress tests build/parse Terms with sparq-core's default
 # features (dict decode helpers) on.
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 # [GPT-5.6] (sq-zvavi) Value-level differential coverage for the SRJ/SRX codecs.
 proptest = "1"

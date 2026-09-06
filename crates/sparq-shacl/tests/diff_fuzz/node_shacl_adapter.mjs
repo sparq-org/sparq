@@ -10,7 +10,7 @@
 //   - "rdf-validate-shacl"  (https://github.com/zazuko/rdf-validate-shacl)
 // A third engine catches bugs where sparq + pySHACL + Jena happen to agree but are
 // all wrong, and — being JS over RDF-JS — it is the same family sparq's own
-// @jeswr/sparq WASM SHACL would slot into (the bonus JS-vs-JS lane noted on the
+// @sparq-org/sparq WASM SHACL would slot into (the bonus JS-vs-JS lane noted on the
 // bead), so this harness is the on-ramp for that.
 //
 // WHY .mjs run directly (no build step): Node runs an ES module file directly

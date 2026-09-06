@@ -661,6 +661,64 @@ fn update_tool_enforces_session_write_authorization() {
     assert!(!is_err, "{text}");
 }
 
+/// Draft §9.4: EVERY tool-issued evaluation MUST be bounded. Until sq-yhlf0 the `update`
+/// tool was the one hole — the read tools threaded `SolidServerConfig`'s deadline/row cap
+/// into the engine, while `update` delegated to the unbudgeted `PodStore::update_as`, so a
+/// pathological `DELETE`/`INSERT … WHERE` could run the server's writer unbounded.
+///
+/// The pathological shape here is a self-cross-product WHERE — the shape that blows up on
+/// a real pod. Two limits are exercised:
+///
+/// - the ROW CAP, which trips on the actual size of the intermediate result with a clock
+///   that has NOT run out (the non-degenerate case);
+/// - the DEADLINE, set to zero seconds so the abort is deterministic and instant in CI
+///   rather than racing a genuine blow-up. It is the same cooperative check a real blow-up
+///   trips at, just reached on the first poll.
+///
+/// Both must surface as a tool ERROR (`isError: true`), not a protocol error and not a
+/// silent truncation.
+#[test]
+fn a_pathological_update_trips_the_tool_budget() {
+    let pathological = "INSERT { GRAPH <https://pod.ex/notes/n1> \
+                        { <urn:x> <urn:y> \"z\" } } \
+                        WHERE { GRAPH <https://pod.ex/notes/n1> { ?s ?p ?o } \
+                                GRAPH <https://pod.ex/> { ?s2 ?p2 ?o2 } }";
+
+    let budgeted = |timeout: Option<u64>, max_rows: Option<usize>| SolidServerConfig {
+        agent: Some(ALICE.to_string()),
+        allow_update: true,
+        query_timeout_secs: timeout,
+        max_rows,
+        ..SolidServerConfig::default()
+    };
+
+    // Row cap: the cross-product's intermediate result exceeds it.
+    let mut capped = SolidMcpServer::with_config(pod(), budgeted(None, Some(1)))
+        .expect("materializes");
+    let (text, is_err) = tool(&mut capped, "update", json!({"sparql": pathological}));
+    assert!(is_err, "an over-budget update must be a tool error: {text}");
+    assert!(
+        text.contains("query budget exceeded"),
+        "the error must name the budget, not a denial: {text}"
+    );
+
+    // Deadline: exhausted before the update is issued.
+    let mut timed = SolidMcpServer::with_config(pod(), budgeted(Some(0), None))
+        .expect("materializes");
+    let (text, is_err) = tool(&mut timed, "update", json!({"sparql": pathological}));
+    assert!(is_err, "an over-deadline update must be a tool error: {text}");
+    assert!(text.contains("query budget exceeded (timeout)"), "{text}");
+
+    // Positive control: alice IS authorized for this exact update, and under the DEFAULT
+    // budget it applies — so the two aborts above are the budget biting, not a denial or a
+    // malformed update. The inserted triple is visible afterwards.
+    let mut alice = server_for(ALICE, true);
+    let (text, is_err) = tool(&mut alice, "update", json!({"sparql": pathological}));
+    assert!(!is_err, "the same update succeeds under the default budget: {text}");
+    let (doc, is_err) = tool(&mut alice, "resource_get", json!({"url": "https://pod.ex/notes/n1"}));
+    assert!(!is_err && doc.contains("urn:x"), "the write really landed: {doc}");
+}
+
 // ───────────────────────── ACL write-through (§7.3) ─────────────────────────
 
 #[test]

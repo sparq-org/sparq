@@ -4,7 +4,7 @@ description: "Graph analytics over a sparq RDF graph with the opt-in sparq-algos
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-algos — graph analytics

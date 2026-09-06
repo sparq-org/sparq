@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: CycloneDX SBOMs for shipped JS code.
 #
-# The published `@jeswr/sparq` package and the shared `@sparq/client` source are both in scope.
+# The published `@sparq-org/sparq` package and the shared `@sparq/client` source are both in scope.
 # The latter is private as a standalone package, but its runtime code and lazy codec dependencies
 # are bundled into the shipped site/GUI artifacts. Each member gets a strict runtime view and a
 # full build-time view. The release workflow provenance-attests every emitted `*.sbom.cdx.json`.
@@ -163,7 +163,7 @@ generate_member() {
   fi
 }
 
-generate_member "js" "@jeswr/sparq" "sparq-js" "sparq" "fzstd"
+generate_member "js" "@sparq-org/sparq" "sparq-js" "sparq" "fzstd"
 generate_member \
   "packages/sparq-client" \
   "@sparq/client" \

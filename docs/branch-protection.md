@@ -107,7 +107,7 @@ From the binding/packaging workflows (when those surfaces are exercised):
 | Job name | Workflow | What it gates |
 |---|---|---|
 | `maturin build + pytest` | `.github/workflows/python.yml` | The `sparq-rdf` PyPI binding (`import sparq`) build + pytest parity suite. |
-| (js binding job) | `.github/workflows/js.yml` | The `@jeswr/sparq` npm build/tests. |
+| (js binding job) | `.github/workflows/js.yml` | The `@sparq-org/sparq` npm build/tests. |
 
 > **Benchmarks — the DETERMINISTIC ratchet gates on PRs; the NOISY timing is nightly (sq-6vshe.6,
 > maintainer-directed).** On a `pull_request` the `bench.yml` `run + track benchmarks` job runs the
@@ -237,7 +237,7 @@ what makes the demotion designable.
 |---|---|
 | `pull_request` (non-draft) | **UNCHANGED — the primary gate.** A PR measures per-crate line-% and enforces the floor, over its **changed cone** (sq-3dr4t): the changed crates plus their transitive reverse-dep closure are re-measured, and a crate outside the cone — unchanged, as is everything it depends on — inherits its floor verdict from `main` (reported `INHERITED`). A full-run trigger or any selector error still measures everything. |
 | `merge_group` | The `coverage-measure` / `coverage-engine-run` / `coverage-engine-merge` legs are **skipped**. `coverage-floors` — the fast, no-compile test-presence + floor-**monotonicity** + shard-partition gates — **still runs**, so a batch can never *lower* a committed floor. The `coverage` aggregate still concludes (a skipped leg counts as satisfied), so the gate never sees an expected-but-missing check; its step summary says plainly that only the floor gates ran. |
-| `push` to `main` | **UNCHANGED, and now load-bearing** — this is the enforcement point for the batch-stacking case. It is deliberately **EXEMPT** from the sq-6vshe.14 push-run skip; the exemption is pinned behaviourally by `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion`, so landing that lever without the exemption REDs a test rather than silently removing the last enforcement point. |
+| `push` to `main` | **UNCHANGED, and now load-bearing** — this is the enforcement point for the batch-stacking case. It is deliberately **EXEMPT** from the sq-6vshe.14 push-run skip — an exemption now also written into that lever's own design (`research/ci-mergequeue-speedup-2026-07.md` §3.1 KEEP-list), so it is designed rather than discovered. It is pinned in `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion` against **both** shapes the skip can take: narrowing the legs' event envelope (behavioural, `test_measure_legs_still_run_on_a_pr_head_and_on_push_to_main`) and adding a `queue-validated` pre-job upstream of them via `needs:`/`if:` (structural, `test_measure_legs_take_no_new_upstream_gate` — the shape §3.1 actually specifies, and one the behavioural evaluation cannot see, since an absent context path is null there exactly as on GitHub). So landing that lever over the coverage legs REDs a test rather than silently removing the last enforcement point. |
 | a `main` coverage red | `coverage-demoted-filer` auto-files a **P1 bead + a deduped GitHub issue** (`[demoted-lane] lane=coverage-ratchet-main`) via `scripts/ci-file-demoted-lane-failure.py` — the same demotion auto-bead protocol the fuzz and heavy-recall demotions use — **and** that open issue **pauses further ratchet ADVANCES**: `coverage-gate.py --check-advance-allowed` (a step in `coverage-floors`) fails a branch that *raises* a floor while the alarm is open, because the measured numbers a raise cites are exactly the numbers in doubt. It never blocks the recovery path (a governed lowering under `--allow-lower`), never blocks adding a *new* crate row, and fails **open** if the alarm probe is unavailable. |
 
 **The residual risk, stated honestly.** Two PRs that each individually sit at or above
@@ -702,10 +702,10 @@ so confirm it with the GitHub API (read-only token is sufficient):
 
 ```sh
 # List rulesets on the default branch and grab the `main` ruleset id.
-gh api repos/jeswr/sparq/rulesets
+gh api repos/sparq-org/sparq/rulesets
 
 # Dump the full rule set and eyeball it against this document.
-gh api repos/jeswr/sparq/rulesets/<id> | python3 -m json.tool
+gh api repos/sparq-org/sparq/rulesets/<id> | python3 -m json.tool
 ```
 
 As verified on the date of this commit, the live `main` ruleset

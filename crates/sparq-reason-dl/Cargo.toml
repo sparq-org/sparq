@@ -63,7 +63,7 @@ dl_transitive = []
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # oxrdf: only to build IRI lookup keys for the fixed OWL/RDFS/rdf vocabulary in extract.rs
 # (the same use as sparq-reason-el). rustc-hash: the structural index maps/sets.
 oxrdf.workspace = true
@@ -71,10 +71,10 @@ rustc-hash.workspace = true
 # [FABLE-5] sq-pbz04.4.4: optional profile-reasoner deps, pulled ONLY by the `dispatch`
 # feature (L4). `version` alongside `path`: cargo uses the path locally, the version on
 # crates.io.
-sparq-reason = { path = "../sparq-reason", version = "0.1.0", optional = true }
-sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.0", optional = true }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", optional = true }
+sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.1", optional = true }
 # [FABLE-5] sq-fj8lj: optional DL-Lite_R consistency checker, pulled ONLY by `dispatch_ql`.
-sparq-reason-ql = { path = "../sparq-reason-ql", version = "0.1.0", optional = true }
+sparq-reason-ql = { path = "../sparq-reason-ql", version = "0.1.1", optional = true }
 
 # [GPT-5.6] sq-7ru8y: Criterion is dev-only and drives the self-relative tableau
 # microbenchmark; it does not enter the shipped opt-in reasoner crate.

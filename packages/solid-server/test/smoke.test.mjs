@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-6xasp.5: end-to-end smoke test — npx-boot the @jeswr/solid-server wasm
+// [SONNET-4.6] sq-6xasp.5: end-to-end smoke test — npx-boot the @sparq-org/solid-server wasm
 // package then run a full Solid LDP CREATE → READ → UPDATE → DELETE + WAC-denied round-trip.
 //
 // DESIGN (research/wasm-solid-server-npm-design.md phase 5):

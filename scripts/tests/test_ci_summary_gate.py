@@ -27,6 +27,7 @@ import io
 import json
 import re
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -106,6 +107,7 @@ def tiny_cfg(**over):
     base budget = 4 polls, absolute cap = 8, settle = 2, floor = 2."""
     base = dict(self_run_id="999", interval=0, min_polls=2, settle_polls=2,
                 base_polls=4, sat_interval=0, max_total_polls=8,
+                reporter_grace_polls=3,
                 sat_queue_min=5, progress_window=2, max_consec_fetch_failures=3,
                 summary_path="")
     base.update(over)
@@ -2855,6 +2857,143 @@ def _grp(run_id, name="opt-in group (sparq-engine 1/2)"):
 def _rep(run_id, conclusion="success", status="completed"):
     return R("feature-matrix report", status=status, conclusion=conclusion,
              external_id=str(run_id))
+
+
+class TestFeatureMatrixReporterPostCapGrace(unittest.TestCase):
+    """[GPT-5.6] #6299: only the correlated reporter gets one bounded tail."""
+
+    @staticmethod
+    def _drive(cfg, polls, depth=0, tier_ctx=None):
+        fetch = scripted(polls)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.run_gate(
+                cfg,
+                fetch,
+                lambda: depth,
+                sleep_fn=lambda _s: None,
+                tier_ctx=tier_ctx,
+            )
+        return code, out.getvalue(), fetch.state["calls"]
+
+    def test_current_report_lands_after_ordinary_cap_and_settles(self):
+        cfg = tiny_cfg(reporter_grace_polls=4)
+        waiting = [_grp("222"), GREEN]
+        in_progress = [
+            _grp("222"),
+            _rep("222", status="in_progress", conclusion=None),
+            GREEN,
+        ]
+        current = [_grp("222"), _rep("222"), GREEN]
+        # The live #6223 reporter check was absent at the cap; also pin the
+        # equivalent states where it is visible but non-terminal, or first lands
+        # terminal-success on the cap and still needs its second settle poll.
+        cap_cases = (
+            ("absent", waiting, [current, current], cfg.settle_polls),
+            ("in progress", in_progress, [current, current], cfg.settle_polls),
+            ("terminal", current, [current], 1),
+        )
+        for state, cap_state, tail, extra_calls in cap_cases:
+            with self.subTest(report_at_cap=state):
+                polls = [waiting] * (cfg.max_total_polls - 1) + [cap_state, *tail]
+
+                code, out, calls = self._drive(cfg, polls)
+
+                self.assertEqual(code, 0, out)
+                self.assertEqual(calls, cfg.max_total_polls + extra_calls)
+                self.assertIn("bounded reporter-only grace", out)
+                self.assertIn("PASSED", out)
+
+    def test_absent_reporter_exhausts_only_the_bounded_grace_then_reds(self):
+        cfg = tiny_cfg(reporter_grace_polls=3)
+
+        code, out, calls = self._drive(cfg, [[_grp("222"), GREEN]])
+
+        self.assertEqual(code, 1, out)
+        self.assertEqual(
+            calls,
+            cfg.max_total_polls + cfg.reporter_grace_polls,
+            "the reporter-only grace must have a fixed, non-rearming bound",
+        )
+        self.assertIn("bounded reporter-only grace exhausted", out)
+        self.assertIn("reporter verdict never landed", out)
+
+    def test_report_success_on_final_grace_poll_cannot_skip_settle(self):
+        # [GPT-6-ASTRA] A last-poll success has only one terminal observation;
+        # the timeout fallback must not turn it green without the normal settle.
+        cfg = tiny_cfg(reporter_grace_polls=3)
+        waiting = [_grp("222"), GREEN]
+        current = [_grp("222"), _rep("222"), GREEN]
+        polls = [waiting] * (cfg.max_total_polls + cfg.reporter_grace_polls - 1)
+
+        code, out, calls = self._drive(cfg, [*polls, current])
+
+        self.assertEqual(code, 1, out)
+        self.assertEqual(calls, cfg.max_total_polls + cfg.reporter_grace_polls)
+        self.assertIn("reporter grace ended before the normal settle window", out)
+        self.assertIn("reached only 1/2 poll(s)", out)
+        self.assertNotIn("PASSED", out)
+
+    def test_current_report_failure_during_grace_still_reds(self):
+        cfg = tiny_cfg(reporter_grace_polls=4)
+        waiting = [_grp("222"), GREEN]
+        failed = [_grp("222"), _rep("222", conclusion="failure"), GREEN]
+        polls = [waiting] * cfg.max_total_polls + [failed, failed]
+
+        code, out, calls = self._drive(cfg, polls)
+
+        self.assertEqual(code, 1, out)
+        self.assertEqual(calls, cfg.max_total_polls + cfg.settle_polls)
+        self.assertIn("reporter concluded a NON-SUCCESS verdict", out)
+        self.assertNotIn("PASSED", out)
+
+    def test_ordinary_pending_sibling_or_full_tier_hold_gets_no_reporter_grace(self):
+        cfg = tiny_cfg(reporter_grace_polls=3)
+        cases = (
+            ("ordinary pending", [_grp("222"), GREEN, PENDING], 20, None),
+            (
+                "awaiting full tier",
+                [_grp("222"), GREEN, R(SELECT_DRAFT, started="2026-07-25T07:00:00Z")],
+                0,
+                draft_ctx(lambda: False, run_tier="full"),
+            ),
+        )
+        for name, runs, depth, tier_ctx in cases:
+            with self.subTest(state=name):
+                code, out, calls = self._drive(
+                    cfg, [runs], depth=depth, tier_ctx=tier_ctx
+                )
+
+                self.assertEqual(code, 1, out)
+                self.assertEqual(calls, cfg.max_total_polls)
+                self.assertNotIn("bounded reporter-only grace", out)
+
+    def test_post_cap_grace_stop_reason_is_written_to_step_summary(self):
+        waiting = [_grp("222"), GREEN]
+        ordinary_work_appears = [_grp("222"), GREEN, PENDING]
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "step-summary.md"
+            cfg = tiny_cfg(reporter_grace_polls=3, summary_path=str(summary))
+            polls = [waiting] * cfg.max_total_polls + [ordinary_work_appears]
+
+            code, out, calls = self._drive(cfg, polls)
+
+            self.assertEqual(code, 1, out)
+            self.assertEqual(calls, cfg.max_total_polls + 1)
+            message = "reporter-only grace stopped because ordinary pending work"
+            self.assertIn(message, out)
+            self.assertIn(message, summary.read_text(encoding="utf-8"))
+
+    def test_stale_report_cannot_satisfy_or_outlive_the_bounded_grace(self):
+        cfg = tiny_cfg(reporter_grace_polls=3)
+        stale_only = [_grp("222"), _rep("111"), GREEN]
+
+        code, out, calls = self._drive(cfg, [stale_only])
+
+        self.assertEqual(code, 1, out)
+        self.assertEqual(calls, cfg.max_total_polls + cfg.reporter_grace_polls)
+        self.assertIn("reporter verdict never landed", out)
+        self.assertNotIn("PASSED", out)
 
 
 class TestFeatureMatrixReporterCorrelation(unittest.TestCase):

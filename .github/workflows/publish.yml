@@ -2,7 +2,7 @@
 #
 # Complements release.yml (#367 / sq-toze.23), which attests the GitHub-Release ARCHIVES +
 # the ghcr.io container. This workflow covers the bytes a CONSUMER actually installs:
-#   - the `@jeswr/sparq` npm client (crates/sparq-wasm wrapper in js/)
+#   - the `@sparq-org/sparq` npm client (crates/sparq-wasm wrapper in js/)
 #   - the packaged crates.io `.crate` artifacts
 #   - the `sparq-rdf` PyPI wheels (crates/sparq-py, maturin-built) — PEP-740 attestations
 #
@@ -13,7 +13,7 @@
 #               npm's registry records a Sigstore-signed in-toto SLSA provenance statement bound
 #               to this workflow run. A consumer verifies with `npm audit signatures`. THIS IS A
 #               PROVENANCE-EMITTING PATH. ONE-TIME needs:user: register the npm Trusted Publisher
-#               for @jeswr/sparq (owner `jeswr`, repo `sparq`, workflow file `publish.yml`); the
+#               for @sparq-org/sparq (owner `sparq-org`, repo `sparq`, workflow file `publish.yml`); the
 #               package must already exist, so one bootstrap publish precedes it (see npm job).
 #   * crates.io — crates.io has NO published-package provenance mechanism upstream as of this
 #               writing (no equivalent of npm `--provenance`). The tractable equivalent we CAN
@@ -33,16 +33,19 @@
 #               verify`). THIS IS A PROVENANCE-EMITTING PATH — the strongest of the three.
 #               BUT there is ONE maintainer prerequisite that CANNOT be wired from this repo:
 #               the PyPI project `sparq-rdf` must have a Trusted Publisher registered (PyPI →
-#               project → Publishing → "Add a new pending/published publisher": owner `jeswr`,
+#               project → Publishing → "Add a new pending/published publisher": owner `sparq-org`,
 #               repo `sparq`, workflow `publish.yml`, environment `pypi`). Until a maintainer
 #               does that one-time PyPI-side config, the `twine`/Trusted-Publishing upload step
 #               here will (correctly) fail to mint a token — the CI is fully wired, the PyPI
 #               account config is the only open item. See compliance/slsa/ + docs/release.md.
 #
-# TRIGGER: this is a MAINTAINER-DRIVEN publish. It fires on `release: published` (the release
-# created by release.yml is published) and on manual `workflow_dispatch`. The npm publish step
-# is what carries provenance forward: the NEXT publish a maintainer triggers emits it. Each job
-# is gated behind an input/secret so a tag alone never force-publishes (see per-job `if:`).
+# TRIGGER: this is a MAINTAINER-DRIVEN publish. `release: published` covers Releases published
+# by a human or external token; GitHub does not emit a new workflow-triggering event when
+# `release.yml` creates its Release with `GITHUB_TOKEN`. [GPT-5.6] The normal release-plz path
+# therefore uses `workflow_dispatch` after the GitHub Release is green. Dispatch uploads are
+# separately gated by explicit boolean inputs; a tag alone never force-publishes. A Release
+# published directly by a maintainer remains an explicit authorization for the primary npm and
+# PyPI jobs, while the optional npm packages still require their dispatch inputs.
 name: publish
 
 on:
@@ -51,7 +54,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_npm:
-        description: "Publish @jeswr/sparq to npm with provenance"
+        description: "Publish @sparq-org/sparq to npm with provenance"
         type: boolean
         default: false
       publish_eyereasoner_compat:
@@ -59,7 +62,7 @@ on:
         type: boolean
         default: false
       publish_solid_server:
-        description: "Publish @jeswr/solid-server to npm (needs the one-time npm-side bootstrap — see job)"
+        description: "Publish @sparq-org/solid-server to npm (needs the one-time npm-side bootstrap — see job)"
         type: boolean
         default: false
       attest_crates:
@@ -80,7 +83,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ---- npm: @jeswr/sparq via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
+  # ---- npm: @sparq-org/sparq via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
   # [OPUS-4.8] sq-v286.11 (maintainer #758): switched from a long-lived NPM_TOKEN to npm's
   # OIDC Trusted Publishing (GA 2025-07-31, github.blog/changelog/2025-07-31). The npm CLI
   # detects the GitHub Actions OIDC environment (granted by `id-token: write` below), exchanges
@@ -89,8 +92,8 @@ jobs:
   # Runs only when a maintainer asks for it (manual input) OR on a published release.
   #
   # ONE-TIME needs:user step (cannot be a repo file — it is registry-side config): on npmjs.com,
-  # @jeswr/sparq must have a Trusted Publisher registered (npmjs.com/package/@jeswr/sparq/access
-  # -> "Trusted Publisher"): organization/user `jeswr`, repository `sparq`, workflow FILENAME
+  # @sparq-org/sparq must have a Trusted Publisher registered (npmjs.com/package/@sparq-org/sparq/access
+  # -> "Trusted Publisher"): organization/user `sparq-org`, repository `sparq`, workflow FILENAME
   # `publish.yml` (filename only, with extension — NOT a path), environment left blank (this job
   # uses none). npm trusted publishing requires the package to ALREADY EXIST, so the maintainer
   # does ONE bootstrap `npm publish` with a granular token, then registers the trusted publisher
@@ -146,7 +149,7 @@ jobs:
         # --provenance: provenance is emitted by default under trusted publishing, but the flag
         #   is kept as an explicit belt-and-suspenders (a practitioner-reported edge case where
         #   it was not auto-attached); it is a no-op when already on.
-        # --access public: @jeswr/sparq is a scoped package; scoped packages default to restricted.
+        # --access public: @sparq-org/sparq is a scoped package; scoped packages default to restricted.
         run: npm publish --provenance --access public
       # Verify the just-published version actually carries a registry provenance attestation, so a
       # misconfigured publish (missing OIDC / old npm) fails the job instead of silently shipping an
@@ -156,11 +159,11 @@ jobs:
         run: |
           set -euo pipefail
           ver=$(node -p "require('./package.json').version")
-          echo "Inspecting registry attestations for @jeswr/sparq@${ver}"
-          att=$(npm view "@jeswr/sparq@${ver}" dist.attestations 2>/dev/null || true)
+          echo "Inspecting registry attestations for @sparq-org/sparq@${ver}"
+          att=$(npm view "@sparq-org/sparq@${ver}" dist.attestations 2>/dev/null || true)
           echo "$att"
           if [ -z "$att" ] || [ "$att" = "undefined" ]; then
-            echo "::error::no provenance attestation recorded for @jeswr/sparq@${ver} — publish was not provenance-bearing"
+            echo "::error::no provenance attestation recorded for @sparq-org/sparq@${ver} — publish was not provenance-bearing"
             exit 1
           fi
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
@@ -169,7 +172,7 @@ jobs:
   # [FABLE-5] sq-ohnj1 (GH #1499). The eye-js migration package (packages/eyereasoner-compat) —
   # the eye-js `n3reasoner` API backed by the sparq-reason wasm bundle, which ships INSIDE the
   # tarball (never the site-hosted wasm URL). Same tokenless OIDC trusted-publishing pattern as
-  # the @jeswr/sparq job above: `id-token: write` lets the npm CLI mint a short-lived publish
+  # the @sparq-org/sparq job above: `id-token: write` lets the npm CLI mint a short-lived publish
   # credential + record a Sigstore-signed SLSA provenance statement; no NPM_TOKEN is stored.
   #
   # GRACEFUL-SKIP: this job runs ONLY on an explicit manual `workflow_dispatch` with
@@ -242,11 +245,11 @@ jobs:
           fi
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
 
-  # ---- npm: @jeswr/solid-server via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
+  # ---- npm: @sparq-org/solid-server via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
   # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp). The WebAssembly Solid server package
   # (packages/solid-server) — a local-dev Solid/LDP pod backed by the sparq-lws wasm handler,
   # which ships INSIDE the tarball (the `files` allowlist packs bin/ + src/ + the built wasm/ +
-  # README). Same tokenless OIDC trusted-publishing pattern as the @jeswr/sparq job above:
+  # README). Same tokenless OIDC trusted-publishing pattern as the @sparq-org/sparq job above:
   # `id-token: write` lets the npm CLI mint a short-lived publish credential + record a
   # Sigstore-signed SLSA provenance statement; no NPM_TOKEN is stored.
   #
@@ -261,14 +264,14 @@ jobs:
   #      wasm first so the tarball ships wasm/ (the `files` allowlist expects it):
   #        cd packages/solid-server && npm run build:lws-wasm && npm publish --access public
   #   2. Register the Trusted Publisher on
-  #      npmjs.com/package/@jeswr/solid-server/access → "Trusted Publisher":
-  #        GitHub organisation/user `jeswr`, repository `sparq`, workflow FILENAME `publish.yml`
+  #      npmjs.com/package/@sparq-org/solid-server/access → "Trusted Publisher":
+  #        GitHub organisation/user `sparq-org`, repository `sparq`, workflow FILENAME `publish.yml`
   #        (filename only, with extension — NOT a path), environment left blank.
   #      Then remove the granular token. Every publish this job triggers thereafter is tokenless.
   # Until step 1–2 are done, DO NOT trigger this job (the publish would fail to mint a credential
   # by design — no static token is stored). See docs/release.md.
   npm-solid-server:
-    name: npm publish @jeswr/solid-server (OIDC trusted publishing)
+    name: npm publish @sparq-org/solid-server (OIDC trusted publishing)
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.publish_solid_server
@@ -295,7 +298,7 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       # Build the wasm bundle so the `files` allowlist packs a populated wasm/ tree. This package
-      # has NO `prepack`/`build` script (unlike @jeswr/sparq / eyereasoner-compat), so the wasm is
+      # has NO `prepack`/`build` script (unlike @sparq-org/sparq / eyereasoner-compat), so the wasm is
       # NOT rebuilt automatically on `npm publish` — build it explicitly here, before publish.
       - name: Build wasm bundle
         run: npm run build:lws-wasm
@@ -309,10 +312,10 @@ jobs:
         run: |
           set -euo pipefail
           ver=$(node -p "require('./package.json').version")
-          att=$(npm view "@jeswr/solid-server@${ver}" dist.attestations 2>/dev/null || true)
+          att=$(npm view "@sparq-org/solid-server@${ver}" dist.attestations 2>/dev/null || true)
           echo "$att"
           if [ -z "$att" ] || [ "$att" = "undefined" ]; then
-            echo "::error::no provenance attestation recorded for @jeswr/solid-server@${ver}"
+            echo "::error::no provenance attestation recorded for @sparq-org/solid-server@${ver}"
             exit 1
           fi
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
@@ -344,38 +347,51 @@ jobs:
         run: |
           rustup default stable
           rustup show active-toolchain
-      # Package every publishable crate (publish = false crates are skipped by cargo package
-      # when run per-package; we package the workspace and collect the resulting .crate files).
+      # Package every publishable crate (publish = false crates are skipped by the loop).
       # --no-verify avoids a full from-scratch compile of every crate on the runner; the bytes
       # are identical to `cargo publish`'s upload (publish runs verify itself). We package each
-      # publishable crate individually so a single unpublishable/dev crate cannot fail the lot.
+      # publishable crate individually so every failure is reported before the job fails closed.
       - name: Package publishable crates
         run: |
           set -euo pipefail
           mkdir -p crate-pkgs
-          # Crates whose Cargo.toml does NOT set `publish = false`.
-          for manifest in crates/*/Cargo.toml; do
-            if grep -q '^publish = false' "$manifest"; then
-              echo "skip (publish=false): $manifest"
-              continue
-            fi
-            pkg=$(grep -m1 '^name' "$manifest" | sed -E 's/.*"(.*)".*/\1/')
+          packaged=0
+          failures=()
+          # Ask Cargo which workspace packages are publishable. In metadata,
+          # `publish = false` is represented as an empty registry list; parsing TOML
+          # with grep would drift on whitespace or alternate valid syntax. [GPT-5.6]
+          mapfile -t packages < <(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.publish != []) | .name' |
+              sort
+          )
+          expected=${#packages[@]}
+          if [ "$expected" -eq 0 ]; then
+            echo "::error::Cargo metadata reported no publishable crates"
+            exit 1
+          fi
+          for pkg in "${packages[@]}"; do
             echo "::group::cargo package -p $pkg"
             # --no-verify: skip the rebuild-from-extracted-tarball check (CI already builds/tests
-            # the workspace); --allow-dirty is unnecessary on a clean checkout. Failures on a
-            # single crate (e.g. an unpublished path-dep not yet on crates.io) are surfaced but
-            # do not abort the others — we record which packaged and which did not.
+            # the workspace); --allow-dirty is unnecessary on a clean checkout. [GPT-5.6]
+            # Continue through the set to expose every bad package, then fail if any is missing.
             if cargo package -p "$pkg" --no-verify --locked 2>&1; then
               find target/package -maxdepth 1 -name "${pkg}-*.crate" -exec cp {} crate-pkgs/ \;
+              packaged=$((packaged + 1))
             else
-              echo "::warning::cargo package failed for $pkg (likely an unpublished path-dependency); skipped"
+              echo "::error::cargo package failed for $pkg"
+              failures+=("$pkg")
             fi
             echo "::endgroup::"
           done
           echo "Packaged crates:"; ls -l crate-pkgs/ || true
-          # Fail only if NOTHING packaged — that means the step is broken, not a single-crate skip.
-          if [ -z "$(ls -A crate-pkgs/ 2>/dev/null)" ]; then
-            echo "::error::no .crate artifacts produced"; exit 1
+          if [ "${#failures[@]}" -ne 0 ]; then
+            echo "::error::${#failures[@]} of ${expected} publishable crates failed to package: ${failures[*]}"
+            exit 1
+          fi
+          if [ "$packaged" -ne "$expected" ]; then
+            echo "::error::packaged count ${packaged} does not match expected count ${expected}"
+            exit 1
           fi
       # Same SHA-pinned attest action + version as release.yml — one signed SLSA provenance
       # predicate per .crate, binding its digest to this workflow run.
@@ -398,7 +414,7 @@ jobs:
   # for each uploaded file — the PyPI-native equivalent of npm `--provenance`.
   #
   # MAINTAINER PREREQUISITE (cannot be wired from this repo — see header + docs/release.md):
-  #   The `sparq-rdf` PyPI project must have a Trusted Publisher registered (owner `jeswr`,
+  #   The `sparq-rdf` PyPI project must have a Trusted Publisher registered (owner `sparq-org`,
   #   repo `sparq`, workflow `publish.yml`, environment `pypi`). Until that one-time PyPI-side
   #   config exists, the upload step below fails to mint an OIDC token (by design — no static
   #   API token is stored). The CI is fully wired; that PyPI account step is the only open item.

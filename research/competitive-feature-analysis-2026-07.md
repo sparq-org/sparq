@@ -80,7 +80,7 @@ when only one of them has the feature).
 | JSON-LD 1.1 full pipeline | — | ~ | ~ | ~ | ~ | **LEAD** — native dependency-free expansion/flattening/compaction/framing default-on (sq-oy1f). |
 | HDT read+write | — | — | — | — | — | **LEAD** — write support is rare anywhere. |
 | Arrow columnar results | — | — | — | — | — | **LEAD** — sparq-arrow (#910). |
-| Python/JS bindings | ✓ | ✓ | ✓ (11.2) | ✓ (2026 SDK) | ✓ | PARITY — sparq-py + @jeswr/sparq WASM; RDF/JS conformance program open (sq-iwhl8/sq-xqchl). |
+| Python/JS bindings | ✓ | ✓ | ✓ (11.2) | ✓ (2026 SDK) | ✓ | PARITY — sparq-py + @sparq-org/sparq WASM; RDF/JS conformance program open (sq-iwhl8/sq-xqchl). |
 
 ### 1.4 ML / vector / NLQ
 

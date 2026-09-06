@@ -12,8 +12,8 @@ categories.workspace = true
 readme = "README.md"
 # Research-stage proof-of-concept (epic sq-pfae, issue #940). The ZK estate it
 # composes with is externally UNAUDITED (sq-qhy4); this crate verifies an issuer
-# signature but does NOT deliver unlinkable/anonymous presentation. NOT published.
-publish = false
+# signature but does NOT deliver unlinkable/anonymous presentation. [GPT-5.6]
+# Published only as the default-off dependency used by sparq-server and sparq-solid.
 
 [[example]]
 name = "admission_cost"
@@ -148,15 +148,15 @@ status-list = []
 status-list-flate2 = ["status-list", "dep:flate2"]
 
 [dependencies]
-sparq-core = { path = "../sparq-core", default-features = false }
-sparq-reason = { path = "../sparq-reason", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", default-features = false }
 # RDFC-1.0 canonical unit the ZK estate already commits over (step 1 of the gate).
-sparq-canon = { path = "../sparq-canon" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.1" }
 # The CHECKED issuer signature over the RDFC-1.0 commitment (step 2). The ZK estate
 # is research-grade and externally UNAUDITED (sq-qhy4) — see the crate docs.
-sparq-zk = { path = "../sparq-zk" }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1" }
 # The `forShape` statement-type primitive (forPredicate desugars to it; step 3).
-sparq-shacl = { path = "../sparq-shacl", default-features = false }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `did` feature only. Parses a fetched `did:web` DID document (JSON). The
 # `did:key` path needs no JSON; the default build pulls neither.
@@ -170,7 +170,7 @@ flate2 = { version = "1", optional = true }
 # SPARQL parser that fail-closed-scopes the supported query fragment (ASK/SELECT over one
 # basic graph pattern). default-features OFF on the engine so the opt-in build stays as lean
 # as the engine allows; the DEFAULT sparq-trust build pulls neither (strict additivity).
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", optional = true, default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", optional = true, default-features = false }
 spargebra = { workspace = true, optional = true }
 # OPTIONAL — `expression` feature only (issue #4621). The OS CSPRNG behind
 # `ChallengeNonce::generate`, the verifier-side construction path for the
@@ -184,7 +184,7 @@ getrandom = { version = "0.4", optional = true }
 # so `sparq-zk` (which this crate depends on) and the lean `sparq-policy` can share them
 # without a cycle. It has no dependencies of its own, so the opt-in build grows by the
 # `const &str` table alone and the default build pulls nothing.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.1", optional = true }
 
 # Test-only: parse-validate the published machine-readable vocabulary
 # `ontologies/trust/trust.ttl` so the Turtle a working group reads stays valid

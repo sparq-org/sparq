@@ -225,7 +225,7 @@ except ImportError as _gh_retry_missing:  # pragma: no cover - see the wiring te
 # exclusions were LABEL-keyed (`EXCLUDED_LABELS` + the `needs:*` namespace). Nothing was
 # keyed on the head branch or the author, so the release-plz **Release PR** carrying
 # `review:pass` and no hold label was re-armed like any other PR. Merging it cuts a `v*`
-# tag and (once `publish = true` in release-plz.toml) `cargo publish`es 17 crates to
+# tag and (once `publish = true` in release-plz.toml) `cargo publish`es 37 crates to
 # crates.io — a version that can never be unpublished.
 #
 # A label-keyed exclusion is the wrong key: anything with `pull-requests: write` can add
@@ -2894,7 +2894,7 @@ def self_test() -> None:
     # ---------------------------------------------------------------- #1135 Release PR
     # THE GAP THIS CLOSES: this sweep's exclusions were LABEL-keyed only, so the Release
     # PR carrying review:pass and no hold label was re-armed. Merging it tags + (once
-    # `publish = true`) publishes 17 crates to crates.io, irreversibly.
+    # `publish = true`) publishes 37 crates to crates.io, irreversibly.
     #
     # Tripwire (c) directly above PROVES a `review:pass` PR IS re-armed by this harness,
     # so "no arm call" below is a discriminating outcome and not the fixture's default.

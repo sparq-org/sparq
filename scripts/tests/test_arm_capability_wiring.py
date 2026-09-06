@@ -618,7 +618,7 @@ class TestMissingReleaseGuardArmsNothing(unittest.TestCase):
     A missing `gh_retry.py` costs RETRIES and must never cost the arm (#3776). A missing
     `release_pr_guard.py` costs the ARM ITSELF and must: without it the sweep cannot prove
     any candidate is not the release-plz Release PR, and arming that PR cuts a `v*` tag
-    and — once `publish = true` — publishes 17 crates to crates.io, irreversibly. A missed
+    and — once `publish = true` — publishes 37 crates to crates.io, irreversibly. A missed
     sweep is covered by the next cron; an unpublishable version is covered by nothing.
 
     These are the tests that go red if someone 'fixes' the fail-closed stub into a

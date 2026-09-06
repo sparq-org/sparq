@@ -96,8 +96,8 @@ rustc-hash.workspace = true
 # O(graph) fork, `update_in_place` for the O(batch) delta-overlay path. The ring
 # and `Writer` stay generic over the snapshot/update types; only `GraphApplier`
 # touches these. (This crate never enters sparq-wasm's graph — guard above.)
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 # Commutativity batching (Wave A2 §6.5): conservative write-footprint analysis of
 # SPARQL Update text (`Footprint::of_sparql`). Workspace-patched to the vendored
 # W3C-conformance fork, same as the engine — both parsers must agree on syntax.

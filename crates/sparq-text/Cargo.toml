@@ -57,14 +57,14 @@ highlight = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # Behind the `engine` feature (the dependency direction is sparq-text -> sparq-engine,
 # exactly like sparq-geo; the engine itself stays text-search-free, and so does the
 # wasm bundle). `default-features = false` so the engine's rayon/regex/digest are NOT
 # force-on'd through unification — the native build opts them back in via the
 # `parallel` + `engine-builtins` features above, the wasm bundle leaves them off.
 # [OPUS-4.8] sq-jbe6
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", optional = true, default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", optional = true, default-features = false }
 spargebra = { workspace = true, optional = true }
 oxrdf.workspace = true
 rustc-hash.workspace = true

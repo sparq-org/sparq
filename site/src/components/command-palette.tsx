@@ -59,7 +59,7 @@ import {
 } from "@/components/palette-commands";
 import { PALETTE_COMMAND_GROUP_ORDER } from "@/lib/palette-commands";
 
-const REPO_URL = "https://github.com/jeswr/sparq";
+const REPO_URL = "https://github.com/sparq-org/sparq";
 
 // [OPUS-4.8] sq-vw3ax.3 — the palette is the 0-click fast path now the sidebar is gone, so it
 // must jump to each surface's NEW home, not a removed /surface/* route that only redirects.
