@@ -582,6 +582,8 @@ jobs:
       # no git, no repo writes (same stdlib-only pattern as the lints above).
       - name: Self-test bench hard-zone gate (zero boundary + noise floor + resolution bounds)
         run: python3 scripts/bench_hardzone.py --self-test
+      - name: Self-test bench-triage.py (dedupe predicate + exhaustive listing)
+        run: python3 scripts/bench-triage.py --self-test
       # ...and the WIRING of that gate: the step above must exist and stay unconditional, the
       # bench.yml lane must keep `set -euo pipefail` with no `|| true` / continue-on-error, and
       # the hard-zone step must keep running BEFORE the Store step (the anti-laundering
