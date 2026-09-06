@@ -993,6 +993,25 @@ jobs:
       # never disagree about what "triggers on merge_group" means.
       - name: Merge-queue lane inventory (docs match the workflow triggers — issue 5165)
         run: python3 scripts/tests/test_mergequeue_lane_inventory.py
+      # [OPUS-5] issue #5250 — the DURATION half of the two checks above. #5165 pinned
+      # WHICH lanes gate the queue; nothing pinned HOW LONG they take, so every duration
+      # in research/ci-mergequeue-speedup-2026-07.md is a hand-run snapshot that rots
+      # (§2.1 is banner-marked STALE, most rows read "not re-sampled", two read "never
+      # sampled"). #3005 then sized the fast lane off a CodeQL figure that codeql.yml's
+      # own header had already refuted by measurement — a stale number steering work at a
+      # non-pole. scripts/ci_mergegroup_poles.py makes the pole ranking RE-DERIVABLE
+      # instead of dated; this suite pins the estimator, because every way a measurement
+      # tool goes wrong is silent (a wrong median looks exactly like a right one). It
+      # covers the event/success filters by BIAS DIRECTION — leaking cancelled runs, which
+      # the queue produces constantly by cancelling waves mid-flight, drags a median DOWN
+      # and so erases a pole rather than inventing one — the max-not-sum entry wall, the
+      # "declares merge_group but produces no check-run" shape that codeql.yml exhibited
+      # while `disabled_manually`, and the fail-louds. It also asserts SET EQUALITY between
+      # the tool's lane parser and the canonical one used by the two suites above, over the
+      # real workflow tree, since a production tool cannot import from scripts/tests/.
+      # Hermetic + stdlib-only (no gh, no network). Pins its OWN call site here.
+      - name: merge_group pole ranker (estimator + lane-parser agreement — issue 5250)
+        run: python3 scripts/tests/test_ci_mergegroup_poles.py
       # [OPUS-5] #4935: the gating inference-conformance lane used to re-download the
       # OWL 2 corpus from web.archive.org over http:// on EVERY run, so a transient
       # outage there concluded `failure` with nothing measured and ejected an unrelated
