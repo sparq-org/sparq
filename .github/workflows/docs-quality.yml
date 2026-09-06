@@ -1212,9 +1212,15 @@ jobs:
       # whole-file pin SUBSUMES the former whole-job pin (there is no level above the
       # whole file), which is why it is terminal (self-test proves it with the full
       # round-1..5 mutation table via the live --root path). Pure stdlib — no PyYAML.
+      # [OPUS-5] #5235: the same checker ALSO enforces SCOPE-DOC — because the pin makes
+      # every edit to the workflow a TWO-FILE change (workflow + golden), the workflow
+      # header must state that contract where a decomposer reads it, or a bead scoped to
+      # the workflow alone forbids the golden regeneration it requires (#2384's shape).
+      # The pin cannot catch that drift on its own: dropping the block from BOTH files
+      # keeps them byte-consistent, so SCOPE-DOC is a genuinely separate check.
       - name: Self-test the fast-fix ring cross-repo guard (#3475 negative fixtures)
         run: python3 scripts/check-fast-fix-ring-guard.py --self-test
-      - name: "Enforce the fast-fix ring fail-closed cross-repo guard (#3475) — GATING"
+      - name: "Enforce the fast-fix ring cross-repo guard + two-file SCOPE doc (#3475, #5235) — GATING"
         run: python3 scripts/check-fast-fix-ring-guard.py
       # [OPUS-5] #4966: the SAME two doorbells, from the opposite direction — a MISSING
       # REGISTRY_RING_TOKEN must fail LOUD instead of suppressing ~130 rings into green
