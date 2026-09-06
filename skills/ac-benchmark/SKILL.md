@@ -92,3 +92,11 @@ limit and the declared literal profile. The helper does not infer mutation rates
 create new collections, change policies, clean incoming references, or validate
 empirical user behavior. Its empty SPARQL result means finite inventory exhaustion
 and must not be submitted as an accepted mutation.
+
+The disposable cloud launcher is `bench/ac/million/launch-ec2.sh pilot|canonical`.
+Canonical runs read the committed `campaign-20260906.json`; the launcher requires a
+frozen status, validates the campaign before creating resources, and rejects host
+type or volume overrides that differ from that file. Set `SPARQ_POD_PRIOR_AWS_USD`
+to the accumulated conservative study spend. The shared benchmark slice and each
+server's cgroup must account for charged page cache as well as application memory.
+Raw request records and Pod inventories are retained with lossless compression.

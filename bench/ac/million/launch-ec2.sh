@@ -7,8 +7,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MODE="${1:-}"
 PROFILE="${AWS_PROFILE:-pss}"
 REGION="${AWS_REGION:-eu-west-2}"
-INSTANCE_TYPE="${SPARQ_POD_INSTANCE_TYPE:-r7g.xlarge}"
-VOLUME_GB="${SPARQ_POD_VOLUME_GB:-80}"
+DEFAULT_INSTANCE_TYPE=r7g.xlarge
+DEFAULT_VOLUME_GB=80
+if [[ "${MODE}" == canonical ]]; then
+  DEFAULT_INSTANCE_TYPE=c7g.4xlarge
+  DEFAULT_VOLUME_GB=120
+fi
+INSTANCE_TYPE="${SPARQ_POD_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
+VOLUME_GB="${SPARQ_POD_VOLUME_GB:-${DEFAULT_VOLUME_GB}}"
 CPUSET="${SPARQ_POD_CPUSET:-1}"
 WATCHDOG_SECONDS="${SPARQ_POD_WATCHDOG_SECONDS:-43200}"
 POLL_DEADLINE_SECONDS="${SPARQ_POD_POLL_DEADLINE_SECONDS:-42600}"
@@ -57,6 +63,27 @@ command -v curl >/dev/null || die "curl is unavailable"
 [[ -f "${ROOT}/bench/ac/million/run-instance.sh" \
    && -r "${ROOT}/bench/ac/million/run-instance.sh" ]] \
   || die "the populated-Pod instance runner is absent or unreadable"
+
+# [GPT-6] Validate the committed campaign before any paid resource is created.
+if [[ "${MODE}" == canonical ]]; then
+  [[ -r "${ROOT}/bench/ac/million/run-campaign.py" ]] \
+    || die "the canonical campaign runner is absent"
+  python3 "${ROOT}/bench/ac/million/run-campaign.py" \
+    --campaign "${ROOT}/bench/ac/million/campaign-20260906.json" --validate-only
+  python3 - "${ROOT}/bench/ac/million/campaign-20260906.json" \
+    "${INSTANCE_TYPE}" "${VOLUME_GB}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    campaign = json.load(source)
+if campaign["status"] != "frozen-before-measurement":
+    raise SystemExit("canonical campaign must be frozen before launch")
+if campaign["host"]["instance_type"] != sys.argv[2]:
+    raise SystemExit("instance type differs from frozen campaign")
+if campaign["host"]["volume_gib"] != int(sys.argv[3]):
+    raise SystemExit("volume size differs from frozen campaign")
+PY
+fi
 
 [[ -z "$(git -C "${ROOT}" status --porcelain)" ]] \
   || die "the source tree must be clean before a canonical bundle is made"
@@ -406,7 +433,7 @@ REMOTE_GID="$(ssh_with_ingress_retry 'id -g')"
 log "starting ${MODE} as a 70%-memory-capped transient service"
 # shellcheck disable=SC2029 # Validated numeric values intentionally expand client-side.
 ssh_with_ingress_retry \
-  "sudo systemd-run --unit=sparq-pod-study --collect \
+  "sudo systemd-run --unit=sparq-pod-study --collect --slice=sparq-pod-bench.slice \
     --property=MemoryMax=70% --property=MemorySwapMax=0 --property=KillMode=control-group \
     --uid=${REMOTE_UID} --gid=${REMOTE_GID} --working-directory=/var/tmp/sparq-source \
     --setenv=HOME=/home/ubuntu \

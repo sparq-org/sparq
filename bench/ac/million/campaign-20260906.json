@@ -1,0 +1,300 @@
+{
+  "schema_version": 1,
+  "campaign_id": "solid-pod-scale-20260906-main",
+  "model_provenance": "[GPT-6]",
+  "status": "prospective-draft-before-next-run",
+  "pilot_source": "74cd9f90eacb29e747294de3cbb18ff2849f0556",
+  "purpose": "Separate physically populated namespace scale, retained service-history volume, active working set and population-derived offered load. The compact corpus is a control and cannot establish all-service capacity.",
+  "host": {
+    "instance_type": "c7g.4xlarge",
+    "region": "eu-west-2",
+    "physical_vcpus": 16,
+    "physical_memory_gib": 32,
+    "volume_gib": 120,
+    "server_cpu_pool": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "client_cpu_pool": [
+      0,
+      5,
+      6,
+      7
+    ],
+    "overall_memory_fraction": 0.7,
+    "swap": false,
+    "server_memory_gib_tiers": [
+      1,
+      4,
+      16
+    ],
+    "server_cpu_tiers": [
+      1,
+      4
+    ]
+  },
+  "seeds": [
+    2026090611,
+    2026090623,
+    2026090637,
+    2026090641,
+    2026090659
+  ],
+  "measurement": {
+    "warmup_seconds": 30,
+    "measurement_seconds": 120,
+    "minimum_offered": 1000,
+    "request_timeout_ms": 5000,
+    "server_deadline_ms": 200,
+    "maximum_inflight": 256,
+    "queue_capacity_per_worker": 64,
+    "arrival": "poisson",
+    "full_response_body": true,
+    "percentile": "nearest-rank",
+    "success_fraction": 0.99,
+    "deadline_fraction_of_all_offered": 0.95,
+    "independent_restart_per_run": true,
+    "paired_model_order": "alternate by replicate; first WAC for even zero-based replicate, ACP for odd"
+  },
+  "corpora": [
+    {
+      "id": "compact-1000",
+      "profile": "smoke",
+      "pods": 1000,
+      "role": "populated-control",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "compact-10000",
+      "profile": "smoke",
+      "pods": 10000,
+      "role": "populated-control",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "compact-100000",
+      "profile": "smoke",
+      "pods": 100000,
+      "role": "populated-control",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "compact-1000000",
+      "profile": "smoke",
+      "pods": 1000000,
+      "role": "populated-control",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "compact-2000000",
+      "profile": "smoke",
+      "pods": 2000000,
+      "role": "populated-control",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "history-8",
+      "profile": "history",
+      "pods": 8,
+      "role": "partially-calibrated-retained-history-scenario",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "history-64",
+      "profile": "history",
+      "pods": 64,
+      "role": "partially-calibrated-retained-history-scenario",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "history-1000",
+      "profile": "history",
+      "pods": 1000,
+      "role": "partially-calibrated-retained-history-scenario",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    },
+    {
+      "id": "entropy-8",
+      "profile": "entropy",
+      "pods": 8,
+      "role": "literal-compressibility-stress",
+      "models": [
+        "wac",
+        "acp"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "population-control",
+      "datasets": [
+        "compact-1000",
+        "compact-1000000",
+        "compact-2000000"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        1
+      ],
+      "cpus": [
+        1
+      ],
+      "cache_source_bytes": 67108864,
+      "cache_pods": 256,
+      "max_pod_bytes": 1048576,
+      "rate": "from-workload-and-persisted-inventory",
+      "repeat": 5,
+      "purpose": "Population-derived offered demand at fixed smallest tested resource tier; failure retained."
+    },
+    {
+      "id": "compact-rate-bracket",
+      "datasets": [
+        "compact-1000000"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        1
+      ],
+      "cpus": [
+        1,
+        4
+      ],
+      "cache_source_bytes": 67108864,
+      "cache_pods": 256,
+      "max_pod_bytes": 1048576,
+      "rates": [
+        32,
+        128,
+        512,
+        2048
+      ],
+      "repeat": 5,
+      "purpose": "Highest tested passing offered rate and next failing rate per language; fixed grid, no interpolated maximum."
+    },
+    {
+      "id": "retained-history-cold",
+      "datasets": [
+        "history-64"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        16
+      ],
+      "cpus": [
+        1,
+        4
+      ],
+      "cache_source_bytes": 8589934592,
+      "cache_pods": 64,
+      "max_pod_bytes": 2147483648,
+      "rates": [
+        16
+      ],
+      "repeat": 5,
+      "purpose": "Cold/churning working-set diagnosis with full heavy-Pod admission attempted; rate is a diagnostic stress, not inferred from these small populations."
+    },
+    {
+      "id": "retained-history-larger",
+      "datasets": [
+        "history-1000",
+        "entropy-8"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        16
+      ],
+      "cpus": [
+        4
+      ],
+      "cache_source_bytes": 8589934592,
+      "cache_pods": 64,
+      "max_pod_bytes": 2147483648,
+      "rates": [
+        16
+      ],
+      "repeat": 5,
+      "purpose": "Cold/churning working-set diagnosis with full heavy-Pod admission attempted; rate is a diagnostic stress, not inferred from these small populations."
+    },
+    {
+      "id": "retained-history-hot",
+      "datasets": [
+        "history-8"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        1,
+        4,
+        16
+      ],
+      "cpus": [
+        1
+      ],
+      "cache_source_bytes": 1073741824,
+      "cache_pods": 8,
+      "max_pod_bytes": 134217728,
+      "rates": [
+        16
+      ],
+      "repeat": 5,
+      "purpose": "Fixed hot working set after warmup, measured under server cgroup limits; smallest passing tested tier only."
+    }
+  ],
+  "dedicated_checks": {
+    "authorization": "Run direct independent rights/result oracle, explicit heavy-quantile admission, actual HTTP positive/negative authentication and post-mutation/revocation checks before eligible timing. Admission rejection is a capacity finding, not an oracle mismatch.",
+    "policy_churn": "Separate deterministic grant/revoke lane with confirmed changes and post-acknowledgement query checks; do not treat rare or zero sampled policy operations as successful churn evidence.",
+    "network": "An isolated network namespace is required for measured regional/mobile journey latency; no modification of SSH interface. Missing implementation yields unmeasured status, never an added-percentile estimate.",
+    "indexed_comparison": "Bounded identical-history raw and compressed native Graph persistence comparison; existing open-time validation retained. Record actual file count/allocated storage/open/materialization/query times, and exact result equality. This is a component test and does not establish indexed million-Pod storage."
+  },
+  "stop_rules": {
+    "invalid_correctness": "Stop and quarantine affected source/configuration; retain failures.",
+    "resource": "Record OOM, maximum Pod admission, low disk or client saturation explicitly. Never reduce histories or remove heavy users to obtain a pass.",
+    "disk_floor_bytes": 26843545600,
+    "runtime_ceiling_seconds": 36000,
+    "full_history_large_population": "Do not allocate a million-history corpus solely to repeat failure at smaller sizes: require a full-history configuration to pass cold/admission and mixed-load criteria first. Report unreached scales as unmeasured.",
+    "grid": "Complete all five paired repetitions of a cell; skip a larger offered rate after both models fail the previous rate in every replicate, recording the skipped cell and trigger. Do not apply this skip to physical compact population generation.",
+    "memory_search": "Stop a hot-set memory ladder after first tier passes both languages in all paired replicates; retain smaller failed tiers."
+  },
+  "artifact_rules": {
+    "source": "Commit this campaign and source before launch; record exact commit, source/config hashes and binary hash.",
+    "raw": "Losslessly zstd-compress per-request records and Pod inventories after close; include compressed hashes in final manifest.",
+    "persistence": "Every counted Pod is generated and written before timing. Preserve pack/index hashes, total records/quads/source/compressed bytes and all per-Pod inventories.",
+    "measurement_boundary": "Per-server cgroup including charged page cache; report host and client resources separately. Flush OS cache before first cold run, record warmup and all cache settings.",
+    "cost": "Conservative preflight and actual runtime estimates for build, generation, measurement and teardown; not invoice charges."
+  }
+}
