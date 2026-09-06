@@ -4,18 +4,54 @@
   "profile": "service-history-central-v1",
   "status": "partially calibrated scenario; not validated as representative of a future all-service Solid population",
   "snapshot_exclusive": "2026-01-01T00:00:00Z",
-  "history_months": {"value": 60, "evidence_class": "assumption", "sensitivities": [12, 120]},
+  "history_months": {
+    "value": 60,
+    "evidence_class": "assumption",
+    "sensitivities": [
+      12,
+      120
+    ]
+  },
   "scope": {
-    "included": ["structured communication records and synthetic text excerpts", "address-book contacts", "calendar appointments", "payment transaction records", "daily activity summaries", "episodic locations", "media metadata", "retained movie ratings"],
-    "excluded": ["original image, video, and attachment binary payloads"],
-    "not_calibrated_or_complete": ["full retained email body sizes", "complete clinical records", "continuous high-frequency sensor streams", "all application-specific fields", "joint population distribution of complete service exports"]
+    "included": [
+      "structured communication records and synthetic text excerpts",
+      "address-book contacts",
+      "calendar appointments",
+      "payment transaction records",
+      "daily activity summaries",
+      "episodic locations",
+      "media metadata",
+      "retained movie ratings"
+    ],
+    "excluded": [
+      "original image, video, and attachment binary payloads"
+    ],
+    "not_calibrated_or_complete": [
+      "full retained email body sizes",
+      "complete clinical records",
+      "continuous high-frequency sensor streams",
+      "all application-specific fields",
+      "joint population distribution of complete service exports"
+    ]
   },
   "domains": {
-    "communication": {"monthly_records": 300, "evidence_class": "assumption", "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en", "limitation": "Export availability establishes a record family, not counts, retention, text sizes or message arrival rates."},
-    "contacts": {"retained_snapshot_records": 250, "evidence_class": "assumption", "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en"},
-    "calendar": {"monthly_records": 8, "evidence_class": "assumption", "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en"},
+    "communication": {
+      "monthly_records": 300,
+      "evidence_class": "assumption",
+      "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en",
+      "limitation": "Export availability establishes a record family, not counts, retention, text sizes or message arrival rates."
+    },
+    "contacts": {
+      "retained_snapshot_records": 250,
+      "evidence_class": "assumption",
+      "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en"
+    },
+    "calendar": {
+      "monthly_records": 8,
+      "evidence_class": "assumption",
+      "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en"
+    },
     "transactions": {
-      "monthly_records_at_unit_intensity": 41,
       "evidence_class": "observational mean anchor with explicit capture and retention assumptions",
       "source": "https://frbservices.org/binaries/content/assets/crsocms/news/research/2026-diary-consumer-payments-choice.pdf",
       "source_year": 2025,
@@ -25,36 +61,113 @@
       "derivation": "47 minus 6 = approximately 41 noncash payments/month; source components are rounded",
       "capture_assumption": "One queryable retained record per noncash payment; not all bank transactions are payments and not all payment-service representations are one-to-one.",
       "schema_source": "https://openbankinguk.github.io/read-write-api-site3/v4.0.1/resources-and-data-models/aisp/Transactions.html",
-      "limitation": "The observed mean does not validate a five-year retained distribution, the synthetic intensity mixture, other countries, synthetic amounts/currencies or account-transfer duplication.",
-      "sensitivity_monthly_records": [20, 41, 90]
+      "limitation": "The observed approximate mean anchors the generated transaction average after mixture normalization. It does not validate a five-year retained distribution, the synthetic mixture tails, other countries, synthetic amounts/currencies, or account-transfer duplication.",
+      "sensitivity_monthly_records": [
+        20,
+        41,
+        90
+      ],
+      "observed_population_mean_approx": 41,
+      "normalized_unit_intensity_rate": 34,
+      "effective_generator_mean": 41.14,
+      "rounding_rule": "round(41 / 1.21) gives integer unit-intensity rate34; the assumed mixture yields expected41.14records/month before finite-sample variation."
     },
-    "activity": {"monthly_records": 30, "evidence_class": "assumption", "aggregation": "daily step/activity summaries", "limitation": "Does not model complete medical history or fine-grained wearable streams."},
-    "location": {"monthly_records": 300, "evidence_class": "assumption", "shape_source": "https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/", "limitation": "Geolife motivates episodic trajectory data but its historical selected cohort does not validate this monthly count, and actual trajectories are not replayed."},
-    "media": {"monthly_records": 40, "evidence_class": "assumption", "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en", "limitation": "Metadata only. Source export formats do not establish population counts or retention."},
-    "ratings": {"evidence_class": "empirical retained-count marginal", "source": "https://grouplens.org/datasets/movielens/1m/", "summary": "calibration/movielens-1m-summary.json", "cdf": "../../../../crates/sparq-acbench/src/population_ratings_cdf.json", "sampling": "Deterministic inverse empirical CDF; synthetic record values and dates are not source observations.", "limitation": "Historical selected users who joined in 2000, supplied demographics and rated at least 20 movies. The observed retained count is independent of the modeled retention horizon and provides no annual arrival-rate estimate."}
+    "activity": {
+      "monthly_records": 30,
+      "evidence_class": "assumption",
+      "aggregation": "daily step/activity summaries",
+      "limitation": "Does not model complete medical history or fine-grained wearable streams."
+    },
+    "location": {
+      "monthly_records": 300,
+      "evidence_class": "assumption",
+      "shape_source": "https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/",
+      "limitation": "Geolife motivates episodic trajectory data but its historical selected cohort does not validate this monthly count, and actual trajectories are not replayed."
+    },
+    "media": {
+      "monthly_records": 40,
+      "evidence_class": "assumption",
+      "schema_source": "https://support.google.com/accounts/answer/3024190?hl=en",
+      "limitation": "Metadata only. Source export formats do not establish population counts or retention."
+    },
+    "ratings": {
+      "evidence_class": "empirical retained-count marginal",
+      "source": "https://grouplens.org/datasets/movielens/1m/",
+      "summary": "calibration/movielens-1m-summary.json",
+      "cdf": "../../../../crates/sparq-acbench/src/population_ratings_cdf.json",
+      "sampling": "Deterministic inverse empirical CDF; synthetic record values and dates are not source observations.",
+      "limitation": "Historical selected users who joined in 2000, supplied demographics and rated at least 20 movies. The observed retained count is independent of the modeled retention horizon and provides no annual arrival-rate estimate."
+    }
   },
   "population_intensity": {
     "evidence_class": "assumption",
     "classes": [
-      {"weight": 50, "numerator": 1, "denominator": 2},
-      {"weight": 40, "numerator": 1, "denominator": 1},
-      {"weight": 9, "numerator": 4, "denominator": 1},
-      {"weight": 1, "numerator": 20, "denominator": 1}
+      {
+        "weight": 50,
+        "numerator": 1,
+        "denominator": 2
+      },
+      {
+        "weight": 40,
+        "numerator": 1,
+        "denominator": 1
+      },
+      {
+        "weight": 9,
+        "numerator": 4,
+        "denominator": 1
+      },
+      {
+        "weight": 1,
+        "numerator": 20,
+        "denominator": 1
+      }
     ],
-    "limitation": "Shared intensity imposes positive cross-service volume correlation; neither mixture prevalence nor correlation strength has been measured. Its expected multiplier is 1.21, so the transaction population mean is deliberately above the observational unit-intensity anchor. The source does not validate this tail."
+    "limitation": "Shared intensity imposes positive cross-service volume correlation; neither mixture prevalence nor correlation strength has been measured. Its expected multiplier is1.21; transaction unit-intensity rate is normalized to approximate the observational mean. The source does not validate this synthetic tail."
   },
-  "resource_packaging": {"evidence_class": "assumption", "rule": "One named graph per service/month, with contacts stored in one snapshot graph. Records spread evenly across months and deterministically across 28 day positions; burst and seasonal retention patterns are not reproduced.", "sensitivities": ["short and long retention", "unit intensity versus mixture", "sharing disabled versus shared", "private exception and group-size variants"]},
+  "resource_packaging": {
+    "evidence_class": "assumption",
+    "rule": "One named graph per service/month, with contacts stored in one snapshot graph. Records spread evenly across months and deterministically across 28 day positions; burst and seasonal retention patterns are not reproduced.",
+    "sensitivities": [
+      "short and long retention",
+      "unit intensity versus mixture",
+      "sharing disabled versus shared",
+      "private exception and group-size variants"
+    ]
+  },
   "access_control": {
     "evidence_class": "scenario assumptions motivated by application roles; frequencies not measured",
     "owner": "Named owner has read/write/append/control on content",
-    "default_private_services": ["communication", "contacts", "transactions", "activity", "location"],
+    "default_private_services": [
+      "communication",
+      "contacts",
+      "transactions",
+      "activity",
+      "location"
+    ],
     "individual": "Recipient zero reads calendar entries",
     "group": "Four named recipients read media metadata",
     "public": "Ratings are publicly readable",
     "direct_exceptions": "Every tenth calendar/media monthly document is owner-only",
     "wac_encoding": "Nearest governing ACL; agentGroup for shared media; own ACL shadows inherited grants on private exceptions",
     "acp_encoding": "Cumulative memberAccessControl; named group membership expansion; deny inherited recipients on private exceptions",
-    "policy_sensitivities": {"group_members": [1, 4, 16, 64], "private_exception_every": [0, 2, 10], "sharing_enabled": [false, true]},
+    "policy_sensitivities": {
+      "group_members": [
+        1,
+        4,
+        16,
+        64
+      ],
+      "private_exception_every": [
+        0,
+        2,
+        10
+      ],
+      "sharing_enabled": [
+        false,
+        true
+      ]
+    },
     "correctness": "Independent intended-rights oracle and independently parsed policy-language references; server must additionally compare actual enforcement and query results before timing."
   }
 }
