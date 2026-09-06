@@ -64,8 +64,10 @@ factor, except the empirical ratings marginal. Population generation is independ
 of Pod order and Pod count, making prefixes and random-access regeneration identical.
 
 `PolicyModel::{Wac,Acp}` produces equivalent intended content rights.
-`expected_record_count` and `can_read` provide a by-construction oracle that never
-invokes the system under test. `benchmark_queries` supplies eight query families.
+`write_readable_content` emits physically filtered record graphs for query-result
+comparison. Query templates use explicit `GRAPH` clauses and deterministic ordering
+for bounded results. `expected_record_count` and `can_read` provide a by-construction oracle that never
+invokes the system under test. `benchmark_queries` supplies eleven query families.
 The generated WAC group expands to named ACP recipients; direct private exceptions
 use WAC inheritance shadowing or ACP deny overrides. Group expansion, policy size,
 and policy setup work must remain visible in benchmark comparisons.
