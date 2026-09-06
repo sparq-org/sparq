@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source": "workload.json",
-  "source_sha256": "0ba6b9fc2d21aa26b36e5b532427efde54588854715e6131d367ab20aef01fa0",
+  "source_sha256": "1b97480d624a9c356d25c0d748c2d94eb6c4feaab80457239096a51c5991c75f",
   "source_role": "declared scenario, not measured demand",
   "numeric_encoding": "Decimal arithmetic; JSON numbers rounded half-even to nine decimal places",
   "journeys_per_active_person_day": 72,
@@ -9,7 +9,7 @@
   "per_hosted_person_daily_requests": {
     "query": 40.5,
     "background-read": 12,
-    "content-write": 24.0,
+    "content-write": 40.842497628,
     "policy-write": 0.02
   },
   "population_rates": [
@@ -19,10 +19,10 @@
       "components_rps": {
         "query": 0.46875,
         "background-read": 0.138888889,
-        "content-write": 0.277777778,
+        "content-write": 0.472714093,
         "policy-write": 0.000231481
       },
-      "total_rps": 0.885648148
+      "total_rps": 1.080584463
     },
     {
       "pods": 1000,
@@ -30,10 +30,10 @@
       "components_rps": {
         "query": 1.875,
         "background-read": 0.555555556,
-        "content-write": 1.111111111,
+        "content-write": 1.890856372,
         "policy-write": 0.000925926
       },
-      "total_rps": 3.542592593
+      "total_rps": 4.322337853
     },
     {
       "pods": 1000,
@@ -41,10 +41,10 @@
       "components_rps": {
         "query": 3.75,
         "background-read": 1.111111111,
-        "content-write": 2.222222222,
+        "content-write": 3.781712743,
         "policy-write": 0.001851852
       },
-      "total_rps": 7.085185185
+      "total_rps": 8.644675706
     },
     {
       "pods": 10000,
@@ -52,10 +52,10 @@
       "components_rps": {
         "query": 4.6875,
         "background-read": 1.388888889,
-        "content-write": 2.777777778,
+        "content-write": 4.727140929,
         "policy-write": 0.002314815
       },
-      "total_rps": 8.856481481
+      "total_rps": 10.805844633
     },
     {
       "pods": 10000,
@@ -63,10 +63,10 @@
       "components_rps": {
         "query": 18.75,
         "background-read": 5.555555556,
-        "content-write": 11.111111111,
+        "content-write": 18.908563717,
         "policy-write": 0.009259259
       },
-      "total_rps": 35.425925926
+      "total_rps": 43.223378532
     },
     {
       "pods": 10000,
@@ -74,10 +74,10 @@
       "components_rps": {
         "query": 37.5,
         "background-read": 11.111111111,
-        "content-write": 22.222222222,
+        "content-write": 37.817127434,
         "policy-write": 0.018518519
       },
-      "total_rps": 70.851851852
+      "total_rps": 86.446757063
     },
     {
       "pods": 100000,
@@ -85,10 +85,10 @@
       "components_rps": {
         "query": 46.875,
         "background-read": 13.888888889,
-        "content-write": 27.777777778,
+        "content-write": 47.271409292,
         "policy-write": 0.023148148
       },
-      "total_rps": 88.564814815
+      "total_rps": 108.058446329
     },
     {
       "pods": 100000,
@@ -96,10 +96,10 @@
       "components_rps": {
         "query": 187.5,
         "background-read": 55.555555556,
-        "content-write": 111.111111111,
+        "content-write": 189.085637168,
         "policy-write": 0.092592593
       },
-      "total_rps": 354.259259259
+      "total_rps": 432.233785316
     },
     {
       "pods": 100000,
@@ -107,10 +107,10 @@
       "components_rps": {
         "query": 375.0,
         "background-read": 111.111111111,
-        "content-write": 222.222222222,
+        "content-write": 378.171274336,
         "policy-write": 0.185185185
       },
-      "total_rps": 708.518518519
+      "total_rps": 864.467570632
     },
     {
       "pods": 1000000,
@@ -118,10 +118,10 @@
       "components_rps": {
         "query": 468.75,
         "background-read": 138.888888889,
-        "content-write": 277.777777778,
+        "content-write": 472.71409292,
         "policy-write": 0.231481481
       },
-      "total_rps": 885.648148148
+      "total_rps": 1080.58446329
     },
     {
       "pods": 1000000,
@@ -129,10 +129,10 @@
       "components_rps": {
         "query": 1875.0,
         "background-read": 555.555555556,
-        "content-write": 1111.111111111,
+        "content-write": 1890.856371678,
         "policy-write": 0.925925926
       },
-      "total_rps": 3542.592592593
+      "total_rps": 4322.33785316
     },
     {
       "pods": 1000000,
@@ -140,10 +140,10 @@
       "components_rps": {
         "query": 3750.0,
         "background-read": 1111.111111111,
-        "content-write": 2222.222222222,
+        "content-write": 3781.712743357,
         "policy-write": 1.851851852
       },
-      "total_rps": 7085.185185185
+      "total_rps": 8644.67570632
     },
     {
       "pods": 2000000,
@@ -151,10 +151,10 @@
       "components_rps": {
         "query": 937.5,
         "background-read": 277.777777778,
-        "content-write": 555.555555556,
+        "content-write": 945.428185839,
         "policy-write": 0.462962963
       },
-      "total_rps": 1771.296296296
+      "total_rps": 2161.16892658
     },
     {
       "pods": 2000000,
@@ -162,10 +162,10 @@
       "components_rps": {
         "query": 3750.0,
         "background-read": 1111.111111111,
-        "content-write": 2222.222222222,
+        "content-write": 3781.712743357,
         "policy-write": 1.851851852
       },
-      "total_rps": 7085.185185185
+      "total_rps": 8644.67570632
     },
     {
       "pods": 2000000,
@@ -173,10 +173,260 @@
       "components_rps": {
         "query": 7500.0,
         "background-read": 2222.222222222,
-        "content-write": 4444.444444444,
+        "content-write": 7563.425486714,
         "policy-write": 3.703703704
       },
-      "total_rps": 14170.37037037
+      "total_rps": 17289.35141264
     }
-  ]
+  ],
+  "stock_based_writes": {
+    "basis": "theoretical retained-stock mean under declared intensity mixture and empirical rating-count CDF; not a generated population measurement",
+    "source_hashes": {
+      "calibration_sha256": "6f5938eaaa3e91a389cd14e64d9bc64230d379abb9ec58dd87745ca87099ae26",
+      "ratings_cdf_sha256": "db7729e027cefe426af3a73b6daf31732998122359e553762a3ae689f05dca9e"
+    },
+    "retention_days": 1800,
+    "services": [
+      {
+        "service": "communication",
+        "retained_records_per_hosted_person": 21780.0,
+        "new_records_per_hosted_day": 12.1,
+        "ingest_requests_per_hosted_day": 12.1,
+        "expire_requests_per_hosted_day": 12.1,
+        "modify_requests_per_hosted_day": 6.05
+      },
+      {
+        "service": "calendar",
+        "retained_records_per_hosted_person": 580.8,
+        "new_records_per_hosted_day": 0.322666667,
+        "ingest_requests_per_hosted_day": 0.322666667,
+        "expire_requests_per_hosted_day": 0.322666667,
+        "modify_requests_per_hosted_day": 0.645333333
+      },
+      {
+        "service": "transactions",
+        "retained_records_per_hosted_person": 2468.4,
+        "new_records_per_hosted_day": 1.371333333,
+        "ingest_requests_per_hosted_day": 0.685666667,
+        "expire_requests_per_hosted_day": 0.685666667,
+        "modify_requests_per_hosted_day": 0.137133333
+      },
+      {
+        "service": "activity",
+        "retained_records_per_hosted_person": 2178.0,
+        "new_records_per_hosted_day": 1.21,
+        "ingest_requests_per_hosted_day": 1.21,
+        "expire_requests_per_hosted_day": 1.21,
+        "modify_requests_per_hosted_day": 0.121
+      },
+      {
+        "service": "location",
+        "retained_records_per_hosted_person": 21780.0,
+        "new_records_per_hosted_day": 12.1,
+        "ingest_requests_per_hosted_day": 1.5125,
+        "expire_requests_per_hosted_day": 1.5125,
+        "modify_requests_per_hosted_day": 0.0
+      },
+      {
+        "service": "media",
+        "retained_records_per_hosted_person": 2904.0,
+        "new_records_per_hosted_day": 1.613333333,
+        "ingest_requests_per_hosted_day": 0.403333333,
+        "expire_requests_per_hosted_day": 0.403333333,
+        "modify_requests_per_hosted_day": 0.403333333
+      },
+      {
+        "service": "ratings",
+        "retained_records_per_hosted_person": 165.597516556,
+        "new_records_per_hosted_day": 0.09199862,
+        "ingest_requests_per_hosted_day": 0.09199862,
+        "expire_requests_per_hosted_day": 0.09199862,
+        "modify_requests_per_hosted_day": 0.004599931
+      }
+    ],
+    "contacts_modify_requests_per_hosted_day": 0.828767123,
+    "per_hosted_person_daily_content_requests": {
+      "ingest": 16.326165287,
+      "expire": 16.326165287,
+      "modify": 8.190167054
+    },
+    "content_write_requests_per_hosted_day": 40.842497628,
+    "scope": "fixed resource topology; balanced ingestion/expiry in expectation; actual finite-run changes require successful mutation receipts"
+  },
+  "legacy_pilot_v1": {
+    "scope": "legacy four-weight approximation and existing-value replacement writes; not the main journey mix",
+    "per_hosted_person_daily_requests": {
+      "query": 40.5,
+      "background-read": 12,
+      "content-write": 24.0,
+      "policy-write": 0.02
+    },
+    "population_rates": [
+      {
+        "pods": 1000,
+        "scenario": "daily-average",
+        "components_rps": {
+          "query": 0.46875,
+          "background-read": 0.138888889,
+          "content-write": 0.277777778,
+          "policy-write": 0.000231481
+        },
+        "total_rps": 0.885648148
+      },
+      {
+        "pods": 1000,
+        "scenario": "busy-period",
+        "components_rps": {
+          "query": 1.875,
+          "background-read": 0.555555556,
+          "content-write": 1.111111111,
+          "policy-write": 0.000925926
+        },
+        "total_rps": 3.542592593
+      },
+      {
+        "pods": 1000,
+        "scenario": "burst",
+        "components_rps": {
+          "query": 3.75,
+          "background-read": 1.111111111,
+          "content-write": 2.222222222,
+          "policy-write": 0.001851852
+        },
+        "total_rps": 7.085185185
+      },
+      {
+        "pods": 10000,
+        "scenario": "daily-average",
+        "components_rps": {
+          "query": 4.6875,
+          "background-read": 1.388888889,
+          "content-write": 2.777777778,
+          "policy-write": 0.002314815
+        },
+        "total_rps": 8.856481481
+      },
+      {
+        "pods": 10000,
+        "scenario": "busy-period",
+        "components_rps": {
+          "query": 18.75,
+          "background-read": 5.555555556,
+          "content-write": 11.111111111,
+          "policy-write": 0.009259259
+        },
+        "total_rps": 35.425925926
+      },
+      {
+        "pods": 10000,
+        "scenario": "burst",
+        "components_rps": {
+          "query": 37.5,
+          "background-read": 11.111111111,
+          "content-write": 22.222222222,
+          "policy-write": 0.018518519
+        },
+        "total_rps": 70.851851852
+      },
+      {
+        "pods": 100000,
+        "scenario": "daily-average",
+        "components_rps": {
+          "query": 46.875,
+          "background-read": 13.888888889,
+          "content-write": 27.777777778,
+          "policy-write": 0.023148148
+        },
+        "total_rps": 88.564814815
+      },
+      {
+        "pods": 100000,
+        "scenario": "busy-period",
+        "components_rps": {
+          "query": 187.5,
+          "background-read": 55.555555556,
+          "content-write": 111.111111111,
+          "policy-write": 0.092592593
+        },
+        "total_rps": 354.259259259
+      },
+      {
+        "pods": 100000,
+        "scenario": "burst",
+        "components_rps": {
+          "query": 375.0,
+          "background-read": 111.111111111,
+          "content-write": 222.222222222,
+          "policy-write": 0.185185185
+        },
+        "total_rps": 708.518518519
+      },
+      {
+        "pods": 1000000,
+        "scenario": "daily-average",
+        "components_rps": {
+          "query": 468.75,
+          "background-read": 138.888888889,
+          "content-write": 277.777777778,
+          "policy-write": 0.231481481
+        },
+        "total_rps": 885.648148148
+      },
+      {
+        "pods": 1000000,
+        "scenario": "busy-period",
+        "components_rps": {
+          "query": 1875.0,
+          "background-read": 555.555555556,
+          "content-write": 1111.111111111,
+          "policy-write": 0.925925926
+        },
+        "total_rps": 3542.592592593
+      },
+      {
+        "pods": 1000000,
+        "scenario": "burst",
+        "components_rps": {
+          "query": 3750.0,
+          "background-read": 1111.111111111,
+          "content-write": 2222.222222222,
+          "policy-write": 1.851851852
+        },
+        "total_rps": 7085.185185185
+      },
+      {
+        "pods": 2000000,
+        "scenario": "daily-average",
+        "components_rps": {
+          "query": 937.5,
+          "background-read": 277.777777778,
+          "content-write": 555.555555556,
+          "policy-write": 0.462962963
+        },
+        "total_rps": 1771.296296296
+      },
+      {
+        "pods": 2000000,
+        "scenario": "busy-period",
+        "components_rps": {
+          "query": 3750.0,
+          "background-read": 1111.111111111,
+          "content-write": 2222.222222222,
+          "policy-write": 1.851851852
+        },
+        "total_rps": 7085.185185185
+      },
+      {
+        "pods": 2000000,
+        "scenario": "burst",
+        "components_rps": {
+          "query": 7500.0,
+          "background-read": 2222.222222222,
+          "content-write": 4444.444444444,
+          "policy-write": 3.703703704
+        },
+        "total_rps": 14170.37037037
+      }
+    ]
+  }
 }

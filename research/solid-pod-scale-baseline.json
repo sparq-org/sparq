@@ -43,6 +43,90 @@
     "cells": {
       "value": 16,
       "pointer": "/results/h2_rollup/materialized-routed/cells"
+    },
+    "endpoint_ratio_threshold": {
+      "value": 1.1,
+      "pointer": "/workload/h2_decision_rule/endpoint_ratio_upper_bound"
+    },
+    "elasticity_threshold": {
+      "value": 0.1,
+      "pointer": "/workload/h2_decision_rule/pod_elasticity_upper_bound"
     }
+  },
+  "effect_size_summary": [
+    {
+      "lane": "materialized-routed",
+      "metric": "wall",
+      "cells": 16,
+      "source_pointer_pattern": "/results/h2/materialized-routed/{domain}/{query}/wall",
+      "endpoint_ratio_range": [
+        0.9633247114233873,
+        1.0
+      ],
+      "maximum_endpoint_ratio_ci95_high": 1.0199544034460657,
+      "elasticity_range": [
+        -0.005134303434962522,
+        0.0004652463715463724
+      ],
+      "maximum_elasticity_ci95_high": 0.0016096093522807407
+    },
+    {
+      "lane": "materialized-routed",
+      "metric": "process_cpu",
+      "cells": 16,
+      "source_pointer_pattern": "/results/h2/materialized-routed/{domain}/{query}/process_cpu",
+      "endpoint_ratio_range": [
+        0.9631750287246266,
+        1.0001455815984859
+      ],
+      "maximum_endpoint_ratio_ci95_high": 1.0195568302513747,
+      "elasticity_range": [
+        -0.005120035629930591,
+        0.0004894905588680306
+      ],
+      "maximum_elasticity_ci95_high": 0.0016831092088908652
+    },
+    {
+      "lane": "native-http-assembly",
+      "metric": "wall",
+      "cells": 16,
+      "source_pointer_pattern": "/results/h2/native-http-assembly/{domain}/{query}/wall",
+      "endpoint_ratio_range": [
+        566.9002006037848,
+        590.4135967556767
+      ],
+      "maximum_endpoint_ratio_ci95_high": 606.8289122976305,
+      "elasticity_range": [
+        0.8362723435887034,
+        0.84156684167321
+      ],
+      "maximum_elasticity_ci95_high": 0.8614439166731181
+    },
+    {
+      "lane": "native-http-assembly",
+      "metric": "process_cpu",
+      "cells": 16,
+      "source_pointer_pattern": "/results/h2/native-http-assembly/{domain}/{query}/process_cpu",
+      "endpoint_ratio_range": [
+        566.5682601665625,
+        590.0551764371902
+      ],
+      "maximum_endpoint_ratio_ci95_high": 606.443752599688,
+      "elasticity_range": [
+        0.8361839956480032,
+        0.8414937802476052
+      ],
+      "maximum_elasticity_ci95_high": 0.8614177896398734
+    }
+  ],
+  "accompanying_artifacts": {
+    "directory": "bench/canonical-competitor-results/ac-sparql/ec2-canonical-20260903t085125z",
+    "raw_archive": {
+      "bytes": 3309068,
+      "path": "bench/canonical-competitor-results/ac-sparql/ec2-canonical-20260903t085125z/raw-sanitized.tar.zst",
+      "sha256": "1700253e8f2e5b339809d7bac6782587683507e5c8eaefdf82c13c1b18746914"
+    },
+    "analysis_commit": "08ab92668397a22a815ce2e477d8f633ab7c84ad",
+    "public_archival_availability": "unresolved; accompanying local review bundle only"
   }
 }
