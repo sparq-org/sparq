@@ -1,98 +1,258 @@
 {
-  "schema_version":1,
-  "study_id":"solid-pod-scale",
-  "model_provenance":"[GPT-6]",
-  "version":"1.0.1",
-  "revision_note":"Prospective clarification before canonical measurements: shared owner-only policy administration is outside both language engines, and response-production timing is distinguished from complete-body delivery. SLO thresholds are unchanged.",
-  "authored_utc":"2026-09-06",
-  "status":"prospective-protocol",
-  "question":"Can we support efficient, access-controlled SPARQL queries over Solid Pods at scale?",
-  "freeze_rule":"Before each canonical campaign, commit and hash this file, workload.json, corpus parameters, source calibration manifest, generator source, runner source, query templates and build lockfile. A later change creates a new protocol version and is not applied retrospectively. Exploratory pilots are separately labeled.",
-  "scope":{
-    "server_count":1,
-    "primary_populated_pods":1000000,
-    "extension_populated_pods":2000000,
-    "scale_ladder":[1000,10000,100000,1000000,2000000],
-    "data":"structured service records and metadata for photos, videos and attachments; original binary payloads excluded",
-    "counting_rule":"Count a Pod only after all corpus content and policies have been persisted, indexed as required by the implementation, and checked against its manifest. Empty namespaces, nominal quotas and lazy synthesis on first read do not count.",
-    "corpora":["compact-control","personal-metadata-central","personal-metadata-heavy"],
-    "representativeness_gate":"Report source-backed schema/quantity/relationship coverage separately. An assumptions-only corpus remains a scenario, regardless of Pod count. Do not relabel the compact control as all-service data."
+  "schema_version": 2,
+  "study_id": "solid-pod-scale",
+  "model_provenance": "[GPT-6]",
+  "version": "2.0.0",
+  "authored_utc": "2026-09-06",
+  "status": "prospective-protocol",
+  "question": "Can we support efficient, access-controlled SPARQL queries over Solid Pods at scale?",
+  "freeze_rule": "Before each canonical campaign, commit and hash this file, workload.json, corpus parameters, source calibration manifest, generator source, runner source, query templates and build lockfile. A later change creates a new protocol version and is not applied retrospectively. Exploratory pilots are separately labeled.",
+  "scope": {
+    "server_count": 1,
+    "primary_populated_pods": 1000000,
+    "extension_populated_pods": 2000000,
+    "scale_ladder": [
+      1000,
+      10000,
+      100000,
+      1000000,
+      2000000
+    ],
+    "data": "structured service records and metadata for photos, videos and attachments; original binary payloads excluded",
+    "counting_rule": "Count a Pod only after all corpus content and policies have been persisted, indexed as required by the implementation, and checked against its manifest. Empty namespaces, nominal quotas and lazy synthesis on first read do not count.",
+    "corpora": [
+      "compact-control",
+      "personal-metadata-central",
+      "personal-metadata-heavy"
+    ],
+    "representativeness_gate": "Report source-backed schema/quantity/relationship coverage separately. An assumptions-only corpus remains a scenario, regardless of Pod count. Do not relabel the compact control as all-service data."
   },
-  "hardware":{
-    "cpu_tiers":[1,2,4],
-    "memory_gib_tiers":[1,2,4,8,16],
-    "selection":"Choose the smallest passing memory tier, then fewest passing CPUs, within tested tiers. Report disk and price separately; this is not a claim of a global hardware minimum.",
-    "memory_accounting":"Linux cgroup memory.current/peak includes anonymous memory and charged page cache; also report process RSS/PSS and swap. Do not count only application cache entries.",
-    "memory_safety_fraction":0.7,
-    "swap_allowed":false,
-    "storage_accounting":["content-bytes","policy-bytes","indexes-bytes","allocated-blocks","filesystem-metadata","journal-or-wal","load-generator-output","backup-excluded-explicitly"],
-    "build_profile":"release",
-    "measurement_host":"dedicated quiet Linux machine; local workstation pilots are noncanonical",
-    "cost_boundary":"Compute, attached storage and public IPv4 during setup, build, loading, measurement and teardown. Reuse the study's existing authorization ceiling; do not exceed it."
+  "hardware": {
+    "cpu_tiers": [
+      1,
+      2,
+      4
+    ],
+    "memory_gib_tiers": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ],
+    "selection": "Choose the smallest passing memory tier, then fewest passing CPUs, within tested tiers. Report disk and price separately; this is not a claim of a global hardware minimum.",
+    "memory_accounting": "Linux cgroup memory.current/peak includes anonymous memory and charged page cache; also report process RSS/PSS and swap. Do not count only application cache entries.",
+    "memory_safety_fraction": 0.7,
+    "swap_allowed": false,
+    "storage_accounting": [
+      "content-bytes",
+      "policy-bytes",
+      "indexes-bytes",
+      "allocated-blocks",
+      "filesystem-metadata",
+      "journal-or-wal",
+      "load-generator-output",
+      "backup-excluded-explicitly"
+    ],
+    "build_profile": "release",
+    "measurement_host": "dedicated quiet Linux machine; local workstation pilots are noncanonical",
+    "cost_boundary": "Compute, attached storage and public IPv4 during setup, build, loading, measurement and teardown. Reuse the study's existing authorization ceiling; do not exceed it."
   },
-  "request_boundary":{
-    "primary":"Real HTTP request with verified authenticated identity, server queueing, route lookup, permission checks, cache miss/loading, query execution and complete response serialization/body delivery",
-    "unsupported_boundary":"An in-process library call, preasserted Session identity, or static allowlist fixture can be reported as a component benchmark but cannot alone establish authenticated Solid server capacity.",
-    "server_time":"From first server admission to completion of response production, including server-side waiting; this timer does not include socket flush and must not be described as complete-body delivery",
-    "scheduled_time":"Client completion minus intended arrival; includes generator lag and network",
-    "complete_response_guard":"For the loopback capacity lane also require at least 95% of all offered requests to finish complete-body client receipt within the unchanged 200 ms deadline. This conservatively includes generator and local transport delay; a response-production timer alone cannot pass the complete-response criterion.",
-    "policy_administration":"For both languages, the same authenticated Pod-owner check authorizes writes only to that Pod's policy resources, outside the WAC/ACP language engines. Measure durable journal, rematerialization, invalidation and subsequent query costs. Do not claim ACP ACR self-access support or generic control-authority equivalence.",
-    "required_auth_evidence":["invalid-signature-rejected","wrong-audience-rejected","expired-token-rejected","principal-bound-to-verified-token","valid-proof-bound-to-request-when-protocol-requires","replay-policy-declared"]
+  "request_boundary": {
+    "primary": "Real HTTP request with verified authenticated identity, server queueing, route lookup, permission checks, cache miss/loading, query execution and complete response serialization/body delivery",
+    "unsupported_boundary": "An in-process library call, preasserted Session identity, or static allowlist fixture can be reported as a component benchmark but cannot alone establish authenticated Solid server capacity.",
+    "server_time": "From first server admission to completion of response production, including server-side waiting; this timer does not include socket flush and must not be described as complete-body delivery",
+    "scheduled_time": "Client completion minus intended arrival; includes generator lag and network",
+    "required_auth_evidence": [
+      "invalid-signature-rejected",
+      "wrong-audience-rejected",
+      "expired-token-rejected",
+      "principal-bound-to-verified-token",
+      "valid-proof-bound-to-request-when-protocol-requires",
+      "replay-policy-declared"
+    ],
+    "local_slo_measure": "Complete client HTTP body latency is a conservative loopback bound; x-server-us ends at response production and is diagnostic, excluding socket delivery and earlier socket waiting.",
+    "complete_response_guard": "For the loopback capacity lane also require at least 95% of all offered requests to finish complete-body client receipt within the unchanged 200 ms deadline. This conservatively includes generator and local transport delay; a response-production timer alone cannot pass the complete-response criterion.",
+    "policy_administration": "For both languages, the same authenticated Pod-owner check authorizes writes only to that Pod's policy resources, outside the WAC/ACP language engines. Measure durable journal, rematerialization, invalidation and subsequent query costs. Do not claim ACP ACR self-access support or generic control-authority equivalence."
   },
-  "correctness":{
-    "neutral_oracle":"Direct expected rights over generated principal/resource/operation/context records; do not call WAC or ACP materializers to calculate expected authorization.",
-    "result_oracle":"Physically select readable content, then compare exact solution bags; ordered queries compare order. If the same SPARQL engine evaluates reference and candidate, claim authorization-selection independence only.",
-    "principals":["owner","explicit-recipient","unrelated-authenticated","anonymous","revoked-recipient"],
-    "operations":["read","append","write","owner-policy-administration"],
-    "administration_oracle":"Separate owner/non-owner and cross-Pod tests for the shared administration boundary; generated content-mode oracle comparisons do not establish authorization of policy-resource self-edits.",
-    "required_cases":["direct-grant","inherited-grant","private-child-exception","multiple-recipients","public-resource","unauthorized-graph-name","join-across-visible-and-hidden-graphs","optional","not-exists","aggregate","graph-enumeration","grant-after-cache-hit","revoke-after-cache-hit","revoke-after-eviction","revoke-after-restart","concurrent-query-policy-update"],
-    "population_checks":"Streaming manifest/checksum verification for every stored Pod; seeded representative query/oracle sample includes domain, volume quantile, sharing class and policy placement, plus each distinct generated policy scenario.",
-    "required_before_timing":true,
-    "stale_read_rule":"After a successful policy-update response, a newly admitted query must observe the new rights. Declare treatment of queries already admitted at update time.",
-    "any_failure":"Quarantine affected run and results; never average a correctness failure into a performance claim."
+  "correctness": {
+    "neutral_oracle": "Direct expected rights over generated principal/resource/operation/context records; do not call WAC or ACP materializers to calculate expected authorization.",
+    "result_oracle": "Physically select readable content, then compare exact solution bags; ordered queries compare order. If the same SPARQL engine evaluates reference and candidate, claim authorization-selection independence only.",
+    "principals": [
+      "owner",
+      "explicit-recipient",
+      "unrelated-authenticated",
+      "anonymous",
+      "revoked-recipient"
+    ],
+    "operations": [
+      "read",
+      "append",
+      "write",
+      "owner-policy-administration"
+    ],
+    "required_cases": [
+      "direct-grant",
+      "inherited-grant",
+      "private-child-exception",
+      "multiple-recipients",
+      "public-resource",
+      "unauthorized-graph-name",
+      "join-across-visible-and-hidden-graphs",
+      "optional",
+      "not-exists",
+      "aggregate",
+      "graph-enumeration",
+      "grant-after-cache-hit",
+      "revoke-after-cache-hit",
+      "revoke-after-eviction",
+      "revoke-after-restart",
+      "concurrent-query-policy-update"
+    ],
+    "population_checks": "Streaming manifest/checksum verification for every stored Pod; seeded representative query/oracle sample includes domain, volume quantile, sharing class and policy placement, plus each distinct generated policy scenario.",
+    "required_before_timing": true,
+    "stale_read_rule": "After a successful policy-update response, a newly admitted query must observe the new rights. Declare treatment of queries already admitted at update time.",
+    "any_failure": "Quarantine affected run and results; never average a correctness failure into a performance claim.",
+    "administration_oracle": "Separate owner/non-owner and cross-Pod tests for the shared administration boundary; generated content-mode oracle comparisons do not establish authorization of policy-resource self-edits."
   },
-  "access_control":{
-    "languages":["wac","acp"],
-    "comparison":"Identical content and intended effective rights; policy encodings and resulting policy bytes may differ.",
-    "common_subset":["explicit-owner","private","public-read","named-recipient-read","named-recipient-write","inherited-folder-grant","private-resource-exception","grant-revoke"],
-    "sharing_scenarios":["private-personal","household","collaboration","public-profile"],
-    "recipient_count_sensitivity":[1,4,16,64],
-    "direct_policy_fraction_sensitivity":[0,0.1,1],
-    "hierarchy_depth_sensitivity":[1,3,6],
-    "policy_reuse":"Report resources per effective policy and actual policy triples. Compare equivalent rights, not equal serialized triple counts.",
-    "language_specific":"ACP client/issuer conditions and denies beyond those needed for equivalent rights; WAC origin/group semantics outside verified common encoding. Separate feature experiments, never pooled with common-subset equivalence. Generic policy-resource control authority and ACP ACR self-access are not compared by the shared owner-administration path.",
-    "frequency_evidence":"Scenario motivation is not a measured population distribution. Unobserved sharing proportions and churn remain declared assumptions."
+  "access_control": {
+    "languages": [
+      "wac",
+      "acp"
+    ],
+    "comparison": "Identical content and intended effective rights; policy encodings and resulting policy bytes may differ.",
+    "common_subset": [
+      "explicit-owner",
+      "private",
+      "public-read",
+      "named-recipient-read",
+      "named-recipient-write",
+      "inherited-folder-grant",
+      "private-resource-exception",
+      "grant-revoke"
+    ],
+    "sharing_scenarios": [
+      "private-personal",
+      "household",
+      "collaboration",
+      "public-profile"
+    ],
+    "recipient_count_sensitivity": [
+      1,
+      4,
+      16,
+      64
+    ],
+    "direct_policy_fraction_sensitivity": [
+      0,
+      0.1,
+      1
+    ],
+    "hierarchy_depth_sensitivity": [
+      1,
+      3,
+      6
+    ],
+    "policy_reuse": "Report resources per effective policy and actual policy triples. Compare equivalent rights, not equal serialized triple counts.",
+    "language_specific": "ACP client/issuer conditions and denies beyond those needed for equivalent rights; WAC origin/group semantics outside verified common encoding. Separate feature experiments, never pooled with common-subset equivalence. Generic policy-resource control authority and ACP ACR self-access are not compared by the shared owner-administration path.",
+    "frequency_evidence": "Scenario motivation is not a measured population distribution. Unobserved sharing proportions and churn remain declared assumptions.",
+    "policy_administration": "Both languages use authenticated manifest-owner policy management restricted to existing policy graphs in that Pod, outside WAC/ACP policy-editing authorization. Journal then rematerialize before acknowledgement. ACP ACR self-access conformance is not claimed."
   },
-  "experiments":[
-    {"id":"storage","purpose":"Materialize and verify populated corpus at each reached scale; measure disk, loading, startup and resource use."},
-    {"id":"working-set","purpose":"Fixed target Pod across hosted scale, repeated-hot, first-touch after process restart, byte-bounded-cache churn, uniform-all-hosted and skewed targets. Record OS cache state separately from application cache state."},
-    {"id":"capacity","purpose":"Replay population-derived average/busy/burst mix, including content and policy writes, with scheduled arrivals. A read-only runner reports read capacity only."},
-    {"id":"policy-parity","purpose":"Paired WAC/ACP run schedules, warm/cold authorization, policy materialization, memory, update acknowledgement and post-update queries."},
-    {"id":"network","purpose":"Replay local/regional/mobile-stress journeys with one and three sequential requests; measure complete journey latency directly."}
+  "experiments": [
+    {
+      "id": "storage",
+      "purpose": "Materialize and verify populated corpus at each reached scale; measure disk, loading, startup and resource use."
+    },
+    {
+      "id": "working-set",
+      "purpose": "Fixed target Pod across hosted scale, repeated-hot, first-touch after process restart, byte-bounded-cache churn, uniform-all-hosted and skewed targets. Record OS cache state separately from application cache state."
+    },
+    {
+      "id": "capacity",
+      "purpose": "Replay population-derived average/busy/burst mix, including content and policy writes, with scheduled arrivals. A read-only runner reports read capacity only."
+    },
+    {
+      "id": "policy-parity",
+      "purpose": "Paired WAC/ACP run schedules, warm/cold authorization, policy materialization, memory, update acknowledgement and post-update queries."
+    },
+    {
+      "id": "network",
+      "purpose": "Replay local/regional/mobile-stress journeys with one and three sequential requests; measure complete journey latency directly."
+    }
   ],
-  "measurement":{
-    "independent_paired_runs":5,
-    "warmup_seconds":30,
-    "measurement_seconds":120,
-    "minimum_offered_per_run":1000,
-    "request_timeout_ms":5000,
-    "paired_order":"Alternate randomized WAC/ACP order with the five frozen seeds; independent process restart per pair. Reuse immutable corpus only with recorded cache state.",
-    "report":["offered-rps","completed-rps","goodput-within-deadline","p50","p95","p99","maximum","failed","timeout","unsent","queue-delay","cpu-seconds","cgroup-memory-peak","rss","disk-read-write-bytes","cache-hit-fraction","policy-update-latency"],
-    "percentile_rule":"Nearest-rank from recorded request durations; publish raw per-request records or lossless histogram plus exact failures. Scheduled failures remain in the SLO denominator.",
-    "uncertainty":"Bootstrap independent paired runs, 10000 resamples, seed 2026090699. Per-request observations within a run are not independent experimental replicates.",
-    "run_duration_rule":"Measure for at least measurement_seconds and minimum_offered_per_run; retain failures and lower-bound timeout durations. All runs must drain or time out before teardown."
+  "measurement": {
+    "independent_paired_runs": 5,
+    "warmup_seconds": 30,
+    "measurement_seconds": 120,
+    "minimum_offered_per_run": 1000,
+    "request_timeout_ms": 5000,
+    "paired_order": "Alternate randomized WAC/ACP order with the five frozen seeds; independent process restart per pair. Reuse immutable corpus only with recorded cache state.",
+    "report": [
+      "offered-rps",
+      "completed-rps",
+      "goodput-within-deadline",
+      "p50",
+      "p95",
+      "p99",
+      "maximum",
+      "failed",
+      "timeout",
+      "unsent",
+      "queue-delay",
+      "cpu-seconds",
+      "cgroup-memory-peak",
+      "rss",
+      "disk-read-write-bytes",
+      "cache-hit-fraction",
+      "policy-update-latency"
+    ],
+    "percentile_rule": "Nearest-rank from recorded request durations; publish raw per-request records or lossless histogram plus exact failures. Scheduled failures remain in the SLO denominator.",
+    "uncertainty": "Bootstrap independent paired runs, 10000 resamples, seed 2026090699. Per-request observations within a run are not independent experimental replicates.",
+    "run_duration_rule": "Measure for at least measurement_seconds and minimum_offered_per_run; retain failures and lower-bound timeout durations. All runs must drain or time out before teardown."
   },
-  "decision_rules":{
-    "service_capacity":"At the tested population-derived busy-period rate, every paired run must have at least 99% successful completions, at least 95% of all offered requests successfully completed within 200 ms server time, no correctness failures, no unbounded queue growth and memory below the declared ceiling. Also report scheduled-arrival and network results. A missing required operation prevents the full-service claim.",
-    "minimum_resource_claim":"Smallest tested tier passing all required common-subset WAC and ACP runs on the central corpus; report heavier corpus and sensitivities independently.",
-    "equivalence_margin_ratio":1.1,
-    "equivalence_interval":[0.9090909091,1.1],
-    "equivalence_confidence":0.95,
-    "equivalence_metrics":["p95-complete-server-latency","sustainable-goodput-under-same-slo"],
-    "equivalence":"For each required common-subset scenario, the entire paired-ratio confidence interval must lie within [1/1.10, 1.10] for both metrics, and both variants must meet the SLO. Ten percent is a declared practical margin, not a null-effect test. Failure to demonstrate equivalence is inconclusive unless the interval establishes a difference outside the margin.",
-    "cold_and_update_costs":"Report separately; warm equivalence does not imply equal materialization, storage, cache-miss or update cost.",
-    "saturation_search":"Pilot geometric offered-rate grid around model demand (0.25,0.5,1,2,4 times busy-period); freeze adjacent pass/fail bracket before the canonical repetition. Report highest tested passing rate and next failing rate, not an interpolated exact maximum."
+  "decision_rules": {
+    "service_capacity": "At the tested population-derived busy-period rate, every paired run must have at least 99% successful completions, at least 95% of all offered requests successfully completed within 200 ms server time, no correctness failures, no unbounded queue growth and memory below the declared ceiling. Also report scheduled-arrival and network results. A missing required operation prevents the full-service claim.",
+    "minimum_resource_claim": "Smallest tested tier passing all required common-subset WAC and ACP runs on the central corpus; report heavier corpus and sensitivities independently.",
+    "equivalence_margin_ratio": 1.1,
+    "equivalence_interval": [
+      0.9090909091,
+      1.1
+    ],
+    "equivalence_confidence": 0.95,
+    "equivalence_metrics": [
+      "p95-complete-server-latency",
+      "sustainable-goodput-under-same-slo"
+    ],
+    "equivalence": "For each required common-subset scenario, the entire paired-ratio confidence interval must lie within [1/1.10, 1.10] for both metrics, and both variants must meet the SLO. Ten percent is a declared practical margin, not a null-effect test. Failure to demonstrate equivalence is inconclusive unless the interval establishes a difference outside the margin.",
+    "cold_and_update_costs": "Report separately; warm equivalence does not imply equal materialization, storage, cache-miss or update cost.",
+    "saturation_search": "Pilot geometric offered-rate grid around model demand (0.25,0.5,1,2,4 times busy-period); freeze adjacent pass/fail bracket before the canonical repetition. Report highest tested passing rate and next failing rate, not an interpolated exact maximum."
   },
-  "artifact_requirements":["source-commit","dirty-status","compiler-version","lockfile-hash","protocol-hash","workload-hash","corpus-manifest-hash","policy-language","hardware","os-kernel","cgroup-limits","storage-type","authentication-boundary","query-schedule-seed","raw-record-hashes","failed-run-records","cost-ledger","analysis-version"],
-  "claim_rule":"The abstract and conclusion state the largest actually persisted, correctness-checked and fully measured population. If million-Pod full-service tests are incomplete or fail, report that outcome directly; never replace it with extrapolated capacity."
+  "artifact_requirements": [
+    "source-commit",
+    "dirty-status",
+    "compiler-version",
+    "lockfile-hash",
+    "protocol-hash",
+    "workload-hash",
+    "corpus-manifest-hash",
+    "policy-language",
+    "hardware",
+    "os-kernel",
+    "cgroup-limits",
+    "storage-type",
+    "authentication-boundary",
+    "query-schedule-seed",
+    "raw-record-hashes",
+    "failed-run-records",
+    "cost-ledger",
+    "analysis-version"
+  ],
+  "claim_rule": "The abstract and conclusion state the largest actually persisted, correctness-checked and fully measured population. If million-Pod full-service tests are incomplete or fail, report that outcome directly; never replace it with extrapolated capacity.",
+  "workload_execution": {
+    "main_mode": "journeys",
+    "specification": "workload.json execution_v2 and journey query_templates",
+    "pilot_mode": "population is exploratory only; uniform query templates, owner principal and one-property replacements do not establish main mixed-workload capacity",
+    "mutation_check": "Journaled selected-record receipts distinguish actual inserted/deleted records and triples from accepted requests. Reconcile unknown transport outcomes from durable journals and verify state after replay. Quarantine incorrect state, retain overload failures.",
+    "request_model": "Journey-weighted independent marked Poisson requests, not complete sequential frontend journeys; separate network experiment measures those."
+  }
 }
