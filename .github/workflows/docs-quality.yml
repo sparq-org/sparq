@@ -1193,6 +1193,42 @@ jobs:
         run: python3 scripts/check-advisory-registry.py --self-test
       - name: "Enforce advisory-job registry + gate-intent placement (C2/C3/C4) — GATING"
         run: python3 scripts/check-advisory-registry.py
+      # [OPUS-5] #5799 — the IMPERATIVE half of the same hole. C2/C3/C4 above police
+      # WHICH JOB a check sits in; they say nothing about whether the check inside it
+      # can actually fail. A step is made unable to fail declaratively via
+      # `continue-on-error:`, or imperatively inside the `run:` body with
+      # `cmd || true` / `set +e` — and the second form is invisible to every
+      # structural check on main: the step reports success, the job stays green, and
+      # `ci-summary / gate` counts a check-run that asserted nothing. Two characters
+      # neutralise a gate with no reviewer signal. Not theoretical — the #4211 review
+      # found `gh issue edit --add-label "$l" || true` in triage-issue.yml silently
+      # dropping routing labels, and that swallow was deleted.
+      #   W1 — a statement-level `|| true` / `|| :` in a GATING job's run body that
+      #        is not declared in .github/run-swallow-waivers.json with a reason.
+      #        No command name is exempt: `grep -q required out.log || true` and
+      #        `find . -exec validate {} \; || true` are assertions with the verdict
+      #        deleted, so a "diagnostic" cat/ls/tail is argued for like any other.
+      #   W2 — a `set +e` region that does not IMMEDIATELY capture and act on the
+      #        status of the command it tolerates: the next statement must be
+      #        `VAR=$?` (with `$VAR` actually read afterwards) or a branch/exit on
+      #        `$?`. `set +e` is not itself the defect — all 7 live uses capture on
+      #        the next line and act on it — but `./gate; echo note; rc=$?` captures
+      #        the echo, and `echo $?` enforces nothing. A bare trailing `exit 0` is
+      #        deliberately NOT flagged: under `bash -e` it is unreachable after a
+      #        failure, so it is an explicit success exit rather than a swallow
+      #        (reasoning, and W2's one stated bound, in the script header).
+      #   W3 — a waiver matching no live command is STALE and must be deleted, so a
+      #        waiver cannot rot into a standing pre-authorisation (C4's spirit).
+      # The waiver file is a RATCHET over a measured inventory, not an approval list:
+      # #5799 asked for the inventory first, and the 57 swallow sites then live in
+      # gating jobs were all reviewed and found intentional — the 22 this checker
+      # flags are declared one by one, with a reason, in the waiver file.
+      # Same shape as C2/C3/C4 — self-test pins the classifier's own logic, the
+      # enforce step applies it to the live workflows, and both are stdlib-only.
+      - name: Self-test the run-body swallow checker (W1/W2/W3 logic — #5799)
+        run: python3 scripts/check-workflow-run-swallow.py --self-test
+      - name: "Enforce run-body failure-swallow waivers (W1/W2/W3) — GATING"
+        run: python3 scripts/check-workflow-run-swallow.py
       # [OPUS-4.8] sparq-org/sparq#3475: the fast-fix ring's ONLY privileged
       # capability is the cross-repo REGISTRY_RING_TOKEN doorbell. Because a
       # `workflow_run` workflow is ALSO delivered for fork / cross-repo triggering
