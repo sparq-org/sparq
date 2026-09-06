@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
@@ -72,6 +74,33 @@ class BuildHostTests(unittest.TestCase):
             jobs.stop_process(process)
         self.assertEqual([call.args for call in kill.call_args_list],
                          [(12345, jobs.signal.SIGTERM), (12345, jobs.signal.SIGKILL)])
+
+    def test_complete_small_python_job_binds_source_logs_and_cleans_staging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base, results, fixture = root / "host", root / "results", root / "fixture"
+            (base / "inbox").mkdir(parents=True)
+            results.mkdir()
+            fixture.mkdir()
+            (fixture / "Cargo.lock").write_text("fixture lock\n")
+            (fixture / "rust-toolchain.toml").write_text("fixture toolchain\n")
+            (fixture / "test_fixture.py").write_text('print("functional fixture passed")\n')
+            archive = base / "inbox" / "test-job.tar.gz"
+            with tarfile.open(archive, "w:gz") as stream:
+                for path in fixture.iterdir():
+                    stream.add(path, arcname=path.name)
+            job = dict(self.job(), archive_sha256=jobs.digest(archive), commands=[["python3", "test_fixture.py"]])
+            sleep = time.sleep
+            with patch.object(jobs, "BASE", base), patch.object(jobs, "RESULTS", results), \
+                 patch.object(jobs.shutil, "disk_usage", return_value=type("Disk", (), {"free": 100 * jobs.GIB})()), \
+                 patch.object(jobs.time, "sleep", side_effect=lambda _: sleep(.01)):
+                result = jobs.run_job(job, time.time() + 1800)
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual(result["source_commit"], job["source_commit"])
+            self.assertEqual(result["commands_run"][0]["sha256"], jobs.digest(results / "test-job-0.log"))
+            self.assertEqual(result["build_environment"]["RUSTDOCFLAGS"], "-D warnings")
+            self.assertFalse(archive.exists())
+            self.assertFalse((base / "sources" / "test-job").exists())
 
     def test_final_marker_follows_manifest_and_all_evidence_hashes_match(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(jobs, "RESULTS", Path(directory)):
