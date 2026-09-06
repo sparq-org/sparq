@@ -1052,7 +1052,7 @@ jobs:
         run: python3 scripts/tests/test_alarm_lanes_non_gating.py
       # [OPUS-5] sq-1lc4i: the CI EXECUTION-LATENCY alarm
       # (scripts/ci_execution_latency_alarm.py, .github/workflows/ci-latency-alarm.yml).
-      # Hermetic (no gh, no network). Three halves: the classifiers for all three choke
+      # Hermetic (no gh, no network). Three halves: the classifiers for all three detected
       # modes — including the two guards that fail SILENTLY if broken, namely the
       # missing-baseline fallback (a lane whose runs never complete must still be
       # watchable, or the detector goes quiet exactly when a lane is 100% hung) and the
@@ -1064,8 +1064,11 @@ jobs:
       # the sparse-checkout that M1 reads its expectation from, and permissions carrying
       # `issues: write` with NO `pull-requests: write` so the detector can never acquire
       # arming authority). The suite pins its OWN call site here, so it cannot silently
-      # leave CI.
-      - name: Self-test the CI execution-latency alarm (3 choke modes + YAML seam)
+      # leave CI. [OPUS-5] #4802 adds M4 (declared-vs-achieved cadence fidelity) with a
+      # KNOWN POSITIVE and a KNOWN NEGATIVE named test, the literal-pinned floor and
+      # admission ceiling, and the exit-code rule that keeps a CHRONIC finding from
+      # permanently redding — and so muting — the two incident modes sharing the lane.
+      - name: Self-test the CI execution-latency alarm (3 modes + YAML seam)
         run: python3 scripts/tests/test_ci_execution_latency_alarm.py
       # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION for the scheduled safety lanes.
       # miri.yml (24 shards + a doctest job) and kani.yml (per-suite proofs) used to admit

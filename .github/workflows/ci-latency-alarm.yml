@@ -4,7 +4,7 @@
 # WHAT: maintainer-requested 2026-07-28 — "alerting for when runners are not picked up for
 # crons or delayed for other dispatches on both repos. This is an indicator that you are
 # choking on runner availability." scripts/ci_execution_latency_alarm.py runs hourly and
-# checks two DISTINCT choke modes, because they have different signatures and only one of
+# checks three DISTINCT modes, because they have different signatures and only one of
 # them is runner availability proper:
 #
 #   M1 a scheduled lane firing far below what its own `cron:` expects. This mode produces
@@ -18,6 +18,15 @@
 #   M3 a run `in_progress` far past its own lane's measured duration. It consumes capacity
 #      while looking perfectly healthy — no red, no alert, no artifact. MEASURED
 #      known-positive: nightly ci.yml ran 17.33h on 2026-07-27 against an 8.35h p90.
+#   M4 (#4802) a lane whose DECLARED `cron:` rate is a fiction here — it keeps running,
+#      keeps going green, and delivers a small fraction of what it declares, every day.
+#      MEASURED known-positive: on the 24h to 2026-07-28T13:15Z, `promote-on-approval`
+#      declared ~144 firings and achieved 12; five more lanes sat between 0.083 and 0.25
+#      fidelity, while every lane with an achievable declaration sat at 0.75-1.00.
+#      CHRONIC, not an incident: it emits ONE repo-level finding into the same deduped
+#      issue and deliberately does NOT set the exit code, because a permanently-red lane
+#      would mute M1 and M3 alongside it. Read the script's M4 section before changing
+#      that — the incident detector #4802 literally asked for could not be validated.
 #
 # WHY THIS IS NOT sparq-org/sparq#4368. That PR's `cron_lane_liveness.py` watches CRON-ONLY
 # lanes (every `on:` key in {schedule, workflow_dispatch}) and asks "is this lane DEAD?"
@@ -26,7 +35,10 @@
 # both raise on one lane. The complement is where the throughput-critical lanes live:
 # ci.yml, auto-arm.yml, batch-merge.yml, verdict-bridge.yml and 9 more all carry a
 # `schedule:` PLUS other triggers, so #4368 structurally cannot see any of them. M3 keys
-# on live run STATE, which #4368 does not read in any scope.
+# on live run STATE, which #4368 does not read in any scope. M4 is scoped to ALL scheduled
+# lanes — three of the five #4802 measured are cron-only — and needs no partition because
+# it answers a question about the workflow FILE's declaration, not about a lane's health,
+# and emits one repo-level finding rather than a per-lane verdict.
 #
 # NOT A GATE (same posture as review-alarm.yml / formal-alarm.yml): scheduled on main,
 # files issues, blocks NO merge. That holds because this job is DECLARED in
@@ -88,7 +100,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Self-test the CI execution-latency alarm (hermetic fixtures)
         run: python3 scripts/ci_execution_latency_alarm.py --self-test
-      - name: Check cron delivery, queue wait, and execution overrun
+      - name: Check cron delivery, cadence fidelity, and execution overrun
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
