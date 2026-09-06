@@ -183,7 +183,9 @@ impl PopulationConfig {
             monthly_records: MonthlyRecords {
                 communication: 300,
                 calendar: 8,
-                transactions: 41,
+                // The assumed mixture has mean multiplier 1.21. A base of 34 gives
+                // approximately 41 retained payments/month across that population.
+                transactions: 34,
                 activity: 30,
                 location: 300,
                 media: 40,
@@ -400,6 +402,59 @@ pub fn planned_record_counts(
     Ok(record_counts(config, pod_id))
 }
 
+/// Stream physically readable record graphs selected by the policy-neutral oracle.
+///
+/// This reference contains records only, excluding authorization and containment
+/// graphs. It supports the supplied record-query families; it is not a reference
+/// for arbitrary queries over the whole Pod. Comparing its query results with the
+/// same SPARQL engine verifies authorization selection, not independent SPARQL semantics.
+///
+/// # Errors
+/// Returns invalid-configuration and writer errors; discard any partial output.
+pub fn write_readable_content(
+    config: &PopulationConfig,
+    pod_id: u64,
+    agent: Option<&str>,
+    writer: impl Write,
+) -> io::Result<u64> {
+    config.validate()?;
+    let root = pod_root(config, pod_id);
+    let owner = owner_webid(config, pod_id);
+    let counts = record_counts(config, pod_id);
+    let mut out = Output {
+        writer,
+        bytes: 0,
+        quads: 0,
+    };
+    let mut emitted = 0;
+    for service in Service::ALL {
+        let mut record = 0;
+        for month in 0..months(config, service) {
+            let count = records_in_month(config, service, counts[&service], month);
+            let doc = format!("{root}{}/m{month:04}.ttl", service.name());
+            if can_read(config, pod_id, service, month, agent) {
+                for local in 0..count {
+                    write_record(
+                        &mut out,
+                        config,
+                        &root,
+                        &owner,
+                        &doc,
+                        service,
+                        record + local,
+                        month,
+                        local,
+                        counts[&Service::Contacts],
+                    )?;
+                }
+                emitted += count;
+            }
+            record += count;
+        }
+    }
+    Ok(emitted)
+}
+
 /// Emit one populated Pod as deterministic named-graph N-Quads.
 ///
 /// Bytes are written incrementally; no server-wide deployment or per-Pod RDF string
@@ -514,20 +569,23 @@ pub fn write_pod(
     Ok(summary)
 }
 
-/// Return eight queries covering point, joins, aggregation, filtering and bounded lists.
+/// Return eleven deterministic query families over the authorized record dataset.
 #[must_use]
 pub fn benchmark_queries(config: &PopulationConfig, pod_id: u64) -> Vec<PopulationQuery> {
     let root = pod_root(config, pod_id);
     let ns = format!("PREFIX p: <{VOCAB}> ");
     [
         ("q1-point", format!("SELECT ?kind WHERE {{ GRAPH <{root}communication/m0000.ttl> {{ <{root}communication/m0000.ttl#r0> p:service ?kind }} }}")),
-        ("q2-count", "SELECT (COUNT(?s) AS ?count) WHERE { ?s a p:Record }".into()),
-        ("q3-star", "SELECT ?s ?created ?value WHERE { ?s p:service p:transactions; p:created ?created; p:value ?value } ORDER BY DESC(?created) LIMIT 20".into()),
-        ("q4-join", "SELECT ?message ?name WHERE { ?message p:service p:communication; p:contact ?contact . ?contact p:name ?name } LIMIT 20".into()),
-        ("q5-aggregate", "SELECT ?service (COUNT(?s) AS ?count) WHERE { ?s p:service ?service } GROUP BY ?service".into()),
-        ("q6-filter", "SELECT ?s ?v WHERE { ?s p:service p:activity; p:value ?v . FILTER(?v > 5000) } LIMIT 20".into()),
-        ("q7-optional", "SELECT ?s ?caption WHERE { ?s p:service p:media . OPTIONAL { ?s p:caption ?caption } } LIMIT 20".into()),
-        ("q8-union", "SELECT ?s WHERE { { ?s p:service p:calendar } UNION { ?s p:service p:media } } LIMIT 20".into()),
+        ("q2-count", "SELECT (COUNT(?s) AS ?count) WHERE { GRAPH ?g { ?s a p:Record } }".into()),
+        ("q3-star", "SELECT ?s ?created ?value WHERE { GRAPH ?g { ?s p:service p:transactions; p:created ?created; p:value ?value } } ORDER BY DESC(?created) ?s LIMIT 20".into()),
+        ("q4-join", "SELECT ?message ?name WHERE { GRAPH ?messages { ?message p:service p:communication; p:contact ?contact } GRAPH ?contacts { ?contact p:name ?name } } ORDER BY ?message ?name LIMIT 20".into()),
+        ("q5-aggregate", "SELECT ?service (COUNT(?s) AS ?count) WHERE { GRAPH ?g { ?s p:service ?service } } GROUP BY ?service".into()),
+        ("q6-filter", "SELECT ?s ?v WHERE { GRAPH ?g { ?s p:service p:activity; p:value ?v . FILTER(?v > 5000) } } ORDER BY ?s ?v LIMIT 20".into()),
+        ("q7-optional", "SELECT ?s ?caption WHERE { GRAPH ?g { ?s p:service p:media . OPTIONAL { ?s p:caption ?caption } } } ORDER BY ?s ?caption LIMIT 20".into()),
+        ("q8-union", "SELECT ?s WHERE { GRAPH ?g { { ?s p:service p:calendar } UNION { ?s p:service p:media } } } ORDER BY ?s LIMIT 20".into()),
+        ("q9-notexists", "SELECT ?s WHERE { GRAPH ?g { ?s p:service p:media . FILTER NOT EXISTS { ?s p:caption ?caption } } } ORDER BY ?s LIMIT 20".into()),
+        ("q10-path", "SELECT ?s ?peer WHERE { GRAPH ?g { ?s p:service p:communication; p:thread/^p:thread ?peer } } ORDER BY ?s ?peer LIMIT 20".into()),
+        ("q11-graphs", "SELECT DISTINCT ?g WHERE { GRAPH ?g { ?s a p:Record } } ORDER BY ?g".into()),
     ].into_iter().map(|(id, sparql)| PopulationQuery { id: id.into(), sparql: ns.clone() + &sparql }).collect()
 }
 

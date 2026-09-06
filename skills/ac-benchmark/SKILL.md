@@ -26,8 +26,11 @@ such in results. Configurations round-trip through `serde_json` and reject unkno
 fields. Freeze the exact configuration before timed capacity runs.
 
 `population::owner_webid`, `recipient_webid`, `benchmark_queries` and
-`expected_record_count` supply identities, eight query families, and a policy-neutral
-record-count oracle. `can_read` models content-resource read rights; it is not a
+`expected_record_count` supply identities, eleven query families, and a policy-neutral
+record-count oracle. `write_readable_content` emits physically filtered record graphs
+for comparison. All templates use explicit `GRAPH` clauses; bounded lists have
+deterministic ordering. The reference verifies authorization selection when the
+same SPARQL engine evaluates both sides. `can_read` models content-resource read rights; it is not a
 general-purpose Solid authorization implementation or an authentication function.
 
 WAC and ACP serialize the same intended owner/private/public/individual/group read
