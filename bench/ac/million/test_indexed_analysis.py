@@ -6,7 +6,7 @@ import unittest
 
 from campaign_analysis import Evidence, RequestAnalysis, stats, analyze_campaign
 from indexed_analysis import indexed_component_summary
-from test_campaign_analysis import MEASUREMENT, records, request, seal, write_rows, complete_fixture
+from test_campaign_analysis import MEASUREMENT, records, request, seal, write_rows, complete_fixture, append_events
 
 
 def fixture(root, wrong=False):
@@ -64,7 +64,7 @@ class IndexedAnalysisTests(unittest.TestCase):
             root = Path(directory) / "artifacts"; root.mkdir()
             complete_fixture(root)
             events = fixture(root, wrong=True)
-            write_rows(root / "campaign-events.jsonl", events)
+            append_events(root, events)
             seal(root)
             review = Path(directory) / "review.json"
             review.write_text(json.dumps({"source_commit": "a" * 40, "status": "passed"}))

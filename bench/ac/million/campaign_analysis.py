@@ -70,6 +70,8 @@ class Evidence:
                 path = self.safe(name)
             except ValueError:
                 self.errors.append({"file": name, "error": "unsafe-path"}); continue
+            # [GPT-6] GNU find emits ./name; bind the same safe path used by readers.
+            name = str(path.relative_to(self.root))
             if name in self.manifest_hashes:
                 self.errors.append({"file": name, "error": "duplicate-manifest-member"}); continue
             self.manifest_hashes[name] = expected
@@ -200,29 +202,123 @@ def resource_summary(before, after, memory_gib):
             "scope": "fresh per-server cgroup peak includes warmup and charged page cache; not a whole-host memory minimum"}
 
 
-def inventory_summary(evidence, dataset, model):
+def representative_verification(evidence, dataset, model, expected, events):
+    """[GPT-6] Validate the frozen main runner's complete per-representative evidence."""
+    label = dataset["id"] + "-" + model
+    declaration = evidence.document(label + "-verification-sample.json")
+    issues, observations = [], []
+    rule = "minimum/maximum source bytes in every observed intensity class; deterministic Pod-ID tiebreak"
+    try:
+        declaration_matches = bool(declaration and declaration.get("rule") == rule and
+                                   canonical(declaration.get("representatives")) == canonical(expected))
+    except ValueError:
+        declaration_matches = False
+    if not declaration_matches or not expected:
+        issues.append("representative-declaration-missing-or-inventory-mismatch")
+    selected_events = [event for event in events if event.get("record_type") == "representative-verification"
+                       and event.get("dataset") == dataset["id"] and event.get("model") == model]
+    expected_ids = {candidate["pod"] for candidate in expected}
+    if any(type(event.get("pod")) is not int or event["pod"] not in expected_ids for event in selected_events):
+        issues.append("unexpected-representative-event")
+    correctness_failure = any(event.get("classification") == "oracle-mismatch" for event in selected_events)
+    for candidate in expected:
+        pod = candidate["pod"]
+        matching = [event for event in selected_events if type(event.get("pod")) is int and event["pod"] == pod]
+        event = matching[0] if len(matching) == 1 else {}
+        local_issues = []
+        if len(matching) != 1:
+            local_issues.append("representative-event-missing-or-duplicate")
+        try:
+            identity_matches = canonical({key: event.get(key) for key in candidate}) == canonical(candidate)
+        except ValueError:
+            identity_matches = False
+        if not identity_matches:
+            local_issues.append("representative-event-inventory-mismatch")
+        classification = event.get("classification")
+        if classification != "verified":
+            local_issues.append("representative-not-verified:" + str(classification))
+        if type(event.get("exit_code")) is not int or event["exit_code"] != 0 or event.get("systemd_result") != "success":
+            local_issues.append("representative-process-not-successful")
+        if type(event.get("verification_memory_max_bytes")) is not int or event["verification_memory_max_bytes"] != 16 * 1024**3:
+            local_issues.append("representative-verification-budget-disagrees")
+        name = f"{label}-verify-pod{pod}.jsonl"
+        # A failed systemd verifier can append plain-text diagnostics. They must
+        # remain failure evidence without pretending to be completion records.
+        rows = list(evidence.rows(name, strict=classification == "verified"))
+        starts = [row for row in rows if row.get("record_type") == "verify-pod-start"]
+        progresses = [row for row in rows if row.get("record_type") == "verify-progress"]
+        completes = [row for row in rows if row.get("record_type") == "verification-complete"]
+        # Frozen verifier: four principals, eleven corpus queries and sixteen journey templates.
+        counts = {"sampled_pods": 1, "checks": 4 * (11 + 16)}
+        if starts != [{"record_type": "verify-pod-start", "pod": pod}] or type(starts[0].get("pod")) is not int:
+            local_issues.append("representative-start-missing-or-mismatched")
+        for kind, records in (("progress", progresses), ("completion", completes)):
+            if len(records) != 1 or any(type(records[0].get(key)) is not int or records[0][key] != value for key, value in counts.items()):
+                local_issues.append("representative-" + kind + "-missing-or-mismatched")
+        if len(completes) == 1 and (completes[0].get("oracle") != "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts" or
+                                   completes[0].get("authentication") != "trusted-session deterministic check; HTTP authentication checked separately"):
+            local_issues.append("representative-verification-description-disagrees")
+        if [row.get("record_type") for row in rows] != ["verify-pod-start", "verify-progress", "verification-complete"]:
+            local_issues.append("representative-record-sequence-incomplete-or-unexpected")
+        if any(error["file"] == name for error in evidence.parse_errors):
+            local_issues.append("representative-record-parsing-failed")
+        issues.extend(local_issues)
+        observations.append({"expected": candidate, "event": event or None, "classification": classification,
+                             "completion": completes[0] if len(completes) == 1 else None,
+                             "passed": not local_issues, "issues": sorted(set(local_issues))})
+    return {"passed": not issues, "issues": sorted(set(issues)), "correctness_failure": correctness_failure,
+            "declaration_matches_inventory": declaration_matches, "expected_representatives": expected,
+            "representatives": observations,
+            "scope": "every inventory-derived volume-class minimum/maximum must pass the exact frozen per-Pod verifier and matching process event; verifier resource failures reject this dataset, not unrelated datasets or HTTP resource measurements"}
+
+
+def inventory_summary(evidence, dataset, model, events):
     label = dataset["id"] + "-" + model
     manifest = evidence.document(label + "-manifest.json") or {}
     count, records, quads, source_bytes, packed_bytes, largest, services = 0, 0, 0, 0, 0, 0, Counter()
-    issues = []
+    issues, extrema = [], {}
+    config = manifest.get("config", {})
+    if not isinstance(config, dict):
+        issues.append("invalid-corpus-config"); config = {}
+    volume_classes = config.get("volume_classes", [])
+    if not isinstance(volume_classes, list):
+        issues.append("invalid-configured-volume-classes"); volume_classes = []
+    configured_classes = set()
+    for volume in volume_classes:
+        if not isinstance(volume, dict) or any(type(volume.get(key)) is not int or volume[key] <= 0 for key in ("numerator", "denominator", "weight")):
+            issues.append("invalid-configured-volume-class"); continue
+        configured_classes.add((volume["numerator"], volume["denominator"]))
+    if not configured_classes: issues.append("configured-volume-classes-missing")
     for row in evidence.rows(label + "-pod-summaries.jsonl"):
         # Writer emits Pod IDs in order; check exhaustively without a huge set.
         if row.get("pod_id") != count: issues.append("inventory-id-sequence-mismatch")
         count += 1
+        service_counts = row.get("records_by_service")
+        if any(type(row.get(key)) is not int or row[key] < 0 for key in ("pod_id", "records", "quads", "bytes", "compressed_bytes")) or not isinstance(service_counts, dict) or any(type(value) is not int or value < 0 for value in service_counts.values()):
+            issues.append("invalid-inventory-counts"); continue
         records += row.get("records", 0); quads += row.get("quads", 0)
         source_bytes += row.get("bytes", 0); packed_bytes += row.get("compressed_bytes", 0)
         largest = max(largest, row.get("bytes", 0)); services.update(row.get("records_by_service", {}))
+        if any(type(row.get(key)) is not int or row[key] < minimum for key, minimum in
+               (("pod_id", 0), ("bytes", 1), ("intensity_numerator", 1), ("intensity_denominator", 1))):
+            issues.append("invalid-inventory-representative-fields"); continue
+        key = (row["intensity_numerator"], row["intensity_denominator"])
+        if key not in configured_classes:
+            issues.append("inventory-volume-class-not-configured"); continue
+        candidate = {"pod": row["pod_id"], "source_bytes": row["bytes"],
+                     "intensity_numerator": key[0], "intensity_denominator": key[1]}
+        low, high = extrema.get(key, (candidate, candidate))
+        extrema[key] = (min((low, candidate), key=lambda value: (value["source_bytes"], value["pod"])),
+                        min((high, candidate), key=lambda value: (-value["source_bytes"], value["pod"])))
     expected = {"pods": count, "records": records, "quads": quads, "source_bytes": source_bytes,
                 "packed_bytes": packed_bytes, "maximum_pod_source_bytes": largest}
     for key, value in expected.items():
-        if manifest.get(key) != value: issues.append("manifest-inventory-mismatch:" + key)
-    if count != dataset["pods"] or not manifest.get("populated"):
+        if type(manifest.get(key)) is not int or manifest[key] != value: issues.append("manifest-inventory-mismatch:" + key)
+    if count != dataset["pods"] or manifest.get("populated") is not True:
         issues.append("population-not-fully-persisted")
+    if type(manifest.get("index_bytes")) is not int or manifest["index_bytes"] != count * 24:
+        issues.append("manifest-index-length-disagrees")
     if sum(services.values()) != records: issues.append("domain-record-totals-disagree")
-    # Verification subprocess output may end with plain-text admission errors.
-    # Absence of its completion invalidates this dataset, not another dataset.
-    verification = [r for r in evidence.rows(label + "-verify.jsonl", strict=False) if r.get("record_type") == "verification-complete"]
-    if not verification: issues.append("verification-completion-missing")
     disk = evidence.text(label + "-disk.txt")
     allocated = None
     if disk:
@@ -230,14 +326,20 @@ def inventory_summary(evidence, dataset, model):
         except (ValueError, IndexError): issues.append("invalid-disk-allocation-record")
     if any(x["file"].startswith(label + "-") for x in evidence.parse_errors):
         issues.append("dataset-record-parsing-failed")
+    storage_inventory_consistent = not issues
+    unique = {candidate["pod"]: candidate for pair in extrema.values() for candidate in pair}
+    expected_representatives = [unique[pod] for pod in sorted(unique)]
+    verification = representative_verification(evidence, dataset, model, expected_representatives, events)
+    issues.extend(verification["issues"])
     return {"dataset": dataset["id"], "model": model, "role": dataset["role"],
             "inventory_consistent": not issues, "issues": sorted(set(issues)),
+            "storage_inventory_consistent": storage_inventory_consistent,
             "manifest": {k: manifest.get(k) for k in ("format", "pods", "records", "quads", "source_bytes", "packed_bytes", "index_bytes",
                 "maximum_pod_source_bytes", "maximum_pod_compressed_bytes", "packed_sha256", "index_sha256", "binary_payloads_included", "populated")},
-            "config": {k: manifest.get("config", {}).get(k) for k in ("profile", "history_months", "literal_profile")},
+            "config": {k: config.get(k) for k in ("profile", "history_months", "literal_profile")},
             "records_by_service": dict(sorted(services.items())), "allocated_bytes_before_load": allocated,
-            "verification": verification[-1] if verification else None,
-            "scope": "complete inventory totals checked locally; remote pack/index checksums asserted by verification, payload packs may not accompany review bundle"}
+            "verification": verification,
+            "scope": "complete inventory totals checked locally; packer records file digests at creation, index length is checked on open and declared representatives are verified; payload packs may not accompany the review bundle and the verifier does not rehash whole files"}
 
 
 class RequestAnalysis:
@@ -422,7 +524,7 @@ class RequestAnalysis:
                              "policy_effective_rights_verified": False,
                              "audit_completion": self.audit_ends[-1] if self.audit_ends else None},
                 "load_metadata": {**{k: start.get(k) for k in ("workload_sha256", "derived_rate", "offered_rate", "mutation_epoch", "arrival", "read_target_selection", "write_target_selection")},
-                                  "settings": {k: start.get("settings", {}).get(k) for k in ("seed", "scenario", "selection", "mix", "timeout-ms", "max-inflight")},
+                                  "settings": {k: start.get("settings", {}).get(k) for k in ("seed", "scenario", "selection", "mix", "timeout-ms", "max-inflight", "duration-seconds", "requests", "rate")},
                                   "corpus": {k: start.get("corpus_manifest", {}).get(k) for k in ("pods", "packed_sha256", "index_sha256")}}}
 
     def close(self):
@@ -606,6 +708,7 @@ def analyze_campaign(root, review_path=None):
     evidence = Evidence(root)
     campaign = evidence.document("campaign.json")
     if not campaign: raise ValueError("A campaign.json object is required")
+    groups = {group["id"]: group for group in campaign["groups"]}
     source_commit = (evidence.text("source-commit.txt") or "").strip()
     runtime = evidence.document("campaign-runtime.json")
     input_hashes = {}
@@ -628,8 +731,12 @@ def analyze_campaign(root, review_path=None):
     inventories, churn = {}, {}
     for dataset in campaign["corpora"]:
         for model in dataset["models"]:
-            inventories[(dataset["id"], model)] = inventory_summary(evidence, dataset, model)
+            inventories[(dataset["id"], model)] = inventory_summary(evidence, dataset, model, events)
             churn[(dataset["id"], model)] = dedicated_churn(evidence, dataset, model)
+            if inventories[(dataset["id"], model)]["verification"]["correctness_failure"]:
+                global_quarantines.append({"record_type": "correctness-quarantine", "origin": "independent-representative-analysis",
+                                           "dataset": dataset["id"], "model": model, "reason": "explicit representative oracle mismatch"})
+    if global_quarantines: review_status = "quarantined"
     dataset_quarantines = {(e.get("dataset"), e.get("model")) for e in events if e.get("record_type") in (
         "correctness-or-admission-quarantine", "admission-quarantine", "dataset-correctness-quarantine", "dataset-not-capacity-eligible")}
     cells = []
@@ -680,6 +787,16 @@ def analyze_campaign(root, review_path=None):
                 issues.append("runner-offered-rate-disagrees-with-raw")
             settings = requests["load_metadata"]["settings"]
             if str(settings.get("seed")) != str(metadata["seed"]): issues.append("raw-schedule-seed-disagrees")
+            group = groups[metadata["group"]]
+            expected_settings = {"scenario": group.get("scenario"), "selection": group.get("selection"), "mix": "journeys",
+                                 "timeout-ms": str(campaign["measurement"].get("request_timeout_ms")),
+                                 "max-inflight": str(campaign["measurement"].get("maximum_inflight")),
+                                 "duration-seconds": str(campaign["measurement"]["measurement_seconds"]),
+                                 "requests": str(campaign["measurement"]["minimum_offered"]),
+                                 "rate": None if metadata["rate_override"] == "derived" else str(metadata["rate_override"])}
+            for key, expected_value in expected_settings.items():
+                if settings.get(key) != expected_value or (expected_value is None and key != "rate"):
+                    issues.append("raw-setting-disagrees:" + key)
             expected_hash = input_hashes.get("bench/ac/million/workload.json")
             if not expected_hash or requests["load_metadata"]["workload_sha256"] != expected_hash:
                 issues.append("raw-workload-hash-unbound-or-disagrees")
