@@ -28,23 +28,28 @@
 //! - The `Mutex` is held only for the O(1) map get/insert/prune; the actual fan-out (`send`) is a
 //!   lock-free broadcast push, so emit does not serialise behind subscriber I/O.
 //!
-//! ## Auth (fail-closed; receive is token-gated; per-resource WAC is the M2-next seam)
+//! ## Auth (fail-closed; authenticated + WAC-gated subscribe, token + WAC-gated receive)
 //! Subscription is gated on an AUTHENTICATED WebID (no anonymous subscriptions) — the subscribe POST
-//! runs behind the same DPoP auth middleware as the LDP routes. The subscribe handler MINTS an
-//! unguessable, short-lived **receive token** bound to `(authenticated WebID, topic, expiry)` and
-//! embeds it in the `receiveFrom` URL. The WS receive endpoint REQUIRES a valid token (unexpired +
-//! its bound topic must match the requested topic) before it registers a subscriber — so RECEIVE is
-//! reachable ONLY by a caller who completed the authenticated subscribe to THAT topic. This closes
-//! the open-receive bypass: the receive endpoint is no longer public, even though a browser
-//! `WebSocket` cannot carry the DPoP `Authorization` header (the token in the URL is the spec's
-//! mechanism for exactly this).
+//! runs behind the same DPoP auth middleware as the LDP routes — AND on a per-resource Web Access
+//! Control decision: the subscriber must hold `acl:Read` on the topic (`acl:Control` when the topic
+//! is an `.acl`), evaluated by the same [`WacAuthorizer`](crate::authz::WacAuthorizer) the LDP read
+//! path uses. A change notification discloses that (and when) the resource changed, so subscribing
+//! IS a read of it. Only after that decision does the handler MINT an unguessable, short-lived
+//! **receive token** bound to `(authenticated WebID, topic, expiry)` and embed it in the
+//! `receiveFrom` URL.
 //!
-//! **Known limitation (documented, not silent):** per-resource WAC authorization of a subscription
-//! (does this WebID have `read` on the topic?) is NOT yet enforced — it is a `// M2-next:` seam gated
-//! on `sparq#992` (the SPARQ access-control design), the same blocker as LDP read/write
-//! authorization. The receive token guarantees only that the connecting party is an authenticated
-//! subscriber of that topic (the minimum bar that closes the bypass); the deeper "is this WebID
-//! allowed to READ this resource?" check lands with `sparq#992`.
+//! The WS receive endpoint REQUIRES a valid token (unexpired + its bound topic must match the
+//! requested topic) — closing the open-receive bypass even though a browser `WebSocket` cannot carry
+//! the DPoP `Authorization` header (the token in the URL is the spec's mechanism for exactly this) —
+//! and then RE-RUNS the same WAC check for the WebID the token is bound to
+//! ([`NotificationHub::authorize_receive_token`]). Re-checking at connect time keeps the two gates in
+//! lock-step and means a grant REVOKED after subscribe cannot be replayed for the remainder of the
+//! token's TTL.
+//!
+//! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
+//! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same
+//! `403` whether the topic exists or not, and an authorized subscription to a not-yet-created
+//! resource still succeeds (that is how a client watches for its `Create`).
 
 pub mod activity;
 pub mod ws;
@@ -76,12 +81,9 @@ const RECEIVE_TOKEN_BYTES: usize = 32;
 struct ReceiveTokenBinding {
     /// The topic IRI this token authorizes RECEIVE on. The requested `?topic=` MUST equal this.
     topic: String,
-    /// The authenticated WebID that subscribed (minted the token). Carried so the binding ties
-    /// receive back to a specific subscriber identity (used in the WAC seam + observability).
-    #[allow(
-        dead_code,
-        reason = "bound for the sparq#992 per-resource WAC seam + audit; not read yet"
-    )]
+    /// The authenticated WebID that subscribed (minted the token). Read back by
+    /// [`NotificationHub::authorize_receive_token`] so the receive endpoint can re-run the
+    /// per-resource WAC check against the SUBSCRIBER's identity, not merely against the token.
     web_id: String,
     /// Absolute expiry instant; a token is invalid at/after this point.
     expires_at: Instant,
@@ -159,16 +161,30 @@ impl NotificationHub {
     /// The token is REUSABLE until expiry (it is NOT consumed here) so a client can reconnect within
     /// the TTL window — see `RECEIVE_TOKEN_TTL`. Never logs the token.
     pub async fn validate_receive_token(&self, token: &str, topic: &str) -> bool {
+        self.authorize_receive_token(token, topic).await.is_some()
+    }
+
+    /// The identity half of the token gate: validate exactly as
+    /// [`validate_receive_token`](Self::validate_receive_token) does AND return the authenticated
+    /// WebID the token was minted for. `None` on any failure (absent / unknown / expired /
+    /// topic-mismatched) — fail-closed, and an expired entry found during lookup is pruned.
+    ///
+    /// The receive endpoint needs the SUBSCRIBER's WebID, not just a yes/no, so it can re-run the
+    /// per-resource WAC check at connect time (see [`ws::receive_handler`]): the token proves *who*
+    /// subscribed, and WAC then decides whether that WebID may STILL read the topic. Never logs the
+    /// token.
+    pub async fn authorize_receive_token(&self, token: &str, topic: &str) -> Option<String> {
         let mut tokens = self.receive_tokens.lock().await;
         let now = Instant::now();
         match tokens.get(token) {
             Some(b) if b.expires_at <= now => {
                 // Expired: prune it and reject.
                 tokens.remove(token);
-                false
+                None
             }
-            Some(b) => b.topic == topic,
-            None => false,
+            Some(b) if b.topic == topic => Some(b.web_id.clone()),
+            // Present but bound to a DIFFERENT topic, or absent entirely.
+            _ => None,
         }
     }
 

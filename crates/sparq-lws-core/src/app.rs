@@ -137,10 +137,12 @@ where
 ///
 /// ## Auth split on the notification surface
 /// - `POST /.notifications/WebSocketChannel2023/` is AUTH-GATED (same DPoP middleware as the LDP
-///   routes) so it sees a `VerifiedToken` and can fail-closed on an anonymous caller.
-/// - `GET …/receive` (the WS upgrade) and `GET /.well-known/solid` (discovery) are PUBLIC: a browser
-///   WebSocket cannot carry the DPoP header, and discovery is public like a storage description. The
-///   receive-token + per-resource WAC seam (`sparq#992`) is documented in `notifications::ws`.
+///   routes) so it sees a `VerifiedToken` and can fail-closed on an anonymous caller. It then runs
+///   the per-resource WAC check on the topic itself (see `notifications::ws`).
+/// - `GET …/receive` (the WS upgrade) and `GET /.well-known/solid` (discovery) are PUBLIC as ROUTES:
+///   a browser WebSocket cannot carry the DPoP header, and discovery is public like a storage
+///   description. `…/receive` is nonetheless gated by the receive token AND — for the WebID that
+///   token is bound to — the same per-resource WAC check, both documented in `notifications::ws`.
 ///
 /// This is the no-overload-layer build (the existing default, used by the unit/integration tests). The
 /// binary uses [`build_router_with_overload`] to add admission control + a request timeout. The two
@@ -248,12 +250,11 @@ where
     // protected routes' state.
     let gate_ldp = ldp.clone();
 
-    // The notification state shares the LDP state's hub + base URL, so a subscriber registered via
-    // `…/receive` is the same registry the LDP emit path fans to.
-    let notify_state = Arc::new(NotifyState::new(
-        ldp.notifications.clone(),
-        ldp.base_url().to_string(),
-    ));
+    // The notification state is derived from the LDP state, so it shares the hub (a subscriber
+    // registered via `…/receive` is on the same registry the LDP emit path fans to), the base URL,
+    // AND the store + parsed-ACL cache — the last of which is what lets the subscribe/receive seams
+    // run the SAME per-resource WAC check as a GET of the topic.
+    let notify_state = Arc::new(NotifyState::new(ldp.clone()));
 
     // The full LDP method set, shared by the wildcard `/{*path}` route AND the explicit `/` (root)
     // route. The `/{*path}` wildcard does NOT match the empty path, so the storage root needs its own
@@ -312,7 +313,7 @@ where
     // The AUTH-GATED subscribe route: behind the SAME DPoP middleware so the handler sees a
     // VerifiedToken (fail-closed on anonymous).
     let subscribe = Router::new()
-        .route(SUBSCRIPTION_PATH, post(subscribe_handler))
+        .route(SUBSCRIPTION_PATH, post(subscribe_handler::<S>))
         .layer(axum::middleware::from_fn_with_state(
             auth.clone(),
             auth_middleware::<J, R>,
@@ -322,8 +323,8 @@ where
     // The PUBLIC notification routes: the WS receive upgrade + the discovery document (no auth — see
     // the auth-split note above).
     let public_notify = Router::new()
-        .route(RECEIVE_PATH, get(receive_handler))
-        .route(WELL_KNOWN_SOLID_PATH, get(storage_description_handler))
+        .route(RECEIVE_PATH, get(receive_handler::<S>))
+        .route(WELL_KNOWN_SOLID_PATH, get(storage_description_handler::<S>))
         .with_state(notify_state);
 
     let mut router = Router::new().merge(subscribe).merge(public_notify);
