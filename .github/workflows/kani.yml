@@ -72,12 +72,13 @@
 #      failure is VISIBLE on the run page and silent-death cannot recur.
 # A genuine counterexample (reachable panic/OOB/UB) ALWAYS ends the job red (honest). A TIMEOUT
 # reds the job too, EXCEPT for a suite marked `debt: true` (the two mmap-validator totality suites
-# whose bounding is tracked by sq-j3u6o): those exceed the 20m per-harness CBMC budget EVERY night,
-# so a pure timeout there is recorded LOUDLY (step summary + `::warning::`) but is NON-FATAL —
-# otherwise the whole `kani` workflow can never conclude `success` and the nightly formal-lane
-# alarm (formal-alarm.yml) fires forever on pre-existing, already-tracked solver-budget debt while
-# the 3 HEALTHY suites (25 substrate order-law proofs + 5 dict id-partition proofs + 6 engine
-# reducer proofs) DO verify green. Flip `debt` off the instant sq-j3u6o bounds those harnesses so
+# and the merge-join equivalence suite, all whose bounding is tracked by sq-j3u6o): those exceed
+# the 20m per-harness CBMC budget EVERY night, so a pure timeout there is recorded LOUDLY (step
+# summary + `::warning::`) but is NON-FATAL — otherwise the whole `kani` workflow can never
+# conclude `success` and the nightly formal-lane alarm (formal-alarm.yml) fires forever on
+# pre-existing, already-tracked solver-budget debt while the 4 HEALTHY suites (25 substrate
+# order-law proofs + 5 dict id-partition proofs + 6 engine reducer proofs + 1 wac-oracle corpus
+# self-check) DO verify green. Flip `debt` off the instant sq-j3u6o bounds those harnesses so
 # they gate normally again. No larger GitHub-hosted runner class or self-hosted runner is available
 # to this repo (`gh api /repos/sparq-org/sparq/actions/runners` == 0; every other workflow uses
 # `ubuntu-latest`), so option "beefier runner" is not currently reachable — recorded in the PR.
@@ -283,6 +284,30 @@ jobs:
               witness_mixed_tier_collapse_now_exact
               witness_numeric_vs_string_now_ranked_by_kind
               witness_nan_now_totalised_first
+          # [FABLE-5] sq-3dyje.10: proof-program wave B-3 — bounded merge-join ≡ nested-loop
+          # reference over the sparq-substrate join kernel (research/testing-strategy-
+          # assessment-2026-07.md §7.2), plus the mandatory §5.1 domain-coverage self-check
+          # (dup-key multi-match witness survival). Bounds: ≤3 two-column rows per side, ids
+          # in 0..=2, unwind 8.
+          # KNOWN-TIMEOUT DEBT (bounding tracked by sq-j3u6o) — same class as the two
+          # mmap-validator totality suites above, and NOT the "seconds-to-minutes" this entry
+          # originally claimed: no harness here has returned a verdict inside the 20m
+          # per-harness budget. Measured against this tree on a 4-core / 15 GB box (Kani 0.67
+          # / CBMC 6.8, non-canonical): no verdict at 8 min / 5.4 GB as committed, and even a
+          # variant shrunk to 2 rows per side at unwind 4 was cut by the 20m ceiling at 7.6 GB
+          # resident — more memory than this runner class has. The cost is dominated by CBMC's
+          # model of SmallVec's clone/push allocation machinery, which merge_join runs once
+          # per emitted row (see the SOLVER BUDGET block in join.rs). So `debt: true` makes a
+          # pure TIMEOUT non-fatal here, while a real Kani FAIL still reds the job; the PR
+          # tier does not gate on it at all (`pr_gate = false` in ci/formal-verification.toml).
+          - name: "sparq-substrate (merge-join equivalence)"
+            crate: sparq-substrate
+            features: "--features join"
+            debt: true
+            harnesses: >-
+              merge_join_equals_nested_loop_reference
+              merge_join_extra_shared_equals_nested_loop_reference
+              domain_merge_join_dup_key_multimatch_survives_the_bound
           # [FABLE-5] sq-39kps: domain-coverage self-check for the wac-oracle POST-Slug
           # `.acl` escalation corpus — pins that the static CORPUS genuinely contains a
           # surviving escalation (exact-image asserts + a kani::cover! witness), so a

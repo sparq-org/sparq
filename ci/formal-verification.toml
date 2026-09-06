@@ -157,6 +157,40 @@ nightly = true
 pr_gate = true
 
 [[suite]]
+id = "substrate-merge-join-equivalence"
+name = "sparq-substrate (merge-join equivalence)"
+crate = "sparq-substrate"
+features = "--features join"
+harnesses = [
+  "merge_join_equals_nested_loop_reference",
+  "merge_join_extra_shared_equals_nested_loop_reference",
+  "domain_merge_join_dup_key_multimatch_survives_the_bound",
+]
+# join.rs imports the Row/Key aliases + Id from rows.rs (representation only, no logic),
+# so a rows.rs change re-obligates the equivalence proofs too.
+proves = [
+  "crates/sparq-substrate/src/join.rs",
+  "crates/sparq-substrate/src/rows.rs",
+]
+nightly = true
+# Same class as the two mmap-validator totality suites above: these harnesses have never
+# returned a CBMC verdict inside the 20m per-harness budget. Measured against this tree on a
+# 4-core / 15 GB box (Kani 0.67 / CBMC 6.8, non-canonical): no verdict at 8 min / 5.4 GB as
+# committed, and — decisively — even a variant shrunk to 2 rows per side at `unwind(4)` was
+# cut by the 20m ceiling (exit 124) at 7.6 GB resident, still in symbolic execution. The cost
+# is dominated by CBMC's model of `SmallVec`'s clone/push allocation machinery, which
+# `merge_join` runs once per emitted row and no harness-side encoding can remove (see the
+# SOLVER BUDGET block in join.rs); it does not fall usefully with the domain bound, and it
+# already exceeds a whole ~7 GB runner. Gating PRs on a proof that has never terminated would
+# hard-block every join.rs/rows.rs PR on a solver-budget problem rather than on its content.
+# Owner: sq-j3u6o, the standing "bound the harnesses that exceed the per-harness CBMC budget"
+# bead — this suite joins its scope; the measurements and the levers already excluded are
+# written up in the join.rs SOLVER BUDGET block. Flip back to `pr_gate = true` (and drop
+# `debt` from the kani.yml entry) the moment these harnesses return a verdict in budget.
+pr_gate = false
+pr_gate_blocked_by = "sq-j3u6o"
+
+[[suite]]
 id = "wac-oracle-escalation-corpus"
 name = "sparq-wac-oracle (.acl escalation corpus domain coverage)"
 crate = "sparq-wac-oracle"
