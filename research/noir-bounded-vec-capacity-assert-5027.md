@@ -393,7 +393,83 @@ Two extensions, in priority order:
   (`deny.toml`, vet, SBOM) and belongs to a reviewer, not to this record.
 - **Blocked on.** A box with `nargo` + `bb` — i.e. `sq-i50o4`, the same bottleneck
   §3.2, §10.8 and §10.10 record. Until then §5 stays a specification, and §4's
-  ordering is unchanged: the flip is still blocked on items 1–3.
+  ordering is unchanged: the flip is still blocked on items 1–3. **§5.8 revises this
+  bullet**: the toolchain half is narrower than stated, and a third blocker — a
+  version skew this section did not know about — was found in front of it.
+
+### 5.8 What the implementation attempt found (2026-08-02, issue #5668)
+
+> 🤖 **SPARQ agent** [OPUS-5]. #5668 asked for §5's L1 fixture "when unblocked".
+> It is still blocked, but not on the pair §5.7 names. Nothing below was executed
+> either — this session also had no `nargo`/`bb` (`command -v` empty) — so this is a
+> revision of the *blocker list*, not a verdict on the guard. Each claim carries what
+> it was read from.
+
+1. **The toolchain blocker is narrower than §5.7 states.** This repo already owns a
+   pinned-toolchain lane: `.github/workflows/zk-toolchain.yml` installs
+   `NARGO_VERSION: 1.0.0-beta.21` + `BB_VERSION: 5.0.0-nightly.20260324` (l.109-110)
+   and runs `cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1`
+   (l.356), triggered on any `crates/sparq-zk/**` path. So an `#[ignore]`d L1 harness
+   would be *executed on its own PR*, not landed blind — the `sq-i50o4` "no box"
+   framing understates what CI can already adjudicate. This is the same convention the
+   forge suite uses (`audit_forge_map.rs`). It does **not** help a local session
+   distinguish §5.5's three verdicts before pushing, which is why the rest matters.
+
+2. **A version skew that §5.2 does not survive as written — the new blocker.** §5.2
+   pins the forge to `acir` **1.0.0-beta.26**. Read from the crates.io sparse index on
+   2026-08-02: `acir` has 58 published versions, and its **only** 1.x release is
+   `1.0.0-beta.26` (the line runs `… 0.45.0, 0.46.0, 1.0.0-beta.26`). There is **no
+   `acir 1.0.0-beta.21`** — i.e. no published `acir` matching the `nargo` this repo's
+   lane actually pins. The siblings are not skewed the same way: `acir_field` and
+   `brillig` *do* publish `1.0.0-beta.21`; `acir` alone skipped it.
+
+   That matters because the forge's whole premise is round-tripping a witness `nargo`
+   wrote. `acir 1.0.0-beta.26` takes a dependency on **`msgpack_tagged`**, which itself
+   has no `1.0.0-beta.21` release — evidence that the MessagePack witness encoding was
+   *tagged* somewhere in that window. **Not verified here:** whether a `target/*.gz`
+   written by nargo 1.0.0-beta.21 in fact deserializes faithfully under acir
+   1.0.0-beta.26. It may; the point is that nobody has checked, and the failure is
+   undiagnosable from the test's own output. A mis-round-trip does not announce itself
+   — it lands in §5.5's run-2-rejects cell (**VACUOUS, no verdict**) or, worse, forges
+   a witness that rejects for a serialization reason while reading exactly like run 3's
+   pass. That is the false guard §3.1 and §5.6 item 2 warn about, one layer down in the
+   plumbing. **Settle this before writing the forge, not after.** Three routes, none of
+   them an implementer's call: bump `NARGO_VERSION` to a beta that `acir 1.0.0-beta.26`
+   was cut against (re-captures the bb anchors — §5.7's own note, and `zk-toolchain.yml`
+   l.44-52); take `acir` as a git dependency pinned to the beta.21 tag (a *larger*
+   supply-chain act than §5.7 costed, not a smaller one); or add a round-trip
+   pre-flight — deserialize→serialize an unmutated honest witness and assert the bytes
+   or the witness map survive — as run 0 of the matrix, which converts the silent
+   failure into a loud one and is worth landing regardless of which route is taken.
+
+3. **The supply-chain cost is larger than §5.7's four crates, and part of it is
+   version-bump cost rather than new-crate cost.** `acir 1.0.0-beta.26`'s normal
+   dependencies, from the same index read, checked against `Cargo.lock` on 2026-08-02:
+
+   - **Absent from the lock entirely (9 new names,** counting `acir` itself**):**
+     `acir`, `acir_field`, `brillig`, `msgpack_tagged`, `rmp-serde`, `num_enum ^0.7`,
+     `strum ^0.28`, `strum_macros ^0.28`, `proptest-derive`.
+   - **Already vendored at a compatible version (no new entry):** `flate2 1.1.9`,
+     `num-traits 0.2.19`, `serde 1.0.228`, `serde-big-array 0.5.1`, `proptest 1.11.0`.
+   - **Present but at a DIFFERENT major — a second copy, not a reuse:** `acir` wants
+     `base64 ^0.23` (lock has `0.22.1`), `num-bigint ^0.5` (lock has `0.4.6`), and
+     `thiserror ^2` (lock has `1.0.69`).
+
+   That last row is the part worth flagging: cargo-vet exemptions are keyed by
+   *(crate, version)*, so three duplicate majors need their own entries and their own
+   review even though the crate names are already familiar — and they widen the
+   dependency graph `deny.toml` scans with `all-features = true` rather than reusing
+   what is there. The gate is not advisory: `supply-chain/config.toml` carries **538
+   `[[exemptions]]`** under a fully-enforced cargo-vet, so every unaudited crate-version
+   needs an exemption or an audit, and the SBOM/VEX (`supply-chain/vex.cdx.json`)
+   regenerate with it. §5.7 is right that this belongs to a reviewer; the point here is
+   only that the reviewer is agreeing to ~12 new crate-versions, not 4.
+
+**Net.** §5's *design* is unchanged and still the right shape. What #5668 establishes
+is that its dependency premise was not checked against this repo's pin, and that the
+ordering is now: settle item 2 → get the supply-chain decision on item 3 → then the
+L1 fixture, whose §5.5 matrix CI can run via item 1. Landing the harness before item 2
+would produce a test whose green and whose red are equally uninformative.
 
 ## 6. The gate row — what is decidable today, and the re-take specified (2026-08-01, issue #5063)
 
