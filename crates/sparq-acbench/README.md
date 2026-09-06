@@ -44,6 +44,36 @@ assert_eq!(oracle_wac(&request, &[]), Decision::Deny);
   supplies an independent physical-readability oracle and eight SPARQL query families.
 - **Zero dependency on `sparq-core` / `sparq-engine`**: opt-in crate architecture.
 
+## Streaming personal-service populations
+
+<!-- [GPT-6] -->
+
+`population::write_pod(&config, pod_id, model, writer)` writes one populated Pod to
+any `std::io::Write` without building or scanning a server-wide deployment. Its
+`PodSummary` counts actual serialized records, quads, graphs, and bytes. The config
+and summaries support `serde_json`; malformed or unknown config fields fail closed.
+`PopulationConfig::smoke()` is a controlled fixture. `service_history()` is the
+central scenario with a partially calibrated service history. Neither constructor
+implies an empirically representative population of future Solid users.
+
+The services cover communication, contacts, calendar, transactions, activity
+summaries, episodic location, media metadata and retained media ratings. Binary
+media payloads are excluded. Message excerpts, not full retained-message body-size
+distributions, are modeled. Record counts share an explicitly assumed activity
+factor, except the empirical ratings marginal. Population generation is independent
+of Pod order and Pod count, making prefixes and random-access regeneration identical.
+
+`PolicyModel::{Wac,Acp}` produces equivalent intended content rights.
+`expected_record_count` and `can_read` provide a by-construction oracle that never
+invokes the system under test. `benchmark_queries` supplies eight query families.
+The generated WAC group expands to named ACP recipients; direct private exceptions
+use WAC inheritance shadowing or ACP deny overrides. Group expansion, policy size,
+and policy setup work must remain visible in benchmark comparisons.
+
+See the [usage skill](../../skills/ac-benchmark/SKILL.md) and
+[calibration manifest](../../bench/ac/million/corpus-calibration.json). The earlier
+`deployment` generator and its frozen study remain separate.
+
 ## 📚 Learn more
 
 - Design record: [`research/ac-query-benchmark.md`](../../research/ac-query-benchmark.md)

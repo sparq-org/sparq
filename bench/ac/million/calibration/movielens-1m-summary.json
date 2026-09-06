@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source_url": "https://files.grouplens.org/datasets/movielens/ml-1m.zip",
+  "source_version": "MovieLens 1M; users joined in 2000; archive README citation updated2015",
+  "archive_sha256": "a6898adb50b9ca05aa231689da44c217cb524e7ebd39d264c56e2832f2c54e20",
+  "archive_md5": "c4d9eecfca2ab87c1945afe126590906",
+  "ratings_dat_sha256": "506d64ca44484487c11dc2d9a28de5c54948213e6b96285e298afe28d6ea4e0f",
+  "download_date": "2026-09-06",
+  "transport_note": "Publisher HTTPS certificate expired; archive retrieved as untrusted public statistical data with TLS verification disabled. MD5 recorded for independent comparison. No archive code executed.",
+  "source_users": 6040,
+  "source_records": 1000209,
+  "min": 20,
+  "p50": 96,
+  "p95": 556,
+  "p99": 903,
+  "max": 2314,
+  "quantile_method": "order statistic floor(p*(n-1)); zero-based",
+  "cdf_bins": 743,
+  "cdf_sha256": "db7729e027cefe426af3a73b6daf31732998122359e553762a3ae689f05dca9e",
+  "use": "Only anonymous aggregate retained-record counts calibrate synthetic ratings volumes; no source rows, identities, movie choices or demographics copied.",
+  "limitations": [
+    "Selected historical MovieLens participants who joined in2000, provided demographics, and retainedatleast20ratings.",
+    "Not a contemporary general-population sample.",
+    "Retained counts do not establish annual arrival rates or retention duration.",
+    "No evidence for other service volumes or cross-service correlations."
+  ],
+  "citation_doi": "10.1145/2827872"
+}

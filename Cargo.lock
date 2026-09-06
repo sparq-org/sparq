@@ -4893,6 +4893,8 @@ dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
  "rand 0.8.6",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 
