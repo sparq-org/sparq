@@ -176,7 +176,11 @@ no-ops, planned/unsent operations and unknown commits remain separate.
 server systemd cgroups inside the capped study slice, records charged page cache
 and CPU/I/O, compresses raw JSONL losslessly, and retains stop/quarantine outcomes.
 The launcher owns paid resource creation and budget authorization; this runner
-does not provision cloud resources. Network journey experiments remain separate
+does not provision cloud resources. Both successful and failed runs close and
+hash collected artifacts before publishing their completion marker; partial raw
+streams are preserved losslessly. Cancellation stops the owned process group,
+including wrapper children, and a failed warmup cannot pass a measured cell.
+Network journey experiments remain separate
 and unmeasured unless an explicit implementation and run artifact establish them.
 
 Raw JSONL preserves every offered request, including unsent requests at
