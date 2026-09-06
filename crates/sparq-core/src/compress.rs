@@ -104,7 +104,7 @@ fn get_varint_checked(buf: &[u8], pos: &mut usize) -> Option<u64> {
 enum Blocks {
     Owned(Vec<u8>),
     #[cfg(feature = "mmap")]
-    Mapped { map: memmap2::Mmap, off: usize },
+    Mapped { map: crate::mapped::MappedBytes, off: usize },
 }
 
 impl Blocks {
@@ -602,6 +602,12 @@ impl CompressedPerm {
     /// the lazy out-of-core mode.
     #[cfg(feature = "mmap")]
     pub fn from_mmap(map: memmap2::Mmap) -> std::io::Result<Self> {
+        Self::from_mapped_bytes(map.into())
+    }
+
+    // [GPT-6] Same codec and validation for whole files and aligned archive regions.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn from_mapped_bytes(map: crate::mapped::MappedBytes) -> std::io::Result<Self> {
         let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("compressed perm: {m}"));
         let b: &[u8] = &map;
         if b.len() < 32 {
@@ -699,6 +705,24 @@ impl CompressedPerm {
         }
         if total_rows != self.len {
             return Err(format!("decoded {total_rows} rows but header declares {}", self.len));
+        }
+        Ok(())
+    }
+
+    // [GPT-6] Startup-only semantic bounds/order checks, with one block of scratch.
+    #[cfg(feature = "native-archive")]
+    pub(crate) fn validate_archive_rows(&self, dict_len: usize) -> std::io::Result<()> {
+        let mut previous = None;
+        let mut rows = Vec::new();
+        for &(first, offset) in &self.dir {
+            rows.clear();
+            self.decode_block_at(offset as usize, &mut rows);
+            if rows.first() != Some(&first) {
+                return Err(crate::archive::invalid("compressed directory differs from first row"));
+            }
+            for &row in &rows {
+                crate::archive::validate_row(row, &mut previous, dict_len)?;
+            }
         }
         Ok(())
     }

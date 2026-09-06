@@ -32,6 +32,8 @@ parallel = ["dep:rayon", "dep:memchr"]
 compact-index = []
 # Out-of-core querying: persist the indexes and memory-map them (native only).
 mmap = ["dep:memmap2"]
+# [GPT-6] Store many native datasets in one immutable mapped archive. Off by default.
+native-archive = ["mmap"]
 # [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
 # (subject/object) leading column of a BLOCK-COMPRESSED permutation. The directory's
 # first-triple already gives an implicit min/max zone map that prunes RANGE scans, but for
