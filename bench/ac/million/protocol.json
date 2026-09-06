@@ -2,7 +2,8 @@
   "schema_version":1,
   "study_id":"solid-pod-scale",
   "model_provenance":"[GPT-6]",
-  "version":"1.0.0",
+  "version":"1.0.1",
+  "revision_note":"Prospective clarification before canonical measurements: shared owner-only policy administration is outside both language engines, and response-production timing is distinguished from complete-body delivery. SLO thresholds are unchanged.",
   "authored_utc":"2026-09-06",
   "status":"prospective-protocol",
   "question":"Can we support efficient, access-controlled SPARQL queries over Solid Pods at scale?",
@@ -32,15 +33,18 @@
   "request_boundary":{
     "primary":"Real HTTP request with verified authenticated identity, server queueing, route lookup, permission checks, cache miss/loading, query execution and complete response serialization/body delivery",
     "unsupported_boundary":"An in-process library call, preasserted Session identity, or static allowlist fixture can be reported as a component benchmark but cannot alone establish authenticated Solid server capacity.",
-    "server_time":"From first server admission to completion of response production, including server-side waiting",
+    "server_time":"From first server admission to completion of response production, including server-side waiting; this timer does not include socket flush and must not be described as complete-body delivery",
     "scheduled_time":"Client completion minus intended arrival; includes generator lag and network",
+    "complete_response_guard":"For the loopback capacity lane also require at least 95% of all offered requests to finish complete-body client receipt within the unchanged 200 ms deadline. This conservatively includes generator and local transport delay; a response-production timer alone cannot pass the complete-response criterion.",
+    "policy_administration":"For both languages, the same authenticated Pod-owner check authorizes writes only to that Pod's policy resources, outside the WAC/ACP language engines. Measure durable journal, rematerialization, invalidation and subsequent query costs. Do not claim ACP ACR self-access support or generic control-authority equivalence.",
     "required_auth_evidence":["invalid-signature-rejected","wrong-audience-rejected","expired-token-rejected","principal-bound-to-verified-token","valid-proof-bound-to-request-when-protocol-requires","replay-policy-declared"]
   },
   "correctness":{
     "neutral_oracle":"Direct expected rights over generated principal/resource/operation/context records; do not call WAC or ACP materializers to calculate expected authorization.",
     "result_oracle":"Physically select readable content, then compare exact solution bags; ordered queries compare order. If the same SPARQL engine evaluates reference and candidate, claim authorization-selection independence only.",
     "principals":["owner","explicit-recipient","unrelated-authenticated","anonymous","revoked-recipient"],
-    "operations":["read","append","write","policy-control"],
+    "operations":["read","append","write","owner-policy-administration"],
+    "administration_oracle":"Separate owner/non-owner and cross-Pod tests for the shared administration boundary; generated content-mode oracle comparisons do not establish authorization of policy-resource self-edits.",
     "required_cases":["direct-grant","inherited-grant","private-child-exception","multiple-recipients","public-resource","unauthorized-graph-name","join-across-visible-and-hidden-graphs","optional","not-exists","aggregate","graph-enumeration","grant-after-cache-hit","revoke-after-cache-hit","revoke-after-eviction","revoke-after-restart","concurrent-query-policy-update"],
     "population_checks":"Streaming manifest/checksum verification for every stored Pod; seeded representative query/oracle sample includes domain, volume quantile, sharing class and policy placement, plus each distinct generated policy scenario.",
     "required_before_timing":true,
@@ -56,7 +60,7 @@
     "direct_policy_fraction_sensitivity":[0,0.1,1],
     "hierarchy_depth_sensitivity":[1,3,6],
     "policy_reuse":"Report resources per effective policy and actual policy triples. Compare equivalent rights, not equal serialized triple counts.",
-    "language_specific":"ACP client/issuer conditions and denies; WAC origin/group semantics outside verified common encoding. Separate feature experiments, never pooled with common-subset equivalence.",
+    "language_specific":"ACP client/issuer conditions and denies beyond those needed for equivalent rights; WAC origin/group semantics outside verified common encoding. Separate feature experiments, never pooled with common-subset equivalence. Generic policy-resource control authority and ACP ACR self-access are not compared by the shared owner-administration path.",
     "frequency_evidence":"Scenario motivation is not a measured population distribution. Unobserved sharing proportions and churn remain declared assumptions."
   },
   "experiments":[

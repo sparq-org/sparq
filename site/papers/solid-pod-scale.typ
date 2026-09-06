@@ -190,6 +190,15 @@ and preserve the update across eviction and restart. Queries already admitted
 when an update occurs need a documented snapshot rule. A fast stale grant is a
 correctness failure, not a low-latency response.
 
+The research implementation uses the same authenticated owner-only administration
+path for policy writes in both languages. It checks that the requester owns the
+target Pod and that the write targets that Pod's policy resources, then records
+the update durably and rebuilds affected authorization state. This administrative
+check is outside the WAC and ACP engines. The experiment measures its cost and
+the effect on subsequent queries, but does not establish ACP ACR self-access or
+general equivalence of policy-control authority. Query reads and content writes
+continue to use the selected language's authorization engine.
+
 == What should scale
 
 For a warm request, the useful cost decomposition is routing, authentication,
@@ -426,8 +435,9 @@ independent implementation of SPARQL semantics.
 The tests include direct and inherited grants, private exceptions, public data,
 multiple recipients, hidden graph names, joins, `OPTIONAL`, `NOT EXISTS`, paths
 and aggregation. They also exercise grants and revocations after warm reads,
-cache eviction and process restart. Content-write and policy-write authorization
-are checked for the operations included in the workload. Invalid, expired or
+cache eviction and process restart. Content-write authorization and the separate
+owner-administration boundary are checked for the operations included in the
+workload. Invalid, expired or
 incorrectly bound credentials must be rejected before query evaluation.
 
 Every persisted Pod is verified against a manifest and checksum. A seeded query
@@ -504,6 +514,11 @@ complete at least 95% of all offered requests successfully within the server
 deadline, without growing queues or exceeding the memory ceiling. Read-only
 measurements establish read capacity. They do not satisfy the mixed-operation
 service criterion by omitting its writes.
+
+The loopback capacity lane also requires complete-body client receipt within
+the same deadline for the required fraction of offered requests. This conservative
+guard includes generator and local transport delay; the server's response-production
+timer alone cannot establish complete-response latency.
 
 = Results and evidence
 
