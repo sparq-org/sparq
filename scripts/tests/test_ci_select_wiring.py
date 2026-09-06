@@ -1073,6 +1073,96 @@ class TestRequiredCheckAnchor(unittest.TestCase):
             )
 
 
+# [OPUS-5] #6048: the COMBINED-HEAD invariant — `merge_group` ⇒ mode=full, which
+# reverses design §7 P8. Full rationale: research/change-based-test-selection.md §10.
+#
+# `grouping_strategy: ALLGREEN` requires EVERY PREFIX of a batch to be green, so an
+# 8-deep group costs up to eight required full validations. `HEADGREEN` requires only
+# the combined head, and the whole group lands on that one result. Compressing the
+# queue's required evidence from N runs to one makes that surviving run the wrong
+# place to spend a selection proof whose premises are a hand-maintained ownership
+# map — so it runs the full matrix. This is a risk-budget trade, NOT a claim that the
+# prefix runs were catching anything the head run misses (§10.2: prefix diffs are
+# nested, so prefix runs add no leg coverage).
+#
+# The paired transition is ordered: force mode=full on merge_group FIRST (this code,
+# landed and validated under the still-ALLGREEN ruleset — it only ever runs more),
+# and only then flip the ruleset's grouping_strategy. Rulesets are maintainer-only
+# (docs/branch-protection.md), so the flip is not part of this suite; what IS pinned
+# here is the override it depends on.
+class TestMergeGroupFullValidation(unittest.TestCase):
+    """[OPUS-5] #6048: pin the merge_group ⇒ mode=full override in the reusable
+    select workflow, and the fact that both selection-consuming workflows that run
+    on the queue ref go through it.
+
+    The EXECUTABLE half of this contract lives in
+    `scripts/tests/test_ci_select.py::MergeGroupForcesFullTests`, which runs the
+    real selector and asserts a diff a pull_request head selects down to one crate
+    resolves to `full` on merge_group. This class pins the workflow-side branch,
+    which YAML/shell cannot be executed here."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sel = _load(SELECT_YML)
+        cls.sel_text = SELECT_YML.read_text(encoding="utf-8")
+        cls.ci = _load(CI_YML)
+        cls.fm = _load(FM_YML)
+
+    def _select_step(self) -> dict:
+        steps = self.sel["jobs"]["select"]["steps"]
+        return next(s for s in steps if s.get("id") == "sel")
+
+    MERGE_GROUP_TEST = '[ "$EVENT" = "merge_group" ]'
+
+    def test_select_step_forces_full_on_merge_group(self):
+        run = str(self._select_step()["run"])
+        self.assertIn(self.MERGE_GROUP_TEST, run,
+                      "ci-select.yml must branch on the merge_group event (#6048)")
+        branch = run[run.index(self.MERGE_GROUP_TEST):]
+        # The FIRST thing the merge_group branch does is force the full matrix.
+        self.assertIn("args+=(--full)", branch)
+        self.assertLess(
+            branch.index("args+=(--full)"), branch.index("elif"),
+            "the merge_group branch must add --full before falling through to any "
+            "other override — a selected merge_group run is unsound under HEADGREEN",
+        )
+
+    def test_no_override_can_downgrade_a_merge_group_run(self):
+        """Ordering is the contract: the merge_group test must come before both the
+        ci-full-label branch and the CI_SELECT_MODE=shadow escape hatch. Shadow is a
+        rollback lever for SELECTION; it must not be able to turn the queue's only
+        validation into a computed-but-unenforced report."""
+        run = str(self._select_step()["run"])
+        mg = run.index(self.MERGE_GROUP_TEST)
+        self.assertLess(mg, run.index('"$CI_FULL_LABEL"'),
+                        "merge_group must be tested before the ci-full label branch")
+        self.assertLess(mg, run.index("--shadow"),
+                        "merge_group must be tested before the shadow escape hatch")
+
+    def test_both_queue_side_callers_reach_the_override(self):
+        """The override lives in ONE reusable workflow, so it only covers a caller
+        that (a) triggers on merge_group and (b) calls that workflow. CI and
+        feature-matrix are the two selection-consuming workflows on the queue ref;
+        both conditions must hold for the combined head to be fully validated."""
+        for name, wf in (("ci.yml", self.ci), ("feature-matrix.yml", self.fm)):
+            self.assertIn("merge_group", _on_block(wf),
+                          f"{name} must trigger on merge_group (queue-ref validation)")
+            self.assertEqual(wf["jobs"]["select"].get("uses"),
+                             "./.github/workflows/ci-select.yml",
+                             f"{name} must select through the reusable workflow, so the "
+                             "#6048 merge_group override applies to it")
+
+    def test_selector_carries_the_same_rule(self):
+        """Belt-and-braces: the workflow branch above and the selector's own rule
+        each force full independently. Pinned so a future refactor that deletes the
+        YAML branch (believing the selector covers it) or vice-versa is a red test,
+        not a silent regression to per-prefix-dependent selection."""
+        self.assertIn('args.event == "merge_group"',
+                      CI_SELECT_PY.read_text(encoding="utf-8"),
+                      "scripts/ci_select.py must keep its own merge_group => full rule "
+                      "(executably pinned by test_ci_select.py::MergeGroupForcesFullTests)")
+
+
 class TestHeavyRecallMergeGroupDemotion(unittest.TestCase):
     """[OPUS-4.8] sq-6vshe.6 (research/ci-structural-speedup.md §7, round 2): the two
     heavy sparq-vectors recall shards (heavy-diskann/heavy-hnsw) are DEMOTED off the

@@ -20,8 +20,12 @@
 #
 # ENFORCE MODE (design §6 — the sq-fmx4u.5 rollout, ENFORCEMENT FLIPPED). [FABLE-5]
 # Enforce is now the DEFAULT: the selector's mode=selected skips are HONORED, so a
-# not-affected crate's wide-lane tests/benchmarks are actually SKIPPED. Two overrides,
-# both fail toward RUNNING MORE:
+# not-affected crate's wide-lane tests/benchmarks are actually SKIPPED — but only on a
+# `pull_request` head. THREE overrides, all failing toward RUNNING MORE:
+#   * merge_group event => --full (mode=full, nothing skipped). [OPUS-5] #6048: under
+#     HEADGREEN grouping the combined head is the only tree whose green the queue
+#     requires before a whole group lands, so it gets the full matrix. See the step
+#     comment below and research/change-based-test-selection.md §10.
 #   * ci-full PR label => the selector runs with --full (mode=full, nothing skipped);
 #     the calling workflows react to labeled/unlabeled so toggling re-evaluates.
 #   * CI_SELECT_MODE repo variable == the literal "shadow" => report-only rollback
@@ -135,9 +139,12 @@ jobs:
           # hardening as every other lane (ci.yml header note).
           CARGO_NET_RETRY: "10"
           EVENT: ${{ github.event_name }}
-          # pull_request: PR base/head. merge_group: the queue entry's target-tip
-          # base_sha/head_sha (the diff is then the union of queued content — sound
-          # per design §3.1/P8). Exactly one pair is non-empty per event.
+          # pull_request: PR base/head — the pair selection is actually computed over.
+          # merge_group: the queue entry's target-tip base_sha/head_sha; still passed so
+          # the step summary and any future consumer see the batch's revision pair, but
+          # since #6048 the merge_group run is forced to --full and NO selection is
+          # computed from it (design §7 P8 is REVERSED — see §10). Exactly one pair is
+          # non-empty per event.
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           # [FABLE-5] sq-fmx4u.5 ENFORCEMENT FLIP: enforce is the DEFAULT now. The
@@ -171,7 +178,20 @@ jobs:
           case "$EVENT" in
             pull_request|merge_group) args+=(--base "$BASE" --head "$HEAD") ;;
           esac
-          if [ "$CI_FULL_LABEL" = "true" ]; then
+          if [ "$EVENT" = "merge_group" ]; then
+            # [OPUS-5] #6048 COMBINED-HEAD OVERRIDE. A merge_group run validates one
+            # speculative queue tree; under HEADGREEN grouping the combined head is
+            # the ONLY one whose green the queue requires before the whole group
+            # lands on `main` — so it runs the FULL matrix, never a selection. The
+            # selector never narrows a queue entry. Belt-and-braces with the rule in
+            # scripts/ci_select.py's main(): either alone forces full, and each is
+            # pinned by its own test (test_ci_select_wiring.py TestMergeGroupFullValidation
+            # for this branch, test_ci_select.py MergeGroupForcesFullTests for the
+            # selector). Do NOT relax this back to a selection while the queue lands a
+            # whole group on one required run — research/change-based-test-selection.md
+            # §10 has the rationale, and §10.2 is honest about what it does not claim.
+            args+=(--full)
+          elif [ "$CI_FULL_LABEL" = "true" ]; then
             # ci-full label: force the full matrix regardless of mode (design §6.2).
             args+=(--full)
           elif [ "${CI_SELECT_MODE:-}" = "shadow" ]; then

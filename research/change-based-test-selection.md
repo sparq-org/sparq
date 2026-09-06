@@ -474,6 +474,9 @@ failed nightly jobs with suspect landed PRs and auto-files a deduplicated issue.
 - **P8 — selection applies to `merge_group` too**: the queue-entry diff vs
   the target tip is the union of queued content — conservative by
   construction, and queue width is where the throughput pain concentrates.
+  *(**REVERSED**, issue #6048, 2026-09-02: `merge_group` ⇒ `mode=full`. The
+  union-diff argument is unchanged; what changed is the redundancy behind it —
+  §10 below. Selection now narrows a `pull_request` head only.)*
 - **P9 — the SAFE list starts empty** and only audit-proven entries join it.
 - **P10 — enforce only after the shadow window** (§6.4); nightly full +
   `ci-full` label remain permanent backstops. *(sq-fmx4u.5, 2026-07-03:
@@ -500,3 +503,127 @@ Once enforced, fold the operative rules (§2, §4.1, the scoped-lane table)
 into the AGENTS.md gate documentation, keep the ownership map + selector as
 the living source of truth, and rewrite this record's "will" into "does" — or
 delete it in favor of the CI docs, per the research-record graduation rule.
+
+## 10. Merge-queue grouping and the combined-head invariant
+
+**[OPUS-5] Issue #6048, 2026-09-02.** Reverses §7 P8. Read with
+`docs/branch-protection.md` § *Merge-queue throughput settings*, which owns the
+ruleset half.
+
+### 10.1 What the queue actually validates
+
+A `merge_group` event is raised on a speculative tree: the target tip
+(`base_sha`) with some **prefix** of the queued entries applied (`head_sha`).
+The ruleset's `grouping_strategy` decides which of those trees must be **green
+before entries merge** — not how many are built (`max_entries_to_build: 3`
+governs that, and is unchanged by this work).
+
+- `ALLGREEN` — every entry's prefix must be green. An 8-deep group therefore
+  costs up to 8 *required* validations, each a full CI + feature-matrix run.
+  (Issue #6048 reports ≈36 minutes to merge for a green queued PR at
+  `max_entries_to_merge: 8` and attributes it to this rebuild-per-prefix
+  behaviour. That figure is quoted from the issue, not re-measured here.)
+- `HEADGREEN` — only the group's **combined head** must be green, and the
+  whole group merges on that one result.
+
+### 10.2 What the ALLGREEN prefix runs did and did not buy
+
+Be precise here, because the tempting version of this argument is wrong.
+
+**The union-diff argument (§7 P8) is untouched by the flip.** For any prefix
+tree the selector diffs `base_sha...head_sha` — everything that prefix adds to
+the target tip — so its reverse-dependency closure is a superset of what that
+tree can break. That is as true of the combined head as of any prefix.
+
+**And prefix runs are NESTED, so they add no leg coverage.** Prefix *k*'s diff
+is contained in prefix *k+1*'s, so its affected closure is too: any leg a prefix
+run executes, the combined-head run also executes. It follows that dropping the
+per-prefix *requirement* loses no leg coverage, and — this is the part worth
+being honest about — **an under-approximation by the selector would have been
+made identically on every prefix containing the offending change.** The prefix
+runs were never *N* independent chances to catch a selection bug. Any claim that
+`ALLGREEN` made `merge_group` selection sound and `HEADGREEN` makes it unsound
+does not survive this observation, and is not made here.
+
+**What the flip does change is evidence concentration.** `ALLGREEN` required
+*N* separate executions of nested trees; `HEADGREEN` requires one execution
+that admits up to eight PRs to `main` at once. Independent of leg *selection*,
+that single run is now the only draw against flakes, infrastructure misses and
+quarantined-test gaps for the whole batch, and a red result no longer isolates
+the culprit entry — it costs a bisect.
+
+So this is a **risk-budget decision, not a proof repair**: the flip buys a large
+throughput win by compressing the queue's validation from *N* runs to one, and
+this change spends a portion of that win back on making the surviving run the
+strongest one available. The selector's own §2 proof rests on a hand-maintained
+ownership map, and the single tree standing between eight PRs and `main` is the
+place least worth spending that premise on.
+
+### 10.3 The combined-head invariant (normative, replaces §7 P8)
+
+> **The tree that becomes `main` is validated by a FULL matrix run.**
+
+Concretely: `event == merge_group ⇒ mode = full`, unconditionally, before any
+other override. Enforced in **two independent places**, each with its own test:
+
+| Enforcement point | Test |
+|---|---|
+| `scripts/ci_select.py` `main()` — the selector rule | `scripts/tests/test_ci_select.py::MergeGroupForcesFullTests` (executes the selector: a diff that selects to one crate on `pull_request` resolves to `full` on `merge_group`) |
+| `.github/workflows/ci-select.yml` — the `--full` branch in the select step | `scripts/tests/test_ci_select_wiring.py::TestMergeGroupFullValidation` (pins the branch, its ordering ahead of the `ci-full`/shadow overrides, and that both queue-side callers go through the reusable workflow) |
+
+Both callers that run on the queue ref — `ci.yml` and `feature-matrix.yml` —
+select through that one reusable workflow, so the combined head runs the full
+matrix for both.
+
+Two things this deliberately does **not** change:
+
+- **The change-class gate is untouched.** The `changes` pre-jobs call
+  `ci_select.py --classify-only`, which returns before the selector; a
+  docs-only/orchestration-only batch still skips the Rust matrix wholesale, for
+  the same audited-allowlist reason as before. Forcing full selection on a batch
+  that is proven inert would have handed most of the flip's saving straight
+  back.
+- **Event-based demotions are untouched.** The heavy `sparq-vectors` recall
+  shards and the coverage *measure* legs are demoted off `merge_group` by
+  event-keyed `if:` guards, not by selection; they were demoted on every prefix
+  under `ALLGREEN` and are demoted on the combined head now. "Full selection"
+  means *no selection-based skipping*, not *every job in the repository*.
+
+### 10.4 The paired transition, and its ordering
+
+The two halves are unsafe in isolation and must land in this order:
+
+1. **This change** — `merge_group ⇒ full`, landed and validated under the
+   still-`ALLGREEN` ruleset. Safe under both strategies: it only ever runs
+   *more* than the previous behaviour.
+2. **The ruleset flip** — `grouping_strategy: ALLGREEN → HEADGREEN` on ruleset
+   `17688455`, changing nothing else (the sole required context stays `gate`;
+   `max_entries_to_merge`, the `pull_request`, `code_scanning` and
+   `non_fast_forward` rules are untouched).
+
+Step 2 is a **maintainer action**: rulesets are configured out-of-repo and
+agents do not edit them (`docs/branch-protection.md`). **As of this commit the
+live ruleset is still `ALLGREEN`** — the doc-of-record table in
+`docs/branch-protection.md` stays accurate until someone flips it and re-dumps
+it.
+
+Doing step 2 first is the risk-increasing ordering: for the window between the
+two, one *narrowed* run would be the only required evidence for a whole group.
+
+**Cost.** Step 1 alone is a regression under `ALLGREEN` (every prefix now runs
+full). It pays for itself only once step 2 lands, where the arithmetic is
+*one full validation per group* against *up to eight selected validations per
+group*. Nobody has measured the post-flip time-to-merge; that measurement is the
+acceptance evidence for step 2 and belongs with it, not here.
+
+**Provenance note (honesty).** Issue #6048 cites a "§10.3" and issue #5262 for
+the premise that `merge_group` selection *relies on every prefix being tested*.
+No §10 existed in this record before this commit — this section creates it — and
+the linked issue was not read from this lane (agents here do not call the GitHub
+API). §10.2 is reconstructed from the selector code and the live ruleset
+parameters recorded in `docs/branch-protection.md`, and it does **not**
+reproduce that premise: the nesting observation in §10.2 says prefix runs never
+supplied coverage the combined head lacks. If #5262 establishes the stronger
+claim, the mechanism is not visible in this repo's code and should be folded in
+here when someone can read it. The implemented rule is the conservative one
+under either reading, so the code does not depend on settling this.

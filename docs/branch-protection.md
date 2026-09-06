@@ -507,8 +507,15 @@ un-draft moment.
 - **Use the merge queue.** The live `merge_queue` rule groups with `ALLGREEN`, admits at
   most 8 entries per merge, and gives required checks 60 minutes to report
   (`check_response_timeout_minutes: 60`). Its **throughput** parameters — how many
-  entries the queue speculatively builds, and the minimum-group-size wait — are recorded
-  in *Merge-queue throughput settings* below.
+  entries the queue speculatively builds, the minimum-group-size wait, and the
+  pending `HEADGREEN` grouping change — are recorded in *Merge-queue throughput
+  settings* below.
+- **What the queue validates.** Whatever the grouping strategy, the tree that becomes
+  `main` is validated by a **full** matrix run: `merge_group` events force the
+  change-based test selector to `mode=full` (issue #6048; `scripts/ci_select.py` and
+  `.github/workflows/ci-select.yml`, each independently tested). Change-based
+  *selection* narrows a pull-request head only — never a queue entry. See
+  `research/change-based-test-selection.md` §10.
 - **Require conversation resolution before merging** (all PR review threads resolved —
   `required_review_thread_resolution: true`).
 
@@ -518,7 +525,10 @@ un-draft moment.
      research/ci-mergequeue-speedup-2026-07.md §3.3. Records the throughput parameter
      set, the min-entries-wait audit VERDICT, and the CodeQL merge_group placement
      re-verdict. INVARIANT: no required-check change — the sole required context stays
-     `gate`; ALLGREEN grouping and squash-only are untouched by all three items. -->
+     `gate`; ALLGREEN grouping and squash-only are untouched by all three items.
+     [OPUS-5] Item (d) is NOT a sq-6vshe.16 item — it was added by issue #6048 and is
+     the one entry here that DOES change `grouping_strategy`. It preserves the
+     required-check invariant (sole context `gate`) and squash-only. -->
 
 The `merge_queue` rule's throughput parameters:
 
@@ -528,7 +538,7 @@ The `merge_queue` rule's throughput parameters:
 | `max_entries_to_merge` | `8` | entries merged in one group (the cap the omnibus batcher folds overflow past) |
 | `min_entries_to_merge` | `1` | one queued entry is enough to form a group |
 | `min_entries_to_merge_wait_minutes` | `5` | **inert** at `min_entries_to_merge: 1` — see (b) |
-| `grouping_strategy` | `ALLGREEN` | one red leg requeues the whole entry |
+| `grouping_strategy` | `ALLGREEN` | every entry's prefix must be green — up to 8 *required* validations per group. Pending change to `HEADGREEN`; see (d) |
 | `check_response_timeout_minutes` | `60` | required-check reporting deadline |
 
 Provenance: `max_entries_to_merge`, `grouping_strategy` and
@@ -584,6 +594,46 @@ produced on any event and it costs the queue nothing at all right now. The stand
 meaning is forward-looking: when PR #3427 settles the successor policy and CodeQL runs
 again, **queue latency is not a valid argument for keeping it off the blocking path** —
 that premise was measured and falsified.
+
+**(d) `grouping_strategy` `ALLGREEN` → `HEADGREEN` — the code half is LANDED; the
+ruleset edit is the maintainer step, NOT yet applied.** ([OPUS-5], issue #6048 —
+not a sq-6vshe.16 item.) Under `ALLGREEN` every entry's prefix must be green, so an
+8-deep group costs up to eight *required* full validations; #6048 reports the
+resulting time-to-merge for a green queued PR in the tens of minutes. `HEADGREEN`
+requires only the group's **combined head**, so the group merges on one result.
+
+The precondition set for that flip is that the combined head is not itself a
+*selected* run — otherwise one narrowed run becomes the only required evidence for up
+to eight PRs. That precondition is now met in code: `merge_group` events force the
+change-based selector
+to `mode=full`, in `scripts/ci_select.py` and again in
+`.github/workflows/ci-select.yml`, each pinned by its own test
+(`MergeGroupForcesFullTests`, `TestMergeGroupFullValidation`). The reasoning — a
+risk-budget trade rather than a soundness fix, and explicitly *not* a claim that
+per-prefix validation was supplying coverage the combined head lacked — is
+`research/change-based-test-selection.md` §10.
+
+Ordering is load-bearing and must not be inverted: the code half lands and runs green
+under the *current* `ALLGREEN` ruleset first (it only ever runs more), and only then is
+the ruleset flipped. Agents cannot edit rulesets, so the flip is carried as a
+maintainer steer, changing `grouping_strategy` **only** — the sole required context
+stays `gate`, and `max_entries_to_merge`, the `pull_request`, `code_scanning` and
+`non_fast_forward` rules are untouched:
+
+1. **Dump the ruleset first** and keep it as the pre-image —
+   `gh api repos/jeswr/sparq/rulesets/17688455 | python3 -m json.tool` (the same
+   read recipe as *Verifying the live ruleset* below). The rulesets API replaces the
+   whole `rules` array on update, so the edit is "this dump, with the `merge_queue`
+   rule's `grouping_strategy` set to `HEADGREEN`" — every other rule and parameter
+   copied through byte-for-byte.
+2. **Re-read the ruleset afterwards** and record the result from that re-read, not
+   from the update response.
+
+Until that is done and re-verified, **the live value is still `ALLGREEN`** and the
+live-ruleset table at the end of this document is the accurate record. Post-flip,
+update that row and this paragraph in the same commit, and record the observed
+time-to-merge — no throughput number is claimed here, because none has been measured
+under `HEADGREEN`.
 
 ## How this maps to the merge discipline
 
@@ -722,7 +772,7 @@ the sections above:
 | `code_quality` | `severity: all` | Required reviews |
 | `code_scanning` | `CodeQL`, `alerts_threshold: errors_and_warnings`, `security_alerts_threshold: all` | Required reviews |
 | `copilot_code_review` | `review_on_push: true`, `review_draft_pull_requests: false` | Required reviews |
-| `merge_queue` | `grouping_strategy: ALLGREEN`, `max_entries_to_merge: 8`, `check_response_timeout_minutes: 60` | Other settings; Merge-queue throughput settings; Omnibus batching |
+| `merge_queue` | `grouping_strategy: ALLGREEN` (flip to `HEADGREEN` prepared in code but **not applied** to the ruleset — throughput settings (d)), `max_entries_to_merge: 8`, `check_response_timeout_minutes: 60` | Other settings; Merge-queue throughput settings; Omnibus batching |
 
 The `Key parameters` column is a selection, not an exhaustive dump: the `merge_queue`
 row's remaining throughput parameters (`max_entries_to_build`, `min_entries_to_merge`,
