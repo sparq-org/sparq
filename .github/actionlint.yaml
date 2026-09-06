@@ -1,0 +1,76 @@
+# actionlint configuration — https://github.com/rhysd/actionlint/blob/main/docs/config.md
+#
+# WHY THIS FILE EXISTS BEFORE THE LANE THAT READS IT
+# ==================================================
+# This repo does not run actionlint in CI today. A workflow-lint lane is a reasonable
+# supply-chain / CI-hygiene ask in its own right, and when it is added it MUST land with
+# these waivers already in place. Every entry below is a case where actionlint's model of
+# GitHub lags GitHub itself — each one was checked against an authoritative GitHub source
+# before being waived, cited inline. Without the waiver the new lane fails on a construct
+# the repo has chosen on purpose, and the pressure becomes "weaken the design" rather than
+# "waive the lint".
+#
+# actionlint reads this file automatically from the project root — no flag needed — so a
+# lane added later inherits the waivers with no extra wiring. An entry whose path does not
+# (yet) exist is inert, not an error.
+#
+# RULES FOR EDITING
+# -----------------
+# - Waive by exact path + anchored message, never repo-wide. A blanket `events` waiver
+#   would let a genuinely-wrong trigger through; each entry below suppresses exactly one
+#   known-good construct in exactly one file.
+# - Every entry carries WHY the construct is correct and WHAT would let the waiver be
+#   deleted (normally: actionlint's bundled data catches up).
+# - Never add an entry to silence a finding you have not established is a false positive.
+# - FAILS SILENTLY. actionlint does not validate this file: a misspelled key (`ignoreee:`)
+#   or a path that no longer matches produces NO error — the waiver just quietly stops
+#   applying and the lint REDs again. So after editing, prove the change: run actionlint
+#   with the entry, then WITHOUT it, and confirm the finding appears only in the second
+#   run. A waiver that was never load-bearing is indistinguishable from one that is.
+
+paths:
+  # Not yet on `main` — pre-armed per issue #5823, discovered while implementing #5654.
+  #
+  # The event-driven ci-summary evaluator designed in
+  # `research/ci-gate-slotless-aggregation.md` §2 must fire when *any* sibling workflow
+  # completes, which is precisely a `workflow_run` trigger with no `workflows:` filter.
+  # actionlint's `events` rule errors on that unconditionally (`rule_events.go`: an empty
+  # `event.Workflows` is always an error), even though GitHub's own workflow-parser schema
+  # (`actions/languageservices`, `workflow-parser/src/workflow-v1.0.json`) makes
+  # `workflows` optional. The unfiltered trigger is the design; the lint is wrong.
+  #
+  # Remove when: actionlint stops requiring `workflows:`, or the evaluator is redesigned
+  # to name its siblings explicitly (it cannot — the sibling set is the whole matrix).
+  .github/workflows/ci-summary-status.yml:
+    ignore:
+      - '^no workflow is configured for "workflow_run" event$'
+
+  # `enqueued` / `dequeued` (merge-queue transitions) are real `pull_request_target`
+  # activity types: the same GitHub schema above lists both under
+  # `pull-request-target-activity`. actionlint v1.7.7's bundled event table omits them.
+  # Both workflows are load-bearing merge-queue machinery, documented at their trigger.
+  #
+  # Remove when: actionlint's `pull_request_target` activity-type list includes them.
+  .github/workflows/merge-group-doorbell.yml:
+    ignore:
+      - '^invalid activity type "(enqueued|dequeued)" for "pull_request_target" Webhook event'
+  .github/workflows/merge-queue-feedback.yml:
+    ignore:
+      - '^invalid activity type "dequeued" for "pull_request_target" Webhook event'
+
+  # `macos-15-intel` is a real GitHub-hosted runner label — the `actions/runner-images`
+  # README lists it as the x64 macOS 15 image, the Intel line that replaced the retired
+  # `macos-13`. actionlint v1.7.7's label list predates it. It is NOT self-hosted, so
+  # declaring it under `self-hosted-runner.labels` would be a lie about the runner's
+  # provenance — waive the message on the three files that use the image instead.
+  #
+  # Remove when: actionlint's bundled runner-label list includes `macos-15-intel`.
+  .github/workflows/build-matrix.yml:
+    ignore:
+      - '^label "macos-15-intel" is unknown\.'
+  .github/workflows/gui.yml:
+    ignore:
+      - '^label "macos-15-intel" is unknown\.'
+  .github/workflows/release.yml:
+    ignore:
+      - '^label "macos-15-intel" is unknown\.'
