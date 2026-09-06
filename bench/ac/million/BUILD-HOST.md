@@ -18,6 +18,12 @@ SPARQ_POD_RESULTS_LOCAL='<absolute artifact directory>' \
 bash bench/ac/million/build-host.sh
 ```
 
+Keep the launcher's checkout and branch unchanged while it is active. The completed
+source bundle's advertised HEAD is checked against the initially captured commit
+before key import, network creation or paid instance launch. A concurrent commit
+during pricing/snapshot creation therefore stops in preflight instead of launching
+a host with a different source snapshot.
+
 The private local `build-host.json` contains the host IP, key **path**, known-hosts
 path, source commit and absolute deadline. Key contents must not be printed or
 copied into artifacts. Wait for the retrieved `READY` marker before submission.
