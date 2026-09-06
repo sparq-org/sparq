@@ -30,6 +30,8 @@ editing uses the same separate, manifest-owner administration rule for both
 languages: this does not implement ACP authorization of ACR editing. The
 corpus, cache admission limits, whole-response client measurements, and
 unimplemented production-server facilities must accompany capacity claims.
+The `history` and `entropy` pack profiles compare declared literal-volume
+and compression assumptions while retaining the same records and rights.
 
 ```bash
 # Build + run the server binary (in-memory store, plain TCP)

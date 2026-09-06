@@ -44,7 +44,7 @@ binary="${CARGO_TARGET_DIR}/release/examples/pod_population_http"
 "${binary}" auth --auth-dir "${auth}" > "${results}/auth.jsonl"
 
 if [[ "${mode}" == pilot ]]; then
-  profiles=(smoke history)
+  profiles=(smoke history entropy)
   counts=(8 64)
   requests=128
   rate=4
@@ -59,7 +59,9 @@ else
 fi
 
 for profile in "${profiles[@]}"; do
-  for count in "${counts[@]}"; do
+  profile_counts=("${counts[@]}")
+  if [[ "${mode}" == pilot && "${profile}" == entropy ]]; then profile_counts=(8); fi
+  for count in "${profile_counts[@]}"; do
     for policy in wac acp; do
       label="${mode}-${profile}-${count}-${policy}"
       printf '%s\n' "${label}-pack" > "${results}/stage.txt"
