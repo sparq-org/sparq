@@ -388,6 +388,10 @@ class RequestAnalysis:
             self.query_families[row.get("query_id", "unclassified")][outcome] += 1
             self.principals[row.get("principal", "unclassified")][outcome] += 1
             intended = {k: row.get(k) for k in ("sequence", "pod", "principal", "channel", "scheduled_us", "operation", "service", "query_id", "desired_grant", "planned_records")}
+            # [GPT-6] Bind query content and record-level mutations, while comparing
+            # WAC/ACP policy operations through their common intended rights.
+            if operation != "policy-attempt":
+                intended.update({k: row.get(k) for k in ("query_sha256", "mutation_request", "expected_inserted_triples", "expected_deleted_triples")})
             digest = hashlib.sha256(canonical(intended).encode()).hexdigest()
             sequence = row.get("sequence")
             if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
