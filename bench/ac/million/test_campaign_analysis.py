@@ -12,6 +12,7 @@ from campaign_analysis import (Evidence, RequestAnalysis, capacity_bounds, paire
 
 
 MEASUREMENT = {"server_deadline_ms": 200, "measurement_seconds": 1, "minimum_offered": 4,
+               "request_timeout_ms": 5000, "maximum_inflight": 8192,
                "success_fraction": .99, "deadline_fraction_of_all_offered": .95,
                "queue_stability": {"allowed_growth_us_floor": 1000,
                  "allowed_growth_fraction_of_first_quarter": .1,
@@ -47,10 +48,39 @@ def seal(root):
     (root / "MANIFEST.sha256").write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in paths))
 
 
+def append_events(root, events):
+    path = root / "campaign-events.jsonl"
+    previous = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    write_rows(path, previous + events)
+
+
+def representative_fixture(root, dataset, model, representatives):
+    # [GPT-6] Sanitized main-format shape from the canonical compact Pod-0 verifier;
+    # generated counts/identities in these unit fixtures are synthetic, not results.
+    label = dataset + "-" + model
+    (root / (label + "-verification-sample.json")).write_text(json.dumps({
+        "rule": "minimum/maximum source bytes in every observed intensity class; deterministic Pod-ID tiebreak",
+        "representatives": representatives}))
+    events = []
+    for candidate in representatives:
+        write_rows(root / f"{label}-verify-pod{candidate['pod']}.jsonl", [
+            {"record_type": "verify-pod-start", "pod": candidate["pod"]},
+            {"record_type": "verify-progress", "sampled_pods": 1, "checks": 108},
+            {"record_type": "verification-complete", "sampled_pods": 1, "checks": 108,
+             "oracle": "policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
+             "authentication": "trusted-session deterministic check; HTTP authentication checked separately"}])
+        events.append({"record_type": "representative-verification", "dataset": dataset, "model": model,
+                       **candidate, "exit_code": 0, "systemd_result": "success", "classification": "verified",
+                       "verification_memory_max_bytes": 17179869184,
+                       "scope": "Verification holds candidate and independent selection reference; its OOM does not alone establish the HTTP server memory requirement."})
+    return events
+
+
 def complete_fixture(root):
     dataset = {"id": "compact-1", "pods": 1, "models": ["wac", "acp"], "role": "populated-control"}
     campaign = {"campaign_id": "fixture", "corpora": [dataset], "seeds": [11, 22], "measurement": MEASUREMENT,
-                "groups": [{"id": "fixed", "datasets": ["compact-1"], "memory_gib": [1], "cpus": [1], "rates": [4], "repeat": 2}]}
+                "groups": [{"id": "fixed", "datasets": ["compact-1"], "memory_gib": [1], "cpus": [1], "rates": [4], "repeat": 2,
+                            "scenario": "busy-period", "selection": "uniform", "lane": "journeys"}]}
     (root / "campaign.json").write_text(json.dumps(campaign))
     (root / "source-commit.txt").write_text("a" * 40)
     (root / "input-hashes.txt").write_text("b" * 64 + "  bench/ac/million/workload.json\n")
@@ -58,12 +88,14 @@ def complete_fixture(root):
     (root / "DONE").write_text("")
     for model in dataset["models"]:
         label = "compact-1-" + model
-        manifest = {"pods": 1, "records": 1, "quads": 3, "source_bytes": 30, "packed_bytes": 10,
+        manifest = {"pods": 1, "records": 1, "quads": 3, "source_bytes": 30, "packed_bytes": 10, "index_bytes": 24,
+                    "config": {"volume_classes": [{"numerator": 1, "denominator": 1, "weight": 1}]},
                     "maximum_pod_source_bytes": 30, "populated": True, "packed_sha256": model + "-pack", "index_sha256": model + "-index"}
         (root / (label + "-manifest.json")).write_text(json.dumps(manifest))
         write_rows(root / (label + "-pod-summaries.jsonl"), [{"pod_id": 0, "records": 1, "quads": 3, "bytes": 30,
-                    "compressed_bytes": 10, "records_by_service": {"communication": 1}}])
-        write_rows(root / (label + "-verify.jsonl"), [{"record_type": "verification-complete", "checks": 1}])
+                    "compressed_bytes": 10, "records_by_service": {"communication": 1}, "intensity_numerator": 1, "intensity_denominator": 1}])
+        append_events(root, representative_fixture(root, dataset["id"], model,
+            [{"pod": 0, "source_bytes": 30, "intensity_numerator": 1, "intensity_denominator": 1}]))
         (root / (label + "-disk.txt")).write_text("4096 corpus\n")
         churn, audit = [], []
         for i, (state, delta) in enumerate(zip(["grant", "revoke", "probe-revoked", "probe-revoked", "grant", "revoke", "grant"], [0, -1, None, None, 1, -1, 1])):
@@ -82,7 +114,9 @@ def complete_fixture(root):
         for replicate, seed in enumerate(campaign["seeds"]):
             name = f"compact-1-fixed-ram1-cpu1-r4-{replicate}-{model}"
             data = records([request(i) for i in range(4)])
-            data[0].update(settings={"seed": str(seed)}, workload_sha256="b" * 64, corpus_manifest=manifest)
+            data[0].update(settings={"seed": str(seed), "scenario": "busy-period", "selection": "uniform", "mix": "journeys",
+                                     "timeout-ms": "5000", "max-inflight": "8192", "duration-seconds": "1", "requests": "4", "rate": "4"},
+                           workload_sha256="b" * 64, corpus_manifest=manifest)
             write_rows(root / (name + "-requests.jsonl"), data)
             write_rows(root / (name + "-audit.jsonl"), [{"record_type": "mutation-audit-complete", "committed_receipts": 0}])
             for stage in ("before", "after"):
@@ -163,12 +197,12 @@ class CampaignAnalysisTests(unittest.TestCase):
             self.assertTrue(all(c["local_guard"] == "pass" for c in result["cells"]))
             self.assertTrue(result["paired_comparisons"][0]["paired_p95_scheduled_response_ratio"]["available"])
             self.assertFalse(result["full_service_million_history_admitted"])
-            write_rows(root / "campaign-events.jsonl", [{"record_type": "admission-quarantine", "dataset": "unreached-history", "model": "wac"}])
+            append_events(root, [{"record_type": "admission-quarantine", "dataset": "unreached-history", "model": "wac"}])
             (root / "DONE").unlink(); (root / "FAILED").write_text("resource stop")
             seal(root)
             limited = analyze_campaign(root, review)
             self.assertTrue(all(c["valid_for_inference"] for c in limited["cells"]))
-            write_rows(root / "campaign-events.jsonl", [{"record_type": "correctness-quarantine", "label": "wrong-result"}])
+            append_events(root, [{"record_type": "correctness-quarantine", "label": "wrong-result"}])
             seal(root)
             quarantined = analyze_campaign(root, review)
             self.assertTrue(all(not c["valid_for_inference"] for c in quarantined["cells"]))
