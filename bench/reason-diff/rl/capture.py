@@ -12,6 +12,11 @@
 #     with no user data at W3C-vocabulary subjects and only canonical-lexical
 #     literals (the harness's cross-tool canonical-multiset comparison needs all
 #     three constraints; it fails loud on bnodes rather than guessing labels).
+#     The W3C-vocabulary-subject constraint is ENFORCED by the Rust harness, on
+#     the document AND on sparq's closure of it (`rl::lint_corpus_document` /
+#     `rl::sparq_rl_closure_lines`) — a case that asserts OR entails a triple at
+#     such a subject fails, because normalization drops those from both sides and
+#     would mask a real divergence. Re-run the Rust test after editing a case.
 #   * The golden vector is the RAW owlrl closure — `OWLRL_Semantics` with
 #     `axiomatic_triples=False, datatype_axioms=False` — serialized one canonical
 #     N-Triples statement per line (rdflib `.n3()` per term) and byte-sorted.
