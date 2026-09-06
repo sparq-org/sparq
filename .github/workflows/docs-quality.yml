@@ -971,6 +971,19 @@ jobs:
         run: python3 scripts/tests/test_path_ownership.py
       - name: Selection wiring inspection (fail-closed guards + real crate needles — sq-fmx4u.3)
         run: python3 scripts/tests/test_ci_select_wiring.py
+      # [OPUS-5] issue #5215 — the LABEL-TRIGGER CHECK-RUN ECONOMY. A run started by
+      # a label event that every job then `if:`-guards off still ANNOUNCES one
+      # `skipped` check-run per JOB DEFINITION (a job-level `if:` is evaluated before
+      # the matrix expands), and each review-pipeline label flip is a REMOVE+ADD pair
+      # — which is how 538 of 639 check-runs on one head SHA came to be skipped
+      # no-ops. `unlabeled` is therefore no longer a trigger for the heavy lanes. That
+      # is sound ONLY while every label they read is a MONOTONE OPT-IN TO MORE WORK
+      # (ci-full / bench-full / fuzz-full), so a label whose REMOVAL enables work
+      # would turn the missing trigger into a silent UNDER-TEST. This suite pins both
+      # halves together — the trigger sets AND the monotonicity invariant — because
+      # nothing else in the repo would go red. Hermetic + stdlib-only (no PyYAML).
+      - name: Label-trigger economy (no `unlabeled`, label reads stay monotone — #5215)
+        run: python3 scripts/tests/test_label_trigger_economy.py
       # [SONNET-4.6] sq-6vshe.15: the merge-queue cache/artifact posture is two
       # single-line YAML properties that are INVISIBLE when absent — a dropped
       # `save-if` just makes the queue slower and churns the shared 10 GB cache
