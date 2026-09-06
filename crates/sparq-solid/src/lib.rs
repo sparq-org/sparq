@@ -41,6 +41,13 @@ pub mod trust_wire;
 #[cfg(feature = "pattern-scope")]
 pub mod pattern_scope;
 mod rewrite;
+// [SONNET-4.6] sq-lzvl (issue #3296): WAC/ACP-aware per-source authorisation for
+// federated planning (the B7 source-skipping hook of
+// research/mpc-untrusted-planner-routing-design.md §8 Phase 7) — opt-in (`source-auth`
+// feature), OFF by default, zero code/deps/cost in the default build. It adds NO
+// dependency in either direction: the MPC seam consumes a plain `bool`.
+#[cfg(feature = "source-auth")]
+pub mod source_auth;
 // [FABLE-5] sq-cnuqd (issue #1569): the BOUNDED, SHARDED, `&self`-readable session cache
 // that lets all read-side entry points take `&self` (concurrent `&PodStore` readers). No
 // feature gate + no new dependency (std `RwLock` + the existing `rustc-hash`).
@@ -93,6 +100,9 @@ pub use trust_wire::{TrustAdmissionOutcome, TrustStaticOutcome};
 // [FABLE-5] sq-lrtc3.3: the pattern-scoped masking types (feature-gated).
 #[cfg(feature = "pattern-scope")]
 pub use pattern_scope::{masked_dataset, masked_graph, GraphScope, ScopePattern, ScopedDataset};
+// [SONNET-4.6] sq-lzvl: the per-source authorisation decision types (feature-gated).
+#[cfg(feature = "source-auth")]
+pub use source_auth::{SkipReason, SourceAuthorization, SourceDescriptor};
 pub use rewrite::{rewrite_for, wrap_for_view};
 // [OPUS-4.8] sq-gq28y (issue #1546): the spec-conformant empty-default + explicit-union
 // read-path rewrite + the spec-minted reserved IRI, per the *Access-Controlled SPARQL Query
