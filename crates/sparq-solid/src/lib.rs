@@ -1755,4 +1755,84 @@ mod scoped_cache_tests {
         let got: Vec<String> = store.accessible(&bob, Mode::Read).iter().map(|n| n.as_str().to_owned()).collect();
         assert_eq!(got, vec!["https://a.ex/n1".to_owned()], "gain-access picked up after scoped write");
     }
+
+    /// [OPUS-5] issue #5579 / `research/solid-pod-scoped-materializer-design.md` §3.1 —
+    /// the perf consequence of the skolem key, pinned white-box.
+    ///
+    /// `matcher_agents`/`matcher_clients`/`matcher_issuers` are keyed on the MATCHER's IRI,
+    /// and a blank-node `acp:noneOf` matcher's IRI is a loader-minted skolem. While that
+    /// skolem was keyed on the document's index in `graph.named`, a `put_acl_acp` to pod B
+    /// renumbered pod A's matcher, `matchers_eq` went false, and `reindex_with` took the
+    /// `ReindexScope::Full` branch — clearing the WHOLE session cache on every ACL write and
+    /// discarding the per-origin slices `sq-b7k7u` exists to keep warm. With the key on the
+    /// document IRI, B's write leaves A's slice untouched.
+    #[test]
+    fn scoped_acp_write_keeps_other_pod_slice_warm_with_a_blank_node_matcher() {
+        const ACP_NS: &str = "http://www.w3.org/ns/solid/acp#";
+        // Two pods, each with an ACR whose public Read policy carries a BLANK-NODE noneOf
+        // matcher excluding carol. `_:exa`/`_:exb` skolemize per document.
+        let pod_quads = |pod: &str, label: &str| {
+            let acr = format!("{}/.acr", pod);
+            format!(
+                "<{pod}/n1#it> <https://ex.dev/ns#k> \"v\" <{pod}/n1> .\n\
+                 <{acr}> <{ACP_NS}accessControl> <{acr}#ac> <{acr}> .\n\
+                 <{acr}> <{ACP_NS}memberAccessControl> <{acr}#ac> <{acr}> .\n\
+                 <{acr}#ac> <{ACP_NS}apply> <{acr}#pol> <{acr}> .\n\
+                 <{acr}#pol> <{ACP_NS}allow> <http://www.w3.org/ns/auth/acl#Read> <{acr}> .\n\
+                 <{acr}#pol> <{ACP_NS}anyOf> <{acr}#mpub> <{acr}> .\n\
+                 <{acr}#mpub> <{ACP_NS}agent> <{ACP_NS}PublicAgent> <{acr}> .\n\
+                 <{acr}#pol> <{ACP_NS}noneOf> _:{label} <{acr}> .\n\
+                 _:{label} <{ACP_NS}agent> <https://carol.ex/card#me> <{acr}> .\n"
+            )
+        };
+        let nq = format!("{}{}", pod_quads("https://a.ex", "exa"), pod_quads("https://b.ex", "exb"));
+        let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+        store.materialize_acp().expect("materializes");
+
+        // Warm alice: public Read reaches one graph in each pod.
+        let alice = sess(ALICE);
+        let warm: Vec<String> =
+            store.accessible(&alice, Mode::Read).iter().map(|n| n.as_str().to_owned()).collect();
+        assert!(warm.contains(&"https://a.ex/n1".to_owned()), "public read at a.ex: {warm:?}");
+        assert!(warm.contains(&"https://b.ex/n1".to_owned()), "public read at b.ex: {warm:?}");
+        let b_before: Vec<String> = with_entry(&store, &alice, |e| {
+            assert!(e.per_origin.contains_key("https://a.ex"), "a.ex slice warmed");
+            e.per_origin["https://b.ex"].iter().map(|n| n.as_str().to_owned()).collect()
+        });
+        assert!(!b_before.is_empty(), "b.ex slice is non-empty, so keeping it warm is meaningful");
+
+        // Scoped ACP write to pod A only: the SAME policy plus `acp:allow Write`. Pod A's
+        // own blank-node matcher is kept, so the only matcher-map change a full cache clear
+        // could be blamed on is a renumbering of pod B's. The write calls `take_named_slot`
+        // (`Vec::swap_remove`) + `push`, so pod B's document moves to a different index.
+        let acr_body = "<https://a.ex/.acr> <http://www.w3.org/ns/solid/acp#accessControl> <https://a.ex/.acr#ac> .\n\
+                        <https://a.ex/.acr> <http://www.w3.org/ns/solid/acp#memberAccessControl> <https://a.ex/.acr#ac> .\n\
+                        <https://a.ex/.acr#ac> <http://www.w3.org/ns/solid/acp#apply> <https://a.ex/.acr#pol> .\n\
+                        <https://a.ex/.acr#pol> <http://www.w3.org/ns/solid/acp#allow> <http://www.w3.org/ns/auth/acl#Read> .\n\
+                        <https://a.ex/.acr#pol> <http://www.w3.org/ns/solid/acp#allow> <http://www.w3.org/ns/auth/acl#Write> .\n\
+                        <https://a.ex/.acr#pol> <http://www.w3.org/ns/solid/acp#anyOf> <https://a.ex/.acr#mpub> .\n\
+                        <https://a.ex/.acr#mpub> <http://www.w3.org/ns/solid/acp#agent> <http://www.w3.org/ns/solid/acp#PublicAgent> .\n\
+                        <https://a.ex/.acr#pol> <http://www.w3.org/ns/solid/acp#noneOf> _:exa .\n\
+                        _:exa <http://www.w3.org/ns/solid/acp#agent> <https://carol.ex/card#me> .\n";
+        store.put_acl_acp("https://a.ex/.acr", acr_body, "ntriples").expect("put");
+
+        // Pod B's cached slice must be BYTE-IDENTICAL and still warm: the write did not
+        // renumber B's matcher, so `matchers_eq` held and the cache was NOT fully cleared.
+        with_entry(&store, &alice, |e| {
+            assert!(e.per_origin.contains_key("https://b.ex"), "b.ex slice kept warm");
+            let b_now: Vec<String> =
+                e.per_origin["https://b.ex"].iter().map(|n| n.as_str().to_owned()).collect();
+            assert_eq!(b_now, b_before, "b.ex slice byte-identical (never recomputed)");
+        });
+
+        // ... and the result still equals a from-scratch rebuild (warmth bought nothing stale).
+        let got: Vec<String> =
+            store.accessible(&alice, Mode::Read).iter().map(|n| n.as_str().to_owned()).collect();
+        let fresh: Vec<String> = AuthIndex::from_graph(&store.graph)
+            .accessible(&alice, Mode::Read)
+            .iter()
+            .map(|n| n.as_str().to_owned())
+            .collect();
+        assert_eq!(got, fresh, "scoped-cache set == from-scratch rebuild");
+    }
 }
