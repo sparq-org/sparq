@@ -273,6 +273,14 @@ pub mod oblivious;
 // secret keys WITHOUT opening it is honestly gated on secure-compare
 // (sq-rrz4/sq-dvuc). See the module docs for the residual-leakage statement.
 pub mod oblivious_join;
+// [OPUS-4.8] sq-ujz8: ORQ-style oblivious SORT-MERGE join over secret keys — the
+// O(n log² n) replacement for the O(|L|·|R|) all-pairs `HiddenValueJoin` candidate
+// enumeration. Wires the landed substrate (Batcher sort network sq-18lk + secure
+// comparator sq-rrz4 + degree reduction sq-dvuc + oblivious shuffle sq-18lk) into a
+// secret-key oblivious sort + a segmented merge scan, delivering the fan-out-free
+// semi/anti-join family (MINUS / EXISTS / NOT EXISTS). Inner-materialisation +
+// eager numeric aggregation are the honestly-scoped follow-ups. See the module docs.
+pub mod sort_merge_join;
 // [OPUS-4.8] sq-tg6b: the NETWORK tier of the MPC benchmark matrix. `transport`
 // is the REAL multi-process loopback transport (Tier 2) — each party is its own
 // PROCESS exchanging the actual protocol messages over a socket, so wall-clock
@@ -361,10 +369,10 @@ pub use hidden_path::planner::{
 // (the `RABBIT_*` constants), up from the masked-open path's `< 2^DECOMP_VALUE_BITS
 // = 2^20` (the `DECOMP_*` constants, retained for the malicious twin / tests).
 pub use compare::{
-    disclose_threshold_verdict, open_verdict, secure_equal_to_bit, secure_greater_than,
-    secure_threshold, COMPARE_BITS, COMPARE_MAX_EXCLUSIVE, DECOMP_MASK_BITS,
-    DECOMP_STAT_SECURITY_BITS, DECOMP_VALUE_BITS, DECOMP_VALUE_MAX_EXCLUSIVE, RABBIT_MASK_BITS,
-    RABBIT_VALUE_BITS, RABBIT_VALUE_MAX_EXCLUSIVE,
+    disclose_threshold_verdict, open_verdict, secure_equal_to_bit, secure_equal_to_bit_shared,
+    secure_greater_than, secure_greater_than_shared, secure_threshold, COMPARE_BITS,
+    COMPARE_MAX_EXCLUSIVE, DECOMP_MASK_BITS, DECOMP_STAT_SECURITY_BITS, DECOMP_VALUE_BITS,
+    DECOMP_VALUE_MAX_EXCLUSIVE, RABBIT_MASK_BITS, RABBIT_VALUE_BITS, RABBIT_VALUE_MAX_EXCLUSIVE,
 };
 // [OPUS-4.8] sq-ka8m: the malicious-secure (honest-majority, with-abort) comparison
 // surface — IT-MAC-carried decompose+compare chain, verdict MAC-checked before open.
@@ -413,6 +421,12 @@ pub use federated_binding::{
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys, Candidate,
     MatchBit, ObliviousOutput, ObliviousOutputCost, OutputSlot,
+};
+// [OPUS-4.8] sq-ujz8: the oblivious sort-merge join surface — the secret-key sort
+// substrate + the fan-out-free semi/anti-join operator.
+pub use sort_merge_join::{
+    oblivious_sort_by_secret_key, sort_merge_semi_anti, SortMergeCost, SortMergeJoinKind,
+    SortMergeOutput,
 };
 pub use rng::{MpcRng, SecureRng};
 // [OPUS-4.8] sq-yyro: the dealer-less correlated-randomness seam surface.

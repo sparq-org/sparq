@@ -506,6 +506,8 @@ fn square_protocol_random_bit(dealer: &mut ShamirDealer) -> Result<Vec<Share>, M
         //    and it is independent of the sign bit of a.
         let a_sq_2t = shamir::mul_shares_raw(&a, &a)?;
         let c = shamir::reconstruct_degree(&a_sq_2t, 2 * t)?;
+        // One interactive open (counted even on the negligible c == 0 retry).
+        dealer.note_open();
         // 3. c == 0 (a was 0; probability 1/p) ⇒ discard and retry with fresh [a].
         if c == Fp::zero() {
             continue;
@@ -663,6 +665,7 @@ fn secure_bit_decompose(
     //    the backend's robust reconstruct, exactly like every other open.
     let masked = shamir::add_shares(a_shares, &r_value)?;
     let c = a.reconstruct(&masked)?.value();
+    dealer.note_open();
 
     // 3. Bitwise subtraction [a]_bits = c_bits ⊖ [r]_bits with a ripple borrow.
     //    a_k = c_k XOR r_k XOR borrow_in ; borrow_out = (¬c_k ∧ r_k) ∨ (borrow_in ∧
@@ -949,6 +952,7 @@ fn secure_bit_decompose_rabbit(
     // 2. Open c = (x + r) mod p — the ONLY opening; (near-)uniform, hides x.
     let masked = shamir::add_shares(x_shares, &r_value)?;
     let c = backend.reconstruct(&masked)?.value();
+    dealer.note_open();
 
     // 3a. Wrap indicator w = 1{c < r} via the public-vs-shared LTBits.
     let w = rabbit_lt_bits_public_less_than_shared(dealer, c, &r_bits)?;
@@ -1036,6 +1040,7 @@ fn secret_is_zero(dealer: &mut ShamirDealer, v: &[Share]) -> Result<bool, MpcErr
     // (mirrors `HiddenValueJoin::secure_equal`); m == 0 ⇔ v == 0. `v` itself is
     // never reconstructed.
     let m = shamir::reconstruct_degree(&m_shares, 2 * t)?;
+    dealer.note_open();
     Ok(m == Fp::zero())
 }
 
@@ -1228,6 +1233,99 @@ pub fn secure_equal_to_bit(
     check_in_range("b", b)?;
     let a_bits = share_bits(dealer, a);
     let b_bits = share_bits(dealer, b);
+    equal_to_bit_from_bits(dealer, &a_bits, &b_bits)
+}
+
+/// [OPUS-4.8] sq-ujz8 — **secure greater-than over two ALREADY-secret-shared
+/// operands**, returning a fresh secret verdict bit that is NEVER reconstructed
+/// here.
+///
+/// The shared-input twin of [`secure_greater_than`]. `secure_greater_than` takes
+/// cleartext operands and deals their bits; this takes two EXISTING degree-`t`
+/// sharings — as they arrive when they already live in a column being sorted —
+/// bit-decomposes each IN-MPC via the Rabbit path (`secure_bit_decompose_rabbit`:
+/// the value is never reconstructed, only a near-uniform masked open `c = (x+r) mod
+/// p`), and runs the SAME MSB-first comparison circuit (`greater_than_bits`). It
+/// is the **P6 comparator** the oblivious sort-by-secret-key
+/// ([`crate::sort_merge_join`], bead sq-ujz8) drives at each compare-exchange —
+/// there is no cleartext to hand `secure_greater_than`, and opening the operands to
+/// compare them would defeat the sort's obliviousness.
+///
+/// Both operands must be `< 2^`[`RABBIT_VALUE_BITS`] — enforced IN-PROTOCOL by the
+/// Rabbit range proof (`verify_value_in_range_rabbit`), which aborts fail-closed
+/// on an over-magnitude operand rather than comparing a truncated decomposition, so
+/// a caller cannot silently get a wrong verdict from a wrapped value. `n >= 2t+1`
+/// (fail-closed). Honest-majority, semi-honest — NOT malicious (module docs);
+/// external soundness sign-off still pending (sq-qhy4).
+pub fn secure_greater_than_shared(
+    dealer: &mut ShamirDealer,
+    backend: &ShamirBackend,
+    a_shares: &[Share],
+    b_shares: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    check_party_count(dealer.parties(), dealer.threshold())?;
+    let a_bits = secure_bit_decompose_rabbit(dealer, backend, a_shares)?;
+    verify_value_in_range_rabbit(dealer, a_shares, &a_bits)?;
+    let b_bits = secure_bit_decompose_rabbit(dealer, backend, b_shares)?;
+    verify_value_in_range_rabbit(dealer, b_shares, &b_bits)?;
+    greater_than_bits(dealer, &a_bits, &b_bits)
+}
+
+/// [OPUS-5] sq-ujz8 (review round 3) — **in-protocol proof that ONE
+/// already-secret-shared operand lies inside the comparator's injective window**
+/// `[0, 2^`[`RABBIT_VALUE_BITS`]`)`, without ever reconstructing it.
+///
+/// This is exactly the guard pair `secure_greater_than_shared` /
+/// `secure_equal_to_bit_shared` run on each of their two operands, factored out so a
+/// caller whose control flow may perform **zero comparisons** can still enforce the
+/// range contract on every value it holds. The motivating case is
+/// `crate::sort_merge_join::oblivious_sort_by_secret_key`: a Batcher network over a
+/// column of `<= 1` element emits ZERO compare-exchange gates, so a contract enforced
+/// only *inside* the comparator is silently skipped there — the same out-of-range
+/// sharing was rejected at two elements and accepted at one. Enforcing it per element
+/// up front makes the documented contract hold at every column length.
+///
+/// Cost: one Rabbit bit-decomposition + one range proof per call (the same masked
+/// openings the comparator would perform — `c = x + r mod p`, near-uniform /
+/// statistically hiding at `≤ 2^{-61}` each; the value itself is never opened).
+/// `n >= 2t+1` (fail-closed). Honest-majority, semi-honest; external soundness
+/// sign-off pending (sq-qhy4).
+pub(crate) fn verify_shared_operand_in_range(
+    dealer: &mut ShamirDealer,
+    backend: &ShamirBackend,
+    value_shares: &[Share],
+) -> Result<(), MpcError> {
+    check_party_count(dealer.parties(), dealer.threshold())?;
+    let bits = secure_bit_decompose_rabbit(dealer, backend, value_shares)?;
+    verify_value_in_range_rabbit(dealer, value_shares, &bits)
+}
+
+/// [OPUS-4.8] sq-ujz8 — **`[a == b]` over two ALREADY-secret-shared operands**,
+/// returning a fresh degree-`t` sharing of the 0/1 equality bit WITHOUT ever
+/// opening it.
+///
+/// The shared-input twin of [`secure_equal_to_bit`]. It bit-decomposes two EXISTING
+/// degree-`t` sharings IN-MPC (Rabbit, never reconstructing either value) and folds
+/// the per-bit equalities into the equality bit (`equal_to_bit_from_bits`). It is
+/// the primitive the sort-merge join's **adjacent-key equality scan** uses: after
+/// the oblivious sort by secret key, two neighbouring positions carry their keys as
+/// shares (they were permuted through the sort), and deciding whether they are in
+/// the same key-group must not open either key.
+///
+/// Both operands must be `< 2^`[`RABBIT_VALUE_BITS`] — enforced IN-PROTOCOL by the
+/// Rabbit range proof (fail-closed on an over-magnitude operand). `n >= 2t+1`
+/// (fail-closed). Honest-majority, semi-honest (sq-qhy4 pending).
+pub fn secure_equal_to_bit_shared(
+    dealer: &mut ShamirDealer,
+    backend: &ShamirBackend,
+    a_shares: &[Share],
+    b_shares: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    check_party_count(dealer.parties(), dealer.threshold())?;
+    let a_bits = secure_bit_decompose_rabbit(dealer, backend, a_shares)?;
+    verify_value_in_range_rabbit(dealer, a_shares, &a_bits)?;
+    let b_bits = secure_bit_decompose_rabbit(dealer, backend, b_shares)?;
+    verify_value_in_range_rabbit(dealer, b_shares, &b_bits)?;
     equal_to_bit_from_bits(dealer, &a_bits, &b_bits)
 }
 
