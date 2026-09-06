@@ -820,6 +820,31 @@ disappears. Fail the sweep outright on a duplicate id or an anchor that no longe
   `.1`-vs-`.11` guard, open-PR/unrelated exclusion, epic/umbrella/needs gating, apply/idempotency/
   fail-safe) is pinned by `scripts/tests/test_reconcile_merged_beads.sh`. The maintenance loop
   runs it (dry-run) each tick (step 0); the orchestrator reviews + applies the closes separately.
+- **`scripts/beads-export-push.sh [--dry-run | --apply] [--json] [--base ref]`** (issue #6088,
+  the residual half of sq-2xdg) — the **box-side producer** for the committed bead mirror. It
+  closes the gap that no lane running on a checkout of this repo structurally can: the Dolt DB
+  is git-ignored (`.beads/.gitignore` ignores `dolt/`), so a bead created with `bd create` on
+  the work box and never re-exported — and never migrated to a GitHub issue (#2475) — exists in
+  **no** git-visible artefact. It
+  runs `bd export`, diffs it **key-wise and order-insensitively** against `.beads/issues.jsonl`
+  on `origin/main`, and on drift opens a `chore-beads-resync-*` PR carrying **only** that file
+  — the same branch convention the orchestrator uses by hand (*Merge discipline*), now on a
+  cron. **The decision it encodes:** the JSONL mirror is KEPT rather than retired in favour of
+  the migrated issue board (#2475), because bd remains the *planned* task graph (`bd ready`
+  drives `push-frontier.sh`; issues are the *discovered*-work channel) — retiring the mirror
+  would delete its only git-visible copy. **Non-disruptive:** `--apply` builds the commit with
+  git plumbing against a private index and pushes the object straight to a new remote branch,
+  so the orchestrator's main checkout keeps its HEAD, branch, index and working tree — a cron
+  can never move the checkout out from under a live session. **Default is dry-run**; it fails
+  CLOSED on every destructive path (an empty export, an export below the 50 % retention floor,
+  a malformed/duplicate-id export, a non-zero `bd export`, a failed fetch under `--apply`) and
+  is a logged no-op when a resync PR is already open (no PR-per-tick spam), when another tick
+  holds the flock, or when there is no drift. Refuses to run from a linked worktree. `--json`
+  emits `{drift,records_base,records_export,added,removed,changed,applied,branch,pr}`. Carries a
+  hermetic `--dry-run-self-test`; the end-to-end behaviour (fail-closed exports, checkout
+  non-disruption, the open-PR guard, order-churn-is-not-drift) is pinned by
+  `scripts/tests/test_beads_export_push.sh`, run HARD in `docs-quality quick-gates`. Install it
+  as an hourly work-box cron — the crontab line is in the script header.
 
 - **`scripts/render-start-here.py [--dry-run | --self-test | --if-ref owner/repo#N]`** (#4145) —
   renders the **maintainer front door**, issue
