@@ -126,6 +126,32 @@ class BuildHostTests(unittest.TestCase):
             self.assertIn("build", result.stderr)
             self.assertNotIn("orphan check", result.stderr)
 
+    def test_completed_bundle_must_match_captured_commit_before_paid_setup(self):
+        source = (HERE / "launch-ec2.sh").read_text()
+        guard = source[source.index("verify_bundle_source() {"):source.index('\ncase "${MODE}" in')]
+        self.assertLess(source.index('verify_bundle_source "${BUNDLE}" "${SOURCE_COMMIT}"'),
+                        source.index('aws ec2 import-key-pair'))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(["git", "-c", "commit.gpgsign=false", *args], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+            git("init", "-q")
+            git("config", "user.name", "Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            (root / "source.txt").write_text("captured\n")
+            git("add", "source.txt")
+            git("commit", "-q", "-m", "captured")
+            captured = git("rev-parse", "HEAD")
+            git("bundle", "create", "frozen.bundle", "HEAD")
+            (root / "source.txt").write_text("changed during pricing\n")
+            git("commit", "-q", "-am", "moved")
+            git("bundle", "create", "changed.bundle", "HEAD")
+            script = 'set -euo pipefail\ndie() { exit 9; }\n' + guard + '\nverify_bundle_source "$1" "$2"'
+            for bundle, expected in (("frozen.bundle", 0), ("changed.bundle", 9)):
+                result = subprocess.run(["/bin/bash", "-c", script, "fixture", str(root / bundle), captured],
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, expected, result.stderr)
+
     def test_fixed_cost_envelope_counts_only_new_storage_and_ipv4(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "prices.csv"

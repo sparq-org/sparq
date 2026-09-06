@@ -39,6 +39,14 @@ TAGSPEC="ResourceType=instance,Tags=[{Key=Name,Value=sparq-pod-study},{Key=Proje
 log() { printf '[pod-ec2 %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { printf '[pod-ec2] ERROR: %s\n' "$*" >&2; exit 1; }
 
+verify_bundle_source() {
+  # [GPT-6] HEAD may move while pricing is fetched. Check the completed bundle,
+  # not the current checkout, before creating any cloud resources.
+  local advertised
+  advertised="$(git bundle list-heads "$1" HEAD)" || return 1
+  [[ "${advertised}" == "$2 HEAD" ]] || die "source changed during snapshot; bundle HEAD differs from captured source commit"
+}
+
 case "${MODE}" in
   pilot|canonical|build) ;;
   *) die "usage: $0 pilot|canonical|build" ;;
@@ -377,6 +385,7 @@ log "creating exact source bundle for ${SOURCE_COMMIT}"
 # fetches it below so Linux preflight can judge this exact diff, not an empty checkout.
 git -C "${ROOT}" bundle create "${BUNDLE}" HEAD origin/main
 git -C "${ROOT}" bundle verify "${BUNDLE}" >/dev/null
+verify_bundle_source "${BUNDLE}" "${SOURCE_COMMIT}"
 ssh-keygen -t ed25519 -N '' -f "${KEYFILE}" -q
 SSH_OPTIONS=(
   -i "${KEYFILE}"
