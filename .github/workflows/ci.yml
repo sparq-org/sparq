@@ -407,6 +407,18 @@ jobs:
       needs.changes.outputs.rust_changed == 'true' &&
       (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')
     runs-on: ubuntu-latest
+    env:
+      # [OPUS-5] #5336 — THE single source of truth for the opt-in features this job
+      # compiles into the archive. Hoisted out of the `run:` lines below because THREE
+      # steps must agree on it: the archive build, the doctest run, and the
+      # `simd::tests` non-vacuity check added after the upload. That check exists to
+      # catch a dropped `approx-ann`; re-typing the feature list next to it would let
+      # the check drift onto its own (still-passing) feature set and go vacuous
+      # alongside the coverage it is guarding. Contents UNCHANGED — this is the same
+      # `approx-ann,filtered-ann,vec-predicate` set sq-vya1 pins (see the archive step's
+      # GUARD comment, and AGENTS.md's default-OFF-feature row); adding a feature here
+      # is the same reviewed decision it always was.
+      ARCHIVE_FEATURES: approx-ann,filtered-ann,vec-predicate
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # [OPUS-4.8] sq-c76x: reclaim ~20-30 GB of pre-installed SDKs/toolchains BEFORE the
@@ -503,7 +515,8 @@ jobs:
       # .tar.zst is self-contained (binaries + the metadata nextest needs to run them
       # on another runner with `--archive-file`), so the shards never recompile.
       #
-      # [OPUS-4.8] The archive runs `--features approx-ann,filtered-ann,vec-predicate`
+      # [OPUS-4.8] The archive runs `--features $ARCHIVE_FEATURES` (= `approx-ann,
+      # filtered-ann,vec-predicate`, defined once in this job's `env:` above)
       # (#363, LOAD-BEARING): sparq-vectors' heavy recall/over-fetch/vec-predicate tests are
       # MODULE-gated (`#![cfg(feature = ...)]`) and MUST run in this sharded lane — without
       # these the gated binaries compile EMPTY and the heavy-hnsw shard's exact filter matches
@@ -518,7 +531,7 @@ jobs:
       # (read that file's GUARD block). Prove a suite is reached: `cargo nextest list -p <crate>
       # --features <set>` must SHOW its test names.
       - name: Build + archive test binaries (nextest archive)
-        run: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst
+        run: cargo nextest archive --workspace --all-targets --features "${ARCHIVE_FEATURES}" --archive-file nextest.tar.zst
       # [OPUS-4.8] Upload the archive immediately after the build, BEFORE doctests, so
       # the shards' input artifact is produced even if the doctest step later fails.
       - name: Upload nextest archive
@@ -540,6 +553,49 @@ jobs:
           # construction (and any drift would still fail LOUD — a shard's exact `-E` filter
           # matching zero tests is nextest exit 4, not a silent pass).
           compression-level: 0
+      # ---- NON-VACUITY GUARD (#5336): the AVX2-bearing module is in this build ----
+      # [OPUS-5] The x86_64 counterpart of vectors-aarch64.yml's second non-vacuity check.
+      #
+      # `crates/sparq-vectors/src/simd.rs` carries `avx2_kernel_is_the_one_the_dispatcher_
+      # actually_ran` (#5065), which fails CLOSED under `CI` when `l2_sq_dist` did not
+      # dispatch to `l2_sq_avx2`. But that report comes from INSIDE a test binary, so it can
+      # only fire if the test was compiled at all — and `mod simd` is
+      # `#[cfg(feature = "approx-ann")]`. Drop `approx-ann` from ARCHIVE_FEATURES and the
+      # kernel, its guards, and the failure report all vanish TOGETHER while the shards below
+      # stay green: the lane would claim AVX2 coverage and carry none, and the `l2_sq_avx2`
+      # row of compliance/memsafety/unsafe-register.md — whose evidence IS those guards —
+      # would rest on a run that never compiled them. Listing the tests here fails the job
+      # BEFORE the shards report success.
+      #
+      # Placed AFTER the upload deliberately: the step above must stay the one that
+      # immediately follows the build (its comment explains why), and a failure here reds
+      # this job, which skips every `test` shard through `needs:` regardless of whether the
+      # artifact was uploaded first.
+      #
+      # Runs `--workspace --all-targets --features "${ARCHIVE_FEATURES}"` — BYTE-FOR-BYTE the
+      # archive step's build selection — so cargo resolves the identical feature unification
+      # and this is a warm no-op build plus the listing, not a second compile. (`-p
+      # sparq-vectors` would resolve features differently from `--workspace` and could
+      # trigger a rebuild.)
+      #
+      # `--color never` is LOAD-BEARING, not cosmetic: this output is MACHINE-PARSED, and
+      # nextest's human list styles the module path and the final name segment as SEPARATE
+      # ANSI spans, so `simd::tests::` is not contiguous in colourised output and the grep
+      # would count 0 on a build that DID compile the kernels. (Same footgun documented in
+      # vectors-aarch64.yml.)
+      - name: Assert the AVX2 kernel tests are compiled into this archive
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/simd-tests.txt"
+          cargo nextest list --workspace --all-targets --features "${ARCHIVE_FEATURES}" \
+            --color never -E 'package(sparq-vectors) & test(/^simd::tests::/)' > "${out}"
+          listed="$(grep -c 'simd::tests::' "${out}" || true)"
+          cat "${out}"
+          if [ "${listed}" -lt 1 ]; then
+            echo "::error::no simd::tests:: test was compiled into the nextest archive — 'mod simd' is #[cfg(feature = \"approx-ann\")], so the AVX2 kernels and their #5065 non-vacuity guard are absent and the test shards cover neither. Check ARCHIVE_FEATURES."
+            exit 1
+          fi
+          echo "${listed} simd::tests:: test(s) archived — the AVX2 kernel guards are in this build."
       # [OPUS-4.8] Doctests run ONCE here (nextest neither executes nor archives them,
       # and --partition does not apply to them), off the warm archive build for ~12s at
       # ZERO extra build cost — the whole point of build-once (sq-vyxy). Tradeoff (raised
@@ -556,7 +612,7 @@ jobs:
       # sparq-vectors doc examples (the approx-ann/filtered-ann/vec-predicate-gated `///`
       # blocks) are compiled/run here too, not silently dropped.
       - name: Doctests (nextest does not run these; run once, off the warm build)
-        run: cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc
+        run: cargo test --workspace --features "${ARCHIVE_FEATURES}" --doc
 
   test:
     # [OPUS-4.8] LOAD-AWARE sharded test matrix (merge-queue-drain speed — @jeswr).
@@ -677,6 +733,55 @@ jobs:
             crate: ""
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # ---- RUNNER-CAPABILITY PREFLIGHT (#5336) ----
+      # [OPUS-5] The x86_64 counterpart of vectors-aarch64.yml's first non-vacuity guard.
+      #
+      # `crates/sparq-vectors/src/simd.rs::simd::tests` are arch-GENERIC: they check the
+      # DISPATCHER against an f64 reference, and `l2_sq_scalar` satisfies them exactly as well
+      # as `l2_sq_avx2` does. So the ONLY thing that decides whether the unsafe AVX2 kernel is
+      # executed at all is the host CPU. `simd::tests` are not named by the `HEAVY` filterset,
+      # and the bulk shards run its negation, so they land in a BULK shard — which is why this
+      # preflight is `if:`-scoped to those (`matrix.crate == ''`, the file's own marker for a
+      # cross-crate shard) and not to the two `sparq-vectors` heavy shards, whose exact
+      # `test(=…)` filters run one recall test each and no `simd::tests` at all.
+      #
+      # WHY A LANE-LEVEL CHECK ON TOP OF THE IN-TEST GUARD (#5065): that guard fails closed
+      # under `CI`, but only from INSIDE the test binary and only on a build that compiled
+      # `mod simd`. This step reports the miss from the LANE, in seconds, before the archive
+      # download and the shard's test-exec, and names the runner rather than a test.
+      # It is NOT a replacement: `active_kernel()` — the very predicate `l2_sq_dist` branches
+      # on — remains the authoritative statement of what ran, and stays so. /proc/cpuinfo is a
+      # cheap PROXY for it (both ultimately report CPUID, but the kernel's flag list and
+      # `is_x86_feature_detected!` are separate readers and are not guaranteed to agree in
+      # every virtualised corner), which is exactly why the in-test guard is left in place.
+      #
+      # FAIL-CLOSED, both halves. `uname -m`: the AVX2 kernel AND its #5065 guard are both
+      # `#[cfg(target_arch = "x86_64")]`, so on a non-x86_64 runner they compile to nothing and
+      # this lane would go green covering neither — the same silent-drop class the check
+      # guards against. Moving these shards off x86_64 is therefore a deliberate edit here,
+      # and must come with somewhere else to execute `l2_sq_avx2`.
+      - name: Assert the runner is x86_64 with AVX2+FMA (fail-closed)
+        if: matrix.crate == ''
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          echo "runner arch: ${arch}"
+          if [ "${arch}" != "x86_64" ]; then
+            echo "::error::this test shard ran on '${arch}', not x86_64 — l2_sq_avx2 in crates/sparq-vectors/src/simd.rs and its avx2_kernel_is_the_one_the_dispatcher_actually_ran guard are both #[cfg(target_arch = \"x86_64\")], so neither was compiled and the AVX2 kernel is unexecuted here. Give it an x86_64 host, or move that coverage to a lane that has one."
+            exit 1
+          fi
+          # `avx2` and `fma` are the two flags `active_kernel()` requires — it answers
+          # `Kernel::Avx2` iff `is_x86_feature_detected!("avx2") && …("fma")`. Miss either and
+          # `l2_sq_dist` takes the scalar fallback, leaving l2_sq_avx2 never executed.
+          missing=""
+          for flag in avx2 fma; do
+            grep -qw "${flag}" /proc/cpuinfo || missing="${missing} ${flag}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::this x86_64 runner does not advertise:${missing} in /proc/cpuinfo — l2_sq_dist would take the scalar fallback and l2_sq_avx2 would stay UNEXECUTED, making every simd::tests guard on this shard (and the unsafe-register row citing them) vacuous for that kernel. Move this shard onto an AVX2+FMA-capable runner."
+            exit 1
+          fi
+          echo "avx2 + fma present — l2_sq_dist dispatches to the AVX2 kernel on this shard."
       # [OPUS-4.8] sq-c76x: reclaim ~20-30 GB BEFORE downloading/extracting the nextest
       # archive and running the shard. This is the PRIMARY site of the `No space left on
       # device` bulk-shard failures: the bulk shards `--extract-to .` the archived
