@@ -29,9 +29,11 @@
 //!   `estimated = None` and therefore no q-error; this is by design, not a gap.
 //! * q-error is undefined when either side is 0 (an empty estimate or empty
 //!   result); those nodes report `q_error = None`.
-//! * On `wasm32` the wall `nanos` are always 0 (no monotonic clock), exactly as
-//!   the text trace already documents, so `slowest`-by-time is row-count-only
-//!   there.
+//! * On `wasm32` the wall `nanos` read 0 (no monotonic clock — `Instant` is
+//!   unusable there) UNLESS the host installs a clock via [`set_trace_clock`]:
+//!   the wasm binding routes `performance.now()` through it (sq-vx7ez, #2428),
+//!   so the in-tab GUI plan explorer shows real per-operator times. Without an
+//!   installed clock, `slowest`-by-time degenerates to row-count-only there.
 //!
 //! [OPUS-4.8]
 
@@ -63,8 +65,9 @@ pub struct PlanNode {
     /// The actual output row count, filled in by [`explain_plan_analyze`]; `None`
     /// for a planning-only [`explain_plan`].
     pub actual: Option<usize>,
-    /// The operator's wall-clock time in nanoseconds (ANALYZE only; always 0 on
-    /// `wasm32`). `None` for a planning-only plan.
+    /// The operator's wall-clock time in nanoseconds (ANALYZE only; 0 on `wasm32`
+    /// unless a host clock is installed via [`set_trace_clock`]). `None` for a
+    /// planning-only plan.
     pub nanos: Option<u64>,
     /// The per-operator q-error `max(est/actual, actual/est)` — 1.0 is a perfect
     /// estimate, larger means a worse estimate in either direction. `None` when no
@@ -234,6 +237,23 @@ pub fn explain_plan_analyze_with_budget(graph: &Graph, sparql: &str, budget: &Qu
     tree_from_trace(&nodes).ok_or_else(|| "empty execution trace".to_string())
 }
 
+/// Installs `clock` as THIS thread's ANALYZE trace clock: a monotonic reading in
+/// **nanoseconds** (only differences are taken, so any epoch works). sq-vx7ez, #2428.
+///
+/// The hook exists for hosts without a monotonic `std::time::Instant` —
+/// wasm32-unknown-unknown, where `Instant` panics and every ANALYZE wall time
+/// otherwise reads 0. The `sparq-wasm` binding routes `performance.now()` (scaled
+/// to nanos) through it so the structured [`explain_plan_analyze`] tree carries
+/// real per-operator times in the browser. An installed clock takes precedence on
+/// any target (which is what makes it unit-testable off-wasm); when none is
+/// installed, native builds keep using `Instant` and nothing changes.
+///
+/// Per-thread and read ONLY while an ANALYZE trace stopwatch is running: queries
+/// without a trace never touch it.
+pub fn set_trace_clock(clock: fn() -> u64) {
+    exec::trace::set_host_clock(clock);
+}
+
 /// The query's root graph pattern (independent of form).
 fn query_pattern(q: &Query) -> &spargebra::algebra::GraphPattern {
     match q {
@@ -343,7 +363,8 @@ pub struct SlowQuery {
     pub sparql: String,
     /// The analyzed plan tree (with per-operator actuals + q-errors).
     pub plan: PlanNode,
-    /// Total wall-clock execution time in nanoseconds (0 on `wasm32`).
+    /// Total wall-clock execution time in nanoseconds (0 on `wasm32` unless a
+    /// host clock is installed via [`set_trace_clock`]).
     pub total_nanos: u64,
     /// The result row count.
     pub total_rows: usize,
@@ -357,8 +378,9 @@ pub struct SlowQuery {
 /// Intended for an ops/admin slow-query view (the server-side opt-in described in
 /// #902); the engine provides the data structure, the server decides the policy.
 ///
-/// On `wasm32` wall times are 0, so the ring degenerates to "most recent N" — still
-/// useful (it keeps the latest analyzed plans) but not time-ordered there.
+/// On `wasm32` wall times are 0 — so the ring degenerates to "most recent N",
+/// still useful (it keeps the latest analyzed plans) but not time-ordered —
+/// unless a host clock is installed via [`set_trace_clock`].
 #[derive(Debug, Clone)]
 pub struct SlowQueryRing {
     capacity: usize,
@@ -380,13 +402,9 @@ impl SlowQueryRing {
     /// malformed). The plan is built via [`explain_plan_analyze`], so the query IS
     /// executed — call only where running the query is acceptable.
     pub fn record(&mut self, graph: &Graph, sparql: &str) -> Result<SlowQuery, String> {
-        #[cfg(not(target_arch = "wasm32"))]
-        let start = std::time::Instant::now();
+        let sw = exec::trace::Stopwatch::start();
         let plan = explain_plan_analyze(graph, sparql)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let total_nanos = start.elapsed().as_nanos() as u64;
-        #[cfg(target_arch = "wasm32")]
-        let total_nanos = 0u64;
+        let total_nanos = sw.elapsed_nanos();
         let total_rows = plan.actual.unwrap_or(0);
         let q = SlowQuery {
             sparql: sparql.to_string(),
@@ -491,6 +509,34 @@ mod tests {
         // Planning-only: no actuals, no q-error anywhere.
         assert!(bgp.actual.is_none() && bgp.q_error.is_none(), "no execution => no actual/q-error");
         assert!(plan.max_q_error().is_none(), "no q-error in a dry-run plan");
+    }
+
+    /// A host clock installed via [`set_trace_clock`] supplies the ANALYZE wall
+    /// times (sq-vx7ez, #2428): every reading here is a multiple of the fake
+    /// clock's 1000-nano tick, which `Instant` (nano-resolution) would virtually
+    /// never produce for every node — so this pins that the trace clock really
+    /// routed through the hook, on the wasm32 code path's exact mechanism.
+    #[test]
+    fn host_clock_overrides_analyze_trace_clock() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TICKS: AtomicU64 = AtomicU64::new(0);
+        fn fake_clock() -> u64 {
+            TICKS.fetch_add(1_000, Ordering::Relaxed)
+        }
+        // Per-thread install; #[test] threads are fresh, so no leak across tests.
+        set_trace_clock(fake_clock);
+        let plan = explain_plan_analyze(
+            &g(),
+            "PREFIX ex: <http://ex/> SELECT ?a ?b WHERE { ?a ex:knows ?b . ?b ex:age ?age }",
+        )
+        .unwrap();
+        fn assert_ticked(n: &PlanNode) {
+            let nanos = n.nanos.expect("ANALYZE fills nanos");
+            assert!(nanos > 0, "host clock ticks between enter/exit: {}", n.operator);
+            assert_eq!(nanos % 1_000, 0, "reading comes from the fake clock, not Instant: {nanos}");
+            n.children.iter().for_each(assert_ticked);
+        }
+        assert_ticked(&plan);
     }
 
     #[test]

@@ -95,7 +95,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   default build is byte-identical, no new deps. See
   [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md).
 - **Structured EXPLAIN** *(opt-in `explain-json` feature, OFF by default)* — `explain_plan` /
-  `explain_plan_analyze` → a typed `PlanNode` tree (BGP `estimated`, `actual`/`nanos`, per-operator **q-error**) + `to_json()` + a bounded `SlowQueryRing`; off, build byte-identical.
+  `explain_plan_analyze` → a typed `PlanNode` tree (BGP `estimated`, `actual`/`nanos`, per-operator **q-error**) + `to_json()` + a bounded `SlowQueryRing`; `set_trace_clock` lets a host without a monotonic `Instant` (wasm32) supply the ANALYZE clock, e.g. `performance.now()`; off, build byte-identical.
 - **Semi-join reducers + membership-cluster planning** *(opt-in `semijoin-bitmap` / `yannakakis` / `cluster-materialize` features, OFF by default)* — `semijoin-bitmap`
   prefilters binary-join scans with an exact membership bitmap; `yannakakis` adds a bottom-up full-semijoin prepass
   for acyclic BGPs (cost-gated; cyclic keep LFTJ); `cluster-materialize` (SP2Bench q07) evaluates an unbound-predicate container-membership pattern together with its small bound-predicate anchor STANDALONE and natural-joins it to the rest, instead of bind-joining the wide relation per driver binding. Pure join-order; result-identical to off (proven differentially); off, no new deps.
