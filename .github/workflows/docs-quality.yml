@@ -981,6 +981,21 @@ jobs:
       # content-parity contract. Hermetic + stdlib-only (no PyYAML needed).
       - name: Merge-queue cache/artifact posture (save-if + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
+      # [OPUS-5] issue #5164 — the same invisible-when-absent shape, one lever over.
+      # sq-6vshe.15 item 3 is the sccache A/B that the posture test above deliberately
+      # says nothing about. Its harness (.github/workflows/sccache-ab.yml) is
+      # dispatch-only, so CI never exercises it; every property that makes it an A/B
+      # rather than two unrelated builds — CARGO_INCREMENTAL=0 (without which sccache
+      # caches nothing and the run reports a confident FALSE negative), save-if: false,
+      # one designated cache writer with READ_ONLY trials, an unwrapped control arm, and
+      # a feature set that still matches ci.yml's build-archive job — is a single line
+      # that nothing reds on when dropped. Also pins that all three of its jobs stay
+      # DECLARED in the advisory registry: a dispatch on main lands check-runs on the
+      # SHA the push-triggered gate polls, so undeclared they would gate main.
+      - name: Shellcheck sccache-ab-namespace.sh
+        run: shellcheck scripts/sccache-ab-namespace.sh
+      - name: sccache A/B harness validity (measure-first instrument — issue 5164)
+        run: python3 scripts/tests/test_sccache_ab_harness.py
       # [OPUS-5] issue #5165 — the LANE INVENTORY half of the same problem. The
       # `merge_group` trigger set and the prose in docs/branch-protection.md
       # §Merge-queue subset that describes it are unrelated files, so the list drifted
