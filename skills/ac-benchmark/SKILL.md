@@ -66,3 +66,12 @@ regular text remains a favorable-compression case. Existing version-one configs
 without `literal_profile` deserialize as `compact`, preserving their original
 N-Quads. The configuration schema remains compatible while the profile identifies
 the changed data distribution.
+
+For a bounded comparison with the engine's existing indexed storage, build the
+`sparq-lws-core` example `indexed_population_preview`. Its `--output-dir` must be
+new; `--profile smoke|history|entropy`, `--model wac|acp`, `--pods` (1–16, default8)
+and `--max-pod-bytes` (default512MiB) define the diagnostic. It retains validation
+and compares exact authorized results through in-memory, raw indexed, and compressed
+indexed graphs. See [`indexed-preview.md`](../../bench/ac/million/indexed-preview.md)
+for phase boundaries, physical storage accounting, descriptor estimates, and the
+uncontrolled-cache limitation. This example is not a million-Pod or HTTP capacity run.
