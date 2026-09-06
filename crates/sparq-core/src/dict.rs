@@ -741,19 +741,19 @@ fn hash_tabled(
 /// The mmap-backed term store + lookup index (out-of-core dictionary).
 #[cfg(feature = "mmap")]
 struct MappedDict {
-    blob: memmap2::Mmap,    // concatenated term records (the format `save_mmap` writes)
-    offsets: memmap2::Mmap, // [u64; n] byte offset of each term record in `blob`
-    hashes: memmap2::Mmap,  // [u64; n] content hashes, SORTED (for lookup)
-    hashids: memmap2::Mmap, // [u32; n] term ids parallel to `hashes`
+    blob: crate::mapped::MappedBytes,    // concatenated term records (the format `save_mmap` writes)
+    offsets: crate::mapped::MappedBytes, // [u64; n] byte offset of each term record in `blob`
+    hashes: crate::mapped::MappedBytes,  // [u64; n] content hashes, SORTED (for lookup)
+    hashids: crate::mapped::MappedBytes, // [u32; n] term ids parallel to `hashes`
 }
 
 #[cfg(feature = "mmap")]
 impl MappedDict {
     #[inline]
-    fn slice_u64(m: &memmap2::Mmap) -> &[u64] {
-        // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u64 (little-endian on
+    fn slice_u64(m: &crate::mapped::MappedBytes) -> &[u64] {
+        // SAFETY: `write_pod_slice_to` wrote these as raw NATIVE-endian u64 (little-endian on
         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
-        // page-aligned (>= 8). This pointer cast reads them back in the same native order.
+        // page-aligned; archive regions are eight-byte aligned. This pointer cast reads them back in the same native order.
         unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u64>(), m.len() / 8) }
     }
     #[inline]
@@ -766,9 +766,9 @@ impl MappedDict {
     }
     #[inline]
     fn hashids(&self) -> &[u32] {
-        // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u32 (little-endian on
+        // SAFETY: `write_pod_slice_to` wrote these as raw NATIVE-endian u32 (little-endian on
         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
-        // page-aligned (>= 4). This pointer cast reads them back in the same native order.
+        // page-aligned; archive regions are eight-byte aligned. This pointer cast reads them back in the same native order.
         unsafe { std::slice::from_raw_parts(self.hashids.as_ptr().cast::<u32>(), self.hashids.len() / 4) }
     }
     /// The parsed term record for a 1-based id.
@@ -2120,53 +2120,44 @@ impl Dict {
     /// [`open_mmap`](Self::open_mmap) with NOTHING large resident and no table rebuild.
     #[cfg(feature = "mmap")]
     pub fn save_mmap(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        use std::io::Write;
         std::fs::create_dir_all(dir)?;
-        // ALL ids — the blob/mmap'd base plus any APPENDED (delta-overlay) terms — so a
-        // grown dictionary persists totally (the compaction path relies on this).
+        self.write_native(&mut crate::native_io::DirectorySink(dir))
+    }
+
+    // [GPT-6] Keep native term/meta/lookup encodings identical in both containers.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn write_native(&self, sink: &mut impl crate::native_io::NativeSink) -> std::io::Result<()> {
+        use std::io::Write;
         let n = self.len();
-
-        // meta: [OPUS-4.8] (review 1409) version header (magic + version + id partition), then
-        // prefixes, datatypes, term count.
-        let mut meta = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin"))?);
-        meta.write_all(&DICT_META_MAGIC.to_le_bytes())?;
-        meta.write_all(&DICT_META_VERSION.to_le_bytes())?;
-        meta.write_all(&INLINE_BASE.to_le_bytes())?; // the id-space partition this file encodes
-        meta.write_all(&(self.prefixes.len() as u32).to_le_bytes())?;
-        for p in &self.prefixes {
-            write_str(&mut meta, p)?;
-        }
-        meta.write_all(&(self.datatypes.len() as u32).to_le_bytes())?;
-        for d in &self.datatypes {
-            write_str(&mut meta, d.as_str())?;
-        }
-        meta.write_all(&(n as u64).to_le_bytes())?;
-        meta.flush()?;
-
-        // term blob + per-term byte offsets; collect (hash, id) for the lookup index.
-        let mut blob = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin"))?);
-        let mut offsets: Vec<u64> = Vec::with_capacity(n);
-        let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(n);
-        let mut pos: u64 = 0;
-        for id in 1..=n as Id {
-            offsets.push(pos);
-            let r = self.record(id);
-            pos += write_record(&mut blob, &r)?;
-            pairs.push((hash_stored_ref(&r, &self.prefixes, &self.datatypes), id));
-        }
-        blob.flush()?;
-        write_pod_slice(&dir.join("dict-offs.bin"), &offsets)?;
-
-        // hash-sorted parallel arrays (binary-searchable lookup). Sorted by (hash, id) —
-        // not just hash — so equal-hash tie order is CANONICAL: the spilled-dict build
-        // (`dictspill`) produces these files by external sort and must match byte-for-byte.
-        // Lookup semantics are unchanged (it walks the whole equal-hash range).
+        sink.component("dict-meta.bin", |mut meta| {
+            meta.write_all(&DICT_META_MAGIC.to_le_bytes())?;
+            meta.write_all(&DICT_META_VERSION.to_le_bytes())?;
+            meta.write_all(&INLINE_BASE.to_le_bytes())?;
+            meta.write_all(&(self.prefixes.len() as u32).to_le_bytes())?;
+            for p in &self.prefixes { write_str(&mut meta, p)?; }
+            meta.write_all(&(self.datatypes.len() as u32).to_le_bytes())?;
+            for d in &self.datatypes { write_str(&mut meta, d.as_str())?; }
+            meta.write_all(&(n as u64).to_le_bytes())
+        })?;
+        let mut offsets = Vec::with_capacity(n);
+        let mut pairs = Vec::with_capacity(n);
+        let mut pos = 0;
+        sink.component("dict-terms.bin", |mut blob| {
+            for id in 1..=n as Id {
+                offsets.push(pos);
+                let r = self.record(id);
+                pos += write_record(&mut blob, &r)?;
+                pairs.push((hash_stored_ref(&r, &self.prefixes, &self.datatypes), id));
+            }
+            Ok(())
+        })?;
+        sink.component("dict-offs.bin", |w| write_pod_slice_to(w, &offsets))?;
+        // Match the original native writer's canonical (hash, ID) tie order.
         pairs.sort_unstable();
         let hashes: Vec<u64> = pairs.iter().map(|&(h, _)| h).collect();
         let ids: Vec<u32> = pairs.iter().map(|&(_, id)| id).collect();
-        write_pod_slice(&dir.join("dict-hash.bin"), &hashes)?;
-        write_pod_slice(&dir.join("dict-hid.bin"), &ids)?;
-        Ok(())
+        sink.component("dict-hash.bin", |w| write_pod_slice_to(w, &hashes))?;
+        sink.component("dict-hid.bin", |w| write_pod_slice_to(w, &ids))
     }
 
     /// Opens a dictionary written by [`save_mmap`](Self::save_mmap) with the term store +
@@ -2175,16 +2166,24 @@ impl Dict {
     /// into RAM. Read-only (no further interning).
     #[cfg(feature = "mmap")]
     pub fn open_mmap(dir: &std::path::Path) -> std::io::Result<Dict> {
-        use std::io::Read;
         let meta_file = std::fs::File::open(dir.join("dict-meta.bin"))?;
-        // [OPUS-4.8] sq-znld: `dict-meta.bin` is attacker-controlled. Its entry COUNTS (np,
-        // nd) and every string LENGTH are u32s read from it; the original code fed them
-        // straight to `Vec::with_capacity` / `vec![0u8; n]`, so one flipped count byte drove
-        // a multi-GB allocation that ABORTS the process (uncatchable OOM DoS). The file
-        // length is a hard upper bound on any count (each entry costs >= 4 bytes) and on any
-        // string length, so we clamp pre-allocations to it and bound each `read_str`.
         let meta_len = meta_file.metadata()?.len() as usize;
-        let mut r = std::io::BufReader::new(meta_file);
+        let r = std::io::BufReader::new(meta_file);
+        Self::open_mapped_with(r, meta_len, |name| {
+            let f = std::fs::File::open(dir.join(name))?;
+            // SAFETY: read-only mapping of a file owned by this dictionary for its lifetime.
+            Ok(unsafe { memmap2::Mmap::map(&f)? }.into())
+        })
+    }
+
+    // [GPT-6] One metadata parser and dictionary validator for directory/archive storage.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn open_mapped_with(
+        mut r: impl std::io::Read,
+        meta_len: usize,
+        mut map: impl FnMut(&str) -> std::io::Result<crate::mapped::MappedBytes>,
+    ) -> std::io::Result<Dict> {
+        // Counts/string allocations remain bounded by the supplied metadata length.
         // [OPUS-4.8] (review 1409) Validate the on-disk id-space partition before trusting any
         // persisted RAW id. A header-less file (legacy, written before this marker) or one
         // whose INLINE_BASE differs from the running build must be REJECTED — its inline vs
@@ -2233,11 +2232,6 @@ impl Dict {
         r.read_exact(&mut nbuf)?;
         let len = u64::from_le_bytes(nbuf) as usize;
 
-        let map = |name: &str| -> std::io::Result<memmap2::Mmap> {
-            let f = std::fs::File::open(dir.join(name))?;
-            // SAFETY: read-only mapping of a file owned by this dict for its lifetime.
-            unsafe { memmap2::Mmap::map(&f) }
-        };
         let mapped = MappedDict {
             blob: map("dict-terms.bin")?,
             offsets: map("dict-offs.bin")?,
@@ -2498,7 +2492,7 @@ pub(crate) fn write_record(w: &mut impl std::io::Write, t: &StoredRef) -> std::i
 }
 
 /// [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 follow-up): the mmap on-disk dictionary format is
-/// little-endian. [`write_pod_slice`] / [`MappedDict::slice_u64`] / [`MappedDict::hashids`]
+/// little-endian. [`write_pod_slice_to`] / [`MappedDict::slice_u64`] / [`MappedDict::hashids`]
 /// move the offset/hash/id arrays through a raw native-endian byte cast, while
 /// [`validate_dict_bytes`] and the `dict-spill` external builder use explicit
 /// `from_le_bytes` / `to_le_bytes`; the two only agree (and the in-RAM vs spilled build only
@@ -2538,14 +2532,14 @@ const DICT_ON_DISK_LE_GUARD: () = assert!(
 /// little-endian targets by [`DICT_ON_DISK_LE_GUARD`]; the only correct way to support BE would
 /// be to route BOTH this writer and the unsafe readers through explicit `*_le_bytes` too.
 #[cfg(feature = "mmap")]
-fn write_pod_slice<T: Copy>(path: &std::path::Path, data: &[T]) -> std::io::Result<()> {
+fn write_pod_slice_to<T: Copy>(mut writer: impl std::io::Write, data: &[T]) -> std::io::Result<()> {
     // Force-evaluate the little-endian on-disk-format guard (sq-lvw8): referencing the const
     // both keeps it from being dead-code-eliminated and makes a big-endian build fail HERE,
     // at the native-endian raw byte write, rather than silently emit a BE file.
     let () = DICT_ON_DISK_LE_GUARD;
     // SAFETY: T is u32/u64 (POD); we only read its bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data)) };
-    std::fs::write(path, bytes)
+    writer.write_all(bytes)
 }
 
 fn read_u32(r: &mut impl std::io::Read) -> std::io::Result<u32> {
@@ -3736,7 +3730,7 @@ mod tests {
 
     /// [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 follow-up) — endianness invariant of the mmap on-disk
     /// dictionary format. The format mixes two byte-order conventions for the SAME files: the
-    /// runtime writer/readers (`write_pod_slice`, `MappedDict::slice_u64`/`hashids`) move the
+    /// runtime writer/readers (`write_pod_slice_to`, `MappedDict::slice_u64`/`hashids`) move the
     /// `u64`/`u32` arrays through a raw NATIVE-endian byte cast, while `validate_dict_bytes` and
     /// the `dict-spill` external builder use explicit `to_le_bytes` / `from_le_bytes`. They
     /// agree, and the in-RAM `save_mmap` output is byte-for-byte identical to the spilled build
@@ -3761,7 +3755,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sparq-dict-endian-mmap-{}", std::process::id()));
         d.save_mmap(&dir).unwrap();
 
-        // (a) `write_pod_slice` is a raw native-endian byte copy; on this LE host the on-disk
+        // (a) `write_pod_slice_to` is a raw native-endian byte copy; on this LE host the on-disk
         //     `dict-offs.bin` must therefore be the EXPLICIT little-endian encoding of the same
         //     u64 offsets that `validate_dict_bytes` (which uses `from_le_bytes`) reads back.
         let offs_bytes = std::fs::read(dir.join("dict-offs.bin")).unwrap();
