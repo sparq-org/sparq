@@ -521,6 +521,177 @@ class TestCliFailLoud(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# #6160 / #4985 — THE DEDUPE READ MUST NOT BE TRUNCATED
+# --------------------------------------------------------------------------- #
+#
+# `open_issue_exists` is design invariant 2 (non-spammy) in one function, and every way
+# it can be wrong is the same way: a MISS mints a duplicate of an issue that is already
+# open. It used to read the open set with `gh issue list --limit 100`, which truncates
+# at 100 and says nothing when it does — and truncates NEWEST-first, so the rows it
+# drops are the OLDEST open alarm issues, precisely the long-lived set a repeat firing
+# would duplicate. Unlike the rest of this script that failure is not loud.
+#
+# TWO EDITS MUST EACH GO RED HERE, and they are different edits:
+#   * reverting the ENDPOINT to `gh issue list --limit 100`   — pinned by argv shape;
+#   * deleting just the `--paginate` FLAG from the api call    — pinned by BEHAVIOUR,
+#     via a marker parked on a late page, AND by argv.
+# #6160 is the report that the second one was NOT pinned: with the marked row on page
+# one, a non-paginated read finds it anyway and the flag is free to be deleted.
+
+# The corpus row that carries the marker. It MUST exceed _StubIssueApi.PER_PAGE, or a
+# non-paginated read returns it on page one and every assertion below passes without
+# the flag under test — the exact vacuity #6160 reports.
+MARKED_INDEX = 250
+DEDUPE_CORPUS_SIZE = 320
+DEDUPE_KEY = "triage:test (load-aware shard bulk 1/3)"
+
+
+class _StubIssueApi:
+    """Stands in for `_run` for the dedupe read, emitting the REAL `gh api --paginate
+    --slurp` shape: a JSON array of PAGES, each page an array of issue objects.
+
+    It honours `--paginate` the way gh does — WITH the flag every page, WITHOUT it
+    exactly the first. That is what makes the flag observable at all: an instrument
+    that returns the whole corpus either way cannot tell the two argvs apart."""
+
+    PER_PAGE = 100
+
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd, cwd=None, check=True):  # noqa: ANN001 — mirrors _run
+        self.calls.append(list(cmd))
+        if cmd[:2] != ["gh", "api"]:
+            raise AssertionError(f"unstubbed command: {cmd}")
+        pages = [self.rows[i:i + self.PER_PAGE]
+                 for i in range(0, len(self.rows), self.PER_PAGE)] or [[]]
+        if "--paginate" not in cmd:
+            pages = pages[:1]
+        return json.dumps(pages)
+
+
+def _issue_corpus(marker: str | None, marked_index: int = MARKED_INDEX,
+                  size: int = DEDUPE_CORPUS_SIZE, as_pull_request: bool = False):
+    """`size` open selection-alarm issues, at most one of which carries `marker`.
+
+    Ordering matches the REST endpoint's default (newest first), so `marked_index`
+    counts back from the newest — the direction `--limit` truncates from."""
+    rows = [{"number": 9000 - i, "body": f"unrelated alarm body {i}"} for i in range(size)]
+    if marker is not None:
+        rows[marked_index]["body"] = f"lead\n\n{marker}\n\ntrailer"
+        if as_pull_request:
+            rows[marked_index]["pull_request"] = {"url": "https://example/pulls/1"}
+    return rows
+
+
+class TestDedupeReadIsNotTruncated(unittest.TestCase):
+    def _exists(self, rows):
+        mod = _load_module()
+        stub = _StubIssueApi(rows)
+        mod._run = stub
+        return mod.open_issue_exists(DEDUPE_KEY, "o/r"), stub
+
+    # -- instrument validation (a stub that cannot see the bug proves nothing) ---- #
+    def test_the_fixture_actually_spans_more_than_one_page(self):
+        self.assertGreaterEqual(
+            MARKED_INDEX, _StubIssueApi.PER_PAGE,
+            "the marked row is on page one, so a non-paginated read finds it and this "
+            "whole class is vacuous — that IS issue #6160",
+        )
+
+    def test_control_a_non_paginated_read_of_the_same_corpus_MISSES_the_marker(self):
+        """KNOWN ANSWER for the stub. Drive it with an argv that has no `--paginate`
+        and the marker must be absent from what comes back. If this ever passes
+        trivially, the behavioural test below cannot fail for the right reason."""
+        stub = _StubIssueApi(_issue_corpus(A.key_marker(DEDUPE_KEY)))
+        pages = json.loads(stub(["gh", "api", "--slurp", "repos/o/r/issues"]))
+        bodies = [i["body"] for page in pages for i in page]
+        self.assertEqual(len(bodies), _StubIssueApi.PER_PAGE)
+        self.assertNotIn(A.key_marker(DEDUPE_KEY), "\n".join(bodies))
+
+    # -- the flag, by behaviour -------------------------------------------------- #
+    def test_a_marker_on_a_LATE_page_is_found(self):
+        """THE #6160 GUARD. Delete `--paginate` from open_issue_exists and this REDs:
+        the open issue on page 3 goes unseen and the alarm mints a duplicate."""
+        found, _ = self._exists(_issue_corpus(A.key_marker(DEDUPE_KEY)))
+        self.assertTrue(
+            found,
+            f"an OPEN alarm issue carrying this key sits at row {MARKED_INDEX} of "
+            f"{DEDUPE_CORPUS_SIZE} and was not found — the dedupe read is truncated, "
+            f"so the next firing files a duplicate",
+        )
+
+    def test_a_marker_on_the_FIRST_page_is_found_too(self):
+        """Paired with the negative below: without both, `return True` passes."""
+        found, _ = self._exists(_issue_corpus(A.key_marker(DEDUPE_KEY), marked_index=0))
+        self.assertTrue(found)
+
+    def test_an_absent_marker_is_not_found(self):
+        """The other half: `return True` would suppress every alarm forever."""
+        found, _ = self._exists(_issue_corpus(None))
+        self.assertFalse(found)
+
+    def test_a_different_key_does_not_match(self):
+        mod = _load_module()
+        mod._run = _StubIssueApi(_issue_corpus(A.key_marker("crate:sparq-geo")))
+        self.assertFalse(
+            mod.open_issue_exists(DEDUPE_KEY, "o/r"),
+            "the marker match must be per-KEY; matching any alarm marker would let one "
+            "open issue suppress every other finding",
+        )
+
+    def test_a_PULL_REQUEST_quoting_the_marker_does_not_suppress_the_alarm(self):
+        """The REST issues endpoint returns PRs as well as issues. A PR that merely
+        QUOTES a marker — a PR editing this file's fixtures does exactly that — must
+        not read as 'already filed'."""
+        found, _ = self._exists(
+            _issue_corpus(A.key_marker(DEDUPE_KEY), as_pull_request=True)
+        )
+        self.assertFalse(
+            found,
+            "a pull request carrying the marker was counted as an open alarm issue",
+        )
+
+    # -- the flag and the endpoint, by argv -------------------------------------- #
+    def test_the_recorded_argv_asks_for_every_page(self):
+        """#6160's own suggested fix: name the flag directly, so the edit that removes
+        it REDs by name rather than only through a corpus that must stay >1 page."""
+        _found, stub = self._exists(_issue_corpus(A.key_marker(DEDUPE_KEY)))
+        self.assertEqual(len(stub.calls), 1, "expected exactly one dedupe read")
+        argv = stub.calls[0]
+        self.assertIn("--paginate", argv, f"dedupe read is not paginated: {argv}")
+        self.assertIn("--slurp", argv, "`--paginate` without `--slurp` emits "
+                                       "concatenated JSON arrays, not one document")
+
+    def test_the_read_uses_the_rest_endpoint_and_no_truncating_limit(self):
+        """Reverting to `gh issue list --repo … --limit 100` REDs here — `gh issue
+        list` never reaches the stub's `gh api` guard, and `--limit` is named."""
+        _found, stub = self._exists(_issue_corpus(A.key_marker(DEDUPE_KEY)))
+        argv = stub.calls[0]
+        self.assertEqual(argv[:2], ["gh", "api"])
+        self.assertNotIn("--limit", argv,
+                         "`--limit` truncates newest-first and reports nothing")
+        endpoint = next(a for a in argv if a.startswith("repos/"))
+        self.assertEqual(endpoint,
+                         "repos/o/r/issues?state=open&labels=selection-alarm&per_page=100")
+
+    def test_the_label_filter_matches_the_label_the_alarm_actually_files_under(self):
+        """The query narrows server-side, so a drift between BASE_LABELS and the query
+        would silently read an empty set and duplicate every finding."""
+        _found, stub = self._exists(_issue_corpus(A.key_marker(DEDUPE_KEY)))
+        self.assertIn(f"labels={A.BASE_LABELS[0]}", stub.calls[0][-1])
+
+    def test_unparseable_output_does_not_crash_the_alarm(self):
+        """`_run(..., check=False)` returns gh's stdout even on failure. That path
+        fails OPEN (a duplicate issue), which is the tolerable direction — but it must
+        not raise out of main() and abort the findings still to be filed."""
+        mod = _load_module()
+        mod._run = lambda cmd, cwd=None, check=True: "not json"
+        self.assertFalse(mod.open_issue_exists(DEDUPE_KEY, "o/r"))
+
+
+# --------------------------------------------------------------------------- #
 # #4965 — THE ADMISSION SEAM
 # --------------------------------------------------------------------------- #
 
