@@ -109,6 +109,24 @@ pub struct VolumeClass {
     pub denominator: u32,
 }
 
+/// Literal compressibility scenarios; their byte lengths are explicit assumptions.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LiteralProfile {
+    /// Preserve the original repeated synthetic excerpts and labels byte-for-byte.
+    #[default]
+    Compact,
+    /// Keep regular text while varying numeric values independently between Pods.
+    PodSpecific,
+    /// Generate diverse deterministic text and numeric values independently per Pod.
+    Seeded {
+        /// Bytes in each message text literal; these are not observed message sizes.
+        message_text_bytes: u32,
+        /// Bytes in names, subjects, appointment titles, filenames, and captions.
+        short_text_bytes: u32,
+    },
+}
+
 /// Versioned corpus parameters, serialized into every persisted corpus manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,6 +155,9 @@ pub struct PopulationConfig {
     pub private_exception_every: u32,
     /// Enable the common owner/private/public/individual/group sharing scenarios.
     pub sharing_enabled: bool,
+    /// Text entropy sensitivity; omitted legacy values preserve the compact fixture.
+    #[serde(default)]
+    pub literal_profile: LiteralProfile,
 }
 
 impl PopulationConfig {
@@ -167,6 +188,7 @@ impl PopulationConfig {
             group_members: 4,
             private_exception_every: 2,
             sharing_enabled: true,
+            literal_profile: LiteralProfile::Compact,
         }
     }
 
@@ -178,7 +200,7 @@ impl PopulationConfig {
     #[must_use]
     pub fn service_history() -> Self {
         Self {
-            profile: "service-history-central-v1".into(),
+            profile: "service-history-central-v2".into(),
             history_months: 60,
             monthly_records: MonthlyRecords {
                 communication: 300,
@@ -216,7 +238,25 @@ impl PopulationConfig {
             rating_count_cdf: serde_json::from_str(include_str!("population_ratings_cdf.json"))
                 .expect("bundled empirical aggregate is validated by population tests"),
             private_exception_every: 10,
+            literal_profile: LiteralProfile::PodSpecific,
             ..Self::smoke()
+        }
+    }
+
+    /// Construct a text-entropy sensitivity with unchanged record counts and rights.
+    ///
+    /// Diverse synthetic text reduces the storage advantage of repeated placeholder
+    /// literals. Its sizes and alphabet are stress assumptions, not an empirical fit
+    /// to full message bodies. The original profile remains separately reproducible.
+    #[must_use]
+    pub fn service_history_entropy() -> Self {
+        Self {
+            profile: "service-history-entropy-v1".into(),
+            literal_profile: LiteralProfile::Seeded {
+                message_text_bytes: 1024,
+                short_text_bytes: 64,
+            },
+            ..Self::service_history()
         }
     }
 
@@ -284,6 +324,19 @@ impl PopulationConfig {
                 ));
             }
             previous = (count, cumulative);
+        }
+        if let LiteralProfile::Seeded {
+            message_text_bytes,
+            short_text_bytes,
+        } = self.literal_profile
+        {
+            if !(1..=65_536).contains(&message_text_bytes)
+                || !(1..=1024).contains(&short_text_bytes)
+            {
+                return Err(invalid(
+                    "seeded literal lengths exceed the bounded text scenario",
+                ));
+            }
         }
         Ok(())
     }
@@ -752,11 +805,34 @@ fn write_record<W: Write>(
         doc,
     )?;
     out.iri(&subject, &format!("{VOCAB}contact"), &contact, doc)?;
-    let value = mix(config.seed ^ record ^ u64::from(month));
+    let salt = match config.literal_profile {
+        LiteralProfile::Compact => 0,
+        // FNV-1a over the Pod root makes otherwise equivalent record positions
+        // independent across Pods; this salt is absent from the legacy profile.
+        LiteralProfile::PodSpecific | LiteralProfile::Seeded { .. } => {
+            root.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            }) ^ mix(service as u64)
+        }
+    };
+    let value = mix(config.seed ^ record ^ u64::from(month) ^ salt);
     out.integer(&subject, &format!("{VOCAB}value"), value % 10000, doc)?;
-    write_record_details(out, root, &subject, doc, service, record, value)
+    write_record_details(
+        out,
+        root,
+        &subject,
+        doc,
+        service,
+        record,
+        value,
+        config.literal_profile,
+    )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "explicit scalar record context plus a bounded literal profile"
+)]
 fn write_record_details<W: Write>(
     out: &mut Output<W>,
     root: &str,
@@ -765,16 +841,29 @@ fn write_record_details<W: Write>(
     service: Service,
     record: u64,
     value: u64,
+    literals: LiteralProfile,
 ) -> io::Result<()> {
+    let (message_length, label_length) = match literals {
+        LiteralProfile::Compact | LiteralProfile::PodSpecific => (0, 0),
+        LiteralProfile::Seeded {
+            message_text_bytes,
+            short_text_bytes,
+        } => (message_text_bytes, short_text_bytes),
+    };
     match service {
         Service::Communication => {
             out.text(
                 subject,
                 &format!("{VOCAB}subject"),
-                &format!("Synthetic conversation {}", record / 5),
+                &seeded_text(
+                    value ^ 1,
+                    &format!("Synthetic conversation {}", record / 5),
+                    label_length,
+                ),
                 doc,
             )?;
-            out.text(subject, &format!("{VOCAB}text"), "Synthetic message excerpt; full message-body volume is not calibrated in this scenario.", doc)?;
+            out.text(subject, &format!("{VOCAB}text"), &seeded_text(value ^ 2,
+                "Synthetic message excerpt; full message-body volume is not calibrated in this scenario.", message_length), doc)?;
             out.iri(
                 subject,
                 &format!("{VOCAB}thread"),
@@ -786,7 +875,11 @@ fn write_record_details<W: Write>(
             out.text(
                 subject,
                 &format!("{VOCAB}name"),
-                &format!("Synthetic contact {record}"),
+                &seeded_text(
+                    value ^ 3,
+                    &format!("Synthetic contact {record}"),
+                    label_length,
+                ),
                 doc,
             )?;
             out.text(
@@ -800,7 +893,11 @@ fn write_record_details<W: Write>(
             out.text(
                 subject,
                 &format!("{VOCAB}title"),
-                &format!("Synthetic appointment {record}"),
+                &seeded_text(
+                    value ^ 4,
+                    &format!("Synthetic appointment {record}"),
+                    label_length,
+                ),
                 doc,
             )?;
             out.integer(
@@ -810,25 +907,7 @@ fn write_record_details<W: Write>(
                 doc,
             )?;
         }
-        Service::Transactions => {
-            out.text(subject, &format!("{VOCAB}currency"), "GBP", doc)?;
-            out.iri(
-                subject,
-                &format!("{VOCAB}account"),
-                &format!("{root}accounts/{}", record % 3),
-                doc,
-            )?;
-            out.text(
-                subject,
-                &format!("{VOCAB}direction"),
-                if record.is_multiple_of(10) {
-                    "credit"
-                } else {
-                    "debit"
-                },
-                doc,
-            )?;
-        }
+        Service::Transactions => write_transaction_details(out, root, subject, doc, record)?,
         Service::Activity => {
             out.text(subject, &format!("{VOCAB}unit"), "steps", doc)?;
             out.integer(subject, &format!("{VOCAB}activeMinutes"), value % 180, doc)?;
@@ -849,7 +928,7 @@ fn write_record_details<W: Write>(
             )?;
         }
         Service::Media | Service::Ratings => {
-            write_media_details(out, subject, doc, service, record, value)?;
+            write_media_details(out, subject, doc, service, record, value, label_length)?;
         }
     }
     Ok(())
@@ -862,6 +941,7 @@ fn write_media_details<W: Write>(
     service: Service,
     record: u64,
     value: u64,
+    label_length: u32,
 ) -> io::Result<()> {
     match service {
         Service::Media => {
@@ -878,14 +958,18 @@ fn write_media_details<W: Write>(
             out.text(
                 subject,
                 &format!("{VOCAB}filename"),
-                &format!("synthetic-{record}.bin"),
+                &seeded_text(value ^ 5, &format!("synthetic-{record}.bin"), label_length),
                 doc,
             )?;
             if record.is_multiple_of(3) {
                 out.text(
                     subject,
                     &format!("{VOCAB}caption"),
-                    "Synthetic retained media description",
+                    &seeded_text(
+                        value ^ 6,
+                        "Synthetic retained media description",
+                        label_length,
+                    ),
                     doc,
                 )?;
             }
@@ -902,6 +986,52 @@ fn write_media_details<W: Write>(
         _ => unreachable!("media detail writer only receives media or ratings"),
     }
     Ok(())
+}
+
+fn write_transaction_details<W: Write>(
+    out: &mut Output<W>,
+    root: &str,
+    subject: &str,
+    doc: &str,
+    record: u64,
+) -> io::Result<()> {
+    out.text(subject, &format!("{VOCAB}currency"), "GBP", doc)?;
+    out.iri(
+        subject,
+        &format!("{VOCAB}account"),
+        &format!("{root}accounts/{}", record % 3),
+        doc,
+    )?;
+    out.text(
+        subject,
+        &format!("{VOCAB}direction"),
+        if record.is_multiple_of(10) {
+            "credit"
+        } else {
+            "debit"
+        },
+        doc,
+    )?;
+    Ok(())
+}
+
+fn seeded_text(mut state: u64, fallback: &str, bytes: u32) -> String {
+    // A fixed 64-character safe ASCII alphabet supplies six bits per character.
+    // It models high-entropy text, not natural-language compressibility. There are
+    // no quotes/backslashes/control bytes, so it remains valid N-Quads text.
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _";
+    if bytes == 0 {
+        return fallback.into();
+    }
+    let mut text = String::with_capacity(bytes as usize);
+    for index in 0..bytes {
+        if index.is_multiple_of(10) {
+            state = mix(state.wrapping_add(0x9e37_79b9_7f4a_7c15));
+        }
+        let shift = 6 * (index % 10);
+        text.push(char::from(ALPHABET[((state >> shift) & 63) as usize]));
+    }
+    text
 }
 
 #[expect(
