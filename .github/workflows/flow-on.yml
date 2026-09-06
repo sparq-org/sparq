@@ -36,8 +36,20 @@ jobs:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout the MERGED commit
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # [OPUS-5] (#2547) The engine reads repo state to decide whether a
+          # follow-on is genuinely owed — `bench/benchmarks.toml` for the
+          # dashboard rule, and (new) `crates/<x>/Cargo.toml` for the
+          # public-vs-`publish = false` split on the new-crate follow-ons. It must
+          # therefore see the POST-merge tree. On `pull_request: closed` the
+          # default ref is `refs/pull/<n>/merge`, a pre-merge preview that GitHub
+          # stops updating once the PR closes; `merge_commit_sha` is the actual
+          # commit that landed on the base branch, so a crate added by this PR is
+          # guaranteed present. The job already runs only `if merged == true`,
+          # where this field is populated.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
