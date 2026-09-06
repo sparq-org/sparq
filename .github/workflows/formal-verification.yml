@@ -208,6 +208,12 @@ jobs:
           # Distinct from the nightly lane's `kani-<crate>` keys: the PR tier churns on
           # branch content and must never poison the nightly backstop's warm cache.
           key: kani-pr-${{ matrix.suite.crate }}
+          # sq-3sbrr save-if discipline: SAVE only from main. Because the key is templated on
+          # the matrix crate, an unguarded PR run writes one entry PER SELECTED CRATE, each
+          # restorable by that one PR alone yet each occupying a slot in the shared 10 GB
+          # budget. RESTORE is untouched, and this lane also runs on `push: branches:[main]`
+          # under the same fv-select gate, so a main push re-seeds the keys it selects.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Kani
         run: |
           cargo install --locked kani-verifier
