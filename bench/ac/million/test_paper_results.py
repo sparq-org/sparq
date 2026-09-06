@@ -35,7 +35,7 @@ class PaperResultBindings(unittest.TestCase):
         if inputs is not None:
             (self.directory / "analysis.json").write_text(json.dumps(inputs))
         source = self.directory / "binding.typ"
-        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts, model-responses, range-label\n' + body)
+        source.write_text('#import "../site/papers/solid-pod-scale-results.typ": main-state, main-tables, bounds, verdict-counts, model-responses, range-label, model-resources, storage-values, storage-number\n' + body)
         result = subprocess.run([TYPST, "query", "--root", str(ROOT), str(source), "<result>", "--field", "value"],
                                 check=True, text=True, capture_output=True)
         return json.loads(result.stdout)
@@ -70,7 +70,9 @@ class PaperResultBindings(unittest.TestCase):
 
     def test_admitted_component_table_uses_actual_extractor_schema(self):
         events = indexed_fixture(self.artifacts)
-        write_rows(self.artifacts / "campaign-events.jsonl", events)
+        event_path = self.artifacts / "campaign-events.jsonl"
+        existing = [json.loads(line) for line in event_path.read_text().splitlines() if line.strip()]
+        write_rows(event_path, existing + events)
         seal(self.artifacts)
         data = analyze_campaign(self.artifacts, self.review)
         self.assertTrue(data["indexed_component_diagnostics"][0]["valid_for_component_inference"])
@@ -118,6 +120,47 @@ class PaperResultBindings(unittest.TestCase):
     def test_percent_range_rounding_does_not_hide_a_small_failure_fraction(self):
         result = self.query('#metadata(range-label((n: 1, lower: 0.99999, upper: 0.99999), scale: 100)) <result>')
         self.assertEqual(result, ["99.9–100"])
+
+    def test_storage_boundaries_keep_source_file_lengths_and_allocation_separate(self):
+        data = {"corpora": [{"dataset": "fixture", "model": "wac", "inventory_consistent": True,
+            "manifest": {"records": 2, "quads": 17, "source_bytes": 100000, "packed_bytes": 700, "index_bytes": 24},
+            "allocated_bytes_before_load": 12288}]}
+        result = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
+        self.assertEqual(result, {"records": 2, "quads": 17, "source_bytes": 100000,
+                                 "packed_index_bytes": 724, "allocated_bytes": 12288})
+        del data["corpora"][0]["manifest"]["index_bytes"]
+        missing = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
+        self.assertIsNone(missing["packed_index_bytes"])
+        self.assertEqual(missing["allocated_bytes"], 12288)
+        data["corpora"][0]["inventory_consistent"] = False
+        invalid = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
+        self.assertTrue(all(value is None for value in invalid.values()))
+        # New adapter separates completed storage arithmetic from heavy-Pod query admission.
+        data["corpora"][0]["storage_inventory_consistent"] = True
+        storage_only = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
+        self.assertEqual(storage_only["source_bytes"], 100000)
+        data["corpora"][0]["inventory_consistent"] = True
+        data["corpora"][0]["storage_inventory_consistent"] = False
+        inconsistent = self.query('#metadata(storage-values(json("analysis.json"), "fixture", "wac")) <result>', data)[0]
+        self.assertTrue(all(value is None for value in inconsistent.values()))
+        self.assertEqual(self.query('#metadata((storage-number(none), storage-number(0), storage-number(1, divisor: 1000000, digits: 2))) <result>'), [["—", "0", "<0.01"]])
+
+    def test_resources_keep_guard_failures_but_exclude_inconclusive_counters(self):
+        cells = []
+        for state, valid, peak, cpu in (("pass", True, 2000000, 3000000), ("fail", True, 5000000, 9000000),
+                                        ("inconclusive", False, 999000000, 888000000), ("unmeasured", False, None, None)):
+            cells.append({"model": "wac", "local_guard": state, "valid_for_inference": valid,
+                "resources": {"samples": {"after": {"memory_peak_bytes": peak}},
+                              "deltas": {"cpu_stat": {"usage_usec": cpu}}}})
+        result = self.query('#metadata(model-resources(json("analysis.json").cells, "wac")) <result>', {"cells": cells})[0]
+        self.assertEqual(result, {"peak_bytes": {"n": 2, "lower": 2000000, "upper": 5000000},
+                                  "cpu_us": {"n": 2, "lower": 3000000, "upper": 9000000}})
+        cells[0]["resources"]["samples"]["after"]["memory_peak_bytes"] = None
+        cells[1]["resources"]["samples"]["after"]["memory_peak_bytes"] = None
+        cells[0]["resources"]["deltas"]["cpu_stat"]["usage_usec"] = -1
+        missing = self.query('#metadata(model-resources(json("analysis.json").cells, "wac")) <result>', {"cells": cells})[0]
+        self.assertEqual(missing["peak_bytes"], {"n": 0, "lower": None, "upper": None})
+        self.assertEqual(missing["cpu_us"], {"n": 1, "lower": 9000000, "upper": 9000000})
 
     def test_all_planned_states_are_visible(self):
         result = self.query('''#let cells = ("pass", "fail", "inconclusive", "unmeasured").map(s => (model: "wac", local_guard: s))
