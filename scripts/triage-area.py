@@ -390,8 +390,15 @@ RULES = [
 
 
 # --- T0: an explicit author declaration in the body -----------------------------
+# The LEFT boundary is `(?<![\w-])`, not `\b` (#4567). T0 is the highest-trust path
+# in classify() — it returns before the scope-disciplined rule table is consulted —
+# so the field name must be a WORD, never the tail of a longer one. A plain `\b` is
+# not enough: in `tool-surface:` the `-` is a non-word character, so `\b` matches
+# happily and prose discussing a tool surface would parse as a DECLARED one. The
+# lookbehind also rejects `subcrates:` (word char) and `my_crates:` (underscore).
 _DECL = re.compile(
-    r"(?:crate_or_surface|crates?|surface)\s*[:=]\s*(.+?)(?:\||\n|\.\s|$)", re.I)
+    r"(?<![\w-])(?:crate_or_surface|crates?|surface)\s*[:=]\s*(.+?)(?:\||\n|\.\s|$)",
+    re.I)
 _SURFACE_TOKENS = {"site": "site", "gui": "gui", "docs": "docs", "bench": "bench",
                    "ci": "ci", "js": "js"}
 # Path fragments a declaration may use instead of a bare token —

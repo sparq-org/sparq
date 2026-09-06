@@ -22,6 +22,10 @@
 #      60 of the 70 rules are title-scoped, and body-matching is the documented
 #      root cause of the mislabels this tool exists to clean up. Asserted PER RULE
 #      (see TestScopeDiscipline), because the realistic edit changes one rule.
+#      Scope discipline is only worth asserting if it cannot be ROUTED AROUND, so
+#      (#4567) the T0 declaration parser — which returns before the rule table is
+#      consulted — must not fire off prose that merely LOOKS like a declaration
+#      (TestRuleTableHygiene.test_a_declaration_shaped_string_in_prose_is_not_a_declaration).
 #
 # and — since #5003 widened the queue from "the parked issues" to "every AREA-LESS
 # open issue" — the two properties that make that widening safe:
@@ -702,6 +706,42 @@ class TestRuleTableHygiene(unittest.TestCase):
                   "programs; docs/SKILL examples beyond the API reference."),
             ["sparq-reason", "sparq-cli"])
 
+    def test_a_declaration_shaped_string_in_prose_is_not_a_declaration(self):
+        """[OPUS-5] (#4567) `_DECL` must not match the TAIL of a longer word.
+
+        T0 is the highest-trust tier: classify() returns on it BEFORE the
+        scope-disciplined rule table is consulted, so anything that reaches it
+        bypasses scope discipline entirely. With no left boundary, prose that merely
+        DISCUSSES a tool surface (`the tool-surface: sparq-core mapping ...`) parsed
+        as an author DECLARATION of one — silently, since a T0 hit looks identical to
+        a real declaration on the board.
+
+        The guard is a `(?<![\\w-])` lookbehind, not a `\\b`, and the FIRST fixture is
+        what distinguishes them: `-` is a non-word character, so `\\b` matches happily
+        inside `tool-surface` and the named case survives. The other two pin the
+        ordinary word-tail spellings (a letter, an underscore). Bodies name TWO crates
+        so the T2 single-crate description fallback declines too and the issue stays
+        wholly parked — which is the behaviour that matters: prose is not evidence."""
+        for body in ("the tool-surface: sparq-core mapping is also used by sparq-jsonld",
+                     "we should update the subcrates: sparq-core and sparq-jsonld together",
+                     "my_crates: sparq-core, sparq-jsonld"):
+            self.assertEqual(TA.declared_areas(body, CRATES), [], body)
+            self.assertEqual(TA.classify(NEUTRAL_TITLE, body, CRATES), ([], ""), body)
+
+    def test_a_real_declaration_still_reaches_t0(self):
+        """The other direction, so the boundary above cannot be "fixed" by breaking
+        the field: each spelling the decomposition templates emit must still take the
+        author-declared path. Without this, tightening `_DECL` to something that never
+        matches would leave the test above passing."""
+        for body, want in (("crate_or_surface: sparq-core | effort:M", ["sparq-core"]),
+                           ("crates: sparq-core", ["sparq-core"]),
+                           ("Crate: sparq-mpc (pipeline.rs)", ["sparq-mpc"]),
+                           ("surface: site", ["site"]),
+                           ("- crate_or_surface: sparq-py (magic) + site", ["sparq-py", "site"])):
+            self.assertEqual(TA.classify(NEUTRAL_TITLE, body, CRATES),
+                             (want, "T0 author-declared crate_or_surface/crates field"),
+                             body)
+
     def test_scope_is_declared_and_only_ever_title_or_text(self):
         """`scope` is a two-valued dispatch in classify(); a typo'd third value
         would silently fall through to the body-matching branch."""
@@ -750,6 +790,20 @@ class TestScopeDiscipline(unittest.TestCase):
         # "the rule did not fire" would be true for uninteresting reasons.
         self.assertEqual(areas(NEUTRAL_TITLE), [], NEUTRAL_TITLE)
 
+    def _assert_the_partition_was_fully_covered(self, checked, other_half):
+        """[OPUS-5] (#4567) NON-VACUITY, the counterpart of the `checked` assertions in
+        test_every_rule_has_a_witness_that_actually_matches. Both loops below range
+        over a HELPER that filters TA.RULES, and an empty list makes "nothing leaked" /
+        "nothing was missed" trivially true — `title_rules() -> []` survived as a
+        mutant. Two independent checks, because neither alone is enough: the count
+        must be non-zero, AND the two halves must still add up to the whole table (a
+        helper that dropped all but one rule keeps the first check green)."""
+        self.assertGreater(checked, 0, "the scope property ranged over NO rules — it "
+                                       "passed vacuously")
+        self.assertEqual(checked + len(other_half), len(TA.RULES),
+                         "the title/text partition no longer covers the rule table, so "
+                         "some rules are checked by neither scope property")
+
     def test_every_rule_has_a_witness_that_actually_matches(self):
         """The generated fixtures are the substrate of both properties below; if one
         stopped matching its own regex they would pass vacuously. Two checks per
@@ -774,14 +828,16 @@ class TestScopeDiscipline(unittest.TestCase):
         Ranges over the DECLARED title rules, so it stays true as the table grows —
         the pinned allow-list in TestRuleTableHygiene is what makes a rule leaving
         this set a reviewed act rather than a silent one."""
-        leaked = []
+        leaked, checked = [], 0
         for rid, _scope, rx, _rule_areas, _why in title_rules():
             witness, _anchored = rule_witness(rx)
             got = TA.classify(NEUTRAL_TITLE, witness, CRATES)
             if got[1].startswith(f"T1 {rid}:"):
                 leaked.append(f"{rid} fired from a body-only {witness!r} -> {got[0]}")
+            checked += 1
         self.assertEqual(leaked, [], "title-scoped rules matched the body:\n  "
                                      + "\n  ".join(leaked))
+        self._assert_the_partition_was_fully_covered(checked, text_rules())
 
     def test_a_text_scoped_rule_does_fire_from_the_body(self):
         """The other direction of the same dispatch. The `text`-scoped rules exist
@@ -789,15 +845,17 @@ class TestScopeDiscipline(unittest.TestCase):
         bodies; collapsing the dispatch the other way — `hay = low_title` — would
         silently stop them finding it and quietly shrink the tool's yield. Without
         this, only one of the two branches of the scope dispatch is pinned."""
-        missed = []
+        missed, checked = [], 0
         for rid, _scope, rx, _areas, _why in text_rules():
             witness, _anchored = rule_witness(rx)
             got = TA.classify(NEUTRAL_TITLE, witness, CRATES)
             if not got[1].startswith(f"T1 {rid}:"):
                 missed.append(f"{rid} did not fire on body-only {witness!r} "
                               f"(got {got[1]!r})")
+            checked += 1
         self.assertEqual(missed, [], "text-scoped rules ignored the body:\n  "
                                      + "\n  ".join(missed))
+        self._assert_the_partition_was_fully_covered(checked, title_rules())
 
     def test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones(self):
         """Keeps the exemption above honest: a rule is exempt only because every
