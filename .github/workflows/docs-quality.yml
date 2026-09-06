@@ -1110,6 +1110,19 @@ jobs:
       # whitespace-only-cone no-op). Stdlib-only, no cargo/network.
       - name: Self-test cone_coverage.py (cone selector + cone report — sq-1cb6l)
         run: python3 scripts/tests/test_cone_coverage.py
+      # [OPUS-5] test_coverage_presence.py (17 tests) — the per-crate test-PRESENCE
+      # gate (scripts/coverage-presence.py). #5140: --check used to iterate only the
+      # RECORDED floors, so 26 crates that were never seeded sat OUTSIDE the gate and
+      # could have lost every test unnoticed. Pins the UNTRACKED-crate arm, that the
+      # committed bench/coverage-presence.json covers every crate on disk (so the file
+      # cannot drift behind crates/ again), note-preservation across --seed, and the
+      # pre-existing count-floor / integration-dir / only-rises contracts. The
+      # every-crate-covered test reads crates/ + the committed floor file — no cargo.
+      # (name QUOTED: an unquoted ` #5140` would be parsed as a YAML comment and
+      # silently truncate the step name — same reason as the quoted name on the
+      # ci-summary mutation step above.)
+      - name: "Self-test coverage-presence.py (untracked-crate arm + floor contracts — #5140)"
+        run: python3 scripts/tests/test_coverage_presence.py
       # test_drift_scan.py (37 tests) — the periodic drift scanner
       # (scripts/drift-scan.py): all 5 scanner classes (bench-missing,
       # skill-missing, explain-asymmetry, dashboard-row, conformance-split),

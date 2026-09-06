@@ -1,13 +1,21 @@
 {
   "_comment": [
-    "[OPUS-4.8] TEST-PRESENCE gate (sq-hbg7). Per-crate FLOOR on the number of #[test]/#[tokio::test]/#[rstest] functions + whether the crate keeps its tests/ integration dir. Catches a whole crate losing its tests — which the line-% ratchet (bench/coverage-floor.json) can miss (esp. the subprocess-driven sparq-cli). Counts are FLOORS (>=); adding tests is always fine.",
-    "Counted from source (no compile) by scripts/coverage-presence.py, run every commit by the .github/workflows/ci.yml coverage job. The floor only RISES (--seed will not lower without --allow-lower). Regenerate after adding tests: scripts/coverage-presence.py --seed."
+    "[OPUS-4.8] TEST-PRESENCE gate (sq-hbg7). Per-crate FLOOR on the number of #[test]/#[tokio::test]/#[rstest] functions + whether the crate keeps its tests/ integration dir. Catches a whole crate losing its tests \u2014 which the line-% ratchet (bench/coverage-floor.json) can miss (esp. the subprocess-driven sparq-cli). Counts are FLOORS (>=); adding tests is always fine.",
+    "Counted from source (no compile) by scripts/coverage-presence.py, run every commit by the .github/workflows/ci.yml coverage job. The floor only RISES (--seed will not lower without --allow-lower). Regenerate after adding tests: scripts/coverage-presence.py --seed.",
+    "EVERY crates/<x> with a Cargo.toml must appear here: --check FAILS on a crate that is on disk with no entry (#5140 \u2014 the file had drifted 26 crates behind, and an unlisted crate is UN-GATED, free to lose every test unnoticed). Adding a crate therefore means re-running --seed. A per-crate `note` is preserved across re-seeds, so record WHY a floor is unusual (e.g. a 0) as a note."
   ],
   "crates": {
+    "sparq-acbench": {
+      "had_integration_dir": true,
+      "min_tests": 141
+    },
     "sparq-algos": {
       "had_integration_dir": true,
-      "min_tests": 26,
-      "note": "[OPUS-4.8] sq-bif.8: 28 #[test]s measured (22 inline src oracles + 6 tests/topology_oracles.rs integration cases); floor 26 leaves a small margin. integration dir added by this bead."
+      "min_tests": 63
+    },
+    "sparq-arrow": {
+      "had_integration_dir": true,
+      "min_tests": 46
     },
     "sparq-bench": {
       "had_integration_dir": false,
@@ -16,88 +24,131 @@
     },
     "sparq-canon": {
       "had_integration_dir": true,
-      "min_tests": 12,
-      "note": "[OPUS-4.8] sq-bif.9: 14 #[test]s measured (5 inline src + 7 tests/bnode_isomorphism_and_bridge.rs + 2 tests/rdf_canon_suite.rs manifest drivers); floor 12 leaves a small margin. The suite itself spans the full 86-entry W3C RDFC-1.0 manifest inside those driver tests."
+      "min_tests": 172
     },
     "sparq-cli": {
       "had_integration_dir": true,
-      "min_tests": 2
+      "min_tests": 161
     },
     "sparq-conformance": {
       "had_integration_dir": true,
-      "min_tests": 10
+      "min_tests": 186
+    },
+    "sparq-conformance-floors": {
+      "had_integration_dir": false,
+      "min_tests": 2
     },
     "sparq-core": {
       "had_integration_dir": true,
-      "min_tests": 67
+      "min_tests": 337
+    },
+    "sparq-crdt": {
+      "had_integration_dir": false,
+      "min_tests": 84
+    },
+    "sparq-difftest": {
+      "had_integration_dir": true,
+      "min_tests": 52
+    },
+    "sparq-e2ee-ng": {
+      "had_integration_dir": true,
+      "min_tests": 79
     },
     "sparq-engine": {
       "had_integration_dir": true,
-      "min_tests": 238
+      "min_tests": 1169
     },
     "sparq-engine-serialize": {
-      "had_integration_dir": false,
-      "min_tests": 103,
-      "note": "[OPUS-4.8] sq-6vshe.4: seam 1 of the sparq-engine facade split — the RDF writer matrix moved here with its 105 inline #[test]s (all in the src `serialize` module `mod tests`; the crate has no tests/ integration dir). Floor 103 leaves a small margin (mirrors the sparq-substrate style). Brought under the presence gate so the moved writer tests cannot silently vanish."
+      "had_integration_dir": true,
+      "min_tests": 128
     },
     "sparq-engine-service": {
-      "had_integration_dir": false,
-      "min_tests": 62,
-      "note": "[OPUS-4.8] sq-6vshe.4: seam A2 of the sparq-engine facade split — the SPARQL 1.1 SERVICE client moved here with its 64 inline #[test]s (all in the src `service` module `mod tests`; the crate has no tests/ integration dir). Floor 62 leaves a small margin (mirrors the sibling sparq-engine-serialize style). Brought under the presence gate so the moved SRJ/SRX-parse / egress-policy / bound-join / transport-timeout tests cannot silently vanish. The end-to-end federation integration tests (tests/federation_features/*) stayed in sparq-engine."
+      "had_integration_dir": true,
+      "min_tests": 115
     },
     "sparq-fedclient": {
       "had_integration_dir": true,
-      "min_tests": 150
+      "min_tests": 330
     },
     "sparq-fedplan": {
       "had_integration_dir": true,
-      "min_tests": 50
+      "min_tests": 137
+    },
+    "sparq-fedplan-mpc": {
+      "had_integration_dir": false,
+      "min_tests": 97
     },
     "sparq-forms": {
       "had_integration_dir": true,
-      "min_tests": 44,
-      "note": "[GPT-5.6] sq-ncrhx: current source scan counts 44 #[test] attributes across src/ and tests/; the crate keeps its tests/ integration directory."
+      "min_tests": 56
     },
     "sparq-geo": {
       "had_integration_dir": true,
-      "min_tests": 85
+      "min_tests": 342
     },
     "sparq-gpu": {
       "had_integration_dir": true,
-      "min_tests": 4
+      "min_tests": 21
     },
     "sparq-hdt": {
       "had_integration_dir": true,
-      "min_tests": 14
+      "min_tests": 66
+    },
+    "sparq-http3": {
+      "had_integration_dir": true,
+      "min_tests": 8
     },
     "sparq-introspect": {
       "had_integration_dir": true,
-      "min_tests": 15
+      "min_tests": 68
     },
-    "sparq-lws-core": {
+    "sparq-jsonld": {
       "had_integration_dir": true,
-      "min_tests": 1000,
-      "note": "[OPUS-5] sq-gg0qq.11: RATCHETED 880 -> 1000. The 880 floor was seeded at import (sq-gg0qq.2, 893 #[test]s from jeswr/solid-server-rs@1e555b10); the crate has since grown to 1014 counted #[test]/#[tokio::test]/#[rstest] attributes (inline unit + tests/ integration), so the old floor carried 134 tests of slack and would no longer catch a large test loss. Floor 1000 leaves a small margin; recount with scripts/coverage-presence.py --check. The line-% floor (bench/coverage-floor.json) is STILL absent for this crate: seeding one requires a real cargo-llvm-cov measurement (scripts/coverage-gate.py --seed), which sq-gg0qq.11 had no toolchain to perform, so the crate stays presence-gated only — open follow-up work, not closed here."
+      "min_tests": 355
     },
-    "sparq-mpc": {
-      "had_integration_dir": false,
-      "min_tests": 61
-    },
-    "sparq-nlq": {
+    "sparq-jsonld-registry": {
       "had_integration_dir": true,
       "min_tests": 9
     },
+    "sparq-kb": {
+      "had_integration_dir": true,
+      "min_tests": 159
+    },
+    "sparq-lws-core": {
+      "had_integration_dir": true,
+      "min_tests": 1014
+    },
+    "sparq-lws-wasm": {
+      "had_integration_dir": true,
+      "min_tests": 26
+    },
+    "sparq-mcp": {
+      "had_integration_dir": true,
+      "min_tests": 187
+    },
+    "sparq-metamorph": {
+      "had_integration_dir": true,
+      "min_tests": 102
+    },
+    "sparq-mpc": {
+      "had_integration_dir": true,
+      "min_tests": 515
+    },
+    "sparq-nlq": {
+      "had_integration_dir": true,
+      "min_tests": 175
+    },
     "sparq-parse": {
-      "had_integration_dir": false,
-      "min_tests": 13
+      "had_integration_dir": true,
+      "min_tests": 29
     },
     "sparq-policy": {
       "had_integration_dir": true,
-      "min_tests": 130
+      "min_tests": 262
     },
     "sparq-prov": {
       "had_integration_dir": true,
-      "min_tests": 30
+      "min_tests": 97
     },
     "sparq-py": {
       "had_integration_dir": true,
@@ -106,82 +157,130 @@
     },
     "sparq-reason": {
       "had_integration_dir": true,
-      "min_tests": 127
+      "min_tests": 669
+    },
+    "sparq-reason-diff": {
+      "had_integration_dir": true,
+      "min_tests": 11
+    },
+    "sparq-reason-dl": {
+      "had_integration_dir": true,
+      "min_tests": 261
     },
     "sparq-reason-el": {
       "had_integration_dir": true,
-      "min_tests": 128,
-      "note": "[OPUS-4.8] sq-qcnn.23: OWL 2 EL classifier (E1 core + rbox Phase E2 + hasse Phase E3). 130 #[test]s measured across src/ (lib.rs 13, abox.rs 17, cdomain.rs 16, rbox.rs 7) and tests/ (differential.rs 20, rbox_differential.rs 16, cdomain.rs 18, hasse_reduction.rs 10, nominals.rs 11, snomed_go_scale.rs 2); floor 128 leaves a small margin (mirrors sparq-substrate/sparq-canon style). Brought under the presence gate so the EL classifier tests cannot silently vanish."
+      "min_tests": 210
     },
     "sparq-reason-ql": {
       "had_integration_dir": true,
-      "min_tests": 137,
-      "note": "[OPUS-4.8] sq-qcnn.23: EXPERIMENTAL OWL 2 QL rewriter (PerfectRef + CQ-shape gate). 139 #[test]s measured across src/ (cq.rs 27, minimise.rs 10, perfectref.rs 7, treewitness.rs 5, lib.rs 9, dllite.rs 2) and tests/ (oracle.rs 18, tbox_capture.rs 18, path_desugar.rs 23, broadened_shapes.rs 12, branch_aware_emit.rs 8); floor 137 leaves a small margin (mirrors sparq-substrate/sparq-canon style). Brought under the presence gate so the QL rewriter tests cannot silently vanish."
+      "min_tests": 180
     },
     "sparq-reason-wasm": {
       "had_integration_dir": true,
-      "min_tests": 9
+      "min_tests": 17
     },
     "sparq-rsp": {
       "had_integration_dir": true,
-      "min_tests": 44
+      "min_tests": 171
     },
     "sparq-rsp-wasm": {
       "had_integration_dir": true,
-      "min_tests": 5
+      "min_tests": 6
+    },
+    "sparq-secprop-vocab": {
+      "had_integration_dir": true,
+      "min_tests": 9
     },
     "sparq-serve": {
       "had_integration_dir": true,
-      "min_tests": 78
+      "min_tests": 193
     },
     "sparq-server": {
       "had_integration_dir": true,
-      "min_tests": 107
+      "min_tests": 865
     },
     "sparq-shacl": {
       "had_integration_dir": true,
-      "min_tests": 103
+      "min_tests": 497
     },
     "sparq-shacl-wasm": {
       "had_integration_dir": true,
-      "min_tests": 6
+      "min_tests": 10
+    },
+    "sparq-shaclc": {
+      "had_integration_dir": true,
+      "min_tests": 27
     },
     "sparq-sim": {
       "had_integration_dir": true,
-      "min_tests": 14
+      "min_tests": 56
     },
     "sparq-solid": {
       "had_integration_dir": true,
-      "min_tests": 15
+      "min_tests": 422
     },
     "sparq-substrate": {
-      "had_integration_dir": false,
-      "min_tests": 33,
-      "note": "[OPUS-4.8] sq-qcnn.3: 35 inline #[test]s measured across the rows/numeric/join/compare modules (all tests live in the src `mod tests` — the crate has no tests/ integration dir); floor 33 leaves a small margin (mirrors the sparq-algos/-canon style). Brought under the presence gate so the correctness core cannot silently lose its tests."
+      "had_integration_dir": true,
+      "min_tests": 172
+    },
+    "sparq-terse": {
+      "had_integration_dir": true,
+      "min_tests": 49
     },
     "sparq-text": {
       "had_integration_dir": true,
-      "min_tests": 37
+      "min_tests": 122
     },
     "sparq-text-wasm": {
       "had_integration_dir": true,
       "min_tests": 4
     },
+    "sparq-trust": {
+      "had_integration_dir": true,
+      "min_tests": 328
+    },
+    "sparq-vc": {
+      "had_integration_dir": true,
+      "min_tests": 26
+    },
     "sparq-vectors": {
       "had_integration_dir": true,
-      "min_tests": 55
+      "min_tests": 512
+    },
+    "sparq-wac-oracle": {
+      "had_integration_dir": true,
+      "min_tests": 30
     },
     "sparq-wasm": {
-      "had_integration_dir": false,
-      "min_tests": 14
+      "had_integration_dir": true,
+      "min_tests": 116
     },
-    "sparq-zk": {
+    "sparq-wrapper": {
       "had_integration_dir": true,
       "min_tests": 79
     },
+    "sparq-wrapper-gen": {
+      "had_integration_dir": false,
+      "min_tests": 0,
+      "note": "reserved seam crate: exposes no API yet (src/lib.rs is doc-comment only), so floor 0 is correct TODAY \u2014 re-seed to raise it as soon as the crate gains code"
+    },
+    "sparq-wrapper-integration": {
+      "had_integration_dir": false,
+      "min_tests": 0,
+      "note": "reserved seam crate: exposes no API yet (src/lib.rs is doc-comment only), so floor 0 is correct TODAY \u2014 re-seed to raise it as soon as the crate gains code"
+    },
+    "sparq-wrapper-shacl": {
+      "had_integration_dir": false,
+      "min_tests": 0,
+      "note": "reserved seam crate: exposes no API yet (src/lib.rs is doc-comment only), so floor 0 is correct TODAY \u2014 re-seed to raise it as soon as the crate gains code"
+    },
+    "sparq-zk": {
+      "had_integration_dir": true,
+      "min_tests": 268
+    },
     "sparq-zk-compose": {
       "had_integration_dir": true,
-      "min_tests": 147
+      "min_tests": 632
     }
   }
 }

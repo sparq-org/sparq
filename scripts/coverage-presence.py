@@ -14,10 +14,16 @@
 # fine; removing them below the recorded floor fails.
 #
 #   --seed                 (re)generate bench/coverage-presence.json from the tree
-#   --check                FAIL if any crate dropped below its recorded test count, or
-#                          lost its integration-tests dir (had_integration_dir: true ->
-#                          now absent).
+#   --check                FAIL if any crate dropped below its recorded test count, lost
+#                          its integration-tests dir (had_integration_dir: true -> now
+#                          absent), or is on disk with NO floor entry at all.
 #   --allow-lower          permit --seed to LOWER a count (deliberate test removal).
+#
+# [OPUS-5] #5140: the UNTRACKED-crate arm of --check exists because the floor file had
+# silently drifted 26 crates behind crates/ — --check only ever iterated the RECORDED
+# floors, so a crate that was never seeded was not "passing" the gate, it was outside it,
+# free to lose every test unnoticed. A crate joins the gate by being on disk, not by
+# being remembered.
 import argparse, json, os, re, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -83,6 +89,11 @@ def seed(path, allow_lower):
         else:
             new.append(f"{crate}={floor}")
         entry = {"min_tests": floor, "had_integration_dir": info["integration_dir"]}
+        # [OPUS-5] #5140: carry a hand-written per-crate `note` across re-seeds. A note
+        # explaining WHY a floor is what it is (e.g. a reserved seam crate legitimately
+        # sitting at 0) is only useful if `--seed` cannot silently erase it.
+        if prev is not None and prev.get("note"):
+            entry["note"] = prev["note"]
         if crate in NO_TEST_CRATES:
             entry["note"] = NO_TEST_CRATES[crate]
         res[crate] = entry
@@ -97,6 +108,11 @@ def seed(path, allow_lower):
             "commit by the .github/workflows/ci.yml coverage job. The floor only RISES "
             "(--seed will not lower without --allow-lower). Regenerate after adding tests: "
             "scripts/coverage-presence.py --seed.",
+            "EVERY crates/<x> with a Cargo.toml must appear here: --check FAILS on a crate "
+            "that is on disk with no entry (#5140 — the file had drifted 26 crates behind, "
+            "and an unlisted crate is UN-GATED, free to lose every test unnoticed). Adding "
+            "a crate therefore means re-running --seed. A per-crate `note` is preserved "
+            "across re-seeds, so record WHY a floor is unusual (e.g. a 0) as a note.",
         ],
         "crates": res,
     }
@@ -126,6 +142,12 @@ def check(path):
         else:
             oks.append(f"{crate}: {info['tests']} tests (floor {mn})"
                        + (" +integ" if info["integration_dir"] else ""))
+    # [OPUS-5] #5140: a crate on disk with no floor entry is UNGATED, not passing.
+    for crate in sorted(cur):
+        if crate not in floors:
+            fails.append(f"{crate}: on disk ({cur[crate]['tests']} tests) but has NO "
+                         f"presence floor — un-gated; run: "
+                         f"python3 scripts/coverage-presence.py --seed")
     for o in oks:   print(f"  ok   {o}")
     for fl in fails: print(f"  FAIL {fl}")
     if fails:
