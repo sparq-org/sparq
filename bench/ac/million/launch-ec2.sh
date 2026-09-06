@@ -13,11 +13,19 @@ if [[ "${MODE}" == canonical ]]; then
   DEFAULT_INSTANCE_TYPE=c7g.4xlarge
   DEFAULT_VOLUME_GB=120
 fi
+if [[ "${MODE}" == build ]]; then
+  DEFAULT_INSTANCE_TYPE=c7g.4xlarge
+  DEFAULT_VOLUME_GB=200
+fi
 INSTANCE_TYPE="${SPARQ_POD_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
 VOLUME_GB="${SPARQ_POD_VOLUME_GB:-${DEFAULT_VOLUME_GB}}"
 CPUSET="${SPARQ_POD_CPUSET:-1}"
 WATCHDOG_SECONDS="${SPARQ_POD_WATCHDOG_SECONDS:-43200}"
 POLL_DEADLINE_SECONDS="${SPARQ_POD_POLL_DEADLINE_SECONDS:-42600}"
+if [[ "${MODE}" == build ]]; then
+  WATCHDOG_SECONDS="${SPARQ_POD_WATCHDOG_SECONDS:-14400}"
+  POLL_DEADLINE_SECONDS="${SPARQ_POD_POLL_DEADLINE_SECONDS:-13800}"
+fi
 POLL_INTERVAL_SECONDS="${SPARQ_POD_POLL_INTERVAL_SECONDS:-45}"
 PRIOR_AWS_USD="${SPARQ_POD_PRIOR_AWS_USD:?set the accumulated study spend before launch}"
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -32,9 +40,16 @@ log() { printf '[pod-ec2 %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { printf '[pod-ec2] ERROR: %s\n' "$*" >&2; exit 1; }
 
 case "${MODE}" in
-  pilot|canonical) ;;
-  *) die "usage: $0 pilot|canonical" ;;
+  pilot|canonical|build) ;;
+  *) die "usage: $0 pilot|canonical|build" ;;
 esac
+if [[ "${MODE}" == build ]]; then
+  [[ "${INSTANCE_TYPE}" == c7g.4xlarge && "${VOLUME_GB}" == 200 ]] \
+    || die "build mode requires c7g.4xlarge and total 200 GiB gp3"
+  [[ "${WATCHDOG_SECONDS}" =~ ^[0-9]+$ ]] && (( WATCHDOG_SECONDS <= 14400 )) \
+    || die "build watchdog cannot exceed four hours"
+  [[ -r "${ROOT}/bench/ac/million/build-jobs.py" ]] || die "build-only runner is absent"
+fi
 [[ "${REGION}" == "eu-west-2" ]] || die "the frozen study region is eu-west-2"
 [[ "${INSTANCE_TYPE}" =~ ^[a-z0-9.]+$ ]] || die "invalid instance type"
 if [[ ! "${VOLUME_GB}" =~ ^[0-9]+$ ]] || (( VOLUME_GB < 40 || VOLUME_GB > 200 )); then
@@ -294,8 +309,23 @@ orphan_preflight
 aws sts get-caller-identity --profile "${PROFILE}" --output json \
   >"${RESULTS_LOCAL}/aws-identity.json"
 date -u +%FT%TZ >"${RESULTS_LOCAL}/price-checked-at.txt"
+printf '%s\n' "${WATCHDOG_SECONDS}" >"${RESULTS_LOCAL}/watchdog-seconds.txt"
+DEADLINE_EPOCH="$(python3 - "${RESULTS_LOCAL}/price-checked-at.txt" "${WATCHDOG_SECONDS}" <<'PY'
+import datetime,sys
+from pathlib import Path
+print(int(datetime.datetime.fromisoformat(Path(sys.argv[1]).read_text().strip().replace('Z','+00:00')).timestamp())+int(sys.argv[2]))
+PY
+)"
+PRICE_HOURS=12
+ANCILLARY_RESERVE=5
+if [[ "${MODE}" == build ]]; then
+  # [GPT-6] Existing prior allocation already includes its contingency. This is
+  # only the new volume+IPv4 estimate, with a 15-minute termination cushion.
+  PRICE_HOURS=4.25
+  ANCILLARY_RESERVE=0
+fi
 PRICE_QUERY_OK=0
-if aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
+if [[ "${MODE}" != build ]] && aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
   --service-code AmazonEC2 \
   --filters \
     "Type=TERM_MATCH,Field=location,Value=EU (London)" \
@@ -307,8 +337,8 @@ if aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
   --max-results 100 --output json >"${WORK}/pricing.json" \
   2>"${RESULTS_LOCAL}/aws-pricing-query-error.txt"; then
   if python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.json" \
-    --hours 12 \
-    --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
+    --hours "${PRICE_HOURS}" \
+    --ancillary-reserve "${ANCILLARY_RESERVE}" --prior-spend "${PRIOR_AWS_USD}" \
     >"${RESULTS_LOCAL}/cost-estimate.json" \
     2>"${RESULTS_LOCAL}/aws-pricing-query-parse-error.txt"; then
     PRICE_QUERY_OK=1
@@ -330,11 +360,16 @@ if (( PRICE_QUERY_OK == 0 )); then
   fi
   printf '%s\n' "${PRICE_DIGEST%% *}" \
     >"${RESULTS_LOCAL}/aws-bulk-pricing.sha256"
-  python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.csv" \
+  if [[ "${MODE}" == build ]]; then
+    python3 "${ROOT}/bench/ac/million/build-cost.py" "${WORK}/pricing.csv" "${PRIOR_AWS_USD}" \
+      >"${RESULTS_LOCAL}/cost-estimate.json"
+  else
+    python3 "${ROOT}/bench/ac/scaling/aws_price.py" "${WORK}/pricing.csv" \
     --bulk-csv --instance-type "${INSTANCE_TYPE}" \
     --location 'EU (London)' --region-code "${REGION}" \
     --hours 12 --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
     >"${RESULTS_LOCAL}/cost-estimate.json"
+  fi
 fi
 
 log "creating exact source bundle for ${SOURCE_COMMIT}"
@@ -351,6 +386,11 @@ SSH_OPTIONS=(
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
 )
+if [[ "${MODE}" == build ]]; then
+  SSH_OPTIONS=(-i "${KEYFILE}" -o StrictHostKeyChecking=accept-new
+    -o "UserKnownHostsFile=${WORK}/known_hosts" -o ConnectTimeout=15
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=3)
+fi
 
 log "resolving Ubuntu 24.04 arm64 image and locked-down network"
 AMI="$(aws ec2 describe-images --profile "${PROFILE}" --region "${REGION}" \
@@ -380,17 +420,19 @@ SSH_RULE_ID="$(aws ec2 authorize-security-group-ingress --profile "${PROFILE}" \
   --output text)"
 [[ "${SSH_RULE_ID}" == sgr-* ]] || die "AWS did not return the SSH security-group rule ID"
 CURRENT_SSH_CIDR="${PUBLIC_CIDR}"
+RUSTUP_TOOLCHAIN_ARGS=""
+if [[ "${MODE}" == build ]]; then RUSTUP_TOOLCHAIN_ARGS="--default-toolchain none"; fi
 
 cat >"${WORK}/user-data.sh" <<USERDATA
 #!/bin/bash
 set -euo pipefail
-( sleep ${WATCHDOG_SECONDS}; shutdown -h now ) &
-systemd-run --unit=sparq-pod-watchdog --on-active=${WATCHDOG_SECONDS} /sbin/shutdown -h now || true
+( sleep \$(( ${DEADLINE_EPOCH} > \$(date +%s) ? ${DEADLINE_EPOCH} - \$(date +%s) : 0 )); shutdown -h now ) &
+systemd-run --unit=sparq-pod-watchdog --on-calendar=@${DEADLINE_EPOCH} /sbin/shutdown -h now || true
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq git curl build-essential pkg-config libssl-dev python3 rsync zstd unzip
 sudo -u ubuntu env HOME=/home/ubuntu bash -c \
-  "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+  "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y ${RUSTUP_TOOLCHAIN_ARGS}"
 touch /var/tmp/SPARQ_POD_BOOTSTRAP_DONE
 USERDATA
 
@@ -414,6 +456,13 @@ printf '%s\n' "${INSTANCE_ID}" >"${RESULTS_LOCAL}/instance-id.txt"
 printf '%s\n' "${SOURCE_COMMIT}" >"${RESULTS_LOCAL}/source-commit.txt"
 printf '%s\n' "${AMI}" >"${RESULTS_LOCAL}/ami-id.txt"
 printf '%s\n' "${RUN_TOKEN}" >"${RESULTS_LOCAL}/study-run-token.txt"
+if [[ "${MODE}" == build ]]; then
+  # [GPT-6] Independent local supervisor is started before any SSH/bootstrap wait.
+  nohup env AWS_PROFILE="${PROFILE}" AWS_REGION="${REGION}" \
+    bash "${ROOT}/bench/ac/million/supervise-instance.sh" "${RESULTS_LOCAL}" \
+    >"${RESULTS_LOCAL}/supervisor.log" 2>&1 </dev/null &
+  printf '%s\n' "$!" >"${RESULTS_LOCAL}/supervisor-pid.txt"
+fi
 
 aws ec2 wait instance-running --profile "${PROFILE}" --region "${REGION}" \
   --instance-ids "${INSTANCE_ID}"
@@ -443,12 +492,26 @@ ssh_with_ingress_retry \
    && git -C /var/tmp/sparq-source fetch -q origin \
         refs/remotes/origin/main:refs/remotes/origin/main \
    && test \"\$(git -C /var/tmp/sparq-source rev-parse HEAD)\" = '${SOURCE_COMMIT}'"
+if [[ "${MODE}" == build ]]; then
+  # [GPT-6] Share paths, never key contents. This private local file expires with cleanup.
+  python3 - "${RESULTS_LOCAL}" "${PUBLIC_IP}" "${KEYFILE}" "${WORK}/known_hosts" "${DEADLINE_EPOCH}" "${SOURCE_COMMIT}" <<'PY'
+import json,os,sys
+from pathlib import Path
+p=Path(sys.argv[1])/'build-host.json'
+p.write_text(json.dumps(dict(ip=sys.argv[2],key_path=sys.argv[3],known_hosts=sys.argv[4],deadline_epoch=int(sys.argv[5]),source_commit=sys.argv[6],results_directory=sys.argv[1]),indent=2))
+os.chmod(p,0o600)
+PY
+fi
 
 REMOTE_UID="$(ssh_with_ingress_retry 'id -u')"
 REMOTE_GID="$(ssh_with_ingress_retry 'id -g')"
 [[ "${REMOTE_UID}" =~ ^[0-9]+$ && "${REMOTE_GID}" =~ ^[0-9]+$ ]] \
   || die "remote uid/gid are not numeric"
 log "starting ${MODE} as a 70%-memory-capped transient service"
+REMOTE_RUNNER="/bin/bash /var/tmp/sparq-source/bench/ac/million/run-instance.sh ${MODE}"
+if [[ "${MODE}" == build ]]; then
+  REMOTE_RUNNER="/usr/bin/python3 /var/tmp/sparq-source/bench/ac/million/build-jobs.py serve --deadline ${DEADLINE_EPOCH}"
+fi
 # shellcheck disable=SC2029 # Validated numeric values intentionally expand client-side.
 ssh_with_ingress_retry \
   "sudo systemd-run --unit=sparq-pod-study --collect --slice=sparq-pod-bench.slice \
@@ -457,11 +520,11 @@ ssh_with_ingress_retry \
     --setenv=HOME=/home/ubuntu \
     --setenv=PATH=/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     --setenv=SPARQ_POD_CPUSET=${CPUSET} \
-    /bin/bash /var/tmp/sparq-source/bench/ac/million/run-instance.sh ${MODE}"
+    ${REMOTE_RUNNER}"
 
 START_EPOCH="$(date +%s)"
 SUCCESS=0
-while (( $(date +%s) - START_EPOCH < POLL_DEADLINE_SECONDS )); do
+while (( $(date +%s) - START_EPOCH < POLL_DEADLINE_SECONDS && $(date +%s) < DEADLINE_EPOCH - 300 )); do
   sleep "${POLL_INTERVAL_SECONDS}"
   refresh_ssh_ingress
   stage_pull
