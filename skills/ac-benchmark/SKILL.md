@@ -100,6 +100,10 @@ type or volume overrides that differ from that file. Set `SPARQ_POD_PRIOR_AWS_US
 to the accumulated conservative study spend. The shared benchmark slice and each
 server's cgroup must account for charged page cache as well as application memory.
 Raw request records and Pod inventories are retained with lossless compression.
+During canonical runs, retrieval skips live request, warmup and audit streams and
+collects their compressed files after close. The final retrieval also includes any
+unfinished streams, preserving partial failure evidence without accumulating a
+second uncompressed copy of every completed run on the client.
 
 For a bounded comparison with the engine's existing indexed storage, build the
 `sparq-lws-core` example `indexed_population_preview`. Its `--output-dir` must be

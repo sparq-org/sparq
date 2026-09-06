@@ -180,7 +180,14 @@ cleanup() {
 trap cleanup EXIT
 
 stage_pull() {
-  rsync -az --partial -e "ssh ${SSH_OPTIONS[*]}" \
+  local exclusions=()
+  # [GPT-6] Closed request streams arrive as zstd artifacts. Avoid retaining a
+  # second, uncompressed copy of every live stream on the smaller client disk.
+  # The final pull includes unfinished streams when a run stops early.
+  if [[ "${MODE}" == canonical && "${1:-live}" != final ]]; then
+    exclusions=(--exclude='*-requests.jsonl' --exclude='*-warmup.jsonl' --exclude='*-audit.jsonl')
+  fi
+  rsync -az --partial "${exclusions[@]}" -e "ssh ${SSH_OPTIONS[*]}" \
     "ubuntu@${PUBLIC_IP}:/var/tmp/sparq-pod-study/" "${RESULTS_LOCAL}/" 2>/dev/null || true
 }
 
@@ -472,7 +479,7 @@ while (( $(date +%s) - START_EPOCH < POLL_DEADLINE_SECONDS )); do
 done
 
 refresh_ssh_ingress
-stage_pull
+stage_pull final
 ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
   'sudo journalctl -u sparq-pod-study --no-pager' \
   >"${RESULTS_LOCAL}/systemd-journal.txt" 2>/dev/null || true
