@@ -44,6 +44,7 @@ pub mod consortium;
 pub mod workload;
 pub mod oracle;
 pub mod deployment;
+pub mod population;
 
 // ── GenParams ───────────────────────────────────────────────────────────────────────
 
