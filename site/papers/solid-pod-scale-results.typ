@@ -51,6 +51,41 @@
     successful_p95_us: observed-range(p95), timely_fraction: observed-range(timely),
     success_fraction: observed-range(successful))
 }
+// Resource summaries use the same admissible run set as response summaries.
+// A failing service guard remains measurable; missing/inconclusive runs supply no zero.
+#let model-resources(cells, model) = {
+  let valid = cells.filter(c => c.model == model and c.at("valid_for_inference", default: false) and
+    ("pass", "fail").contains(c.local_guard))
+  let peaks = valid.map(c => c.at("resources", default: (:)).at("samples", default: (:)).at("after", default: (:)).at("memory_peak_bytes", default: none))
+  let cpu = valid.map(c => c.at("resources", default: (:)).at("deltas", default: (:)).at("cpu_stat", default: (:)).at("usage_usec", default: none))
+  (peak_bytes: observed-range(peaks), cpu_us: observed-range(cpu))
+}
+#let storage-values(data, dataset, model) = {
+  let rows = data.at("corpora", default: ()).filter(c => c.dataset == dataset and c.model == model)
+  let empty = (records: none, quads: none, source_bytes: none, packed_index_bytes: none, allocated_bytes: none)
+  if rows.len() != 1 { return empty }
+  let row = rows.first()
+  // Storage arithmetic is independent of representative query admission. Older
+  // summaries have only the stricter combined gate, which remains a safe fallback.
+  if not row.at("storage_inventory_consistent", default: row.at("inventory_consistent", default: false)) { return empty }
+  let manifest = row.at("manifest", default: (:))
+  let present(key) = {
+    let v = manifest.at(key, default: none)
+    if v != none and (type(v) == int or type(v) == float) and v >= 0 { v } else { none }
+  }
+  let packed = present("packed_bytes")
+  let index = present("index_bytes")
+  let allocated = row.at("allocated_bytes_before_load", default: none)
+  (records: present("records"), quads: present("quads"), source_bytes: present("source_bytes"),
+    packed_index_bytes: if packed == none or index == none { none } else { packed + index },
+    allocated_bytes: if allocated != none and (type(allocated) == int or type(allocated) == float) and allocated >= 0 { allocated } else { none })
+}
+#let storage-number(value, divisor: 1, digits: 0) = {
+  if value == none { return "—" }
+  let scaled = value / divisor
+  let step = calc.pow(10, -digits)
+  if scaled > 0 and scaled < step { "<" + str(step) } else { num(scaled, digits: digits) }
+}
 #let range-label(observation, scale: 1, digits: 1) = {
   if observation.n == 0 { return "—" }
   // Outward rounding prevents nearly complete service fractions displaying 100%.
@@ -60,6 +95,12 @@
   if lo == hi { str(lo) } else { str(lo) + "–" + str(hi) }
 }
 #let range-cell(observation, scale: 1, digits: 1) = [#range-label(observation, scale: scale, digits: digits)#if observation.n > 0 { super(str(observation.n)) }]
+
+#let peak-cell(observation) = {
+  if observation.n == 0 { return [—] }
+  // Peak is the maximum across runs, rounded upward; the superscript is coverage.
+  [#(calc.ceil(observation.upper / calc.pow(2, 20) * 10) / 10)#super(str(observation.n))]
+}
 
 #let offered-label(cells, pair) = {
   if pair.rate_override != "derived" { return pair.rate_override }
@@ -88,30 +129,40 @@
         table.cell(rowspan: 2)[*Corpus / lane*\ *CPU/GiB · rps*],
         table.cell(colspan: 3)[*WAC*], table.cell(colspan: 3)[*ACP*],
         table.cell(rowspan: 2)[*p95 ratio*\ *95% CI*],
-        [*P/F/I/U*], [*OK p95*\ *ms*], [*Timely %*\ *OK %*],
-        [*P/F/I/U*], [*OK p95*\ *ms*], [*Timely %*\ *OK %*],
+        [*P/F/I/U*], [*OK p95 ms*\ *Peak MiB*\ *CPU s*], [*Timely %*\ *OK %*],
+        [*P/F/I/U*], [*OK p95 ms*\ *Peak MiB*\ *CPU s*], [*Timely %*\ *OK %*],
       ),
       ..data.paired_comparisons.map(p => {
         let rows = paired-cells(data, p)
         let ci = p.paired_p95_scheduled_response_ratio
         let wac = model-responses(rows, "wac")
         let acp = model-responses(rows, "acp")
+        let wac-resource = model-resources(rows, "wac")
+        let acp-resource = model-resources(rows, "acp")
         (
           [#dataset-label(p.dataset)\ #text(size: 7pt)[#group-label(p.group)\ #p.cpus/#p.memory_gib · #offered-label(rows, p)]],
           [#verdict-counts(rows, "wac")],
-          [#range-cell(wac.successful_p95_us, scale: 0.001)],
+          [#range-cell(wac.successful_p95_us, scale: 0.001)\
+           #peak-cell(wac-resource.peak_bytes)\
+           #range-cell(wac-resource.cpu_us, scale: 0.000001)],
           [#range-cell(wac.timely_fraction, scale: 100, digits: 2)\ #range-cell(wac.success_fraction, scale: 100, digits: 2)],
           [#verdict-counts(rows, "acp")],
-          [#range-cell(acp.successful_p95_us, scale: 0.001)],
+          [#range-cell(acp.successful_p95_us, scale: 0.001)\
+           #peak-cell(acp-resource.peak_bytes)\
+           #range-cell(acp-resource.cpu_us, scale: 0.000001)],
           [#range-cell(acp.timely_fraction, scale: 100, digits: 2)\ #range-cell(acp.success_fraction, scale: 100, digits: 2)],
           [#if ci.available { bounds(ci.ci95) } else { "unavailable" }],
         )
       }).flatten(),
     )
   }, caption: [Main local HTTP cells. P/F/I/U count passing, valid failing,
-    inconclusive and unmeasured repetitions. Absolute columns show between-run
-    min–max ranges, rounded outward; superscripts count contributing valid runs.
-    A dash is unavailable, not zero. “OK p95” uses successful responses only,
+    inconclusive and unmeasured repetitions. CPU/GiB means configured CPU affinity
+    count and server cgroup ceiling, not a CPU quota or whole-host memory minimum.
+    Absolute columns show between-run min–max ranges except “Peak”, the maximum
+    cgroup memory across valid runs, rounded up, including warm-up and charged file
+    pages. CPU seconds are the cgroup usage-counter difference after warm-up through
+    measurement and drain, not utilization. Superscripts count contributing valid
+    runs; dashes mean unavailable. “OK p95” uses successful responses only,
     from scheduled arrival to complete body. “Timely” and “OK” divide successful
     responses within #data.campaign.measurement.server_deadline_ms ms and all
     successful responses by *all offered requests*, including
@@ -137,6 +188,34 @@
       untested intervals; neither matching passing grid points nor their bootstrap
       interval establishes capacity equivalence. Displayed interval endpoints are
       rounded outward; decisions use full precision.])
+  }
+
+  let stored = data.campaign.at("corpora", default: ())
+  if stored.len() > 0 {
+    figure({
+      set text(size: 8pt)
+      table(columns: (1.15fr, 0.42fr, 0.9fr, 0.95fr, 0.8fr, 0.8fr, 0.85fr), inset: 3pt,
+        table.header([*Stored corpus*], [*Policy*], [*Records*], [*Quads*],
+          [*N-Quads*\ *GiB*], [*Pack + index*\ *GiB*], [*Allocated*\ *GiB*]),
+        ..stored.map(d => ("wac", "acp").map(model => {
+          let v = storage-values(data, d.id, model)
+          (
+            [#if model == "wac" { dataset-label(d.id) }], [#upper(model)],
+            [#storage-number(v.records)], [#storage-number(v.quads)],
+            [#storage-number(v.source_bytes, divisor: calc.pow(2, 30), digits: 2)],
+            [#storage-number(v.packed_index_bytes, divisor: calc.pow(2, 30), digits: 2)],
+            [#storage-number(v.allocated_bytes, divisor: calc.pow(2, 30), digits: 2)],
+          )
+        })).flatten().flatten(),
+      )
+    }, caption: [Stored data per policy language, before HTTP load. Records count
+      service records; quads also include structure and policy. N-Quads is serialized
+      source size, not occupied disk. Pack + index sums the two files' logical lengths.
+      Allocated is the whole corpus directory's measured disk allocation, including
+      the uncompressed inventory and manifest, before later journal growth. These
+      columns are different accounting boundaries and must not be added. Verified
+      storage totals can remain visible when representative query admission fails;
+      incomplete or inconsistent storage evidence is unavailable, not zero.])
   }
 
   let indexed = data.at("indexed_component_diagnostics", default: ()).filter(d => d.valid_for_component_inference)
