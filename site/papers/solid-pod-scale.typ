@@ -4,7 +4,8 @@
 #let baseline = json("../../research/solid-pod-scale-baseline.json")
 #let workload = json("../../bench/ac/million/workload.json")
 #let derived = json("../../bench/ac/million/workload-derived.json")
-#let protocol = json("../../bench/ac/million/protocol.json")
+#let frozen = json("../../bench/ac/million/campaign-20260906.json")
+#let messaging = json("../../bench/ac/million/messaging-volume-config.json")
 #let corpus = json("../../research/solid-pod-scale-corpus.json").calibration
 #let pilot = json("../../research/solid-pod-scale-pilot.json")
 #let pilot_row(profile, pods, model) = pilot.configurations.find(x => x.label == "pilot-" + profile + "-" + str(pods) + "-" + model)
@@ -93,9 +94,10 @@ must cover a realistic active working set.
 
 Our question is therefore practical: *Can we support efficient, access-controlled
 SPARQL queries over Solid Pods at scale?* The target is a single modest machine
-holding a million populated Pods, with a two-million-Pod extension if resources
-permit. We seek the smallest successful configuration within a stated set of CPU
-and memory limits. Success requires correct authorization and useful response
+holding a million populated Pods, with a two-million-Pod extension. The frozen
+campaign separates compact populated-Pod controls at those scales from bounded
+retained-history experiments. We report successful configurations within the
+selected CPU and memory limits. Success requires correct authorization and useful response
 times under a declared service workload. The population target is an experimental
 question, rather than an assumed outcome.
 
@@ -114,7 +116,8 @@ in WAC and ACP. The workload is central to the contribution. We model retained
 service histories, not just a fixed number of arbitrary triples, and derive the
 offered request rate from explicit user journeys. Published observations and
 public data provide calibration anchors; unsupported frequencies remain visible
-assumptions with sensitivity experiments.
+assumptions. The frozen sensitivity cells vary message stock and literal
+compressibility.
 
 The data boundary is structured service records and metadata for photos, videos
 and attachments. The benchmark does not store their original binary payloads.
@@ -169,14 +172,14 @@ SPARQL route.
   A cache miss also includes loading the Pod and preparing its authorization state.],
 ) <architecture>
 
-The request path in @architecture selects the
-Pod before graph enumeration. On a cache hit, the server reuses its indexes and
-authorization state. On a miss, it reads the already populated persistent data and
-reconstructs the same state. The active cache limits Pod count and retained input
-bytes; the complete population is not represented by a resident `PodStore` for
-each person. That input budget does not bound materialized heap state: an external
-cgroup enforces the actual memory limit. A manifest
-allows the generator and loader to account for every persisted Pod.
+The request path in @architecture selects the Pod before graph enumeration.
+HTTP storage uses one compressed N-Quads frame per Pod and an offset index.
+A cache miss reads and decompresses the frame, parses RDF, builds in-memory
+indexes and materializes authorization; a hit reuses this state. This is distinct
+from the native indexed-file reopening tested in the separate component diagnostic.
+The cache limits resident Pod count and retained input bytes. An external cgroup
+bounds actual memory, including materialized state and charged file pages.
+A manifest accounts for every persisted Pod.
 
 SPARQ exposes WAC and ACP materialization through a common authorization index
 and session-specific dataset view. This makes similar warm query costs plausible:
@@ -286,20 +289,18 @@ WhatsApp donors were asked for their most important
 #observations.dona.whatsapp.requested_important_chats.first()–#observations.dona.whatsapp.requested_important_chats.last()
 chats; Facebook exports covered all chats. This young, self-selected cohort
 supports testing substantial multi-year histories, not a population distribution.
-It motivates a proposed #observations.messaging_sensitivity.monthly_records\-message/month
+It motivates the frozen #messaging.monthly_records.communication\-message/month
 sensitivity while preserving the central scenario. Dividing these separate
 medians would not estimate an observed arrival rate; text and binary sizes remain
 outside this count-based evidence.
 
 The remaining volume model specifies retention periods and event rates openly.
-The central scenario retains #corpus.history_months.value months; lower and heavier
-variants vary retention and activity. @volumes shows the base rates. A shared
-activity factor correlates volumes across
-domains, preventing an implausible population in which every service is sampled
-independently. That correlation is a modeling choice until joint observations
-validate it. The corpus manifest distinguishes such assumptions from observed
-source statistics and records the generated distribution rather than just its
-mean.
+All frozen retained-history variants use #corpus.history_months.value months.
+@volumes shows the base rates. The shared intensity mixture assigns
+#corpus.population_intensity.classes.map(c => str(c.weight) + "% at " + rounded(c.numerator / c.denominator, digits: 1) + "×").join(", ").
+It imposes cross-domain volume correlation; neither the class frequencies nor
+that correlation is empirically validated. The corpus manifest records the
+resulting distribution. Retention and activity sweeps remain future experiments.
 
 #figure(
   {
@@ -322,26 +323,11 @@ mean.
   other numeric base rates and the activity mixture are assumptions.],
 ) <volumes>
 
-#figure(
-  table(columns: (1.05fr, 1.45fr, 1.55fr),
-    table.header([*Dimension*], [*Validation evidence*], [*What remains assumed*]),
-    [Record types], [Export formats and service schemas], [Future service coverage and mapping choices],
-    [Retained volume], [Rating-count marginal and payment mean], [Other rates, retention, tails and deletion],
-    [Relationships], [Identifiers, accounts and temporal constraints], [Cross-service correlation and link degree],
-    [Sharing], [Named household and collaboration scenarios], [Their frequency, audience size and churn],
-    [Demand], [Observed device interaction counts], [Queries per journey, caching, fanout and background work],
-  ),
-  caption: [Evidence coverage. A validated schema or one empirical marginal does
-  not establish the full joint distribution of future personal data.],
-) <coverage>
-
-The corpus manifest records per-domain counts, triples, serialized bytes, resource
-counts and the largest Pods. The remaining validation plan adds link-degree and
-query-selectivity distributions, temporal checks and held-out comparisons where
-independent samples are available. Those comparisons and the retention, activity
-and sharing sensitivities have not yet been completed. The available observations
-therefore support a partially calibrated scenario, not a statistically
-representative joint distribution of future Pod contents.
+The manifest records per-domain counts, triples, serialized bytes, resource
+counts and the largest Pods. Joint link-degree and selectivity calibration,
+held-out validation, and retention, activity and sharing sweeps remain outside
+this campaign. The available observations support a partially calibrated scenario,
+not a statistically representative joint distribution of future Pod contents.
 
 Original photos, videos and attachments are excluded from both storage totals
 and request bodies. Their metadata includes the fields needed by the modeled
@@ -359,26 +345,25 @@ capacity result for it must retain that qualification.
 
 == Why these permissions
 
-Private personal records motivate owner-only access. Calendars and selected
-documents motivate sharing with named people. Household media and collaborative
-collections motivate recipient sets and inherited folder permissions. Public
-profiles motivate anonymous reads. A private item inside a shared collection
-motivates an exception. These cases exercise the mechanisms applications need
-without assuming that every resource has its own independent rule.
+The intended rights are fixed, application-motivated scenarios. Communication,
+contacts, transactions, activity and location are owner-private. The owner retains
+all content modes; one named recipient may read calendars, and
+#messaging.group_members named recipients may read media metadata. Ratings are
+publicly readable. One in every #messaging.private_exception_every calendar or
+media monthly resources is owner-only; the compact fixture uses every second
+resource.
+These choices model private records, sharing and exceptions without claiming
+measured policy frequencies.
 
-The generator first assigns intended rights to resources and recipient identities.
-It then emits WAC or ACP policies for the same assignments. For example, replacing
-inherited WAC permissions with a private resource ACL may require a different
-ACP policy structure to achieve the same effective rights. A deny used for that
-equivalent exception is part of the paired scenario. Additional client, issuer
-or other language-specific conditions are reported separately.
-
-Recipient count, hierarchy depth, direct-policy coverage and policy reuse vary
-independently. Their central frequencies are scenario assumptions, not published
-measurements of typical Pods. Reporting only owner reads would make most sharing
-rules irrelevant, so correctness probes include recipients, unrelated authenticated
-people, anonymous requests and revoked recipients. Performance schedules likewise
-identify the requester mix instead of hiding it inside an authorization cache.
+The generator assigns these rights first, then emits WAC or ACP. WAC encodes
+shared media with `agentGroup`; ACP expands the same fixed members into agent
+matchers. A private resource ACL shadows inherited WAC grants; the equivalent
+ACP exception denies inherited recipients. Membership, hierarchy and policy
+placement remain fixed during timing. Shared owner administration changes the
+selected calendar grant, with recipient, owner and anonymous probes before and
+after revocation, eviction and restart. This does not test dynamic group membership
+or additional client/issuer conditions. Correctness tests include unrelated
+requesters; the performance identity mix is explicit below.
 
 == From people to offered requests
 
@@ -391,8 +376,9 @@ foreground query rate is
 
 $ lambda_Q = N a / 86400 sum_j u_j r_j (1-c_j) f_j / b_j. $
 
-Background reads, content writes and policy writes add separately. A busy-period
-multiplier raises the offered rate without changing the stored population.
+Background reads, content writes and policy writes add separately. A
+#workload.offered_multiplier_scenarios.at("busy-period")× busy-period multiplier
+raises the offered rate without changing the stored population.
 Fanout is counted as separately authorized target-Pod requests; it does not
 assume that one request provides unbounded federation over the whole service.
 
@@ -408,6 +394,12 @@ observations of broad service use motivate multiple domains, rather than a
 numerical conversion from time online to SPARQL queries @ofcom. Application
 caching and fanout are separate because they can substantially change backend
 traffic @memcache.
+
+A Google Photos engineering account reports media and product metadata in
+Spanner, serving both interactive services and batch processing @photos-spanner.
+This supports treating metadata as a substantial query workload and including
+background work. It supplies no per-person request rate for Solid; the background
+frequencies below remain scenario assumptions.
 
 #figure(
   {
@@ -427,15 +419,18 @@ traffic @memcache.
   are added separately.],
 ) <journeys>
 
-With the declared active fraction and background work, this model implies
+With #rounded(100 * workload.population.daily_active_fraction)% daily-active people,
+#derived.per_hosted_person_daily_requests.at("background-read") background reads
+and #derived.per_hosted_person_daily_requests.at("policy-write") policy attempts
+per hosted person per day, this model implies
 #rounded(rate(1000000, "daily-average").total_rps) total requests per second at
 one million hosted Pods on an average day, and
 #rounded(rate(1000000, "busy-period").total_rps) during the chosen busy period.
 These are *derived demand targets*, not measured server throughput. The artifact
-exposes each component, including writes. The planned sensitivity experiments
-vary activity, cache effectiveness, fanout, background synchronization and policy
-churn. Uniform target selection and a skewed active working set distinguish
-population size from the portion repeatedly accessed.
+exposes each component, including writes. The frozen campaign keeps activity,
+client caching, fanout and background rates fixed and selects target Pods uniformly.
+Changing stored population and cache size exposes working-set effects. Skewed
+activity and broader demand or policy sweeps remain outside these measurements.
 
 The pilot exercises eleven concrete templates: a bound record lookup, all-visible
 record count, transaction star, communication/contact join, per-service aggregate,
@@ -503,8 +498,9 @@ creating new resources or containers requires a separate experiment.
 The primary server target is a #workload.latency_budget.complete_server_response_p95_ms ms
 95th-percentile complete response, including queueing, authentication, authorization,
 loading where necessary, SPARQL and serialization. This reserves time for network
-transit and client work within the declared one-second interactive journey. The
-target is an experimental usability criterion, not a deadline specified by Solid.
+transit and client work within the declared one-second interactive journey,
+including a #workload.latency_budget.client_processing_budget_ms ms client allowance.
+These are experimental usability budgets, not deadlines specified by Solid.
 User-relevant latency and availability must be measured explicitly @sre.
 
 The workload also declares local, regional and mobile-stress network profiles,
@@ -517,42 +513,48 @@ Summing component 95th percentiles would not establish a journey percentile.
 
 = Evaluation method
 
-@protocol-numbers makes the proposed canonical conditions explicit. These are
-scenario choices and experimental controls; the exploratory pilot below uses a
-shorter, fixed-rate schedule and does not satisfy this protocol.
+Frozen campaign #raw(frozen.campaign_id) defines the selected cells in
+@campaign-cells.
+The earlier baseline and short HTTP pilot remain separate experiments.
+The full host is a #raw(frozen.host.instance_type) with
+#frozen.host.physical_vcpus vCPUs, #frozen.host.physical_memory_gib GiB RAM and
+a #frozen.host.volume_gib GiB volume. Server and client use disjoint CPU sets.
+A small server quota is a measured process-and-cache allowance, not the total
+host RAM requirement or evidence that every request performs physical disk I/O.
+
+Each cell schedules #frozen.seeds.len() independently restarted WAC/ACP pairs with
+alternating order and fresh journals. A #frozen.measurement.warmup_seconds s
+constant-arrival owner-read warm-up precedes at least
+#frozen.measurement.measurement_seconds s and #frozen.measurement.minimum_offered
+Poisson-scheduled requests, with a #frozen.measurement.request_timeout_ms ms timeout.
+The client admits at most #frozen.measurement.maximum_inflight requests in flight;
+each worker queues at most #frozen.measurement.queue_capacity_per_worker requests.
+Swap is disabled. These controls do not change the declared demand assumptions.
 
 #figure(
   {
-    set text(size: 9pt)
-    table(columns: (1fr, 2.4fr),
-      table.header([*Parameter*], [*Declared value*]),
-      [Daily-active fraction], [#rounded(100 * workload.population.daily_active_fraction)% of hosted people],
-      [Daily requests/person], [Foreground #derived.per_hosted_person_daily_requests.query,
-        background #derived.per_hosted_person_daily_requests.at("background-read"),
-        content writes #rounded(derived.per_hosted_person_daily_requests.at("content-write"), digits: 2),
-        policy writes #derived.per_hosted_person_daily_requests.at("policy-write")],
-      [Arrival multipliers], [Busy #workload.offered_multiplier_scenarios.at("busy-period")×;
-        burst #workload.offered_multiplier_scenarios.burst× the daily mean; scheduled open-loop arrivals],
-      [Resource tiers], [#protocol.hardware.cpu_tiers.map(str).join(", ") CPUs;
-        #protocol.hardware.memory_gib_tiers.map(str).join(", ") GiB; swap disabled],
-      [Independent runs], [#protocol.measurement.independent_paired_runs pairs;
-        #protocol.measurement.warmup_seconds s warm-up;
-        at least #protocol.measurement.measurement_seconds s and
-        #protocol.measurement.minimum_offered_per_run offered requests;
-        #protocol.measurement.request_timeout_ms ms timeout],
-      [Response/journey budget], [#workload.latency_budget.complete_server_response_p95_ms ms server p95;
-        #workload.latency_budget.interactive_journey_p95_ms ms journey p95;
-        #workload.latency_budget.client_processing_budget_ms ms client allowance],
-      ..workload.network_profiles.map(n => (
-        [Unmeasured network: #n.id], [RTT #n.round_trip_delay_ms ms; one-way jitter #n.one_way_jitter_ms ms;
-          loss #rounded(100 * n.packet_loss_fraction, digits: 1)%; #n.bandwidth_mbit_per_second Mbit/s],
+    set text(size: 8.5pt)
+    table(columns: (1.25fr, 1.65fr, 0.55fr, 0.8fr, 0.8fr), inset: 4pt,
+      table.header([*Experiment*], [*Corpus and stored Pods*], [*CPUs*], [*GiB*], [*Offered rps*]),
+      ..frozen.groups.map(g => (
+        [#(
+          "compact-fixed-population": "Fixed-load population",
+          "population-control": "Population demand",
+          "compact-rate-bracket": "Compact rate bracket",
+          "retained-history-cold": "History cold/churn",
+          "retained-history-larger": "History/size stress",
+          "retained-history-hot": "History hot set",
+        ).at(g.id)],
+        [#g.datasets.map(d => d.replace("-", " ")).join(", ")],
+        [#g.cpus.map(str).join(", ")], [#g.memory_gib.map(str).join(", ")],
+        [#if g.at("rates", default: none) == none { "inventory-derived" } else { g.rates.map(str).join(", ") }],
       )).flatten(),
     )
   },
-  caption: [Central protocol parameters. Daily rates include inactive hosted
-  people in their denominator; all quantities in this table are declared,
-  not measured demand or capacity.],
-) <protocol-numbers>
+  caption: [Frozen selected cells, not a full cross-product of resource tiers.
+  A listed cell can remain unmeasured under the recorded admission and stopping
+  rules. Only compact controls reach the million-Pod targets in this matrix.],
+) <campaign-cells>
 
 == Correctness is an admission condition
 
@@ -572,59 +574,59 @@ owner-administration boundary are checked for the operations included in the
 workload. Invalid, expired or
 incorrectly bound credentials must be rejected before query evaluation.
 
-Every persisted Pod is verified against a manifest and checksum. A seeded query
-sample spans volume quantiles, domains, policy placement and sharing scenarios;
-all distinct generated policy scenarios receive oracle coverage. This verifies
-the actual population on disk without claiming that a small sample exhaustively
-proves every possible query. A wrong authorization result, durable receipt or
+Every persisted Pod is counted in a checksummed inventory. Before a dataset is
+eligible for timing, the runner selects the smallest and largest serialized Pod
+in every observed intensity class, using Pod ID to break ties, and checks those
+representatives against the rights/result oracle. Dedicated HTTP probes check
+policy changes. Inventory accounting is exhaustive; query verification is sampled
+and does not prove every possible answer. A wrong authorization result, durable receipt or
 replayed state quarantines all inferential results from that source. A resource
 or admission failure instead rejects its dataset/configuration; it does not
 invalidate independently verified compact controls.
 
 == Storage, working set and service capacity
 
-The scale ladder begins with pilot-sized populations and proceeds to the million-
-and two-million-Pod targets where storage, resource and cost ceilings allow it.
-The central and heavier personal corpora retain their stated volumes. If a corpus
-cannot fit, that outcome is reported with observed bytes and the limiting resource;
-its records are not thinned after inspecting performance. Loading time, index size,
-policy size, startup and recovery are part of the resource report.
+The frozen compact storage ladder calls for
+#frozen.corpora.filter(c => c.profile == "smoke").map(c => str(c.pods)).join(", ")
+physically populated Pods per policy language. Only the populations in
+@campaign-cells receive HTTP load cells. Retained-history cells are limited to
+#calc.max(..frozen.corpora.filter(c => c.profile != "smoke").map(c => c.pods)) Pods;
+no million-Pod retained-history run is included. Records are not thinned after
+observing performance. Admission failures and unreached cells remain visible.
+The earlier baseline supplies the fixed-target isolation evidence.
 
-On the query path, a fixed-target experiment first isolates the effect of adding
-unrelated stored Pods. The working-set experiments then compare a repeated hot
-Pod, first touches, application-cache churn, uniform requests across the population
-and skewed activity. Application and operating-system caches are distinguished:
-a process restart does not by itself make disk data cold. The manifest records
-the actual cache preparation for each run.
+Each main run begins with an operating-system cache drop and a fresh server,
+then the declared owner-read warm-up. Measurement therefore starts from a recorded
+post-warm-up state, not a guaranteed cold cache. Uniform target selection over
+the bounded active cache creates misses as the population grows. Cache headers
+and loading phases expose those events. There is no separate skewed or first-touch
+sweep. The eight-Pod hot set is a fixed prefix and does not cover every intensity
+class in the larger population.
 
-Capacity uses scheduled arrivals at rates derived from the population model. A
-slow server must not cause the generator to lower the offered rate automatically.
-We record the original arrival time, send time and completion time, including
-requests that could not be sent, were rejected or timed out. This avoids the
-coordinated-omission problem that can make overloaded services appear responsive
-@wrk2. Server latency, network latency and generator lag are reported separately,
-and all offered requests remain in the success and deadline denominators.
+All cells retain the journey and mutation mix. Population-demand cells derive
+the rate from stored compact inventory; the other cells use the fixed diagnostic
+rates in @campaign-cells. Open-loop scheduling records intended arrival, dispatch
+and complete response, retaining unsent, rejected and timed-out requests. This
+avoids coordinated omission @wrk2. Server production time, complete local HTTP
+time and generator lag are separate; network journey latency is unmeasured.
 
-The machine is tested under explicit CPU and memory limits. Memory accounting
-includes the operating-system page cache charged to the server's cgroup, alongside
-process RSS and PSS. A byte-bounded application cache is useful but cannot alone
-establish a memory bound for the service. Swap is disabled. Disk totals include
-content, policies, indexes, allocated blocks and required journal state; replication
-and backups are outside this single-machine experiment and identified as such.
-
-We select the smallest passing memory tier and then the fewest passing CPUs
-within the tested tiers. Storage and price are reported alongside that choice.
-This procedure identifies a small tested configuration; it does not establish a
-global hardware minimum across all implementations and device types.
+Cgroup accounting includes charged file pages, with process RSS/PSS reported
+separately. Memory peak includes warm-up; admission requires both resource
+snapshots and no OOM. Content, policies, indexes and measured allocation are
+reported; pre-load disk snapshots exclude subsequent journal growth. Audits check
+durable receipts and replay after each run. The hot-set ladder stops at the first
+memory tier passing both languages in all repetitions. Other resource cells are
+fixed; there is no independent search for the fewest CPUs. Reported small quotas
+identify tested configurations, not a global minimum or a complete hosting budget.
 
 == Comparing WAC and ACP
 
 Each language receives identical content, intended rights and offered request
 schedule. We alternate their order across independently restarted run pairs and
 retain all failed attempts. Warm-up and measurement durations, schedule seeds,
-timeouts and the minimum request count are fixed in the protocol before the
-canonical campaign. The shipping release profile is used on a quiet dedicated
-Linux host; workstation timings remain exploratory.
+timeouts and the minimum request count are frozen before the main campaign.
+The shipping release profile runs on the dedicated Linux host; workstation
+timings remain exploratory.
 
 The practical equivalence interval for an ACP/WAC ratio is
 $[1 / 1.10, 1.10]$. For each required common-rights scenario, the confidence interval
@@ -635,9 +637,8 @@ estimates, is not evidence of equivalence.
 
 Confidence intervals resample independent paired runs, rather than pretending
 that every request in one run is an independent experiment. The primary comparison
-uses p95 at the same hardware and offered load. Sustainable goodput is established
-separately for each language by a saturation search under the same service
-objective. Each language supplies a highest tested passing rate and, where
+uses p95 at the same hardware and offered load. The compact rate grid bounds
+operational capacity separately for each language under the same service objective. Each language supplies a highest tested passing rate and, where
 reached, a consistently failing upper rate. Equal completion rates
 at a shared low offered rate are capped by the client and cannot establish
 capacity equivalence. Let the passing and failing bounds be $L_W, U_W$ for
@@ -647,14 +648,21 @@ equivalence margin: identical highest passing points on a coarse grid are
 insufficient. A paired confidence interval for the tested-grid statistic does
 not narrow untested intervals. Missing bounds or repetitions, mixed pass/fail
 repetitions, or nonmonotone results leave capacity equivalence unestablished.
-Cold loading, policy materialization, memory and update
-latency are reported separately; similar warm queries would not erase differences
-in those costs.
+The frozen grid's adjacent rates are too widely separated to establish this
+10% capacity-equivalence margin, even if both languages share the same passing
+grid points. Its capacity result is a bound, not a resolved equivalence test.
+Loading, materialization and update costs remain separate diagnostics.
 
 A tested configuration supports the modeled busy-period service only if all
-required runs pass correctness, achieve at least 99% successful completions, and
-complete at least 95% of all offered requests successfully within the server
-deadline, without growing queues or exceeding the memory ceiling. Read-only
+required runs pass correctness, achieve at least
+#rounded(100 * frozen.measurement.success_fraction)% successful completions, and
+complete at least #rounded(100 * frozen.measurement.deadline_fraction_of_all_offered)%
+of all offered requests successfully within the deadline and memory ceiling.
+The queue guard requires #rounded(100 * frozen.measurement.queue_stability.required_timer_coverage_fraction_of_offered)%
+timer coverage. Last-quarter queue p95 may exceed first-quarter p95 by at most the
+larger of #rounded(frozen.measurement.queue_stability.allowed_growth_us_floor / 1000) ms
+and #rounded(100 * frozen.measurement.queue_stability.allowed_growth_fraction_of_first_quarter)%
+of that first-quarter value. Read-only
 measurements establish read capacity. They do not satisfy the mixed-operation
 service criterion by omitting its writes.
 
@@ -682,11 +690,9 @@ cells. The server-wide assembly path met it in #old("native_pass_count") of
 using the upper confidence bounds of the endpoint ratio and Pod-count elasticity.
 The endpoint ratio could increase by at most
 #rounded(100 * (old("endpoint_ratio_threshold") - 1))%, and the elasticity upper
-bound had to remain at most #old("elasticity_threshold"). The elasticity is the
-slope of log cost against log Pod count. @baseline-effects shows effect sizes for
-every domain/query cell, rather than just the pass counts.
-These verdicts are generated from the original source artifact, rather than
-recomputed with a threshold selected for the new study.
+bound had to remain at most #old("elasticity_threshold"). Elasticity is the slope of log cost against log Pod count. @baseline-effects
+summarizes the original cell estimates and intervals; the reused verdicts retain
+the original thresholds.
 
 #figure(
   {
@@ -734,7 +740,9 @@ Its input checksums and all request sequences pass the extractor's integrity
 checks. Each configuration offered #history8.requests.offered requests at
 #history8.requests.settings.rate requests/s, selected Pods uniformly and chose
 uniformly among the eleven query templates. Reads and existing-value replacements
-used the owner identity. A single worker served each language in a fixed order,
+used the owner identity. The pilot host records
+#pilot.host_environment.at("CPU(s)") #pilot.host_environment.at("Model name") CPUs
+(#pilot.host_environment.Architecture); one HTTP worker served each language in a fixed order,
 with a cache of #history8.server.settings.at("cache-pods") Pods and
 #rounded(int(history8.server.settings.at("cache-bytes")) / calc.pow(2, 20)) MiB of
 encoded input. These are pilot controls, not the population-derived canonical mix.

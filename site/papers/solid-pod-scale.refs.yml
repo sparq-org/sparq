@@ -203,3 +203,15 @@ dona:
     volume: 57
   serial-number: "94"
   url: https://doi.org/10.3758/s13428-024-02593-z
+
+photos-spanner:
+  type: web
+  title: "The big picture: How Google Photos scaled rapidly on Spanner"
+  author:
+    - Perra, Dave
+    - Ferrell, Tracy
+  date: 2023-07-17
+  parent:
+    type: web
+    title: Google Cloud Blog
+  url: https://cloud.google.com/blog/products/databases/google-photos-builds-user-experience-on-spanner
