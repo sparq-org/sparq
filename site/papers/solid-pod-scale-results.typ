@@ -20,6 +20,7 @@
 }
 
 #let num(value, digits: 1) = if value == none { "—" } else { str(calc.round(value, digits: digits)) }
+#let units(value, divisor) = num(if value == none { none } else { value / divisor })
 #let bounds(interval) = if interval == none { "unestablished" } else {
   // Outward rounding preserves the printed uncertainty interval.
   "[" + str(calc.floor(interval.first() * 1000) / 1000) + ", " + str(calc.ceil(interval.last() * 1000) / 1000) + "]"
@@ -94,10 +95,32 @@
       rounded outward; decisions use full precision.])
   }
 
-  [The source-bound analysis also retains per-operation failures, timeout and
-  admission-drop classifications, acknowledged and durably resolved mutations,
-  no-ops, policy probes, inventory totals and before/after cgroup measurements.
-  Its complete cell table records why a planned cell failed or remained unmeasured.
-  These diagnostics are part of the evidence, even where a capacity ratio is
-  unavailable.]
+  let indexed = data.at("indexed_component_diagnostics", default: ()).filter(d => d.valid_for_component_inference)
+  if indexed.len() > 0 {
+    figure({
+      set text(size: 8.5pt)
+      table(columns: (0.5fr, 0.75fr, 1fr, 1fr, 0.75fr, 1fr), inset: 4pt,
+        table.header([*Policy*], [*Index form*], [*Parse + ready*\ *median ms*], [*Open + ready*\ *median ms*], [*Files*], [*Allocated MiB*]),
+        ..indexed.map(d => ("raw", "compressed").map(storage => (
+          [#upper(d.model)], [#storage],
+          [#units(d.timing_ns.parse_plus_memory_authorized_ready_ns.p50, 1000000)],
+          [#units(d.timing_ns.at("open:" + storage + ":open_to_authorized_ready_ns").p50, 1000000)],
+          [#d.footprint.at(storage).final_list_files],
+          [#units(d.footprint.at(storage).snapshots.open.allocated_bytes.total, calc.pow(2, 20))],
+        ))).flatten().flatten(),
+      )
+    }, caption: [Bounded indexed component diagnostic:
+      #indexed.map(d => upper(d.model) + " " + str(d.configuration.pods) + " Pods / " + str(d.exact_comparisons.confirmed_matches) + " exact comparisons").join("; ").
+      Timings include authorization readiness; parsing excludes generation and save.
+      Reopening retains index validation. Medians span these Pods, not independent
+      repetitions. Cache state is uncontrolled after file generation; file and
+      allocated-byte totals cover each stored index form. No HTTP or million-Pod
+      indexed-capacity result follows.])
+  }
+
+  [The source-bound analysis retains cache hit, miss and missing-header counts
+  alongside phase distributions; missing headers are never inferred misses.
+  Per-operation failures, resolved mutations, no-ops, policy probes, inventories
+  and cgroup snapshots remain available for every measured cell. The full table
+  also records why each planned cell failed or remained unmeasured.]
 }
