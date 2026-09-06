@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # [OPUS-5] 🤖 SPARQ agent — derive a PR's `area:` conflict-partition labels from its
 # changed paths. Registry issue jeswr/agent-account-registry#677.
-"""pr-area-labels.py — the ONE deriver used by both the per-PR workflow and the backfill.
+"""pr-area-labels.py — the ONE deriver used by both the per-PR workflow and the backfill,
+plus the `--check-totality` gate over the tree the same table must cover.
 
 WHY (measured, reg#677 2026-07-26): the fleet scheduler partitions work by `area:<name>`.
 An in-flight PR RESERVES its areas; a ready issue defers while any of its areas is
@@ -52,6 +53,10 @@ MODES
   --pr N        derive (and with --apply, label) a single PR. Used by the workflow.
   --backfill    derive (and with --apply, label) every OPEN PR in one pass.
   --self-test   hermetic assertions; no network. Run by routing-self-tests.yml.
+  --check-totality  assert EVERY git-tracked path attributes to an area; exit non-zero
+                listing the ones that do not. No gh, no network, no PR context. Run by
+                docs-quality's `quick-gates` — the lane with no `paths:` filter, so the
+                PR that ADDS an unmapped path is the one that reds (issue #5160).
 
 FORK PRs: `pull_request` (not `pull_request_target`) hands a fork PR a READ-ONLY token,
 so no label write can succeed. That path is handled EXPLICITLY: pass
@@ -366,6 +371,73 @@ def unresolved_paths(pr, policy, known_areas):
     return out
 
 
+# ----------------------------------------------------------------------- totality
+
+
+def tracked_paths(root=REPO_ROOT):
+    """Every git-tracked repo-relative path, or None when git cannot answer.
+
+    Reads the INDEX (`git ls-files`), so it is correct on a shallow CI checkout and
+    needs no network, no toolchain and no `gh`.
+    """
+    proc = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                          capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        return None
+    return [p for p in proc.stdout.split("\0") if p]
+
+
+def unattributed_tracked(policy, known, tracked=None):
+    """The tracked paths that attribute to NOTHING under `policy` — i.e. every path
+    whose PR would fall back to the serializing `__global__` partition.
+
+    THE one computation behind both the `--check-totality` gate below and
+    `test_pr_area_labels.py`'s totality assertion plus its non-vacuity guard, so a
+    neutered version reds the suite rather than silently passing the gate.
+    """
+    if tracked is None:
+        tracked = tracked_paths()
+    if tracked is None:
+        return []
+    return sorted({p for p in tracked if attribute(p, policy) not in known})
+
+
+def check_totality(out, err=None):
+    """TOTALITY over the real tree: every tracked path must attribute to an area.
+
+    WHY THIS IS A CLI MODE (issue #5160). The assertion has to run on the PR that can
+    BREAK it, and what breaks it is a NEW path — a root-level config file, a new
+    top-level directory — that no `paths:` filter can name in advance. routing-self-tests
+    is path-filtered, so a PR adding only `.jscpd.json` matched no trigger, never ran the
+    suite, and merged with the gate already broken; the red then landed on the next,
+    unrelated PR that happened to touch a filtered path (reported on #5150). So this runs
+    from docs-quality's `quick-gates`, which carries NO `paths:` filter and therefore
+    sees every PR. Hermetic: policy TOML + `git ls-files`, no `gh`, no network.
+    """
+    err = err or sys.stderr
+    policy = load_policy()
+    known = policy.members | policy.non_crate
+    tracked = tracked_paths()
+    if not tracked:
+        print("::error title=area-totality inert::`git ls-files` returned nothing; the "
+              "totality of ci/area-labels.toml could NOT be checked. Fail closed rather "
+              "than report a vacuous pass.", file=err)
+        return 2
+    unresolved = unattributed_tracked(policy, known, tracked=tracked)
+    if unresolved:
+        shown = ", ".join(unresolved[:20])
+        more = f" (+{len(unresolved) - 20} more)" if len(unresolved) > 20 else ""
+        print(f"::error title=area-totality::{len(unresolved)} tracked path(s) attribute "
+              f"to no `{AREA_PREFIX}` partition, so every PR that touches one takes the "
+              f"serializing {GLOBAL} partition and defers the whole issue frontier: "
+              f"{shown}{more}. Add a [[map]] row to ci/area-labels.toml (or, for a path "
+              f"that does not exist yet, a [policy] anticipated_roots entry).", file=err)
+        return 1
+    print(f"area-totality OK: all {len(tracked)} tracked path(s) attribute to an "
+          f"`{AREA_PREFIX}` partition", file=out)
+    return 0
+
+
 # ------------------------------------------------------------------------ github I/O
 
 
@@ -575,10 +647,18 @@ def main(argv=None, runner=None, out=None):
                     help="the PR head repo full_name. When it is not --repo the PR is a "
                          "FORK PR whose `pull_request` token is READ-ONLY: report and exit 0.")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--check-totality", action="store_true",
+                    help="assert every git-tracked path attributes to an area and exit "
+                         "non-zero listing the ones that do not. Reads only the policy "
+                         "TOML and the git index — no `gh`, no network, no PR context. "
+                         "Wired into docs-quality quick-gates, the unfiltered lane, so a "
+                         "PR that ADDS an unmapped path fails on ITS OWN run (#5160).")
     args = ap.parse_args(argv)
 
     if args.self_test:
         return _self_test()
+    if args.check_totality:
+        return check_totality(out)
     if args.apply and args.dry_run:
         print("--apply and --dry-run are mutually exclusive", file=sys.stderr)
         return 2
