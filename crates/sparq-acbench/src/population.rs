@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
+pub mod mutation;
+
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const ACL: &str = "http://www.w3.org/ns/auth/acl#";
 const ACP: &str = "http://www.w3.org/ns/solid/acp#";
@@ -782,13 +784,7 @@ fn write_record<W: Write>(
 ) -> io::Result<()> {
     let subject = format!("{doc}#r{record}");
     let contact = format!("{root}contacts/m0000.ttl#r{}", record % contacts);
-    let absolute_month = 2026 * 12 - config.history_months + month;
-    let date = format!(
-        "{:04}-{:02}-{:02}T12:00:00Z",
-        absolute_month / 12,
-        absolute_month % 12 + 1,
-        local % 28 + 1
-    );
+    let date = record_date(config, month, local);
     out.iri(&subject, RDF_TYPE, &format!("{VOCAB}Record"), doc)?;
     out.iri(
         &subject,
@@ -805,17 +801,7 @@ fn write_record<W: Write>(
         doc,
     )?;
     out.iri(&subject, &format!("{VOCAB}contact"), &contact, doc)?;
-    let salt = match config.literal_profile {
-        LiteralProfile::Compact => 0,
-        // FNV-1a over the Pod root makes otherwise equivalent record positions
-        // independent across Pods; this salt is absent from the legacy profile.
-        LiteralProfile::PodSpecific | LiteralProfile::Seeded { .. } => {
-            root.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-            }) ^ mix(service as u64)
-        }
-    };
-    let value = mix(config.seed ^ record ^ u64::from(month) ^ salt);
+    let value = record_value(config, root, service, record, month);
     out.integer(&subject, &format!("{VOCAB}value"), value % 10000, doc)?;
     write_record_details(
         out,
@@ -827,6 +813,36 @@ fn write_record<W: Write>(
         value,
         config.literal_profile,
     )
+}
+
+fn record_date(config: &PopulationConfig, month: u32, local: u64) -> String {
+    let absolute_month = 2026 * 12 - config.history_months + month;
+    format!(
+        "{:04}-{:02}-{:02}T12:00:00Z",
+        absolute_month / 12,
+        absolute_month % 12 + 1,
+        local % 28 + 1
+    )
+}
+
+fn record_value(
+    config: &PopulationConfig,
+    root: &str,
+    service: Service,
+    record: u64,
+    month: u32,
+) -> u64 {
+    let salt = match config.literal_profile {
+        LiteralProfile::Compact => 0,
+        // FNV-1a over the Pod root makes otherwise equivalent record positions
+        // independent across Pods; this salt is absent from the legacy profile.
+        LiteralProfile::PodSpecific | LiteralProfile::Seeded { .. } => {
+            root.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            }) ^ mix(service as u64)
+        }
+    };
+    mix(config.seed ^ record ^ u64::from(month) ^ salt)
 }
 
 #[expect(
