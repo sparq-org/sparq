@@ -192,7 +192,7 @@ class Campaign:
 
     def cgroup(self, unit):
         path = subprocess.check_output(['sudo','systemctl','show',unit,'--property=ControlGroup','--value'],text=True).strip()
-        if not path or not path.startswith('/sparq-pod-bench.slice/') or not path.endswith('/'+unit):
+        if not path or 'sparq-pod-bench.slice' not in path.split('/') or not path.endswith('/'+unit):
             raise OSError('server cgroup path unavailable or outside study slice')
         return Path('/sys/fs/cgroup') / path.lstrip('/')
 
