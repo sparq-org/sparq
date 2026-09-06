@@ -2,7 +2,7 @@
   "schema_version": 1,
   "campaign_id": "solid-pod-scale-20260906-main",
   "model_provenance": "[GPT-6]",
-  "status": "prospective-draft-before-next-run",
+  "status": "frozen-before-measurement",
   "pilot_source": "74cd9f90eacb29e747294de3cbb18ff2849f0556",
   "purpose": "Separate physically populated namespace scale, retained service-history volume, active working set and population-derived offered load. The compact corpus is a control and cannot establish all-service capacity.",
   "host": {
@@ -324,7 +324,7 @@
     "indexed_comparison": "Bounded identical-history raw and compressed native Graph persistence comparison; existing open-time validation retained. Record actual file count/allocated storage/open/materialization/query times, and exact result equality. This is a component test and does not establish indexed million-Pod storage."
   },
   "stop_rules": {
-    "invalid_correctness": "Stop and quarantine affected source/configuration; retain failures.",
+    "invalid_correctness": "A definite wrong result or durable-state mismatch stops and quarantines the source. Resource or admission failures disqualify the affected dataset/configuration without inferring an incorrect result; retain all failures.",
     "resource": "Record OOM, maximum Pod admission, low disk or client saturation explicitly. Never reduce histories or remove heavy users to obtain a pass.",
     "disk_floor_bytes": 26843545600,
     "runtime_ceiling_seconds": 36000,
