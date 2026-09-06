@@ -99,6 +99,7 @@ INSTANCE_ID=""
 SECURITY_GROUP_ID=""
 SSH_RULE_ID=""
 CURRENT_SSH_CIDR=""
+RETRIEVAL_COMPLETE=0
 
 cleanup() {
   local original_status=$? cleanup_failed=0
@@ -106,6 +107,11 @@ cleanup() {
   local attempt
   trap - EXIT
   set +e
+  # [GPT-6] Bash 3 can report $?=0 after a fatal expansion inside a function.
+  # Only reaching the verified final retrieval permits a successful exit.
+  if (( original_status == 0 && RETRIEVAL_COMPLETE == 0 )); then
+    original_status=1
+  fi
   # `run-instances` can succeed server-side while its response is lost. The unique
   # idempotency/tag token lets cleanup discover that instance even if INSTANCE_ID was
   # never assigned locally. Retry boundedly for tag eventual consistency. Both exact
@@ -180,15 +186,20 @@ cleanup() {
 trap cleanup EXIT
 
 stage_pull() {
-  local exclusions=()
+  # [GPT-6] A nonempty array is safe with Bash 3's nounset handling.
+  local rsync_args=(-az --partial) transfer_status=0
   # [GPT-6] Closed request streams arrive as zstd artifacts. Avoid retaining a
   # second, uncompressed copy of every live stream on the smaller client disk.
   # The final pull includes unfinished streams when a run stops early.
   if [[ "${MODE}" == canonical && "${1:-live}" != final ]]; then
-    exclusions=(--exclude='*-requests.jsonl' --exclude='*-warmup.jsonl' --exclude='*-audit.jsonl')
+    rsync_args+=(--exclude='*-requests.jsonl' --exclude='*-warmup.jsonl' --exclude='*-audit.jsonl')
   fi
-  rsync -az --partial "${exclusions[@]}" -e "ssh ${SSH_OPTIONS[*]}" \
-    "ubuntu@${PUBLIC_IP}:/var/tmp/sparq-pod-study/" "${RESULTS_LOCAL}/" 2>/dev/null || true
+  rsync "${rsync_args[@]}" -e "ssh ${SSH_OPTIONS[*]}" \
+    "ubuntu@${PUBLIC_IP}:/var/tmp/sparq-pod-study/" "${RESULTS_LOCAL}/" 2>/dev/null || transfer_status=$?
+  if [[ "${1:-live}" == final ]]; then
+    return "${transfer_status}"
+  fi
+  return 0
 }
 
 valid_ipv4() {
@@ -484,8 +495,8 @@ ssh "${SSH_OPTIONS[@]}" "ubuntu@${PUBLIC_IP}" \
   'sudo journalctl -u sparq-pod-study --no-pager' \
   >"${RESULTS_LOCAL}/systemd-journal.txt" 2>/dev/null || true
 date -u +%FT%TZ >"${RESULTS_LOCAL}/retrieved-at.txt"
-if [[ -f "${RESULTS_LOCAL}/MANIFEST.sha256" ]]; then
-  (cd "${RESULTS_LOCAL}" && sha256sum -c MANIFEST.sha256)
-fi
+[[ -f "${RESULTS_LOCAL}/MANIFEST.sha256" ]] || die "final results manifest is absent"
+(cd "${RESULTS_LOCAL}" && sha256sum -c MANIFEST.sha256)
 (( SUCCESS == 1 )) || die "the ${MODE} run did not complete; partial results were retained"
 log "results verified at ${RESULTS_LOCAL}; cleanup will terminate ${INSTANCE_ID}"
+RETRIEVAL_COMPLETE=1
