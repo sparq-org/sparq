@@ -38,10 +38,12 @@ while true; do
       *) echo 'supervisor-refused: exact tags/state unavailable' >&2; exit 1 ;;
     esac
     if (( $(date +%s) >= DEADLINE )); then
-      aws ec2 terminate-instances --profile "${PROFILE}" --region "${REGION}" \
-        --instance-ids "${INSTANCE_ID}" --query 'TerminatingInstances[].CurrentState.Name' --output text
-      echo 'supervisor-deadline-termination-requested'
-      exit 0
+      if aws ec2 terminate-instances --profile "${PROFILE}" --region "${REGION}" \
+        --instance-ids "${INSTANCE_ID}" --query 'TerminatingInstances[].CurrentState.Name' --output text; then
+        echo 'supervisor-deadline-termination-requested; awaiting state confirmation'
+      else
+        echo 'supervisor-termination-failed; retrying after exact-tag recheck' >&2
+      fi
     fi
     printf '%s supervisor-active %s\n' "$(date -u +%FT%TZ)" "${MATCH}"
   else
