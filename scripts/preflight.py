@@ -735,7 +735,7 @@ class Delegate:
 
 
 DELEGATES = [
-    Delegate("G1 new-crate-completeness", ["python3", "scripts/gate-new-crate.py"],
+    Delegate("G1 new-crate/new-package completeness", ["python3", "scripts/gate-new-crate.py"],
              pass_changed_files=True),
     Delegate("G2 public-api-to-skill", ["python3", "scripts/gate-api-skill.py"],
              pass_changed_files=True),
