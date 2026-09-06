@@ -6,6 +6,10 @@
 
 #[path = "population_http/auth.rs"]
 mod auth;
+#[path = "population_http/churn.rs"]
+mod churn;
+#[path = "population_http/journeys.rs"]
+mod journeys;
 #[path = "population_http/load.rs"]
 mod load;
 #[path = "population_http/storage.rs"]
@@ -164,12 +168,15 @@ fn worker_loop(
             Err(error) => error.into_response(),
             Ok(token) => {
                 let start = Instant::now();
-                match pods.execute(
+                match pods.execute_observed(
                     work.pod,
                     &token,
                     &work.body,
                     work.update,
                     work.policy_administration,
+                    work.headers
+                        .get("x-benchmark-records")
+                        .and_then(|v| v.to_str().ok()),
                 ) {
                     Ok(outcome) => {
                         let operation_us = start.elapsed().as_micros() as u64;
@@ -246,7 +253,7 @@ async fn serve(settings: Settings) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     let settings = Settings::parse()?;
     match settings.text("mode", "help").as_str() {
@@ -255,8 +262,10 @@ async fn main() -> Result<()> {
         "load" => load::run(settings).await,
         "pack" => storage::pack(&settings),
         "verify" => storage::verify(&settings),
+        "audit" => storage::audit(&settings),
+        "churn" => churn::run(settings).await,
         _ => {
-            println!("pod_population_http auth|pack|serve|load|verify --name value\nSee skills/solid-lws-server/SKILL.md for the research-only interface.");
+            println!("pod_population_http auth|pack|serve|load|verify|audit|churn --name value\nSee skills/solid-lws-server/SKILL.md for the research-only interface.");
             Ok(())
         }
     }

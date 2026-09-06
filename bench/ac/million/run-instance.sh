@@ -9,6 +9,12 @@ results=/var/tmp/sparq-pod-study
 corpora=/var/tmp/sparq-pod-corpus
 auth=/var/tmp/sparq-pod-auth
 mkdir -p "${results}" "${corpora}"
+write_manifest() {
+  date -u +%FT%TZ > "${results}/finished-at.txt"
+  manifest_tmp=$(mktemp /var/tmp/pod-results-manifest.XXXXXX)
+  (cd "${results}" && find . -maxdepth 1 -type f ! -name MANIFEST.sha256 ! -name DONE -print0 | sort -z | xargs -0 sha256sum) > "${manifest_tmp}"
+  mv "${manifest_tmp}" "${results}/MANIFEST.sha256"
+}
 date -u +%FT%TZ > "${results}/started-at.txt"
 printf '%s\n' setup > "${results}/stage.txt"
 cat > "${results}/runner-scope.json" <<'JSON'
@@ -18,7 +24,7 @@ server_pid=""
 cleanup() {
   if [[ -n "${server_pid}" ]]; then kill "${server_pid}" 2>/dev/null || true; fi
 }
-failure() { printf '%s\n' "run failed at line $1" > "${results}/FAILED"; }
+failure() { printf '%s\n' "run failed at line $1" > "${results}/FAILED"; printf '%s\n' failed > "${results}/stage.txt"; write_manifest; }
 trap 'failure ${LINENO}' ERR
 trap cleanup EXIT
 cd "${root}"
@@ -33,7 +39,9 @@ export CARGO_TARGET_DIR=/var/tmp/sparq-pod-target
 } > "${results}/environment.txt"
 git rev-parse HEAD > "${results}/source-commit.txt"
 sha256sum Cargo.lock bench/ac/million/protocol.json bench/ac/million/workload.json > "${results}/input-hashes.txt"
-cargo build --release --locked -p sparq-lws-core --example pod_population_http > "${results}/build.log" 2>&1 &
+examples=(--example pod_population_http)
+if [[ "${mode}" == canonical ]]; then examples+=(--example indexed_population_preview); fi
+cargo build --release --locked -p sparq-lws-core "${examples[@]}" > "${results}/build.log" 2>&1 &
 build_pid=$!
 while kill -0 "${build_pid}" 2>/dev/null; do
   printf '%s\n' 'Building shipping release benchmark example'
@@ -43,20 +51,22 @@ wait "${build_pid}"
 binary="${CARGO_TARGET_DIR}/release/examples/pod_population_http"
 "${binary}" auth --auth-dir "${auth}" > "${results}/auth.jsonl"
 
-if [[ "${mode}" == pilot ]]; then
-  profiles=(smoke history entropy)
-  counts=(8 64)
-  requests=128
-  rate=4
-else
-  # Canonical matrix is a reviewed campaign input; never silently launch an
-  # extrapolated million-Pod workload from exploratory defaults.
-  : "${SPARQ_POD_COUNTS:?set the frozen canonical population ladder}"
-  read -r -a counts <<< "${SPARQ_POD_COUNTS}"
-  profiles=(history)
-  requests="${SPARQ_POD_REQUESTS:?set the frozen offered request count}"
-  rate="${SPARQ_POD_RATE:?set the frozen offered request rate}"
+finish_results() {
+  printf '%s\n' complete > "${results}/stage.txt"
+  write_manifest
+  touch "${results}/DONE"
+}
+
+if [[ "${mode}" == canonical ]]; then
+  printf '%s\n' '{"record_type":"runner-scope","status":"frozen-campaign","workload":"journeys schema v2","network_journeys":"unmeasured","memory":"separate server cgroups inside overall capped study slice"}' > "${results}/runner-scope.json"
+  python3 bench/ac/million/run-campaign.py --campaign "${SPARQ_POD_CAMPAIGN:-bench/ac/million/campaign-20260906.json}" --binary "${binary}" --auth "${auth}" --results "${results}" --corpora "${corpora}"
+  finish_results
+  exit 0
 fi
+profiles=(smoke history entropy)
+counts=(8 64)
+requests=128
+rate=4
 
 for profile in "${profiles[@]}"; do
   profile_counts=("${counts[@]}")
@@ -101,9 +111,4 @@ for profile in "${profiles[@]}"; do
     done
   done
 done
-date -u +%FT%TZ > "${results}/finished-at.txt"
-printf '%s\n' complete > "${results}/stage.txt"
-manifest_tmp=$(mktemp /var/tmp/pod-results-manifest.XXXXXX)
-(cd "${results}" && sha256sum -- *.jsonl *.json *.txt build.log) > "${manifest_tmp}"
-mv "${manifest_tmp}" "${results}/MANIFEST.sha256"
-touch "${results}/DONE"
+finish_results

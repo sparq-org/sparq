@@ -1,5 +1,5 @@
 // [GPT-6] Packed independent Pod snapshots and a bounded active dataset cache.
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -97,6 +97,8 @@ struct JournalEntry {
     query: String,
     #[serde(default)]
     policy_administration: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mutation_receipt: Option<Value>,
 }
 
 impl JournalEntry {
@@ -257,13 +259,25 @@ impl PodCache {
         update: bool,
         administration: bool,
     ) -> std::result::Result<Outcome, OperationError> {
+        self.execute_observed(pod, token, query, update, administration, None)
+    }
+
+    pub(super) fn execute_observed(
+        &mut self,
+        pod: u64,
+        token: &VerifiedToken,
+        query: &str,
+        update: bool,
+        administration: bool,
+        observation: Option<&str>,
+    ) -> std::result::Result<Outcome, OperationError> {
         if pod >= self.pods {
             return Err(OperationError {
                 status: StatusCode::NOT_FOUND,
                 message: "unknown Pod".into(),
             });
         }
-        let result = self.execute_inner(pod, token, query, update, administration);
+        let result = self.execute_inner(pod, token, query, update, administration, observation);
         result.map_err(|error| {
             // An unsuccessful mutation may have changed an in-memory graph: discard it,
             // then reconstruct solely from the durable snapshot and accepted journal.
@@ -288,7 +302,30 @@ impl PodCache {
         query: &str,
         update: bool,
         administration: bool,
+        observation: Option<&str>,
     ) -> Result<Outcome> {
+        let observation: Option<RecordObservation> =
+            observation.map(serde_json::from_str).transpose()?;
+        if let Some(observation) = &observation {
+            if !update
+                || token.web_id.as_deref()
+                    != Some(population::owner_webid(&self.config, pod).as_str())
+            {
+                return Err(
+                    "record observations require an authenticated Pod owner data update".into(),
+                );
+            }
+            if administration {
+                if !observation.records.is_empty()
+                    || observation.id.is_empty()
+                    || observation.id.len() > 80
+                {
+                    return Err("policy receipt requires an ID and no content records".into());
+                }
+            } else {
+                observation.validate(&population::pod_root(&self.config, pod))?;
+            }
+        }
         let (cache_hit, load_us, materialize_us) = self.get(pod)?;
         let session = Session {
             agent: token.web_id.as_deref(),
@@ -322,13 +359,18 @@ impl PodCache {
             if token.is_public() {
                 return Err("authenticated update required".into());
             }
-            let journal = JournalEntry {
+            let mut journal = JournalEntry {
                 agent: token.web_id.clone(),
                 client: token.client_id.clone(),
                 issuer: token.issuer.clone(),
                 query: query.into(),
                 policy_administration: administration,
+                mutation_receipt: None,
             };
+            let before = observation
+                .as_ref()
+                .map(|o| o.snapshot(&entry.store))
+                .transpose()?;
             let serialized = serde_json::to_vec(&journal)?;
             let current = fs::metadata(&journal_path).map_or(0, |metadata| metadata.len());
             if current + serialized.len() as u64 + 1 > self.maximum_journal_bytes {
@@ -346,8 +388,23 @@ impl PodCache {
             } else {
                 self.model.update(&mut entry.store, &session, query)?;
             }
+            if let (Some(observation), Some(before)) = (&observation, before) {
+                let after = observation.snapshot(&entry.store)?;
+                journal.mutation_receipt = Some(observation.receipt(&before, &after));
+            }
+            if administration {
+                if let Some(observation) = &observation {
+                    journal.mutation_receipt = Some(
+                        json!({"id":observation.id,"policy_triple_delta":policy_count(&entry.store) as i64-policies_before as i64}),
+                    );
+                }
+            }
+            let serialized = serde_json::to_vec(&journal)?;
+            if current + serialized.len() as u64 + 1 > self.maximum_journal_bytes {
+                return Err("journal including mutation receipt is full".into());
+            }
             commit_journal(&journal_path, &serialized)?;
-            json!({"updated":true,"policy_administration":administration}).to_string()
+            json!({"updated":true,"policy_administration":administration,"mutation_receipt":journal.mutation_receipt}).to_string()
         } else {
             match spargebra::SparqlParser::new().parse_query(query)? {
                 spargebra::Query::Select { .. } | spargebra::Query::Ask { .. } => (),
@@ -369,6 +426,86 @@ impl PodCache {
             cache_entries: self.entries.len(),
             cache_bytes: self.bytes,
         })
+    }
+}
+
+// Only explicitly selected owner-owned records are observed; no full Pod scan or unbounded audit copy.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecordObservation {
+    id: String,
+    records: Vec<(String, String)>,
+}
+impl RecordObservation {
+    fn validate(&self, root: &str) -> Result<()> {
+        if self.id.is_empty()
+            || self.id.len() > 80
+            || self.records.is_empty()
+            || self.records.len() > 8
+        {
+            return Err("invalid bounded record observation".into());
+        }
+        let mut seen = BTreeSet::new();
+        for (graph, subject) in &self.records {
+            if !graph.starts_with(root)
+                || !graph.ends_with(".ttl")
+                || !subject.starts_with(&format!("{graph}#"))
+                || !seen.insert((graph, subject))
+            {
+                return Err("record observation outside this Pod or duplicate".into());
+            }
+        }
+        Ok(())
+    }
+    fn snapshot(&self, store: &PodStore) -> Result<Vec<BTreeSet<String>>> {
+        self.records
+            .iter()
+            .map(|(graph, subject)| {
+                let name: oxrdf::Term = oxrdf::NamedNode::new(graph.clone())?.into();
+                let graph = store
+                    .graph
+                    .named_graph(&name)
+                    .ok_or("observation graph does not exist")?;
+                let name: oxrdf::Term = oxrdf::NamedNode::new(subject.clone())?.into();
+                let id = graph.dict.lookup(&name);
+                let mut values = BTreeSet::new();
+                let scan = graph.store.scan(&[Some(id), None, None]);
+                for row in scan.rows.iter() {
+                    let triple = scan.to_spo(row);
+                    values.insert(format!(
+                        "{} {} {}",
+                        graph.dict.term(triple[0]),
+                        graph.dict.term(triple[1]),
+                        graph.dict.term(triple[2])
+                    ));
+                    if values.len() > 64 {
+                        return Err("observed record exceeds 64 triples".into());
+                    }
+                }
+                Ok(values)
+            })
+            .collect()
+    }
+    fn receipt(&self, before: &[BTreeSet<String>], after: &[BTreeSet<String>]) -> Value {
+        let record_type=" <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://sparq.dev/bench/personal#Record>";
+        let is_record =
+            |triples: &BTreeSet<String>| triples.iter().any(|t| t.ends_with(record_type));
+        let inserted_records = before
+            .iter()
+            .zip(after)
+            .filter(|(b, a)| !is_record(b) && is_record(a))
+            .count();
+        let deleted_records = before
+            .iter()
+            .zip(after)
+            .filter(|(b, a)| is_record(b) && !is_record(a))
+            .count();
+        json!({"id":self.id,"records":self.records,
+            "inserted_records":inserted_records,"deleted_records":deleted_records,
+            "inserted_triples":before.iter().zip(after).map(|(b,a)|a.difference(b).count()).sum::<usize>(),
+            "deleted_triples":before.iter().zip(after).map(|(b,a)|b.difference(a).count()).sum::<usize>(),
+            "poststate_sha256":after.iter().map(|a|format!("{:x}",Sha256::digest(a.iter().cloned().collect::<Vec<_>>().join("\n").as_bytes()))).collect::<Vec<_>>(),
+            "poststate_triples":after.iter().map(BTreeSet::len).collect::<Vec<_>>()})
     }
 }
 
@@ -595,14 +732,31 @@ pub(super) fn verify(settings: &Settings) -> Result<()> {
         serde_json::from_slice(&fs::read(cache.directory.join("manifest.json"))?)?;
     let config: PopulationConfig = serde_json::from_value(manifest["config"].clone())?;
     let count = settings.number("verify-pods", cache.pods)?.min(cache.pods);
+    let ids: Vec<u64> = if settings.0.contains_key("verify-pod-ids") {
+        settings
+            .text("verify-pod-ids", "")
+            .split(',')
+            .map(str::parse)
+            .collect::<std::result::Result<_, _>>()?
+    } else {
+        (0..count)
+            .map(|sample| {
+                if count == 1 {
+                    0
+                } else {
+                    sample * (cache.pods - 1) / (count - 1)
+                }
+            })
+            .collect()
+    };
+    if ids.is_empty() || ids.iter().any(|pod| *pod >= cache.pods) {
+        return Err("verification Pod IDs outside populated corpus".into());
+    }
+    let count = ids.len();
     let mut checked = 0_u64;
-    for sample in 0..count {
-        // Spread verification throughout the persisted population, including its endpoint.
-        let pod = if count == 1 {
-            0
-        } else {
-            sample * (cache.pods - 1) / (count - 1)
-        };
+    for (sample, pod) in ids.into_iter().enumerate() {
+        println!("{}", json!({"record_type":"verify-pod-start","pod":pod}));
+        cache.get(pod)?;
         let owner = population::owner_webid(&config, pod);
         let recipient = population::recipient_webid(&config, pod, 0);
         for agent in [
@@ -620,7 +774,13 @@ pub(super) fn verify(settings: &Settings) -> Result<()> {
             let reference =
                 sparq_core::Graph::load_dataset(std::str::from_utf8(&readable)?, "nquads")?;
             drop(readable);
-            for query in population::benchmark_queries(&config, pod) {
+            let mut queries = population::benchmark_queries(&config, pod);
+            if settings.0.contains_key("workload-file") {
+                let workload: Value =
+                    serde_json::from_slice(&fs::read(settings.path("workload-file", ""))?)?;
+                queries.extend(super::journeys::query_templates(&workload, &config, pod)?);
+            }
+            for query in queries {
                 let outcome = cache
                     .execute(pod, &token, &query.sparql, false, false)
                     .map_err(|error| error.message)?;
@@ -664,6 +824,95 @@ pub(super) fn verify(settings: &Settings) -> Result<()> {
         json!({"record_type":"verification-complete","sampled_pods":count,
         "checks":checked,"oracle":"policy-neutral physically filtered content; same SPARQ query evaluator; exact bags or ordered rows plus independent counts",
         "authentication":"trusted-session deterministic check; HTTP authentication checked separately"})
+    );
+    Ok(())
+}
+
+/// Reconcile durable mutation receipts after all HTTP work has drained and the server stopped.
+/// Reopens each touched Pod from snapshot + journal; the last observation of each record
+/// must equal its actual reconstructed state. Transport-error IDs can be joined offline.
+pub(super) fn audit(settings: &Settings) -> Result<()> {
+    let mut cache = PodCache::open(settings, 1)?;
+    let updates = cache.directory.join("updates");
+    let mut checked = 0_u64;
+    let mut receipts = 0_u64;
+    if updates.exists() {
+        for shard in fs::read_dir(&updates)? {
+            let shard = shard?;
+            if !shard.file_type()?.is_dir() {
+                continue;
+            }
+            for path in fs::read_dir(shard.path())? {
+                let path = path?;
+                let name = path.file_name();
+                let name = name.to_str().ok_or("journal filename")?;
+                if !name.ends_with(".jsonl") {
+                    continue;
+                }
+                let pod: u64 = name.trim_end_matches(".jsonl").parse()?;
+                let mut last = HashMap::<(String, String), (String, u64)>::new();
+                for line in BufReader::new(File::open(path.path())?).lines() {
+                    let entry: JournalEntry = serde_json::from_str(&line?)?;
+                    if let Some(receipt) = entry.mutation_receipt {
+                        println!(
+                            "{}",
+                            json!({"record_type":"committed-mutation","pod":pod,"receipt":receipt})
+                        );
+                        receipts += 1;
+                        if let Some(records) = receipt["records"].as_array() {
+                            for (i, record) in records.iter().enumerate() {
+                                let graph = record[0].as_str().ok_or("receipt graph")?.to_owned();
+                                let subject =
+                                    record[1].as_str().ok_or("receipt subject")?.to_owned();
+                                last.insert(
+                                    (graph, subject),
+                                    (
+                                        receipt["poststate_sha256"][i]
+                                            .as_str()
+                                            .ok_or("receipt hash")?
+                                            .to_owned(),
+                                        receipt["poststate_triples"][i]
+                                            .as_u64()
+                                            .ok_or("receipt count")?,
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+                cache.get(pod)?;
+                let store = &cache.entries.get(&pod).ok_or("audited Pod missing")?.store;
+                for (record, (expected_hash, expected_count)) in last {
+                    let observation = RecordObservation {
+                        id: "audit".into(),
+                        records: vec![record.clone()],
+                    };
+                    let actual = observation.snapshot(store)?;
+                    let actual_hash = format!(
+                        "{:x}",
+                        Sha256::digest(
+                            actual[0]
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                                .as_bytes()
+                        )
+                    );
+                    if actual_hash != expected_hash || actual[0].len() as u64 != expected_count {
+                        return Err(
+                            format!("replayed record mismatch Pod{pod} {}", record.1).into()
+                        );
+                    }
+                    checked += 1;
+                }
+                cache.evict(pod);
+            }
+        }
+    }
+    println!(
+        "{}",
+        json!({"record_type":"mutation-audit-complete","committed_receipts":receipts,"replayed_records_checked":checked})
     );
     Ok(())
 }
@@ -894,6 +1143,114 @@ mod tests {
         let mut restarted = PodCache::open(&settings, 1)?;
         assert_eq!(count(&mut restarted, 0, RECIPIENT)?, 1);
         fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+    #[test]
+    fn observed_insert_modify_delete_and_replay_are_exact() -> Result<()> {
+        use population::mutation::{emit_mutation_batch, PopulationMutationRequest as Request};
+        use population::Service;
+        for model in ["wac", "acp"] {
+            let directory =
+                std::env::temp_dir().join(format!("sparq-mutation-{}", uuid::Uuid::new_v4()));
+            let settings = Settings(HashMap::from([
+                ("out".into(), directory.to_string_lossy().into_owned()),
+                ("corpus".into(), directory.to_string_lossy().into_owned()),
+                ("model".into(), model.into()),
+                ("profile".into(), "smoke".into()),
+                ("pods".into(), "1".into()),
+            ]));
+            pack(&settings)?;
+            let mut cache = PodCache::open(&settings, 1)?;
+            let config = PopulationConfig::smoke();
+            let owner = token(&population::owner_webid(&config, 0));
+            let mut i = 0;
+            for service in Service::ALL {
+                for request in [
+                    Request::Insert {
+                        batch_id: 17,
+                        count: 2,
+                    },
+                    Request::Modify {
+                        offset: 0,
+                        count: 1,
+                        revision: 1,
+                    },
+                    Request::Delete {
+                        offset: 0,
+                        count: 1,
+                    },
+                ] {
+                    let batch = emit_mutation_batch(&config, 0, service, request)?;
+                    let observation=json!({"id":format!("test-{i}"),"records":batch.record_refs.iter().map(|r|json!([r.graph,r.subject])).collect::<Vec<_>>()}).to_string();
+                    i += 1;
+                    let result = cache
+                        .execute_observed(0, &owner, &batch.sparql, true, false, Some(&observation))
+                        .map_err(|e| e.message)?;
+                    let response: Value = serde_json::from_str(&result.body)?;
+                    let receipt = &response["mutation_receipt"];
+                    assert_eq!(receipt["inserted_triples"], batch.expected_inserted_triples);
+                    assert_eq!(receipt["deleted_triples"], batch.expected_deleted_triples);
+                    let (inserted, deleted) = match request {
+                        Request::Insert { .. } => (2, 0),
+                        Request::Delete { .. } => (0, 1),
+                        _ => (0, 0),
+                    };
+                    assert_eq!(receipt["inserted_records"], inserted);
+                    assert_eq!(receipt["deleted_records"], deleted);
+                    if matches!(request, Request::Delete { .. }) {
+                        assert_eq!(receipt["poststate_triples"], json!([0]));
+                        let result = cache
+                            .execute_observed(
+                                0,
+                                &owner,
+                                &batch.sparql,
+                                true,
+                                false,
+                                Some(&observation),
+                            )
+                            .map_err(|e| e.message)?;
+                        let response: Value = serde_json::from_str(&result.body)?;
+                        assert_eq!(response["mutation_receipt"]["deleted_triples"], 0);
+                    }
+                }
+            }
+            drop(cache);
+            audit(&settings)?;
+            let mut cache = PodCache::open(&settings, 1)?;
+            let batch = emit_mutation_batch(
+                &config,
+                0,
+                Service::Communication,
+                Request::Modify {
+                    offset: 0,
+                    count: 1,
+                    revision: 2,
+                },
+            )?;
+            let observation=json!({"id":"missing-after-restart","records":batch.record_refs.iter().map(|r|json!([r.graph,r.subject])).collect::<Vec<_>>()}).to_string();
+            let response = cache
+                .execute_observed(0, &owner, &batch.sparql, true, false, Some(&observation))
+                .map_err(|e| e.message)?;
+            let response: Value = serde_json::from_str(&response.body)?;
+            assert_eq!(response["mutation_receipt"]["inserted_triples"], 0);
+            assert_eq!(
+                response["mutation_receipt"]["poststate_triples"],
+                json!([0])
+            );
+            let recipient = token(&population::recipient_webid(&config, 0, 0));
+            assert!(cache
+                .execute_observed(
+                    0,
+                    &recipient,
+                    &batch.sparql,
+                    true,
+                    false,
+                    Some(&observation)
+                )
+                .is_err());
+            drop(cache);
+            fs::remove_dir_all(directory)?;
+        }
         Ok(())
     }
 }

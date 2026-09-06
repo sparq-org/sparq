@@ -41,11 +41,11 @@ def main():
     for model in ("wac", "acp"):
         corpus = root / model
         run(["pack", "--corpus", str(corpus), "--profile", "smoke", "--pods", "8", "--model", model], f"{model}-pack.jsonl")
-        run(["verify", "--corpus", str(corpus), "--verify-pods", "8"], f"{model}-verify.jsonl")
+        run(["verify", "--corpus", str(corpus), "--verify-pods", "8", "--workload-file", str(arguments.workload)], f"{model}-verify.jsonl")
         with (root / f"{model}-server.jsonl").open("w") as stream:
             server = subprocess.Popen(
                 [binary, "serve", "--corpus", str(corpus), "--auth-dir", str(root / "auth"),
-                 "--bind", address, "--cache-pods", "2"], stdout=stream, stderr=subprocess.STDOUT,
+                 "--bind", address, "--cache-pods", "1"], stdout=stream, stderr=subprocess.STDOUT,
             )
             try:
                 for _ in range(50):
@@ -59,6 +59,29 @@ def main():
                         time.sleep(0.1)
                 else:
                     raise RuntimeError("server did not become ready")
+                for index, (state, delta) in enumerate((("grant", "0"), ("revoke", "-1"), ("probe-revoked", None), ("probe-revoked", None), ("grant", "1"))):
+                    if index == 3:
+                        previous_args=server.args
+                        server.terminate();server.wait(timeout=5)
+                        server=subprocess.Popen(previous_args,stdout=stream,stderr=subprocess.STDOUT)
+                        for _ in range(50):
+                            try: urllib.request.urlopen(f"http://{address}/",timeout=.1)
+                            except urllib.error.HTTPError: break
+                            except urllib.error.URLError: time.sleep(.1)
+                    command=["churn", "--corpus", str(corpus), "--auth-dir", str(root / "auth"), "--connect", f"http://{address}", "--state", state, "--mutation-id", f"churn-{index}"]
+                    if delta is not None: command += ["--expected-delta", delta]
+                    elif index == 2: command += ["--evict-pod", "1"]
+                    run(command, f"{model}-churn-{index}.jsonl")
+                # The eviction/restart lane above deliberately uses one entry. Load
+                # correctness uses all eight tiny fixtures; this is not a capacity run.
+                previous_args=list(server.args)
+                previous_args[previous_args.index("--cache-pods")+1]="8"
+                server.terminate();server.wait(timeout=5)
+                server=subprocess.Popen(previous_args,stdout=stream,stderr=subprocess.STDOUT)
+                for _ in range(50):
+                    try: urllib.request.urlopen(f"http://{address}/",timeout=.1)
+                    except urllib.error.HTTPError: break
+                    except urllib.error.URLError: time.sleep(.1)
                 common = ["load", "--corpus", str(corpus), "--auth-dir", str(root / "auth"),
                           "--connect", f"http://{address}", "--query-set", "population",
                           "--arrival", "poisson", "--rate", "20"]
@@ -66,10 +89,18 @@ def main():
                               "--workload-file", str(arguments.workload), "--out", str(root / f"{model}-requests.jsonl")], f"{model}-load.txt")
                 run(common + ["--pods", "1", "--requests", "4", "--mix", "population",
                               "--workload-file", str(root / "policy-only.json"), "--out", str(root / f"{model}-policy.jsonl")], f"{model}-policy-load.txt")
-                for label in ("requests", "policy"):
+                run(common + ["--requests", "512", "--mix", "journeys", "--seed", "2026090601",
+                              "--mutation-epoch", "1", "--workload-file", str(arguments.workload),
+                              "--out", str(root / f"{model}-journeys.jsonl")], f"{model}-journeys-load.txt")
+                for label in ("requests", "policy", "journeys"):
                     rows = [json.loads(line) for line in (root / f"{model}-{label}.jsonl").read_text().splitlines()]
                     rows = [row for row in rows if row["record_type"] == "request"]
-                    assert all(row.get("status") == 200 for row in rows), rows
+                    bad=[row for row in rows if row.get("status")!=200]
+                    assert not bad, {"failed":len(bad),"sample":bad[:3],"artifacts":str(root)}
+                    if label == "journeys":
+                        mutations = [row for row in rows if row.get("planned_records")]
+                        assert mutations, "smoke seed must exercise real mutations"
+                        assert all(row.get("mutation_receipt_present") for row in mutations), mutations
                     if label == "policy":
                         deltas = [row["policy_triple_delta"] for row in sorted(rows, key=lambda row: row["sequence"])]
                         assert deltas == [-1, 1, -1, 1], rows
@@ -77,6 +108,7 @@ def main():
             finally:
                 server.terminate()
                 server.wait(timeout=5)
+        run(["audit", "--corpus", str(corpus)], f"{model}-audit.jsonl")
     print("ARTIFACTS", root)
 
 
