@@ -66,3 +66,29 @@ regular text remains a favorable-compression case. Existing version-one configs
 without `literal_profile` deserialize as `compact`, preserving their original
 N-Quads. The configuration schema remains compatible while the profile identifies
 the changed data distribution.
+
+`population::planned_record_counts` provides cheap per-Pod inventory without RDF.
+The `population::mutation` module builds bounded content workload requests from the
+same record emitter. `existing_record_refs(config, pod, service, offset, count)`
+selects baseline records by `(created timestamp, numeric sequence)`, including the
+fixture's 28-day cycles. Its finite cursor is independent of earlier deletions;
+log exhaustion instead of recycling deleted records as successful expiry work.
+Contacts are a snapshot and should have zero expiry under the central workload.
+
+`emit_mutation_batch` accepts `PopulationMutationRequest::Insert { batch_id, count }`,
+`Delete { offset, count }`, or `Modify { offset, count, revision }`. It returns the
+SPARQL request, addressed records, inserted N-Quads for a stateful content oracle,
+and **expected** inserted/deleted triple counts. Actual changes must be measured at
+the server. Ingestion uses the latest populated graph's existing permissions and
+January 2026 virtual dates. Batch IDs reserve disjoint ranges of 1024 sequences and
+must remain unique per Pod/service, including resumed runs. Expiry deletes current
+outgoing triples, including edited values. Modification replaces the current value
+with `10000 + revision`; positive revisions and explicit record-existence patterns
+avoid baseline no-ops and orphan inserts. Replaying a revision is idempotent.
+
+Each helper call accepts at most 1024 records and bounds each generated text field
+to 16 MiB. Use smaller batches (for example eight records) to respect the HTTP body
+limit and the declared literal profile. The helper does not infer mutation rates,
+create new collections, change policies, clean incoming references, or validate
+empirical user behavior. Its empty SPARQL result means finite inventory exhaustion
+and must not be submitted as an accepted mutation.
