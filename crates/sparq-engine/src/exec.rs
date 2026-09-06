@@ -10205,7 +10205,8 @@ fn values_bindings(graph: &Graph, local: &mut LocalVocab, variables: &[Variable]
 
 fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: &Variable, expr: &Expression) -> Result<Bindings, String> {
     // Pre-resolve Variable → column index once before the row loop. [OPUS-4.8] sq-7d3dj.4.
-    let compiled = compile_expr(expr, &b);
+    // Then lower it into a flat program (opt-in `expr-program`). [FABLE-5] sq-7d3dj.11.
+    let compiled = RowEval::new(compile_expr(expr, &b));
     // BIND was fully serial because each row's computed value was interned immediately. Split it
     // (T1.0b): a PARALLEL pass evaluates the expression (read-only) and resolves the value to an
     // id read-only (inline / graph-dict / already-local); only genuinely new terms fall through to
@@ -10234,7 +10235,9 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
         b.rows
             .par_iter()
             .enumerate()
-            .map(|(i, row)| {
+            // One expression scratch stack per worker, reused across its rows (see the
+            // FILTER branch). [FABLE-5] sq-7d3dj.11.
+            .map_init(eval_stack, |stack, (i, row)| {
                 let _fns = functions::worker_install(&fns);
                 let _vw = view::worker_install(&vw);
                 let _spx = spatial::worker_install(&spx);
@@ -10243,15 +10246,16 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 ROW_SCOPE.set((scope, i));
-                let v = eval_compiled(graph, lv, bref, row, &compiled)?;
+                let v = compiled.eval(graph, lv, bref, row, stack)?;
                 Ok(value_to_id_readonly(graph, lv, &v))
             })
             .collect::<Result<Vec<_>, String>>()?
     } else {
         let mut out = Vec::with_capacity(b.rows.len());
+        let mut stack = eval_stack();
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            let v = eval_compiled(graph, local, &b, row, &compiled)?;
+            let v = compiled.eval(graph, local, &b, row, &mut stack)?;
             out.push(value_to_id_readonly(graph, local, &v));
         }
         out
@@ -10259,9 +10263,10 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
     #[cfg(not(feature = "parallel"))]
     let resolved: Vec<Result<Id, Term>> = {
         let mut out = Vec::with_capacity(b.rows.len());
+        let mut stack = eval_stack();
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            let v = eval_compiled(graph, local, &b, row, &compiled)?;
+            let v = compiled.eval(graph, local, &b, row, &mut stack)?;
             out.push(value_to_id_readonly(graph, local, &v));
         }
         out
@@ -12336,6 +12341,9 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
             idfast_rewrite(&mut compiled, &cols);
         }
     }
+    // Lower the compiled tree into a flat program once (opt-in `expr-program`; a no-op
+    // wrapper when off). [FABLE-5] sq-7d3dj.11.
+    let compiled = RowEval::new(compiled);
     // Per-row FILTER evaluation is independent and read-only over the graph/bindings, so a
     // large residual (non-pushed-down) filter is evaluated in parallel on native.
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
@@ -12360,7 +12368,9 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
         b.rows
             .par_iter()
             .enumerate()
-            .map(|(i, row)| {
+            // `map_init` gives each worker ONE expression scratch stack reused across its
+            // rows (a per-row `map` would re-allocate it). [FABLE-5] sq-7d3dj.11.
+            .map_init(eval_stack, |stack, (i, row)| {
                 let _fns = functions::worker_install(&fns);
                 let _vw = view::worker_install(&vw);
                 let _spx = spatial::worker_install(&spx);
@@ -12369,23 +12379,25 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 ROW_SCOPE.set((scope, i));
-                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
+                Ok(effective_boolean(&compiled.eval(graph, local, b, row, stack)?))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
+        let mut stack = eval_stack();
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&compiled.eval(graph, local, b, row, &mut stack)?));
         }
         keep
     };
     #[cfg(not(feature = "parallel"))]
     let keep: Vec<bool> = {
         let mut keep = Vec::with_capacity(b.rows.len());
+        let mut stack = eval_stack();
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&compiled.eval(graph, local, b, row, &mut stack)?));
         }
         keep
     };
@@ -14370,6 +14382,475 @@ fn eval_compiled(
             eval_function_inner(f, args.len(), |i| eval_compiled(graph, local, b, row, &args[i]))
         }
         Exists(inner) => Ok(Value::Bool(eval_exists(graph, local, b, row, inner)?)),
+    }
+}
+
+// ── Flat compiled scalar-expression program (sq-7d3dj.11) ────────────────────────────────
+//
+// OPT-IN (`expr-program`, OFF by default). `CompiledExpr` (sq-7d3dj.4) removed the per-row
+// `b.col(v)` scan but is still a `Box`-linked TREE: every row re-walks it through recursive
+// `eval_compiled` calls. This module lowers that tree ONCE per operator into a FLAT postfix
+// program — a `Vec<Op>` over the same resolved column indices plus pre-built constants —
+// evaluated per row by a straight loop over a value stack the row loop reuses. No recursion,
+// no pointer chasing, one contiguous instruction array.
+//
+// WHAT IS LOWERED vs WHAT DELEGATES — this split IS the correctness argument:
+//
+//   * LOWERED: `Var` / `BOUND` / constants / `!` / `&&` / `||` / `IF` / `COALESCE` / `IN` /
+//     `sameTerm` / `+ - * /` / unary sign, and function-call ARGUMENT evaluation. Every op
+//     performs exactly what the matching `eval_compiled` arm performs, in the same operand
+//     order, with the same short-circuiting, reusing the same helpers (`ebv3` / `and3` /
+//     `or3` / `values_equal` / `as_numeric` / `Num::binop`). SPARQL's three-valued logic and
+//     type-error propagation are therefore preserved instruction-for-instruction.
+//   * DELEGATES to `eval_compiled` through a single `Op::Tree` leaf holding the UNTOUCHED
+//     subtree: `=`, the four order comparisons, the `id-filter-fastpath` id-equality node,
+//     and `EXISTS`. `cmp_compiled` / `equal_compiled` dispatch on the SHAPE of their operand
+//     TREES (`compiled_expr_has_arith` gates the exact-decimal path; `eval_compiled_numeric`
+//     / `_exact_lexical` / `_temporal` each re-walk the operand), so lowering their operands
+//     would change which path a comparison takes — i.e. change RESULTS. They keep their trees.
+//   * FUNCTION BODIES delegate to the same `eval_function_inner` with a lazy `ev(i)` closure,
+//     so an argument is evaluated exactly WHEN, and as many times as, it is today. That is
+//     load-bearing for `BNODE`/`UUID`-style per-call functions and for error propagation from
+//     an argument a function never asks for; only the argument's own evaluation is lowered.
+//
+// TERM IDENTITY is untouched: `Op::Var` materialises the row's term exactly as the tree arm
+// does and `Op::Const` clones the same constant term, so `sameTerm` / `STR` / BIND passthrough
+// observe identical terms. [FABLE-5] sq-7d3dj.11
+#[cfg(feature = "expr-program")]
+pub(crate) mod expr_program {
+    use super::*;
+
+    thread_local! {
+        /// Whether new operators lower their compiled expression (default on with the
+        /// feature). The ON==OFF differential flips this to run BOTH evaluators in one
+        /// binary; see `expr_program_testing`.
+        static ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+        /// How many programs were lowered since the last [`reset_stats`] — the
+        /// anti-vacuity witness that the differential's "on" leg really ran this path.
+        static LOWERED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Enables/disables lowering on the current thread, returning the previous value.
+    pub(crate) fn set_enabled(v: bool) -> bool {
+        ENABLED.with(|c| c.replace(v))
+    }
+
+    /// Whether the next operator will lower its expression.
+    pub(super) fn enabled() -> bool {
+        ENABLED.with(|c| c.get())
+    }
+
+    /// Clears the lowering counter.
+    pub(crate) fn reset_stats() {
+        LOWERED.with(|c| c.set(0));
+    }
+
+    /// Programs lowered on this thread since the last [`reset_stats`].
+    pub(crate) fn lowered() -> usize {
+        LOWERED.with(|c| c.get())
+    }
+
+    /// One instruction. Operands are popped from, and results pushed to, the caller's value
+    /// stack; control ops carry already-patched absolute instruction offsets.
+    #[derive(Clone, Debug)]
+    pub(super) enum Op {
+        /// Push the row's term for a pre-resolved column (`Unbound` when absent/unbound).
+        Var(Option<usize>),
+        /// Push `BOUND(?v)` for a pre-resolved column.
+        BoundCol(Option<usize>),
+        /// Push a constant, built once at lowering time.
+        Const(Value),
+        /// Push `eval_compiled` of a subtree kept in tree form (see the module comment).
+        Tree(CompiledExpr),
+        /// Pop one; push its negated three-valued EBV (`Error` on a type error).
+        Not,
+        /// Pop the right then the left operand; push `sameTerm` term identity.
+        SameTerm,
+        /// Pop the right then the left operand; push the typed arithmetic result.
+        Arith(ArithOp),
+        /// Pop one; push its numeric negation (`Error` when non-numeric).
+        Neg,
+        /// `&&` left arm: pop the left value; on `Some(false)` push `false` and jump to
+        /// `end`, otherwise push its three-valued normalisation for [`Op::And3`].
+        AndShort { end: usize },
+        /// Pop the right then the normalised left value; push `and3`.
+        And3,
+        /// `||` left arm: the `Some(true)`-dominates mirror of [`Op::AndShort`].
+        OrShort { end: usize },
+        /// Pop the right then the normalised left value; push `or3`.
+        Or3,
+        /// `IF` dispatch: pop the condition — `Some(true)` falls through to the THEN arm,
+        /// `Some(false)` jumps to `els`, a type error pushes `Error` and jumps to `end`.
+        If { els: usize, end: usize },
+        /// Unconditional jump (ends an `IF` arm).
+        Jump(usize),
+        /// `COALESCE` arm: pop the arm's value — keep it and jump to `end` when it is
+        /// neither unbound nor an error, otherwise discard it and fall through.
+        CoalesceTake { end: usize },
+        /// `IN`: the tested value and the list items as sub-programs (no operand-tree
+        /// dispatch is involved, so lowering them is result-preserving).
+        In { arg: Box<Program>, items: Vec<Program> },
+        /// A function call whose ARGUMENTS are lowered but whose body is the unchanged
+        /// `eval_function_inner`, driven by the same lazy per-index closure.
+        Call { f: spargebra::algebra::Function, args: Vec<Program> },
+    }
+
+    /// A lowered scalar expression: a flat instruction array evaluated per row.
+    #[derive(Clone, Debug)]
+    pub(super) struct Program {
+        ops: Vec<Op>,
+    }
+
+    /// Lowers a compiled expression into a flat program. Total — every `CompiledExpr` node
+    /// either lowers or becomes an `Op::Tree` leaf, so there is no decline path.
+    pub(super) fn lower(e: &CompiledExpr) -> Program {
+        LOWERED.with(|c| c.set(c.get() + 1));
+        let mut ops = Vec::new();
+        emit(e, &mut ops);
+        Program { ops }
+    }
+
+    /// Patches the jump target of the control op at `at` to `target`.
+    fn patch(ops: &mut [Op], at: usize, target: usize) {
+        match &mut ops[at] {
+            Op::AndShort { end } | Op::OrShort { end } | Op::CoalesceTake { end } | Op::Jump(end) => *end = target,
+            Op::If { end, .. } => *end = target,
+            other => unreachable!("not a patchable control op: {other:?}"),
+        }
+    }
+
+    fn emit(e: &CompiledExpr, ops: &mut Vec<Op>) {
+        use CompiledExpr as C;
+        match e {
+            C::Var(c) => ops.push(Op::Var(*c)),
+            C::BoundCol(c) => ops.push(Op::BoundCol(*c)),
+            C::NamedNode(n) => ops.push(Op::Const(Value::Term(Term::NamedNode(n.clone())))),
+            C::Literal(l) => ops.push(Op::Const(Value::Term(Term::Literal(l.clone())))),
+            // Operand-tree-directed or re-entrant nodes: kept verbatim (module comment).
+            C::Equal(..) | C::Greater(..) | C::GreaterOrEqual(..) | C::Less(..) | C::LessOrEqual(..) | C::Exists(_) => {
+                ops.push(Op::Tree(e.clone()))
+            }
+            #[cfg(feature = "id-filter-fastpath")]
+            C::IdEqNonLit(..) => ops.push(Op::Tree(e.clone())),
+            C::Not(a) => {
+                emit(a, ops);
+                ops.push(Op::Not);
+            }
+            C::SameTerm(a, c) => {
+                emit(a, ops);
+                emit(c, ops);
+                ops.push(Op::SameTerm);
+            }
+            C::Add(a, c) => emit_arith(a, c, ArithOp::Add, ops),
+            C::Subtract(a, c) => emit_arith(a, c, ArithOp::Sub, ops),
+            C::Multiply(a, c) => emit_arith(a, c, ArithOp::Mul, ops),
+            C::Divide(a, c) => emit_arith(a, c, ArithOp::Div, ops),
+            // Unary `+` is the identity on its operand's value, exactly as the tree arm is.
+            C::UnaryPlus(a) => emit(a, ops),
+            C::UnaryMinus(a) => {
+                emit(a, ops);
+                ops.push(Op::Neg);
+            }
+            C::And(a, c) => {
+                emit(a, ops);
+                let short = ops.len();
+                ops.push(Op::AndShort { end: usize::MAX });
+                emit(c, ops);
+                ops.push(Op::And3);
+                let end = ops.len();
+                patch(ops, short, end);
+            }
+            C::Or(a, c) => {
+                emit(a, ops);
+                let short = ops.len();
+                ops.push(Op::OrShort { end: usize::MAX });
+                emit(c, ops);
+                ops.push(Op::Or3);
+                let end = ops.len();
+                patch(ops, short, end);
+            }
+            C::If(cond, t, f) => {
+                emit(cond, ops);
+                let br = ops.len();
+                ops.push(Op::If { els: usize::MAX, end: usize::MAX });
+                emit(t, ops);
+                let jmp = ops.len();
+                ops.push(Op::Jump(usize::MAX));
+                let els = ops.len();
+                emit(f, ops);
+                let end = ops.len();
+                if let Op::If { els: e, .. } = &mut ops[br] {
+                    *e = els;
+                }
+                patch(ops, br, end);
+                patch(ops, jmp, end);
+            }
+            C::Coalesce(es) => {
+                let mut takes = Vec::with_capacity(es.len());
+                for arm in es {
+                    emit(arm, ops);
+                    takes.push(ops.len());
+                    ops.push(Op::CoalesceTake { end: usize::MAX });
+                }
+                // Every arm was unbound or an error.
+                ops.push(Op::Const(Value::Unbound));
+                let end = ops.len();
+                for at in takes {
+                    patch(ops, at, end);
+                }
+            }
+            C::In(a, list) => ops.push(Op::In {
+                arg: Box::new(lower_sub(a)),
+                items: list.iter().map(lower_sub).collect(),
+            }),
+            C::FunctionCall(f, args) => {
+                ops.push(Op::Call { f: f.clone(), args: args.iter().map(lower_sub).collect() })
+            }
+        }
+    }
+
+    /// A nested program (an `IN` operand / a function argument). Does not bump the lowering
+    /// counter — that counts OPERATORS, which is what the anti-vacuity witness asserts.
+    fn lower_sub(e: &CompiledExpr) -> Program {
+        let mut ops = Vec::new();
+        emit(e, &mut ops);
+        Program { ops }
+    }
+
+    fn emit_arith(a: &CompiledExpr, c: &CompiledExpr, op: ArithOp, ops: &mut Vec<Op>) {
+        emit(a, ops);
+        emit(c, ops);
+        ops.push(Op::Arith(op));
+    }
+
+    /// The three-valued EBV carried forward as a `Value` for the `And3`/`Or3` join point:
+    /// `ebv3` maps `Bool(b)` back to `Some(b)` and `Error` back to `None`, so this round
+    /// trip is exact.
+    #[inline]
+    fn normalise3(x: Option<bool>) -> Value {
+        match x {
+            Some(b) => Value::Bool(b),
+            None => Value::Error,
+        }
+    }
+
+    /// Evaluates `p` for one row. `stack` is scratch reused across rows (and shared with
+    /// nested sub-programs, which run above the caller's base and restore it); it is left
+    /// at its entry depth whether or not evaluation succeeds.
+    pub(super) fn eval(
+        p: &Program,
+        graph: &Graph,
+        local: &LocalVocab,
+        b: &Bindings,
+        row: &[Id],
+        stack: &mut Vec<Value>,
+    ) -> Result<Value, String> {
+        let base = stack.len();
+        match run(p, graph, local, b, row, stack) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                stack.truncate(base);
+                Err(e)
+            }
+        }
+    }
+
+    fn run(
+        p: &Program,
+        graph: &Graph,
+        local: &LocalVocab,
+        b: &Bindings,
+        row: &[Id],
+        stack: &mut Vec<Value>,
+    ) -> Result<Value, String> {
+        // Every op is emitted with its operands already on the stack, so a well-formed
+        // program never underflows; `pop_val` keeps that assumption checked rather than
+        // silently mis-evaluating if a future op is emitted wrongly.
+        macro_rules! pop_val {
+            () => {
+                stack.pop().ok_or_else(|| "expr program: stack underflow".to_string())?
+            };
+        }
+        let mut ip = 0usize;
+        while let Some(op) = p.ops.get(ip) {
+            ip += 1;
+            match op {
+                Op::Var(col) => stack.push(match col {
+                    Some(c) if row[*c] != NO_ID => Value::Term(term_of(graph, local, row[*c]).unwrap()),
+                    _ => Value::Unbound,
+                }),
+                Op::BoundCol(col) => stack.push(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
+                Op::Const(v) => stack.push(v.clone()),
+                Op::Tree(t) => {
+                    let v = eval_compiled(graph, local, b, row, t)?;
+                    stack.push(v);
+                }
+                Op::Not => {
+                    let v = pop_val!();
+                    stack.push(match ebv3(&v) {
+                        Some(x) => Value::Bool(!x),
+                        None => Value::Error,
+                    });
+                }
+                Op::SameTerm => {
+                    let y = pop_val!();
+                    let x = pop_val!();
+                    stack.push(Value::Bool(matches!((&x, &y), (Value::Term(q), Value::Term(r)) if q == r)));
+                }
+                Op::Arith(op) => {
+                    let y = pop_val!();
+                    let x = pop_val!();
+                    stack.push(match (as_numeric(&x), as_numeric(&y)) {
+                        (Some(m), Some(n)) => m.binop(n, *op).map(Value::Num).unwrap_or(Value::Error),
+                        _ => Value::Error,
+                    });
+                }
+                Op::Neg => {
+                    let v = pop_val!();
+                    stack.push(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error));
+                }
+                Op::AndShort { end } => {
+                    let v = pop_val!();
+                    let x = ebv3(&v);
+                    if x == Some(false) {
+                        stack.push(Value::Bool(false));
+                        ip = *end;
+                    } else {
+                        stack.push(normalise3(x));
+                    }
+                }
+                Op::And3 => {
+                    let y = pop_val!();
+                    let x = pop_val!();
+                    stack.push(and3(ebv3(&x), ebv3(&y)));
+                }
+                Op::OrShort { end } => {
+                    let v = pop_val!();
+                    let x = ebv3(&v);
+                    if x == Some(true) {
+                        stack.push(Value::Bool(true));
+                        ip = *end;
+                    } else {
+                        stack.push(normalise3(x));
+                    }
+                }
+                Op::Or3 => {
+                    let y = pop_val!();
+                    let x = pop_val!();
+                    stack.push(or3(ebv3(&x), ebv3(&y)));
+                }
+                Op::If { els, end } => {
+                    let v = pop_val!();
+                    match ebv3(&v) {
+                        Some(true) => {}
+                        Some(false) => ip = *els,
+                        None => {
+                            stack.push(Value::Error);
+                            ip = *end;
+                        }
+                    }
+                }
+                Op::Jump(target) => ip = *target,
+                Op::CoalesceTake { end } => {
+                    let v = pop_val!();
+                    if !matches!(v, Value::Unbound | Value::Error) {
+                        stack.push(v);
+                        ip = *end;
+                    }
+                }
+                Op::In { arg, items } => {
+                    let x = run(arg, graph, local, b, row, stack)?;
+                    let mut errored = false;
+                    let mut found = false;
+                    for item in items {
+                        let y = run(item, graph, local, b, row, stack)?;
+                        match values_equal(&x, &y) {
+                            Some(true) => {
+                                found = true;
+                                break;
+                            }
+                            Some(false) => {}
+                            None => errored = true,
+                        }
+                    }
+                    stack.push(if found {
+                        Value::Bool(true)
+                    } else if errored {
+                        Value::Error
+                    } else {
+                        Value::Bool(false)
+                    });
+                }
+                Op::Call { f, args } => {
+                    // The argument stacks nest above the caller's: each `ev(i)` borrows the
+                    // shared scratch for the duration of ONE argument evaluation and returns
+                    // it at the same depth, and `eval_function_inner` never re-enters `ev`
+                    // from inside `ev`, so the borrows are strictly sequential.
+                    let cell = std::cell::RefCell::new(&mut *stack);
+                    let v = eval_function_inner(f, args.len(), |i| {
+                        let mut s = cell.borrow_mut();
+                        run(&args[i], graph, local, b, row, &mut **s)
+                    });
+                    drop(cell);
+                    stack.push(v?);
+                }
+            }
+        }
+        let v = stack.pop().ok_or_else(|| "expr program: empty result".to_string())?;
+        Ok(v)
+    }
+}
+
+/// A FILTER/BIND expression in the form the per-row loop evaluates: the `CompiledExpr` tree
+/// with its columns pre-resolved (sq-7d3dj.4) plus, under the opt-in `expr-program` feature,
+/// the flat program lowered from it (sq-7d3dj.11). Built ONCE per operator, before the row
+/// loop; shared read-only by the rayon workers.
+struct RowEval {
+    tree: CompiledExpr,
+    #[cfg(feature = "expr-program")]
+    prog: Option<expr_program::Program>,
+}
+
+/// Scratch value stack for the flat program — created once per row loop (per rayon worker on
+/// the parallel path) and reused for every row. A zero-sized placeholder when the feature is
+/// off, so the default build allocates nothing and the call sites need no `cfg`.
+#[cfg(feature = "expr-program")]
+type EvalStack = Vec<Value>;
+#[cfg(not(feature = "expr-program"))]
+type EvalStack = ();
+
+/// A fresh scratch stack (see [`EvalStack`]).
+#[inline]
+fn eval_stack() -> EvalStack {
+    Default::default()
+}
+
+impl RowEval {
+    fn new(tree: CompiledExpr) -> Self {
+        #[cfg(feature = "expr-program")]
+        let prog = expr_program::enabled().then(|| expr_program::lower(&tree));
+        Self {
+            tree,
+            #[cfg(feature = "expr-program")]
+            prog,
+        }
+    }
+
+    #[inline]
+    fn eval(
+        &self,
+        graph: &Graph,
+        local: &LocalVocab,
+        b: &Bindings,
+        row: &[Id],
+        stack: &mut EvalStack,
+    ) -> Result<Value, String> {
+        #[cfg(feature = "expr-program")]
+        if let Some(p) = &self.prog {
+            return expr_program::eval(p, graph, local, b, row, stack);
+        }
+        let _ = stack;
+        eval_compiled(graph, local, b, row, &self.tree)
     }
 }
 
