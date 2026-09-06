@@ -29,13 +29,15 @@ on:
 # so a merge it triggers is attributed to the App rather than github-actions[bot]); the
 # workflow token is the fallback and, with write, is sufficient to arm.
 #
-# [OPUS-5] #4548 — the stuck-arm phase adds two more scopes. `checks: write` is the ONLY
-# thing that can re-request a cancelled check run, and `issues: write` is what labelling a
-# pull request actually consumes (`gh pr edit --add-label` posts to the ISSUES labels
-# endpoint). Without them the stuck-arm phase would classify correctly and then fail every
-# remediation with a 403 — visible, but useless. `contents: write` already present above
-# also covers the `PUT /pulls/{n}/update-branch` the CONFLICTING class attempts.
+# [OPUS-5] #4548 added checks/issue write scopes for the original stuck-arm phase.
+# [GPT-6 Astra] #6438 replaces that Checks rerequest with an Actions job rerun under
+# the preferred App. The legacy checks grant is retained pending separate review.
+# `issues: write` covers labels and recovery comments; `contents: write` also covers
+# `PUT /pulls/{n}/update-branch` for the CONFLICTING class.
 permissions:
+  # [GPT-6 Astra] #6438: cancelled Actions recovery uses the preferred App's
+  # actions:write, not this legacy checks grant. Grants remain unchanged here;
+  # fallback GITHUB_TOKEN has no actions:write and is refused before any claim POST.
   contents: write
   pull-requests: write
   checks: write

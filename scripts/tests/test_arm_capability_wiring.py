@@ -44,13 +44,16 @@ from __future__ import annotations
 import ast
 import copy
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
+import socket
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import ModuleType
 from typing import NamedTuple
@@ -1152,8 +1155,9 @@ class TestStuckArmWiring(unittest.TestCase):
     def test_the_scopes_its_mutations_need_are_granted(self) -> None:
         """Classify-then-403 is the failure mode this pin exists for.
 
-        `checks: write` is the only scope that can re-request a cancelled run, and
-        labelling a pull request consumes the ISSUES scope.
+        [GPT-6 Astra] #6438 keeps existing workflow grants. The preferred App's
+        Actions grant governs reruns; the fallback has no Actions write and fails
+        closed. These declarations never elevate the minted installation token.
         """
         permissions = self.document.get("permissions") or {}
         for scope in ("contents", "pull-requests", "checks", "issues"):
@@ -1464,6 +1468,348 @@ class TestStuckArmScriptContract(unittest.TestCase):
             set(),
         )
 
+
+
+# [GPT-6 Astra] #6438: exercise the production rerun path with distinct server IDs.
+# The existing workflow runs THIS suite; these are not an uncalled fixture appendix.
+class ActionsRerunFixture:
+    def __init__(self, module):
+        self.m = module
+        self.clock = module._iso_epoch("2026-09-06T12:00:00Z")
+        self.viewer = {"login": "sparq-orchestrator[bot]"}
+        self.actor = dict(id="BOT_4300853", login=self.viewer["login"], __typename="Bot")
+        self.raw = module.live_pr(6360, labels=("review:pass",), head="a" * 40)
+        self.check = dict(module.check_run("gate", "cancelled", ident=101),
+            head_sha="a" * 40, app={"slug": "github-actions"},
+            details_url="https://github.com/sparq-org/sparq/actions/runs/303/job/202")
+        self.run = dict(id=303, workflow_id=404, run_attempt=1, event="pull_request",
+            path=".github/workflows/ci-summary.yml", status="completed", conclusion="cancelled",
+            head_sha="a" * 40, repository={"full_name": "sparq-org/sparq"},
+            pull_requests=[{"number": 6360, "head": {"sha": "a" * 40}}])
+        self.job = dict(id=202, run_id=303, head_sha="a" * 40, name="gate",
+            status="completed", conclusion="cancelled",
+            check_run_url="https://api.github.com/repos/sparq-org/sparq/check-runs/101")
+        self.comments = []
+        self.calls = []
+        self.after_claim = lambda: None
+        self.claim_reply = None
+        self.post_error = False
+        self.history_extra = 0
+        self.history_truncated = False
+        self.latest_extra = []
+        self.jobs_extra = 0
+        self.logs = []
+        self.sweeper = self.new_sweeper()
+        self.original = self.sweeper.live_pull(6360)
+        self.calls.clear()
+
+    def new_sweeper(self):
+        return self.m.StuckArmSweeper("sparq-org/sparq", "main", gh=self,
+            log=self.logs.append, now=lambda: self.clock)
+
+    def __call__(self, argv):
+        self.calls.append(list(argv))
+        if argv[:2] == ["pr", "list"]:
+            return json.dumps([self.raw])
+        if argv[:2] == ["api", "graphql"]:
+            query = next(x for x in argv if x.startswith("query="))
+            if "pullRequests(states:OPEN)" in query:
+                return json.dumps({"data": {"repository": {"pullRequests": {"totalCount": 1}}}})
+            if "viewer{" in query:
+                return json.dumps({"data": {"viewer": self.viewer, "repository": {"pullRequest": {
+                    "comments": {"totalCount": len(self.comments) + self.history_extra,
+                        "pageInfo": {"hasPreviousPage": self.history_truncated}, "nodes": self.comments}}}}})
+            return json.dumps({"data": {"repository": {"pullRequest": self.raw}}})
+        if argv[:3] == ["api", "-X", "POST"]:
+            if argv[3].endswith("/comments"):
+                body = next(x.removeprefix("body=") for x in argv if x.startswith("body="))
+                self.comments.append(dict(databaseId=505, body=body, author=copy.deepcopy(self.actor)))
+                self.raw["updatedAt"] = "2026-09-06T12:00:00Z"
+                self.after_claim()
+                return self.claim_reply if self.claim_reply is not None else json.dumps({"id": 505})
+            if argv[3] == "repos/sparq-org/sparq/actions/jobs/202/rerun":
+                if self.post_error:
+                    raise self.m.GhError("Resource not accessible by integration (HTTP 403)")
+                return "{}"
+            raise AssertionError(f"unexpected mutation: {argv}")
+        path = argv[-1]
+        if path == f"users/{self.viewer['login']}":
+            return json.dumps(dict(login=self.actor["login"],node_id=self.actor["id"],type="Bot"))
+        if "/commits/" in path:
+            return json.dumps(self.m.check_pages([self.check]))
+        if "/actions/workflows/ci-summary.yml/runs?" in path:
+            rows = [self.run] + self.latest_extra
+            return json.dumps([{"total_count": len(rows), "workflow_runs": rows}])
+        if "/attempts/1/jobs?" in path:
+            return json.dumps([{"total_count": 1 + self.jobs_extra, "jobs": [self.job]}])
+        if path == "repos/sparq-org/sparq/check-runs/101":
+            return json.dumps(self.check)
+        if path == "repos/sparq-org/sparq/actions/runs/303":
+            return json.dumps(self.run)
+        raise AssertionError(f"unexpected read: {argv}")
+
+    def posts(self):
+        return [c for c in self.calls if c[:3] == ["api", "-X", "POST"]]
+
+    def reruns(self):
+        return [c for c in self.posts() if c[3].endswith("/rerun")]
+
+    def drive(self):
+        self.sweeper.retrigger(self.original, 101, "fixture")
+
+
+class TestCancelledActionsRecovery(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_module(REARM_PY, "rerun_rearm")
+
+    def setUp(self):
+        def poison(*args, **kwargs):
+            raise AssertionError("unexpected process/network access in rerun fixture")
+        for target, name in ((subprocess, "run"), (subprocess, "Popen"),
+                             (socket, "create_connection"), (socket.socket, "connect")):
+            patcher = patch.object(target, name, poison)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.f = ActionsRerunFixture(self.m)
+
+    def denied(self):
+        with self.assertRaises(self.m.GhError):
+            self.f.drive()
+        self.assertEqual(self.f.reruns(), [])
+
+    def test_distinct_check_job_and_run_ids_reach_actions_only(self):
+        self.assertEqual(self.f.sweeper.run(), 0)
+        self.assertEqual([c[3] for c in self.f.posts()], [
+            "repos/sparq-org/sparq/issues/6360/comments",
+            "repos/sparq-org/sparq/actions/jobs/202/rerun"])
+        claim = self.m.parse_rerun_claim(self.f.comments[0]["body"])
+        self.assertEqual((claim["check"], claim["job"], claim["run"], claim["attempt"]), (101, 202, 303, 1))
+        self.assertFalse(any("/rerequest" in arg for call in self.f.calls for arg in call))
+
+    def test_fallback_identity_is_refused_before_any_claim_or_rerun(self):
+        # [GPT-6 Astra] Opus B1: valid bot metadata cannot grant the explicitly
+        # unprivileged fallback a claim. Keep the real App happy path above.
+        self.f.viewer = {"login": "github-actions[bot]"}
+        self.f.actor = dict(id="BOT_ACTIONS", login="github-actions[bot]", __typename="Bot")
+        self.f.post_error = True  # model the fallback's known Actions denial
+        self.assertEqual(self.f.sweeper.run(), 1)
+        self.assertEqual(self.f.posts(), [])
+        self.assertEqual(self.f.comments, [])
+        self.assertTrue(any("github-actions[bot]" in line and "no actions:write" in line
+                            for line in self.f.logs), self.f.logs)
+
+    def test_rerun_claim_cannot_shadow_or_satisfy_a_park_receipt(self):
+        # [GPT-6 Astra] Opus B2: exercise the actual park parser/evaluator, with
+        # a new claim appearing AFTER the park in a complete comment history.
+        park = self.m.stuck_comment(self.f.original, "gate-failed", self.m.GATE_FAILURE,
+                                   "fixture park", self.f.clock)
+        self.f.comments = [dict(databaseId=501, body=park, author=self.f.actor)]
+        self.f.drive()
+        claim_body = self.f.comments[-1]["body"]
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertNotIn(self.m.STUCK_MARKER, claim_body)
+        self.assertNotIn(self.m.RECEIPT_OPEN, claim_body)
+        self.assertIsNone(self.m.parse_stuck_receipt(claim_body))
+        self.assertIsNone(self.m.parse_rerun_claim(park))
+        expected_park = self.m.parse_stuck_receipt(park)
+        for history in (park + "\n\n" + claim_body, claim_body + "\n\n" + park):
+            selected = self.m.parse_stuck_receipt(history)
+            self.assertEqual(selected, expected_park)
+            self.assertTrue(self.m.unpark_satisfied(selected, self.f.original, self.m.GATE_SUCCESS))
+            self.assertFalse(self.m.unpark_satisfied(selected, self.f.original, self.m.GATE_FAILURE))
+        claim = self.m.parse_rerun_claim(claim_body)
+        self.assertFalse(self.m.unpark_satisfied(claim, self.f.original, self.m.GATE_SUCCESS))
+
+    def test_claim_history_cannot_change_the_existing_rearm_path(self):
+        self.f.drive()
+        claim_history = copy.deepcopy(self.f.comments)
+        for held in (False, True):
+            with self.subTest(held=held):
+                labels = ("review:pass", "needs:user") if held else ("review:pass",)
+                dropped = self.m.fixture(6360, labels=labels, armed=False)
+                dropped["comments"] = {"nodes": claim_history}
+                fake, _messages, outcome = self.m.exercise(dropped)
+                self.assertEqual(outcome.exit_code, 0)
+                self.assertEqual(len(self.m.arm_calls(fake)), 0 if held else 1)
+                # There is no production comment fetch/selector in re-arm; the
+                # separate unpark evaluator remains a human-only tool today.
+                queries = [arg for call in fake.calls for arg in call if arg.startswith("query=")]
+                self.assertFalse(any("comments(" in query for query in queries))
+
+    def test_crlf_claim_readback_preserves_integrity_and_attempt_dedupe(self):
+        def normalize_server_body():
+            self.f.comments[-1]["body"] = self.f.comments[-1]["body"].replace("\n", "\r\n")
+        self.f.after_claim = normalize_server_body
+        self.assertEqual(self.f.sweeper.run(), 0)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.f.clock += 1800
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertEqual(len(self.f.comments), 1)
+
+    def test_changed_head_draft_review_hold_queue_and_grace_never_claim(self):
+        changes = [dict(headRefOid="b" * 40), dict(isDraft=True), dict(state="CLOSED"),
+            dict(autoMergeRequest=None), dict(baseRefName="other"), dict(mergeable="UNKNOWN"),
+            dict(mergeQueueEntry={"id": "queued"}), dict(updatedAt="2026-09-06T12:00:00Z"),
+            dict(labels={"nodes": [], "pageInfo": {"hasNextPage": False}}),
+            dict(labels={"nodes": [{"name": "review:pass"}, {"name": "needs:user"}], "pageInfo": {"hasNextPage": False}}),
+            dict(reviewThreads={"totalCount": 1,"nodes": [{"isResolved": False}], "pageInfo": {"hasNextPage": False}}),
+            dict(labels={"nodes": [{"name":"review:pass"}], "pageInfo":{"hasNextPage":True}}),
+            dict(reviewThreads={"totalCount":0,"nodes":[],"pageInfo":{"hasNextPage":True}})]
+        for change in changes:
+            with self.subTest(change=change):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.raw.update(change)
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_explicit_6049_hold_survives_even_cancelled_metadata(self):
+        self.f.raw["number"] = 6049
+        self.f.original = self.m.replace(self.f.original, number=6049)
+        self.f.run["pull_requests"][0]["number"] = 6049
+        self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_live_waiting_requested_and_action_required_are_not_cancelled(self):
+        for target in ("check", "job", "run"):
+            for status, conclusion in (("queued",None), ("in_progress",None), ("waiting",None),
+                    ("requested",None), ("completed","action_required"), ("completed","success"),
+                    ("completed","failure"), ("completed","stale")):
+                with self.subTest(target=target, status=status, conclusion=conclusion):
+                    self.f = ActionsRerunFixture(self.m)
+                    getattr(self.f,target).update(status=status,conclusion=conclusion)
+                    self.denied()
+                    self.assertEqual(self.f.posts(), [])
+
+    def test_wrong_app_url_job_run_head_workflow_event_or_attempt(self):
+        cases = [("check", "app", {"slug":"other"}),
+            ("check","details_url","https://github.com/other/repo/actions/runs/303/job/202"),
+            ("check","head_sha","b"*40), ("check","name","gate, draft-tier"),
+            ("job","check_run_url","https://api.github.com/repos/sparq-org/sparq/check-runs/999"),
+            ("job","id",999), ("job","run_id",999), ("job","head_sha","b"*40),
+            ("job","name","other"), ("run","head_sha","b"*40),
+            ("run","path",".github/workflows/other.yml"),
+            ("run","repository",{"full_name":"other/repo"}), ("run","pull_requests",[]),
+            ("run","event","merge_group"), ("run","event","schedule"), ("run","event","workflow_dispatch"),
+            ("run","run_attempt",2), ("run","run_attempt",True)]
+        for target,key,value in cases:
+            with self.subTest(target=target,key=key,value=value):
+                self.f = ActionsRerunFixture(self.m)
+                getattr(self.f,target)[key] = value
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_latest_workflow_supersedes_cancelled_check_and_short_attempt_denies(self):
+        for status,conclusion in (("waiting",None),("completed","cancelled")):
+            self.f = ActionsRerunFixture(self.m)
+            self.f.latest_extra = [dict(self.f.run,id=304,status=status,conclusion=conclusion)]
+            self.denied()
+            self.assertEqual(self.f.posts(), [])
+        self.f = ActionsRerunFixture(self.m)
+        self.f.jobs_extra = 1
+        self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_stale_metadata_after_claim_prevents_rerun(self):
+        for target,key,value in (("raw","headRefOid","b"*40), ("raw","mergeQueueEntry",{"id":"q"}),
+                ("run","run_attempt",2), ("run","status","waiting"), ("job","status","in_progress"),
+                ("check","conclusion","success"),
+                ("raw","labels",{"nodes":[{"name":"review:needs"}],"pageInfo":{"hasNextPage":False}})):
+            with self.subTest(target=target,key=key):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.after_claim = lambda: getattr(self.f,target).__setitem__(key,value)
+                self.denied()
+                self.assertEqual(len(self.f.posts()), 1)
+
+    def test_claim_blocks_repeat_within_and_across_ticks_after_rejection(self):
+        self.f.post_error = True
+        self.assertEqual(self.f.sweeper.run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.f.clock += 1800  # beyond the comment's grace, same server attempt
+        self.assertEqual(self.f.sweeper.run(), 2)  # same instance retains sticky errors
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertEqual(len(self.f.comments), 1)
+
+    def test_successful_but_not_yet_visible_attempt_stays_claimed(self):
+        self.f.drive()
+        self.f.clock += 1800
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+
+    def test_receipts_must_be_complete_unquoted_and_authenticated(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        valid_body = self.m.StuckArmSweeper.rerun_claim_body(claim)
+        old_body = self.m.StuckArmSweeper.rerun_claim_body(dict(claim,head="b"*40))
+        for body, author in ((valid_body,dict(self.f.actor,id="OTHER")),
+                (valid_body,dict(self.f.actor,login="someone")),
+                (old_body,dict(self.f.actor,id="OTHER")),
+                (old_body,dict(self.f.actor,login="someone")),
+                (old_body,dict(self.f.actor,__typename="User")),
+                ("> " + valid_body,self.f.actor), ("```\n"+valid_body+"\n```",self.f.actor),
+                (valid_body + "\n",self.f.actor), (valid_body.replace("\n", "\r"),self.f.actor),
+                (old_body.replace('"head":"'+'b'*40+'"','"head":"invalid"'),self.f.actor),
+                (valid_body.replace('"attempt":1','"attempt":"bad"'),self.f.actor),
+                (valid_body.replace('"repo":"sparq-org/sparq"','"repo":"other/repo"'),self.f.actor),
+                (valid_body.replace("-->",""),self.f.actor),
+                (valid_body,self.f.actor)):
+            with self.subTest(body=body,author=author):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.comments=[dict(databaseId=501,body=body,author=author)]
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_authenticated_receipt_on_an_old_head_does_not_claim_new_head(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        self.f.comments = [dict(databaseId=501,author=self.f.actor,
+            body=self.m.StuckArmSweeper.rerun_claim_body(dict(claim,head="b"*40)))]
+        self.f.drive()
+        self.assertEqual(len(self.f.reruns()),1)
+
+    def test_same_attempt_is_claimed_even_if_job_or_check_id_changes(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        self.f.comments = [dict(databaseId=501,author=self.f.actor,
+            body=self.m.StuckArmSweeper.rerun_claim_body(dict(claim,job=999,check=998)))]
+        self.denied()
+        self.assertEqual(self.f.posts(),[])
+
+    def test_claim_is_not_review_evidence_or_a_verdict_bridge_trigger(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        body = self.m.StuckArmSweeper.rerun_claim_body(claim)
+        bridge_tests = load_module(REPO_ROOT / "scripts/tests/test_verdict_bridge.py", "claim_bridge_tests")
+        condition = load(WORKFLOWS / "verdict-bridge.yml")["jobs"]["bridge"]["if"]
+        event = bridge_tests.payload("issue_comment", issue={"number":6360,"pull_request":{}}, comment={"body":body})
+        self.assertFalse(bridge_tests.evaluate_if(condition,event))
+        self.assertIsNone(bridge_tests.vb.trailing_verdict(body))
+        # Positive control: the same production condition admits a real verdict.
+        event["github"]["event"]["comment"]["body"] = "VERDICT: pass"
+        self.assertTrue(bridge_tests.evaluate_if(condition,event))
+
+    def test_truncated_history_or_nonbot_authentication_never_claims(self):
+        for attr,value in (("history_truncated",True),("history_extra",1),
+                ("viewer",{"id":"HUMAN","login":"jeswr","__typename":"User"})):
+            self.f = ActionsRerunFixture(self.m)
+            setattr(self.f,attr,value)
+            self.denied()
+            self.assertEqual(self.f.posts(), [])
+
+    def test_claim_response_or_readback_uncertainty_never_posts_rerun(self):
+        for reply in ("bad-json", "{}", '{"id":"505"}', '{"id":999}'):
+            self.f = ActionsRerunFixture(self.m)
+            self.f.claim_reply=reply
+            self.denied()
+            self.assertEqual(len(self.f.posts()),1)
+
+    def test_per_tick_cap_and_dry_run_preserve_zero_posts(self):
+        self.f.sweeper.limits=self.m.StuckLimits(max_actions=0)
+        self.assertEqual(self.f.sweeper.run(),0)
+        self.assertEqual(self.f.sweeper.deferred,1)
+        self.assertEqual(self.f.posts(),[])
+        self.f.sweeper=self.f.new_sweeper()
+        self.f.sweeper.dry_run=True
+        self.assertEqual(self.f.sweeper.run(),0)
+        self.assertEqual(self.f.posts(),[])
 
 
 if __name__ == "__main__":
