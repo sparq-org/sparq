@@ -174,6 +174,41 @@
 //!   the same trigger machinery but needs a live multi-source execution layer this pure
 //!   crate does not own; deferred.
 //!
+//! ## Prior art: porting this to the LOCAL evaluator — attempted, unmerged (read before re-deriving)
+//!
+//! [OPUS-5] The recurring request to reuse this trigger + hysteresis in the **local**
+//! (`sparq-engine`) join loop — gh-903 / sq-gafdh / #2932 — **has already been implemented
+//! once, in full, and was held back rather than merged.** It is recorded here because the
+//! federated re-planner is where a reader looking to port it starts, and the prior art was
+//! not discoverable from this module, which is very likely why the task kept being re-raised.
+//!
+//! * The implementation is commit `f85d0180` on branch `sq-p6p6-adaptive-replan-local`
+//!   (verified **not** an ancestor of `main`). It ships an opt-in `adaptive-replan-local`
+//!   engine feature (OFF by default), a `replan_result_equals_static` oracle, and an
+//!   in-process micro-benchmark.
+//! * The "put the policy in a shared module so the two cannot diverge" half was **started but
+//!   NOT completed there**: that branch extracted a *candidate* shared policy — a pure,
+//!   dependency-free `sparq-replan-policy` crate carrying a verbatim port of the divergence +
+//!   hysteresis rule — and wired only the **local** evaluator onto it. It deliberately did
+//!   **not** rewire *this* module, which keeps its own richer policy (the latency knobs
+//!   below), so the federated path and this file's adaptive test suite stayed provably
+//!   unaffected. One shared crate with one consumer does not stop the two rules drifting, so
+//!   convergence onto a single implementation is still outstanding. Doing that rewiring here
+//!   as a standalone change, with no local consumer on `main`, would take the regression risk
+//!   for no convergence gain — it belongs with whatever lands the local consumer.
+//! * **Why it was held back:** its benchmark gate was recorded UNMET — the engine
+//!   micro-benchmark showed no win on a non-canonical work box. No numbers are repeated
+//!   here; see the commit and `bench/` protocol.
+//!
+//! **The negative is narrower than "the idea does not work."** Per
+//! `research/adaptive-replan-local-evaluator.md` §2.2, the mis-estimated fixture that was
+//! measured contains **no pruning arm** — both of its remaining arms inflate — so it never
+//! instantiated the shape a reorder could win on, and whether a local adaptive reorder pays
+//! off on a genuinely *pruning* remaining arm is **still open, not refuted**. That record is
+//! the authority on what was and was not measured, on the redesign options (checkpoint-
+//! triggered strategy switch, sq-6i40, is judged the higher-ceiling path), and on the
+//! maintainer questions still outstanding. Read it before re-implementing anything.
+//!
 //! [OPUS-4.8] sq-7s4z (epic sq-3183) — flagged for Fable re-review.
 
 use crate::pattern::Bgp;

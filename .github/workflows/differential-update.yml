@@ -1,15 +1,24 @@
-# [FABLE-5] Standing nightly SPARQL UPDATE differential vs Oxigraph (bead sq-3dyje.4).
+# [FABLE-5] Standing nightly SPARQL UPDATE differential vs Oxigraph (beads sq-3dyje.4,
+# sq-hodke).
 #
 # WHAT: runs the sparq-bench UPDATE differential fuzzer
 # (crates/sparq-bench/src/update_fuzz.rs) as a standing nightly lane. It generates
-# seeded GROUND-TERM update sequences (INSERT DATA / DELETE DATA / DELETE-INSERT-
-# WHERE incl. WITH/USING/variable graph names / CLEAR / DROP / CREATE / COPY / MOVE
-# / ADD; no blank nodes, no LOAD) and applies each sequence, one request at a time,
-# to THREE implementations — sparq's rebuild path (`sparq_engine::update`), sparq's
+# seeded update sequences (INSERT DATA / DELETE DATA / DELETE-INSERT-WHERE incl.
+# WITH/USING/variable graph names / CLEAR / DROP / CREATE / COPY / MOVE / ADD / LOAD,
+# over ground terms plus non-canonical numeric lexicals, blank nodes and RDF-1.2
+# triple terms) and applies each sequence, one request at a time, to THREE
+# implementations — sparq's rebuild path (`sparq_engine::update`), sparq's
 # delta-overlay path (`update_in_place`), and in-process Oxigraph 0.5 — asserting
-# after EVERY step that (a) the canonical dataset (sorted N-Quads; ground terms, so
-# no isomorphism to adjudicate) and (b) the full binding sets of two probe SELECTs
-# are identical. A divergence is therefore localized to the exact offending step.
+# after EVERY step that (a) the canonical dataset and (b) the full binding sets of
+# two probe SELECTs are identical. A divergence is therefore localized to the exact
+# offending step.
+#
+# The canonical form is sorted N-Quads while a step's dataset is ground, and RDFC-1.0
+# (blank-node-relabelled, i.e. RDF isomorphism) as soon as a blank node is in play;
+# the summary line reports `isomorphism_compares=` so a window that silently lost
+# blank-node coverage is visible. `LOAD` reads a local `file://` document that ONLY
+# sparq can fetch — Oxigraph 0.5's LOAD is HTTP-only — so the reference engine runs
+# the equivalent INSERT DATA for those steps; see the module docs for that oracle.
 #
 # WHY ITS OWN FILE: differential.yml (query differential, sq-0iqzw) and fuzz.yml are
 # owned by other open beads (sq-qcnn.5/.10); this lane deliberately lives in a file
@@ -35,9 +44,12 @@
 # is still self-sufficient.
 #
 # ADJUDICATED DIVERGENCES: the comparator consults bench/differential-divergences.json
-# for classes whose id starts with `update-`. None exist today, so every divergence
-# FAILS (strict); a listed update class without a detector in update_fuzz.rs also
-# stays strict, with a loud warning — never a silent skip.
+# for classes whose id starts with `update-`. One is adjudicated today —
+# `update-oxigraph-integer-lexical-canonicalization` (Oxigraph's storage layer collapses
+# xsd:integer lexical forms; sparq is the spec-correct side) — and it is absorbed only
+# by re-deriving that normalization independently on both sides, never as a blind skip.
+# Every other divergence FAILS (strict); a listed update class without a detector in
+# update_fuzz.rs also stays strict, with a loud warning — never a silent skip.
 #
 # TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
 # differential.yml / shacl-diff-fuzz.yml: this workflow never produces a check-run

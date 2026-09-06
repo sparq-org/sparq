@@ -1,6 +1,6 @@
 // AUTHORED-BY Claude Fable 5
 //! End-to-end tests of the identity host (provider WebIDs OUTSIDE the pod —
-//! `docs/design/webid-outside-pod.md`) through the assembled router:
+//! `research/lws-design-records.md` §4) through the assembled router:
 //!
 //! - the id-doc is served on GET/HEAD (Turtle/JSON-LD conneg, ETag/304, public cache, `ACAO: *`)
 //!   with **no auth and no WAC** — no `WWW-Authenticate`, no `.acl` Link, no `WAC-Allow`;

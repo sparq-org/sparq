@@ -10,8 +10,9 @@
 # anchors — see the `link-fixup` preprocessor below for how their repo-relative links
 # (kept that way for the lychee gate) are made mount-portable at build time.
 #
-# Reproducible build (CI pins the exact mdbook version — see .github/workflows/docs.yml):
-#   mdbook build book      # → book/book/ (the rendered site)
+# Reproducible build (CI pins the exact mdbook version — see .github/workflows/docs.yml
+# and .github/workflows/pages.yml, which must agree):
+#   scripts/build-guide.sh # → book/book/ (the rendered site; mdbook build + [ERROR] teeth)
 #   mdbook test  book      # compile-checks any ```rust fences
 
 [book]
@@ -31,7 +32,7 @@ create-missing = false
 # The canonical README.md / SKILL.md keep REPO-RELATIVE per-surface guide links
 # (required by the lychee internal-links gate); when those are {{#include}}d into a
 # chapter, mdBook would resolve them against the page mount and 404 under Pages. This
-# preprocessor rewrites such links to https://github.com/jeswr/sparq/blob/main/... so
+# preprocessor rewrites such links to https://github.com/sparq-org/sparq/blob/main/... so
 # the single-sourced content renders correctly under the mdBook mount. The command is
 # resolved relative to the dir `mdbook` runs in (the repo root: `mdbook build book`).
 # Run after the built-in `links` preprocessor so it sees the post-{{#include}} text.
@@ -40,11 +41,21 @@ command = "python3 scripts/mdbook-rewrite-links.py"
 after = ["links"]
 
 [output.html]
-# Pages will eventually serve this under /sparq/... (a sub-path of the GitHub
-# Pages base path). The exact mount point + the Pages-source cutover is deferred
-# to the publishing bead (sq-fymm / sq-w9sr) — see docs.yml header. git-repository
-# links keep working regardless of mount point.
-git-repository-url = "https://github.com/jeswr/sparq"
-edit-url-template = "https://github.com/jeswr/sparq/edit/main/book/{path}"
+# [OPUS-5] issue #5022 — THE MOUNT IS DECIDED: the guide is published at
+# https://sparq.jeswr.org/guide/ , assembled into the EXISTING pages.yml artifact as one
+# more overlay directory (research/docs-site-single-sourcing-anti-drift.md §7 option (a)).
+# One producer, one Pages deploy slot, no race with the showcase at /, no live URL moves.
+#
+# `site-url` is load-bearing for exactly ONE emitted file: mdBook stamps it into the
+# generated 404.html as `<base href="/guide/">`. Normal chapter pages use relative
+# `path_to_root` links and are mount-independent, so nothing else in the render changes.
+# GitHub Pages serves a directory-level 404.html, so /guide/<typo> renders THAT page — and
+# without the sub-path base href every stylesheet/script on it would resolve against the
+# site root and 404. It must therefore stay equal to the sub-path pages.yml overlays the
+# render to; scripts/check-guide-publish-wiring.py gates that the two cannot drift apart.
+site-url = "/guide/"
+# git-repository links are absolute, so they keep working regardless of mount point.
+git-repository-url = "https://github.com/sparq-org/sparq"
+edit-url-template = "https://github.com/sparq-org/sparq/edit/main/book/{path}"
 default-theme = "rust"
 preferred-dark-theme = "ayu"

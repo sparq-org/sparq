@@ -516,6 +516,8 @@ export class TauriWorkspaceStore implements WorkspaceStore {
   readonly backend: WorkspaceBackend = "tauri";
   private readonly fs: TauriFsApi;
   private readonly opts: { baseDir: number };
+  /** [SONNET-4.6] Shared tail for every `__index__.json` read-modify-write. */
+  private indexMutationTail: Promise<void> = Promise.resolve();
 
   constructor(fs: TauriFsApi) {
     this.fs = fs;
@@ -548,6 +550,17 @@ export class TauriWorkspaceStore implements WorkspaceStore {
     await this.fs.writeTextFile(TAURI_INDEX, JSON.stringify(ids), this.opts);
   }
 
+  /** Serialize index mutations across workspace ids without wedging after a failed write. */
+  private mutateIds(update: (ids: string[]) => string[] | null): Promise<void> {
+    const operation = this.indexMutationTail.then(async () => {
+      const ids = await this.readIds();
+      const next = update(ids);
+      if (next) await this.writeIds(next);
+    });
+    this.indexMutationTail = operation.catch(() => {});
+    return operation;
+  }
+
   async list(): Promise<WorkspaceSummary[]> {
     const ids = await this.readIds();
     const summaries: WorkspaceSummary[] = [];
@@ -571,8 +584,7 @@ export class TauriWorkspaceStore implements WorkspaceStore {
     await this.ensureDir();
     const record: Workspace = { ...ws, updatedAt: Date.now(), schema: WORKSPACE_SCHEMA };
     await this.fs.writeTextFile(this.path(ws.id), JSON.stringify(record), this.opts);
-    const ids = await this.readIds();
-    if (!ids.includes(ws.id)) await this.writeIds([...ids, ws.id]);
+    await this.mutateIds((ids) => (ids.includes(ws.id) ? null : [...ids, ws.id]));
   }
 
   async remove(id: string): Promise<void> {
@@ -583,7 +595,7 @@ export class TauriWorkspaceStore implements WorkspaceStore {
     } catch {
       // A missing file is fine — remove is best-effort idempotent.
     }
-    await this.writeIds((await this.readIds()).filter((x) => x !== id));
+    await this.mutateIds((ids) => ids.filter((x) => x !== id));
     if ((await this.lastOpenedId()) === id) await this.setLastOpenedId(null);
   }
 

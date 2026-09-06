@@ -48,7 +48,9 @@ pub enum ProverTomlError {
     ///
     /// [OPUS-4.8] sq-2ezsx: the same applies to the `xsd:double`
     /// ([`filter_value_dl_f64_prover_toml`]) and `xsd:decimal`
-    /// ([`filter_value_dl_decimal_prover_toml`]) sibling members.
+    /// ([`filter_value_dl_decimal_prover_toml`]) sibling members, and
+    /// [OPUS-5] sq-wz99x: to the `xsd:dateTime` / `xsd:date` member
+    /// ([`filter_value_dl_datetime_prover_toml`]).
     #[cfg(feature = "dual-leaf")]
     FilterValueDlUseDedicatedFn,
     /// A [`ProofInputs::PathReach`] (bounded-depth property path) was passed to the
@@ -232,6 +234,47 @@ pub fn filter_value_dl_decimal_prover_toml(
     s.push_str(&format!("op = \"{}\"\n", op));
     s.push_str(&format!("bound_neg = {}\n", bound_neg));
     s.push_str(&format!("bound_scaled = \"{}\"\n", bound_scaled));
+    s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.0));
+    s.push_str(&format!("expected = {}\n", expected));
+    s.push_str(&format!("value_neg = {}\n", value_neg));
+    s.push_str(&format!("value_hook_scaled = \"{}\"\n", value_hook_scaled.0));
+    s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
+    s
+}
+
+/// Render the `Prover.toml` body for a DUAL-LEAF `xsd:dateTime` / `xsd:date`
+/// value-lane FILTER proof (`filter_value_dl_datetime`, [OPUS-5] sq-wz99x). Order
+/// MUST match `zk/compose/filter_value_dl_datetime/src/main.nr`: challenge,
+/// operand_enc, op, bound_neg, bound_scaled_epoch, datatype_const, expected
+/// (public), then value_neg, value_hook_scaled, lexical_component (private).
+///
+/// The value handle is the SIGNED SCALED EPOCH (milliseconds on the XSD
+/// `timeOnTimeline`; sign in `value_neg`, magnitude in `value_hook_scaled`); the
+/// lane AND the scale are folded into `datatype_const` — pass
+/// [`crate::manifest::datetime_datatype_const`]`()` for `xsd:dateTime` or
+/// [`crate::manifest::date_datatype_const`]`()` for `xsd:date`. ONE member serves
+/// both lanes, so this ONE renderer does too. DOCUMENTED RISK: INV-VL downgrade +
+/// the open §13 audit obligation (CR-G8 / sq-qhy4); NOT externally audited.
+#[cfg(feature = "dual-leaf")]
+#[allow(clippy::too_many_arguments)]
+pub fn filter_value_dl_datetime_prover_toml(
+    challenge: &FieldHex,
+    operand_enc: &FieldHex,
+    op: u32,
+    bound_neg: bool,
+    bound_scaled_epoch: u64,
+    datatype_const: &FieldHex,
+    expected: bool,
+    value_neg: bool,
+    value_hook_scaled: &FieldHex,
+    lexical_component: &FieldHex,
+) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
+    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
+    s.push_str(&format!("op = \"{}\"\n", op));
+    s.push_str(&format!("bound_neg = {}\n", bound_neg));
+    s.push_str(&format!("bound_scaled_epoch = \"{}\"\n", bound_scaled_epoch));
     s.push_str(&format!("datatype_const = \"{}\"\n", datatype_const.0));
     s.push_str(&format!("expected = {}\n", expected));
     s.push_str(&format!("value_neg = {}\n", value_neg));
@@ -756,8 +799,12 @@ pub fn prover_toml_for(
         // [OPUS-4.8] sq-2ezsx: the double + decimal value-lane siblings also carry
         // FIELD-element private witnesses, so they use the dedicated fns
         // (`filter_value_dl_f64_prover_toml` / `filter_value_dl_decimal_prover_toml`).
+        // [OPUS-5] sq-wz99x: same for the dateTime/date member
+        // (`filter_value_dl_datetime_prover_toml`).
         #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDlF64 { .. } | ProofInputs::FilterValueDlDecimal { .. } => {
+        ProofInputs::FilterValueDlF64 { .. }
+        | ProofInputs::FilterValueDlDecimal { .. }
+        | ProofInputs::FilterValueDlDateTime { .. } => {
             return Err(ProverTomlError::FilterValueDlUseDedicatedFn);
         }
         // [OPUS-4.8] sq-bwwl / sq-r2s8 (step 4 proving path): hidden cross-credential
@@ -1149,6 +1196,39 @@ mod toml_glue_tests {
         assert!(lines[9].starts_with("lexical_component = "));
     }
 
+    /// [OPUS-5] sq-wz99x: the dateTime/date renderer emits the member `main`'s
+    /// declaration order — the decimal layout with `bound_scaled` renamed
+    /// `bound_scaled_epoch`. A reorder silently desyncs the proof from the
+    /// verifier's public-input reconstruction, so pin it here too.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn filter_value_dl_datetime_toml_shape_and_order() {
+        let toml = filter_value_dl_datetime_prover_toml(
+            &fh("0x01"),  // challenge
+            &fh("0x02"),  // operand_enc
+            0,            // op (lt)
+            false,        // bound_neg
+            86_400_000,   // bound_scaled_epoch (1970-01-02T00:00:00Z)
+            &fh("0x03"),  // datatype_const (the LANE constant)
+            true,         // expected
+            true,         // value_neg (a pre-epoch instant)
+            &fh("0x04"),  // value_hook_scaled
+            &fh("0x05"),  // lexical_component
+        );
+        let lines: Vec<&str> = toml.lines().collect();
+        assert!(lines[0].starts_with("challenge = "));
+        assert!(lines[1].starts_with("operand_enc = "));
+        assert!(lines[2].starts_with("op = "));
+        assert!(lines[3] == "bound_neg = false");
+        assert!(lines[4].starts_with("bound_scaled_epoch = "));
+        assert!(lines[5].starts_with("datatype_const = "));
+        assert!(lines[6] == "expected = true");
+        assert!(lines[7] == "value_neg = true");
+        assert!(lines[8].starts_with("value_hook_scaled = "));
+        assert!(lines[9].starts_with("lexical_component = "));
+        assert_eq!(lines.len(), 10);
+    }
+
     /// The double + decimal value-lane inputs route to the dedicated-fn error in
     /// the general `prover_toml_for` (their FIELD-element witnesses do not fit the
     /// general entry's digit-byte threading), never a panic.
@@ -1170,6 +1250,16 @@ mod toml_glue_tests {
                 op: FilterOp::Ge,
                 bound_neg: false,
                 bound_scaled: 10000,
+                datatype_const: fh("0x03"),
+                expected: true,
+            },
+            // [OPUS-5] sq-wz99x: the dateTime/date member routes the same way.
+            ProofInputs::FilterValueDlDateTime {
+                id: CircuitId::FilterValueDlDateTime,
+                operand_enc: fh("0x02"),
+                op: FilterOp::Ge,
+                bound_neg: false,
+                bound_scaled_epoch: 86_400_000,
                 datatype_const: fh("0x03"),
                 expected: true,
             },

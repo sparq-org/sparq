@@ -10,6 +10,22 @@ Kern/PSS #1746 profile + fixture freeze and is deliberately NOT implemented here
 **Status:** **DESIGN ONLY — NOT IMPLEMENTED, AND DELIBERATELY SO.** The gate this work is
 conditioned on has not been observed to close (§1). Nothing in `crates/` changes with this record.
 
+> **AMENDMENT — [SONNET-4.6], issue #1746.** The *profile-independent* part of phase 3 has since
+> landed as `crates/sparq-canon`'s opt-in, off-by-default **`concept`** feature: the
+> multibase/multihash envelope (both published multiformats specs, not Kern's to freeze) and the
+> fail-closed, constant-time, full-multihash-prefix recompute-and-byte-compare of §5.2, over a
+> **caller-supplied** quad set. The gate of §1 is NOT treated as closed: the scope-extraction rule
+> (§3, §5.1) is still Kern's, is still not vendored, and is deliberately absent from the
+> implementation — which is why the caller passes the quads. **Still blocked:** phase 1 (vendor the
+> frozen profile + authoritative corpus), phase 2 (a scope-canonicalization primitive, which
+> presupposes a scope rule), and the phase-4 wiring of the guard into an actual ingestion path. The
+> §2 independence caveat and the §3 not-whole-graph-RDFC-1.0 statement are carried verbatim into
+> the module rustdoc, the crate README, and `skills/rdf-canon/SKILL.md` (phase 5, partial).
+> Open questions **Q1, Q2 and Q4-for-the-scope-primitive remain open**; **Q3 is answered only for
+> this implementation's own conventions** (trailing newline hashed; empty scope rejected rather
+> than hashed; permitted codes = sha2-256/384/512 at full length), stated as conventions so a
+> disagreement with the frozen profile shows up as a visible difference, not a silent one.
+
 ## 1. Gate status: the freeze has not landed in this repository
 
 The bead is explicit: *"gated on the #1746 profile/fixture freeze — do NOT implement ahead of the
@@ -277,3 +293,51 @@ both.
 `sq-lhcot.2` (external-key `.spqv` profile) is a **different** seam on the same KERN boundary and is
 not addressed here. The `EmbeddingProvenance::reserved` area remains opaque with no fields defined;
 nothing in this record extends it.
+
+## 9. Estate-fit verdict from the earlier KB evaluation
+
+<!-- [GPT-5.6] sq-y64lh / issue #3124 — this section records the broader
+canonicalisation + embedding + ZK + grounding verdict without changing the
+freeze-gated implementation plan above. -->
+
+The earlier `sq-y64lh` research issue asked whether sparq should consume this mechanism natively
+across the KB estate. The answer is **conditionally yes at the ingestion and identity boundary,
+but no as a shared primitive across every content-addressed subsystem**:
+
+- **Canonicalisation:** share the existing `sparq-canon` serialization and scope-canonicalisation
+  primitives where the frozen profile permits, but implement node/SCC extraction and cycle handling
+  as a distinct algorithm. Section 3 demonstrates why whole-dataset RDFC-1.0 output cannot serve as
+  the concept identifier. SCC construction also requires retaining the extracted dependency
+  subgraph and canonicalising each component as a unit; blank-node closure must therefore be a
+  profile invariant, not an implementation convenience. No credible cycle or blank-node cost can
+  be stated until the authoritative corpus fixes the extraction rule and supplies representative
+  cyclic fixtures.
+- **PKG/vector reuse:** a concept digest is a good *content revision key*, not an embedding identity.
+  The reusable key must be at least `(concept multihash, model id, model version, content version,
+  verbalisation regime, metric, normalization, dimension)`. Those latter axes already exist in
+  `EmbeddingProvenance`; omitting them would let vectors from incompatible coordinate spaces collide
+  under the same concept hash. A frozen concept profile could therefore populate a future versioned
+  extension of the reserved provenance area, but it must not replace provenance or the `.spqv`
+  graph-generation/staleness contract. This seam is worthwhile only after cross-system fixtures
+  demonstrate that independent producers derive the same concept digest and embedding input text.
+- **ZK commitments:** reuse is limited to canonical RDF observations and algorithm identifiers.
+  `sparq-zk` commits an ordered canonical graph representation into domain-specific BN254/Poseidon2
+  field elements; a `urn:concept` multihash is a wire identity over a scoped definition. Treating
+  either digest as the other would change the committed statement and omit the ZK scheme's
+  domain/leaf encoding. A later circuit may bind a concept multihash as an explicitly
+  domain-separated public value, but the concept digest must not replace `C(G)` or its registry
+  scheme. The ZK estate remains research-grade and lacks the pending external audit.
+- **Human labels and NSM grounding:** neither is an identity-layer invariant. A deterministic label
+  can be derived only after freezing a lossy presentation policy (language preference, predicate
+  priority, lexicalisation, tie-breaking, and version); structural isomorphism alone does not yield
+  a uniquely meaningful human label. Likewise, treating a fixed Natural Semantic Metalanguage
+  prime set as the sole labelled foundation is a linguistic hypothesis, not evidence supplied by
+  content addressing. sparq should permit such annotations as versioned, attributed presentation
+  or grounding layers and evaluate them empirically; they must not enter the concept digest or be
+  described as canonical semantics without an independently reviewed specification and corpus.
+
+Consequently, early alignment should freeze **one concept-record format and one multihash profile**
+with Kern/PSS, then let sparq verify it independently before indexing. Alignment does **not** mean
+reusing that digest as an embedding-space identifier or a ZK graph commitment. Until the profile
+and fixtures named in §1 land, sparq consumes no native `urn:concept` wire format and reserves no
+semantics in `EmbeddingProvenance`.

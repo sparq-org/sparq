@@ -227,6 +227,7 @@ fn manifest_with_set_proof(proof: HolderSetProof) -> ProofManifest {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],

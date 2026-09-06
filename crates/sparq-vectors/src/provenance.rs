@@ -14,14 +14,26 @@
 //!
 //! # What `w(t)` combines (design §USE-1)
 //!
-//! For an object-property triple `(h, r, t)` the weight is derived from the **head** entity `h`'s
-//! provenance (the subject the fact is asserted about — `h`'s Finding/resource carries the
-//! `prov:wasDerivedFrom` lineage and the `pkg:confidence` / `pkg:assurance` quality axes):
+//! `w(t)` is provenance **about the triple `t` itself** wherever the graph expresses it, and falls
+//! back to the head otherwise:
+//!
+//! 1. **Statement-level (the design's `w(t)` proper).** If the graph *reifies* the triple — RDF 1.2
+//!    `:r rdf:reifies <<( h r t )>>`, or RDF 1.1 standard reification (`rdf:subject` /
+//!    `rdf:predicate` / `rdf:object`) — and the reifier carries provenance, then `w(t)` is that
+//!    **reifier's** weight (the MIN over reifiers, mirroring the min-over-sources rule: a statement
+//!    is only as trustworthy as its least-trustworthy annotation).
+//! 2. **Head-level fallback** (no reifier, or no provenance on it): the **head** entity `h`'s own
+//!    provenance. This is an *approximation* — it says `h` is a low-assurance entity, not that this
+//!    particular assertion is doubtful — and it is the only signal a plain RDF-1.1 graph with no
+//!    reification can offer. It is fail-open, never invented.
+//!
+//! Either way the scalar is built from the same annotations, read off whichever subject qualifies
+//! (the reifier, or `h`):
 //!
 //! | provenance fact | contribution |
 //! |---|---|
-//! | `pkg:confidence "c"` on `h` (epistemic weight, `0..1`) | the **confidence factor** `c` |
-//! | `pkg:confidence "c"` on `h`'s `prov:wasDerivedFrom` source (source reliability) | folded in as the source-reliability factor (min over sources) |
+//! | `pkg:confidence "c"` on the subject (epistemic weight, `0..1`) | the **confidence factor** `c` |
+//! | `pkg:confidence "c"` on its `prov:wasDerivedFrom` source (source reliability) | folded in as the source-reliability factor (min over sources) |
 //! | `pkg:assurance secx:Proven` | high **assurance multiplier** ([`WeightConfig::proven`]) |
 //! | `pkg:assurance secx:Claimed` | mid multiplier ([`WeightConfig::claimed`]) |
 //! | `pkg:assurance secx:Conjectured` | low multiplier ([`WeightConfig::conjectured`]) |
@@ -65,6 +77,19 @@ pub const PROV_WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFro
 /// addition to the super-property so the source-reliability factor resolves on an un-closed graph
 /// (where the sub→super entailment has not been materialised).
 pub const PKG_DISCOVERED_FROM: &str = "https://sparq.dev/ns/pkg#discoveredFrom";
+
+/// `rdf:reifies` — the RDF 1.2 reifier → triple-term edge (`:r rdf:reifies <<( s p o )>>`). The
+/// reifier `:r` is an ordinary entity, so its own `pkg:confidence` / `pkg:assurance` /
+/// `prov:wasDerivedFrom` annotations are provenance about **the statement**, which is what the
+/// design's per-triple `w(t)` is defined over. [OPUS-5] sq-w2af4.
+pub const RDF_REIFIES: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies";
+/// `rdf:subject` — RDF 1.1 standard reification, the plain-RDF spelling of the same
+/// statement → provenance mapping (`:st rdf:subject :s ; rdf:predicate :p ; rdf:object :o`).
+pub const RDF_SUBJECT: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#subject";
+/// `rdf:predicate` — RDF 1.1 standard reification (see [`RDF_SUBJECT`]).
+pub const RDF_PREDICATE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate";
+/// `rdf:object` — RDF 1.1 standard reification (see [`RDF_SUBJECT`]).
+pub const RDF_OBJECT: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#object";
 
 /// The three `secx:` epistemic-basis IRIs (`pkg:assurance` objects). The `secx:` namespace is the
 /// sec-prop extension the PKG reuses for the assurance axis; the design records both the
@@ -127,6 +152,12 @@ pub struct ProvenanceWeights {
     assurance: FxHashMap<Id, Assurance>,
     /// The source ids each subject id was derived from (`prov:wasDerivedFrom` / `pkg:discoveredFrom`).
     derived_from: FxHashMap<Id, Vec<Id>>,
+    /// **Statement-level** provenance: for each asserted triple the graph *reifies*, the reifier
+    /// ids that themselves carry provenance. Reifiers with no annotation of their own are dropped
+    /// here (they say nothing), so a non-empty entry always means real per-statement provenance.
+    /// Empty on any graph without reification — the head fallback then covers every triple.
+    /// [OPUS-5] sq-w2af4.
+    statement: FxHashMap<[Id; 3], Vec<Id>>,
     config: WeightConfig,
 }
 
@@ -154,6 +185,10 @@ impl ProvenanceWeights {
         let assurance_pred = graph.id_of(&iri(PKG_ASSURANCE));
         let derived_pred = graph.id_of(&iri(PROV_WAS_DERIVED_FROM));
         let discovered_pred = graph.id_of(&iri(PKG_DISCOVERED_FROM));
+        let reifies_pred = graph.id_of(&iri(RDF_REIFIES));
+        let reif_subj_pred = graph.id_of(&iri(RDF_SUBJECT));
+        let reif_pred_pred = graph.id_of(&iri(RDF_PREDICATE));
+        let reif_obj_pred = graph.id_of(&iri(RDF_OBJECT));
 
         // Resolve the assurance-object ids up front (None when the graph never mentions them).
         let proven = first_present(graph, &SECX_PROVEN);
@@ -163,6 +198,11 @@ impl ProvenanceWeights {
         let mut confidence: FxHashMap<Id, f32> = FxHashMap::default();
         let mut assurance: FxHashMap<Id, Assurance> = FxHashMap::default();
         let mut derived_from: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+        // Reification, collected raw in the same pass and resolved after it: at scan time we do not
+        // yet know which reifiers carry provenance of their own. `reifies` keeps graph order (a
+        // Vec, not a map) so the mined result never depends on hash iteration order.
+        let mut reifies: Vec<([Id; 3], Id)> = Vec::new();
+        let mut reif_parts: FxHashMap<Id, [Id; 3]> = FxHashMap::default();
 
         for [s, p, o] in graph.iter_ids() {
             if Some(p) == conf_pred {
@@ -188,10 +228,42 @@ impl ProvenanceWeights {
                 }
             } else if Some(p) == derived_pred || Some(p) == discovered_pred {
                 derived_from.entry(s).or_default().push(o);
+            } else if Some(p) == reifies_pred {
+                // RDF 1.2: the object IS the triple term, stored structurally as its three ids.
+                if let TermParts::Triple(ids) = graph.dict.term_parts(o) {
+                    reifies.push((ids, s));
+                }
+            } else if Some(p) == reif_subj_pred {
+                reif_parts.entry(s).or_insert([NO_ID; 3])[0] = o;
+            } else if Some(p) == reif_pred_pred {
+                reif_parts.entry(s).or_insert([NO_ID; 3])[1] = o;
+            } else if Some(p) == reif_obj_pred {
+                reif_parts.entry(s).or_insert([NO_ID; 3])[2] = o;
             }
         }
 
-        ProvenanceWeights { confidence, assurance, derived_from, config }
+        let mut pw = ProvenanceWeights {
+            confidence,
+            assurance,
+            derived_from,
+            statement: FxHashMap::default(),
+            config,
+        };
+        // Resolve reification now that every entity's own annotations are known: a reifier that
+        // carries NO provenance says nothing about the statement, so it is dropped rather than
+        // fail-opening the triple to 1.0 and masking the head fallback.
+        for (triple, reifier) in reifies {
+            if pw.has_provenance(reifier) {
+                pw.statement.entry(triple).or_default().push(reifier);
+            }
+        }
+        for (stmt, parts) in &reif_parts {
+            if parts.contains(&NO_ID) || !pw.has_provenance(*stmt) {
+                continue; // an incomplete or unannotated reification is not statement provenance
+            }
+            pw.statement.entry(*parts).or_default().push(*stmt);
+        }
+        pw
     }
 
     /// The configured factors (so a harness can read what it swept).
@@ -209,23 +281,64 @@ impl ProvenanceWeights {
         seen.len()
     }
 
+    /// The number of **triples** the graph carries statement-level provenance for — a reified
+    /// statement (RDF 1.2 `rdf:reifies` or RDF 1.1 `rdf:subject`/`rdf:predicate`/`rdf:object`)
+    /// whose reifier is itself annotated. `0` ⇒ no per-statement signal exists and every `w(t)`
+    /// comes from the head fallback, so any *within-subject* weighting (e.g. pooling one node's
+    /// edges) is an exact no-op. Read this before claiming a pooling result is provenance-driven.
+    /// [OPUS-5] sq-w2af4.
+    pub fn annotated_statements(&self) -> usize {
+        self.statement.len()
+    }
+
     /// Is the graph entirely free of provenance (so weighting is a no-op `1.0` everywhere)?
     pub fn is_empty(&self) -> bool {
-        self.confidence.is_empty() && self.assurance.is_empty() && self.derived_from.is_empty()
+        self.confidence.is_empty()
+            && self.assurance.is_empty()
+            && self.derived_from.is_empty()
+            && self.statement.is_empty()
+    }
+
+    /// Does `id` carry at least one mined provenance fact of its own?
+    fn has_provenance(&self, id: Id) -> bool {
+        self.confidence.contains_key(&id)
+            || self.assurance.contains_key(&id)
+            || self.derived_from.contains_key(&id)
     }
 
     /// The provenance weight `w(t) ∈ [floor, 1.0]` for the object-property triple `(h, r, t)` under
-    /// `mode`. Derived from the **head** `h`'s provenance (the subject the fact is about).
+    /// `mode` — provenance about **the statement itself** when the graph reifies it, else the
+    /// **head** `h`'s (see the module header for the two-level rule).
+    ///
+    /// Statement-level wins because it is the design's `w(t)`: the head fallback only reports that
+    /// `h` is a low-assurance *entity*, which is a strictly weaker claim than "this assertion is
+    /// doubtful". Consequence worth internalising: **without reification every triple sharing a
+    /// head has an identical weight**, so any weighting *within* one subject's edges degenerates to
+    /// the uniform mean. [`annotated_statements`](Self::annotated_statements) reports whether the
+    /// per-statement signal exists at all.
     ///
     /// Under [`WeightMode::Uniform`] this is **always** `1.0` (the ablation-off baseline — provenance
     /// is not even consulted). Under [`WeightMode::Provenance`] it is the design-§USE-1 combination;
-    /// a head with no provenance still returns `1.0` (fail-open).
+    /// an unannotated statement and head still return `1.0` (fail-open).
     pub fn weight_of(&self, triple: [Id; 3], mode: WeightMode) -> f32 {
         if mode == WeightMode::Uniform {
             return 1.0;
         }
-        let [h, _r, _t] = triple;
-        self.weight_for_subject(h)
+        self.statement_weight(triple).unwrap_or_else(|| self.weight_for_subject(triple[0]))
+    }
+
+    /// The weight of `triple`'s **reified statement**, or `None` when the graph asserts no
+    /// statement-level provenance for it. The MIN over the triple's annotated reifiers — a
+    /// statement is only as trustworthy as its least-trustworthy annotation, mirroring the
+    /// min-over-sources rule — so the result never depends on reifier iteration order.
+    fn statement_weight(&self, triple: [Id; 3]) -> Option<f32> {
+        let reifiers = self.statement.get(&triple)?;
+        reifiers.iter().map(|&r| self.weight_for_subject(r)).fold(None, |acc, w| {
+            Some(match acc {
+                None => w,
+                Some(a) => a.min(w),
+            })
+        })
     }
 
     /// The provenance weight contributed by a single subject `h` (the head of a positive). Public so
@@ -261,30 +374,39 @@ impl ProvenanceWeights {
     }
 
     // ---- integration point 2: confidence-weighted structural-sketch pooling -------------------
-    // [OPUS-4.8] sq-oy9ya (design §USE-1 point 2). When a node has MULTIPLE values for a
-    // multi-valued predicate (a characteristic set / structural sketch), the standard pooling is a
-    // uniform mean of the value contributions. These helpers pool **confidence-weighted** instead:
-    // each contribution is weighted by the provenance weight of the SUBJECT it came from, so a fact
-    // a low-assurance/low-confidence source asserted pulls the pooled vector less. With uniform
-    // weights (all 1.0, i.e. a provenance-free graph) this reduces EXACTLY to the arithmetic mean —
-    // a plain graph is unchanged. No accuracy claim is made; it ships behind the same on/off
-    // ablation (`WeightMode`).
+    // [OPUS-4.8] sq-oy9ya (design §USE-1 point 2), per-triple keying [OPUS-5] sq-w2af4. When a node
+    // has MULTIPLE values for a multi-valued predicate (a characteristic set / structural sketch),
+    // the standard pooling is a uniform mean of the value contributions. This pools by the
+    // contributing ASSERTION's own `w(t)` instead, so a fact the graph reifies as low-assurance
+    // pulls the pooled vector less. With uniform weights (all 1.0, i.e. a provenance-free graph)
+    // this reduces EXACTLY to the arithmetic mean — a plain graph is unchanged. No accuracy claim
+    // is made; it ships behind the same on/off ablation (`WeightMode`).
 
-    /// **Confidence-weighted pool** of a node's per-value contributions for one multi-valued
-    /// predicate (design §USE-1 point 2). `contributions` is the list of `(subject_id,
-    /// value_vector)` pairs that feed this node's block for the predicate — one entry per asserted
-    /// value, `subject_id` being the head whose provenance qualifies that value. The pooled vector
-    /// is `Σ w_i · v_i / Σ w_i`, with `w_i = self.weight_of([subject_i, _, _], mode)`.
+    /// **Provenance-weighted pool** of a node's per-value contributions for one multi-valued
+    /// predicate (design §USE-1 point 2). `contributions` is the list of `(triple, value_vector)`
+    /// pairs that feed this node's block for the predicate — one entry per asserted value, keyed by
+    /// **the asserting triple itself**. The pooled vector is `Σ w_i · v_i / Σ w_i`, with
+    /// `w_i = self.weight_of(triple_i, mode)`.
+    ///
+    /// **The weight is the assertion's `w(t)`** (see [`weight_of`](Self::weight_of)): the reified
+    /// statement's provenance where the graph carries it, the head's otherwise. That fallback makes
+    /// the *within-subject* case honest rather than proxied — every `(node, p, ·)` contribution
+    /// shares the head `node`, so on a graph with no statement-level provenance
+    /// ([`annotated_statements`](Self::annotated_statements) `== 0`) all weights are equal and the
+    /// pool is **exactly** the arithmetic mean. It is deliberately NOT keyed on the value entity:
+    /// "the object is a low-assurance entity" is a different heuristic from "this assertion is
+    /// doubtful", and substituting it would misreport the design point as implemented.
     ///
     /// Under [`WeightMode::Uniform`] every `w_i = 1.0`, so the result is the **plain arithmetic
     /// mean** — byte-identical to the unweighted pooler (the ablation-off baseline). Under
-    /// [`WeightMode::Provenance`] a value from a lower-quality source contributes proportionally
-    /// less. Returns `None` for an empty `contributions` list, or `Err` if the vectors differ in
-    /// length (a layout bug, never silently truncated). The denominator can never be zero: the
-    /// weight floor (`> 0`) guarantees `Σ w_i > 0` whenever there is at least one contribution.
+    /// [`WeightMode::Provenance`] a value asserted by a lower-quality statement contributes
+    /// proportionally less. Returns `None` for an empty `contributions` list, or `Err` if the
+    /// vectors differ in length (a layout bug, never silently truncated). The denominator can never
+    /// be zero: the weight floor (`> 0`) guarantees `Σ w_i > 0` whenever there is at least one
+    /// contribution.
     pub fn pool_weighted(
         &self,
-        contributions: &[(Id, Vec<f32>)],
+        contributions: &[([Id; 3], Vec<f32>)],
         mode: WeightMode,
     ) -> Result<Option<Vec<f32>>, String> {
         if contributions.is_empty() {
@@ -293,7 +415,7 @@ impl ProvenanceWeights {
         let dim = contributions[0].1.len();
         let mut acc = vec![0.0f32; dim];
         let mut wsum = 0.0f32;
-        for (subject, vec) in contributions {
+        for (triple, vec) in contributions {
             if vec.len() != dim {
                 return Err(format!(
                     "pool_weighted: contribution vectors differ in length ({} vs {})",
@@ -301,7 +423,7 @@ impl ProvenanceWeights {
                     dim
                 ));
             }
-            let w = self.weight_of([*subject, NO_ID, NO_ID], mode);
+            let w = self.weight_of(*triple, mode);
             wsum += w;
             for (a, x) in acc.iter_mut().zip(vec.iter()) {
                 *a += w * *x;
@@ -360,6 +482,124 @@ impl ProvenanceWeights {
             WeightMode::Uniform => 1.0,
             WeightMode::Provenance => self.weight_for_subject(h),
         }
+    }
+
+    // ---- integration point 3 (WIRING): graph → per-block weights on a real SchemaHeader --------
+    // [OPUS-5] sq-w2af4. sq-oy9ya landed the `block_weight` aggregate and the `Block::weight`
+    // field but left the caller that JOINS them unwritten, so nothing in-tree ever produced a
+    // weighted header. These two methods are that caller: they derive each block's weight from the
+    // graph itself (the subjects of the predicate that feeds the block) and hand back a
+    // `SchemaHeader` whose blocks carry it — which the `.spqv` SPQS-v2 sidecar then persists and
+    // `Block::fusion_weight` serves to the query-time fusion path.
+
+    /// The **graph-global** default fusion weight for the block a `predicate` feeds:
+    /// [`block_weight`](Self::block_weight) aggregated over **every** subject of that predicate's
+    /// triples in `graph`.
+    ///
+    /// **Scope (do not over-read this).** The result is a single scalar per *predicate*, mined
+    /// across the whole graph — it is **not** a per-node quantity and carries no information about
+    /// any individual node's incident edges. A node with no incident `predicate` edge at all still
+    /// receives this same multiplier once it is attached to the shared
+    /// [`SchemaHeader`](crate::encode::SchemaHeader) (see [`weight_header`](Self::weight_header)).
+    /// It is the persisted **default**; the design's §USE-1 point-3 per-node scaling is
+    /// [`node_block_weight`](Self::node_block_weight), computed at grounding time.
+    ///
+    /// `1.0` (fail-open) when the graph never mentions `predicate`, and — as everywhere in this
+    /// module — always exactly `1.0` under [`WeightMode::Uniform`], so the ablation-off arm leaves
+    /// every block at the unweighted default.
+    pub fn predicate_block_weight(&self, graph: &Graph, predicate: &str, mode: WeightMode) -> f32 {
+        let Some(pid) = id_of_iri(graph, predicate) else {
+            return 1.0;
+        };
+        let scan = graph.store.scan(&[None, Some(pid), None]);
+        let subjects: Vec<Id> = scan.rows.iter().map(|row| scan.to_spo(row)[0]).collect();
+        self.block_weight(subjects, mode)
+    }
+
+    /// The **per-node** fusion weight for the block a `predicate` feeds on **`node`'s own**
+    /// incident edges (design §USE-1 point 3): the mean of `w(t)` over the `(node, predicate, ·)`
+    /// triples `node` actually asserts. This is the per-node quantity the design asks for — it
+    /// reads nothing from any other subject, so two nodes with different incident-edge provenance
+    /// get different weights, and it is computed at grounding/query time
+    /// ([`ground_weighted`](crate::grounding::ground_weighted)) rather than baked into the shared
+    /// header.
+    ///
+    /// `1.0` (fail-open) when `node` has **no** incident `predicate` edge, when the graph never
+    /// mentions `predicate`, and always under [`WeightMode::Uniform`] — so a node the modality does
+    /// not describe is never penalised, and the ablation-off arm is the unweighted default. The
+    /// result is in `(0, 1]`, a valid [`fuse_rrf_weighted`](crate::fuse_rrf_weighted) weight.
+    /// [OPUS-5] sq-w2af4.
+    pub fn node_block_weight(
+        &self,
+        graph: &Graph,
+        node: Id,
+        predicate: &str,
+        mode: WeightMode,
+    ) -> f32 {
+        let Some(pid) = id_of_iri(graph, predicate) else {
+            return 1.0;
+        };
+        let scan = graph.store.scan(&[Some(node), Some(pid), None]);
+        let mut sum = 0.0f32;
+        let mut n = 0u32;
+        for row in scan.rows.iter() {
+            sum += self.weight_of(scan.to_spo(row), mode);
+            n += 1;
+        }
+        if n == 0 {
+            return 1.0;
+        }
+        sum / n as f32
+    }
+
+    /// Attach provenance-derived per-block fusion weights to `header`, returning the weighted
+    /// header (design §USE-1 point 3 — the graph-global **default** half; the per-node half is
+    /// [`node_block_weight`](Self::node_block_weight)). `block_predicates[i]` names the predicate
+    /// that feeds `header.blocks()[i]`; a `None` entry leaves that block at the fail-open default
+    /// (`weight: 1.0` — e.g. a text or taxonomy lane with no single feeding predicate).
+    ///
+    /// **A `SchemaHeader` is graph-global, so these weights are too.** Each block's multiplier is
+    /// [`predicate_block_weight`](Self::predicate_block_weight) — the mean over *all* subjects
+    /// asserting that predicate anywhere in `graph`. Every node subsequently grounded against this
+    /// header therefore receives the **same** per-block weights, whatever its own incident edges
+    /// are. Treat it as a per-modality *default* ("this lane is fed by low-assurance data on this
+    /// graph"), never as per-node evidence. For per-node evidence pass a
+    /// [`NodeWeighting`](crate::grounding::NodeWeighting) to
+    /// [`ground_weighted`](crate::grounding::ground_weighted), which overrides these defaults with
+    /// [`node_block_weight`](Self::node_block_weight) for the node being grounded.
+    ///
+    /// The returned header is layout-identical to `header` ([`Block`](crate::encode::Block)'s
+    /// `PartialEq` excludes the weight), so a weighted header is a drop-in replacement everywhere
+    /// the unweighted one was used; only [`Block::fusion_weight`](crate::encode::Block::fusion_weight)
+    /// — and the SPQS-v2 bytes — differ. Under [`WeightMode::Uniform`] every block resolves to
+    /// `1.0`, so the ablation-off arm is behaviourally identical to today's unweighted header.
+    ///
+    /// `Err` if `block_predicates` is not exactly one entry per block (a caller/layout mismatch is
+    /// a bug, never silently padded).
+    pub fn weight_header(
+        &self,
+        graph: &Graph,
+        header: &crate::encode::SchemaHeader,
+        block_predicates: &[Option<&str>],
+        mode: WeightMode,
+    ) -> Result<crate::encode::SchemaHeader, String> {
+        if block_predicates.len() != header.blocks().len() {
+            return Err(format!(
+                "weight_header: {} block predicates for {} blocks",
+                block_predicates.len(),
+                header.blocks().len()
+            ));
+        }
+        let blocks = header
+            .blocks()
+            .iter()
+            .zip(block_predicates.iter())
+            .map(|(b, pred)| match pred {
+                Some(p) => b.with_weight(self.predicate_block_weight(graph, p, mode)),
+                None => *b,
+            })
+            .collect();
+        crate::encode::SchemaHeader::new(blocks)
     }
 }
 
@@ -545,8 +785,12 @@ ex:b ex:rel ex:a .
         let alice = id(&g, "http://ex/alice");
         let bob = id(&g, "http://ex/bob");
         let carol = id(&g, "http://ex/carol");
-        let contribs =
-            vec![(alice, vec![3.0, 0.0]), (bob, vec![0.0, 3.0]), (carol, vec![3.0, 3.0])];
+        let knows = id(&g, "http://ex/knows");
+        let contribs = vec![
+            ([alice, knows, bob], vec![3.0, 0.0]),
+            ([bob, knows, carol], vec![0.0, 3.0]),
+            ([carol, knows, alice], vec![3.0, 3.0]),
+        ];
         let pooled = pw.pool_weighted(&contribs, WeightMode::Uniform).unwrap().unwrap();
         // Mean of (3,0),(0,3),(3,3) = (2,2).
         assert!((pooled[0] - 2.0).abs() < 1e-6 && (pooled[1] - 2.0).abs() < 1e-6, "{pooled:?}");
@@ -555,17 +799,21 @@ ex:b ex:rel ex:a .
     #[test]
     fn pool_provenance_mode_downweights_low_quality_contributions() {
         // alice (Proven, conf 0.9, reliable source) weighs 0.9; bob (Claimed 0.7 · conf 0.8 ·
-        // source 0.5) weighs 0.28. The pooled vector must lean toward alice's contribution.
+        // source 0.5) weighs 0.28. The pooled vector must lean toward alice's assertion.
         let g = graph();
         let pw = ProvenanceWeights::mine(&g);
         let alice = id(&g, "http://ex/alice");
         let bob = id(&g, "http://ex/bob");
+        let carol = id(&g, "http://ex/carol");
+        let knows = id(&g, "http://ex/knows");
         let wa = pw.weight_for_subject(alice);
         let wb = pw.weight_for_subject(bob);
         assert!(wb < wa, "precondition: bob is lower quality ({wb} < {wa})");
 
-        // alice → (1,0), bob → (0,1). Weighted pool = (wa, wb)/(wa+wb): more mass on dim 0.
-        let contribs = vec![(alice, vec![1.0, 0.0]), (bob, vec![0.0, 1.0])];
+        // alice's edge → (1,0), bob's → (0,1). Neither is reified, so each falls back to its head:
+        // the weighted pool is (wa, wb)/(wa+wb) — more mass on dim 0.
+        let contribs =
+            vec![([alice, knows, bob], vec![1.0, 0.0]), ([bob, knows, carol], vec![0.0, 1.0])];
         let pooled = pw.pool_weighted(&contribs, WeightMode::Provenance).unwrap().unwrap();
         let expect0 = wa / (wa + wb);
         let expect1 = wb / (wa + wb);
@@ -581,8 +829,11 @@ ex:b ex:rel ex:a .
         let pw = ProvenanceWeights::mine(&g);
         let alice = id(&g, "http://ex/alice");
         let bob = id(&g, "http://ex/bob");
+        let carol = id(&g, "http://ex/carol");
+        let knows = id(&g, "http://ex/knows");
         assert!(pw.pool_weighted(&[], WeightMode::Provenance).unwrap().is_none());
-        let bad = vec![(alice, vec![1.0, 2.0]), (bob, vec![1.0])];
+        let bad =
+            vec![([alice, knows, bob], vec![1.0, 2.0]), ([bob, knows, carol], vec![1.0])];
         assert!(pw.pool_weighted(&bad, WeightMode::Provenance).is_err(), "length mismatch is Err");
     }
 
@@ -592,11 +843,97 @@ ex:b ex:rel ex:a .
         let g = graph();
         let pw = ProvenanceWeights::mine(&g);
         let bob = id(&g, "http://ex/bob");
-        let one = vec![(bob, vec![7.0, -2.0, 0.5])];
+        let carol = id(&g, "http://ex/carol");
+        let knows = id(&g, "http://ex/knows");
+        let one = vec![([bob, knows, carol], vec![7.0, -2.0, 0.5])];
         for mode in [WeightMode::Uniform, WeightMode::Provenance] {
             let pooled = pw.pool_weighted(&one, mode).unwrap().unwrap();
             assert_eq!(pooled, vec![7.0, -2.0, 0.5], "single contribution pools to itself ({mode:?})");
         }
+    }
+
+    // ---- STATEMENT-level provenance: `w(t)` about the assertion itself (sq-w2af4) -------------
+
+    /// Two edges of the SAME head, one reified low-confidence: the design's per-triple `w(t)`
+    /// separates them, which no head- or object-keyed proxy can do. Both reification spellings are
+    /// read — RDF 1.2 `rdf:reifies` and RDF 1.1 `rdf:subject`/`rdf:predicate`/`rdf:object`.
+    #[test]
+    fn statement_provenance_beats_the_head_fallback() {
+        let ttl = r#"
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix pkg:  <https://sparq.dev/ns/pkg#> .
+@prefix secx: <https://sparq.dev/ns/secx#> .
+@prefix ex:   <http://ex/> .
+
+ex:hub pkg:assurance secx:Proven ; ex:cites ex:a , ex:b , ex:c .
+
+# RDF 1.2: the reifier annotates ONE of the hub's statements as doubtful.
+ex:st1 rdf:reifies <<( ex:hub ex:cites ex:a )>> ; pkg:confidence "0.2" .
+# RDF 1.1 standard reification: the same mapping, spelled for a plain-RDF graph.
+ex:st2 rdf:subject ex:hub ; rdf:predicate ex:cites ; rdf:object ex:b ;
+       pkg:assurance secx:Conjectured .
+# An UNANNOTATED reifier says nothing — it must not fail-open over the head.
+ex:st3 rdf:reifies <<( ex:hub ex:cites ex:c )>> .
+"#;
+        let g = Graph::load_str(ttl, "turtle").unwrap();
+        let pw = ProvenanceWeights::mine(&g);
+        let hub = id(&g, "http://ex/hub");
+        let cites = id(&g, "http://ex/cites");
+        let (a, b, c) = (id(&g, "http://ex/a"), id(&g, "http://ex/b"), id(&g, "http://ex/c"));
+
+        assert_eq!(pw.annotated_statements(), 2, "only the ANNOTATED reifiers count");
+        let head = pw.weight_for_subject(hub); // Proven, no confidence → 1.0
+        let wa = pw.weight_of([hub, cites, a], WeightMode::Provenance);
+        let wb = pw.weight_of([hub, cites, b], WeightMode::Provenance);
+        let wc = pw.weight_of([hub, cites, c], WeightMode::Provenance);
+        assert!((wa - 0.2).abs() < 1e-6, "RDF 1.2 reifier confidence is w(t): {}", wa);
+        assert!(
+            (wb - WeightConfig::default().conjectured).abs() < 1e-6,
+            "RDF 1.1 reification is read too: {}",
+            wb
+        );
+        assert_eq!(wc, head, "an unannotated reifier falls back to the head");
+        // The load-bearing point: one subject's edges now carry DIFFERENT weights.
+        assert!(wa < wc && wb < wc, "the doubted statements weigh less than the plain one");
+        // Ablation-off is still exactly 1.0 everywhere.
+        assert_eq!(pw.weight_of([hub, cites, a], WeightMode::Uniform), 1.0);
+    }
+
+    #[test]
+    fn statement_weight_is_the_min_over_reifiers() {
+        // Two reifiers disagree about the same statement: it is only as trustworthy as its
+        // least-trustworthy annotation, so the result cannot depend on reifier order.
+        let ttl = r#"
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix pkg: <https://sparq.dev/ns/pkg#> .
+@prefix ex:  <http://ex/> .
+ex:a ex:rel ex:b .
+ex:r1 rdf:reifies <<( ex:a ex:rel ex:b )>> ; pkg:confidence "0.9" .
+ex:r2 rdf:reifies <<( ex:a ex:rel ex:b )>> ; pkg:confidence "0.3" .
+"#;
+        let g = Graph::load_str(ttl, "turtle").unwrap();
+        let pw = ProvenanceWeights::mine(&g);
+        let (a, rel, b) = (id(&g, "http://ex/a"), id(&g, "http://ex/rel"), id(&g, "http://ex/b"));
+        let w = pw.weight_of([a, rel, b], WeightMode::Provenance);
+        assert!((w - 0.3).abs() < 1e-6, "min over reifiers, got {}", w);
+    }
+
+    #[test]
+    fn pool_weighted_is_the_exact_mean_without_statement_provenance() {
+        // The honest no-op: every contribution of ONE subject shares the head, so on a graph with
+        // no reification the weighted pool IS the arithmetic mean — the pooling axis reports
+        // itself unimplemented rather than substituting a different heuristic.
+        let g = graph();
+        let pw = ProvenanceWeights::mine(&g);
+        assert_eq!(pw.annotated_statements(), 0, "the PKG fixture is entity-level only");
+        let bob = id(&g, "http://ex/bob");
+        let knows = id(&g, "http://ex/knows");
+        let carol = id(&g, "http://ex/carol");
+        let alice = id(&g, "http://ex/alice");
+        let contribs =
+            vec![([bob, knows, carol], vec![4.0, 0.0]), ([bob, knows, alice], vec![0.0, 2.0])];
+        let pooled = pw.pool_weighted(&contribs, WeightMode::Provenance).unwrap().unwrap();
+        assert!((pooled[0] - 2.0).abs() < 1e-6 && (pooled[1] - 1.0).abs() < 1e-6, "{:?}", pooled);
     }
 
     // ---- integration point 3 (producer): per-block fusion weight aggregate (sq-oy9ya) ---------
@@ -628,6 +965,89 @@ ex:b ex:rel ex:a .
 
         // An empty subject set is the fail-open 1.0 (a block with no provenance edges).
         assert_eq!(pw.block_weight(std::iter::empty(), WeightMode::Provenance), 1.0);
+    }
+
+    // ---- integration point 3 (WIRING): graph → weighted SchemaHeader (sq-w2af4) ---------------
+
+    #[test]
+    fn predicate_block_weight_aggregates_the_predicate_subjects() {
+        // [OPUS-5] `ex:knows` is asserted by alice (w=0.9), bob (w=0.28) and carol (no provenance,
+        // w=1.0), so the block that predicate feeds weighs the mean of the three.
+        let g = graph();
+        let pw = ProvenanceWeights::mine(&g);
+        let alice = id(&g, "http://ex/alice");
+        let bob = id(&g, "http://ex/bob");
+        let carol = id(&g, "http://ex/carol");
+        let expect = (pw.weight_for_subject(alice)
+            + pw.weight_for_subject(bob)
+            + pw.weight_for_subject(carol))
+            / 3.0;
+        let got = pw.predicate_block_weight(&g, "http://ex/knows", WeightMode::Provenance);
+        assert!((got - expect).abs() < 1e-6, "{} vs {}", got, expect);
+        // Ablation-off, and an unknown predicate, are both the fail-open 1.0.
+        assert_eq!(pw.predicate_block_weight(&g, "http://ex/knows", WeightMode::Uniform), 1.0);
+        assert_eq!(pw.predicate_block_weight(&g, "http://ex/absent", WeightMode::Provenance), 1.0);
+    }
+
+    /// [OPUS-5] sq-w2af4 — the PER-NODE half of point 3: each node's modality weight is derived
+    /// from **that node's own** incident edges and from nothing else.
+    #[test]
+    fn node_block_weight_reads_only_that_nodes_incident_edges() {
+        let g = graph();
+        let pw = ProvenanceWeights::mine(&g);
+        let alice = id(&g, "http://ex/alice");
+        let bob = id(&g, "http://ex/bob");
+        let carol = id(&g, "http://ex/carol");
+
+        // alice / bob / carol each assert exactly one `ex:knows` edge, of differing quality.
+        let wa = pw.node_block_weight(&g, alice, "http://ex/knows", WeightMode::Provenance);
+        let wb = pw.node_block_weight(&g, bob, "http://ex/knows", WeightMode::Provenance);
+        let wc = pw.node_block_weight(&g, carol, "http://ex/knows", WeightMode::Provenance);
+        assert!((wa - pw.weight_for_subject(alice)).abs() < 1e-6, "alice's own edge: {}", wa);
+        assert!((wb - pw.weight_for_subject(bob)).abs() < 1e-6, "bob's own edge: {}", wb);
+        assert_eq!(wc, 1.0, "carol has no provenance → fail-open");
+        // Distinct nodes get DISTINCT weights — the property the graph-global default cannot have.
+        assert!(wb < wa && wa < wc, "per-node ordering ({} < {} < {})", wb, wa, wc);
+        // And each differs from the graph-global mean over ALL subjects of the predicate.
+        let global = pw.predicate_block_weight(&g, "http://ex/knows", WeightMode::Provenance);
+        assert!((wa - global).abs() > 1e-6 && (wb - global).abs() > 1e-6);
+
+        // A node with NO incident edge for the predicate is the fail-open 1.0, not the global mean.
+        assert_eq!(pw.node_block_weight(&g, alice, "http://ex/absent", WeightMode::Provenance), 1.0);
+        // Ablation-off leaves every node at the unweighted default.
+        assert_eq!(pw.node_block_weight(&g, bob, "http://ex/knows", WeightMode::Uniform), 1.0);
+    }
+
+    #[test]
+    fn weight_header_attaches_block_weights_and_survives_the_spqs_round_trip() {
+        use crate::encode::{Block, Encoder, Metric, SchemaHeader};
+        let g = graph();
+        let pw = ProvenanceWeights::mine(&g);
+        let plain = SchemaHeader::new(vec![
+            Block::new(Encoder::Numeric, Metric::Euclidean, 0, 4),
+            Block::new(Encoder::Other, Metric::Euclidean, 4, 2),
+        ])
+        .unwrap();
+
+        // Block 0 is fed by `ex:knows`; block 1 has no single feeding predicate (fail-open 1.0).
+        let preds = [Some("http://ex/knows"), None];
+        let weighted = pw.weight_header(&g, &plain, &preds, WeightMode::Provenance).unwrap();
+        let w0 = weighted.blocks()[0].fusion_weight();
+        assert!(w0 > 0.0 && w0 < 1.0, "the provenance-fed block is down-weighted: {}", w0);
+        assert_eq!(weighted.blocks()[1].fusion_weight(), 1.0, "an unfed block stays fail-open");
+        // The LAYOUT is unchanged — a weighted header is a drop-in for the plain one.
+        assert_eq!(weighted, plain, "the weight is not part of the header's identity");
+
+        // And the weight survives the real SPQS-v2 sidecar round trip (not just in RAM).
+        let back = SchemaHeader::from_bytes(&weighted.to_bytes()).unwrap();
+        assert!((back.blocks()[0].fusion_weight() - w0).abs() < 1e-6);
+
+        // Ablation-off: every block resolves to the unweighted 1.0.
+        let off = pw.weight_header(&g, &plain, &preds, WeightMode::Uniform).unwrap();
+        assert!(off.blocks().iter().all(|b| b.fusion_weight() == 1.0));
+
+        // A length mismatch is a caller bug, never silently padded.
+        assert!(pw.weight_header(&g, &plain, &[None], WeightMode::Provenance).is_err());
     }
 
     #[test]

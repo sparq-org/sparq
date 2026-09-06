@@ -7,7 +7,7 @@
 
 - [ ] `cargo build --workspace` succeeds.
 - [ ] `cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings` is clean (run over the **full workspace** — feature unification surfaces lints a single-crate check misses).
-- [ ] `cargo fmt --check` is clean.
+- [ ] The code **this PR touches** is formatted (matching the surrounding committed style). `cargo fmt --all --check` is informational, not gating — it reports pre-existing diffs in untouched files until the deferred one-time workspace reformat lands (see `rustfmt.toml`), so do not run `cargo fmt --all` to clear it.
 - [ ] `cargo test` passes for every crate this PR touches.
 
 ## Targeted re-evaluation (check the rows that apply to your change)

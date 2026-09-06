@@ -155,7 +155,7 @@ quoted-triples = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 rustc-hash.workspace = true
 rayon = { workspace = true, optional = true }
@@ -173,7 +173,7 @@ rayon = { workspace = true, optional = true }
 # exists to kill. The heavier `rows` / `join` / `compare` slices STAY behind the consumer
 # features above (each names exactly the slices it needs), so the base `numeric` slice never
 # drags the join/compare machinery in.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, features = ["numeric"] }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.1", default-features = false, features = ["numeric"] }
 # [OPUS-4.8] sq-yk6or: the `Row`/`Key` SmallVec aliases the substrate join kernels operate on.
 # OPTIONAL: linked ONLY by `substrate-join`. Same crate sparq-substrate uses, so the row
 # representation is byte-identical across the engine, the substrate and this reasoner.
@@ -198,7 +198,7 @@ quick-xml = { version = "0.41", default-features = false, optional = true }
 # dev-dep MUST carry a `version` alongside `path` (crates.io cannot resolve
 # path-only dev-deps; same pattern as sparq-cli/nlq/mcp). NO cycle: sparq-engine
 # does not depend on sparq-reason.
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 
 # [FABLE-5] sq-pbz04.1.2: the engine-vs-reasoner ordering-parity test — compiled only with
 # the feature it exercises, so default-feature `--all-targets` builds stay engine-light.
@@ -212,6 +212,13 @@ required-features = ["substrate-compare"]
 [[test]]
 name = "substrate_join_owl"
 required-features = ["substrate-join"]
+
+# [OPUS-5] sq-3xsx0: the bench Datalog encodings' cls-int1 generalises to ANY
+# owl:intersectionOf list arity — the rule shape is validated through this crate's own
+# semi-naive Datalog fixpoint, so it needs (and only needs) the `datalog` feature.
+[[test]]
+name = "datalog_intersection_arity"
+required-features = ["datalog"]
 
 # [Kern] quoted-triple RL inference, end-to-end: Turtle 1.2 fixtures (reifiers,
 # annotation blocks, classic-reification data) through `Graph::parse_to_triples`,
@@ -238,6 +245,20 @@ required-features = ["compiled-rules"]
 # (work-box only; reported in bead/PR comments, never baked into docs or tests).
 [[example]]
 name = "compiled_rules_bench"
+required-features = ["compiled-rules"]
+
+# [OPUS-5] sq-zgbso.6: the Phase-4 SPIKE that gates RDFS/OWL-RL-as-compiled-N3 — compiles
+# `rules/rdfs.n3` (the same six rules src/rdfs.rs implements) through the compiled-rules
+# evaluator, asserts closure equivalence against `materialize(Profile::Rdfs, ..)` on a
+# hand-written differential corpus (each document carrying the conclusions RDFS requires
+# and the near-misses it must not reach — NOT the W3C entailment-conformance suite, which
+# runs against the shipping materializer in sparq-conformance), and only then reports the
+# wall-clock ratio. Measurement only: it reads nothing the shipping materializer writes
+# and changes no shipping path.
+# Wall-clock output is NON-canonical (work-box; bead/PR comments, never docs or tests).
+# Compiled only with the feature it exercises.
+[[example]]
+name = "rdfs_n3_spike"
 required-features = ["compiled-rules"]
 
 # [FABLE-5] sq-hmd7l.24: the W3C RIF conformance PASS-RATE runner (bench registry id

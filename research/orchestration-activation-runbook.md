@@ -36,6 +36,15 @@ It is safe to enable early — it never dispatches or merges.
 `python3 scripts/bd-to-issues.py --apply --repo sparq-org/sparq` (idempotent two-pass; validated on a
 throwaway repo). Test on a copy first if you like (`--limit N`, a scratch repo). Freeze `bd` after.
 
+Then **re-verify**: `python3 scripts/bd-to-issues.py --verify --repo sparq-org/sparq` (read-only;
+exit 1 on any gap). `--apply` cannot answer "did it finish" — it is idempotent, so a re-run prints
+`0/0/0` both when it repaired nothing and when there was never anything wrong. `--verify` reconciles
+the counts (over `bd-migration`-labelled issues only — a bare body marker is forgeable, so an
+unlabelled one is reported as unauthenticated, never counted as migrated), reports any bd-id
+mapped to two issues, and checks that pass 2's `Blocked-by:` /
+`Parent:` markers actually landed — the pass that runs only *after* pass 1 completes, and is
+therefore silently absent from a run that died partway through creating issues.
+
 ## 4. Build + enable Phase 3 (dispatch + worker)
 
 Compose the three tested cores — `ready-issues.py` (frontier) → `route-resolve.py` (model_chain+agent)

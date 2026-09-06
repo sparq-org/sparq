@@ -219,6 +219,15 @@ pub mod term_encode;
 // explicit. Composes EXISTING primitives only; proof.prove stays the honest stub.
 pub mod pipeline;
 pub mod proof;
+// [OPUS-5] sq-34ml: the two NON-RESEARCH M4-v1 prerequisites split out of the
+// sq-bjl Q1 SPIKE (feasibility record §2/§4) — the out-of-circuit
+// freshness/replay binding (ZK audit #4 is NOT automatic when the issuer
+// signature is checked beside the proof rather than inside it) and the
+// federated/multi-source `reconstruct_public_inputs` layout spanning every
+// holder's commitments/rows/attribution, byte-compared unchanged (#1 generalised).
+// SCOPING + LAYOUT ONLY: still hard-gated on the ZK foundation (§5.1), and
+// `proof.rs` stays an honest `NotYetImplemented`.
+pub mod federated_binding;
 // [OPUS-4.8] sq-it50: the owned ChaCha20 CSPRNG backing SecureRng — private
 // implementation detail (not a public API), so its key schedule can be
 // ZeroizeOnDrop-scrubbed (which ecosystem rand_chacha cannot do from our side).
@@ -229,10 +238,18 @@ pub mod rng;
 // [OPUS-4.8] sq-yyro: the DEALER-LESS correlated-randomness seam. `rng` fixes the
 // randomness QUALITY (CSPRNG); this fixes WHO draws it — the contract a PRSS /
 // honest-majority coin-toss / dealer-less VSS source must satisfy to replace the
-// single-trusted-dealer simulation. Design + seam only (the current `ShamirDealer`
-// reports `RandomnessModel::TrustedDealerSim`, `deployable() == false`); no
-// dealer-less crypto ships. See research/mpc-distributed-randomness-design.md.
+// single-trusted-dealer simulation. `ShamirDealer` reports
+// `RandomnessModel::TrustedDealerSim`; `crate::prss` is the first dealer-less
+// GENERATOR behind it. NO variant is `deployable()` — acceptance stays fail-closed.
+// See research/mpc-distributed-randomness-design.md.
 pub mod randomness;
+// [OPUS-5] sq-yyro follow-on (#3531): PRSS — replicated-PRF pseudo-random secret
+// sharing behind the `randomness` seam. Non-interactive (0 online rounds) degree-t
+// masks from a one-time replicated-seed setup; SMALL-n honest-majority only (the
+// C(n,t) seed count fails closed past `prss::MAX_PRSS_SEEDS`). The generator is
+// real; the SETUP is a simulated one-time trusted setup, dealer-less VSS is still
+// refused, and the source is still NOT `deployable()`. See the module docs.
+pub mod prss;
 // [OPUS-4.8] sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
 // (Berlekamp-Welch) reconstruction over Fp — detect-and-abort / correct tampered
 // shares when redundancy is present. Closes malicious-security gap (D) at the
@@ -384,6 +401,14 @@ pub use pipeline::{
     OperatorRouting, Routing,
 };
 pub use proof::{Attestation, CollaborativeProof, ProofStatement};
+// [OPUS-5] sq-34ml: the M4-v1 out-of-circuit freshness/replay binding + the
+// federated public-input layout surface. A statement shape + a byte layout, NOT
+// a proof — see the module docs for the hard gate it does not close.
+pub use federated_binding::{
+    check_freshness, key_set_digest, BindingError, FederatedStatement, FieldWord, FreshnessBinding,
+    HolderSegment, InMemorySeenChallenges, SeenChallenges, ValidityWindow, VerifierChallenge,
+    COMMITMENT_DOMAIN_TAG, FRESHNESS_DOMAIN_TAG, HOLDER_DOMAIN_TAG, KEY_SET_DOMAIN_TAG, WORD_BYTES,
+};
 // [OPUS-4.8] sq-jnkm: the oblivious set-returning output path surface.
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys, Candidate,

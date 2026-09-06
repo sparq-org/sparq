@@ -79,10 +79,22 @@ pub fn encode_i128(value: i128) -> Literal {
     Literal::new_typed_literal(value.to_string(), xsd::INTEGER)
 }
 
+/// The whitespace XML Schema's `collapse` facet normalizes: tab, line feed,
+/// carriage return, and space. Deliberately narrower than [`str::trim`], which
+/// also strips Unicode whitespace the facet leaves in place.
+const XSD_WHITESPACE: &[char] = &['\t', '\n', '\r', ' '];
+
 /// Decodes an exact `xsd:integer` literal as `i128`.
 ///
+/// `xsd:integer` fixes XML Schema's `whiteSpace` facet to `collapse`, so
+/// boundary whitespace is normalized away before the lexical-to-value mapping
+/// and `" 7"` decodes as `7`. Interior whitespace survives the collapse, so
+/// `"+ 1"` is still rejected. This keeps the codec agreeing with the query
+/// engine, which reads `" 1 "^^xsd:integer` as the value 1.
+///
 /// Other datatypes, malformed lexical forms, and integers outside the `i128`
-/// range are returned as typed errors rather than coerced or truncated.
+/// range are returned as typed errors rather than coerced or truncated. The
+/// error reports the literal's original lexical form, not the collapsed one.
 pub fn decode_i128(literal: &Literal) -> Result<i128, CodecError> {
     if literal.datatype() != xsd::INTEGER {
         return Err(CodecError::Datatype {
@@ -90,8 +102,13 @@ pub fn decode_i128(literal: &Literal) -> Result<i128, CodecError> {
             found: literal.datatype().into_owned(),
         });
     }
+    // `collapse` rewrites tab/LF/CR to a space, folds runs of spaces, then trims
+    // both ends. For `xsd:integer` any space surviving the fold is interior and
+    // fails the parse regardless, so trimming the facet's four characters off the
+    // ends reaches the same decision and the same value.
     literal
         .value()
+        .trim_matches(XSD_WHITESPACE)
         .parse()
         .map_err(|_| CodecError::InvalidInteger {
             lexical_form: literal.value().to_owned(),

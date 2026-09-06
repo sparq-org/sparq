@@ -212,6 +212,7 @@ fn join_manifest() -> ProofManifest {
         key_set: vec![public_key_to_hex(&sk.public_key())],
         commitment_attestations: vec![attest_full(ca, sa, &sk), attest_full(cb, sb, &sk)],
         attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
         // [OPUS-4.8] sq-en5dx: `graph_a`/`graph_b` are DISTINCT commitments, so the
         // shared `?p` is a genuine cross-graph join whose non-bnode obligation the Q6
         // gate now requires (keyed on committed-graph identity). Declare it so these

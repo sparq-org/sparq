@@ -1,0 +1,149 @@
+# xpath-differential — PROOF M1 differential oracle for noir_XPath (sq-3x7dl.14.2).
+# [SONNET-4.6]
+#
+# WHY A SEPARATE LANE (and not a job inside zk-toolchain.yml): that workflow's paths
+# filter drives the ~60-minute `forge-suite`, and its `merge_group` detect step
+# short-circuits to zk=true on every other event. Adding `zk/xpath/**` there would run the
+# whole forge suite on a PR that only touched this harness. This lane carries its own,
+# narrower path filter so an xpath-harness change pays for the xpath harness and nothing
+# else. (zk-toolchain.yml keeps the sparq-specific verifier-soundness estate; the two do
+# not overlap.)
+#
+# WHAT IT GATES: `noir_XPath`'s scalar primitives must return EXACTLY what sparq's own
+# trusted Rust SPARQL/XSD evaluator returns, over a unicode-aware corpus that re-covers the
+# edges the W3C qt3 corpus lacks — non-exact `op:numeric-divide`, `fn:substring` with
+# `start < 1`, mixed int/float comparisons outside the i8 range, NUL-padded and multibyte
+# strings, pre-1970 `xs:dateTime`. Those are exactly the cases the correctness beads
+# `sq-3x7dl.4`–`.7` fixed, so this lane is their standing regression oracle.
+#
+# The `noir_XPath` source is NOT in this repo — it was externalized to the
+# sparq-org/noir_XPath face repo (sq-5reoy / #1599). The ORACLE half lives here (that is
+# where the trusted Rust evaluator is); the generated Noir test file is compiled against
+# the pinned released face repo.
+#
+# HONEST SCOPE: this is VERIFICATION, not proof. The TCB is the (unaudited) sparq Rust XSD
+# evaluator, the SAMPLE the corpus covers, and the trusted Noir -> ACIR -> Barretenberg
+# lowering — `nargo test` exercises witness generation only. A green run makes no soundness
+# or privacy claim; the ZK estate stays research-grade and NOT externally audited (sq-qhy4).
+# See zk/xpath/differential/README.md.
+name: xpath-differential
+
+on:
+  schedule:
+    # Nightly safety net, offset from ci.yml (03:17) and zk-toolchain.yml (04:23) so the
+    # heavy nightly lanes do not contend for the same runner window.
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+  pull_request:
+    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs this
+    # gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "zk/xpath/**"
+      # The oracle IS the engine's scalar evaluator, so an engine change can move an
+      # expected value. The drift guard below turns that into a visible RED check on the
+      # PR that causes it rather than a silent divergence discovered a month later.
+      - "crates/sparq-engine/**"
+      - ".github/workflows/xpath-differential.yml"
+  push:
+    branches: [main]
+    paths:
+      - "zk/xpath/**"
+      - "crates/sparq-engine/**"
+      - ".github/workflows/xpath-differential.yml"
+
+# Least-privilege: this lane only reads the repo + runs tests.
+permissions:
+  contents: read
+
+concurrency:
+  group: xpath-differential-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Pinned Noir toolchain — kept in lock-step with .github/workflows/zk-toolchain.yml.
+  # Bump both together (and confirm the released noir_XPath tag was cut on a compatible
+  # nargo); never float to "latest".
+  NARGO_VERSION: "1.0.0-beta.21"
+  # The released face repo under verification. Pinned by TAG, never a branch — a floating
+  # ref would silently change WHAT is being verified while the check stayed green.
+  # Keep in lock-step with the default in zk/xpath/scripts/run_differential_harness.sh:
+  # a green run here is evidence about THIS tag and no other.
+  XPATH_GIT: "https://github.com/sparq-org/noir_XPath"
+  XPATH_TAG: "v0.3.0"
+  # Pinned bootstrap source for noirup (supply-chain: see the long rationale in
+  # zk-toolchain.yml — the upstream `install` helper re-fetches noirup from a moving
+  # `releases/latest`, which silently defeats the pin, so the binary is taken from a
+  # TAGGED release directly).
+  NOIRUP_BIN_URL: "https://github.com/noir-lang/noirup/releases/download/v0.1.4/noirup"
+
+jobs:
+  differential-xpath:
+    name: xpath differential oracle (nargo)
+    runs-on: ubuntu-latest
+    # Building the engine + installing the Noir toolchain + nargo test; generous headroom.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Rust (preinstalled stable)
+        # [FABLE-5] CI-economy: the runner image ships a rustup toolchain; `rustup default`
+        # never triggers a toolchain download (and rust-toolchain.toml outranks it anyway).
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Distinct cache key: this lane builds the detached harness workspace.
+          key: xpath-differential
+          workspaces: |
+            zk/xpath/differential
+
+      # CHEAP HALF FIRST — no Noir toolchain needed. Runs the harness's own unit tests
+      # (the F&O references, the self-expiring oracle-divergence guards, the
+      # fault-injection non-vacuity check), regenerates the oracle file and diffs it
+      # against the committed golden. A corpus/oracle change that was not regenerated, or
+      # an engine change that moved an expected value, fails HERE — before paying for the
+      # toolchain install.
+      - name: Oracle drift guard + harness unit tests (no toolchain needed)
+        run: bash zk/xpath/scripts/run_differential_harness.sh --generate-only
+
+      # Install nargo via noirup, pinned to NARGO_VERSION. Two-level pin: the noirup binary
+      # from a TAGGED release, then the EXACT nargo version.
+      - name: Install nargo (Noir) — pinned
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.nargo/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "${NOIRUP_BIN_URL}" \
+            -o "$HOME/.nargo/bin/noirup"
+          chmod +x "$HOME/.nargo/bin/noirup"
+          echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nargo/bin:$PATH"
+          noirup --version "${NARGO_VERSION}"
+          nargo --version
+
+      - name: Toolchain versions (record for the run log)
+        # Block scalar: a plain (unquoted) YAML scalar may not contain `": "`, so the
+        # inline form of this `echo` is a workflow-level YAML parse error.
+        run: |
+          echo "nargo: $(nargo --version | head -1)"
+
+      # THE LOAD-BEARING STEP. Compiles the generated oracle file against the pinned
+      # noir_XPath release and runs every differential test, then re-runs it once PER
+      # generated test function — each time with one expected value corrupted in that
+      # function alone — and asserts every one of those `nargo test` runs FAILS. That
+      # second half is what stops this lane from going green while testing nothing: a
+      # fault-injected variant that still passes means that test function is not wired to
+      # the circuit, and the script exits non-zero. One variant per function (rather than
+      # one all-faults run, whose single nonzero exit would prove only that SOME test
+      # failed) is why this step costs an extra `nargo test` per section.
+      #
+      # NOTE: this needs network access to github.com to fetch the pinned noir_XPath git
+      # dependency on a cold ~/.nargo cache (the rust-cache above does not cache ~/.nargo).
+      - name: Differential oracle + non-vacuity self-test (real nargo)
+        run: bash zk/xpath/scripts/run_differential_harness.sh

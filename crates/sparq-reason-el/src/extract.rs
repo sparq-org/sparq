@@ -346,6 +346,12 @@ struct Idx {
     cd_range: FxHashMap<Id, Concept>, // supported range / DataOneOf node -> range concept
     #[cfg(feature = "cdomain")]
     cd_exists: FxHashMap<Id, Concept>, // supported DataHasValue restriction node -> point concept
+    // [SONNET-4.6] sq-vkq9u (`abox` + `cdomain`): DataPropertyAssertion LITERAL -> its minted
+    // POINT-range concept. Filled by `resolve_cdomain` from the literals `abox_data_literals`
+    // pre-collected; read by `decode_abox` to internalize `a q 5` as `{a} ⊑ ∃q.{5}`. Empty
+    // unless the caller asked for ABox internalization (`ExtractOpts::abox`).
+    #[cfg(all(feature = "abox", feature = "cdomain"))]
+    cd_abox_point: FxHashMap<Id, Concept>,
     #[cfg(feature = "rbox")]
     sub_property: Vec<(Id, Id)>, // (r, s) from rdfs:subPropertyOf — a role inclusion r ⊑ s
     #[cfg(feature = "rbox")]
@@ -369,8 +375,20 @@ pub fn extract(dict: &Dict, triples: &[[Id; 3]], opts: ExtractOpts) -> Extracted
     // [FABLE-5] sq-pbz04.2.2 (CR7–CR9): resolve the concrete-domain candidates BEFORE
     // decoding axioms, so `decode` can route supported faceted-range / point nodes to
     // their minted concepts. Returns the CR7/CR8 axioms appended after normalization.
+    // [SONNET-4.6] sq-vkq9u (`abox` + `cdomain`): the ABox data-property-assertion literals must
+    // be minted in the SAME `Mint` registry as the TBox ranges — that is what makes `{5}` from
+    // `a q 5` and a TBox `[5, 5]` / `DataHasValue 5` ONE concept, so CR8 relates them — which
+    // means collecting them BEFORE this pre-pass. Empty unless the caller asked for ABox
+    // internalization, so `Classifier::classify` mints exactly what it minted before.
     #[cfg(feature = "cdomain")]
-    let cd_axioms = resolve_cdomain(dict, triples, &mut idx, &v, &mut names);
+    let cd_axioms = {
+        #[cfg(feature = "abox")]
+        let abox_lits =
+            if opts.abox { abox_data_literals(dict, triples, &idx, &v) } else { Vec::new() };
+        #[cfg(not(feature = "abox"))]
+        let abox_lits: Vec<Id> = Vec::new();
+        resolve_cdomain(dict, triples, &mut idx, &v, &mut names, &abox_lits)
+    };
     // Pre-seed ⊤/⊥ so the recognisers route owl:Thing/owl:Nothing dict ids to TOP/BOTTOM.
     let mut report = Report::default();
     let mut norm = Normalizer::new(&mut names);
@@ -820,6 +838,11 @@ pub(crate) fn has_concrete_domain_vocab(dict: &Dict, triples: &[[Id; 3]]) -> boo
 /// non-EL skip.
 /// Decoding just its range half would DROP that structure and STRENGTHEN the asserted
 /// axiom in a subclass (LHS) position, which is unsound.
+///
+/// [SONNET-4.6] sq-vkq9u: `abox_lits` carries the `DataPropertyAssertion` literals to rescue as
+/// point ranges (empty unless `ExtractOpts::abox`). They go through the SAME mint registry, so a
+/// value already minted by the TBox shares its concept; an out-of-tier literal is simply absent
+/// from `idx.cd_abox_point` and `decode_abox` keeps its counted skip.
 #[cfg(feature = "cdomain")]
 fn resolve_cdomain(
     dict: &Dict,
@@ -827,6 +850,7 @@ fn resolve_cdomain(
     idx: &mut Idx,
     v: &Vocab,
     names: &mut Names,
+    abox_lits: &[Id],
 ) -> Vec<Normal> {
     let structure = |n: Id| {
         idx.on_prop.contains_key(&n)
@@ -881,11 +905,22 @@ fn resolve_cdomain(
         .map(|(&n, &l)| (n, l))
         .collect();
     exists_points.sort_unstable();
-    let out = crate::cdomain::resolve(dict, triples, names, &ranges, &points, &exists_points, |h| {
-        decode_list(h, idx, v)
-    });
+    let out = crate::cdomain::resolve(
+        dict,
+        triples,
+        names,
+        &ranges,
+        &points,
+        &exists_points,
+        abox_lits,
+        |h| decode_list(h, idx, v),
+    );
     idx.cd_range = out.node_range;
     idx.cd_exists = out.node_exists;
+    #[cfg(feature = "abox")]
+    {
+        idx.cd_abox_point = out.lit_point;
+    }
     out.axioms
 }
 
@@ -1235,9 +1270,15 @@ fn is_literal(dict: &Dict, id: Id) -> bool {
 /// - `a p b`         (p a user-namespace object property, b an individual) ⇒ `{a} ⊑ ∃p.{b}`;
 /// - `a rdf:type owl:NamedIndividual` ⇒ register `a` (no axiom — a declaration).
 ///
+/// [SONNET-4.6] sq-vkq9u (`abox` + `cdomain`): additionally
+/// - `a q v` (v a LITERAL in the exact numeric tier) ⇒ `{a} ⊑ ∃q.{v}`, with `{v}` the point range
+///   `resolve_cdomain` minted for it. SOUNDNESS: `a q v` asserts `(a^I, v) ∈ q^I` and
+///   `v ∈ {v}^D`, so `a^I ∈ (∃q.{v})^I`. Without `cdomain` — or for a literal outside the exact
+///   tier — there is no point concept, so the assertion keeps the fail-closed skip below.
+///
 /// Returns the count of assertions DEFERRED as counted skips (`Report::skipped_assertions`): a
-/// `DataPropertyAssertion` (literal object — the `cdomain` point-range rescue is a sequenced
-/// follow-up bead) and a `ClassAssertion` whose class expression is outside the EL fragment.
+/// `DataPropertyAssertion` whose literal has no minted point range, and a `ClassAssertion` whose
+/// class expression is outside the EL fragment.
 /// SOUNDNESS: `{a} ⊑ C` holds because `{a}^I = {a^I} ⊆ C^I`; `{a} ⊑ ∃p.{b}` because
 /// `(a^I,b^I) ∈ p^I` with `b^I ∈ {b}^I`. Structural bnodes (restriction / intersection / list
 /// nodes) are never minted as individuals — realising one would be noise, not an entailment.
@@ -1252,18 +1293,7 @@ fn decode_abox(dict: &Dict, triples: &[[Id; 3]], idx: &Idx, v: &Vocab, norm: &mu
         .filter(|&id| id != sparq_core::dict::NO_ID)
         .collect();
 
-    // A node the TBox pass uses as a class expression (restriction / intersection / oneOf / list
-    // cell) or a non-EL marker must never be minted as an ABox individual.
-    let structural = |n: Id| {
-        idx.is_restriction.contains(&n)
-            || idx.inter_head.contains_key(&n)
-            || idx.one_of_head.contains_key(&n)
-            || idx.first.contains_key(&n)
-            || idx.non_el_node.contains(&n)
-            // [OPUS-4.8] sq-pbz04.2.6: a self-restriction node (`∃r.Self`) is a class expression,
-            // never an ABox individual — it must not be minted as a nominal.
-            || idx.self_true.contains(&n)
-    };
+    let structural = |n: Id| is_class_expression_node(idx, n);
 
     let mut skipped = 0usize;
     for &[s, p, o] in triples {
@@ -1294,8 +1324,23 @@ fn decode_abox(dict: &Dict, triples: &[[Id; 3]], idx: &Idx, v: &Vocab, norm: &mu
                 let b = norm.names.nominal(o);
                 norm.add_sub(&Expr::Atom(a), &Expr::Exists(role, Box::new(Expr::Atom(b))));
             } else if is_literal(dict, o) {
-                // DataPropertyAssertion — deferred (fail-closed counted skip).
-                skipped += 1;
+                // DataPropertyAssertion. [SONNET-4.6] sq-vkq9u: under `cdomain` an exact-numeric
+                // literal was minted as the point range `{o}` by the `resolve_cdomain` pre-pass,
+                // so the assertion internalizes as `{s} ⊑ ∃p.{o}` and CR8 threads the asserted
+                // VALUE into the TBox's data-range obligations. Everything else — no `cdomain`, a
+                // string / lang-tagged / float-tier / ill-formed literal — keeps the fail-closed
+                // counted skip: no value space is ever guessed.
+                match abox_point(idx, o) {
+                    Some(point) => {
+                        let role = norm.names.role(p);
+                        let a = norm.names.nominal(s);
+                        norm.add_sub(
+                            &Expr::Atom(a),
+                            &Expr::Exists(role, Box::new(Expr::Atom(point))),
+                        );
+                    }
+                    None => skipped += 1,
+                }
             } else {
                 // ObjectPropertyAssertion whose OBJECT is a structural blank node (a
                 // restriction / intersection / list cell / non-EL node) — not a plain
@@ -1308,6 +1353,65 @@ fn decode_abox(dict: &Dict, triples: &[[Id; 3]], idx: &Idx, v: &Vocab, norm: &mu
         }
     }
     skipped
+}
+
+/// [OPUS-4.8] sq-pbz04.2.5 (`abox`): whether the TBox pass uses `n` as a CLASS EXPRESSION — a
+/// restriction / intersection / enumeration node, an RDF list cell, a non-EL-marked node, or
+/// ([OPUS-4.8] sq-pbz04.2.6) a self-restriction. Such a node must never be minted as an ABox
+/// individual: realising one would be noise, not an entailment.
+///
+/// [SONNET-4.6] sq-vkq9u: shared by [`decode_abox`] and [`abox_data_literals`] so the point-range
+/// pre-pass mints exactly the literals `decode_abox` will go on to internalize — a divergence
+/// would either mint an unused concept or leave a rescuable assertion counted as a skip.
+#[cfg(feature = "abox")]
+fn is_class_expression_node(idx: &Idx, n: Id) -> bool {
+    idx.is_restriction.contains(&n)
+        || idx.inter_head.contains_key(&n)
+        || idx.one_of_head.contains_key(&n)
+        || idx.first.contains_key(&n)
+        || idx.non_el_node.contains(&n)
+        || idx.self_true.contains(&n)
+}
+
+/// [SONNET-4.6] sq-vkq9u (`abox` + `cdomain`): the LITERALS of the graph's `DataPropertyAssertion`s
+/// — the objects [`decode_abox`] will reach through its data branch — deduplicated and sorted so
+/// the mint order (and therefore every minted concept id) depends only on the graph, not on triple
+/// order. The recogniser is deliberately IDENTICAL to `decode_abox`'s data branch: a non-`rdf:type`
+/// non-structural predicate, an individual non-class-expression subject, a literal object.
+/// Over-collecting would mint a concept for a literal that is never internalized (harmless but
+/// wasteful); under-collecting would silently keep a rescuable assertion as a skip.
+#[cfg(all(feature = "abox", feature = "cdomain"))]
+fn abox_data_literals(dict: &Dict, triples: &[[Id; 3]], idx: &Idx, v: &Vocab) -> Vec<Id> {
+    let mut lits: Vec<Id> = triples
+        .iter()
+        .filter(|&&[s, p, o]| {
+            p != v.ty
+                && !is_structural_predicate(dict, p)
+                && is_individual(dict, s)
+                && !is_class_expression_node(idx, s)
+                && is_literal(dict, o)
+        })
+        .map(|&[_, _, o]| o)
+        .collect();
+    lits.sort_unstable();
+    lits.dedup();
+    lits
+}
+
+/// [SONNET-4.6] sq-vkq9u: the minted POINT-range concept of a `DataPropertyAssertion` literal
+/// (`{5}` for `a q 5`), or `None` — which keeps [`decode_abox`]'s fail-closed counted skip.
+/// Always `None` without `cdomain`: there is no concrete-domain value tower to mint a point on,
+/// so the pre-sq-vkq9u skip behaviour is byte-identical in that feature state.
+#[cfg(all(feature = "abox", feature = "cdomain"))]
+fn abox_point(idx: &Idx, lit: Id) -> Option<Concept> {
+    idx.cd_abox_point.get(&lit).copied()
+}
+
+/// The no-`cdomain` counterpart of [`abox_point`]: no point range exists, so every
+/// `DataPropertyAssertion` stays a counted skip.
+#[cfg(all(feature = "abox", not(feature = "cdomain")))]
+fn abox_point(_idx: &Idx, _lit: Id) -> Option<Concept> {
+    None
 }
 
 /// [OPUS-4.8] sq-pbz04.2.8 (`abox`): whether a dict id is a NAMED (IRI) individual/property. Keys

@@ -11,11 +11,11 @@ consequence-based reasoner that computes the **complete `rdfs:subClassOf` subsum
 lattice** of an EL ontology, the one thing OWL 2 RL (`sparq-reason`) is **sound but silently
 incomplete** for.
 
-RL has no rule that reasons *through* an existential successor, so running `--reason owl` over
-a biomedical EL ontology (GO, ChEBI, SNOMED-style) returns a hierarchy that silently omits
-subsumptions like `A ⊑ D` from `A ⊑ ∃r.B`, `B ⊑ C`, `∃r.C ⊑ D` (Krötzsch, ISWC 2012). EL
-closes that gap with a deterministic least-fixpoint saturation (PTIME). This is a **separate
-crate** — the core engine and the wasm build carry zero EL code, deps, or cost by default.
+RL's rule set is complete only for *assertional* conclusions, so `--reason owl` over a biomedical
+EL ontology (GO, ChEBI, SNOMED-style) silently omits derivable subsumptions — e.g. `B ⊑ D` from
+`B ⊑ C`, `B ⊑ E`, `C ⊓ E ⊑ D` (RL never composes a TBox conjunction, nor reasons through a fresh
+`∃r` successor; Krötzsch, ISWC 2012). EL closes that gap with a deterministic least-fixpoint
+saturation (PTIME). A **separate crate** — core engine + wasm carry zero EL code, deps, or cost.
 
 ## 🚀 Quickstart
 
@@ -74,8 +74,8 @@ For a typed view (super-classes, subsumption test, unsatisfiable classes) use
   internalizes `ClassAssertion` (`{a} ⊑ C`) and `ObjectPropertyAssertion` (`{a} ⊑ ∃p.{b}`) as
   SAFE-NOMINAL axioms over CR6, then reads off instance typings, `owl:sameAs`, and a whole-ontology
   `inconsistent` verdict (`{a} ⊑ ⊥` or `⊤ ⊑ ⊥`) via the additive `realize` / `realize_graph` entry
-  — every emitted fact holds in EVERY model. The TBox `Classifier::classify` / `classify_graph` stay
-  **byte-identical**. Unsupported assertion shapes stay counted `Report::skipped_assertions`.
+  — every emitted fact holds in EVERY model; TBox `Classifier::classify` stays **byte-identical**.
+  With `cdomain` too, `a q 5` ⇒ `{a} ⊑ ∃q.{5}` (a CR9 point); unsupported shapes stay counted skips.
 - **Keys, negative assertions & differentFrom** *(also `abox`)* — `owl:hasKey` merges two DISTINCT
   named individuals in the key class that share a value on EVERY key property (`owl:sameAs`);
   a PARTIAL key match cannot fire (object keys match a shared nominal successor, data keys a
@@ -109,7 +109,7 @@ ms) end-to-end scaling check confirming normalise + RBox + Hasse compose with no
 
 ## 📚 Learn more
 
-- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (EL section).
+- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (EL section). **From the CLI** ([OPUS-5] sq-2ch27, Phase E6): `sparq-cli`'s own opt-in `el` feature (which pulls this crate *with* `rbox` but **without** `cdomain`, so that surface is the E1+E2 fragment and concrete-domain axioms stay in `skipped_axioms`) adds `classify <file> <format> [out.nt]` — the classification report as `name<TAB>value` lines on stdout, lattice-augmented graph to `out.nt` — plus the `el` reasoning profile (`query … --reason el`, `reason <f> <fmt> el`). Honest-incompleteness signals (`skipped_axioms`, `rbox_non_regular`, unsatisfiable classes) also print a NOTE on stderr, and without the feature `--reason el` exits 2 naming it rather than silently downgrading to the incomplete `owl` profile. See [`skills/cli/SKILL.md`](../../skills/cli/SKILL.md).
 - **API reference** — [docs.rs/sparq-reason-el](https://docs.rs/sparq-reason-el).
 - **Design** — [`research/owl2-el-ql-reasoning-spike.md`](../../research/owl2-el-ql-reasoning-spike.md)
   (why EL, the RL-incompleteness proof, the phased plan).

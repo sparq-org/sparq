@@ -396,6 +396,7 @@ fn sample_manifest() -> ProofManifest {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -733,6 +734,7 @@ fn full_manifest_prove_verify_scan() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -857,6 +859,7 @@ fn filter_manifest(
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -1217,6 +1220,7 @@ fn nonce_binding_mismatch_rejected() {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![vec![0]],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -1316,6 +1320,7 @@ fn holder_pop_manifest(holder_hex: &str, pop_hex: &str, cryptosuite: &str) -> Pr
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -1585,6 +1590,7 @@ fn holder_bound_manifest(
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -1969,6 +1975,7 @@ fn holder_pop_valid_verifies_end_to_end() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2032,6 +2039,7 @@ fn malformed_proof_hex_rejected_not_panicked() {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![vec![0]],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -2299,6 +2307,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2336,6 +2345,7 @@ fn filter_reject_filter_add_on_scan_only() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2370,6 +2380,7 @@ fn filter_reject_constant_swap_age_as_salary() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2419,6 +2430,7 @@ fn filter_reject_operand_slot_substitution() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2469,6 +2481,7 @@ fn filter_reject_false_verdict_row() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2506,6 +2519,7 @@ fn filter_reject_unbindable_filter_fragment() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2549,6 +2563,7 @@ fn filter_binding_happy_path_structure() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2618,6 +2633,7 @@ fn filter_reject_unproven_failing_row() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2672,6 +2688,7 @@ fn filter_two_rows_both_gated_verifies() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2699,6 +2716,653 @@ fn filter_two_rows_both_gated_verifies() {
     attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
     prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
         .expect("both rows gated true => verifies");
+}
+
+/// L-1 / `sq-q9r5e` (`research/zk-audit-gpt56-2026-07.md`): a filtered variable
+/// may occupy MORE THAN ONE slot within the SAME scan. Two query patterns with
+/// the same constant layout (`(?, <age>, ?)`) are BOTH answered by one scan
+/// sub-proof (pattern→scan is resolved by constant MEMBERSHIP, not an explicit
+/// mapping — see `bind_attributions`), and here they place `?v` at slot 2
+/// (pattern 0, object) and slot 0 (pattern 1, subject).
+///
+/// The prover gates only slot 2, with an HONEST `25 >= 18` filter proof. Slot 0
+/// — the column `?v` binds to under pattern 1, disclosed in the same row — is
+/// left ungated, so the relying party reads a solution binding `?v` to a term
+/// the FILTER was never proven over. Every slot the variable occupies within a
+/// matching scan must be gated => REJECT (`UnboundFilter`).
+///
+/// RED before the sq-q9r5e fix: `bind_query_correctness` used `find_map` over
+/// the variable's `(pattern, slot)` positions, so only the FIRST matching
+/// pattern's slot (2) was gated and this manifest verified structurally.
+#[test]
+fn filter_reject_ungated_second_slot_within_scan() {
+    let scan = scan_inputs_for(&credential_graph(), "http://ex/age"); // age=25
+    let scan_operand = match &scan {
+        ProofInputs::Scan { rows, .. } => rows[0][2].clone(),
+        _ => unreachable!(),
+    };
+    // An honest, bb-valid `25 >= 18` filter proof over the OBJECT slot only.
+    let mut filt = filter_inputs(25, FilterOp::Ge, 18, true);
+    if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
+        *operand_enc = scan_operand;
+    }
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: "SELECT ?s ?v ?o WHERE { ?s <http://ex/age> ?v . ?v <http://ex/age> ?o FILTER(?v >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
+        issuers: vec![],
+        key_set: vec![],
+        commitment_attestations: vec![],
+        attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![
+            SubProof { inputs: scan, proof_hex: String::new() }, // proof 0
+            SubProof { inputs: filt, proof_hex: String::new() }, // proof 1
+        ],
+        // Slot 2 gated; slot 0 (where ?v binds under pattern 1) NOT gated.
+        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+            holder_pok_proofs: vec![],
+            holder_set_proofs: vec![],
+    };
+    attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::UnboundFilter { variable }) if variable == "v" => {}
+        other => panic!(
+            "L-1/sq-q9r5e: a filtered variable's SECOND slot within the same scan \
+             must be gated too; expected UnboundFilter(v), got {other:?}"
+        ),
+    }
+}
+
+/// `sq-q9r5e` positive control: when the two patterns one scan answers place the
+/// filtered variable at the SAME slot, the every-slot rule must collapse to the
+/// single slot and NOT demand a second, non-existent gating edge. `?v` is at slot
+/// 2 in both `(?a <age> ?v)` and `(?b <age> ?v)`, so one true-verdict edge per
+/// disclosed row is the whole obligation => verifies.
+#[test]
+fn filter_same_slot_in_two_patterns_needs_one_edge() {
+    let scan = scan_inputs_for(&credential_graph(), "http://ex/age"); // age=25
+    let scan_operand = match &scan {
+        ProofInputs::Scan { rows, .. } => rows[0][2].clone(),
+        _ => unreachable!(),
+    };
+    let mut filt = filter_inputs(25, FilterOp::Ge, 18, true);
+    if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
+        *operand_enc = scan_operand;
+    }
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: "SELECT ?a ?b ?v WHERE { ?a <http://ex/age> ?v . ?b <http://ex/age> ?v FILTER(?v >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
+        issuers: vec![],
+        key_set: vec![],
+        commitment_attestations: vec![],
+        attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![
+            SubProof { inputs: scan, proof_hex: String::new() },
+            SubProof { inputs: filt, proof_hex: String::new() },
+        ],
+        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+            holder_pok_proofs: vec![],
+            holder_set_proofs: vec![],
+    };
+    attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("same-slot-in-both-patterns needs only the one gating edge");
+}
+
+// --- WITHIN-pattern repeated variable (`{ ?v <p> ?v }`) -------------------
+//
+// [OPUS-5] #5240 (follow-up raised while fixing audit L-1 / sq-q9r5e). The
+// cross-pattern analogues of "a variable used twice must bind ONE term" are
+// covered — `recheck`/`join_obligations` for the disclosed path and `bind_joins`
+// for the hidden path — but both iterate pattern PAIRS (`i < j`) over per-pattern
+// variable SETS, so a variable repeated at two slots of the SAME pattern is
+// invisible to them. `scan_matches_pattern` only compares per-slot const-ness and
+// the constant encodings, and the scan circuit binds only the CONSTANT slots to
+// `pattern_const_enc`, so nothing made a disclosed row satisfy `row[i] == row[j]`.
+//
+// The witness below was empirically confirmed reachable against
+// `prefilter_manifest_structure` (the same method used for L-1) before the gate
+// landed: the `(alice, knows, bob)` manifest was ACCEPTED under the query
+// `{ ?v <knows> ?v }`. NOT externally audited (sq-qhy4).
+
+/// A one-triple credential `<subject> <http://ex/knows> <object>` for the
+/// within-pattern slot-equality witnesses.
+fn knows_graph(subject: &str, object: &str) -> Vec<Triple> {
+    vec![Triple::new(
+        NamedOrBlankNode::NamedNode(iri(subject)),
+        iri("http://ex/knows"),
+        Term::NamedNode(iri(object)),
+    )]
+}
+
+/// The self-loop query: `?v` occupies BOTH the subject and the object slot of the
+/// single BGP pattern, so any disclosed row answering it must have
+/// `row[0] == row[2]`.
+const SELF_LOOP_QUERY: &str = "SELECT ?v WHERE { ?v <http://ex/knows> ?v }";
+
+/// Build the flat self-loop manifest over a single `<knows>` scan (no FILTER, no
+/// joins) so the only gate that can decide it is the within-pattern slot-equality
+/// check.
+fn self_loop_manifest(graph: &[Triple]) -> ProofManifest {
+    let scan = scan_inputs_for(graph, "http://ex/knows");
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: SELF_LOOP_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![],
+        commitment_attestations: vec![],
+        attributions: vec![vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![SubProof { inputs: scan, proof_hex: String::new() }],
+        binding_edges: vec![],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    };
+    attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
+    m
+}
+
+/// #5240 FORGE: a scan row `(alice, knows, bob)` with `alice != bob` presented as
+/// answering `{ ?v <http://ex/knows> ?v }`. The relying party would read a
+/// solution binding `?v` to two DIFFERENT terms at once — a row that does not
+/// satisfy the pattern it is disclosed under => REJECT.
+///
+/// RED before the #5240 gate: `prefilter_manifest_structure` returned `Ok` (the
+/// empirical witness that made this a real gap rather than a deliberate omission).
+#[test]
+fn repeated_pattern_var_rejects_a_row_whose_slots_disagree() {
+    let m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/bob"));
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::RepeatedSlotMismatch {
+            pattern: 0,
+            proof: 0,
+            row: 0,
+            ref variable,
+            slots: (0, 2),
+        }) if variable == "v" => {}
+        other => panic!(
+            "#5240: a disclosed row whose two ?v slots differ must not answer \
+             {{ ?v <knows> ?v }}; expected RepeatedSlotMismatch, got {other:?}"
+        ),
+    }
+}
+
+/// #5240 positive control: the SAME shape with a genuine self-loop row
+/// `(alice, knows, alice)` must still VERIFY — the new gate must not reject an
+/// honest repeated-variable manifest.
+#[test]
+fn repeated_pattern_var_accepts_a_genuine_self_loop_row() {
+    let m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/alice"));
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("a genuine self-loop row satisfies { ?v <knows> ?v }");
+}
+
+/// #5240 scope control: a pattern with NO repeated variable is untouched by the
+/// new gate — `(alice, knows, bob)` legitimately answers `{ ?s <knows> ?o }`.
+#[test]
+fn distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate() {
+    let mut m = self_loop_manifest(&knows_graph("http://ex/alice", "http://ex/bob"));
+    m.query = "SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }".into();
+    prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
+        .expect("distinct subject/object variables impose no slot equality");
+}
+
+// --- explicit pattern→scan mapping (`manifest.pattern_scans`) -------------
+//
+// [OPUS-5] sq-q9r5e follow-up. The sq-q9r5e fix closed audit L-1 by demanding
+// the FILTER be discharged at EVERY slot the filtered variable occupies across
+// EVERY pattern a scan MATCHES BY CONSTANTS. That is an over-demand where two
+// query patterns share a constant layout — but narrowing it to a prover-DECLARED
+// pattern→scan mapping is UNSOUND, because SPARQL evaluates each pattern over
+// every compatible committed row and the query text authorises no prover-chosen
+// partition of the data. So `manifest.pattern_scans` is recorded and re-checked
+// for well-formedness, and carries NO verification weight: every obligation
+// still runs over constant membership.
+//
+// These tests pin BOTH halves: the declaration never buys an acceptance
+// (`pattern_scans_do_not_narrow_the_filter_obligation` and friends), and a
+// malformed declaration is an ADDITIONAL rejection.
+//
+// They are STRUCTURAL (no bb): the declaration is checked against the same
+// bb-bound `pattern_is_const`/`pattern_const_enc` the audit-#1 reconstruction
+// binds, so the structural stage decides it on its own.
+
+/// The `{ ?x <age> ?v . ?x <age> ?c }` shape: TWO query patterns with the SAME
+/// constant layout `(?, <ex/age>, ?)`, JOINED on `?x` (slot 0 of both), with the
+/// FILTER on `?v` — which occurs only in pattern 0, at slot 2.
+///
+/// This shape is the one the over-demand blocks: the two scans below disclose
+/// `(alice, age, 25)` and `(alice, age, 5)`, which AGREE on the join variable
+/// `?x`, so `(?x=alice, ?v=25, ?c=5)` is a solution of this BGP over the
+/// committed union and `FILTER(25 >= 18)` holds on it. It is nevertheless
+/// REJECTED: `{alice age 5}` is a constant-compatible row of pattern 0 too, and
+/// nothing in the manifest proves it does not contribute there, so its `5` needs
+/// a `?v >= 18` proof it cannot have. That over-demand is the price of not
+/// letting the prover partition the data by declaration.
+const SAME_LAYOUT_QUERY: &str = "SELECT ?x ?v ?c WHERE { ?x <http://ex/age> ?v . ?x <http://ex/age> ?c FILTER(?v >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }";
+
+/// The `{ ?s <age> ?v . ?v <age> ?o }` shape, which places the FILTERED variable
+/// `?v` at slot 2 (pattern 0) AND slot 0 (pattern 1). Used by the L-1 REJECTION
+/// witnesses only: `?v` at a subject slot cannot bind an `xsd:integer`, so this
+/// query has no solution over any real RDF and is not a valid happy path.
+const L1_CROSS_SLOT_QUERY: &str = "SELECT ?s ?v ?o WHERE { ?s <http://ex/age> ?v . ?v <http://ex/age> ?o FILTER(?v >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }";
+
+/// A one-triple `<ex/age>` credential committed under its OWN salt (audit #9
+/// requires distinct salts for distinct committed graphs), plus the scan over
+/// `(?, <ex/age>, ?)` that answers it.
+fn age_scan(subject: &str, age: u64, salt_byte: u8) -> (ProofInputs, Fr, Fr) {
+    let graph = vec![Triple::new(
+        NamedOrBlankNode::NamedNode(iri(subject)),
+        iri("http://ex/age"),
+        int_lit(age),
+    )];
+    let salt = salt_from_bytes(&[salt_byte; 32]);
+    let commit = commit_triples(&graph, salt).unwrap();
+    let commitment = commit.commitment;
+    let pattern = Pattern {
+        s: Slot::Var,
+        p: Slot::Const(Term::NamedNode(iri("http://ex/age"))),
+        o: Slot::Var,
+    };
+    let inputs = build_scan(&[commit], &pattern).expect("scan builds").inputs;
+    (inputs, commitment, salt)
+}
+
+/// A witness-only `filter_int` whose `operand_enc` is pinned to `slot_enc` (the
+/// scanned column the binding edge consumes), so stage 2's edge equality holds.
+fn filter_over_slot(slot_enc: FieldHex) -> ProofInputs {
+    let mut filt = filter_inputs(25, FilterOp::Ge, 18, true);
+    if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
+        *operand_enc = slot_enc;
+    }
+    filt
+}
+
+fn scan_row_slot(inputs: &ProofInputs, row: usize, slot: usize) -> FieldHex {
+    match inputs {
+        ProofInputs::Scan { rows, .. } => rows[row][slot].clone(),
+        _ => unreachable!("scan inputs"),
+    }
+}
+
+/// The honest two-scan, same-constant-layout manifest over [`SAME_LAYOUT_QUERY`].
+///
+/// Scan 0 = `{alice age 25}` is the intended answer for pattern 0 (`?x` slot 0,
+/// `?v` slot 2); scan 1 = `{alice age 5}` for pattern 1 (`?x` slot 0, `?c` slot
+/// 2). The two rows AGREE on the join variable `?x` (`alice`), so the intended
+/// reading `(?x=alice, ?v=25, ?c=5)` is a real solution of this BGP satisfying
+/// `FILTER(?v >= 18)`.
+///
+/// Exactly one true-verdict FILTER edge is carried: scan 0's slot 2 (`25`). Scan
+/// 1's slot 2 (`5`) is a filter-VIOLATING value, deliberately: it is the row
+/// membership also places at pattern 0, and the whole point of the tests below is
+/// that no declaration lets the prover drop it out of pattern 0's obligation.
+/// `pattern_scans` is left EMPTY here; each test sets it as it wants.
+fn same_layout_manifest() -> ProofManifest {
+    let (scan_a, commit_a, salt_a) = age_scan("http://ex/alice", 25, 9);
+    let (scan_b, commit_b, salt_b) = age_scan("http://ex/alice", 5, 11);
+    let filt_a = filter_over_slot(scan_row_slot(&scan_a, 0, 2));
+    let sk = test_issuer_sk(1);
+    ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: SAME_LAYOUT_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![public_key_to_hex(&sk.public_key())],
+        commitment_attestations: vec![
+            attest_with_salt(commit_a, salt_a, &sk),
+            attest_with_salt(commit_b, salt_b, &sk),
+        ],
+        attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
+        // The two scans are over DISTINCT committed graphs, so `?x` joining
+        // patterns 0/1 is a genuine cross-graph join and the Q6 gate (sq-en5dx,
+        // keyed on committed-graph identity) requires the non-bnode obligation.
+        join_obligations: vec![("x".to_string(), 0, 1)],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![
+            SubProof { inputs: scan_a, proof_hex: String::new() }, // proof 0 -> pattern 0
+            SubProof { inputs: scan_b, proof_hex: String::new() }, // proof 1 -> pattern 1
+            SubProof { inputs: filt_a, proof_hex: String::new() }, // proof 2
+        ],
+        binding_edges: vec![BindingEdge {
+            from_proof: 0,
+            from_row: 0,
+            from_slot: 2,
+            to_proof: 2,
+        }],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    }
+}
+
+/// THE load-bearing witness of the round-2 review finding: a `pattern_scans`
+/// declaration must not suppress a query-semantic FILTER obligation.
+///
+/// [`same_layout_manifest`] discloses `{alice age 25}` and `{alice age 5}` under
+/// `FILTER(?v >= 18)`, with only the `25` gated. The `5` is a constant-compatible
+/// row of pattern 0 (where `?v` binds), so membership demands a `?v >= 18` proof
+/// over it and the manifest is rejected. EVERY declaration a prover could write —
+/// including the "obvious" one that assigns each scan to the pattern it was meant
+/// to answer, and the opposite assignment that hides the failing slot behind
+/// pattern 1 — leaves that rejection standing, because the obligations are
+/// derived from constant membership and never from the declaration.
+///
+/// Deleting the `check_pattern_scans` call does NOT turn this test red (it never
+/// asserts a `PatternScan*` error) — that is deliberate: it asserts the ABSENCE
+/// of narrowing, so it goes red exactly when `bind_query_correctness` starts
+/// reading `pattern_scans`, which is the regression worth catching. The four
+/// tests below cover `check_pattern_scans` itself.
+#[test]
+fn pattern_scans_do_not_narrow_the_filter_obligation() {
+    let mut m = same_layout_manifest();
+    let expect_reject = |m: &ProofManifest, case: &str| {
+        match prefilter_manifest_structure(m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+            Err(CheckError::UnboundFilter { variable }) if variable == "v" => {}
+            other => panic!(
+                "{}: the ungated `5` matches pattern 0 by constants, so the FILTER \
+                 obligation must stand; expected UnboundFilter(v), got {:?}",
+                case, other
+            ),
+        }
+    };
+
+    // No declaration: the membership over-demand, unchanged.
+    expect_reject(&m, "no declaration");
+
+    // The intended reading — scan 0 answers pattern 0, scan 1 answers pattern 1.
+    // Accepting this is exactly the soundness gap the round-2 review named: it
+    // would let the prover drop scan 1's rows out of pattern 0's FILTER on its
+    // own say-so, with nothing proving they cannot contribute there.
+    m.pattern_scans = vec![vec![0], vec![1]];
+    expect_reject(&m, "declaration excluding the failing scan from pattern 0");
+
+    // The cross assignment — the prover hides the failing slot by pointing the
+    // declaration at the opposite pattern.
+    m.pattern_scans = vec![vec![1], vec![0]];
+    expect_reject(&m, "cross declaration");
+
+    // Widening pattern 0 to cover both scans changes nothing either.
+    m.pattern_scans = vec![vec![0, 1], vec![0, 1]];
+    expect_reject(&m, "declaration naming both scans for both patterns");
+}
+
+/// The round-1 reviewer's "declarations hide the opposite failing slots" witness,
+/// on the CROSS-SHAPED query [`L1_CROSS_SLOT_QUERY`] where the filtered variable
+/// sits at a DIFFERENT slot in each pattern (`?v` at slot 2 of pattern 0, slot 0
+/// of pattern 1).
+///
+/// Two scans disclose `{alice age 25}` and `{bob age 17}`, and the manifest
+/// gates EXACTLY the slot each scan's intended pattern binds `?v` at: scan 0's
+/// slot 2 and scan 1's slot 0. Every OTHER slot the query reads `?v` off — scan
+/// 0's subject and scan 1's `17` — is ungated. So the declaration `[[0], [1]]` is
+/// precisely a declaration engineered to hide the failing slots, and it must be
+/// REJECTED: membership demands slots {0, 2} of BOTH scans, so the ungated `17`
+/// is caught. Narrowing to the declared mapping would ACCEPT it (verified by
+/// mutation: making `bind_query_correctness` read `pattern_scans` turns this
+/// test red).
+///
+/// (The reviewer's literal `(17, age, 25)` / `(25, age, 17)` rows are not
+/// constructible: an integer literal cannot occupy an RDF subject slot, so the
+/// commit/scan builders cannot produce such a graph. Two cross-read scans carry
+/// the same property — each scan's rows are read at both slots `?v` occupies —
+/// which is what this pins.)
+#[test]
+fn pattern_scans_do_not_narrow_the_cross_slot_filter_obligation() {
+    let (scan_a, commit_a, salt_a) = age_scan("http://ex/alice", 25, 13);
+    let (scan_b, commit_b, salt_b) = age_scan("http://ex/bob", 17, 15);
+    // One true-verdict edge per scan, over the slot that scan's INTENDED pattern
+    // binds `?v` at — and nothing else.
+    let filt_a = filter_over_slot(scan_row_slot(&scan_a, 0, 2));
+    let filt_b = filter_over_slot(scan_row_slot(&scan_b, 0, 0));
+    let sk = test_issuer_sk(1);
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: L1_CROSS_SLOT_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![public_key_to_hex(&sk.public_key())],
+        commitment_attestations: vec![
+            attest_with_salt(commit_a, salt_a, &sk),
+            attest_with_salt(commit_b, salt_b, &sk),
+        ],
+        attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![("v".to_string(), 0, 1)],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![
+            SubProof { inputs: scan_a, proof_hex: String::new() },
+            SubProof { inputs: scan_b, proof_hex: String::new() },
+            SubProof { inputs: filt_a, proof_hex: String::new() },
+            SubProof { inputs: filt_b, proof_hex: String::new() },
+        ],
+        binding_edges: vec![
+            BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 2 },
+            BindingEdge { from_proof: 1, from_row: 0, from_slot: 0, to_proof: 3 },
+        ],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    };
+
+    for decl in [vec![], vec![vec![0], vec![1]], vec![vec![1], vec![0]]] {
+        m.pattern_scans = decl.clone();
+        match prefilter_manifest_structure(&m, &trusted_k(&sk), &fresh_policy()) {
+            Err(CheckError::UnboundFilter { variable }) if variable == "v" => {}
+            other => panic!(
+                "declaration {:?} must not ungate the opposite slot on a cross-shaped \
+                 query; expected UnboundFilter(v), got {:?}",
+                decl, other
+            ),
+        }
+    }
+}
+
+/// The declaration must not become an ESCAPE HATCH for audit L-1. In the L-1
+/// witness shape ONE scan answers both same-layout patterns; declaring it for
+/// both keeps both slots in the obligation, so the ungated second slot is still
+/// rejected. (Declaring it for only one pattern is impossible: the other pattern
+/// would be left unanswered — `PatternScanUnbound`, pinned below.)
+#[test]
+fn pattern_scans_cannot_ungate_the_l1_second_slot() {
+    let (scan, commit, salt) = age_scan("http://ex/alice", 25, 9);
+    let filt = filter_over_slot(scan_row_slot(&scan, 0, 2));
+    let sk = test_issuer_sk(1);
+    let mut m = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: L1_CROSS_SLOT_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![public_key_to_hex(&sk.public_key())],
+        commitment_attestations: vec![attest_with_salt(commit, salt, &sk)],
+        attributions: vec![vec![0], vec![0]],
+        // One scan, declared as answering BOTH same-layout patterns.
+        pattern_scans: vec![vec![0], vec![0]],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![
+            SubProof { inputs: scan, proof_hex: String::new() },
+            SubProof { inputs: filt, proof_hex: String::new() },
+        ],
+        // Slot 2 gated; slot 0 (where ?v binds under pattern 1) NOT gated.
+        binding_edges: vec![BindingEdge { from_proof: 0, from_row: 0, from_slot: 2, to_proof: 1 }],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    };
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::UnboundFilter { variable }) if variable == "v" => {}
+        other => panic!(
+            "declaring one scan for both same-layout patterns must keep BOTH slots in \
+             the FILTER obligation (L-1); expected UnboundFilter(v), got {other:?}"
+        ),
+    }
+
+    // …and dropping pattern 1 from the declaration is not an escape either.
+    m.pattern_scans = vec![vec![0], vec![]];
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::PatternScanUnbound { pattern: 1 }) => {}
+        other => panic!("an empty declared entry must reject; got {other:?}"),
+    }
+}
+
+/// A scan sub-proof named by NO pattern is rejected: the manifest discloses its
+/// rows while its own declared reading gives them no pattern, which is
+/// incoherent. This makes a declaration TOTAL over the disclosed scans. It is an
+/// ADDITIONAL rejection, not a step toward narrowing — the FILTER obligations are
+/// membership-derived either way
+/// (`pattern_scans_do_not_narrow_the_filter_obligation`).
+#[test]
+fn pattern_scans_reject_a_dangling_scan() {
+    let mut m = same_layout_manifest();
+    // Scan 1 is left out of the declaration while still disclosing its rows.
+    m.pattern_scans = vec![vec![0], vec![0]];
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::PatternScanUndeclared { proof: 1 }) => {}
+        other => panic!(
+            "a scan declared for no pattern must reject; expected \
+             PatternScanUndeclared{{proof:1}}, got {other:?}"
+        ),
+    }
+}
+
+/// A declaration must not contradict the proof-bound constants: naming a
+/// sub-proof that is not a scan, is out of range, or whose bb-bound pattern
+/// constants do not answer the pattern (audit #10) is rejected — a recorded
+/// reading that a scan of a different predicate answers this pattern is a false
+/// statement about the proofs, whatever weight the field carries.
+#[test]
+fn pattern_scans_reject_a_declaration_contradicting_the_bound_constants() {
+    let mut m = same_layout_manifest();
+    // sub-proof 2 is the `filter_int`, not a scan.
+    m.pattern_scans = vec![vec![2], vec![1]];
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::PatternScanMismatch { pattern: 0, proof: 2 }) => {}
+        other => panic!("declaring a non-scan must reject; got {other:?}"),
+    }
+
+    // …and an out-of-range index is the same rejection.
+    m.pattern_scans = vec![vec![0], vec![99]];
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::PatternScanMismatch { pattern: 1, proof: 99 }) => {}
+        other => panic!("an out-of-range declared index must reject; got {other:?}"),
+    }
+
+    // …and a scan whose bound predicate constant answers a DIFFERENT pattern:
+    // an `<ex/role>` scan cannot be declared as answering an `<ex/age>` pattern.
+    let role_scan = scan_inputs_for(&credential_graph(), "http://ex/role");
+    let mut m = same_layout_manifest();
+    m.sub_proofs.push(SubProof { inputs: role_scan, proof_hex: String::new() });
+    let sk = test_issuer_sk(1);
+    for c in scan_commitments(&m) {
+        if !m
+            .commitment_attestations
+            .iter()
+            .any(|a| a.commitment == FieldHex::from_field(&c))
+        {
+            m.commitment_attestations
+                .push(attest_with_salt(c, salt_from_bytes(&[9u8; 32]), &sk));
+        }
+    }
+    m.pattern_scans = vec![vec![3], vec![1]];
+    match prefilter_manifest_structure(&m, &trusted_k(&sk), &fresh_policy()) {
+        Err(CheckError::PatternScanMismatch { pattern: 0, proof: 3 }) => {}
+        other => panic!(
+            "declaring a constant-mismatched scan must reject (audit #10); got {other:?}"
+        ),
+    }
+}
+
+/// The declaration is indexed per query pattern in query order (like
+/// `attributions`), so a mis-sized vector cannot be interpreted — it is rejected
+/// rather than silently recorded.
+#[test]
+fn pattern_scans_reject_an_arity_mismatch() {
+    let mut m = same_layout_manifest();
+    m.pattern_scans = vec![vec![0]]; // one entry for two query patterns
+    match prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::PatternScanArityMismatch { patterns: 2, declared: 1 }) => {}
+        other => panic!(
+            "a mis-sized pattern_scans must reject; expected \
+             PatternScanArityMismatch{{patterns:2,declared:1}}, got {other:?}"
+        ),
+    }
+}
+
+/// `pattern_scans` is `#[serde(default)]`, so a legacy manifest that never heard
+/// of the field parses with an EMPTY declaration and skips the well-formedness
+/// checks. The FILTER/attribution obligations are membership-derived either way,
+/// so omitting the field neither weakens nor strengthens a gate.
+#[test]
+fn pattern_scans_absent_in_json_means_no_declaration() {
+    let m = same_layout_manifest();
+    let json = m.to_json();
+    assert!(json.contains("\"pattern_scans\""), "the field serialises");
+    let stripped: serde_json::Value = {
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v.as_object_mut().unwrap().remove("pattern_scans");
+        v
+    };
+    let legacy = ProofManifest::from_json(&stripped.to_string())
+        .expect("a manifest with no pattern_scans still parses");
+    assert!(legacy.pattern_scans.is_empty());
+    match prefilter_manifest_structure(&legacy, &trusted_k(&test_issuer_sk(1)), &fresh_policy()) {
+        Err(CheckError::UnboundFilter { variable }) if variable == "v" => {}
+        other => panic!(
+            "with no declaration the fail-closed membership over-demand must stand; \
+             got {other:?}"
+        ),
+    }
 }
 
 // --- issuer-signature / key-set NEGATIVE tests (audit #3) -----------------
@@ -2737,6 +3401,7 @@ fn scan_only_manifest(graph: &[Triple], salt_byte: u8) -> (ProofManifest, Fr, Fr
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -2888,6 +3553,7 @@ fn issuer_reject_drop_triple_recommit_suppression() {
         key_set: vec![public_key_to_hex(&sk.public_key())],
         commitment_attestations: vec![full_attestation],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -3205,6 +3871,7 @@ fn cross_graph_manifest(
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: declared,
+        pattern_scans: vec![],
         join_obligations: obligations,
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -3878,6 +4545,7 @@ fn revocation_stale_status_list_rejected() {
         key_set: vec![public_key_to_hex(&sk.public_key())],
         commitment_attestations: vec![att],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -4078,6 +4746,7 @@ fn revocation_within_window_verifies() {
         key_set: vec![public_key_to_hex(&sk.public_key())],
         commitment_attestations: vec![att],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -4265,6 +4934,7 @@ fn hidden_scan_manifest(prover: &CircuitProver, tag: &str) -> (ProofManifest, Fr
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -4357,6 +5027,7 @@ fn committed_index_without_hidden_revocation_rejected() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
@@ -4406,6 +5077,7 @@ fn committed_index_disclosed_commitment_mismatch_rejected() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
@@ -4722,6 +5394,7 @@ fn fully_hidden_scan_manifest(
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -5009,6 +5682,7 @@ fn fh_structural_manifest(rev: RevocationStatus) -> ProofManifest {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -5153,6 +5827,7 @@ fn fully_hidden_proof_without_fully_hidden_reference_rejected() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -5416,6 +6091,7 @@ fn hi_scan_manifest(prover: &CircuitProver, signer_sk: &SecretKey, tag: &str) ->
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -5594,6 +6270,7 @@ fn hi_scan_manifest_no_clear_attestation(
         key_set: vec![],                  // no declared narrowing
         commitment_attestations: vec![],  // NO clear attestation — hidden-only
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         binding: BindingMode::Challenge { challenge },
@@ -6066,6 +6743,7 @@ fn filter_f64_composes_end_to_end() {
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -6174,6 +6852,7 @@ fn entailment_manifest(regime: EntailmentRegime, steps: Vec<DerivationStep>) -> 
         key_set: vec![],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: regime,
         derivation_steps: steps,
@@ -6344,6 +7023,88 @@ fn entailment_simple_accepted_progresses_past_gate() {
         Err(CheckError::MissingProof { .. }) => {}
         other => panic!(
             "a Simple manifest must pass the entailment gate (then hit MissingProof), got {other:?}"
+        ),
+    }
+}
+
+// --- sq-rsd3v.7: completeness-under-entailment is UNBUILT — the enforced deferral -
+//
+// [OPUS-5] sq-rsd3v.7. SOUNDNESS of derivation ("every derived triple IS entailed",
+// sq-314 above + the in-circuit relation sq-rsd3v.2) and COMPLETENESS under
+// entailment ("no entailed answer is MISSING") are two obligations that must never
+// be conflated. Completeness needs BOTH an in-circuit closure-sweep over the flat
+// full graph AND a fixpoint-SATURATION proof; the saturation half exists nowhere in
+// sparq, so the property is NOT claimed. A relying party that demands it is REFUSED
+// fail-closed rather than handed a soundness-only accept it could misread.
+
+/// A well-formed rdfs9 step over this fixture's graph. Its `subClassOf` antecedent
+/// is NOT in the disclosed base (the scan discloses only the `rdf:type` row), so
+/// WITHOUT the completeness demand this manifest rejects as
+/// `UngroundedDerivationAntecedent` — which is exactly what makes the tests below
+/// non-vacuous: the completeness refusal must PRE-EMPT a different, later rejection,
+/// proving the new gate fired rather than riding an error that was coming anyway.
+fn rdfs9_step_for_fixture() -> DerivationStep {
+    let t = enc_iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+    let sc = enc_iri("http://www.w3.org/2000/01/rdf-schema#subClassOf");
+    DerivationStep {
+        rule: EntailmentRule::Rdfs9SubClassType,
+        antecedents: vec![
+            [enc_iri("http://ex/alice"), t.clone(), enc_iri("http://ex/Student")],
+            [enc_iri("http://ex/Student"), sc, enc_iri("http://ex/Person")],
+        ],
+        derived: [enc_iri("http://ex/alice"), t, enc_iri("http://ex/Person")],
+    }
+}
+
+/// sq-rsd3v.7: a relying party that REQUIRES completeness under entailment is
+/// REFUSED on every non-`Simple` regime — `CompletenessUnderEntailmentUnavailable`,
+/// naming the regime — even when its policy accepts that regime. Non-vacuity: the
+/// SAME manifest under the SAME regime-acceptance but WITHOUT the demand rejects
+/// with a DIFFERENT error, so the refusal is attributable to the new gate.
+#[test]
+fn completeness_demand_refuses_every_inference_regime() {
+    for (regime, name, accepting) in [
+        (EntailmentRegime::Rdfs, "rdfs", EntailmentPolicy::simple_only().with_rdfs()),
+        (EntailmentRegime::Owl, "owl", EntailmentPolicy::simple_only().with_owl()),
+    ] {
+        let m = entailment_manifest(regime, vec![rdfs9_step_for_fixture()]);
+        // Baseline (no demand): rejected for an unrelated, LATER reason.
+        match run_entailment(&m, &accepting) {
+            Err(CheckError::UngroundedDerivationAntecedent { .. }) => {}
+            other => panic!(
+                "baseline for {name} must reject at the grounding check (keeps the \
+                 completeness test non-vacuous), got {other:?}"
+            ),
+        }
+        // With the demand: refused FIRST, as a capability gap.
+        match run_entailment(&m, &accepting.clone().require_completeness_under_entailment()) {
+            Err(CheckError::CompletenessUnderEntailmentUnavailable { regime: r }) => {
+                assert_eq!(r, name, "the refusal must name the manifest's regime");
+            }
+            other => panic!(
+                "a demand for completeness under `{name}` must be refused as \
+                 CompletenessUnderEntailmentUnavailable (sq-rsd3v.7 is UNBUILT), got {other:?}"
+            ),
+        }
+    }
+}
+
+/// sq-rsd3v.7: the demand does NOT brick the `Simple` path — a `Simple` manifest
+/// carries no entailment for completeness to range over, so it still passes the
+/// entailment gate (and stops later, at MissingProof). Passing it is NOT an
+/// assertion that its answer set is complete: that rests on the rest of the
+/// (NOT externally audited — sq-qhy4) verifier, and an off-circuit materialised
+/// closure presented as `Simple` is a distinct trust model this dial cannot see
+/// (design §3.6(a)).
+#[test]
+fn completeness_demand_leaves_simple_regime_verifiable() {
+    let m = entailment_manifest(EntailmentRegime::Simple, vec![]);
+    let policy = EntailmentPolicy::simple_only().require_completeness_under_entailment();
+    match run_entailment(&m, &policy) {
+        Err(CheckError::MissingProof { .. }) => {}
+        other => panic!(
+            "Simple must still pass the entailment gate under a completeness demand \
+             (then hit MissingProof), got {other:?}"
         ),
     }
 }

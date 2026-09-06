@@ -6,8 +6,8 @@ parameters, request/response media types, content-negotiation rules, status code
 shape an **HTTP-only consumer** (one that talks to sparq exclusively over the network, e.g.
 [solid-server-rs / PSS](https://github.com/jeswr/solid-server-rs)) may rely on. It is the HTTP
 counterpart of [`docs/api-stability.md`](api-stability.md), which covers the **in-process
-embedding** surface ([#1248](https://github.com/jeswr/sparq/issues/1248)); this document covers
-the ask in [#1416](https://github.com/jeswr/sparq/issues/1416).
+embedding** surface ([#1248](https://github.com/sparq-org/sparq/issues/1248)); this document covers
+the ask in [#1416](https://github.com/sparq-org/sparq/issues/1416).
 
 Everything in [The frozen v1 surface](#the-frozen-v1-surface) is enumerated **as-implemented**
 and pinned end-to-end by `crates/sparq-server/tests/wire_contract.rs` (the served-surface
@@ -115,6 +115,17 @@ ASK has no CSV/TSV form; a CSV/TSV `Accept` on an ASK yields the JSON boolean fo
 
 **Result envelopes** (SPARQL 1.1 Query Results JSON Format): a SELECT body is
 `{"head":{"vars":[…]},"results":{"bindings":[…]}}`; an ASK body is `{"head":{},"boolean":…}`.
+
+<!-- [SONNET-4.6] sq-7d3dj.26 -->
+**Streamed SELECT-JSON and truncation safety.** A SELECT-JSON result larger than one 64 KiB
+chunk is sent under **chunked transfer-encoding with no `Content-Length`**; smaller results stay
+buffered with a `Content-Length`. Once the first byte is on the wire the status is committed, so
+a later row/byte-cap or deadline trip can only **truncate** — and a truncated stream is always
+distinguishable from a complete one: the closing `]}}` is **never** written, so the body fails
+to parse as `sparql-results+json`. A **well-formed but short `200` is not a possible outcome.**
+A client that sends **`TE: trailers`** additionally receives a `Trailer` header and, after the
+body, `X-Sparq-Complete: true` or `X-Sparq-Truncated: deadline|max-rows|max-bytes|cancelled|panic|error`;
+a client that does not gets the chunked stream aborted without its terminating zero-length chunk.
 
 **CONSTRUCT / DESCRIBE** (default: **N-Triples**):
 
@@ -236,7 +247,7 @@ Served today, **NOT covered by the v1 freeze** — may change or disappear in an
 2. Cut the release line that carries it (see [`docs/release.md`](release.md)) and record the
    freeze in `CHANGELOG.md`.
 3. Flip this document's [Status](#status-v1-proposed-not-yet-ratified) from *PROPOSED* to
-   *in force*, and note it on [#1416](https://github.com/jeswr/sparq/issues/1416) so PSS can
+   *in force*, and note it on [#1416](https://github.com/sparq-org/sparq/issues/1416) so PSS can
    pin the release line.
 
 ## Related
@@ -246,6 +257,6 @@ Served today, **NOT covered by the v1 freeze** — may change or disappear in an
 - `crates/sparq-server/src/status_contract.rs` — the versioned retry contract (rustdoc).
 - [`skills/http-server/SKILL.md`](../skills/http-server/SKILL.md) — the full operational
   endpoint + hardening reference (superset; not a stability contract).
-- [#1416](https://github.com/jeswr/sparq/issues/1416) (PSS HTTP-freeze ask) ·
-  [#1248](https://github.com/jeswr/sparq/issues/1248) (embedding freeze) ·
-  [#50](https://github.com/jeswr/sparq/issues/50) (transient-vs-permanent contract).
+- [#1416](https://github.com/sparq-org/sparq/issues/1416) (PSS HTTP-freeze ask) ·
+  [#1248](https://github.com/sparq-org/sparq/issues/1248) (embedding freeze) ·
+  [#50](https://github.com/sparq-org/sparq/issues/50) (transient-vs-permanent contract).

@@ -65,10 +65,10 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 
 ## ✨ Features
 
-- **LDP surface** — containers + RDF/non-RDF resources, Turtle / JSON-LD content
-  negotiation (oxrdf/oxttl/oxjsonld) honouring the JSON-LD `profile` parameter
-  (expanded / compacted forms echoed in `Content-Type`; compaction is local and
-  context-free — nothing fetched), conditional requests, `Content-Range` reads.
+- **LDP surface** — containers + RDF/non-RDF resources, conditional requests,
+  `Content-Range` reads, Turtle / JSON-LD conneg (oxrdf/oxttl/oxjsonld) honouring the
+  JSON-LD `profile` parameter (expanded / compacted forms echoed in `Content-Type`;
+  compaction is local and context-free — nothing fetched).
 - **Access control** — WAC (`acl:`) evaluated against the SPARQ-authoritative
   store, with an ACL decision cache; public-read fast path.
 - **WAC-scoped query endpoint** — [GPT-5.6] default-on, query-only
@@ -77,39 +77,40 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   unreadable or uncertain resources never reach the query engine.
 - **Auth** — Solid-OIDC access tokens + mandatory DPoP, verified-token cache,
   tiered PoP: RFC 8705 mTLS cert-bound tokens and HKDF/HMAC DPoP-SK attestation.
-- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the
-  embedded in-process engine (default), in-memory double, opt-in live SPARQ
-  HTTP client, and `object_store` blob backends.
+- **Storage seams** — `Store` / `SparqClient` / `BlobStore` traits: the in-process
+  engine (compiled by default, but selected only by `PSS_SPARQ_BACKEND=embedded` — the
+  boot default stays the in-memory double), opt-in live SPARQ HTTP client, `object_store`.
 - **Notification observability** — [GPT-5.6] process-wide backlog-overflow totals
   are available through `notifications::ws::NotificationMetrics::snapshot()`.
-- **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards,
-  including explicit header-count, aggregate-byte, and slow-header timeout
-  bounds; request timeouts, body limits, per-connection max-requests, rate
-  limiting, and overload shedding.
+- **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards (explicit
+  header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body
+  limits, per-connection max-requests, rate limiting, and overload shedding.
 - Cargo features:
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);
     `--no-default-features` builds the engine-free profile.
-  - `sparql-endpoint` (**default-on**, [GPT-5.6] sq-r1ei8) — the WAC-scoped,
-    query-only `/sparql` route. Disable all defaults for the pure Solid core
-    tier; the internal Store methods used by LDP/WAC are independent of it.
+  - `sparql-endpoint` (**default-on**, [GPT-5.6] sq-r1ei8) — the WAC-scoped, query-only
+    `/sparql` route; the internal Store methods LDP/WAC use are independent of it.
   - `http-sparq` (off) — the remote SPARQL-over-HTTP backend
     (`PSS_SPARQ_BACKEND=http`) for a shared-service deployment.
-  - `http3` (off, [GPT-5.6] sq-oprna.2) — with the TLS PEM variables configured,
-    also serve the same hardened LDP router over HTTP/3 on UDP at the resolved
-    `SOLID_SERVER_BIND` address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
+  - `http3` (off, [GPT-5.6] sq-oprna.2) — with the TLS PEM variables configured, also serve
+    the same hardened LDP router over HTTP/3 on UDP at the resolved `SOLID_SERVER_BIND`
+    address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
   - `redis-replay` (off) — a shared Redis-backed DPoP `jti` replay store for
     horizontally-scaled deployments.
-  - `odrl-authz` (off, [SONNET-4.6] sq-elg47) — the native ODRL policy gate seam
-    on the read/query path (`authz::odrl`, attached via `LdpState::set_odrl_gate`;
-    deny-overrides / permit-extends over the WAC decision, fail-closed).
+  - `odrl-authz` (off, [SONNET-4.6] sq-elg47) — the native ODRL policy gate seam on the
+    read/query path (`authz::odrl`, via `LdpState::set_odrl_gate`; deny-overrides /
+    permit-extends over the WAC decision, fail-closed).
+  - `trust-graph` (off, [OPUS-5] sq-hed3q) — the LIBRARY-only trust-graph admission
+    seam (`authz::trust_admit`); NOT handler-wired. Research prototype (sq-qhy4).
 
 ## 📚 Learn more
 
-- Epic sq-gg0qq tracks the migration: bench/, conformance/, docs/, decisions/
-  stay in the source repo until their own beads land (sq-gg0qq.3 landed).
-- Design records: `docs/` + `decisions/` in
-  [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs).
+- Usage: [`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md).
+- Design records: [`research/lws-design-records.md`](../../research/lws-design-records.md) — the in-repo home for this crate's migrated `decisions/` + `docs/design/` estate (sq-gg0qq.10), reconstructed from the code. Doc-comments here cite that record by section; where a source-repo path is still named it carries its `RSS`/`PSS` namespace (§2), and §1 maps every source path to its in-repo home. `bench/` stays in the source repo.
+- Specification estate (what this crate is pinned to, and what is still UNRESOLVED — issue #4971): the crate-level rustdoc, `cargo doc -p sparq-lws-core --open`.
+- Normative specs — the spec is the contract, not this implementation: [DPoP-SK](https://jeswr.github.io/dpop-sk-spec/), implemented here in `src/pop/sk/` against that profile (its Appendix-A worked example runs as a test vector); and the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier), which owns baseline (cache-miss) Solid-OIDC token + DPoP proof verification. On a verified-token-cache hit `src/auth_cache.rs` re-verifies the fresh proof locally — signature, `htm`/`htu`/`iat`, `ath`, `jti` replay, `cnf.jkt` binding — built from the verifier's own public primitives and its shared replay store, so that path is security-sensitive code to audit here.
+- Solid CTH conformance: [`conformance/`](./conformance) — opt-in lane; the score is generated + ratcheted, never committed prose (sq-gg0qq.7).
 - Related crates: [`sparq-solid`](../sparq-solid) (Solid protocol pieces),
   [`sparq-server`](../sparq-server) (the SPARQL endpoint it can delegate to).
 

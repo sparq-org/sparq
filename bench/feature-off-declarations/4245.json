@@ -1,0 +1,5 @@
+{
+  "pr": 4245,
+  "date": "2026-07-26",
+  "reason": "sq-7d3dj.16: sparq-core store.rs Overlay gains cached perm-sorted projections of `added` (a [OnceLock<Vec<[Id;3]>>; 6] field, added_sorted/invalidate_added, binary-searched added_rows) — always-compiled scan/estimate/heap_bytes code that sparq-wasm links, so the feature-OFF bundle bytes move"
+}

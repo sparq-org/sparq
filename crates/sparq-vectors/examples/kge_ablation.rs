@@ -217,6 +217,73 @@ fn main() {
         println!();
     }
 
+    // ---- Phase-4 PROVENANCE-WEIGHTING: all three design-§USE-1 integration points --------------
+    // [OPUS-5] sq-w2af4. The `w(t)` reader feeds three points, each with its OWN paired ablation:
+    //   (1) the TRAINING axis  — `run_weight_ablation`  (sq-2489d.4): scale each positive's SGD step;
+    //   (2) the POOLING  axis  — `run_pooling_ablation` (sq-w2af4):  structural-sketch pooling of
+    //       a node's neighbours weighted by each ASSERTION's w(t), instead of the uniform mean. It
+    //       can only move where the graph carries STATEMENT-level provenance (a reified statement);
+    //       with entity-level provenance alone every edge of a subject shares its head weight and
+    //       the delta is exactly zero by construction — a null SIGNAL, not a null result;
+    //   (3) the FUSION   axis  — `ProvenanceWeights::weight_header` attaches the per-`Block`
+    //       multiplier that `fuse_rrf_weighted` consumes (and `ground_weighted` rescales it per
+    //       node from that node's own incident edges). It changes a *ranking fusion*, not a
+    //       link-prediction score, so it has NO MRR delta to print here and is deliberately not
+    //       faked into one; `tests/grounding.rs` proves that loop end-to-end instead.
+    // Both printed deltas are INDICATIVE work-box numbers. The bar is pre-registered and the honest
+    // verdict may be ABANDON — a non-positive or non-significant delta means the axis did not help
+    // on this slice, and nothing here claims otherwise.
+    {
+        use sparq_vectors::eval::{run_pooling_ablation, run_weight_ablation, synthetic_provenance_ttl};
+
+        println!("== PHASE-4 provenance-weighting: paired deltas on the annotated slice ==");
+        let w_seeds: Vec<u64> = (0..8u64).map(|i| seed0.wrapping_add(0xB00 + i)).collect();
+        let prov_ttl = synthetic_provenance_ttl(entities.max(200), seed0 ^ 0x2489);
+        let mut cfg = EvalConfig::small(seed0);
+        cfg.train.model = ModelKind::ComplEx;
+        cfg.train.epochs = 150;
+        cfg.train.dim = 64;
+        cfg.train.negatives_per_positive = 16;
+
+        match run_weight_ablation(&prov_ttl, "turtle", cfg, &w_seeds) {
+            Ok(ab) => println!(
+                "  (1) TRAINING axis: MRR delta={:.4}  se={:.4}  n={}  [adopt@2se={}]  \
+                 H@10 delta={:.4}",
+                ab.mrr.mean,
+                ab.mrr.se,
+                ab.mrr.n,
+                ab.mrr_significant_at(2.0),
+                ab.hits10.mean,
+            ),
+            Err(e) => println!("  (1) TRAINING axis: (failed: {})", e),
+        }
+        // The blend is a sweepable, NON-canonical knob — sweep it rather than trusting one value.
+        for &blend in &[0.1f32, 0.25, 0.5] {
+            match run_pooling_ablation(&prov_ttl, "turtle", cfg, &w_seeds, blend) {
+                Ok(ab) => println!(
+                    "  (2) POOLING  axis (blend={:<4}): MRR delta={:.4}  se={:.4}  n={}  \
+                     [adopt@2se={}]  H@10 delta={:.4}",
+                    blend,
+                    ab.mrr.mean,
+                    ab.mrr.se,
+                    ab.mrr.n,
+                    ab.mrr_significant_at(2.0),
+                    ab.hits10.mean,
+                ),
+                Err(e) => println!("  (2) POOLING  axis (blend={}): (failed: {})", blend, e),
+            }
+        }
+        println!(
+            "  (3) FUSION   axis: no MRR delta by construction (it reweights RRF fusion, not \
+             link-prediction) — see tests/grounding.rs."
+        );
+        println!(
+            "  (read: a delta that does not clear 2*se is NO measured lift — the honest verdict \
+             is ABANDON that axis on this slice.)"
+        );
+        println!();
+    }
+
     // DATASET-GATED full run.
     if let Ok(path) = std::env::var("SPARQ_KGE_DATASET") {
         println!("== real dataset: {} ==", path);

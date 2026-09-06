@@ -31,11 +31,18 @@ THE CONTRACT
     the authoritative `changedFiles` count; any disagreement is `incomplete-paths`.
     Renames are consumed via `previous_filename` (REST-only), so a cross-crate move
     implicates BOTH the source and the destination crate.
-  * It NEVER creates a label. GitHub's "add labels to an issue" REST call SILENTLY
-    CREATES an unknown label, so a typo'd area would become permanent repo state; every
-    candidate area is therefore checked against the repo's live label set first and
-    dropped (loudly) if absent. A dropped area means the PR stays `__global__` — the
-    safe direction.
+  * It creates a label in EXACTLY ONE case, on a STRUCTURAL WITNESS. GitHub's "add labels
+    to an issue" REST call SILENTLY CREATES an unknown label, so a typo'd area would
+    become permanent repo state; every candidate area is therefore checked against the
+    repo's live label set first and dropped (loudly) if absent. The ONE exception
+    (issue #4582) is a PR that ADDS `crates/<name>/Cargo.toml`: that entry, carrying a
+    base-ref-absent status, is PROOF — not a guess — that this PR creates crate `<name>`,
+    and such a PR is otherwise unattributable FOREVER, because the workflow evaluates it
+    against the DEFAULT BRANCH, where the crate does not exist and no `area:<name>` label
+    was ever made. There the label is created EXPLICITLY (`POST /repos/{repo}/labels`,
+    with `new_crate_area` deciding the name) and, if creation fails, the run FAILS LOUDLY
+    rather than warning and falling back to `__global__`. With no such witness the
+    fail-closed behaviour is unchanged.
   * IDEMPOTENT: areas already on the PR are never re-posted; a second run over an
     already-labelled PR issues zero writes.
   * READ-ONLY BY DEFAULT (repo convention, cf. scripts/push-frontier.sh): `--dry-run` is
@@ -69,6 +76,21 @@ WORKSPACE_MANIFEST = REPO_ROOT / "Cargo.toml"
 GLOBAL = "__global__"          # mirrors ready-issues.py / dispatch-claim.py
 AREA_PREFIX = "area:"
 CRATES_DIR = "crates"
+CRATE_MANIFEST = "Cargo.toml"
+
+# The `status` values GitHub's `pulls/{n}/files` payload uses for an entry whose CURRENT
+# path does NOT exist at that path on the base ref. `modified` is deliberately absent:
+# editing an existing crate's manifest is not evidence that the crate is new.
+BASE_ABSENT_STATUSES = frozenset({"added", "copied", "renamed"})
+# A created label's name is derived from a PR-authored directory name, so it is
+# constrained here rather than trusted: no whitespace, no comma (which GitHub's label
+# filters treat as a separator), no `:` beyond the prefix, bounded length.
+AREA_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Cosmetic; nothing structural reads either value. The description records WHY the label
+# exists so a human auditing the label list can tell an auto-created one from a hand-made
+# one. GitHub caps a label description at 100 characters.
+AREA_LABEL_COLOR = "c5def5"
+AREA_LABEL_DESCRIPTION = "Scheduler conflict partition (auto-created for a new crate)"
 
 
 class PolicyError(RuntimeError):
@@ -194,12 +216,61 @@ def attribute(path, policy):
     return None
 
 
-def derive_areas(paths, policy, known_areas, complete=True):
+def new_crate_area(path, status):
+    """The crate area a changed-file ENTRY WITNESSES as created by this PR, else None.
+
+    THE WITNESS (issue #4582). A PR that adds a crate is unattributable by every other
+    rule here: `attribute` resolves `crates/<name>/...` to `<name>` happily, but the
+    caller's live-`area:`-label check then drops it, because on the DEFAULT BRANCH — the
+    only tree this privileged job may read — the crate does not exist and nobody ever made
+    an `area:<name>` label. The measured case is PR #4578 (`crates/sparq-wrapper-shacl`),
+    which the deriver reported as `KEEP __global__ [unresolved]`.
+
+    What makes creating that label safe is that this is not a guess. The entry's CURRENT
+    path is exactly `crates/<name>/Cargo.toml` — three segments, the crate root manifest —
+    and its `status` says that manifest is NOT at that path on the base ref. A directory
+    named `crates/<name>/` with no added root manifest is NOT a crate (it could be a typo,
+    a stray file, or a subdirectory of an existing crate), and produces no witness, so it
+    keeps the old fail-closed answer. `crates/README.md` has two segments and produces
+    none either.
+
+    The name is then range-checked against `AREA_NAME_RE`, because it is the one part of
+    a created label that comes from PR-authored content.
+    """
+    if not isinstance(path, str) or not isinstance(status, str):
+        return None
+    if status.strip().lower() not in BASE_ABSENT_STATUSES:
+        return None
+    parts = (path[2:] if path.startswith("./") else path).split("/")
+    if len(parts) != 3 or parts[0] != CRATES_DIR or parts[2] != CRATE_MANIFEST:
+        return None
+    return parts[1] if AREA_NAME_RE.fullmatch(parts[1]) else None
+
+
+def creatable_areas(pr, known_areas):
+    """The area names this PR record is ALLOWED to have a label created for.
+
+    Exactly the witnessed new crates (`new_crate_area`) that have no label yet. A name
+    that already exists as a label needs no creation, and a name with no witness is not
+    creatable at all — so this set, not the changed-path list, is the whole authority for
+    the one write that can add permanent repo state.
+    """
+    return frozenset(c for c in (pr.get("new_crates") or ())
+                     if isinstance(c, str) and c not in known_areas
+                     and AREA_NAME_RE.fullmatch(c))
+
+
+def derive_areas(paths, policy, known_areas, complete=True, creatable=frozenset()):
     """(areas, reason) for a changed-path list. EMPTY areas == stay on `__global__`.
 
     `known_areas` is the set of area names for which an `area:<name>` label ACTUALLY
     exists in the repo; an area outside it is treated as unresolved, because applying
     it would silently create a label (see module docstring).
+
+    `creatable` extends that set with the areas this PR is entitled to have a label
+    CREATED for — the witnessed new crates from `creatable_areas`. It widens attribution
+    ONLY for a name the PR's own added crate manifest proves, and the widening is what
+    turns a new-crate PR from `unresolved` into `resolved`.
 
     `complete` is the verdict of `paths_are_complete` — whether `paths` is KNOWN to be
     the whole changed-file list. A partial list derives a proper SUBSET of the true
@@ -215,10 +286,11 @@ def derive_areas(paths, policy, known_areas, complete=True):
         return frozenset(), "incomplete-paths"
     if not paths:
         return frozenset(), "no-paths"
+    attributable = frozenset(known_areas) | frozenset(creatable)
     areas, unresolved = set(), []
     for path in paths:
         area = attribute(path, policy)
-        if area is None or area not in known_areas:
+        if area is None or area not in attributable:
             unresolved.append(path)
             continue
         areas.add(area)
@@ -262,8 +334,9 @@ def plan_for_pr(pr, policy, known_areas):
     """
     existing = {lb[len(AREA_PREFIX):] for lb in pr.get("labels") or []
                 if isinstance(lb, str) and lb.startswith(AREA_PREFIX)}
+    creatable = creatable_areas(pr, known_areas)
     areas, reason = derive_areas(pr.get("files") or [], policy, known_areas,
-                                 complete=pr.get("complete") is True)
+                                 complete=pr.get("complete") is True, creatable=creatable)
     add = sorted(areas - existing)
     after = existing | areas
     return {
@@ -271,6 +344,9 @@ def plan_for_pr(pr, policy, known_areas):
         "existing": sorted(existing),
         "derived": sorted(areas),
         "add": [AREA_PREFIX + a for a in add],
+        # A SUBSET of `add`, so a label is never created unless it is also about to be
+        # applied: a fail-closed plan derives no areas and therefore creates nothing.
+        "create": [AREA_PREFIX + a for a in add if a in creatable],
         "reason": reason,
         # The scheduler reads absence-of-area as `__global__`; a PR that keeps a
         # human-applied area is NOT global even when derivation failed.
@@ -281,10 +357,11 @@ def plan_for_pr(pr, policy, known_areas):
 
 def unresolved_paths(pr, policy, known_areas):
     """The paths that blocked narrowing — the actionable output of a `unresolved` run."""
+    attributable = frozenset(known_areas) | creatable_areas(pr, known_areas)
     out = []
     for path in pr.get("files") or []:
         area = attribute(path, policy)
-        if area is None or area not in known_areas:
+        if area is None or area not in attributable:
             out.append(path)
     return out
 
@@ -324,7 +401,7 @@ def known_area_labels(repo, runner=None):
 
 
 def fetch_changed_files(repo, number, runner=None):
-    """(paths, entry_count) for a PR, enumerated with the PAGINATED REST endpoint.
+    """(paths, entry_count, new_crates) for a PR, from the PAGINATED REST endpoint.
 
     `gh pr view --json files` is GraphQL `files(first: 100)` and is NOT used anywhere in
     this module: it silently truncates, and a truncated list derives a proper SUBSET of
@@ -334,26 +411,38 @@ def fetch_changed_files(repo, number, runner=None):
     `previous_filename` as well, so a move out of `crates/A/` into `crates/B/` implicates
     BOTH crates. `entry_count` counts ENTRIES, not paths, because that is the number
     `changedFiles` is comparable with.
+
+    `new_crates` is the crate names this PR is WITNESSED to create — see `new_crate_area`.
+    It needs each entry's `status`, which is why the REST payload (not the path list
+    alone) is the input: `status` is what distinguishes adding a crate manifest from
+    editing one, and only the former justifies creating a label.
     """
     raw = _gh(["api", "--paginate", f"repos/{repo}/pulls/{number}/files?per_page=100",
-               "--jq", r'.[] | [.filename, (.previous_filename // "")] | @tsv'],
+               "--jq", r'.[] | [.filename, (.previous_filename // ""), .status] | @tsv'],
               runner=runner)
-    paths, entries = [], 0
+    paths, entries, new_crates = [], 0, set()
     for line in raw.splitlines():
         if not line.strip():
             continue
         entries += 1
-        current, _, previous = line.partition("\t")
-        for p in (current.strip(), previous.strip()):
+        cols = line.split("\t")
+        current = cols[0].strip()
+        previous = cols[1].strip() if len(cols) > 1 else ""
+        status = cols[2].strip() if len(cols) > 2 else ""
+        for p in (current, previous):
             if p and p not in paths:
                 paths.append(p)
-    return paths, entries
+        witnessed = new_crate_area(current, status)
+        if witnessed:
+            new_crates.add(witnessed)
+    return paths, entries, frozenset(new_crates)
 
 
 def _with_changed_files(repo, record, changed, runner=None):
     """Attach the enumerated paths + the completeness verdict to a PR record."""
-    paths, entries = fetch_changed_files(repo, record["number"], runner=runner)
+    paths, entries, new_crates = fetch_changed_files(repo, record["number"], runner=runner)
     record["files"] = paths
+    record["new_crates"] = sorted(new_crates)
     record["complete"] = paths_are_complete(entries, changed)
     return record
 
@@ -386,6 +475,40 @@ def fetch_open_prs(repo, limit=300, runner=None):
             "isDraft": bool(data.get("isDraft")),
         }, data.get("changedFiles"), runner=runner))
     return out
+
+
+def ensure_area_label(repo, label, runner=None, out=None):
+    """CREATE `label` in `repo`. The ONLY call in this module that adds permanent repo
+    state beyond a PR's own labels, and the ONLY answer to issue #4582 that is not
+    "warn and fall back".
+
+    It is reached only for a name in `plan["create"]` — i.e. a crate whose root manifest
+    THIS PR adds (`new_crate_area`), which has no label yet, and which the same run is
+    about to apply. `POST /repos/{repo}/labels` is used deliberately instead of relying on
+    the "add labels to an issue" endpoint's silent creation: an explicit create names the
+    one label being made and records in its description why it exists, so a human auditing
+    the repo's label list can tell it from a hand-made one.
+
+    FAILS LOUDLY. A creation that cannot succeed (no `issues: write`, a rejected name)
+    propagates out of `_gh` and REDS the run, because the alternative is exactly the
+    latent `__global__` hazard #4582 describes. The ONE tolerated failure is the
+    already-exists race between two concurrent runs adding the same crate, and that is
+    RE-READ from the live label set rather than assumed from the error text.
+    """
+    out = out or sys.stdout
+    try:
+        _gh(["api", "--method", "POST", f"repos/{repo}/labels",
+             "-f", f"name={label}", "-f", f"color={AREA_LABEL_COLOR}",
+             "-f", f"description={AREA_LABEL_DESCRIPTION}"], runner=runner)
+        outcome = "created"
+    except RuntimeError:
+        if label[len(AREA_PREFIX):] not in known_area_labels(repo, runner=runner):
+            raise
+        outcome = "already present (created concurrently)"
+    print(f"::notice title=pr-area-label label created::{label} {outcome} — this PR adds "
+          f"the crate's root {CRATE_MANIFEST}, so the area is witnessed, not guessed.",
+          file=out)
+    return outcome
 
 
 def apply_areas(repo, number, labels, runner=None):
@@ -421,7 +544,11 @@ def _emit(plan, pr, policy, known_areas, apply, out):
         print(f"#{n} no-change  already {' '.join(plan['existing']) or '(none)'}", file=out)
         return 0
     verb = "LABEL" if apply else "would label"
-    print(f"#{n} {verb} {' '.join(plan['add'])}"
+    made = ""
+    if plan["create"]:
+        made = (f"  ({'CREATE' if apply else 'would create'} "
+                f"{' '.join(plan['create'])} — new crate manifest added by this PR)")
+    print(f"#{n} {verb} {' '.join(plan['add'])}{made}"
           f"   partition -> {' '.join(plan['partition'])}", file=out)
     return 1
 
@@ -493,6 +620,11 @@ def main(argv=None, runner=None, out=None):
         if plan["reason"] != "resolved":
             kept += 1
         if args.apply and plan["add"]:
+            for label in plan["create"]:
+                ensure_area_label(args.repo, label, runner=runner, out=out)
+                # Keep the live set current so a BACKFILL over two PRs adding the same
+                # crate creates the label once and applies it twice.
+                known.add(label[len(AREA_PREFIX):])
             apply_areas(args.repo, plan["number"], plan["add"], runner=runner)
             if args.pace > 0:
                 import time
@@ -555,15 +687,51 @@ def _self_test():
     assert paths_are_complete(100, 646) is False
     assert paths_are_complete(646, 646) is True
     assert paths_are_complete(0, None) is False
-    # An area with no live label is unresolved, never auto-created.
+    # An area with no live label is unresolved, never auto-created ON PATH SHAPE ALONE.
     assert derive_areas(["crates/sparq-core/src/lib.rs"], policy, set()) == (
         frozenset(), "unresolved")
+    # ... but an ADDED crate root manifest WITNESSES the crate (#4582), so a PR creating
+    # `crates/<new>/` resolves and the label is queued for creation.
+    new = "sparq-brand-new"
+    assert new not in policy.members
+    assert new_crate_area(f"crates/{new}/{CRATE_MANIFEST}", "added") == new
+    # ... and nothing weaker is a witness: a source file, a nested manifest, an EDIT to an
+    # existing manifest, or a name that cannot be a label.
+    assert new_crate_area(f"crates/{new}/src/lib.rs", "added") is None
+    assert new_crate_area(f"crates/{new}/sub/{CRATE_MANIFEST}", "added") is None
+    assert new_crate_area(f"crates/{new}/{CRATE_MANIFEST}", "modified") is None
+    assert new_crate_area(f"crates/{CRATE_MANIFEST}", "added") is None
+    assert new_crate_area(f"crates/bad name/{CRATE_MANIFEST}", "added") is None
+    add_crate = {"number": 5, "labels": [], "complete": True,
+                 "files": [f"crates/{new}/{CRATE_MANIFEST}", f"crates/{new}/src/lib.rs"],
+                 "new_crates": [new]}
+    plan_new = plan_for_pr(add_crate, policy, known)
+    assert plan_new["reason"] == "resolved", plan_new
+    assert plan_new["add"] == [AREA_PREFIX + new], plan_new
+    assert plan_new["create"] == [AREA_PREFIX + new], plan_new
+    # Without the witness the SAME paths stay fail-closed on `__global__`.
+    no_witness = dict(add_crate, new_crates=[])
+    assert plan_for_pr(no_witness, policy, known)["reason"] == "unresolved"
+    # A witness for a crate that ALREADY has a label creates nothing.
+    assert plan_for_pr({"number": 6, "labels": [], "complete": True,
+                        "files": [f"crates/sparq-core/{CRATE_MANIFEST}"],
+                        "new_crates": ["sparq-core"]}, policy, known)["create"] == []
+    # A witness never rescues an otherwise-unattributable PR: `create` is a subset of
+    # `add`, and a fail-closed plan adds nothing.
+    poisoned = plan_for_pr(dict(add_crate, files=add_crate["files"] + ["no/such/x.txt"]),
+                           policy, known)
+    assert poisoned["reason"] == "unresolved" and poisoned["create"] == [], poisoned
     # `*` never crosses `/`: the root-markdown row must not swallow a skill or a crate doc.
     assert attribute("README.md", policy) == "docs"
     assert attribute("skills/inference/SKILL.md", policy) == "sparq-reason"
     assert attribute("crates/sparq-core/README.md", policy) == "sparq-core"
     # The shared-lane rows the frontier depends on.
     assert attribute("Cargo.lock", policy) == "deps"
+    # sparq#5128: the root manifest must stay ATTRIBUTABLE. `derive_areas` is strict — one
+    # unresolved path and the PR derives no labels at all — so were this row to stop resolving,
+    # every PR touching the root manifest would declare nothing. (It is NOT a gate that a new crate
+    # registers itself in `[workspace] members`; see `ready-issues.py::partition_path`.)
+    assert attribute("Cargo.toml", policy) == "workspace"
     assert attribute(".github/workflows/ci.yml", policy) == "ci"
     assert attribute("scripts/pr-area-labels.py", policy) == "ci"
     # Additive only: derivation never proposes removing a human label.

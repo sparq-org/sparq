@@ -8,10 +8,54 @@
 # session. This workflow is that hop, made durable. registry#700 records the same
 # write-path-vs-read-predicate mismatch class.
 #
-# NOT A GATE. Schedule / workflow_dispatch only; it never runs on a PR head and never
-# executes candidate-PR code. It grants NO new arming authority: it writes LABELS only.
-# The arm itself is still performed by auto-arm.py with its own expectedHeadOid CAS and
-# its own security-label exclusions, so every existing fail-closed guard still applies.
+# NOT A GATE, and the event triggers do not change that. `ci-summary / gate` decides by
+# POLLING check-runs on the PR HEAD commit; for `issue_comment`, `pull_request_review`
+# and `workflow_run`, GitHub sets GITHUB_SHA to the DEFAULT BRANCH head, not the PR head,
+# so this workflow's check-run never lands on a ref the aggregator inspects. That is the
+# same property batch-merge.yml and pr-backlog.yml already rely on for their `workflow_run`
+# legs. It never runs on a PR head and never executes candidate-PR code. It grants
+# NO new arming authority: it writes LABELS only. The arm itself is still performed by
+# auto-arm.py with its own expectedHeadOid CAS and its own security-label exclusions, so
+# every existing fail-closed guard still applies.
+#
+# EVENT-DRIVEN + CRON BACKSTOP (2026-07-26 maintainer observation: "we are not being
+# event driven enough ... in 4324 the tag review:unreviewed was added 15 minutes after
+# the last commit. This would seem to be an operation that can just be done statically by
+# CI."). Every input this policy reads — head SHA, comments on that head, review bodies,
+# the `gate` conclusion — is carried by a webhook, so the decision is a pure function of
+# state that is already delivered. Three event triggers are added below and the CRON IS
+# KEPT as the reconciliation backstop for dropped or never-delivered webhooks: removing
+# it would convert a latency bug into a lost-work bug.
+#
+# WHY THIS IS WORTH DOING — MEASURED, not the nominal cron period:
+#   * PR #4324: `gate` completed 21:40:43Z, review:unreviewed applied 21:50:31Z = 9.8 min.
+#   * The nominal 10-minute cron is FICTION on this repository. Over the 24h to
+#     2026-07-26T22:10Z, GitHub actually fired 16/144 (11.1%) of this cron family's
+#     scheduled ticks; observed inter-run gaps in the last 6h were 71.8, 65.0, 73.4, 53.7
+#     and 58.2 minutes. auto-arm, rearm-sweeper, promote-on-approval and batch-merge all
+#     measure the same 11-16% fire rate, so the "bridge at :01 -> arm at :04" offset chain
+#     never actually lands where the crons say it does.
+#   * The sweep itself is O(open PRs x check-run pages): run 30221614764 took 8m30s for
+#     103 open PRs. An event run reads ONE PR.
+#
+# WHY IT COSTS THROUGHPUT AND NOT MERELY LATENCY. scripts/ready-issues.py partitions the
+# dispatch frontier by `area:` label, and an OPEN pull request reserves its areas
+# unconditionally — drafts included, with no CI / mergeability / review condition (see the
+# `if "pull_request" in it` reservation at scripts/ready-issues.py and AGENTS.md's
+# "an in-flight PR reserves its areas"). The only releases are the PR leaving OPEN state
+# and a parking label (needs:user / review:needs-user / status:blocked); `review:pass`,
+# green CI and an armed auto-merge release NOTHING. So every minute a mergeable PR sits
+# unlabelled-and-therefore-unarmed is a minute its partition is closed to the frontier.
+#
+# TRUST. issue_comment / pull_request_review / workflow_run all resolve the workflow file
+# from the DEFAULT BRANCH and never check out the PR head, so no candidate-controlled code
+# or workflow definition ever runs. `pull_request` and `pull_request_target` are both
+# still forbidden here (the former takes its workflow file from the candidate ref). The
+# only value taken from the payload is an integer PR number, parsed by
+# scripts/verdict-bridge.py::parse_pr_argument before use; no comment body, title or
+# branch name is ever interpolated into a shell. A third-party comment gains NOTHING: the
+# OWNER/MEMBER/COLLABORATOR provenance check and the head-binding check are the SAME code
+# on both paths, and no model is invoked anywhere in this workflow.
 #
 # HEAD BINDING (load-bearing): scripts/verdict-bridge.py honours a verdict only when the
 # comment's LAST non-blank line is exactly `VERDICT: pass`/`VERDICT: fail`, the body
@@ -27,10 +71,37 @@
 name: verdict-bridge
 
 on:
+  # RECONCILIATION BACKSTOP — do NOT remove when adding event triggers. A webhook that
+  # GitHub never delivers, a run cancelled by a concurrency group, or a PR whose state
+  # changed with no event of its own is only ever recovered by this full sweep.
   schedule:
     # Three minutes ahead of auto-arm's 4,14,24,... cron so a promotion lands in time
     # for the very next arming sweep. Explicit minutes (no */N) keep it auditable.
     - cron: "1,11,21,31,41,51 * * * *"
+
+  # EVENT: a reviewer posted or edited the line-anchored `VERDICT:` comment. This is the
+  # maintainer's own example path (comment -> review:pass). Fires on issues too, so the
+  # job-level `if` below requires `github.event.issue.pull_request`.
+  issue_comment:
+    types: [created, edited]
+
+  # EVENT: the same verdict arriving through a PR REVIEW body. Review bodies are
+  # WITHHOLD-ONLY in the policy, so this can only ever SHRINK the promote-set — but a
+  # retraction must not wait an hour either. `dismissed` carries no body change but does
+  # change which reviews are evidence.
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+  # EVENT: `gate` concluded on a PR head, which is what makes a PR green + visible (the
+  # `flag` / `unflag` population). ci-summary is the workflow that publishes the `gate`
+  # check-run. workflow_run fires ONCE per head-CI completion, where check_suite would
+  # fire ~18 times (one per suite) for the same head. Runs on the default branch by
+  # definition; `github.event.workflow_run.pull_requests` is empty for merge_group refs
+  # and for fork heads, and the job-level `if` skips those (the cron reconciles them).
+  workflow_run:
+    workflows: [ci-summary]
+    types: [completed]
+
   workflow_dispatch:
     inputs:
       dry_run:
@@ -45,13 +116,60 @@ permissions:
   issues: write
   pull-requests: write
 
+# PER-PR groups so a comment on one PR never queues behind a comment on another, and
+# both fall clear of the whole-repo sweep. HONEST LIMIT: this REDUCES the double-fire
+# window, it does not close it. A concurrency group CANCELS, it does not lock, and the
+# sweep group is disjoint from every per-PR group by construction — so an event run and
+# the scheduled sweep CAN execute against the same PR at the same instant. Convergence
+# comes from the write path instead: scripts/verdict-bridge.py::reconfirm re-reads the
+# single PR and re-decides immediately before every label edit, so a decision computed
+# from a stale snapshot is abandoned rather than applied. See
+# scripts/tests/test_verdict_bridge.py::TestDoubleFireIdempotence.
 concurrency:
-  group: verdict-bridge
+  group: >-
+    verdict-bridge-${{ github.event.issue.number
+    || github.event.pull_request.number
+    || github.event.workflow_run.pull_requests[0].number
+    || 'sweep' }}
   cancel-in-progress: false
 
 jobs:
   bridge:
     name: bridge verdict comments to review labels
+    # Admit every scheduled / dispatched sweep unconditionally (the backstop must never
+    # be conditional), and admit an event ONLY when its payload names a pull request.
+    # An issue comment on a plain issue, or a ci-summary run with no associated PR, would
+    # otherwise start a full ~9-minute repository sweep on someone else's say-so.
+    #
+    # VOLUME. MEASURED over the 24h to 2026-07-26T22:30Z: 1286 comments on PRs and 8524
+    # lifetime ci-summary runs. Admitting all of them would add >1300 jobs/day, and this
+    # repo has a documented congestion-collapse mode where over-dispatching saturates the
+    # runners and manufactures FALSE gate failures — a "fix" that makes throughput worse.
+    # Two filters below, both provably NARROWING and both cron-backstopped:
+    #
+    #   contains(comment.body, 'VERDICT') — every comment the policy can act on has a
+    #   last non-blank line matching verdict-bridge.py's VERDICT_SHAPE_RE, which requires
+    #   the literal case-insensitive token `VERDICT`. A comment WITHOUT it decides
+    #   nothing: `decide()` never retracts on the ABSENCE of a verdict. So the filter is
+    #   a strict superset of the evidence set, pinned by
+    #   test_the_comment_body_filter_is_a_SUPERSET_of_the_evidence_the_policy_reads.
+    #   The body is used only inside this `if:`, which GitHub evaluates itself — it never
+    #   reaches a shell (see test_no_untrusted_payload_text_is_interpolated_into_a_shell).
+    #
+    #   workflow_run.conclusion == 'success' — the gate conclusion is consulted by exactly
+    #   one decision, `flag`, and only via is_green_and_ready. A non-success conclusion can
+    #   therefore only ever make a PR LESS flaggable, and the bridge never unflags on a red
+    #   gate (unflag requires a verdict, which arrives on the comment/review path). Pinned
+    #   by test_only_a_SUCCESSFUL_gate_can_change_a_decision_the_ci_event_uniquely_enables.
+    #
+    # Pinned by scripts/tests/test_verdict_bridge.py::TestJobConditionAdmission, which
+    # EVALUATES this expression against synthetic payloads rather than grepping it.
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, 'VERDICT'))
+      || (github.event_name == 'pull_request_review' && github.event.pull_request.number != null)
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.pull_requests[0].number != null)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -105,8 +223,25 @@ jobs:
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+          # WHICH PR this run answers for. Empty on schedule/dispatch => the whole-repo
+          # reconciliation sweep. An integer on every event trigger => a single-PR run.
+          # This is the ONLY value taken from the webhook payload, it is an integer, and
+          # parse_pr_argument rejects anything that is not a positive ASCII decimal
+          # rather than degrading to a sweep.
+          BRIDGE_PR: >-
+            ${{ github.event.issue.number
+            || github.event.pull_request.number
+            || github.event.workflow_run.pull_requests[0].number
+            || '' }}
+          # event: no useful cron backstop on the measured 53-75 minute real cadence, so
+          # an exhausted transient exits RED. sweep: a missed cycle is cron-covered.
+          BRIDGE_MODE: >-
+            ${{ (github.event_name == 'schedule'
+            || github.event_name == 'workflow_dispatch') && 'sweep' || 'event' }}
         run: >-
           python3 scripts/verdict-bridge.py
           --repo "$REPO"
           --default-branch "$DEFAULT_BRANCH"
+          --pr "$BRIDGE_PR"
+          --mode "$BRIDGE_MODE"
           $DRY_RUN

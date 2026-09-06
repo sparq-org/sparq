@@ -124,4 +124,59 @@
 ///   `create_term_definition` (§4.2.2 step 14.3.3) is now gated on JSON-LD 1.1
 ///   mode and skipped when the expanded value is itself a keyword (e.g. `@type`),
 ///   matching the spec's 1.1-only semantics. Fixes t0026 and t0071.
-pub const FLOOR: usize = 276;
+///
+/// ## [OPUS-5] sq-gzsky — the NEGATIVE lane lands; 276 → 381 (skips 109 → 0)
+///
+/// The 109-case skip bucket above WAS the entire expand gap
+/// (`research/gap-jsonld-conformance-2026-07.md` §6, lever sq-oy1f.31). It is now closed:
+/// the runner RUNS every `NegativeEvaluationTest` — a case passes iff `expand()` raises
+/// EXACTLY the manifest's `expectErrorCode` (a WRONG code is a FAIL, never a pass), the
+/// same oracle shape the `frame` lane has used since sq-oy1f.29. Wiring alone measured
+/// 371/14/0; seven spec-faithful `sparq-jsonld` fixes took it to **381 pass / 4 fail /
+/// 0 skip** of 385:
+///
+/// * **`@included` arrayification** (§5.1.2 step 13.4.13) — a DROPPED expansion (`None`)
+///   is not an empty array; arrayifying it yields one non-node element, so
+///   `@included: "string"` / `{"@value": …}` / `{"@list": […]}` raise
+///   `invalid @included value` instead of vacuously succeeding (in07, in08, in09).
+/// * **`@type` + `@direction`** (step 15.1) — a value object "must not contain an `@type`
+///   entry if it contains either `@language` or `@direction`"; only the `@language` half
+///   was checked (di09).
+/// * **datatype-IRI validation** (step 15.4) — `is_absolute_iri` accepted any
+///   scheme-prefixed string, so `"http://example.com/baz z"` (a SPACE) passed; it now
+///   admits only the RFC 3987 `unreserved`/`gen-delims`/`sub-delims`/`ucschar`/`iprivate`
+///   code points and requires every `%` to open a well-formed `pct-encoded` triplet (0123).
+///   It validates the IRI *code-point* grammar, not the full structural grammar — see
+///   `sparq_jsonld`'s `has_only_iri_chars` for the stated scope.
+/// * **blank-node datatype** (step 15.4) — `@type: "_:dt"` is not an IRI, so it is an
+///   `invalid typed value` outside frame expansion (er40).
+/// * **term round-trip vs a keyword** (§4.2.2 step 14.3.3) — the check was skipped when the
+///   IRI mapping was a keyword, which is exactly the case 1.1 forbids; the 1.0/1.1 split is
+///   the `ProcessingMode::JsonLd10` gate alone, so the 1.0 twin `#t0026` still passes (er43).
+/// * **`@container` array in 1.0 mode** (§4.2.2 step 21.2) — a container value that "is
+///   otherwise not a string" is an `invalid container mapping` under
+///   `processingMode: json-ld-1.0`, so `["@set"]` no longer normalises to a legal `@set`
+///   (es01; the same fix takes compact `#tep12`).
+/// * **relative `@vocab` in 1.0 mode** (§4.1.2 step 5.8) — resolving a relative reference
+///   (including `""`) against `@base`/the current `@vocab` is the 1.1 relaxation; in 1.0
+///   it is an `invalid vocab mapping` (0115, 0116). The 1.1 positive `#t0112` is unaffected.
+///
+/// ### The 4 remaining FAILS — honest, itemised, NOT skipped
+///
+/// All four expect a JSON-LD **1.0** error code that the 1.1 REC REMOVED from the
+/// `JsonLdErrorCode` registry, so `sparq_jsonld::JsonLdErrorCode` (a deliberately CLOSED
+/// mirror of that registry) cannot name them:
+///
+/// * `#ter02`, `#ter03` — `recursive context inclusion`. 1.1 replaces the cyclic-remote-
+///   context error with `context overflow` on a processor-defined recursion limit
+///   (§4.1.2 step 5.2.3); sparq's loader resolves the cycle rather than raising either.
+/// * `#ter24`, `#ter32` — `list of lists`. 1.1 ALLOWS a list of lists outright — the code
+///   is absent from the registry and the shape is legal — so a REC-conformant 1.1
+///   processor expanding in 1.0 mode has nothing to raise.
+///
+/// They are recorded as FAILS rather than absorbed into a skip bucket so they stay visible
+/// in the runner's failure listing (the `#t0038` precedent narrowly pins one exact id; a
+/// blanket `specVersion: json-ld-1.0` skip was rejected in review and is not reintroduced
+/// here). Deciding whether to model the retired 1.0 codes is follow-up work, not a floor
+/// concern: the floor moves with the PASS count.
+pub const FLOOR: usize = 381;

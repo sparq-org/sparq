@@ -1,6 +1,6 @@
 {
-  "name": "@jeswr/solid-server",
-  "version": "0.1.0",
+  "name": "@sparq-org/solid-server",
+  "version": "0.1.1",
   "description": "Local-development Solid/LDP server backed by sparq WebAssembly.",
   "license": "MIT",
   "type": "module",
@@ -47,16 +47,16 @@
   "devDependencies": {
     "fastify": "^5.0.0",
     "fastify-v4": "npm:fastify@^4.28.0",
-    "jose": "^5.10.0"
+    "jose": "^6.2.4"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeswr/sparq.git",
+    "url": "git+https://github.com/sparq-org/sparq.git",
     "directory": "packages/solid-server"
   },
-  "homepage": "https://github.com/jeswr/sparq/tree/main/packages/solid-server#readme",
+  "homepage": "https://github.com/sparq-org/sparq/tree/main/packages/solid-server#readme",
   "bugs": {
-    "url": "https://github.com/jeswr/sparq/issues"
+    "url": "https://github.com/sparq-org/sparq/issues"
   },
   "publishConfig": {
     "access": "public",

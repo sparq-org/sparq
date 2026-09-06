@@ -136,8 +136,9 @@ use sparq_policy::{
     conflict_admissibility, evaluate, matched_prohibition, parse_policy_str, prohibition_status,
     Operator, Policy, ProhibitionStatus, Request, Rule, Value,
 };
-use sparq_reason::reason_n3;
+use sparq_reason::n3::compiled::{compile, eval, intern_facts, CompiledRuleSet};
 use std::fmt::Write as _;
+use std::sync::OnceLock;
 
 /// [OPUS-5] Stratum A0 — the operand/combinator-arity guard whose `odrlx:shape
 /// odrlx:Ambiguous` marks stratum A's and C's satisfaction rules negate. See
@@ -147,6 +148,30 @@ const ODRL_A: &str = include_str!("../rules/odrl-a.n3");
 const ODRL_B: &str = include_str!("../rules/odrl-b.n3");
 const ODRL_C: &str = include_str!("../rules/odrl-c.n3");
 const ODRL_D: &str = include_str!("../rules/odrl-d.n3");
+
+/// The five ODRL strata (`rules/odrl-{a0,a,b,c,d}.n3`, in evaluation order) lowered to
+/// the id-level compiled IR, once per process — the same `OnceLock` shape
+/// `crate::materialize`'s `wac_rules`/`acp_rules` use after sq-zgbso.4.
+///
+/// [SONNET-4.6] sq-zgbso.5: compilation is deterministic over `const` rule text, so the
+/// result is cached verbatim — including a failure, which is returned as an ordinary
+/// `Err` (a rule leaving the compiled subset must surface as a materialize error and a
+/// refusal, never a panic and never a silently empty auth view).
+fn odrl_rules() -> Result<&'static [CompiledRuleSet; 5], String> {
+    static RULES: OnceLock<Result<[CompiledRuleSet; 5], String>> = OnceLock::new();
+    RULES
+        .get_or_init(|| {
+            Ok([
+                compile(ODRL_A0)?,
+                compile(ODRL_A)?,
+                compile(ODRL_B)?,
+                compile(ODRL_C)?,
+                compile(ODRL_D)?,
+            ])
+        })
+        .as_ref()
+        .map_err(|e| format!("ODRL rules: {}", e))
+}
 
 /// The ODRL namespace prefix (`odrl:`), re-exported for caller convenience.
 pub const ODRL_NS: &str = sparq_policy::ODRL_NS;
@@ -957,6 +982,17 @@ fn recipient_principal_allowed(p: &str) -> bool {
 /// `auth:Public` (any session) — legitimately public because the action/target/duties
 /// were already satisfied at materialization.
 ///
+/// A head naming an `odrl:PartyCollection` for which the request supplied `odrl:partOf`
+/// evidence ([`sparq_policy::Request::with_party_membership`]) is expanded to one grant
+/// per KNOWN member, keeping the collection IRI itself as a head ([SONNET-4.6] sq-rf9uv).
+/// An ACP `auth:agent` head matches by identity and a session carries no membership
+/// evidence, so the unexpanded collection head matched no member and the grant was dead
+/// — an over-restriction. The expanded head is exactly the party set the evaluator would
+/// admit under the supplied evidence, never wider. A head the policy declares a collection
+/// ([`sparq_policy::Policy::party_collections`]) but for which this request supplied no
+/// member falls back to one-shot instead: there is nothing to expand to, and freezing the
+/// bare collection IRI would persist a grant that binds nobody.
+///
 /// # Fail-closed
 ///
 /// - A Deny (prohibition override, unmet *unmappable* constraint, undischarged duty)
@@ -969,6 +1005,13 @@ fn recipient_principal_allowed(p: &str) -> bool {
 ///   maps faithfully.
 /// - A recipient IRI inside the reserved pair encoding is dropped from the grant head
 ///   (it could otherwise impersonate a minted pair principal).
+/// - A `neq`/`isNoneOf` carve-out naming a party collection falls back to one-shot
+///   ([SONNET-4.6] sq-rf9uv): a frozen `noneOf` matcher is matched by identity and cannot
+///   re-check membership, so every member of the excluded collection would escape the
+///   exception and keep access (fail-open). This does **not** depend on the request
+///   supplying membership evidence — collection identity is read from the policy document
+///   too ([`sparq_policy::Policy::party_collections`]), so a collection with zero supplied
+///   member edges takes the same one-shot route.
 ///
 /// Returns a [`BridgeOutcome`]; on a conditional grant `grant_triple` reports the
 /// `(agent, auth:effect, graph)` of the FIRST emitted grant (audit anchor) and
@@ -1043,6 +1086,39 @@ pub fn materialize_permission_conditional(
                     ));
                     continue;
                 }
+                // [SONNET-4.6] sq-rf9uv: a carve-out naming a party COLLECTION cannot be
+                // frozen into `noneOf` heads — the matcher is matched by identity, so every
+                // member escapes the exception and keeps access (fail-OPEN). One-shot
+                // instead, where the evaluator does the real identity-or-membership check.
+                // Collection-ness comes from the POLICY's own declaration as well as the
+                // request's evidence, so a collection with zero supplied member edges is
+                // caught here too.
+                if heads_name_party_collection(policy, request, &excepts) {
+                    fallback_reasons.push(format!(
+                        "permission {} carves out a party collection (its members would \
+                         escape a frozen noneOf); one-shot path",
+                        rule.id
+                    ));
+                    continue;
+                }
+                // [SONNET-4.6] sq-rf9uv: a collection-valued assignee/recipient head is
+                // matched by the evaluator via membership, but by ACP via identity — expand
+                // it to the members the request evidenced, else the grant is dead. A head
+                // the POLICY declares a collection but that this request supplied no member
+                // for has nothing to expand to, so it goes one-shot rather than freeze a
+                // grant that binds nobody.
+                if agents.iter().any(|a| {
+                    policy.party_collections.contains(a)
+                        && request.party_collection_members(a).is_empty()
+                }) {
+                    fallback_reasons.push(format!(
+                        "permission {} grants a party collection with no supplied membership \
+                         evidence (a frozen head would bind no member); one-shot path",
+                        rule.id
+                    ));
+                    continue;
+                }
+                let agents = expand_party_collection_heads(request, &agents);
                 let (first, emitted) = append_conditional_grants(
                     graph, &agents, &excepts, &window, mode, target, GrantEffect::Allow,
                 );
@@ -1111,6 +1187,34 @@ pub fn materialize_permission_conditional(
 /// - A reserved-encoded recipient/exclusion cannot become an enforceable matcher; the
 ///   rule falls back to one-shot rather than emit a deny condition that cannot bite
 ///   (which would FAIL OPEN — a deny silently dropped widens access).
+/// - A deny head naming a party collection falls back to one-shot ([SONNET-4.6] sq-rf9uv)
+///   — the DENY dual of the allow path's member expansion. A frozen deny head is matched
+///   against the session agent by IDENTITY, so a bare collection IRI binds no member at
+///   all and a head frozen to the members this request happened to evidence lets every
+///   other member escape the deny; the collection-member expansion is sound in the ALLOW
+///   direction only.
+///
+/// ## Where collection identity comes from
+///
+/// The check is on collection IDENTITY, carried independently of any member list, so it
+/// fires for a collection with **zero** supplied membership edges — the case that would
+/// otherwise persist a bare collection IRI no member session can match. Two sources are
+/// unioned (see the crate-internal `heads_name_party_collection`):
+///
+/// - [`Policy::party_collections`] — retained by [`sparq_policy::parse_policy`] from the
+///   policy document: a subject typed `a odrl:PartyCollection`, or the object of an
+///   `odrl:partOf` edge the document states.
+/// - A non-empty `Request::party_collection_members` — this request's own `odrl:partOf`
+///   evidence, for a caller that reads membership out of the state-of-the-world graph
+///   rather than the policy.
+///
+/// A head neither source identifies is treated as a plain party IRI and frozen as one. In
+/// ODRL 2.2 an IRI is a party collection because it is *declared* one, so a policy
+/// document asserting neither the type nor a membership edge, materialized against a
+/// request supplying no `odrl:partOf` evidence either, has given nothing in reach of the
+/// bridge a reason to read that head as a collection. Hand-building a [`Policy`] instead
+/// of parsing one leaves `party_collections` empty; populate it (or supply the request's
+/// membership evidence) if the rule heads are collections.
 ///
 /// Returns a [`BridgeOutcome`]; on a conditional deny `prohibited == true`,
 /// `deny_triple` reports the `(agent, auth:effect, graph)` anchor of the first emitted
@@ -1165,6 +1269,22 @@ pub fn materialize_prohibition_conditional(
                 if agents.is_empty() {
                     fallback_reasons.push(format!(
                         "prohibition {} recipients are all reserved-encoded; no deny",
+                        rule.id
+                    ));
+                    continue;
+                }
+                // [SONNET-4.6] sq-rf9uv: the DENY dual of the collection-head expansion is
+                // fail-OPEN and must stay one-shot. A concrete deny head is matched by
+                // identity and cannot re-check membership, so a bare collection IRI binds no
+                // member session at all, and freezing it to the members this request
+                // happened to evidence lets every other member escape the deny. The one-shot
+                // path's evaluator does the real identity-or-membership check. Collection-
+                // ness comes from the POLICY's own declaration as well as the request's
+                // evidence, so a collection with zero supplied member edges is caught too.
+                if heads_name_party_collection(policy, request, &agents) {
+                    fallback_reasons.push(format!(
+                        "prohibition {} denies a party collection (its members would escape a \
+                         frozen deny head); one-shot path",
                         rule.id
                     ));
                     continue;
@@ -1227,6 +1347,13 @@ pub fn materialize_prohibition_conditional(
 /// Only when there is NO recipient constraint AND NO assignee does the head fall back to
 /// a single `auth:Public` head (any session matches) — a legitimately public rule whose
 /// action/target/duties were already satisfied at materialization.
+///
+/// The heads returned here are identity-space and request-independent, and nothing here
+/// (or in the parsed [`Policy`]) knows whether a head is an `odrl:PartyCollection` — that
+/// is resolved afterwards, and ONLY against the request's own membership evidence, by
+/// [`expand_party_collection_heads`] (ALLOW only). See [SONNET-4.6] sq-rf9uv for why the
+/// DENY dual must not do the same, and *The limit of the collection check* on
+/// [`materialize_prohibition_conditional`] for the un-evidenced case neither can detect.
 fn condition_agents(rule: &Rule, recipients: &[String]) -> Vec<String> {
     if recipients.is_empty() {
         // [OPUS-4.8] sq-9n1q4: a bare `odrl:assignee` PROPERTY scopes the head to that
@@ -1258,6 +1385,81 @@ fn condition_excepts(except: &[String]) -> Vec<String> {
         .filter(|r| recipient_principal_allowed(r))
         .map(|r| normalise_recipient_principal(r))
         .collect()
+}
+
+/// Expand every head that names an `odrl:PartyCollection` into one head per KNOWN
+/// member, keeping the collection IRI itself as a head. [SONNET-4.6] sq-rf9uv.
+///
+/// The evaluator matches a collection-valued `odrl:assignee`/`odrl:recipient` by
+/// identity-OR-membership (`Request::party_matches` / its recipient twin), but an ACP
+/// `auth:agent` head is matched against the session agent by identity ALONE — a session
+/// carries no membership evidence, so a lone collection-IRI head matches NO member and
+/// the persisted grant is dead (the over-restriction sq-rf9uv reports). Emitting
+/// `{collection} ∪ members(collection)` makes the head the EXACT set of parties the
+/// evaluator would admit under the membership evidence this request supplied.
+///
+/// **Soundness.** The expansion draws only on that caller-supplied evidence, so it can
+/// never grant a party the evaluator would not; a member the request did not evidence is
+/// simply absent (fail-closed under-grant, never a widening). With no evidence the result
+/// is byte-for-byte the input heads. A member inside the reserved pair encoding is
+/// dropped, exactly as [`condition_agents`] drops a reserved-encoded recipient.
+///
+/// This is sound for a positive ALLOW head only. The DENY dual and an ALLOW's `noneOf`
+/// carve-out must NOT be expanded this way — see [`heads_name_party_collection`]. A
+/// positive head that IS a known collection but has no evidenced member is likewise not
+/// expandable here (the frozen head would bind nobody); the caller routes that case to
+/// the one-shot path before calling this.
+fn expand_party_collection_heads(request: &Request, heads: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for head in heads {
+        if !out.contains(head) {
+            out.push(head.clone());
+        }
+        for member in request.party_collection_members(head) {
+            if !recipient_principal_allowed(member) {
+                continue;
+            }
+            let m = normalise_recipient_principal(member);
+            if !out.contains(&m) {
+                out.push(m);
+            }
+        }
+    }
+    out
+}
+
+/// Does any of `heads` name an `odrl:PartyCollection`? The fail-closed trigger for every
+/// direction a frozen identity-matched head cannot faithfully carry a collection.
+/// [SONNET-4.6] sq-rf9uv.
+///
+/// Collection IDENTITY is read from two independent sources, and **membership evidence is
+/// not required for either**:
+///
+/// 1. [`Policy::party_collections`] — what the policy DOCUMENT says: a subject typed
+///    `a odrl:PartyCollection`, or the object of an `odrl:partOf` edge the document
+///    states. This is the source that closes the zero-member case: a real collection the
+///    request supplied no edges for is still recognised, so its DENY head / carve-out
+///    still routes to the sound path.
+/// 2. A non-empty [`Request::party_collection_members`] — this request's own `odrl:partOf`
+///    evidence. Strictly a lower bound (empty proves nothing on its own), kept as a second
+///    source so a caller reading membership out of the state-of-the-world graph is covered
+///    even when the policy document is silent.
+///
+/// **Why any collection head must leave the frozen path.** The head is fixed at
+/// materialization and the ACP session re-check matches it against the session agent by
+/// IDENTITY alone. For a **DENY** head, or an ALLOW's `noneOf` **carve-out**, that means
+/// every member of the collection — evidenced or not — walks past the restriction and
+/// keeps access, the exact widening the bridge exists to prevent. For a **positive ALLOW**
+/// head with no evidenced member there is nothing to expand to, so the frozen grant binds
+/// nobody and the permission is silently lost. In all three cases the rule falls back to
+/// the one-shot path, whose evaluator performs the real identity-or-membership check
+/// against each request (frozen, but sound). The one case that stays on the frozen path is
+/// a positive ALLOW head WITH evidenced members, where
+/// [`expand_party_collection_heads`] emits exactly the party set the evaluator would admit.
+fn heads_name_party_collection(policy: &Policy, request: &Request, heads: &[String]) -> bool {
+    heads.iter().any(|h| {
+        policy.party_collections.contains(h) || !request.party_collection_members(h).is_empty()
+    })
 }
 
 /// Map an ODRL recipient value to a principal-space `auth:agent` IRI. The two ODRL
@@ -2122,8 +2324,10 @@ pub(crate) mod count {
 
 // ============================================================================
 // [SONNET-4.6] sq-zgbso.2 — N3-stratum ODRL bridge.
-// Runs the stateless ODRL core as four stratified reason_n3 calls
-// (rules/odrl-{a,b,c,d}.n3), mirroring the WAC/ACP stratification pattern.
+// Runs the stateless ODRL core as five stratified rule evaluations
+// (rules/odrl-{a0,a,b,c,d}.n3), mirroring the WAC/ACP stratification pattern —
+// on the id-level COMPILED evaluator since sq-zgbso.5, as WAC/ACP are since
+// sq-zgbso.4.
 // Decision-equivalent to the one-shot Rust bridge for the supported constraint
 // types (dateTime lteq/gteq over the canonical UTC lexical subset, recipient
 // eq/neq, odrl:or, odrl:and) — on permissions AND prohibitions.
@@ -2171,7 +2375,10 @@ pub(crate) mod count {
 /// `=>`, quoted graphs, and every other Turtle-extension construct are syntax
 /// errors → `Err`), and only the parsed ground terms are re-serialized — with
 /// IRI validation and literal escaping — into the reasoner input. The raw text
-/// never reaches [`reason_n3`], so a crafted policy cannot smuggle rules or
+/// never reaches the reasoner — the strata are compiled separately, from `const`
+/// rule text, and the policy/request facts enter through a fact-ONLY interner
+/// (`sparq_reason::n3::compiled::intern_facts`) that rejects outright any document
+/// carrying rules — so a crafted policy cannot smuggle rules or
 /// out-of-band triples that derive `auth:*` grants directly. The request is
 /// serialized the same way, as validated RDF terms (`<urn:odrl-req>` subject,
 /// `odrl:dateTime` for the temporal evidence): a request field that is not a
@@ -2211,8 +2418,11 @@ pub(crate) mod count {
 /// `xsd:dateTime` lexical form is outside the canonical UTC subset,
 /// a constraint node is ambiguous (several operand triples in one position, or several
 /// logical combinators), a prohibition is outside the supported stateless scope, a rule
-/// carries more than one logical constraint, a request field is not a valid IRI, or the
-/// N3 reasoner rejects the assembled source in any stratum.
+/// carries more than one logical constraint, a request field is not a valid IRI, the
+/// reasoner rejects the assembled fact source, or a rule file falls outside the compiled
+/// evaluator's N3 subset (a build-time property of the `const` `rules/odrl-*.n3`, so in
+/// practice that last one cannot fire at runtime — but it is reported as an error rather
+/// than a panic, and nothing is materialized).
 pub fn materialize_odrl_n3(
     graph: &mut Graph,
     policy_ttl: &str,
@@ -2253,49 +2463,41 @@ pub fn materialize_odrl_n3(
     let policy_facts = triples_to_n3(&policy_triples);
     let req_n3 = serialize_request_n3(request)?;
 
-    // Stratum A0: the operand/combinator-arity guard (odrlx:shape odrlx:Ambiguous) the
-    // stratum A/C satisfaction rules negate. [OPUS-5]
-    let src_a0 = format!("{policy_facts}\n{req_n3}\n{ODRL_A0}");
-    let mut dict_a0 = Dict::new();
-    let closure_a0 = reason_n3(&mut dict_a0, &src_a0)?;
-    let f_a0 = closure_ids_to_n3(&dict_a0, &closure_a0);
-
-    // Stratum A: action facts + atomicSat + lcSat(or)
-    let src_a = format!("{f_a0}\n{ODRL_A}");
-    let mut dict_a = Dict::new();
-    let closure_a = reason_n3(&mut dict_a, &src_a)?;
-    let f_a = closure_ids_to_n3(&dict_a, &closure_a);
-
-    // Stratum B: andSubUnsat + anyRuleConstrUnsat + unconstrained prohibMatches/denies
-    let src_b = format!("{f_a}\n{ODRL_B}");
-    let mut dict_b = Dict::new();
-    let closure_b = reason_n3(&mut dict_b, &src_b)?;
-    let f_b = closure_ids_to_n3(&dict_b, &closure_b);
-
-    // Stratum C: lcSat(and) + CONSTRAINED prohibMatches/denies
-    let src_c = format!("{f_b}\n{ODRL_C}");
-    let mut dict_c = Dict::new();
-    let closure_c = reason_n3(&mut dict_c, &src_c)?;
-    let f_c = closure_ids_to_n3(&dict_c, &closure_c);
-
-    // Stratum D: permission grants (NAF over the now-complete prohibMatches)
-    let src_d = format!("{f_c}\n{ODRL_D}");
-    let mut dict_d = Dict::new();
-    let closure_d = reason_n3(&mut dict_d, &src_d)?;
+    // [SONNET-4.6] sq-zgbso.5 — the five strata, in evaluation order:
+    //   A0: the operand/combinator-arity guard (odrlx:shape odrlx:Ambiguous) the
+    //       stratum A/C satisfaction rules negate [OPUS-5]
+    //   A:  action facts + atomicSat + lcSat(or)
+    //   B:  andSubUnsat + anyRuleConstrUnsat + unconstrained prohibMatches/denies
+    //   C:  lcSat(and) + CONSTRAINED prohibMatches/denies
+    //   D:  permission grants (NAF over the now-complete prohibMatches)
+    //
+    // They now chain entirely at the id level, in ONE dictionary, over the compiled IR
+    // (`odrl_rules()`) — each stratum's closure IS the next one's fact set, so a negated
+    // predicate is still complete before the stratum that negates it runs (design doc
+    // §3.5) and the four intermediate closure → N3 text → re-parse round trips are gone.
+    // The stratification, the rule text, and the fact set entering stratum A0 are all
+    // unchanged: this is a behaviour-identical switch of the evaluation seam, and
+    // `tests/odrl_n3_differential.rs` is the oracle that says so.
+    let rules = odrl_rules()?;
+    let mut dict = Dict::new();
+    let mut closure = intern_facts(&mut dict, &format!("{}\n{}", policy_facts, req_n3))?;
+    for stratum in rules {
+        closure = eval(&mut dict, &closure, stratum);
+    }
 
     // Extract auth:* triples from the final closure.
     let mut new_triples: Vec<[Term; 3]> = Vec::new();
     let mut grant_triple: Option<(String, String, String)> = None;
     let mut deny_triple: Option<(String, String, String)> = None;
 
-    for t in &closure_d {
-        let Term::NamedNode(p) = dict_d.term(t[1]) else { continue };
+    for t in &closure {
+        let Term::NamedNode(p) = dict.term(t[1]) else { continue };
         let p_str = p.as_str();
         if !p_str.starts_with(AUTH_NS) {
             continue;
         }
-        let Term::NamedNode(s) = dict_d.term(t[0]) else { continue };
-        let Term::NamedNode(o) = dict_d.term(t[2]) else { continue };
+        let Term::NamedNode(s) = dict.term(t[0]) else { continue };
+        let Term::NamedNode(o) = dict.term(t[2]) else { continue };
         let triple = [
             Term::NamedNode(NamedNode::new_unchecked(s.as_str())),
             Term::NamedNode(NamedNode::new_unchecked(p_str)),
@@ -2769,15 +2971,6 @@ fn serialize_request_n3(req: &Request) -> Result<String, String> {
     }
     let _ = writeln!(out, "    .");
     Ok(out)
-}
-
-/// Re-serialize a reasoning closure as N3 ground facts for the next stratum.
-fn closure_ids_to_n3(dict: &Dict, closure: &[[sparq_core::dict::Id; 3]]) -> String {
-    let mut out = String::with_capacity(closure.len() * 64);
-    for t in closure {
-        let _ = writeln!(out, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2]));
-    }
-    out
 }
 
 #[cfg(test)]

@@ -1,11 +1,23 @@
 # rustfmt configuration for the sparq workspace.
 #
 # The codebase predates this file, so a one-time `cargo fmt --all` reformat is still
-# pending — it is deferred until the in-flight branches (serve-wave-b, MPC M3,
-# neon-intersect) land, to avoid a workspace-wide reformat conflicting with them.
+# pending — it was originally deferred until the in-flight branches (serve-wave-b, MPC M3,
+# neon-intersect) landed; `origin/serve-wave-b` and `origin/neon-intersect` have not moved
+# since 2026-06-13, so that specific blocker is stale. The reformat stays deferred for the
+# standing reason: a workspace-wide diff across every crate collides with every open PR, so
+# it has to be its own scheduled, reviewed change — not a drive-by inside an unrelated one.
 # Until then the CI `lint` job runs `cargo fmt --all --check` *informationally*
 # (continue-on-error); clippy is the hard gate. Pinning the config now means that
 # deferred reformat — and the eventual flip of fmt to a hard gate — is deterministic.
+#
+# FORMATTER VERSION (issue #2360). This file pins the rustfmt *config*; the rustfmt
+# *binary* used to be whatever the machine happened to carry, which is why the same
+# `cargo fmt --all --check` produced different diffs on different boxes (#2360 reported a
+# workspace-wide failure, unchanged `sparq-forms` files included, under rustfmt 1.9.0).
+# That half is now fixed elsewhere: `rust-toolchain.toml` pins the channel and lists
+# `rustfmt` in `components`, and rustup honours it for every cargo invocation inside this
+# checkout — so CI and a local checkout run the SAME formatter. Do not reformat the
+# workspace with an ad-hoc `+nightly`/`+stable` rustfmt; it will not match the gate.
 #
 # STABLE options only: `cargo fmt` on the stable toolchain rejects unstable keys
 # (imports_granularity, group_imports, etc.), which would turn the informational

@@ -40,6 +40,22 @@
 # No data changes required. Verdict record: research/provenance-driven-genai-kb.md §6
 # item 5. Revisit trigger: if the fleet's KM-query tier moves predominantly to
 # Fable-class models, re-run bench/fo-km Metric-1 before reopening.
+#
+# READ-PATH FACADE SELECTION (sq-mztg8.4, FO-bridge Phase 5): the facade STAYS
+# schema.org-as-top — the "otherwise" branch of the phase, taken on the EVIDENCE, not
+# by preference. gist is NOT promoted because the pre-registered kill-criterion K2
+# ("if gist does not match-or-beat schema.org, gist-as-named-facade is dropped and
+# schema.org-as-top stays the facade", research/fo-llm-bridge.md §4.3) has never been
+# able to fire: the broadened Metric-1 round-2 arm set (sq-givgo) has NOT landed —
+# bench/fo-km/overlays/ carries no gist (or BFO) overlay — so gist has never been
+# measured against this PKG at any model tier. Metric 2 (sq-p5ro8) likewise remains
+# EC2-deferred and sign-unstable, and reads on the rich-FO BACKBONE, not on the facade.
+# The bridge axioms below are therefore unchanged; the schema.org facade they assert is
+# now also surfaced to the agent's introspect stage by the `facade-terms` canned query
+# (src/query/canned.rs), which the pkg:-filtered `schema-classes` card cannot show.
+# Reopen trigger: sq-givgo lands a measured gist arm. Promoting gist is additionally a
+# facade-IDENTITY values call (research/fo-llm-bridge.md §7 open question 3) and needs
+# maintainer steer, so it is NOT taken here on evidence alone. [OPUS-5]
 
 @prefix pkg:     <https://sparq.dev/ns/pkg#> .
 @prefix prov:    <http://www.w3.org/ns/prov#> .
@@ -74,7 +90,7 @@ into pkg:Finding; reuses PROV-O, SKOS, DCAT, DQV, FaBiO/FRBR/DC, CiTO, schema.or
 nanopublications. Companion: PROVENANCE.md (reuse table + live-ontology alignment
 verification) and research/dogfooding-sparq-knowledge-graph.md (design record, PR
 #1063); DQV is a W3C Working Group Note (see PROVENANCE.md)."""@en-GB ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/1063> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/1063> ;
   rdfs:comment "sparq-local namespace; the net-new terms would be rehomed by a standardisation pass."@en-GB .
 
 # =============================================================================

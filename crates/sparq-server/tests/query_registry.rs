@@ -367,3 +367,213 @@ async fn explain_registered_while_in_flight_via_state_accessor() {
          call was removed from the EXPLAIN branch in run_query_pinned)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// [SONNET-4.6] sq-m9prn — SPARQL UPDATE registration + kill
+//
+// A running UPDATE holds the single sequenced writer thread, so it is the operation an
+// operator most needs to see and kill: every write queued behind it is blocked until it
+// releases. These tests drive the REAL HTTP path end to end.
+// ---------------------------------------------------------------------------
+
+/// The number of subjects seeded for the long-running UPDATE below. The update's WHERE is a
+/// three-way cross product over them, so the writer has `SEEDS^3` solutions to grind through
+/// — long enough to observe and cancel, and it aborts promptly once the flag flips.
+const SEEDS: usize = 100;
+
+/// Serialises a graph of `SEEDS` triples on one predicate.
+fn seed_turtle() -> String {
+    let mut ttl = String::new();
+    for i in 0..SEEDS {
+        ttl.push_str(&format!("<http://ex/s{}> <http://ex/p> \"{}\" .\n", i, i));
+    }
+    ttl
+}
+
+/// Boots an open (no-auth) server seeded with [`seed_turtle`].
+async fn spawn_seeded() -> String {
+    let graph = sparq_core::Graph::load_str(&seed_turtle(), "turtle").unwrap();
+    let app = sparq_server::router(sparq_server::AppState::with_config(
+        graph,
+        sparq_server::ServerConfig::default(),
+    ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// Polls `GET /queries` until an entry with `kind == "update"` appears, and returns its id.
+/// Returns `None` if none appears within the deadline.
+async fn await_update_row(base: &str) -> Option<serde_json::Value> {
+    for _ in 0..600 {
+        let body: serde_json::Value = client()
+            .get(format!("{base}/queries"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if let Some(row) = body["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == "update")
+        {
+            return Some(row.clone());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    None
+}
+
+/// Counts the seeded triples still present.
+async fn remaining(base: &str) -> usize {
+    let body: serde_json::Value = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", "SELECT ?s WHERE { ?s <http://ex/p> ?o }")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    body["results"]["bindings"].as_array().unwrap().len()
+}
+
+/// A running SPARQL UPDATE is listed by `GET /queries` as `kind: "update"`, carries only a
+/// fingerprint (never the update text), and `DELETE /queries/{id}` aborts it so the delete
+/// never commits.
+///
+/// Non-vacuity, both halves:
+///   * drop the `register_update` call from `ServerApplier::apply` → no `kind:"update"` row
+///     ever appears → `await_update_row` returns `None` → the first assert fires;
+///   * drop the `.with_cancel(...)` from that same budget (or the `with_registry` wiring) →
+///     `DELETE /queries/{id}` no longer reaches the engine's poll site → the update runs to
+///     completion, returns 204, and deletes everything → the last two asserts fire.
+#[tokio::test]
+async fn running_update_is_listed_and_killable() {
+    let base = spawn_seeded().await;
+    assert_eq!(remaining(&base).await, SEEDS, "the seed data must be loaded");
+
+    // A DELETE whose WHERE is a three-way cross product: slow enough to catch in flight.
+    let update = "DELETE { ?a <http://ex/p> ?x } WHERE { \
+                  ?a <http://ex/p> ?x . ?b <http://ex/p> ?y . ?c <http://ex/p> ?z }";
+    let update_base = base.clone();
+    let in_flight = tokio::spawn(async move {
+        client()
+            .post(format!("{update_base}/sparql"))
+            .header("content-type", "application/sparql-update")
+            .body(update)
+            .send()
+            .await
+            .unwrap()
+            .status()
+    });
+
+    let row = await_update_row(&base)
+        .await
+        .expect("a running UPDATE must appear in GET /queries with kind=\"update\"");
+
+    // Redaction posture (#241): the row exposes a fingerprint, never the update text.
+    assert!(
+        row["fingerprint"].as_str().is_some_and(|f| f.len() == 16),
+        "an update row must carry the 16-hex fingerprint; got: {row}"
+    );
+    assert!(
+        !row.to_string().contains("DELETE"),
+        "the listing must never echo the update text; got: {row}"
+    );
+
+    // Kill it.
+    let id = row["id"].as_str().unwrap();
+    let killed = client()
+        .delete(format!("{base}/queries/{id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        killed.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "DELETE /queries/{{id}} on a running update must be 204"
+    );
+
+    // The cancelled update is REJECTED, not committed: the writer forks per batch and only
+    // seals on success, so the seed data survives intact.
+    let status = in_flight.await.unwrap();
+    assert!(
+        !status.is_success(),
+        "a cancelled UPDATE must not report success; got: {status}"
+    );
+    assert_eq!(
+        remaining(&base).await,
+        SEEDS,
+        "a cancelled UPDATE must not commit — every seeded triple must survive"
+    );
+}
+
+/// After the cancelled update returns, its registry row is gone (the RAII guard in
+/// `ServerApplier::apply` fires on the error path too), and the server still accepts writes —
+/// the kill released the sequenced writer rather than wedging it.
+#[tokio::test]
+async fn writer_survives_a_killed_update() {
+    let base = spawn_seeded().await;
+    let update = "DELETE { ?a <http://ex/p> ?x } WHERE { \
+                  ?a <http://ex/p> ?x . ?b <http://ex/p> ?y . ?c <http://ex/p> ?z }";
+    let update_base = base.clone();
+    let in_flight = tokio::spawn(async move {
+        client()
+            .post(format!("{update_base}/sparql"))
+            .header("content-type", "application/sparql-update")
+            .body(update)
+            .send()
+            .await
+            .unwrap()
+            .status()
+    });
+
+    let row = await_update_row(&base).await.expect("the update must register");
+    let id = row["id"].as_str().unwrap();
+    client()
+        .delete(format!("{base}/queries/{id}"))
+        .send()
+        .await
+        .unwrap();
+    let _ = in_flight.await.unwrap();
+
+    // The row is deregistered once the apply returns.
+    let body: serde_json::Value = client()
+        .get(format!("{base}/queries"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        body["queries"].as_array().unwrap().is_empty(),
+        "the killed update's row must be removed on the error path; got: {body}"
+    );
+
+    // The writer is still alive and sequencing writes.
+    let ok = client()
+        .post(format!("{base}/sparql"))
+        .header("content-type", "application/sparql-update")
+        .body("INSERT DATA { <http://ex/after> <http://ex/p> \"kill-survivor\" }")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        ok.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "the writer must still accept updates after a kill"
+    );
+    assert_eq!(
+        remaining(&base).await,
+        SEEDS + 1,
+        "the post-kill insert must be visible"
+    );
+}

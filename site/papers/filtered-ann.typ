@@ -1,13 +1,45 @@
-// [FABLE-5] sq-gum8.3 — Filter-as-Query: filtered ANN over SPARQL.
+// [OPUS-5] sq-gum8.3 — Filter-as-Query: filtered ANN over SPARQL.
 //
-// Single-source Typst. Numbers come ONLY from #headline(...) / #ev(...) (paper-evidence.json),
-// never hard-coded. Compiles to BOTH a PDF (the download) and semantic HTML (the in-site page).
+// REVISION 2 — response to the adversarial PC panel (novelty / rigor / reproducibility /
+// clarity referee reports run under sq-gum8.3). What changed, each verified against the code
+// rather than taken from the reports on faith:
+//  (1) "PRE-REGISTERED" → "SPECIFIED" throughout. No public, timestamped registry deposit
+//      exists, so pre-registration may not be claimed. Same correction the sibling paper
+//      odrl-policy-bridge.typ took under PR #1330 review; the factory is now consistent.
+//  (2) THE SHIPPED FILTERED PATH IS ANSWER-EXACT, and the paper now says so. Verified:
+//      rewrite.rs routes every filtered `vec:` request through
+//      cost::nearest_filtered_costed_tiebreak, whose BOTH branches rank the COMPLETE admitted
+//      pool (nearest_exact_filtered / postfilter_exact). So pre≡post holds unconditionally on
+//      the path the paper describes — the previous draft's hedge was hedging the wrong path.
+//  (3) THE OVER-FETCH LOOP IS NOT WIRED INTO THAT PATH. Verified: backend.rs's
+//      nearest_filtered_overfetch has NO caller outside tests/overfetch.rs. The previous draft
+//      presented it as the shipped mitigation for under-fill; it is a backend seam for a
+//      future approximate filtered path. Now stated as such.
+//  (4) THE APPROXIMATE PRECONDITION WAS NECESSARY-BUT-NOT-SUFFICIENT as written (surfacing k
+//      admissible candidates does not make them the SAME k, since the pre- and post-filtered
+//      traversals explore different frontiers). Corrected, and no equivalence is claimed for
+//      the approximate path at all now.
+//  (5) THE 0.90 FILTERED RECALL FLOOR MEASURES A DIFFERENT PATH than the one the paper
+//      describes — DiskAnnIndex::nearest_filtered, not the `vec:` rewrite. backend.rs's own
+//      docs say to keep that distinction; the paper now keeps it.
+//  (6) TWO CROSSOVERS, not one: FilterConfig (1% / 256-node floor) governs the approximate
+//      traversal; CostModel (scatter_penalty 2.0 → 50%) governs the exact path. Only the
+//      second was described; both are now.
+//  (7) SIDEWAYS-INFORMATION-PASSING lineage cited (magic sets, semi-joins, RDF-3X SIP) — the
+//      connected-component pushdown is a static SIP instantiation, and not saying so was a
+//      novelty overclaim at a DB venue.
+//  (8) Artifact-availability statement added; "broad mask" defined at first use.
+//
+// Single-source Typst. MEASURED values come ONLY from #headline(...) / #ev(...)
+// (paper-evidence.json), never hard-coded; fixture SETUP facts (store size, dimensionality,
+// query count) are typed inline, which the no-perf-numbers gate permits by design.
+// Compiles to BOTH a PDF (the download) and semantic HTML (the in-site page).
 //
 // Honest scope (mirrored in the text, never as draft-note scaffolding): this is a
-// correctness/architecture contribution; the performance evaluation is pre-registered in the
+// correctness/architecture contribution; the performance evaluation is specified in the
 // Evaluation section and BLOCKED on the canonical bare-metal runner. Remaining code-level open
 // items are stated as limitations in the text and tracked as beads:
-//   - a selective-mask equivalence fixture for the approximate traversal (the under-fill regime);
+//   - an equivalence fixture for a filtered APPROXIMATE path (none is wired into `vec:` today);
 //   - intra-query snapshot semantics of a derived IdMask under concurrent writes.
 // The SPARQL surface (vec:nearest / vec:search) and the recomposition pipeline are documented
 // from skills/vector-search/SKILL.md (the crate's public-API doc).
@@ -36,7 +68,7 @@
   A systems-integration contribution. All evidence in this document is deterministic and
   machine-independent (asserted equivalence invariants, recall floors, a cost-model
   constant); no wall-clock latency or throughput is claimed — the performance evaluation is
-  pre-registered in @eval-plan and deferred to the canonical runner.
+  specified in @eval-plan and deferred to the canonical runner.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
@@ -56,14 +88,20 @@ to the full BGP join — including multi-hop (transitive) and cyclic sub-pattern
 per-vector tag expresses. Relative to engine-integrated systems such as VBASE and NaviX,
 which already evaluate joins in the host engine, the delta is narrower and architectural:
 one shared key space (no metadata mirroring, no id translation at the boundary) and an
-enforced answer contract — on the exact search path, pre-filtering is answer-safe by
-construction; on the approximate path the same pre≡post equivalence is preconditioned on
-the traversal surfacing at least $k$ admissible candidates, and is enforced as
-machine-checked invariants on broad-mask fixtures, with the highly-selective-mask regime
-stated as open. We are explicit about what this paper is and is not: the ANN traversal is
-unmodified prior art, the answer-safety property is mathematically simple, and no
+enforced answer contract. That contract is scoped precisely. The SPARQL-level filtered path
+described here is _answer-exact_: both of its physical strategies rank the complete
+mask-admitted pool, so the filtered top-$k$ is identical to post-filtering the unfiltered
+result, unconditionally and by construction. Two machine-checked invariants pin that
+argument at different layers: end-to-end equality of the ordered result ids across
+single-pattern, transitive, and cyclic constraint shapes, and — at the layer that chooses
+between the strategies — equality of the two branches' hits, scores included.
+The engine also carries an _approximate_ filtered traversal, used for the recall
+measurement reported here but not wired into the SPARQL surface; for that path we claim no
+pre≡post equivalence at all. We are explicit about what this paper is and is not: the ANN
+traversal is unmodified prior art, the constraint pushdown is a static instantiation of
+sideways-information-passing, the answer-safety property is mathematically simple, and no
 performance numbers are reported — the contribution is the integration architecture, its
-enforced correctness envelope, and a pre-registered evaluation design against the current
+enforced correctness envelope, and a specified evaluation design against the current
 filtered-ANN state of the art.
 
 == Introduction <intro>
@@ -111,8 +149,9 @@ over its existing permutation indexes @rdf3x — and projects the admissible ids
 `IdMask` that the ANN traversal consumes directly. The filter _is_ a query: there is no
 mirrored metadata and no id translation at the boundary, the filter language is the BGP
 join language itself (including transitive and cyclic sub-patterns; @method), and the
-narrow-never-widen property is enforced as a deterministic, machine-checked invariant across
-every constraint shape and both physical execution strategies.
+narrow-never-widen property is enforced as deterministic, machine-checked invariants —
+end-to-end across every constraint shape, and, at the layer that chooses between them,
+across both physical execution strategies.
 
 === Contributions and non-contributions <contributions>
 
@@ -123,18 +162,25 @@ We claim the following, each forward-referencing its evidence:
   extracted by a terminating fixpoint (@alg-cc) that handles multi-hop and cyclic
   sub-patterns, evaluated exactly by the host engine, and projected as an `IdMask` over the
   dictionary ids the vectors are already keyed on. No metadata is mirrored; ids are never
-  re-encoded at the boundary. The SPARQL surface is a magic-predicate family
-  (`vec:nearest` and `vec:search`); @surface gives the end-to-end pipeline on a worked
-  query.
+  re-encoded at the boundary. The extraction itself is standard graph reachability and the
+  pushdown it performs is a static sideways-information-passing decision (@related); what we
+  claim is the compilation target — the engine's own id space — not the strategy. The
+  SPARQL surface is a magic-predicate family (`vec:nearest` and `vec:search`); @surface
+  gives the end-to-end pipeline on a worked query.
 - *C2 — An enforced answer-safety envelope* (@safety). Pre-filtering narrows the candidate
-  set and never changes the answer: the filtered top-$k$ is byte-identical to
-  post-filtering the unfiltered result by the same constraint, asserted as deterministic
-  equivalence invariants over single-pattern, transitive, and cyclic constraint shapes. The
-  property is scoped precisely: on the _exact_ search path it holds by construction and
-  unconditionally; on the _approximate_ path it is preconditioned on the traversal
-  surfacing at least $k$ admissible candidates, and the fixtures exercise broad masks only
-  (@safety). Its value is that it is _enforced end-to-end_ — including across the physical
-  pre/post decision of C3 — not that it is deep (@safety-scope).
+  set and never changes the answer: the filtered top-$k$ is identical to post-filtering the
+  unfiltered result by the same constraint, asserted end-to-end as equality of the ordered
+  result ids over single-pattern, transitive, and cyclic constraint shapes — each fixture
+  exercising the pre-filter plan its mask selectivity elects under the default cost model —
+  with strategy-agnosticism asserted separately, and with scores, at the cost layer. The
+  property is scoped precisely to the path that carries it: the SPARQL-level filtered path
+  is answer-_exact_ (both physical strategies rank the complete admitted pool), so the
+  equivalence holds by construction and unconditionally there. The crate's _approximate_
+  filtered traversal is a separate path, not reached from the SPARQL surface, and we claim
+  no equivalence for it (@safety). C2's value is that it is _enforced_ — end-to-end from the
+  SPARQL surface, and across the physical pre/post decision of C3 — not that it is deep
+  (@safety-scope): as @related notes, narrowing-without-falsification is the defining property
+  of a semi-join, and we present it as an enforcement result rather than a discovery.
 - *C3 — A deterministic pre/post-filter decision rule with a confined failure mode*
   (@cost). A one-constant cost model chooses between scanning the mask and scanning the
   store; both branches provably return the identical answer, so a mis-estimate costs
@@ -143,8 +189,10 @@ We claim the following, each forward-referencing its evidence:
   injected at build time from an evidence ledger whose records are labelled by environment;
   headline tables can only cite deterministic, machine-independent records (the build fails
   otherwise). Because the canonical performance runner is not yet available, we report _no_
-  latency or throughput and instead pre-register the evaluation design — baselines,
-  datasets, metrics, and the results that would falsify the approach.
+  latency or throughput and instead specify the evaluation design — baselines,
+  datasets, metrics, and the results that would falsify the approach. We say _specified_
+  and not _pre-registered_: no public, timestamped registry deposit exists, and we do not
+  claim the epistemic warrant that pre-registration would carry.
 
 Equally important is what we do _not_ claim. The ANN index and its traversal (an HNSW-style
 graph @hnsw) are unmodified prior art; we contribute no new traversal, pruning, or
@@ -154,7 +202,7 @@ feed any of them. The BGP-join filter language is a widening only relative to pe
 attribute schemes — engine-integrated systems @vbase @navix express joins too, and @related
 states that comparison carefully. The mask-caching layer that memoises BGP→`IdMask`
 derivations is an engineering optimisation, not a contribution. And this paper contains no
-performance evaluation: we state that gap plainly in @limitations and pre-register the
+performance evaluation: we state that gap plainly in @limitations and specify the
 evaluation design in @eval-plan rather than let two correctness tables masquerade as one.
 
 == Related work <related>
@@ -201,11 +249,12 @@ BGP with standard SPARQL semantics and the admissible set is materialised in the
 term-dictionary id space, which is _identically_ the vector table's key space — no
 attribute columns co-located with the index, nothing mirrored, no id translation at the
 boundary; (ii) an answer contract that is _enforced_ (build-failing deterministic
-equivalence assertions across constraint shapes and both physical plans) rather than argued
+equivalence assertions across constraint shapes end-to-end, and across both physical plans
+at the layer that selects between them) rather than argued
 from a traversal property or measured; and (iii) a deliberately minimal one-constant
 strategy rule whose mis-selection is proven answer-invariant (@cost). Whether the
 shared-id-space design yields a measurable memory or freshness advantage over these systems
-is an empirical question this paper defers to the pre-registered evaluation (@eval-plan);
+is an empirical question this paper defers to the specified evaluation (@eval-plan);
 we do not claim it here.
 
 #figure(
@@ -242,7 +291,7 @@ we do not claim it here.
     [full BGP join incl. transitive + cyclic sub-patterns],
     [host SPARQL engine, exactly, over permutation indexes],
     [the engine's dictionary ids (identically the vector key space; nothing mirrored)],
-    [enforced pre≡post equivalence (deterministic asserts; exact path unconditional, approximate path preconditioned, broad-mask fixtures)],
+    [enforced pre≡post equivalence (deterministic asserts; unconditional on the SPARQL-level path, which is answer-exact; nothing claimed for the approximate traversal)],
   ),
   caption: [
     Qualitative delta against the nearest prior art, from the cited papers' published
@@ -253,6 +302,25 @@ we do not claim it here.
     index). No performance ordering is implied by this table.
   ],
 ) <tab-delta>
+
+*Constraint pushdown and semi-joins — the lineage we inherit.* The mechanism by which
+the constraint reaches the index is not new, and positioning it as new would be an
+overclaim. Deriving the exact projection of one sub-query and using it to narrow another is
+the semi-join @semijoin, and computing such a narrowing set _before_ evaluating the
+operation it constrains is sideways-information-passing, the strategy the magic-sets
+rewriting family formalised for recursive programs @magic-sets. The idea is native to RDF
+engines in particular: RDF-3X passes filters sideways between the joins of a BGP to prune
+scans @rdf3x-sip. Our @alg-cc is, in these terms, a _static_ sideways-information-passing
+decision — take the join-connected component, evaluate it exactly, pass the projection on —
+and its termination and correctness arguments are the ordinary ones for that family rather
+than new results. Two consequences we accept rather than paper over. First, the
+answer-safety of @safety is a semi-join property, not a discovery of ours; what we
+contribute is that it is machine-enforced end-to-end (@safety-scope). Second, the classical
+failure mode of sideways-information-passing applies unchanged here: the derived set can
+cost more to compute than the operation it narrows. That is precisely the mask-derivation
+cost we flag as unmeasured in @idspace and @limitations. The transfer to filtered ANN — the
+narrowed operation being a vector traversal rather than another relational join — is the
+part we claim, together with the shared key space that makes the transfer free.
 
 *Vector search in RDF and graph stores.* Property-graph and RDF stores increasingly bundle
 vector indexes (NaviX in Kùzu is the research frontier @navix; several production stores
@@ -434,7 +502,7 @@ engine-integrated systems achieve closely related properties inside their own st
 NaviX keys vectors by DBMS-internal node ids @navix — so the claim here is the RDF
 instantiation and its enforced contract, not exclusivity of the idea; whether the shared
 dictionary-id design buys measurable memory or freshness advantages is a question the
-pre-registered evaluation (@eval-plan) exists to answer.
+specified evaluation (@eval-plan) exists to answer.
 
 === Answer-safety as an enforced invariant <safety>
 
@@ -450,20 +518,36 @@ both sides denote the $k$ minimal admissible elements. Because the exact path ra
 _entire_ store, no under-fill boundary exists: if $M$ admits fewer than $k$ stored vectors,
 both sides are equally short. #h(0.3em) $qed$
 
-_Scope (approximate path)._ For an approximate traversal the equivalence cannot be
-unconditional: a bounded traversal surfaces a bounded candidate list, and the pre≡post
-equivalence holds only under the precondition that _at least $k$ mask-admissible candidates
-are surfaced within the traversal's explored frontier_. When the mask is highly selective
-this precondition can fail (the under-fill regime). The implementation narrows that gap
-with an iterative over-fetch loop — size the initial fetch by the mask's selectivity,
-post-filter, and grow the fetch until $k$ admissible survivors are found or the backend is
-exhausted — which fills $k$ whenever $k$ admissible vectors exist _and the index surfaces
-them_; this repairs under-fill, not recall, and the approximate path remains approximate.
-Our equivalence fixtures exercise _broad_ masks only (the recall fixture's mask admits
-roughly half the store; @tab-recall), so the byte-identical claim of @tab-safety should be
-read as established for the exact path and for broad-mask fixtures, not for the
-selective-mask regime — that regime is exactly what the pre-registered selectivity sweep of
-@eval-plan probes, and we make no equivalence claim for it here (@limitations).
+_Which path carries the proposition._ The precondition of that proposition — that the
+ranking is over the entire admitted pool — is met by the SPARQL-level filtered path
+described in @surface, and this is the load-bearing scoping fact of the paper. Every
+filtered `vec:` request is served by the cost-model seam of @cost, and _both_ of its
+strategies produce a complete admitted ranking: the pre-filter branch ranks all of $M$, and
+the post-filter branch ranks all of $"dom"("V")$ and then drops non-members. Neither branch
+is a bounded traversal, so neither can under-fill, and the equivalence is unconditional on
+the path a SPARQL user reaches.
+
+_Why we claim nothing for the approximate path._ The crate also implements an approximate
+filtered traversal (the graph index's own mask-aware search), and it is that traversal —
+not the `vec:` path above — which the filtered recall floor of @tab-recall measures. For it
+we claim no pre≡post equivalence, and we want to be precise about why, because a weaker
+statement would be easy to write and would be wrong. It is tempting to say the equivalence
+holds whenever at least $k$ mask-admissible candidates are surfaced within the traversal's
+explored frontier. That condition is _necessary but not sufficient_: pre-filtered and
+post-filtered traversals explore _different_ frontiers, so surfacing $k$ admissible
+candidates does not make them the same $k$ that post-filtering the unfiltered traversal
+would have yielded. A sufficient condition would have to quantify over the true admitted
+top-$k$, which is exactly what an approximate index does not guarantee it visits. We
+therefore state the honest contract for that path as a measured recall floor (@tab-recall)
+and nothing stronger.
+
+The engine does carry an iterative over-fetch loop — size the initial fetch by the mask's
+selectivity, post-filter, and grow the fetch until $k$ admissible survivors are found or
+the backend is exhausted — behind a pluggable backend seam, and it repairs _under-fill_
+(returning fewer than $k$ when $k$ admissible vectors exist) rather than recall. We flag
+plainly that this seam is exercised by its own tests and is _not_ wired into the `vec:`
+rewrite: it is provision for a future approximate filtered path, not a mitigation shipping
+underneath the results reported here (@limitations).
 
 === Scope: the invariant is shallow by design <safety-scope>
 
@@ -472,12 +556,21 @@ mathematically deep. Answer-safety deserves space for its _enforcement surface_,
 depth. In deployed filtered-ANN systems the analogous property spans several moving parts —
 the mirrored metadata's freshness, the traversal's pruning heuristics, the pre/post
 strategy switch — and typically holds empirically rather than by contract. Here it is
-pinned as a set of deterministic, machine-checked equivalences (byte-identical results,
-fixed fixtures, fixed seeds) across every constraint shape the compiler accepts —
-single-pattern, transitive, and cyclic — _and across both physical plans_ of the decision
-rule below, so a regression in any layer fails the build rather than skewing an experiment.
-The evidence table is in @evaluation; its scope (exact path unconditional; approximate path
-preconditioned, broad-mask fixtures) is stated in the proposition above.
+pinned as a set of deterministic, machine-checked equivalences (fixed fixtures, fixed
+seeds) at two layers: end-to-end from the SPARQL surface, across every constraint shape the
+compiler accepts — single-pattern, transitive, and cyclic, each compared as the ordered list
+of result ids — _and_, on the decision rule below, across _both physical plans_, forced in
+turn on one fixture and compared with their scores. The two are separate assertions rather
+than a cross-product: the constraint-shape fixtures run whichever plan their mask
+selectivity elects (at their 50% selectivity, the pre-filter branch), and it is the cost
+layer that establishes the plan choice is not observable in the answer. A regression in
+either layer fails the build rather than skewing an experiment.
+The evidence table is in @evaluation; its scope (unconditional on the SPARQL-level filtered
+path; nothing claimed for the approximate traversal) is stated in the proposition above.
+The property itself is not ours to claim as novel: narrowing a search by the exact
+projection of a sub-query, without falsifying its result, is the defining property of a
+semi-join (@related). What we contribute is that the property is _held_ across the whole
+integration, by construction and under CI, rather than argued or observed.
 
 === A deterministic pre/post-filter decision rule <cost>
 
@@ -486,12 +579,22 @@ the unfiltered scan and drop non-members (post-filter). With $m = |M|$, $n = |"d
 and a single modelled constant `scatter_penalty` pricing a scattered masked-row access
 against a sequential row, pre-filter is chosen iff $m dot.c "scatter_penalty" <= n$. With
 the default penalty the crossover sits at a mask admitting at most
-#ev("filtered_ann.prefilter_crossover") of the store.
+#headline("filtered_ann.prefilter_crossover") of the store.
+
+For completeness — because a reader comparing the implementation against this section would
+otherwise find a discrepancy — the engine carries _two_ such decisions, at different layers
+and with deliberately different constants. The rule just given governs the exact
+SPARQL-level path this paper describes. The approximate filtered traversal (@safety) has its
+own, far more conservative line: it pre-filters only below roughly a hundredth of the store
+or a small absolute floor of nodes, because above that line an exact scan of the mask stops
+paying against a beam-widened traversal. Only the first rule bears on any claim made here;
+we name the second so that the two constants are not mistaken for one.
 
 This is a heuristic over an estimate, and we make no claim that the constant is optimal on
 any hardware — that is exactly the kind of claim this paper refuses to make without the
 canonical runner. The property we _do_ claim is architectural: both branches return the
-identical top-$k$ (asserted, same fixtures as above), so the decision rule's failure mode
+identical top-$k$ — asserted at this layer by forcing each strategy in turn on one fixture
+and comparing the returned hits and scores — so the decision rule's failure mode
 is confined to throughput. A mis-estimated crossover can make a query slower; it cannot
 make it wrong. This separation — correctness pinned by invariant, performance left to
 honest measurement — is the design stance of the whole integration.
@@ -511,31 +614,47 @@ commit.
 
 === What is established: answer-safety across constraint shapes <eval-safety>
 
+// [OPUS-5] sq-gum8.3 REVISION 2 — a FALSE invariant must FAIL THE BUILD, not render an
+// em-dash that a reader mistakes for "not applicable". `headline` already fails closed on a
+// non-canonical record; this closes the remaining hole (a canonical record whose value went
+// false) so that this paper's claim — "a regression in any layer fails the build" — is
+// actually true of the paper's own rendering, not just of the test suite.
+#let held(key) = {
+  let v = headline(key)
+  if v != true {
+    panic("answer-safety invariant is NOT true for evidence key: " + key)
+  }
+  [holds]
+}
+
 #figure(
   table(
     columns: 3,
     align: (left, center, left),
     table.header[Constraint shape][pre-filter ≡ post-filter][evidence],
     [single-pattern (`?n a :Vehicle`)],
-    [#if headline("filtered_ann.prefilter_equals_postfilter") [holds] else [—]],
+    [#held("filtered_ann.prefilter_equals_postfilter")],
     [`filtered_bgp.rs`],
     [transitive (2-hop join)],
-    [#if headline("filtered_ann.transitive_equals_postfilter") [holds] else [—]],
+    [#held("filtered_ann.transitive_equals_postfilter")],
     [`filtered_bgp_transitive.rs`],
     [cyclic sub-BGP],
-    [#if headline("filtered_ann.cyclic_equals_postfilter") [holds] else [—]],
+    [#held("filtered_ann.cyclic_equals_postfilter")],
     [`filtered_bgp_cyclic.rs`],
   ),
   caption: [
     Enforced answer-safety across constraint shapes. Each cell is a deterministic
-    equivalence proven by assertion over a fixed fixture — the filtered top-$k$ is
-    byte-identical to post-filtering the unfiltered result by the same constraint, and a
-    subset of it ("true" renders as "holds"). Scope: these fixtures assert the exact search
-    path on small, broad-mask fixtures; for the approximate path the equivalence is
-    additionally preconditioned on the traversal surfacing at least $k$ admissible
-    candidates (@safety), and the selective-mask regime is not yet exercised. Per
-    @safety-scope, read this as an _enforcement_ result (the invariant is CI-pinned
-    end-to-end), not a deep one.
+    equivalence proven by assertion over a fixed fixture — the filtered top-$k$, as an
+    ordered list of result ids, equals post-filtering the unfiltered result by the same
+    constraint, and is a subset of it. Scope: these fixtures exercise the SPARQL-level
+    filtered path, which is answer-exact, so the equivalence is unconditional there
+    (@safety); each runs the plan its mask selectivity elects under the default cost model
+    (here the pre-filter branch), the plan choice itself being pinned as unobservable by the
+    separate cost-layer assertion of @cost; and no equivalence is
+    claimed, or tested, for the approximate traversal of @tab-recall. A cell cannot silently
+    render empty: a canonical record that ceased to be true fails the build, which is the
+    property @safety-scope claims. Per @safety-scope, read this as an _enforcement_ result
+    (the invariant is CI-pinned end-to-end), not a deep one.
   ],
 ) <tab-safety>
 
@@ -543,7 +662,12 @@ commit.
 
 The mask is exact; the only approximation is the ANN traversal it feeds. The relevant
 sanity question is whether the _filtered_ traversal preserves the index's recall against
-the _exact-filtered_ ground truth. On deterministic fixtures it does, with asserted floors:
+the _exact-filtered_ ground truth. On deterministic fixtures it does, with asserted floors.
+One attribution matters and is easy to get wrong: the second row below measures the
+graph index's own mask-aware traversal against exact-filtered ground truth. That traversal
+is _not_ the path a `vec:` query takes (@safety) — the floors bound the approximation the
+integration would inherit were an approximate backend wired in, and they carry no
+implication for the answer-exact path whose invariants @tab-safety pins.
 
 #figure(
   table(
@@ -554,7 +678,7 @@ the _exact-filtered_ ground truth. On deterministic fixtures it does, with asser
     [50,000 × 32],
     [#headline("ann.recall_at_10_floor")],
     [100],
-    [filtered traversal vs exact-filtered (≈50% mask)],
+    [approximate filtered traversal vs exact-filtered (≈50% mask; not the `vec:` path)],
     [20,000 × 32],
     [#headline("filtered_ann.recall_at_10_floor")],
     [100],
@@ -562,9 +686,12 @@ the _exact-filtered_ ground truth. On deterministic fixtures it does, with asser
   caption: [
     Deterministic recall floors (asserted lower bounds over fixed seeds). These are
     correctness sanity checks on an unmodified HNSW-style index under masking — they bound
-    the approximation the integration inherits. They are _not_ a recall-versus-latency
-    evaluation and we do not present them as one: a single broad selectivity, synthetic
-    vectors, and low dimensionality (see @limitations).
+    the approximation the integration _would_ inherit from an approximate backend. They are
+    _not_ a recall-versus-latency evaluation and we do not present them as one: a single
+    broad selectivity (a mask admitting about half the store), synthetic vectors, and low
+    dimensionality (see @limitations). The second row measures the graph index's mask-aware
+    traversal, which the SPARQL surface does not reach; neither row characterises the
+    answer-exact path of @tab-safety, whose recall is by construction $1.0$.
   ],
 ) <tab-recall>
 
@@ -578,12 +705,12 @@ branch under the default scatter penalty — together with the branch-equivalenc
 of @tab-safety. No claim is made about where the crossover _should_ sit on real hardware;
 that is a measurement, and it is deferred.
 
-=== What is not established, and the pre-registered design to establish it <eval-plan>
+=== What is not established, and the specified design to establish it <eval-plan>
 
 This paper reports no latency, no throughput, no recall-versus-latency Pareto, no
 selectivity sweep, and no comparison measurement against any external system: it is a
 systems description whose empirical case is still owed. To make the deferred evaluation
-falsifiable rather than aspirational, we pre-register its design:
+falsifiable rather than aspirational, we specify its design:
 
 - *Baselines.* ACORN @acorn (predicate-agnostic, accepts our mask directly — the critical
   comparison, since it isolates the value of _in-engine_ mask derivation), NaviX @navix
@@ -604,7 +731,8 @@ falsifiable rather than aspirational, we pre-register its design:
   including any metadata mirroring the baselines require and we avoid — the direct test of
   whether the shared-id-space delta has measurable value.
 - *Selectivity sweep.* Mask fractions from highly selective through the cost-model
-  crossover to near-unfiltered, explicitly probing the under-fill precondition of @safety.
+  crossover to near-unfiltered, run against an approximate backend wired into the `vec:`
+  path, so that the under-fill regime @safety leaves unclaimed is actually exercised.
 - *Environment.* The canonical bare-metal runner, with every number environment-labelled
   under the discipline of @methodology; nothing measured on shared development hardware
   will be reported as evidence.
@@ -621,19 +749,25 @@ falsifiable rather than aspirational, we pre-register its design:
   contains no wall-clock measurement of any kind. The evaluation design of @eval-plan is
   specified but unexecuted, blocked on the canonical runner. Until it runs, the claim
   inventory is architectural and correctness-only.
-- *Answer-safety is shallow.* Per @safety-scope, the headline invariant is near-immediate
-  for an exact mask; its value is enforcement breadth, not depth. Readers seeking a
-  theoretical contribution will not find one here.
+- *Answer-safety is shallow, and inherited.* Per @safety-scope, the headline invariant is
+  near-immediate for an exact mask, and per @related it is the semi-join property rather than a
+  new one; its value is enforcement breadth, not depth. Readers seeking a theoretical
+  contribution will not find one here.
+- *The pushdown mechanism is not novel.* The constraint extraction of @alg-cc is a static
+  instantiation of sideways-information-passing (@related). We claim its transfer to filtered
+  ANN over a shared dictionary-id space, not the strategy.
 - *Recall floors are sanity checks.* @tab-recall covers one broad selectivity, synthetic
   low-dimensional vectors, and modest scale — floors chosen to be deterministic in CI, not
   to characterise the index. They bound nothing about behaviour at high selectivity or at
   realistic embedding dimensionality.
-- *Selective-mask (under-fill) regime is open.* Per the scope statement in @safety, the
-  approximate-path equivalence is preconditioned on the traversal surfacing at least $k$
-  admissible candidates. The implementation's iterative over-fetch fills $k$ whenever $k$
-  admissible vectors exist and the index surfaces them, but no equivalence fixture
-  currently pins the highly-selective-mask regime; it is exercised only by the planned
-  selectivity sweep of @eval-plan.
+- *The approximate filtered path is unclaimed, and its over-fetch is unwired.* The
+  answer-safety result covers the SPARQL-level path only, which is answer-exact. The crate's
+  approximate filtered traversal has no equivalence claim (@safety) and no equivalence
+  fixture. The iterative over-fetch that would repair under-fill for such a path exists
+  behind the backend seam but has no caller outside its own tests: it is not a mitigation
+  operating beneath any result reported here, and we would be overclaiming to present it as
+  one. Wiring an approximate backend into `vec:` — and pinning its selective-mask behaviour
+  — is future work, probed by the selectivity sweep of @eval-plan.
 - *Mask-derivation cost is unmeasured.* An expensive constraint component may cost more
   than the search it narrows; the crossover between "derive the mask" and "post-filter
   without one" is precisely the kind of question only the deferred evaluation can answer.
@@ -656,13 +790,34 @@ sub-BGP, evaluated exactly by the machinery that already exists, projected into 
 space the index already speaks. The filter language becomes the BGP join language,
 transitive and cyclic constraints included — a strict widening over per-vector attribute
 schemes, and parity with engine-integrated evaluators; metadata mirroring disappears; and
-the narrow-never-widen contract is enforced end-to-end as build-failing invariants rather
-than observed empirically — unconditional on the exact path, preconditioned and
-broad-mask-verified on the approximate path, with strategy mis-selection confined,
-provably, to throughput. What remains — and what we have pre-registered rather than
+the narrow-never-widen contract — the semi-join property this design inherits rather than
+invents — is enforced end-to-end as build-failing invariants rather than observed
+empirically, unconditionally on the answer-exact path the SPARQL surface reaches, with
+strategy mis-selection confined, provably, to throughput. What remains — and what we have specified rather than
 performed — is the honest performance case against ACORN-class and engine-integrated
 filtered search. The architecture stands or falls on that measurement, and this paper is
 written so that either outcome is reportable.
+
+== Artifact availability <artifact>
+
+The engine is open source, and every value this paper reports in a headline table — the
+measured floors and constants, and the boolean answer-safety records those tables render —
+is a build-time citation of a committed evidence record rather than a transcribed number,
+so those values cannot drift from the tests that produced them without failing the build.
+That guarantee is scoped to exactly them: the paper's prose, architectural, and novelty
+claims — including the scoping of the answer contract in @safety — are ordinary prose,
+checked by review rather than bound to the ledger, and can drift as any paper's can. The
+three answer-safety invariants of @tab-safety are the assertions in
+`filtered_bgp.rs`, `filtered_bgp_transitive.rs`, and `filtered_bgp_cyclic.rs`; the recall
+floors of @tab-recall are asserted in `recall.rs` and `filtered.rs`; the decision constant
+of @eval-cost is pinned by `cost_model.rs` against the model in `cost.rs` — all under
+`crates/sparq-vectors`. Constraint extraction (@alg-cc) and the `VALUES` recomposition of
+@surface live in the same crate's query-rewrite module, and the pluggable backend seam that
+@limitations describes as unwired is `backend.rs`. Each record cited here carries its own
+source path in the evidence ledger, and the published page stamps the evidence commit, so a
+reader can resolve any figure in this paper to the test that produced it. No baseline
+system's artifact was reproduced (@limitations), and there is nothing further to release for
+the deferred evaluation of @eval-plan, which has not run.
 
 #heading(level: 2, numbering: none)[References]
 #bibliography("filtered-ann.refs.yml", style: "ieee", title: none)

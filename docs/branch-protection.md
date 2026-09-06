@@ -11,7 +11,8 @@ recreated.
 ## Protected branch
 
 - **`main`** — the only long-lived branch. All changes land via pull request; direct
-  pushes are disallowed (including for administrators — see "Other settings").
+  pushes are disallowed for non-administrators. Repository administrators can always
+  bypass the ruleset (see "Other settings"); the automated landing flow does not.
 
 ## Required status checks
 
@@ -79,7 +80,7 @@ From the **CI** workflow (`.github/workflows/ci.yml`):
 | `W3C SPARQL conformance (ratchet >= 1229 pass+divergence)` | The W3C SPARQL conformance ratchet (never lower). |
 | `W3C SHACL conformance (ratchet — core >= 98, sparql >= 5)` | The W3C SHACL core + SHACL-SPARQL ratchets. |
 | `Inference conformance (ratchet >= 1967 pass+divergence)` | The RDFS/OWL-RL/N3/entailment + rdf-turtle inference ratchet. |
-| `coverage ratchet + test-presence gate (per-crate)` | The per-crate line-coverage floor + the test-presence gate. |
+| `coverage ratchet + test-presence gate (per-crate)` | The per-crate line-coverage floor + the test-presence gate. **On `merge_group` this verdict covers the fast no-compile FLOOR gates only** — the instrumented per-crate line-% MEASUREMENT is demoted off the queue's blocking path (see *Coverage MEASUREMENT off the merge queue* below). Where the measurement *does* run, it is **changed-cone scoped** (sq-3dr4t): a PR re-measures only the changed crates and their transitive reverse-dep closure; a crate outside that cone is unchanged (as is everything it depends on) so its floor verdict is inherited from `main` — reported as `INHERITED`, not silently dropped. Any full-run trigger (`Cargo.lock`, root `Cargo.toml`, `.github/`, `scripts/`, an unowned path — which includes `bench/coverage-floor.json`) or any selector error measures everything, and the nightly full run on `main` is the drift backstop. |
 | `wasm build (sparq-wasm)` | The `wasm32-unknown-unknown` build, the wasm-deps guard, and `wasm-pack test --node`. |
 
 From the security / supply-chain / SAST workflows (aggregated by the gate; all LIVE except
@@ -106,7 +107,7 @@ From the binding/packaging workflows (when those surfaces are exercised):
 | Job name | Workflow | What it gates |
 |---|---|---|
 | `maturin build + pytest` | `.github/workflows/python.yml` | The `sparq-rdf` PyPI binding (`import sparq`) build + pytest parity suite. |
-| (js binding job) | `.github/workflows/js.yml` | The `@jeswr/sparq` npm build/tests. |
+| (js binding job) | `.github/workflows/js.yml` | The `@sparq-org/sparq` npm build/tests. |
 
 > **Benchmarks — the DETERMINISTIC ratchet gates on PRs; the NOISY timing is nightly (sq-6vshe.6,
 > maintainer-directed).** On a `pull_request` the `bench.yml` `run + track benchmarks` job runs the
@@ -173,8 +174,22 @@ untouched here to avoid colliding with it.)
 Heavy or independent lanes that already ran and gated on the PR head dropped their
 `merge_group` trigger because the queue re-run added wall-clock per enqueue with no new
 signal: currently `formal-verification.yml` (Kani proofs), `fuzz.yml` (corpus replay),
-and `bench.yml` (noisy timing suites; the deterministic ratchet is guarded separately).
-This is a **decision, not a defect**.
+`zk-toolchain.yml` (Noir forge suite), `container-scan.yml` (trivy image build + scan),
+`supply-chain.yml` (cargo-deny/vet/SBOM), and `bench.yml` (noisy timing suites; the
+deterministic ratchet is guarded separately — `bench.yml`'s removal predates this
+directive, under sq-6vshe.6). This is a **decision, not a defect**.
+
+<!-- [OPUS-5] issue #5165: the three zk/container/supply-chain lanes carry the same
+     "(2026-07-18 maintainer directive, merge-queue subset) merge_group REMOVED" header
+     comment as the other two but were missing from this list, which is the doc-of-record
+     for the subset. Verified against the `on:` blocks in .github/workflows/ on
+     2026-08-01; the same pass corrected research/ci-mergequeue-speedup-2026-07.md §2.1. -->
+
+The lanes that DO trigger on `merge_group` today are: `ci-summary.yml` (the gate itself),
+`ci.yml`, `feature-matrix.yml`, `vectorized-feature-off.yml`, `docs-quality.yml`,
+`flow-on-gates.yml`, `routing-self-tests.yml` and `pr-area-label.yml` — plus
+`codeql.yml`, whose trigger set lists `merge_group` but which is operationally disabled
+per the note above and so produces no check-run there.
 
 Why it stays sound:
 
@@ -198,6 +213,40 @@ The residual risk this accepts: a defect that manifests only in a *specific queu
 combination* of PRs (not on any single PR head) reaches `main` and is caught post-merge
 rather than pre-merge. The maintainer accepted this trade against per-enqueue wall-clock
 and shared-runner contention.
+
+### Coverage MEASUREMENT off the merge queue (sq-6vshe.17, 2026-07-29)
+
+<!-- [SONNET-4.6] sq-6vshe.17 — LEVER 4a of research/ci-mergequeue-speedup-2026-07.md
+     §3.4a. Recorded here (not only in the workflow comments) because it changes what a
+     green merge-queue coverage check MEANS. -->
+
+**Measured motive.** The instrumented per-crate coverage shards are the merge-group *entry
+pole* whenever change-based selection skips the test shards: in the profiled runs cited in
+`research/ci-mergequeue-speedup-2026-07.md` §2.2 a single coverage shard *was* the entry
+critical path. (That record's timings are a dated snapshot of shared-runner CI, kept there
+rather than restated here — steering data, not a canonical performance claim.)
+
+**Why this one is demotable at all.** Coverage is a **ratchet, not a correctness test**. A
+floor regression that slips through a queued batch is *detectable and recoverable*
+post-merge; a functional bug is not. That asymmetry — and nothing about wall-clock — is
+what makes the demotion designable.
+
+**The enforcement topology** (`ci.yml`):
+
+| Where | What runs |
+|---|---|
+| `pull_request` (non-draft) | **UNCHANGED — the primary gate.** A PR measures per-crate line-% and enforces the floor, over its **changed cone** (sq-3dr4t): the changed crates plus their transitive reverse-dep closure are re-measured, and a crate outside the cone — unchanged, as is everything it depends on — inherits its floor verdict from `main` (reported `INHERITED`). A full-run trigger or any selector error still measures everything. |
+| `merge_group` | The `coverage-measure` / `coverage-engine-run` / `coverage-engine-merge` legs are **skipped**. `coverage-floors` — the fast, no-compile test-presence + floor-**monotonicity** + shard-partition gates — **still runs**, so a batch can never *lower* a committed floor. The `coverage` aggregate still concludes (a skipped leg counts as satisfied), so the gate never sees an expected-but-missing check; its step summary says plainly that only the floor gates ran. |
+| `push` to `main` | **UNCHANGED, and now load-bearing** — this is the enforcement point for the batch-stacking case. It is deliberately **EXEMPT** from the sq-6vshe.14 push-run skip — an exemption now also written into that lever's own design (`research/ci-mergequeue-speedup-2026-07.md` §3.1 KEEP-list), so it is designed rather than discovered. It is pinned in `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion` against **both** shapes the skip can take: narrowing the legs' event envelope (behavioural, `test_measure_legs_still_run_on_a_pr_head_and_on_push_to_main`) and adding a `queue-validated` pre-job upstream of them via `needs:`/`if:` (structural, `test_measure_legs_take_no_new_upstream_gate` — the shape §3.1 actually specifies, and one the behavioural evaluation cannot see, since an absent context path is null there exactly as on GitHub). So landing that lever over the coverage legs REDs a test rather than silently removing the last enforcement point. |
+| a `main` coverage red | `coverage-demoted-filer` auto-files a **P1 bead + a deduped GitHub issue** (`[demoted-lane] lane=coverage-ratchet-main`) via `scripts/ci-file-demoted-lane-failure.py` — the same demotion auto-bead protocol the fuzz and heavy-recall demotions use — **and** that open issue **pauses further ratchet ADVANCES**: `coverage-gate.py --check-advance-allowed` (a step in `coverage-floors`) fails a branch that *raises* a floor while the alarm is open, because the measured numbers a raise cites are exactly the numbers in doubt. It never blocks the recovery path (a governed lowering under `--allow-lower`), never blocks adding a *new* crate row, and fails **open** if the alarm probe is unavailable. |
+
+**The residual risk, stated honestly.** Two PRs that each individually sit at or above
+their floors can merge to a combined tree that sits below one. That case is **rare**, is
+caught on the next `push` to `main` (order of ~15 minutes later), and is recovered by
+revert / fix-forward — the same recovery mechanism the rest of this subset relies on.
+What is **not** risked: no committed floor is ever silently lowered (the monotonicity gate
+never left the queue, and a deliberate lowering stays a governed, loud re-baseline), and
+the nightly full-coverage tier (`coverage-nightly`) is untouched.
 
 ## Draft-tier CI (reduced matrix on draft PR heads)
 
@@ -229,16 +278,18 @@ no check-run there either — not a byte-identical copy of the PR check-set.)
 
 | Skipped on drafts | Where | Kept when |
 |---|---|---|
-| coverage ratchet (measure + engine split + aggregate) | `ci.yml` | never on drafts (merge_group + ready_for_review re-measure) |
+| coverage ratchet (measure + engine split + aggregate) | `ci.yml` | never on drafts. The `ready_for_review` run re-measures at full tier; since sq-6vshe.17 the `merge_group` run does **not** re-measure (only the fast floor gates run there — see *Coverage MEASUREMENT off the merge queue*), so the non-draft PR head and the post-merge `main` run are the measurement points |
 | benchmarks (deterministic ratchet + PR comparison/alert comments) | `bench.yml` | never on drafts |
-| CodeQL analysis | `codeql.yml` | never on drafts (push-main + weekly schedule + merge_group + the ready_for_review run keep the `code_scanning` rule fed *when the workflow is enabled*; codeql.yml is byte-identical to `main` — its triggers, including merge_group, are untouched by this PR — but the workflow is currently operationally disabled (`disabled_manually`), so no CodeQL check-run is produced on any trigger today; open PR #3427 owns the successor policy) |
+| `cargo-fuzz` corpus replay (nightly toolchain + a libFuzzer build of every `fuzz/fuzz_targets/` target) | `fuzz.yml` `fuzz` | kept iff the PR carries `ci-full`/`fuzz-full` (`fuzz-full` also selects the randomized budget, so a bare draft skip would neuter it); otherwise the `ready_for_review` run re-replays at full tier. `differential-smoke` — the wrong-answer gate in the same workflow — is deliberately NOT draft-skipped: a wrong-answer regression is review-relevant |
+| CodeQL analysis | `codeql.yml` | never on drafts (push-main + weekly schedule + merge_group + the ready_for_review run keep the `code_scanning` rule fed *when the workflow is enabled*; the merge_group run is since sq-g25hr additionally class-gated — an inert batch produces no analysis, a batch with any Rust does — while push-main and the weekly schedule always analyse in full. The workflow is currently operationally disabled (`disabled_manually`), so no CodeQL check-run is produced on any trigger today; open PR #3427 owns the successor policy) |
 | heavy recall shards (`heavy-diskann`/`heavy-hnsw`) | `ci.yml` `test` | never on drafts (same demotion mechanism as their merge_group demotion) |
 | wasm bundle build | `ci.yml` `wasm` | kept iff a wasm-bundle crate is in the affected closure (the existing lane-seed guard — unchanged on both tiers) |
 | `artifact-exact-equality` (wasm feature-OFF byte identity) | `vectorized-feature-off.yml` | kept iff `sparq-wasm` is in the affected closure (in-step `ci_select.py` verdict; ci-full label / selector error / full mode ⇒ run) |
 
 **The integrity invariant — a draft-tier gate result must NEVER admit a PR to the
 merge queue.** The load-bearing mechanism is rule 1 (structural); rules 2–8 are
-belts (all in `scripts/ci_summary_gate.py`, unit-tested in
+belts, and rule 9 is diagnosis + a recorded decision rather than a belt (all in
+`scripts/ci_summary_gate.py`, unit-tested in
 `scripts/tests/test_ci_summary_gate.py`; the name/trigger wiring pinned by
 `scripts/tests/test_ci_select_wiring.py`):
 
@@ -332,6 +383,25 @@ belts (all in `scripts/ci_summary_gate.py`, unit-tested in
    reaches at budget exhaustion — never a new pass — and it stands down whenever the
    set is still settling, the PR reads non-draft, or the draft state is unreadable
    (then the pre-#3781 budget-exhaustion path renders the verdict unchanged).
+9. **Both draft-tier refusals say that re-running the gate is futile, and the
+   idle-head case deliberately has no exit (#4614).** [OPUS-5] Two carry-overs from
+   the superseded #3765:
+   * **Re-run futility is stated, not implied.** Rule 8's fast fail and rule 4's
+     budget-exhaustion belt both end with the shared `UNSAT_HOLD_REMEDY` tail
+     (`scripts/ci_summary_gate.py`): re-running `ci-summary` re-runs no *selecting*
+     workflow, so a bare `gh run rerun` cannot make the missing full-tier select
+     appear — only `gh pr ready` or a new head commit does. The audience is the
+     automated repair lanes, whose reflex for any RED is otherwise "re-run it".
+   * **The idle head gets no exit — decided, not overlooked.** Rule 8 fires only on
+     a live draft read of `True`. If the PR reads NON-draft, or the draft read
+     fails, the gate polls to the absolute budget. That is deliberate: the exit is
+     licensed by a causal fact (only a non-draft payload produces a full-tier
+     select), and no equivalent fact exists for an idle head — the successor may
+     merely be late. #3765's alternative, a head-activity probe counting
+     non-terminal Actions runs on the head SHA, is circumstantial evidence and
+     would buy speed by introducing a new false-RED mode on PRs with zero failing
+     legs. Burning the budget is slow; a false RED is a regression. Prior art if
+     revisited: closed branch `fable/gate-unsatisfiable-hold-3758` at `dc92b4af`.
 
 **Why the queue can never latch a draft-tier result.** Rule 1 is structural: the
 queue and branch protection admit a PR only on a successful check-run of the
@@ -352,7 +422,13 @@ The ruleset additionally carries a `code_scanning` rule (CodeQL). While CodeQL
 is operationally disabled (manual workflow-disable — see the OPERATIONALLY DISABLED note) no
 analyses are produced, so this rule currently exerts **no** blocking pressure.
 If CodeQL is re-enabled: a draft-built head carries no PR CodeQL analysis
-(`analyze` skips on drafts), so the rule would *independently* block such a head
+(`analyze` skips on drafts), and — since sq-g25hr — neither does a `merge_group`
+batch whose change-class is proven inert (`scripts/ci_select.py --classify-only`
+returns one of `_INERT_CLASSES`: the queued diff touches no Rust at all. Any
+`crates/**` path in the batch classifies `mixed` and the full analysis runs, and
+`push`-to-main analyses every merged commit in full, so the default branch's
+code-scanning database never goes stale). The rule would then *independently*
+block such a head
 — but it is an **out-of-repo, owner-mutable setting** and evadable in corner
 cases (a non-draft PR sharing the same head SHA supplies an analysis for the
 commit; the rule may be relaxed during a CodeQL outage), so it is recorded here
@@ -423,11 +499,91 @@ un-draft moment.
 
 ## Other settings
 
-- **Do not allow bypassing the above** — the rules apply to administrators too. The live
-  ruleset has an **empty `bypass_actors` list** and reports `current_user_can_bypass:
-  never`, so the gate is uniform (no bypass actors, including the owner).
+- **Repository administrators can always bypass the ruleset.** The live ruleset's
+  `bypass_actors` list contains the repository-role actor (`actor_id: 5`,
+  `bypass_mode: always`). This is an explicit exception to uniform enforcement, not a
+  compensating control. The automated landing flow does not use the bypass: auto-merge
+  still enters the merge queue and waits for its required checks.
+- **Use the merge queue.** The live `merge_queue` rule groups with `ALLGREEN`, admits at
+  most 8 entries per merge, and gives required checks 60 minutes to report
+  (`check_response_timeout_minutes: 60`). Its **throughput** parameters — how many
+  entries the queue speculatively builds, and the minimum-group-size wait — are recorded
+  in *Merge-queue throughput settings* below.
 - **Require conversation resolution before merging** (all PR review threads resolved —
   `required_review_thread_resolution: true`).
+
+### Merge-queue throughput settings (sq-6vshe.16)
+
+<!-- [OPUS-5] sq-6vshe.16 / issue #2759 — LEVER 3 of
+     research/ci-mergequeue-speedup-2026-07.md §3.3. Records the throughput parameter
+     set, the min-entries-wait audit VERDICT, and the CodeQL merge_group placement
+     re-verdict. INVARIANT: no required-check change — the sole required context stays
+     `gate`; ALLGREEN grouping and squash-only are untouched by all three items. -->
+
+The `merge_queue` rule's throughput parameters:
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `max_entries_to_build` | `3` | entries built speculatively **in parallel** — the queue's drain capacity |
+| `max_entries_to_merge` | `8` | entries merged in one group (the cap the omnibus batcher folds overflow past) |
+| `min_entries_to_merge` | `1` | one queued entry is enough to form a group |
+| `min_entries_to_merge_wait_minutes` | `5` | **inert** at `min_entries_to_merge: 1` — see (b) |
+| `grouping_strategy` | `ALLGREEN` | one red leg requeues the whole entry |
+| `check_response_timeout_minutes` | `60` | required-check reporting deadline |
+
+Provenance: `max_entries_to_merge`, `grouping_strategy` and
+`check_response_timeout_minutes` are in the verified live-ruleset table at the end of
+this document. The other three are read from the 2026-07-10 profile of ruleset
+`17688455` (`research/ci-mergequeue-speedup-2026-07.md` §1, §3.3, §6) and are **not**
+re-verified against the live API at this commit — this is a doc-only change. Confirm
+them with the `gh api …/rulesets/<id>` recipe below before acting on (a).
+
+**(a) `max_entries_to_build` 3 → 5 — approved in principle, NOT yet requested; blocked
+on `sq-6vshe.14`.** Drain capacity scales directly with this number: a full 8-deep queue
+takes `ceil(8/3) = 3` entry-wall waves at 3 and `ceil(8/5) = 2` at 5 — a third off a
+full-depth drain — and the entry-failure rate measured over the profile window (**0
+failed of the last 250 `merge_group` runs**) means the extra speculative builds are
+almost never discarded work. But it is **conditional, and the condition is not yet met**:
+5 concurrent entries × ~30 jobs needs the runner-pool headroom that the redundant
+push-to-main waves currently burn, and the same profile measured **43–225 s of per-job
+runner-queue delay during a 3-entry burst**. Raising parallelism *before* the push-skip
+lands would worsen that contention, not relieve it. `sq-6vshe.14` (the `queue-validated`
+push-skip, §3.1 of the design record) has **not** landed — no such job exists anywhere in
+`.github/workflows/` as of this commit — so the ruleset edit stays **unrequested**.
+Agents cannot edit rulesets, so when the precondition clears the edit is carried as a
+maintainer steer issue, not applied from a PR.
+
+**(b) `min_entries_to_merge_wait_minutes: 5` — AUDITED; verdict INERT, no edit needed.**
+The concern was that this is a flat ~5 minute tax on every quiet-period (single-entry)
+merge. It is not. The field is a **ceiling on waiting, not a floor**: per the rulesets
+API it is the time the queue waits *after the first entry is queued, while the minimum
+entry count is **not** met*, before going ahead and merging anyway. With
+`min_entries_to_merge: 1` that minimum is satisfied by the first entry itself, so the
+wait condition is never entered and the timer never binds. This is corroborated by the
+measured entry-wall decomposition, which `ceil(position / capacity) × entry-wall` plus
+the async ruleset evals accounts for with no residual flat term. The verdict rests on
+that field semantics plus the decomposition, **not** on a direct measurement: nobody has
+diffed the enqueue→merge timestamps of an isolated quiet-period single-entry merge. That
+observation would settle it outright and is the cheap confirmation to run if a
+quiet-period merge ever *looks* like it stalled ~5 m before merging. Setting it to `0` would
+be a cosmetic no-op and is therefore **not** requested — but the pairing is load-bearing:
+if `min_entries_to_merge` is ever raised above 1 this value becomes live, and the ~5 m
+quiet-period tax becomes real and must be re-audited then.
+
+**(c) CodeQL on the queue-blocking path — re-verdict KEEP; measured non-pole.**
+Re-confirming `sq-6vshe.6` / issue #1815 with `merge_group`-specific data: over the
+profile window CodeQL ran **3.8 m median / 4.2 m max (n ≈ 19)** on the merge-queue ref,
+against a 15.1 m median entry wall set by `CI` (14.4 m median). It is buildless and it is
+not the pole — the 20–40 minute figure that originally motivated moving it predates the
+buildless migration. Moving a security gate off the queue-blocking path to save ≈ 0 is
+all risk and no win: **REJECTED**, and the alerts-at-zero posture plus the ruleset's
+`code_scanning` rule stay intact. **Read this against the 2026-07-18 operational
+disable** (*Merge-queue subset* above): the conclusion stands, but its premise no longer
+describes today's CI — `codeql.yml` is `disabled_manually`, so no CodeQL check-run is
+produced on any event and it costs the queue nothing at all right now. The standing
+meaning is forward-looking: when PR #3427 settles the successor policy and CodeQL runs
+again, **queue latency is not a valid argument for keeping it off the blocking path** —
+that premise was measured and falsified.
 
 ## How this maps to the merge discipline
 
@@ -516,8 +672,9 @@ this document (procedure below).
   "no second human" values (`0` / `false` / `false`, see [§Required reviews](#required-reviews)),
   so those particular sub-signals do not earn points even though the *substantive*
   protections (no force-push, no deletion, squash-only linear history, conversation
-  resolution, CodeQL alert gate, no bypass actors, a required CI aggregator) are all
-  present and enforced.
+  resolution, CodeQL alert gate, a required CI aggregator, and merge-queue admission) are
+  present and enforced for the normal automated landing path. Repository administrators
+  retain the always-on bypass documented above.
 
 These are **inherent to the operating model**, not fixable code changes — consistent with
 the disposition recorded in `compliance/openssf/gap-register.md` (the Scorecard SARIF is no
@@ -531,7 +688,7 @@ alerts).
 | Independent human approving review | **GitHub Copilot code review on every PR** (`copilot_code_review`, `review_on_push: true`) — an automated, independent reviewer recorded on the PR. |
 | Code-owner gate | **CodeQL code-scanning gate** (`code_scanning` rule, `CodeQL`, `errors_and_warnings`) — blocks merge on new alerts; plus the SHA-pinned clippy/test/conformance gate aggregated by `ci-summary`. |
 | Review-thread accountability | **Conversation resolution required** (`required_review_thread_resolution: true`) — every Copilot/CodeQL thread must be resolved before merge. |
-| "Trusted committer only" | **No bypass actors** (`bypass_actors: []`, `current_user_can_bypass: never`) — the gate applies to the owner too; **squash-only** + **no force-push** + **no deletion** keep history linear and auditable. |
+| "Trusted committer only" | **No equivalent ruleset control.** Repository administrators can always bypass (`RepositoryRole`, `actor_id: 5`); the normal automated flow does not bypass and remains constrained by **merge-queue admission**, **squash-only** merges, **no force-push**, and **no deletion**. |
 
 The agent operating discipline (`AGENTS.md`) adds a *process* layer on top: changes land via
 PR (never direct push), and an out-of-band Codex/roborev review pass is run before arming a
@@ -545,14 +702,15 @@ so confirm it with the GitHub API (read-only token is sufficient):
 
 ```sh
 # List rulesets on the default branch and grab the `main` ruleset id.
-gh api repos/jeswr/sparq/rulesets
+gh api repos/sparq-org/sparq/rulesets
 
 # Dump the full rule set and eyeball it against this document.
-gh api repos/jeswr/sparq/rulesets/<id> | python3 -m json.tool
+gh api repos/sparq-org/sparq/rulesets/<id> | python3 -m json.tool
 ```
 
 As verified on the date of this commit, the live `main` ruleset
-(`enforcement: active`, `bypass_actors: []`) carries exactly these rules, all of which match
+(`enforcement: active`) carries one always-on repository-administrator bypass actor
+(`actor_id: 5`, `actor_type: RepositoryRole`) and exactly these rules, all of which match
 the sections above:
 
 | Live rule (`type`) | Key parameters | Doc section |
@@ -564,6 +722,13 @@ the sections above:
 | `code_quality` | `severity: all` | Required reviews |
 | `code_scanning` | `CodeQL`, `alerts_threshold: errors_and_warnings`, `security_alerts_threshold: all` | Required reviews |
 | `copilot_code_review` | `review_on_push: true`, `review_draft_pull_requests: false` | Required reviews |
+| `merge_queue` | `grouping_strategy: ALLGREEN`, `max_entries_to_merge: 8`, `check_response_timeout_minutes: 60` | Other settings; Merge-queue throughput settings; Omnibus batching |
+
+The `Key parameters` column is a selection, not an exhaustive dump: the `merge_queue`
+row's remaining throughput parameters (`max_entries_to_build`, `min_entries_to_merge`,
+`min_entries_to_merge_wait_minutes`) are recorded in *Merge-queue throughput settings*
+above, sourced from the 2026-07-10 profile snapshot rather than re-verified here — fold
+them into this row the next time the ruleset is dumped and verified.
 
 If a future check finds drift (e.g. a rule added or a parameter changed), update **this
 table and the matching section above in the same commit** so the doc-of-record never lags

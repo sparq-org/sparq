@@ -214,7 +214,7 @@ set consumed **verbatim by** — the UNCHANGED admission gate (stratum 1 above).
 
 A `trustx:Certification` is modelled as a signed **edge** (`graph::Certification`): an
 authority (the **certifier** — a framework operator / a higher issuer) attests that a
-**certified issuer** is certified — `trustx:underFramework`, over `trustx:scope`, within
+**certified issuer** is certified — `trustx:underFramework`, over `trustx:certificationScope`, within
 `trustx:validFrom`/`validUntil` — to issue statements of that scope. A Trusted-List /
 DIATF-register entry **is** one such edge. The edge is admitted into the closure ONLY if
 a signature over its domain-separated `certification_message` (which binds the certifier,

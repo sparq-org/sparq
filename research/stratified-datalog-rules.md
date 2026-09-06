@@ -108,8 +108,11 @@ slices, no new transitive crate):
   substitution evaluator (no kernels, no indexes, `i128` integer compare) that must
   agree with the engine on every fixture and on seed-randomised graphs (deterministic
   LCG). Rationale: an in-tree independent-implementation oracle is the house pattern
-  (`compiled_equivalence`, the Rust-vs-N3 ODRL differential); an EXTERNAL-engine
-  (Soufflé) differential arm is beaded (§6) rather than adding a CI dependency here.
+  (`compiled_equivalence`, the Rust-vs-N3 ODRL differential).
+- `souffle.rs` (test-only) — the **EXTERNAL-engine** differential arm (sq-xzb9p, §6.4):
+  translates the relational fragment into Soufflé Datalog and compares closures. Soufflé
+  is an external binary, never a cargo dependency, so the default build and the dependency
+  graph are untouched; the fixtures skip (loudly) when it is absent.
 
 Public API (5 items, each with a doctest + direct unit test): `parse_program`,
 `Program::n_rules`, `stratify`, `Stratification::n_strata`, `eval`.
@@ -125,10 +128,30 @@ Public API (5 items, each with a doctest + direct unit test): `parse_program`,
   maintenance across strata is the BIG follow-up phase and must be SEQUENCED with the
   deletion-maintenance bead sq-6tykl.4 (same-crate collision, per the epic note).
   *(Since shipped as Phase 3, sq-4foq0 — see §6 item 3 and `datalog::incr`.)*
-- **No CLI/`MaterializedGraph` wiring** — library API only.
-- The `datalog` feature is not yet in `scripts/coverage.sh`'s per-crate measurement
-  (sparq-reason is measured default-features, so the module doesn't regress the floor;
-  wiring it like `sparq-reason-el`'s `rbox,hasse` case is beaded).
+- **No CLI/`MaterializedGraph` wiring** — library API only. *(Both since shipped. The
+  `MaterializedGraph`-style handle landed as Phase 3's `MaterializedProgram` (sq-4foq0, §6 item 3)
+  — the same `new`/`insert`/`delete`/`contains`/`closure`/`len` shape as
+  `MaterializedGraph`/`MaterializedOwlGraph`, plus a batched `update`. The CLI
+  landed as sq-p4zci (§6 item 6): `--reason datalog:<rules.dlog>` on `query` and
+  `reason <f> <fmt> datalog:<rules.dlog> [out.nt]`, behind the CLI's own opt-in `datalog` feature
+  forwarding this crate's. The one-shot CLI path calls `eval`, not `MaterializedProgram` — there
+  is nothing to maintain across a single process run.)* <!-- [SONNET-4.6] sq-p4zci -->
+- The `datalog` feature IS now in `scripts/coverage.sh`'s per-crate measurement
+  (sq-iwf3c): sparq-reason has a `measure()` case arm naming `--features datalog`, the
+  `sparq-reason-el` `rbox,hasse` pattern, so the module is no longer compiled out of the
+  crate's line-coverage denominator. The committed floor could NOT be re-seeded in that
+  change (the authoring environment had no cargo-llvm-cov, so no honest with-datalog number
+  could be taken there); it is the pre-datalog default-feature floor carried over the larger
+  denominator, and the entry is marked `"seed_pending": true` to say so in the one place the
+  gate reads. That flag makes CI, not the author, settle the seed: `coverage-gate.py --check`
+  recomputes `floor(measured) - MARGIN` for a `seed_pending` entry and FAILS if it exceeds
+  the committed floor, naming the number to write. So the carried-forward floor cannot land
+  wrong in either direction — measuring below it fails as an ordinary floor breach, and
+  measuring far enough above it fails as a stale seed; only a measurement that genuinely
+  seeds the same floor passes. Editing `scripts/coverage.sh` is a full-run trigger, so
+  `coverage ratchet (shard 2/3)` — the shard that owns sparq-reason — runs that check with
+  `--features datalog` on the non-draft PR head and again in the merge queue. `--seed` clears
+  the flag, because it rebuilds each entry from the measurement.
 
 ## 6. Phased decomposition (beaded)
 
@@ -145,15 +168,53 @@ Public API (5 items, each with a doctest + direct unit test): `parse_program`,
    (no persistent deletable index); the incrementality is delta-driven rule-firing work,
    measured by deterministic counters. FBF-style over-deletion limits await the sq-6tykl.4
    deletion-heavy benchmark (profile first).
-4. **External-engine differential arm** (sq-xzb9p) — the same fixtures run through Soufflé (or
-   crepe) in an optional CI lane; requires a cargo-vet/tooling decision.
+4. **External-engine differential arm** (sq-xzb9p) — SHIPPED, with a deliberately NARROW
+   scope. `datalog::souffle` (test-only) translates a `Program` into Soufflé Datalog and
+   compares closures over the same seed-randomised graphs the oracle arm uses; the optional
+   `datalog-souffle.yml` lane (heavy tier, never a PR check-run) installs Soufflé and runs it
+   with `SPARQ_DATALOG_SOUFFLE_REQUIRED=1` so a missing binary fails instead of skipping.
+   *Tooling decision:* **Soufflé as an EXTERNAL BINARY, not a cargo dependency** — so the arm
+   adds no crate and needs no cargo-vet audit at all (`crepe` would have been a new proc-macro
+   dep plus a shared attestation; this sidesteps that sequencing entirely).
+   *Why it is worth having on top of `oracle`:* the translation does NOT consult our
+   `stratify()` — it emits one relation per dependency node and lets Soufflé stratify the
+   program itself — so it checks BOTH directions (Soufflé must accept what we accept and
+   refuse what we refuse) and can catch a stratification bug an in-tree oracle structurally
+   cannot. The per-CLASS relation encoding is what makes Soufflé accept the class-granular
+   negation of §3, so that decision is now externally corroborated too.
+   *Honest scope:* the arm covers the RELATIONAL fragment only — constant-predicate atoms,
+   recursion, single-atom and grouped `NOT`, multi-atom heads. `AGGREGATE`/`FILTER` and
+   variable predicates/classes are OUT, and translating them is a loud error rather than a
+   silent partial comparison: their semantics are term-level and XSD-typed, so encoding them
+   into Soufflé's untyped-symbol domain would mean re-implementing the substrate numeric tower
+   inside the translator, at which point the "external reference" would be running largely on
+   our own code. Those paths keep the in-tree `oracle` differential. Extending the arm past
+   the relational fragment is NOT beaded — it should stay unbeaded unless someone first shows
+   a faithful encoding that does not import our numeric tower.
 5. **Fragment extensions** (sq-a7bmo) — SHIPPED: grouped `NOT` / `NOT EXISTS`,
    projected `COUNT(DISTINCT ?v)`, relational float/double FILTER, and variable
    predicates with conservative top-node stratification and incremental relevance.
    <!-- [GPT-5.6] -->
-6. **Surface wiring** (sq-p4zci) — CLI `--reason datalog:<rules.dlog>`, `MaterializedGraph`-style
-   handle, SKILL/docs examples beyond the API reference.
+6. **Surface wiring** (sq-p4zci) — SHIPPED: CLI `--reason datalog:<rules.dlog>` on `query` plus
+   `reason <f> <fmt> datalog:<rules.dlog> [out.nt]`, behind sparq-cli's opt-in `datalog` feature
+   (forwards `sparq-reason/datalog`; no new third-party dep). Reasoning runs at the same
+   parse → index-build seam as `--reason rdfs`, so the default path is untouched; the profile is
+   intercepted before the RDFS/RL profile parse (as `el` is) and, feature-off, is a hard exit-2
+   error naming the feature with NO fall-back — RDFS/OWL-RL are monotone, so substituting one
+   would silently drop `NOT`/`AGGREGATE`. Parse errors and stratification rejections are exit-1
+   and name the construct / a predicate on the cycle. Worked examples in `skills/cli/SKILL.md`
+   and `skills/inference/SKILL.md`; end-to-end tests in `crates/sparq-cli/tests/datalog_cli.rs`
+   with the feature-OFF half in `tests/error_paths_cli.rs`, run by the
+   `sparq-cli (datalog …)` feature-matrix leg. The `MaterializedGraph`-style handle this item
+   also listed was ALREADY shipped by Phase 3 (`MaterializedProgram`, item 3), so no second
+   handle was added. <!-- [SONNET-4.6] -->
 7. **N3-compiled adoption of the checker** (sq-pi2k0) — replace the documented caller-discipline
    stratification of `n3::compiled` `log:notIncludes` with this checked stratification.
-8. **Coverage measure-case wiring** (sq-iwf3c) — add `--features datalog` to the sparq-reason
-   measurement in `scripts/coverage.sh` (the `sparq-reason-el` pattern).
+8. **Coverage measure-case wiring** (sq-iwf3c) — SHIPPED: the sparq-reason `measure()` case
+   arm in `scripts/coverage.sh` names `--features datalog` (the `sparq-reason-el` pattern),
+   so `src/datalog/` enters the crate's line-coverage denominator. Only `datalog` is named —
+   the crate's other default-off features (explain/profile/d-entail/rif/compiled-rules/reify)
+   are separately beaded. The floor is enforced against the expanded denominator by that
+   change's own CI (shard 2 `--check-robust`), and the entry's `"seed_pending": true` makes
+   that run also reject a floor looser than the measurement supports — so the re-seed is a
+   gate, not a promise (see §5).

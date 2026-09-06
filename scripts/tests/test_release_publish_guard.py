@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Tests for the crates.io publishing protections (issue #1135).
+"""Tests for the crates.io publishing protections (issues #1135, #2552).
 
 [OPUS-5] 🤖 SPARQ agent.
 
 WHY THIS FILE EXISTS AS A SEPARATE SUITE
 ========================================
-Two of the three protections live at seams that no other gate covers:
+Most of the protections live at seams that no other gate covers:
 
-1. **The YAML seam.** `.github/workflows/release-plz.yml` runs only on `push: main`, so
-   it NEVER registers on a PR's `gate` aggregator — a defect in it surfaces for the first
-   time at release time, when a crates.io publish cannot be undone. This suite therefore
-   parses that workflow **structurally** (`yaml.safe_load`, then indexing into
+1. **The YAML seam.** `.github/workflows/release-plz.yml` and `release.yml` run only on
+   `push: main` / a `v*` tag push, so neither EVER registers on a PR's `gate` aggregator —
+   a defect in either surfaces for the first time at release time, when a crates.io
+   publish cannot be undone. This suite therefore
+   parses those workflows **structurally** (`yaml.safe_load`, then indexing into
    `jobs.<id>.steps[i]`) rather than by substring. Measured in this repo: 18/18 Python
    mutants died while every uncaught mutant lived in a workflow `if:` / step / call-site.
    A `"--enforce" in text` assertion does not catch `if: false`; `steps[i]["if"]` does.
@@ -32,9 +33,11 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -48,6 +51,13 @@ RELEASE_PLZ_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-plz.yml"
 GUARD_SCRIPT_REL = "scripts/release-interval-guard.py"
 RELEASE_JOB_ID = "release-plz-release"
 
+# The SECOND place a release can start (issue #2552): a `v*` tag push fires release.yml
+# directly, never touching release-plz. Its `setup` job is where the guard runs, because
+# every other job in that workflow depends on it.
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_SETUP_JOB_ID = "setup"
+PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+
 # The guard step's `run:` is pinned EXACTLY, not by substring. Four mutants applied to
 # this step survived a substring/identity reading (reported on PR #4192):
 #   run: … --enforce --repo-root . || true      -> `"--enforce" in run` still passes
@@ -57,6 +67,16 @@ RELEASE_JOB_ID = "release-plz-release"
 # Equality plus absence closes both readings. If this command is ever legitimately
 # changed, update this constant in the same commit — deliberately.
 EXPECTED_GUARD_RUN = "python3 scripts/release-interval-guard.py --enforce --repo-root ."
+
+# The tag-push guard (issue #2552), pinned by the same reasoning plus one mutant unique to
+# it: DROPPING `--released-tag` leaves a step that runs, passes and guards nothing, because
+# on a tag push `v<workspace version>` is already tagged and the guard reads that as an
+# already-released no-op. The tag is passed through the environment, never interpolated
+# into the command, so a tag name can never be spliced into the shell.
+EXPECTED_TAG_PUSH_GUARD_RUN = (
+    "python3 scripts/release-interval-guard.py --enforce --repo-root . "
+    '--released-tag "${RELEASED_TAG}"'
+)
 
 # Shell constructs that can discard the guard's non-zero exit status, or run something
 # before it that exits first. `runs-on: ubuntu-*` executes `run:` under `bash -e`, so a
@@ -77,6 +97,52 @@ def _load(name: str, filename: str):
 sys.path.insert(0, str(SCRIPTS))
 release_pr_guard = _load("release_pr_guard", "release_pr_guard.py")
 interval_guard = _load("release_interval_guard", "release-interval-guard.py")
+
+
+class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
+    """The locked workspace has one public tag, even though 37 crates release together."""
+
+    def test_only_the_dependency_final_anchor_enables_git_tags(self) -> None:
+        # release-plz processes every package independently. If the workspace default is
+        # enabled, all 37 packages try to create the same `v{{ version }}` tag. [GPT-5.6]
+        config = tomllib.loads(
+            (REPO_ROOT / "release-plz.toml").read_text(encoding="utf-8")
+        )
+        workspace = config["workspace"]
+        self.assertFalse(workspace.get("git_tag_enable"))
+        self.assertEqual(workspace.get("git_tag_name"), "v{{ version }}")
+
+        anchors = [
+            package["name"]
+            for package in config.get("package", [])
+            if package.get("git_tag_enable") is True
+        ]
+        self.assertEqual(
+            anchors,
+            ["sparq-cli"],
+            "exactly the dependency-final sparq-cli package must create the shared tag",
+        )
+
+
+class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
+    """A missing `.crate` must stop provenance generation, not merely warn."""
+
+    def test_packaging_collects_failures_and_refuses_incomplete_output(self) -> None:
+        workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["crates"]["steps"]
+        matches = [step for step in steps if step.get("name") == "Package publishable crates"]
+        self.assertEqual(len(matches), 1)
+
+        step = matches[0]
+        self.assertNotIn("continue-on-error", step)
+        run = step["run"]
+        self.assertIn("cargo metadata --no-deps --format-version 1", run)
+        self.assertIn("select(.publish != [])", run)
+        self.assertIn("failures=()", run)
+        self.assertIn('failures+=("$pkg")', run)
+        self.assertIn('if [ "${#failures[@]}" -ne 0 ]; then', run)
+        self.assertIn('if [ "$packaged" -ne "$expected" ]; then', run)
+        self.assertGreaterEqual(run.count("exit 1"), 2)
 
 
 def _workflow() -> dict:
@@ -244,6 +310,187 @@ class TestReleaseWorkflowStructure(unittest.TestCase):
         triggers = _workflow()[True] if True in _workflow() else _workflow()["on"]
         self.assertNotIn("pull_request", triggers)
         self.assertNotIn("pull_request_target", triggers)
+
+
+# ============================================ THE TAG-PUSH SEAM (issue #2552)
+class TestTagPushReleaseIsCadenceGuarded(unittest.TestCase):
+    """`.github/workflows/release.yml` — the OTHER way a release starts.
+
+    release-plz.yml only covers releases that go through the Release PR. The runbook's
+    canonical instruction is "push a `v*` tag", which fires release.yml directly and used
+    to be entirely uncadenced. The guard now runs in that workflow's `setup` job — the
+    one every other job depends on — so a refusal stops the archives, the SBOM/VEX, the
+    GitHub Release and the ghcr image.
+
+    Mutants each of these kills (verified by hand-editing the workflow and re-running):
+      * delete the guard step                  -> test_guard_step_exists
+      * `if: false` (or any `if:` at all)      -> test_guard_step_is_unconditional
+      * `continue-on-error: true` (any form)   -> test_guard_step_is_not_continue_on_error
+      * `--dry-run` instead of `--enforce`     -> test_guard_step_enforces
+      * drop `--released-tag`                  -> test_guard_step_enforces (VACUITY: on a
+        tag push the version is already tagged, so without it the guard always ALLOWs)
+      * `… || true` / `exit 0; …`              -> test_guard_cannot_swallow_its_exit_status
+      * lose `fetch-depth: 0`                  -> test_setup_job_checks_out_full_history
+    """
+
+    def setUp(self) -> None:
+        self.workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+        self.steps = self.workflow["jobs"][RELEASE_SETUP_JOB_ID]["steps"]
+
+    def _guard(self) -> dict:
+        matches = [
+            step
+            for step in self.steps
+            if GUARD_SCRIPT_REL in str(step.get("run") or "")
+        ]
+        self.assertEqual(
+            len(matches),
+            1,
+            f"expected exactly ONE step in `{RELEASE_SETUP_JOB_ID}` running "
+            f"{GUARD_SCRIPT_REL}, found {len(matches)} — the #2552 cadence guard on the "
+            "tag-push release path was deleted or duplicated",
+        )
+        return matches[0]
+
+    def test_guard_step_exists(self) -> None:
+        self.assertIsInstance(self._guard(), dict)
+
+    def test_guard_step_enforces(self) -> None:
+        # EQUALITY, not containment — the same reasoning as EXPECTED_GUARD_RUN above, plus
+        # one more mutant unique to this seam: dropping `--released-tag` leaves a step that
+        # runs, passes, and guards NOTHING (the pushed tag is `v<workspace version>`, which
+        # the guard reads as an already-released no-op).
+        self.assertEqual(
+            str(self._guard()["run"]).strip(),
+            EXPECTED_TAG_PUSH_GUARD_RUN,
+            "the #2552 tag-push cadence guard's `run:` is not the exact expected command."
+            f"\n  expected: {EXPECTED_TAG_PUSH_GUARD_RUN!r}"
+            f"\n  found:    {str(self._guard()['run'])!r}\n"
+            "If this changed on purpose, update EXPECTED_TAG_PUSH_GUARD_RUN in the same "
+            "commit — deliberately.",
+        )
+
+    def test_guard_passes_the_resolved_version_as_the_released_tag(self) -> None:
+        # The tag to exclude must be the SAME version string every other job names assets
+        # with. Threading a different value (e.g. github.ref_name, which is a BRANCH on
+        # dispatch) would exclude the wrong tag — or no tag at all, which is vacuity again.
+        self.assertEqual(
+            (self._guard().get("env") or {}).get("RELEASED_TAG"),
+            "${{ steps.v.outputs.version }}",
+            "the guard must exclude the version `setup` resolved, not some other ref",
+        )
+
+    def test_guard_step_is_unconditional(self) -> None:
+        # PARSED, not grepped: `if: false` / `if: ${{ false }}` would leave the step text
+        # intact while never running it. There is no condition worth admitting here —
+        # a `workflow_dispatch` build creates a GitHub Release too, and publish.yml's
+        # `npm` job runs on ANY `release` event, so exempting dispatch reopens the hole.
+        self.assertNotIn(
+            "if",
+            self._guard(),
+            "the #2552 cadence guard carries an `if:` condition. A skipped guard is an "
+            "absent guard, and every trigger of this workflow ends in a published "
+            "GitHub Release (which publish.yml then acts on).",
+        )
+
+    def test_guard_step_is_not_continue_on_error(self) -> None:
+        # ABSENCE, not `!= True`: `'true'` and `${{ true }}` both load as strings while
+        # Actions evaluates them truthy, turning a refusal into an advisory warning.
+        self.assertNotIn(
+            "continue-on-error",
+            self._guard(),
+            "the #2552 cadence guard must carry no `continue-on-error` key at all — any "
+            "value lets the release proceed past a refusal.",
+        )
+
+    def test_guard_cannot_swallow_its_exit_status(self) -> None:
+        run = str(self._guard()["run"])
+        for token in _EXIT_STATUS_SWALLOWING:
+            self.assertNotIn(
+                token,
+                run,
+                f"the tag-push guard's `run:` contains {token!r} ({run!r}) — a shell "
+                "operator can discard its non-zero exit status or short-circuit it, "
+                "leaving the step present and the release unguarded.",
+            )
+
+    def test_setup_job_checks_out_full_history(self) -> None:
+        # PRECONDITION: on a shallow checkout the `v*` tag list is not authoritative and
+        # the guard (correctly) refuses. Pinned so a future "fix" for a wedged release is
+        # not to relax the shallow check.
+        checkout = next(
+            step
+            for step in self.steps
+            if str(step.get("uses") or "").startswith("actions/checkout@")
+        )
+        self.assertEqual(
+            (checkout.get("with") or {}).get("fetch-depth"),
+            0,
+            f"`{RELEASE_SETUP_JOB_ID}` must check out with fetch-depth: 0 so the `v*` "
+            "tag list is authoritative for the #2552 cadence guard.",
+        )
+
+    def test_every_release_job_depends_on_the_guarded_setup_job(self) -> None:
+        # The guard only bounds what `setup` gates. A job that does not depend on it —
+        # transitively — would build/publish regardless of the verdict.
+        jobs = self.workflow["jobs"]
+        deps = {
+            job_id: (
+                [spec["needs"]]
+                if isinstance(spec.get("needs"), str)
+                else list(spec.get("needs") or [])
+            )
+            for job_id, spec in jobs.items()
+        }
+
+        def reaches_setup(job_id: str, seen: frozenset = frozenset()) -> bool:
+            if job_id in seen:
+                return False
+            return any(
+                dep == RELEASE_SETUP_JOB_ID or reaches_setup(dep, seen | {job_id})
+                for dep in deps[job_id]
+            )
+
+        unguarded = sorted(
+            job_id
+            for job_id in jobs
+            if job_id != RELEASE_SETUP_JOB_ID and not reaches_setup(job_id)
+        )
+        self.assertEqual(
+            unguarded,
+            [],
+            f"{unguarded} in {RELEASE_WORKFLOW.name} do not depend on "
+            f"`{RELEASE_SETUP_JOB_ID}`, so the #2552 publish-cadence guard cannot stop "
+            "them. Add `needs: setup` (or a dependency that reaches it).",
+        )
+
+
+class TestReleaseCarriesTheExperimentalZkCaveat(unittest.TestCase):
+    """Issue #2552: v0.1.0 ships WITHOUT the external ZK review, so every release must
+    carry the experimental caveat in its own notes — the one surface a downloader who
+    never opens the repo still reads."""
+
+    def test_release_body_states_the_zk_mpc_scaffolds_are_unaudited(self) -> None:
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+        bodies = [
+            str((step.get("with") or {}).get("body") or "")
+            for step in workflow["jobs"]["release"]["steps"]
+        ]
+        body = "\n".join(bodies)
+        for fragment in (
+            "Experimental",
+            "sparq-zk",
+            "sparq-mpc",
+            "no external accredited cryptographer",
+            "SECURITY.md",
+        ):
+            self.assertIn(
+                fragment,
+                body,
+                f"the GitHub Release body no longer mentions {fragment!r}. The release "
+                "ships ahead of the external ZK review (#2552) on the strength of that "
+                "caveat; removing it makes the release notes overclaim by omission.",
+            )
 
 
 class TestArmWorkflowsSelfTestTheGuard(unittest.TestCase):
@@ -646,8 +893,40 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
     def test_unreachable_crates_io_refuses(self) -> None:
         with self.assertRaises(interval_guard.GuardRefusal):
             interval_guard.crates_io_last_publish(
-                ["sparq-core"], fetch=lambda _u: (None, "HTTP 503")
+                ["sparq-core"],
+                fetch=lambda _u: (None, "HTTP 503"),
+                retry_sleep=lambda _seconds: None,
             )
+
+    def test_transient_crates_io_failure_is_retried_but_remains_fail_closed(self) -> None:
+        responses = iter(
+            [(None, "request failed: TLS EOF"), (None, "HTTP 503"), (None, None)]
+        )
+        sleeps: list[float] = []
+        self.assertIsNone(
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"],
+                fetch=lambda _url: next(responses),
+                retry_sleep=sleeps.append,
+            )
+        )
+        self.assertEqual(sleeps, list(interval_guard.CRATES_IO_RETRY_DELAYS))
+
+        calls = 0
+
+        def always_fails(_url):
+            nonlocal calls
+            calls += 1
+            return None, "HTTP 503"
+
+        with self.assertRaises(interval_guard.GuardRefusal) as ctx:
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"],
+                fetch=always_fails,
+                retry_sleep=lambda _seconds: None,
+            )
+        self.assertEqual(calls, 3)
+        self.assertIn("after 3 attempt(s)", str(ctx.exception))
 
     def test_a_definitive_404_is_NOT_an_unknown(self) -> None:
         # The discriminating counterpart: a successful "this crate does not exist" must
@@ -685,7 +964,17 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
                     )
 
 
-def _make_test_repo(tmp: Path, *, tag_at: dt.datetime | None) -> Path:
+def _make_test_repo(
+    tmp: Path,
+    *,
+    tag_at: dt.datetime | None,
+    extra_tag: tuple[str, dt.datetime] | None = None,
+) -> Path:
+    """A throwaway workspace at version 0.2.0, optionally tagged `v0.1.0` at `tag_at`.
+
+    `extra_tag` adds one more annotated tag — used by the tag-push tests to create the
+    `v0.2.0` tag that IS the release being cut, alongside the earlier `v0.1.0`.
+    """
     root = tmp / "repo"
     (root / "crates" / "a").mkdir(parents=True)
     (root / "crates" / "b").mkdir(parents=True)
@@ -715,16 +1004,42 @@ def _make_test_repo(tmp: Path, *, tag_at: dt.datetime | None) -> Path:
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@e",
     }
+    # [GPT-5.6] Keep the fixture hermetic when a maintainer signs commits/tags globally.
     git = lambda *a: subprocess.run(  # noqa: E731
-        ["git", "-C", str(root), *a], check=True, capture_output=True, env=env
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+            "-C",
+            str(root),
+            *a,
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
     )
     git("init", "-q", "-b", "main")
     git("add", "-A")
     git("commit", "-qm", "init")
-    if tag_at is not None:
-        env["GIT_COMMITTER_DATE"] = tag_at.isoformat()
+    for name, when in (("v0.1.0", tag_at), extra_tag or (None, None)):
+        if name is None or when is None:
+            continue
+        env["GIT_COMMITTER_DATE"] = when.isoformat()
         subprocess.run(
-            ["git", "-C", str(root), "tag", "-a", "v0.1.0", "-m", "r"],
+            [
+                "git",
+                "-c",
+                "tag.gpgsign=false",
+                "-C",
+                str(root),
+                "tag",
+                "-a",
+                name,
+                "-m",
+                "r",
+            ],
             check=True,
             capture_output=True,
             env=env,
@@ -761,6 +1076,135 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
             )
             self.assertEqual(code, 0, "\n".join(log))
             self.assertTrue(any("ALLOW" in line for line in log), log)
+
+    def test_a_tag_push_inside_the_window_is_REFUSED_and_the_flag_is_what_does_it(
+        self,
+    ) -> None:
+        """The discriminating pair for the #2552 tag-push seam.
+
+        SAME repository, SAME clock, SAME crates.io answer — the only difference is
+        `released_tag`. Without it the guard sees `v0.2.0` in the tag list, concludes
+        "already tagged, `release-plz release` is a no-op" and ALLOWS: exactly the vacuity
+        that would make the step in release.yml decorative. With it, the tag being cut is
+        excluded and the 2h-old `v0.1.0` correctly refuses.
+        """
+        now = dt.datetime.now(dt.timezone.utc)
+        never_published = lambda _url: (None, None)  # noqa: E731
+        with tempfile.TemporaryDirectory(prefix="sparq-2552-tagpush-") as tmp:
+            root = _make_test_repo(
+                Path(tmp),
+                tag_at=now - dt.timedelta(hours=2),  # v0.1.0: the PREVIOUS release
+                extra_tag=("v0.2.0", now),  # the release being cut RIGHT NOW
+            )
+            vacuous: list[str] = []
+            self.assertEqual(
+                interval_guard.run(
+                    root,
+                    dry_run=False,
+                    now=now,
+                    fetch=never_published,
+                    log=vacuous.append,
+                ),
+                0,
+                "the no-op short-circuit is expected to allow here — if it does not, the "
+                "pair below no longer discriminates:\n" + "\n".join(vacuous),
+            )
+            self.assertTrue(any("already tagged" in line for line in vacuous), vacuous)
+
+            guarded: list[str] = []
+            code = interval_guard.run(
+                root,
+                dry_run=False,
+                now=now,
+                released_tag="v0.2.0",
+                fetch=never_published,
+                log=guarded.append,
+            )
+            self.assertEqual(
+                code,
+                1,
+                "a `v0.2.0` tag pushed 2h after `v0.1.0` was ALLOWED. --released-tag must "
+                "exclude the tag being cut and suppress the already-tagged short-circuit, "
+                "or the guard on release.yml is vacuous.\n" + "\n".join(guarded),
+            )
+            self.assertTrue(any("REFUSED" in line for line in guarded), guarded)
+
+    def test_a_tag_push_outside_the_window_is_ALLOWED(self) -> None:
+        # The paired positive: the guard must not simply refuse every tag push.
+        now = dt.datetime.now(dt.timezone.utc)
+        never_published = lambda _url: (None, None)  # noqa: E731
+        with tempfile.TemporaryDirectory(prefix="sparq-2552-tagpush-ok-") as tmp:
+            root = _make_test_repo(
+                Path(tmp),
+                tag_at=now - dt.timedelta(days=5),
+                extra_tag=("v0.2.0", now),
+            )
+            log: list[str] = []
+            code = interval_guard.run(
+                root,
+                dry_run=False,
+                now=now,
+                released_tag="v0.2.0",
+                fetch=never_published,
+                log=log.append,
+            )
+            self.assertEqual(code, 0, "\n".join(log))
+            self.assertTrue(any("ALLOW" in line for line in log), log)
+
+    def test_a_tag_push_consults_crates_io_even_though_the_version_is_tagged(
+        self,
+    ) -> None:
+        # run() skips the ~26 registry requests when the version is already tagged. On the
+        # tag-push path it always IS, so that skip must not apply — otherwise a release
+        # cut by hand minutes after a crates.io publish has no bound at all.
+        now = dt.datetime.now(dt.timezone.utc)
+        urls: list[str] = []
+
+        def fetch_recent(url: str):
+            urls.append(url)
+            return (
+                {"versions": [{"created_at": (now - dt.timedelta(hours=1)).isoformat()}]},
+                None,
+            )
+
+        with tempfile.TemporaryDirectory(prefix="sparq-2552-cratesio-") as tmp:
+            # No previous tag: crates.io is the ONLY release signal in existence.
+            root = _make_test_repo(Path(tmp), tag_at=None, extra_tag=("v0.2.0", now))
+            log: list[str] = []
+            code = interval_guard.run(
+                root,
+                dry_run=False,
+                now=now,
+                released_tag="v0.2.0",
+                fetch=fetch_recent,
+                log=log.append,
+            )
+            self.assertTrue(
+                urls,
+                "run() never queried crates.io on the tag-push path. The version is "
+                "always already tagged there, so reusing the no-op skip leaves an "
+                "UNBOUNDED cadence.\n" + "\n".join(log),
+            )
+            self.assertEqual(code, 1, "\n".join(log))
+
+    def test_a_non_release_released_tag_REFUSES(self) -> None:
+        # Fail-closed: if the guard cannot tell which tag to exclude, it would measure the
+        # interval against the very release it is deciding.
+        now = dt.datetime.now(dt.timezone.utc)
+        never_published = lambda _url: (None, None)  # noqa: E731
+        with tempfile.TemporaryDirectory(prefix="sparq-2552-badtag-") as tmp:
+            root = _make_test_repo(Path(tmp), tag_at=now - dt.timedelta(days=5))
+            log: list[str] = []
+            code = interval_guard.run(
+                root,
+                dry_run=False,
+                now=now,
+                released_tag="release-candidate",
+                fetch=never_published,
+                log=log.append,
+            )
+            self.assertEqual(code, 1, "\n".join(log))
+            self.assertTrue(any("REFUSED" in line for line in log), log)
 
     def test_run_ACTUALLY_fetches_crates_io_when_the_version_is_untagged(self) -> None:
         """The CALL SITE, not the pure function (PR #4192 review, finding 2).
@@ -860,7 +1304,7 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
             root = _make_test_repo(Path(tmp), tag_at=now - dt.timedelta(days=5))
             # Retag as the CURRENT workspace version so the push is a no-op.
             subprocess.run(
-                ["git", "-C", str(root), "tag", "v0.2.0"],
+                ["git", "-c", "tag.gpgsign=false", "-C", str(root), "tag", "v0.2.0"],
                 check=True,
                 capture_output=True,
             )
@@ -903,6 +1347,75 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
             )
             self.assertEqual(code, 0, "\n".join(log))
             self.assertTrue(any("::warning" in line for line in log), log)
+
+
+class TestPublishableDependencyClosure(unittest.TestCase):
+    """A registry package cannot retain workspace-only dependency edges."""
+
+    def test_release_runbook_order_matches_the_live_dependency_graph(self) -> None:
+        crates = interval_guard.publishable_crates(REPO_ROOT)
+        expected = [crate.name for crate in interval_guard.publish_order(crates)]
+        documented = re.findall(
+            r"^cargo publish -p ([A-Za-z0-9_-]+)$",
+            (REPO_ROOT / "docs" / "release.md").read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+        self.assertEqual(documented, expected)
+
+    @staticmethod
+    def _fixture(
+        root: Path, *, dependency_publishable: bool, dependency_version: str | None
+    ) -> None:
+        (root / "crates" / "a").mkdir(parents=True)
+        (root / "crates" / "b").mkdir(parents=True)
+        (root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/a", "crates/b"]\n'
+            '[workspace.package]\nversion = "0.2.0"\n',
+            encoding="utf-8",
+        )
+        version = (
+            f', version = "{dependency_version}"' if dependency_version is not None else ""
+        )
+        (root / "crates" / "a" / "Cargo.toml").write_text(
+            '[package]\nname = "a"\nversion.workspace = true\n'
+            f'[dependencies]\nb = {{ path = "../b"{version} }}\n',
+            encoding="utf-8",
+        )
+        private = "" if dependency_publishable else "publish = false\n"
+        (root / "crates" / "b" / "Cargo.toml").write_text(
+            '[package]\nname = "b"\nversion.workspace = true\n' + private,
+            encoding="utf-8",
+        )
+
+    def test_public_to_private_workspace_dependency_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-private-dep-") as tmp:
+            root = Path(tmp)
+            self._fixture(
+                root, dependency_publishable=False, dependency_version="0.2.0"
+            )
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "unpublished workspace crate"
+            ):
+                interval_guard.publishable_crates(root)
+
+    def test_path_dependency_without_registry_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-unversioned-dep-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version=None)
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "no registry version requirement"
+            ):
+                interval_guard.publishable_crates(root)
+
+    def test_versioned_publishable_dependency_enters_publish_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-closed-deps-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="0.2.0")
+            crates = interval_guard.publishable_crates(root)
+            self.assertEqual(
+                [crate.name for crate in interval_guard.publish_order(crates)],
+                ["b", "a"],
+            )
 
 
 class TestDryRunIsInert(unittest.TestCase):

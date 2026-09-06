@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use axum::routing::get;
 use axum::Router;
-use rustls_pemfile::certs;
 use sparq_lws_core::tls::{build_rustls_config, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
@@ -27,7 +27,7 @@ type ClientStream = tokio_rustls::client::TlsStream<tokio::net::TcpStream>;
 fn client_config() -> ClientConfig {
     let pem = std::fs::read(CA_PATH).expect("read fixture CA");
     let mut roots = RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         let cert: CertificateDer<'_> = cert.expect("parse fixture CA");
         roots.add(cert).expect("add fixture CA");
     }

@@ -9,7 +9,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "ZK derived-credential commitment pipeline + zk-trace seam for sparq (RDFC10 canonicalization, Poseidon2-BN254 per-graph commitments, <urn:sparq:zk> registry plumbing)"
-publish = false
+readme = "README.md"
+# [GPT-5.6] Published only as the externally unaudited, default-off dependency used by
+# sparq-server and sparq-trust; this does not change the crate's security posture.
 
 # NOTHING in the workspace depends on this crate: default builds, the wasm
 # artifact, and every other crate's dependency graph are untouched by it.
@@ -43,38 +45,75 @@ dual-leaf = []
 # (no `Proven` on a positive property while sq-qhy4 is open; completeness; the
 # source-layer-only non-transfer rule). OFF by default: the default build is
 # byte-unchanged and the `secprop` module is compiled out. Pulls in the `oxttl`
-# Turtle parser to load the static graph. The `secx:` IRIs the graph references are
-# owned by sparq-trust's `secprop-vocab` vocabulary; sparq-trust depends on sparq-zk
-# (so sparq-zk CANNOT depend on sparq-trust — that is a cycle), therefore the
-# `secx:` constants this module needs are declared LOCALLY and a drift test pins them
-# to the canonical published `secprop-ext.ttl` via `include_str!` (a compile-time
-# file read, NOT a crate edge). RECORDS claims + their epistemic basis; asserts NO
-# soundness/privacy property (estate NOT externally audited, sq-qhy4).
-secprop-annotations = ["dep:oxttl"]
+# Turtle parser to load the static graph.
+#
+# [OPUS-5] sq-3705: the `secx:` IRIs the graph references now come from the
+# ZERO-dependency `sparq-secprop-vocab` leaf, which owns the constants, the canonical
+# `secprop-ext.ttl` and the single drift test. They used to be redeclared LOCALLY and
+# pinned by an `include_str!("../../sparq-trust/…")` — sparq-trust depends on sparq-zk,
+# so importing them back would have been a cycle — and that cross-package compile-time
+# read ALSO broke `cargo package` file inclusion for this crate. The leaf sits BELOW
+# sparq-trust, sparq-policy and sparq-zk alike, so the edge is cycle-free and pulls in
+# no transitive dependency (the leaf has none).
+#
+# RECORDS claims + their epistemic basis; asserts NO soundness/privacy property (estate
+# NOT externally audited, sq-qhy4).
+secprop-annotations = ["dep:oxttl", "dep:sparq-secprop-vocab"]
 # [OPUS-4.8] sq-9c5e: the OFF-circuit W3C Verifiable-Credential ingest BRIDGE
 # (`vc_bridge` module) — verify a source VC's W3C Data-Integrity proof
 # (`eddsa-rdfc-2022` / `ecdsa-rdfc-2019`) at the HOST (off-circuit, fail-closed),
 # then re-commit under sparq's commitment pipeline and record the
 # `zk:sourceCryptosuite` provenance. OFF by default: a normal build does NOT pull
-# ed25519/p256/sha2/serde_json and the `vc_bridge` module is compiled out — the
-# default `commit`/`ingest`/`registry`/`sig` surface is byte-unchanged. The
+# ed25519/p256/p384/sha2/serde_json/oxjsonld/bs58 and the `vc_bridge` /
+# `vc_bridge_json` modules are compiled out — the default
+# `commit`/`ingest`/`registry`/`sig` surface is byte-unchanged. The
 # `zk:sourceCryptosuite` registry SLOT (the provenance field + IRI const +
 # (de)serialization) is always present (it is just an optional registry field);
 # this feature gates the VERIFY+re-commit bridge that POPULATES it. NOT externally
 # audited (sq-qhy4); the bridge verifies the DI hashing off-circuit and asserts no
 # in-circuit / soundness property. design `research/zk-configurable-commitment-design.md` §5.
-# LEAN footprint: the bridge operates over the credential's RDF graph (its
-# canonical N-Quads — the form the DI suites hash) + raw resolved key/signature
-# bytes, so it pulls only the verify primitives (Ed25519 / ECDSA-P256 + SHA-256),
-# NOT a JSON-LD processor (`oxjsonld` does JSON-LD->RDF as a separate ingest step).
-vc-bridge = ["dep:ed25519-dalek", "dep:p256", "dep:sha2"]
+#
+# [OPUS-5] sq-txg1y (issue #3234, follow-up to sq-9c5e) EXTENDS this feature twice,
+# and both additions are why the dependency list grew:
+#   * `ecdsa-rdfc-2019` with a **P-384** key (the W3C SHA-384 profile,
+#     vc-di-ecdsa §A.3) now verifies instead of failing closed as
+#     `UnsupportedKeyCurve` -> `p384` (verify primitive only, same RustCrypto
+#     `elliptic-curve` 0.13 family as the existing `p256`).
+#   * an ADDITIVE **JSON-LD VC envelope** entry point (`vc_bridge_json`) layered on
+#     top of the RDF-native `verify_source_proof` -> `serde_json` (envelope split),
+#     `oxjsonld` (JSON-LD -> RDF expansion, the same parser sparq-core's `jsonld`
+#     feature uses), `bs58` (the `z` multibase `proofValue`/key decode, the same
+#     crate `sparq-vc` uses).
+# The RDF-native core is UNCHANGED by the envelope layer: it still takes triples +
+# raw key/signature bytes, so a caller that already has the credential's RDF never
+# touches the JSON-LD path. `oxjsonld` is driven with a caller-supplied context
+# allowlist and NO network (see `vc_bridge_json`'s module docs).
+#
+# [OPUS-5] sq-u5y1f (issue #3235) adds the SELECTIVE-DISCLOSURE ingest SEAM
+# (`vc_bridge_sd`) under this same gate, and adds NO dependency: a real BBS /
+# `ecdsa-sd-2023` verifier is not in-repo, so `bbs-2023` / `ecdsa-sd-2023` are
+# DELEGATED to a host-supplied `SelectiveDisclosureVerifier` trait impl (the BBS/SD
+# crypto stays outside sparq entirely). sparq's part is the RDFC10 canonicalization,
+# the re-commitment of the DISCLOSED subset, and the `zk:sourceCryptosuite`
+# provenance; with no verifier supplied the ingest FAILS CLOSED
+# (`SelectiveDisclosureUnavailable`). Asserts NO selective-disclosure soundness or
+# unlinkability — that claim belongs to the host verifier (sq-qhy4).
+vc-bridge = [
+    "dep:ed25519-dalek",
+    "dep:p256",
+    "dep:p384",
+    "dep:sha2",
+    "dep:serde_json",
+    "dep:oxjsonld",
+    "dep:bs58",
+]
 
 [dependencies]
 # sparq term model / store / engine. The engine dep turns on its non-default
 # `zk` feature (the zk-trace executor seam); that feature only exists inside
 # sparq-zk's own dependency graph.
-sparq-core = { path = "../sparq-core" }
-sparq-engine = { path = "../sparq-engine", features = ["zk"] }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", features = ["zk"] }
 oxrdf = { workspace = true }
 spargebra = { workspace = true }
 
@@ -82,7 +121,7 @@ spargebra = { workspace = true }
 # `sparq-canon` crate (the public canonicalization surface; sq-0qip). It owns
 # the oxrdf 0.3 <-> 0.2 bridge and the rdf-canon dependency, so `sparq-zk`'s
 # `canon` module is now just a re-export. [OPUS-4.8]
-sparq-canon = { path = "../sparq-canon" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.1" }
 
 # BN254 scalar field (the Noir `Field`) for Poseidon2.
 # [OPUS-4.8] The whole arkworks stack (ark-bn254/ark-ff/ark-ec/ark-serialize/ark-ed-on-bn254/
@@ -101,6 +140,16 @@ blake3 = "1"
 # (`ontologies/secprop-methods.ttl`). Same `oxttl` the rest of the workspace uses
 # (sparq-core / sparq-trust). The default build pulls neither it nor the module.
 oxttl = { workspace = true, optional = true }
+
+# [OPUS-5] sq-3705 — OPTIONAL, `secprop-annotations` feature only. The shared
+# `sec-prop:`/`secx:` IRI constants + the canonical `secprop-ext.ttl` they are pinned
+# to. A ZERO-dependency LEAF crate deliberately placed BELOW sparq-trust (the vocabulary's
+# declared owner, which depends on THIS crate), so importing the constants is finally
+# cycle-free — replacing the local copies + the cross-package
+# `include_str!("../../sparq-trust/…")` drift test that broke `cargo package` here. It has
+# no dependencies of its own, so the opt-in build grows by a `const &str` table only and
+# the default build pulls nothing.
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.1", optional = true }
 
 # [OPUS-4.8] sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
 # CR-G5): secret-memory hygiene + constant-time-equality PRIMITIVES for the
@@ -129,10 +178,30 @@ ark-std = { version = "0.6", default-features = false, features = ["std"] }
 # gated behind the OFF-by-default `vc-bridge` feature, so the default build pulls
 # NONE of them (the lean-default constraint). RustCrypto Ed25519 (eddsa-rdfc-2022)
 # + P-256 ECDSA (ecdsa-rdfc-2019) verify the source VC's Data-Integrity proof at
-# the HOST; sha2 is the DI hash over the RDFC10-canonical credential + proof config.
+# the HOST; sha2 is the DI hash over the RDFC10-canonical credential + proof config
+# (SHA-256 for the Ed25519 / P-256 profiles, SHA-384 for the P-384 profile).
 ed25519-dalek = { version = "2", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
+# [OPUS-5] sq-txg1y: the `ecdsa-rdfc-2019` P-384 / SHA-384 profile (vc-di-ecdsa
+# §A.3). Deliberately the 0.13 line — the same RustCrypto `elliptic-curve` /
+# `ecdsa` generation `p256` above is on, so the two curves share one copy of the
+# shared traits instead of unifying to two `elliptic-curve` majors.
+p384 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
 sha2 = { version = "0.10", default-features = false, optional = true }
+
+# [OPUS-5] sq-txg1y: the ADDITIVE JSON-LD VC envelope entry point
+# (`vc_bridge_json`). Same OFF-by-default `vc-bridge` gate as the crypto above.
+#   * serde_json — split a DI-secured VC into (unsecured document, proof config)
+#     and read `proof.cryptosuite` / `proof.verificationMethod` / `proof.proofValue`.
+#   * oxjsonld   — expand both halves to RDF. Driven with a caller-supplied
+#     `@context` allowlist and NO `LoadDocumentCallback` fallback, so this crate
+#     opens no socket (the same fail-closed posture as sparq-wasm's
+#     `jsonld-contexts` binding and `sparq_jsonld::NoopLoader`).
+#   * bs58       — decode the `z` (base58-btc) multibase `proofValue`. Same crate
+#     and major as `sparq-vc`'s.
+serde_json = { version = "1", optional = true }
+oxjsonld = { workspace = true, optional = true }
+bs58 = { version = "0.5", default-features = false, features = ["alloc"], optional = true }
 
 # [dev-dependencies] removed: the W3C rdf-canon suite (and its serde_json/sha2
 # deps) moved to `sparq-canon` with the canonicalization surface (sq-0qip).

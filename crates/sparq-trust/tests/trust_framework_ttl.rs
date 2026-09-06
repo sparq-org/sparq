@@ -17,12 +17,19 @@ use oxrdf::{NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
 
 const TTL: &str = include_str!("../ontologies/trust/trust-framework.ttl");
+/// The `trust:` core vocabulary this layer EXTENDS under the SAME base IRI — read here to
+/// assert no local name collides (issue #3801).
+const TRUST_TTL: &str = include_str!("../ontologies/trust/trust.ttl");
 
 const TRUSTX_NS: &str = "https://sparq.dev/ns/trust#";
 const SEC_REQ_NS: &str = "https://w3id.org/zkp-sparql/sec-req#";
 const RDFS_SEE_ALSO: &str = "http://www.w3.org/2000/01/rdf-schema#seeAlso";
+const RDFS_DOMAIN: &str = "http://www.w3.org/2000/01/rdf-schema#domain";
 const OWL_IMPORTS: &str = "http://www.w3.org/2002/07/owl#imports";
+const OWL_UNION_OF: &str = "http://www.w3.org/2002/07/owl#unionOf";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
+const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
 
 /// The published vocabulary is valid Turtle (parses without error) and is non-empty.
 #[test]
@@ -57,7 +64,7 @@ fn trust_framework_ttl_declares_all_trustx_terms() {
         "Certification",
         "certifies",
         "underFramework",
-        "scope",
+        "certificationScope",
         "validFrom",
         "validUntil",
         "AnyServiceScope",
@@ -135,6 +142,123 @@ fn extends_trust_and_references_vendored_sec_req_in_the_parsed_graph() {
     assert!(
         import_objects.contains("https://sparq.dev/ns/trust"),
         "the framework ontology node must owl:imports the trust: vocabulary it extends",
+    );
+}
+
+/// The validity-window properties are carried by BOTH `trustx:Certification` and
+/// `trustx:StatusAttestation`, so their `rdfs:domain` must not name `Certification`
+/// alone: under RDFS entailment `?a trustx:validFrom ?t` would then type every status
+/// attestation as a `trustx:Certification` — a class this model expects to carry
+/// `trustx:certifies`, `trustx:underFramework` and `trustx:certificationScope`, none of
+/// which a status attestation has (issue #3801). Verified on the PARSED graph — the
+/// domain must be the union class containing both.
+#[test]
+fn validity_window_domain_admits_status_attestations() {
+    let triples: Vec<_> = TurtleParser::new()
+        .for_reader(TTL.as_bytes())
+        .map(|r| r.expect("valid Turtle"))
+        .collect();
+
+    // Blank-node subject → the classes its `owl:unionOf` list enumerates.
+    let union_members = |head: &NamedOrBlankNode| -> std::collections::HashSet<String> {
+        let mut members = std::collections::HashSet::new();
+        // Follow `head owl:unionOf ?list`, then the rdf:first/rdf:rest chain.
+        let mut cursor = triples.iter().find_map(|t| {
+            (&t.subject == head && t.predicate.as_str() == OWL_UNION_OF)
+                .then(|| NamedOrBlankNode::try_from(t.object.clone()).ok())
+                .flatten()
+        });
+        while let Some(node) = cursor {
+            for t in &triples {
+                if t.subject != node {
+                    continue;
+                }
+                if t.predicate.as_str() == RDF_FIRST {
+                    if let Term::NamedNode(o) = &t.object {
+                        members.insert(o.as_str().to_owned());
+                    }
+                }
+            }
+            cursor = triples.iter().find_map(|t| {
+                (t.subject == node && t.predicate.as_str() == RDF_REST)
+                    .then(|| NamedOrBlankNode::try_from(t.object.clone()).ok())
+                    .flatten()
+            });
+        }
+        members
+    };
+
+    for local in ["validFrom", "validUntil"] {
+        let prop = format!("{TRUSTX_NS}{local}");
+        let domains: Vec<_> = triples
+            .iter()
+            .filter(|t| {
+                matches!(&t.subject, NamedOrBlankNode::NamedNode(s) if s.as_str() == prop)
+                    && t.predicate.as_str() == RDFS_DOMAIN
+            })
+            .map(|t| t.object.clone())
+            .collect();
+        assert_eq!(
+            domains.len(),
+            1,
+            "trustx:{local} must declare exactly one rdfs:domain (found {})",
+            domains.len(),
+        );
+        let head = NamedOrBlankNode::try_from(domains[0].clone()).unwrap_or_else(|_| {
+            panic!("trustx:{local}'s rdfs:domain must be a class node, not a literal")
+        });
+        let members = union_members(&head);
+        assert!(
+            !members.is_empty(),
+            "trustx:{local}'s rdfs:domain must be an owl:unionOf class node (found the bare \
+             domain {head}) — a single named domain class excludes the other window-carrying \
+             class (issue #3801)",
+        );
+        for required in ["Certification", "StatusAttestation"] {
+            let iri = format!("{TRUSTX_NS}{required}");
+            assert!(
+                members.contains(&iri),
+                "trustx:{local}'s rdfs:domain must be a union including trustx:{required} \
+                 ({iri}) — a narrower domain entails that every status attestation is a \
+                 certification (issue #3801); found {members:?}",
+            );
+        }
+    }
+}
+
+/// `trustx:` and `trust:` share ONE base IRI, so a repeated local name is the SAME
+/// property carrying two `rdfs:domain` axioms — not a homonym. No term declared in this
+/// extension may already be declared by `trust.ttl` (issue #3801: `trustx:scope` WAS
+/// `trust:scope`, with domains `trustx:Certification` and `trust:TrustRule` at once).
+#[test]
+fn no_trustx_term_collides_with_a_trust_core_term() {
+    // The IRIs each document DECLARES (gives an `rdf:type` to) in the shared base.
+    let declared = |ttl: &str| -> std::collections::HashSet<String> {
+        TurtleParser::new()
+            .for_reader(ttl.as_bytes())
+            .map(|r| r.expect("valid Turtle"))
+            .filter(|t| t.predicate.as_str() == RDF_TYPE)
+            .filter_map(|t| match t.subject {
+                NamedOrBlankNode::NamedNode(s) if s.as_str().starts_with(TRUSTX_NS) => {
+                    Some(s.into_string())
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    let core = declared(TRUST_TTL);
+    let ext = declared(TTL);
+    assert!(
+        core.contains(&format!("{TRUSTX_NS}scope")),
+        "sanity: trust.ttl declares trust:scope",
+    );
+    let collisions: Vec<_> = ext.intersection(&core).cloned().collect();
+    assert!(
+        collisions.is_empty(),
+        "trust-framework.ttl redeclares {} term(s) already declared by trust.ttl under the \
+         SAME base IRI — same IRI, conflicting rdfs:domain axioms (issue #3801): {collisions:?}",
+        collisions.len(),
     );
 }
 

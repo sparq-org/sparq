@@ -8,3 +8,12 @@ verdict.json
 tok_*.json
 answers*.json
 tokens_real_out.json
+# [OPUS-5] sq-2489d.6 — Phase 7 provenance-capability A/B runtime artifacts
+# (regenerable; NON-CANONICAL). The committed artifacts are PREREG-PROVENANCE.md,
+# prov_ab.py, and its synthetic self-test.
+prov-verdict.json
+tok_prov*.json
+answers_prov*.json
+runmeta*.json
+pkg-iris.txt
+prov_outcomes.json

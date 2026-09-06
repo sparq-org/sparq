@@ -12,6 +12,9 @@ crate-type = ["cdylib", "rlib"]
 # The host build intentionally has no request-core dependencies. Building this dedicated crate for
 # wasm32 is the opt-in: it does not add Solid-server code to sparq-core, sparq-engine, or sparq-wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# [GPT-5.6] sq-6xasp.7: the `Store` trait the persistence decorator implements is an
+# `#[async_trait]`; sparq-lws-core already resolves the same crate, so this adds nothing new.
+async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 # [SONNET-4.6] sq-250si: emit a diagnostic to console.error on panic (panic=abort in release
 # lowers to an unreachable trap — this hook fires in dev/debug builds where unwinding is

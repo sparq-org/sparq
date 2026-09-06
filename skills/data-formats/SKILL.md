@@ -488,7 +488,10 @@ previous-context reversion, `@list`/`@language`/`@index`/`@id`/`@type`/`@graph` 
 reshaping, `@nest`, `@reverse` redistribution, keyword aliasing, Value Compaction, and the
 `compactArrays`/`compactToRelative`/`ordered` options — and the `compact` conformance lane now
 compares against the W3C **expected** documents (the normative oracle; floor re-pinned 186 →
-228, one documented 1.0-era fail + 17 negative skips, see `floors::compact`). Framing on this
+228, then raised to 243 by sq-gzsky RUNNING the negatives, see `floors::compact`). The
+`expand` and `compact` lanes no longer SKIP `NegativeEvaluationTest`s: a negative passes iff
+the algorithm raises EXACTLY the manifest's `expectErrorCode`, so a wrong code is a FAIL and
+error-code completeness is now gated (expand floor 276 → 381). Framing on this
 substrate, the surface wiring (the engine-serialize cutover, sq-oy1f.41), and the remaining
 conformance-lane switches land in later beads; the RDF-first writers above remain the shipped
 emit path until then.
@@ -666,16 +669,49 @@ cargo build -p sparq-cli --features serialize-rdf
   per-scan decode for ~2.5× more triples per byte of RAM (browser target).
 - **`block-bloom` (opt-in, OFF by default).** A block-compressed permutation already has an
   implicit min/max zone map (the directory's first-triple) that prunes RANGE scans, but for an
-  EQUALITY-BOUND leading column (a point/prefix lookup on a constant subject/object) whose id
-  overlaps several blocks' `[min,max]` spans on a high-NDV column, only a per-block Bloom filter
-  can skip the blocks that cannot contain it. The `block-bloom` feature builds a tiny per-block
-  Bloom bitset over each block's distinct leading ids (built only for high-NDV columns past a
-  density gate; pure-std, no new dep) and probes it in `range` before decoding a block. Zero
-  false negatives by construction, so results are IDENTICAL to the feature-off path — only fewer
-  blocks decode. The filter is in-RAM/build-time only: it is NEVER written to the on-disk
-  `SPQCPRM1` format, so a perm built with the feature on persists byte-identically to one built
-  with it off, and a memory-mapped perm carries no filter. Whether the hypothesised block-skip
-  win materialises is to be confirmed on the canonical perf host (no number is asserted here).
+  EQUALITY-BOUND leading column (a point/prefix lookup on a constant subject/object) the zone map
+  still leaves a candidate block that must be decoded just to discover it holds no matching row.
+  The `block-bloom` feature builds a tiny per-block Bloom bitset over each block's distinct
+  leading ids (built only for high-NDV columns past a density gate; pure-std, no new dep) and
+  probes it in `range` before decoding a block. Zero false negatives by construction, so results
+  are IDENTICAL to the feature-off path — only fewer blocks decode. The filter is in-RAM/build-time
+  only: it is NEVER written to the on-disk `SPQCPRM1` format, so a perm built with the feature on
+  persists byte-identically to one built with it off, and a memory-mapped perm carries no filter.
+  **The measured skip opportunity is on ABSENT-key lookups.** On the SYNTHETIC high-NDV columns
+  the sq-v8ixk harness generates (`measure_bloom_*` in `compress.rs`), the original "the id
+  overlaps several blocks" rationale does not show up: because those columns are high-NDV, a
+  PRESENT id's rows are contiguous and the zone map already narrows the candidate window to about
+  one block, so there is little left for the filter to skip. The larger skip opportunity is an
+  equality-bound id that is ABSENT from the permutation — a subject/object bound by an earlier
+  pattern with no rows here — where the candidate block can be dropped undecoded. Those are
+  block-SKIP COUNTS on a synthetic distribution: host-independent, but they establish no latency
+  result and do not settle the question for real workloads. Run the harness for figures; none is
+  asserted here, and the canonical run against a real dataset on the perf host is bead `sq-0g6g`
+  (PENDING).
+- **`elias-fano` (opt-in, OFF by default) — compressed-seek codecs, PROTOTYPE, not wired in.**
+  `sparq-core = { …, features = ["elias-fano"] }` exposes `sparq_core::eliasfano` with
+  `EliasFano` and `PartitionedEliasFano` (plus `EliasFanoIter` and
+  `PartitionedEliasFano::DEFAULT_PARTITION`). Their `next_geq(target)` answers a successor query
+  *directly on the compressed data* — no whole-block decode, unlike the varint block codec. Pure
+  `std`, no new dependency.
+  - **Input MUST be non-decreasing.** `encode` returns `None` on a non-monotone slice (EF is
+    undefined there — that means the caller mis-segmented the column), and also `None` when the
+    high-bits vector would exceed `u32::MAX` bits. An empty slice encodes fine. A permutation
+    column is monotone only *within* one leading-prefix group, so you segment first.
+  - **Nothing in the store calls this yet.** It is a measurement-gated spike: not a `PermData`
+    variant, no join uses it, and its A/B against the incumbent codec
+    (`eliasfano::tests::measure_ef_vs_block_varint`, `#[ignore]`d) is **native-only** — it times
+    with `std::time::Instant`, so the `wasm32` half of the comparison is unresolved. Treat
+    adoption as an open question; no performance number is asserted.
+  ```rust
+  use sparq_core::eliasfano::EliasFano;
+  let ef = EliasFano::encode(&[3, 3, 9, 40, 41]).expect("non-decreasing");
+  assert_eq!(ef.get(2), Some(9));
+  assert_eq!(ef.next_geq(10), Some((3, 40))); // first (index, value) >= target
+  assert_eq!(ef.next_geq(99), None);          // every element is smaller
+  assert_eq!(ef.iter().collect::<Vec<_>>(), vec![3, 3, 9, 40, 41]);
+  assert!(EliasFano::encode(&[5, 1]).is_none()); // not non-decreasing
+  ```
 - **SPQCPRM2 frame-of-reference col2 encoding (versioned on-disk format; V2 emission opt-in).**
   A second block-stream version, `SPQCPRM2`, alongside the shipped `SPQCPRM1`. Where `SPQCPRM1`
   writes a middle-column-reset col2 id ABSOLUTE, `SPQCPRM2` writes it as a zigzag signed delta from

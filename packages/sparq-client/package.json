@@ -23,6 +23,7 @@
   "sideEffects": false,
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "pretest": "node scripts/check-test-deps.mjs",
     "test": "node --import ./test-support/register-ts.mjs --test test/*.test.mjs",
     "check:wasm-types": "node scripts/check-wasm-types.mjs",
     "sync:wasm-types": "node scripts/sync-wasm-types.mjs",
@@ -37,7 +38,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.1.2",
     "typescript": "^5.7.0"
   },
   "dependencies": {

@@ -45,20 +45,33 @@ pub(crate) fn applicable(
         }
         let mut via: Option<ShapeVia> = None;
         for t in &shape.targets {
-            match t {
-                Target::Node(n) if n == focus => {
-                    via = Some(ShapeVia::TargetNode);
-                    break; // strongest rationale
-                }
+            let matched = match t {
+                Target::Node(n) if n == focus => Some(ShapeVia::TargetNode),
                 Target::Class(c) | Target::ImplicitClass(c) if data.is_instance_of(focus, c) => {
-                    via = via.or(Some(ShapeVia::TargetClass));
+                    Some(ShapeVia::TargetClass)
                 }
-                // SubjectsOf/ObjectsOf/Where/Sparql targets select VALIDATION
-                // focus sets, not form applicability — deliberately skipped.
-                _ => {}
+                // [OPUS-4.8] sq-vfcxv: predicate targets DO drive applicability —
+                // the focus node is a subject (resp. object) of the predicate in
+                // the data graph — but rank below the class-based rationales.
+                Target::SubjectsOf(p) if !data.objects(focus, p).is_empty() => {
+                    Some(ShapeVia::TargetSubjectsOf)
+                }
+                Target::ObjectsOf(p) if !data.subjects(p, focus).is_empty() => {
+                    Some(ShapeVia::TargetObjectsOf)
+                }
+                // sh:targetWhere / SPARQL-valued targets need a conformance
+                // check (resp. a node-expression evaluation) that sparq-shacl
+                // does not expose publicly — still skipped, see the crate docs.
+                _ => None,
+            };
+            via = stronger(via, matched);
+            if via == Some(ShapeVia::TargetNode) {
+                break; // strongest rationale
             }
         }
-        if via.is_none()
+        // dash:applicableToClass outranks the predicate targets, so it is still
+        // consulted when only one of those matched. [OPUS-4.8] sq-vfcxv
+        if via.is_none_or(|v| via_rank(v) > via_rank(ShapeVia::ApplicableToClass))
             && shapes
                 .objects(&shape.node, &dash("applicableToClass"))
                 .iter()
@@ -67,15 +80,9 @@ pub(crate) fn applicable(
             via = Some(ShapeVia::ApplicableToClass);
         }
         if let Some(via) = via {
-            // Strongest rationale first: an explicit node target beats a class
-            // target beats dash:applicableToClass; the FIRST choice becomes the
-            // default selected shape.
-            let rank = match via {
-                ShapeVia::TargetNode => 0,
-                ShapeVia::TargetClass => 1,
-                ShapeVia::ApplicableToClass => 2,
-                ShapeVia::Explicit => 0, // unreachable here (inserted by derive)
-            };
+            // Strongest rationale first; the FIRST choice becomes the default
+            // selected shape.
+            let rank = via_rank(via);
             let choice = ShapeChoice {
                 shape: TermRef::from_term(&shape.node),
                 label: shape_label(shapes, &shape.node),
@@ -87,6 +94,31 @@ pub(crate) fn applicable(
     // Deterministic switcher order: rationale rank, then the node's text.
     out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     out.into_iter().map(|(_, _, c)| c).collect()
+}
+
+/// Switcher strength of a rationale — LOWER sorts first. An explicit node
+/// target beats a class target, which beats `dash:applicableToClass`, which
+/// beats the predicate targets (`sh:targetSubjectsOf` then
+/// `sh:targetObjectsOf`). [OPUS-4.8] sq-vfcxv
+fn via_rank(via: ShapeVia) -> u8 {
+    match via {
+        ShapeVia::TargetNode => 0,
+        ShapeVia::TargetClass => 1,
+        ShapeVia::ApplicableToClass => 2,
+        ShapeVia::TargetSubjectsOf => 3,
+        ShapeVia::TargetObjectsOf => 4,
+        ShapeVia::Explicit => 0, // unreachable in `applicable` (inserted by derive)
+    }
+}
+
+/// The stronger of two rationales for the SAME shape — one shape may carry
+/// several matching targets, and the switcher reports the strongest.
+fn stronger(a: Option<ShapeVia>, b: Option<ShapeVia>) -> Option<ShapeVia> {
+    match (a, b) {
+        (Some(a), Some(b)) if via_rank(b) < via_rank(a) => Some(b),
+        (Some(a), _) => Some(a),
+        (None, b) => b,
+    }
 }
 
 pub(crate) fn derive(

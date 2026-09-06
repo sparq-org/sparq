@@ -1096,7 +1096,7 @@ impl OwlProver<'_> {
 /// Render an N3 term as its serialized form (the engine's own writer).
 fn n3_term_string(t: &N3Term) -> String {
     let mut s = String::new();
-    n3_write_term(t, &mut s);
+    crate::n3::serialize::write_term(t, &mut s);
     s
 }
 

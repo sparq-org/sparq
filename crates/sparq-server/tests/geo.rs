@@ -20,12 +20,28 @@ const DATA: &str = r#"
     ex:lyon   ex:loc "POINT(4.8357 45.7640)"^^geo:wktLiteral .
 "#;
 
+/// [SONNET-4.6] sq-6ep — a GeoSPARQL-VOCABULARY fixture (`geo:Feature` /
+/// `geo:hasGeometry` / `geo:asWKT`), as opposed to [`DATA`], which hangs WKT
+/// literals off a plain `ex:loc` predicate. Used by the protocol-level probe the
+/// OGC R1 row cites.
+const GEO_VOCAB_DATA: &str = r#"
+    @prefix geo: <http://www.opengis.net/ont/geosparql#> .
+    @prefix ex:  <http://ex/> .
+    ex:london a geo:Feature ; geo:hasGeometry ex:londonGeom .
+    ex:londonGeom a geo:Geometry ;
+        geo:asWKT "POINT(-0.1278 51.5074)"^^geo:wktLiteral .
+"#;
+
 const PREFIXES: &str = "PREFIX geof: <http://www.opengis.net/def/function/geosparql/> \
                         PREFIX uom:  <http://www.opengis.net/def/uom/OGC/1.0/> \
                         PREFIX ex:   <http://ex/> ";
 
 async fn spawn() -> String {
-    let graph = Graph::load_str(DATA, "turtle").unwrap();
+    spawn_with(DATA).await
+}
+
+async fn spawn_with(data: &str) -> String {
+    let graph = Graph::load_str(data, "turtle").unwrap();
     let app = router(AppState::new(graph));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -110,6 +126,37 @@ async fn update_where_with_geof_filter() {
     let body = resp.text().await.unwrap();
     assert!(body.contains("http://ex/paris"), "got: {body}");
     assert!(!body.contains("http://ex/lyon"), "got: {body}");
+}
+
+/// [SONNET-4.6] sq-6ep — the SPARQL-PROTOCOL half of OGC GeoSPARQL R1 ("support
+/// SPARQL Query + Protocol + the `geo:` ontology vocabulary"): a `geo:Feature` /
+/// `geo:hasGeometry` / `geo:asWKT` graph pattern answered over real HTTP by the
+/// `/sparql` endpoint.
+///
+/// The other tests in this file drive `geof:` FUNCTIONS over a plain `ex:loc`
+/// predicate, so they exercise none of the `geo:` vocabulary; this one is what
+/// lets sparq-geo's requirements scoreboard
+/// (`crates/sparq-geo/tests/ogc_geosparql_requirements.rs`, R1) cite a
+/// protocol-level probe over that vocabulary instead of resting the Protocol
+/// conjunct on an in-process evaluator, which is not an endpoint.
+#[tokio::test]
+async fn geo_vocabulary_graph_pattern_over_http() {
+    let base = spawn_with(GEO_VOCAB_DATA).await;
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/sparql"))
+        .query(&[(
+            "query",
+            "PREFIX geo: <http://www.opengis.net/ont/geosparql#> \
+             SELECT ?wkt WHERE { ?f a geo:Feature ; geo:hasGeometry ?g . \
+                                 ?g geo:asWKT ?wkt }"
+                .to_string(),
+        )])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("POINT(-0.1278 51.5074)"), "got: {body}");
 }
 
 #[tokio::test]

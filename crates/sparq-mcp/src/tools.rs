@@ -297,6 +297,41 @@ pub const ASK: ToolSpec = ToolSpec {
     },
 };
 
+/// The `nl_query` tool: server-side natural-language → SPARQL **translation**, behind the
+/// same opt-in `nlq` feature (`sq-sj1f9`). The description's load-bearing job is to stop an
+/// agent reading the output as an ANSWER: nothing was executed, so no rows are implied.
+/// [SONNET-4.6]
+#[cfg(feature = "nlq")]
+pub const NL_QUERY: ToolSpec = ToolSpec {
+    name: "nl_query",
+    description: "Translate a natural-language question into a SPARQL query and return the \
+                  query WITHOUT running it. The query is validated (it parses, and it uses \
+                  no construct the server refuses, such as SERVICE federation) but NOT \
+                  executed: the response carries `executed: false` and NO result rows, so \
+                  do not read it as an answer. Review the query, then run it with `query` \
+                  (or use `ask` to translate and execute in one step). HONEST FRAMING: like \
+                  `ask` this embeds a configurable LLM call — cost, latency, and query \
+                  quality depend entirely on the model/endpoint YOU configure (via \
+                  ANTHROPIC_API_KEY, or an OpenAI-compatible SPARQ_NLQ_ENDPOINT_URL + \
+                  _MODEL); the server ships no default model. If no model is configured \
+                  the tool returns a clear 'not configured' error — it NEVER fabricates a \
+                  query. Because nothing was executed, a returned query may still fail at \
+                  runtime or match nothing.",
+    input_schema: || {
+        json!({
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "A natural-language question about the loaded dataset."
+                }
+            },
+            "required": ["question"],
+            "additionalProperties": false
+        })
+    },
+};
+
 /// The `template_list` tool (feature `templates`): the registered named-template
 /// definitions, so an agent can ground a `template_invoke` call. [FABLE-5] sq-lsp7k.10
 #[cfg(feature = "templates")]
@@ -474,8 +509,8 @@ pub const DESCRIBE_FORM: ToolSpec = ToolSpec {
     },
 };
 
-/// The read-only tool set, always advertised in the default build. `ask` (feature `nlq`)
-/// is appended by [`advertised`] only when a model backend is configured.
+/// The read-only tool set, always advertised in the default build. `ask` / `nl_query`
+/// (feature `nlq`) are appended by [`advertised`] only when a model backend is configured.
 pub const READ_ONLY: &[&ToolSpec] = &[
     &QUERY,
     &CONSTRUCT,
@@ -488,17 +523,20 @@ pub const READ_ONLY: &[&ToolSpec] = &[
 ];
 
 /// The full list of tools this server advertises, given its config — `UPDATE` is
-/// appended only when [`McpServer`] was built with update enabled, and `ask` (feature
-/// `nlq`) only when an LLM backend is configured (so a feature-on server with no key
-/// configured does not advertise an unusable tool — it degrades cleanly).
+/// appended only when [`McpServer`] was built with update enabled, and the NL tools
+/// (`ask` / `nl_query`, feature `nlq`) only when an LLM backend is configured (so a
+/// feature-on server with no key configured does not advertise an unusable tool — it
+/// degrades cleanly).
 pub fn advertised(server: &McpServer) -> Vec<&'static ToolSpec> {
     let mut tools: Vec<&'static ToolSpec> = READ_ONLY.to_vec();
     if server.allow_update() {
         tools.push(&UPDATE);
     }
+    // Both NL tools share the one backend, so they are advertised (or withheld) together.
     #[cfg(feature = "nlq")]
     if crate::nlq::backend_configured() {
         tools.push(&ASK);
+        tools.push(&NL_QUERY);
     }
     // [FABLE-5] sq-lsp7k.10: the template tools are advertised only when the embedder
     // registered at least one template (a template-less server does not advertise an

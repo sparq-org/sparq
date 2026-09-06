@@ -23,11 +23,18 @@
 //! [SONNET-4.6] (sq-jo6ty) **Per-query `ef_search` (`nearest_with_ef`)**: `instant-distance`
 //! encodes `ef_search` into `HnswMap` at build time and does not expose a per-search
 //! override. `VectorIndex` therefore caches the L2-normalised `NPoint` vectors and builds
-//! a secondary map on first use of each new `ef_search` value (same graph topology;
-//! `ef_construction` and `seed` are unchanged). The secondary map is stored in a
-//! `Mutex<HashMap<usize, HnswMap<…>>>` so sweeps amortise the rebuild cost: 100 queries
+//! a secondary map on first use of each new `ef_search` value (`ef_construction` and `seed`
+//! are unchanged — though see `nearest_with_ef` on why that does NOT pin the resulting graph
+//! topology bit-for-bit). The secondary map is stored in an
+//! `RwLock<HashMap<usize, Arc<HnswMap<…>>>>` so sweeps amortise the rebuild cost: 100 queries
 //! at `ef=16`, then 100 at `ef=32`, pay one extra build per ef level, not one per query.
 //! `nearest_with_ef(q, k, ef)` where `ef == build_ef_search` is free (uses the primary map).
+//!
+//! [SONNET-4.6] (sq-ey95c) The secondary path holds NO lock while it searches: a cache hit
+//! takes a *read* guard, clones the `Arc<HnswMap<…>>` handle out, drops the guard, and searches
+//! the map unlocked — so any number of threads can query the same (or different) ef level in
+//! parallel. The lazy build likewise runs outside the lock; the write guard is taken only for
+//! the `HashMap` insert.
 
 use crate::store::VectorStore;
 #[cfg(feature = "approx-ann")]
@@ -35,7 +42,7 @@ use instant_distance::{Builder, HnswMap, Point, Search};
 #[cfg(feature = "approx-ann")]
 use std::collections::HashMap;
 #[cfg(feature = "approx-ann")]
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use oxrdf::Term;
 use sparq_core::dict::Id;
 use sparq_core::Graph;
@@ -429,7 +436,13 @@ pub struct VectorIndex {
     values: Vec<Id>,
     /// Lazily-built secondary maps keyed by `ef_search`. Populated on the first
     /// `nearest_with_ef` call at a new ef level; thereafter the cached map is reused.
-    ef_cache: Mutex<HashMap<usize, HnswMap<NPoint, Id>>>,
+    ///
+    /// [SONNET-4.6] (sq-ey95c) An `RwLock` over `Arc`-handled maps rather than a
+    /// `Mutex<HashMap<_, HnswMap<…>>>`: the `Arc` lets a hit clone the handle out from under a
+    /// *read* guard and search with NO lock held, so concurrent queries at the same ef level run
+    /// in parallel instead of serialising on the cache. A once-built map is never mutated, so
+    /// sharing it by `Arc` is sound.
+    ef_cache: RwLock<HashMap<usize, Arc<HnswMap<NPoint, Id>>>>,
     dim: usize,
 }
 
@@ -469,7 +482,7 @@ impl VectorIndex {
             seed: cfg.seed,
             points,
             values,
-            ef_cache: Mutex::new(HashMap::new()),
+            ef_cache: RwLock::new(HashMap::new()),
             dim: store.dim(),
         }
     }
@@ -505,8 +518,21 @@ impl VectorIndex {
     /// When `ef_search == build_ef_search` (the value passed to [`HnswConfig`] at build
     /// time), the primary map is used directly — zero extra overhead. For any other value,
     /// a secondary map is built once and cached; subsequent calls at the same ef level
-    /// reuse the cached map. All secondary maps share the same `ef_construction`, `seed`,
-    /// and normalised point set as the primary map, so the graph topology is identical.
+    /// reuse the cached map. All secondary maps are built from the same `ef_construction`,
+    /// `seed`, and normalised point set as the primary map.
+    ///
+    /// [SONNET-4.6] (sq-ey95c) **Not bit-reproducible across builds.** Measured on this crate's
+    /// 5 000 × 32 test corpus, two `build_with` calls with an identical store and identical
+    /// `HnswConfig` (`seed` included) disagree on a small fraction of queries at low `ef`:
+    /// `instant-distance` builds the graph rayon-parallel, and the seed does not pin the
+    /// resulting topology. Results are therefore stable *within* one `VectorIndex` (each ef
+    /// level is built and cached exactly once), but two indices over the same data may differ.
+    /// Compare against the same index, not a rebuilt one.
+    ///
+    /// [SONNET-4.6] (sq-ey95c) **Concurrency**: the secondary path holds no lock while it
+    /// searches, so any number of threads may query the same ef level in parallel; only the
+    /// cache lookup/insert is synchronised. The method takes `&self` and is safe to call from
+    /// many threads at once.
     ///
     /// **APPROXIMATE** — recall `< 1.0` at any finite `ef_search`; use [`nearest_exact`]
     /// for answer-exact results.
@@ -524,28 +550,56 @@ impl VectorIndex {
                 .map(|item| (*item.value, 1.0 - item.distance * item.distance / 2.0))
                 .collect();
         }
-        // [SONNET-4.6] (sq-jo6ty) Non-default ef: check the cache, build and insert if absent,
-        // then search with the lock held. The search is read-only on the map and only mutates
-        // `search` (a local variable), so there is no correctness issue with holding the lock
-        // here — throughput of the secondary path is a benchmarking sweep concern, not a
-        // production hot path.
-        let mut cache = self.ef_cache.lock().unwrap_or_else(|e| e.into_inner());
-        let ef_construction = self.ef_construction;
-        let seed = self.seed;
-        let points = &self.points;
-        let values = &self.values;
-        cache.entry(ef_search).or_insert_with(|| {
-            Builder::default()
-                .ef_search(ef_search)
-                .ef_construction(ef_construction)
-                .seed(seed)
-                .build(points.clone(), values.clone())
-        });
-        cache[&ef_search]
-            .search(&q, &mut search)
+        // [SONNET-4.6] (sq-ey95c) Non-default ef: resolve the secondary map to an owned `Arc`
+        // handle, then search with NO lock held. Both guards below are scoped so the (expensive)
+        // build and the (hot) search happen outside them — concurrent queries at the same ef
+        // level share a read guard and then run fully in parallel.
+        let map = self.secondary_map(ef_search);
+        map.search(&q, &mut search)
             .take(k)
             .map(|item| (*item.value, 1.0 - item.distance * item.distance / 2.0))
             .collect()
+    }
+
+    /// [SONNET-4.6] (sq-ey95c) Returns the cached secondary map for a non-default `ef_search`,
+    /// building it on first use. Neither the lookup nor the insert keeps a guard alive past the
+    /// statement that takes it, so the caller searches the returned handle lock-free.
+    ///
+    /// A lost build race is possible — two threads may build the same ef level concurrently and
+    /// one result is discarded. That is deliberate: building under the write guard would block
+    /// every reader (including readers at *other*, already-cached ef levels) for the whole build.
+    /// The race costs duplicated work, never a differing answer: `or_insert` keeps the FIRST map
+    /// to land and the loser searches that same map, so for the life of the index exactly ONE
+    /// map is ever observed per ef level. (This matters because `instant-distance`'s build is
+    /// not bit-reproducible even at a fixed `seed` — see the caveat on [`Self::nearest_with_ef`]
+    /// — so returning the loser's own map instead could change results between runs.)
+    fn secondary_map(&self, ef_search: usize) -> Arc<HnswMap<NPoint, Id>> {
+        // Fast path: a shared read guard, released before the (unlocked) search.
+        if let Some(map) = self
+            .ef_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ef_search)
+        {
+            return Arc::clone(map);
+        }
+        // Miss: build OUTSIDE the lock so concurrent queries at other ef levels are unaffected.
+        let built = Arc::new(
+            Builder::default()
+                .ef_search(ef_search)
+                .ef_construction(self.ef_construction)
+                .seed(self.seed)
+                .build(self.points.clone(), self.values.clone()),
+        );
+        // The write guard covers the insert only. `or_insert` keeps the first map to land, so a
+        // racing thread's map is dropped here rather than replacing a handle already in use.
+        Arc::clone(
+            self.ef_cache
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(ef_search)
+                .or_insert(built),
+        )
     }
 
     /// Approximate top-`k` neighbors of `term`: resolves it through the graph's

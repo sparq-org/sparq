@@ -356,8 +356,9 @@ impl<S: Store> LdpState<S> {
     }
 
     /// Single-pass READ authorization over ONE combined read-plan round-trip (read-2 —
-    /// `docs/design/backend-read-path.md` §3.1), still deriving the decision AND both `WAC-Allow`
-    /// audiences from ONE effective-ACL resolution (Optimization #2).
+    /// `research/lws-design-records.md` §7; RSS `docs/design/backend-read-path.md` §3.1), still
+    /// deriving the decision AND both `WAC-Allow` audiences from ONE effective-ACL resolution
+    /// (Optimization #2).
     ///
     /// The per-read metadata chain — the target's own metadata plus the presence/etag of EVERY ACL
     /// candidate on its resolution chain — is fetched in ONE [`Store::read_plan`] call (one
@@ -512,10 +513,11 @@ impl<S: Store> LdpState<S> {
         }
     }
 
-    /// The shared write-path PLANNED authorization core (write-2, `docs/design/backend-read-path.md`
-    /// §3.1 applied to the write verbs): derive the ACL-candidate chain, fetch every candidate's
-    /// presence/etag in ONE combined [`Store::read_plan`] round-trip (replacing the sequential k+1
-    /// per-candidate `meta` probes the [`WacAuthorizer::authorize`] walk pays), then decide via
+    /// The shared write-path PLANNED authorization core (write-2 — `research/lws-design-records.md`
+    /// §7; RSS `docs/design/backend-read-path.md` §3.1, applied to the write verbs): derive the
+    /// ACL-candidate chain, fetch every candidate's presence/etag in ONE combined
+    /// [`Store::read_plan`] round-trip (replacing the sequential k+1 per-candidate `meta` probes
+    /// the [`WacAuthorizer::authorize`] walk pays), then decide via
     /// [`WacAuthorizer::authorize_planned`] — whose in-memory walk + LIVE found-ACL re-confirm is
     /// differentially tested bit-for-bit against the sequential walk for every [`AccessMode`].
     ///
@@ -599,7 +601,8 @@ impl<S: Store> LdpState<S> {
         Ok(())
     }
 
-    /// EXISTENCE-NON-DISCLOSURE — the **V4** conditional-channel closure (decisions/0003).
+    /// EXISTENCE-NON-DISCLOSURE — the **V4** conditional-channel closure
+    /// (`research/lws-design-records.md` §6; RSS `decisions/0003`).
     ///
     /// A conditional precondition (`If-Match` / `If-None-Match`) on a mutating request is evaluated
     /// against the target's CURRENT ETag, which is a CONTENT-derived (for a document) or
@@ -656,7 +659,8 @@ impl<S: Store> LdpState<S> {
         Ok(())
     }
 
-    /// EXISTENCE-NON-DISCLOSURE — the **V6** POST descendant-existence closure (decisions/0003).
+    /// EXISTENCE-NON-DISCLOSURE — the **V6** POST descendant-existence closure
+    /// (`research/lws-design-records.md` §6; RSS `decisions/0003`).
     ///
     /// A POST authorizes `acl:Append` on the target container. For a MISSING target (a not-yet-existing
     /// sub-container, or a reserved non-container path), that target has no own `.acl`, so the required
@@ -697,7 +701,8 @@ impl<S: Store> LdpState<S> {
     /// existence-probing writer genuinely lacks. One narrow residual survives — a Read-holder-via-
     /// inheritance who is SEPARATELY denied on a specific existing child by that child's own restrictive
     /// `.acl` can still distinguish THAT child (403) from a missing one (404); this is WAC-inherent
-    /// (a per-child `.acl` legitimately overrides inheritance) and documented in decisions/0003.
+    /// (a per-child `.acl` legitimately overrides inheritance) and documented in RSS
+    /// `decisions/0003` — carried forward as `research/lws-design-records.md` §6.
     fn guard_post_existence_requires_read(
         &self,
         target_iri: &str,
@@ -891,14 +896,15 @@ pub(crate) async fn serve_read<S: Store>(
     // so sizing for the container/storage-root maximum means neither the 304 path (fewer entries) nor
     // a full plain-resource/container response reallocates. Byte-identical output.
     let mut out = HeaderMap::with_capacity(18);
-    // V5 (decisions/0003) — the membership-derived container `etag` computed above shifts on every
-    // child add/remove, so it is a listing oracle. It is exposed ONLY here, on the GET/HEAD read path,
-    // which is gated above by `authorize_read` requiring `acl:Read` on the container — so a non-reader
-    // NEVER reaches this ETag (nor the 304 short-circuit that also carries it). The conditional-channel
-    // sibling (a non-reader probing the container ETag via `If-Match` on a write) is closed by the V4
-    // `guard_conditional_requires_read` in the mutating handlers. Together these Read-gate the container
-    // ETag end to end. (If a future change emits a container's representation ETag outside a Read-gated
-    // path, that gate must be re-established there too.)
+    // V5 (`research/lws-design-records.md` §6) — the membership-derived container `etag` computed
+    // above shifts on every child add/remove, so it is a listing oracle. It is exposed ONLY here,
+    // on the GET/HEAD read path, which is gated above by `authorize_read` requiring `acl:Read` on
+    // the container — so a non-reader NEVER reaches this ETag (nor the 304 short-circuit that also
+    // carries it). The conditional-channel sibling (a non-reader probing the container ETag via
+    // `If-Match` on a write) is closed by the V4 `guard_conditional_requires_read` in the mutating
+    // handlers. Together these Read-gate the container ETag end to end. (If a future change emits a
+    // container's representation ETag outside a Read-gated path, that gate must be re-established
+    // there too.)
     set_str(&mut out, header::ETAG, &etag);
     // `Vary: Accept` (RFC 9110 §12.5.5): the representation AND its `ETag` above were selected using
     // the request's `Accept` header (RDF conneg Turtle↔JSON-LD; a container's rendered body is
@@ -1095,17 +1101,18 @@ pub async fn put_handler<S: Store>(
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
 
-    // WAC for PUT — EXISTENCE-NON-DISCLOSURE (decisions/0003): a PUT requires `acl:Write` on the
-    // TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing target), authorized
-    // **regardless of whether the target exists** so create and overwrite are INDISTINGUISHABLE to an
-    // under-authorized requester:
+    // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
+    // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
+    // target), authorized **regardless of whether the target exists** so create and overwrite are
+    // INDISTINGUISHABLE to an under-authorized requester:
     //  - **Overwrite** (target exists): `acl:Write` on the target — unchanged.
     //  - **Create** (target absent): ALSO `acl:Write` on the target's INHERITED ACL — NOT the weaker
     //    parent-`acl:Append`. This closes the V1 create-vs-forbidden-overwrite existence oracle: a
     //    drop-box writer holding only parent `acl:Append` (no target Write) previously got a 201 on a
     //    free name but a 403 on a taken one — leaking which child names exist. Now both are the SAME
     //    denial. (CTH-safe: every `write-access-*` PUT-fictive row that expects 201 grants the agent
-    //    inheritable `acl:Write`; no row expects an Append-only PUT-create=201 — see decisions/0003.)
+    //    inheritable `acl:Write`; no row expects an Append-only PUT-create=201 —
+    //    see `research/lws-design-records.md` §6.)
     //    TRADE-OFF: an `acl:Append`-only agent can no longer PUT-create; it MUST use POST (which mints
     //    a server-opaque, collision-free name — the containment-mutating create primitive). Documented
     //    in the ADR.
@@ -1118,10 +1125,11 @@ pub async fn put_handler<S: Store>(
     let origin = request_origin(&headers);
     let granted = state.authorize("PUT", &target, &token, origin).await?;
 
-    // V4 (decisions/0003): a conditional precondition is a CONTENT/MEMBERSHIP-derived validator — a
-    // requester lacking `acl:Read` on the target must NOT get its existence-revealing 412-vs-2xx
-    // outcome (nor a returned ETag). Fold to the denial code when a conditional header is present and
-    // the requester holds no Read. Done BEFORE the existence probe so it adds no oracle of its own.
+    // V4 (`research/lws-design-records.md` §6): a conditional precondition is a
+    // CONTENT/MEMBERSHIP-derived validator — a requester lacking `acl:Read` on the target must NOT
+    // get its existence-revealing 412-vs-2xx outcome (nor a returned ETag). Fold to the denial code
+    // when a conditional header is present and the requester holds no Read. Done BEFORE the
+    // existence probe so it adds no oracle of its own.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
     // The caller IS authorized. Only NOW probe existence (an authorized writer is entitled to learn
@@ -1254,10 +1262,11 @@ pub async fn post_handler<S: Store>(
     // 405 Method-Not-Allowed when a plain resource is there (POST does not create a child of a
     // resource). (This supersedes the earlier 409 — a 409 is not the spec-accepted status here.)
     if !container.is_container {
-        // EXISTENCE-NON-DISCLOSURE (V6, decisions/0003): the non-container existence branch (405 when a
-        // resource is present, 404 when absent) DISCLOSES whether the named target exists. Fold it to
-        // the requester's denial unless they hold Read on the target — BEFORE the existence probe, so
-        // the deny path performs no target-dependent lookup (structural, per the ADR's timing note).
+        // EXISTENCE-NON-DISCLOSURE (V6, `research/lws-design-records.md` §6): the non-container
+        // existence branch (405 when a resource is present, 404 when absent) DISCLOSES whether the
+        // named target exists. Fold it to the requester's denial unless they hold Read on the
+        // target — BEFORE the existence probe, so the deny path performs no target-dependent lookup
+        // (structural, per the ADR's timing note).
         state.guard_post_existence_requires_read(&container.iri, &granted, &token)?;
         return if state.store.exists(&container.iri).await? {
             Err(ServerError::MethodNotAllowed)
@@ -1436,10 +1445,11 @@ pub async fn delete_handler<S: Store>(
         }
     }
 
-    // V4 (decisions/0003): a DELETE may carry `If-Match`/`If-None-Match`, whose 412-vs-2xx outcome
-    // against the CONTENT/MEMBERSHIP-derived current ETag is an existence+content oracle. A requester
-    // authorized to DELETE but NOT to READ the target (a Write-without-Read document holder) must get
-    // the denial code rather than that conditional outcome. Folded BEFORE the existence probe.
+    // V4 (`research/lws-design-records.md` §6): a DELETE may carry `If-Match`/`If-None-Match`,
+    // whose 412-vs-2xx outcome against the CONTENT/MEMBERSHIP-derived current ETag is an
+    // existence+content oracle. A requester authorized to DELETE but NOT to READ the target (a
+    // Write-without-Read document holder) must get the denial code rather than that conditional
+    // outcome. Folded BEFORE the existence probe.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
     let current = state.store.meta(&target.iri).await?;
@@ -1552,7 +1562,8 @@ pub async fn patch_handler<S: Store>(
 
     let origin = request_origin(&headers);
 
-    // WAC for PATCH — EXISTENCE-NON-DISCLOSURE (decisions/0003): the required mode is derived purely
+    // WAC for PATCH — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): the required
+    // mode is derived purely
     // from the patch CONTENT (already parsed) and authorized against the TARGET's effective ACL
     // (inherited via `acl:default` for a not-yet-existing target), **BEFORE any target-dependent
     // read/existence probe**, so create-on-PATCH and forbidden-modify are INDISTINGUISHABLE to an
@@ -1570,7 +1581,7 @@ pub async fn patch_handler<S: Store>(
     // (CTH-safe: every `write-access-*` PATCH-fictive row that expects 2xx grants the agent inheritable
     // `acl:Append`/`acl:Write` — which the target's effective-ACL resolution picks up via `acl:default`;
     // the `acl:Control`-only fictive rows expect a denial, which Append-on-target rejects. The earlier
-    // delete-on-missing closure is now just the general rule. See decisions/0003.)
+    // delete-on-missing closure is now just the general rule. See `research/lws-design-records.md` §6.)
     //
     // Authorizing BEFORE the target read closes the V3 timing channel too: the under-authorized denial
     // is returned with NO target-dependent read in its path, and the access decision reads ONLY `.acl`
@@ -1585,16 +1596,17 @@ pub async fn patch_handler<S: Store>(
         .authorize_mode(&target, required, &token, origin)
         .await?;
 
-    // V4 (decisions/0003) — the `solid:where` READ-gate. A patch carrying a `solid:where` clause READS
-    // the target graph: `apply_patch` runs the BGP solver over the target's CURRENT triples, and its
-    // outcome (exactly-one-solution ⇒ 2xx vs zero/many ⇒ 409, and a missing target ⇒ empty graph ⇒
-    // always 0 ⇒ 409) is a CONTENT/EXISTENCE oracle — the very channel V4 closes for conditional
-    // HEADERS, but reachable through the patch BODY at only `acl:Append`. So a `where`-bearing patch
-    // additionally requires the target's READ mode (`acl:Read`, or `acl:Control` for an `.acl` — reading
-    // an `.acl`'s representation is a Control op, and `granted` already holds Control for an authorized
-    // `.acl` writer). This matches CSS's `N3PatchModesExtractor`, which adds `read` when the patch has
-    // `conditions`. Fold to the requester's denial (401 anon / 403 auth) BEFORE the target read, so it
-    // adds no oracle of its own. An unconditional (no-`where`) patch is unaffected.
+    // V4 (`research/lws-design-records.md` §6) — the `solid:where` READ-gate. A patch carrying a
+    // `solid:where` clause READS the target graph: `apply_patch` runs the BGP solver over the
+    // target's CURRENT triples, and its outcome (exactly-one-solution ⇒ 2xx vs zero/many ⇒ 409, and
+    // a missing target ⇒ empty graph ⇒ always 0 ⇒ 409) is a CONTENT/EXISTENCE oracle — the very
+    // channel V4 closes for conditional HEADERS, but reachable through the patch BODY at only
+    // `acl:Append`. So a `where`-bearing patch additionally requires the target's READ mode
+    // (`acl:Read`, or `acl:Control` for an `.acl` — reading an `.acl`'s representation is a Control
+    // op, and `granted` already holds Control for an authorized `.acl` writer). This matches CSS's
+    // `N3PatchModesExtractor`, which adds `read` when the patch has `conditions`. Fold to the
+    // requester's denial (401 anon / 403 auth) BEFORE the target read, so it adds no oracle of its
+    // own. An unconditional (no-`where`) patch is unaffected.
     if !patch.conditions.is_empty() {
         let read_mode = if crate::authz::is_acl_resource(&target.iri) {
             AccessMode::Control
@@ -1610,8 +1622,9 @@ pub async fn patch_handler<S: Store>(
         }
     }
 
-    // V4 (decisions/0003): a conditional precondition is a CONTENT-derived validator — fold to the
-    // denial when the requester lacks `acl:Read` and sent a conditional header, BEFORE the target read.
+    // V4 (`research/lws-design-records.md` §6): a conditional precondition is a CONTENT-derived
+    // validator — fold to the denial when the requester lacks `acl:Read` and sent a conditional
+    // header, BEFORE the target read.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
     // The caller IS authorized. ONLY NOW load the current representation (an authorized writer is
@@ -2197,7 +2210,8 @@ fn wants_container_via_link(headers: &HeaderMap) -> bool {
 /// Mint a child IRI within `container`. A `Slug` (sanitised) is used ONLY as a NON-binding PREFIX of a
 /// server-generated, collision-free, **opaque** name — NEVER as the verbatim final segment.
 ///
-/// V2 — EXISTENCE-NON-DISCLOSURE for the `Location` header (decisions/0003). The prior mint returned
+/// V2 — EXISTENCE-NON-DISCLOSURE for the `Location` header (`research/lws-design-records.md` §6;
+/// RSS `decisions/0003`). The prior mint returned
 /// the verbatim `…/<slug>` when that name was FREE but a mangled `…/<slug>-<opaque>` when it was TAKEN.
 /// A POST always returns 201, so the *shape* of the `Location` was the only difference — and it leaked
 /// whether `<slug>` already existed in the container to any caller who can POST (an `acl:Append`
@@ -3476,9 +3490,10 @@ mod tests {
         .await
         .expect("a .meta slug is a normal resource name and must be allowed");
         assert_eq!(resp.status(), StatusCode::CREATED);
-        // V2 (decisions/0003): the minted `Location` is collision-INDEPENDENT — it CONTAINS the Slug
-        // stem (`secret.meta`) but is opaque-suffixed (never the verbatim segment), so it carries no
-        // existence signal. The created resource exists at exactly that minted Location.
+        // V2 (`research/lws-design-records.md` §6): the minted `Location` is collision-INDEPENDENT
+        // — it CONTAINS the Slug stem (`secret.meta`) but is opaque-suffixed (never the verbatim
+        // segment), so it carries no existence signal. The created resource exists at exactly that
+        // minted Location.
         let loc = resp
             .headers()
             .get(header::LOCATION)
@@ -3524,10 +3539,11 @@ mod tests {
         .await
         .expect("a benign Append POST must still succeed");
         assert_eq!(resp.status(), StatusCode::CREATED);
-        // V2 (decisions/0003): the child's `Location` CONTAINS the Slug (`note`) as an opaque-suffixed
-        // prefix — collision-INDEPENDENT, so it leaks nothing about which names already exist — and the
-        // resource exists at exactly that Location. (The CTH `post-uri-assignment-slug` row asserts only
-        // `Location contains '<slug>'`, which this satisfies.)
+        // V2 (`research/lws-design-records.md` §6): the child's `Location` CONTAINS the Slug
+        // (`note`) as an opaque-suffixed prefix — collision-INDEPENDENT, so it leaks nothing about
+        // which names already exist — and the resource exists at exactly that Location. (The CTH
+        // `post-uri-assignment-slug` row asserts only `Location contains '<slug>'`, which this
+        // satisfies.)
         let loc = resp
             .headers()
             .get(header::LOCATION)
@@ -3777,7 +3793,8 @@ mod tests {
     }
 
     // =====================================================================================
-    // EXISTENCE-NON-DISCLOSURE (decisions/0003) — the exhaustive byte-identical matrix.
+    // EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6; RSS `decisions/0003`) — the
+    // exhaustive byte-identical matrix.
     //
     // THE RULE: 404 is served ONLY to a requester who holds the operation's required mode. Every other
     // requester (anonymous → 401, authenticated-but-unauthorized → 403) gets their DENIAL code for BOTH
@@ -4000,7 +4017,7 @@ mod tests {
     // container-exists check 404s). The V6 closure Read-gates the POST existence branch: a requester
     // WITHOUT `acl:Read` on the target gets the byte-identical denial for missing AND locked, so the
     // status reveals nothing; a Read holder (the owner / the CTH `post-target-not-found` client) keeps
-    // the true 404. See `guard_post_existence_requires_read` + decisions/0003.
+    // the true 404. See `guard_post_existence_requires_read` + `research/lws-design-records.md` §6.
 
     const DAVE: &str = "https://pod.example/dave/profile/card#me";
     const EVE: &str = "https://pod.example/eve/profile/card#me";

@@ -1,0 +1,470 @@
+# [OPUS-5] start-here.toml — the CURATED copy of the maintainer front door, issue #1135.
+#
+# WHY THIS FILE EXISTS (sparq-org/sparq#4145). #1135 is titled "auto-maintained" and never was:
+# it was refreshed by hand, and on 2026-07-26 it was 13 days stale with SEVEN entries already
+# resolved (#1848/#992/#1917 closed, #1084/#1973 closed-unmerged, #1791/#1155 merged) while still
+# being presented to the maintainer as work needing them. A front door that lists resolved work
+# burns the one resource the project cannot scale. So the de-staling is STRUCTURAL: this file holds
+# only the JUDGEMENT (which asks exist, how they are worded), and
+# `scripts/render-start-here.py` re-renders the issue body from it plus LIVE GitHub state, dropping
+# any entry whose issue/PR has closed or merged.
+#
+# CONTRACT (enforced by scripts/render-start-here.py --self-test and
+# scripts/tests/test_start_here_render.py):
+#   * The renderer may only DROP, ANNOTATE and ORDER what is written here. It NEVER invents an ask.
+#     A new 🔴/🟡 item therefore arrives as a PR to this file — not as a hand edit of the issue
+#     (a hand edit is overwritten by the next refresh).
+#   * Every entry needs `ref` (or an explicit `untracked = true`), `bucket`, `ask`, `short`.
+#   * `ref` is the LIVE-STATE KEY only; it is never the source of the rendered prose (the 🔴 asks
+#     carry their own inline links). Cross-repo refs are allowed — "owner/repo#N" — but the refresh
+#     job runs on the repo-scoped GITHUB_TOKEN, so a ref in a PRIVATE repo reads as "state unknown":
+#     the entry is kept and marked (fail-closed), never dropped, and the job reds. Keep cross-repo
+#     refs public (jeswr/agent-account-registry is).
+#   * `ask` is free markdown on ONE logical line: the renderer collapses whitespace and re-wraps,
+#     so wrap it here for readability however you like. No blank lines inside a value.
+#   * `short` is the label used when the entry is dropped ("Removed as resolved").
+#   * `{placeholders}` in [[process]]/[[flight]]/[text] are substituted from LIVE counts; an
+#     unknown placeholder is a hard error, so a typo cannot ship a literal "{needs_user}".
+#
+# HOUSEKEEPING: entries that the renderer has dropped stay here (harmlessly re-listed under
+# "Removed as resolved") until a follow-up PR prunes them. Pruning is a copy edit; dropping is
+# automatic — that ordering is deliberate, because the automatic half is the one that must never
+# depend on anyone remembering.
+
+[meta]
+repo = "sparq-org/sparq"
+issue = 1135
+
+[text]
+header = '''
+🤖 **SPARQ agent** — your single front door. Decisions-first; only 🔴/🟡 need you.
+'''
+
+# Substituted: {date}, {dropped_sentence}.
+preamble = '''
+**Every item below was re-verified against the live GitHub API on {date}.** {dropped_sentence}
+This body is RENDERED by [`scripts/render-start-here.py`](https://github.com/sparq-org/sparq/blob/main/scripts/render-start-here.py)
+from [`orchestration/start-here.toml`](https://github.com/sparq-org/sparq/blob/main/orchestration/start-here.toml)
+on a schedule and whenever an issue or PR closes ([#4145](https://github.com/sparq-org/sparq/issues/4145)),
+so a closed or merged item drops out by construction and the PR table reads live conflict state.
+Changing what we ask you arrives as a PR to that TOML — a hand edit here is overwritten.
+'''
+
+blocked_intro = '''
+Each of these is human-only by nature — a credential, a licence, an external human, or your name on
+a public decision. No agent can close them.
+'''
+
+gated_intro = '''
+Protected paths and spec surfaces the fleet will not self-arm.
+'''
+
+process_intro = '''
+These cap everything else. Counts are live.
+'''
+
+# ---------------------------------------------------------------------------------------------
+# 🔴 Only you can unblock.
+# ---------------------------------------------------------------------------------------------
+
+[[entry]]
+ref = "sparq-org/sparq#53"
+bucket = "blocked"
+short = "npm bootstrap publish"
+ask = '''
+**npm bootstrap publish** — `@jeswr/sparq` is **still not live** (registry returns **404**).
+`publish.yml` (OIDC trusted publishing) is merged and ready; it needs your one-time `npm publish` +
+trusted-publisher registration. **Revoke the chat-sent token either way.**
+([#53](https://github.com/sparq-org/sparq/issues/53))
+'''
+
+[[entry]]
+# The ask is bead sq-qhy4, which has no GitHub issue of its own; #3274 (assurance promotion) is
+# GATED BY it, not equal to it, so #3274 closing must NOT drop this. Hence untracked: this entry
+# can only ever be removed by a human editing this file.
+untracked = true
+bucket = "blocked"
+short = "external cryptographer ZK audit (sq-qhy4)"
+ask = '''
+**External accredited-cryptographer ZK audit** (`sq-qhy4`, **P0**) — the bead says it plainly:
+*"agent-out-of-scope by definition."* sparq's ZK soundness claim currently rests entirely on
+internal single-model self-audits. Until an external cryptographer signs off, **no ZK
+security/privacy/integrity property may be relied on in production**, and `SECURITY.md` must keep
+its conservative "treat as untrusted" posture. This gates every production ZK claim and the
+assurance-promotion work ([#3274](https://github.com/sparq-org/sparq/issues/3274)).
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#3337"
+bucket = "blocked"
+short = "crates.io API token"
+ask = '''
+**[#3337](https://github.com/sparq-org/sparq/issues/3337) — crates.io API token / `cargo owner`.**
+Blocks Rust-side publication entirely.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1139"
+bucket = "blocked"
+short = "literature-DB API key"
+ask = '''
+**[#1139](https://github.com/sparq-org/sparq/issues/1139) — literature-DB API key** (Semantic
+Scholar): free key + signup, blocks the research-ingest lane.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#3382"
+bucket = "blocked"
+short = "RDFox licence"
+ask = '''
+**[#3382](https://github.com/sparq-org/sparq/issues/3382) — RDFox licence.** Needed to gather
+competitor numbers honestly; without it the performance-dominance tables cannot include RDFox and
+we must keep saying so.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1840"
+bucket = "blocked"
+short = "Noir upstream PR"
+ask = '''
+**[#1840](https://github.com/sparq-org/sparq/issues/1840) — Noir upstream PR**
+(noir-lang/noir#13314, BoundedVec capacity assert): review + flip from draft to ready. Upstream
+maintainers need a human author.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1615"
+bucket = "blocked"
+short = "LinkedIn post + profile pin"
+ask = '''
+**[#1615](https://github.com/sparq-org/sparq/issues/1615) — LinkedIn post + profile repo pin.**
+Text is drafted and ready; needs your click.
+'''
+
+[[entry]]
+# Cross-repo: the enrollment-template fix that carries this ask lives in the registry.
+ref = "jeswr/agent-account-registry#278"
+bucket = "blocked"
+short = "worker-account credentials"
+ask = '''
+**Worker-account credentials (agent-account-registry)** — `acct08` login and the missing
+`REGISTRY_SECRETS_PAT`. Enrollment cannot be automated because writing env secrets requires your
+auth. Directly limits fleet parallelism.
+'''
+
+[[entry]]
+# One ask, three drafted filings. The renderer drops the entry only when ALL THREE are resolved,
+# and annotates it when only some are — so a partial resolution can neither hide the remainder nor
+# keep claiming a filing that is already done.
+ref = [
+  "sparq-org/sparq#3338",
+  "sparq-org/sparq#3329",
+  "sparq-org/sparq#3385",
+]
+bucket = "blocked"
+short = "upstream filings needing your identity"
+ask = '''
+**Upstream filings that need your identity** —
+[#3338](https://github.com/sparq-org/sparq/issues/3338) (4 drafted `w3c/rdf-tests` issues),
+[#3329](https://github.com/sparq-org/sparq/issues/3329) (georust/geo feature request),
+[#3385](https://github.com/sparq-org/sparq/issues/3385) (offer the GML-SF parser as a standalone
+crate). All drafted; each wants a human to file it.
+'''
+
+# ---------------------------------------------------------------------------------------------
+# 🟡 Decisions — one line each. The Item cell is rendered from `ref`.
+# ---------------------------------------------------------------------------------------------
+
+[[entry]]
+ref = "sparq-org/sparq#3399"
+bucket = "decision"
+short = "final npm package name"
+ask = '''
+**final npm package name** (currently `@jeswr/sparq`). Blocks the npm bootstrap above and the JS
+docs surface — worth settling first.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1974"
+bucket = "decision"
+short = "ODRL JS API contract"
+ask = '''
+public JS API contract for ODRL policy evaluation; wasm32 probe works, +135 kB raw bundle. Pick the
+exposed surface.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1897"
+bucket = "decision"
+short = "merge-queue skip-push-CI soundness"
+ask = '''
+merge-queue skip-push-CI is **unsound** under SQUASH+ALLGREEN (squash mints a new SHA; the green
+gate lives on the ephemeral queue ref). Pick **A)** REBASE/MERGE + `max_entries:1`, **B)** leaner
+always-run push matrix *(recommended)*, **C)** drop.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1825"
+bucket = "decision"
+short = "SPQCPRM2 default emit"
+ask = '''
+default SPQCPRM2 (V2) on-disk emit **ON**? Reader ships; gated on a canonical EC2 measurement
+(`needs:ec2`).
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#3299"
+bucket = "decision"
+short = "GitHub Pages root owner"
+ask = '''
+reconcile the GitHub Pages **root** — which surface owns `/`.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1248"
+bucket = "decision"
+short = "tier-1 semver freeze"
+ask = '''
+ratify the tier-1 **semver freeze** — policy has landed, the declaration is yours.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1817"
+bucket = "decision"
+short = "/download alias contract"
+ask = '''
+`/download` alias contract + prerelease fallback.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1815"
+bucket = "decision"
+short = "CodeQL per-push end state"
+ask = '''
+⚠️ **premise now stale** — this asks whether to keep CodeQL per-push, but CodeQL was **disabled** on
+sparq (2026-07-18, merge latency) and the ruleset now requires only `gate`. Related PR
+[#3427](https://github.com/sparq-org/sparq/pull/3427) (CodeQL advisory-at-merge) is open. Decide the
+end state, then we close or rewrite both.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1690"
+bucket = "decision"
+short = "logo / brand pick"
+ask = '''
+logo / brand pick — concepts consolidated.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1587"
+bucket = "decision"
+short = "next-phase work-plan steer"
+ask = '''
+next-phase work-plan steer.
+'''
+
+# ---------------------------------------------------------------------------------------------
+# 🟡 Maintainer-gated PRs. `State` is rendered LIVE; `ask` is the CLEAN-state ask and is replaced
+# by the rebase ask whenever the PR has rotted to CONFLICTING.
+# ---------------------------------------------------------------------------------------------
+
+[[entry]]
+ref = "sparq-org/sparq#1712"
+bucket = "gated-pr"
+short = "zk-compose fail-closed coverage"
+what = "zk-compose fail-closed / determinism coverage"
+ask = '''
+cross-provider review in flight; I'll arm on a clean pair unless you object
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1607"
+bucket = "gated-pr"
+short = "Trust Expression proposal"
+what = "Trust Expression proposal draft"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1509"
+bucket = "gated-pr"
+short = "zkSPARQL proposal draft"
+what = "zkSPARQL proposal draft (restarted from the codebase)"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1658"
+bucket = "gated-pr"
+short = "zkSPARQL §7 extended fragment"
+what = "zkSPARQL §7 extended fragment + bounded-depth paths"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1621"
+bucket = "gated-pr"
+short = "ODRL core as stratified N3"
+what = "ODRL core as stratified N3 rules + Rust-vs-N3 differential"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1487"
+bucket = "gated-pr"
+short = "Kani harnesses for WAC/ACP"
+what = "Kani harnesses for the WAC/ACP decision core"
+ask = '''
+harness re-scoping decision
+'''
+
+# ---------------------------------------------------------------------------------------------
+# THE SEVEN STALE ENTRIES (#4145). These are the entries the hand-maintained revision was still
+# showing the maintainer on 2026-07-26 after they had already closed or merged. They are seeded
+# here DELIBERATELY and left for one cycle: the first automated render must drop all seven against
+# the live API and list them under "Removed as resolved", which is the end-to-end proof that the
+# drop is structural rather than a habit. The next housekeeping PR prunes this block.
+# ---------------------------------------------------------------------------------------------
+
+[[entry]]
+ref = "sparq-org/sparq#1848"
+bucket = "decision"
+short = "geo dict-pointer freshness"
+ask = '''
+geo dict-pointer freshness.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#992"
+bucket = "decision"
+short = "empty-container default flip"
+ask = '''
+empty-container default flip.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1917"
+bucket = "decision"
+short = "miri formal-alarm"
+ask = '''
+miri formal-alarm scope.
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1084"
+bucket = "gated-pr"
+short = "release v0.1.0"
+what = "release v0.1.0"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1791"
+bucket = "gated-pr"
+short = "agent-role refresh"
+what = "agent-role refresh"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1155"
+bucket = "gated-pr"
+short = "VC cryptosuite ingest bridge"
+what = "VC cryptosuite ingest bridge"
+ask = '''
+"arm it"
+'''
+
+[[entry]]
+ref = "sparq-org/sparq#1973"
+bucket = "gated-pr"
+short = "wasm policy feature probe"
+what = "wasm policy feature probe"
+ask = '''
+"arm it"
+'''
+
+# ---------------------------------------------------------------------------------------------
+# ⚠️ Process problems worth your steer. Counts are LIVE placeholders.
+# ---------------------------------------------------------------------------------------------
+
+[[process]]
+text = '''
+**`needs:user` has lost its meaning — {needs_user} open issues carry it.** Spot-checking, most are
+*not* decisions for you: e.g. [#3190](https://github.com/sparq-org/sparq/issues/3190) is a
+`bind_join` perf task, [#3211](https://github.com/sparq-org/sparq/issues/3211) an Elias-Fano codec.
+They were parked onto a **terminal human hold** when they should have been on a
+machine-recoverable class. **Ask:** may I run a re-triage pass that demotes every non-decision item
+off `needs:user`, leaving only the genuine asks (the 🔴 list above)? A front door with
+{needs_user} items behind it is not a front door.
+'''
+
+[[process]]
+text = '''
+**{needs_area} issues are blocked on `needs:area`** — they cannot be dispatched at all until an
+area label exists, and area classification is mechanical. Same ask: authorise the automated pass.
+'''
+
+[[process]]
+text = '''
+**{needs_ec2} issues sit on `needs:ec2`** — measurement runs that need a canonical box, not you
+personally, but they do need a spend decision.
+'''
+
+[[process]]
+text = '''
+**{held_prs} open PRs are held for you**
+([full list](https://github.com/sparq-org/sparq/pulls?q=is%3Apr+is%3Aopen+label%3A%22review%3Aneeds-user%22)),
+of which {held_prs_conflicting} are conflicted and decaying. Most are ZK/MPC drafts awaiting the
+`sq-qhy4` gate.
+'''
+
+[[process]]
+text = '''
+**Fleet throughput is capped by worker yield, not parallelism** — dominated by
+`EXIT_CLASS: no_change`, with the same hard issue retried 3× on the same model. Filed as
+[registry #701](https://github.com/jeswr/agent-account-registry/issues/701), with
+[#700](https://github.com/jeswr/agent-account-registry/issues/700) (PRs dead-ended with no exit
+from a `fail` verdict) and [#699](https://github.com/jeswr/agent-account-registry/issues/699) (park
+re-admission gated on a ledger window that closes above ~33 records/hour — i.e. closed at your
+60/hr target). **No action needed from you**; flagged because they explain why merge rate sits well
+below the 60/hr target.
+'''
+
+# ---------------------------------------------------------------------------------------------
+# 🟢 In flight — no action needed. TRUNCATED FIRST if the body approaches GitHub's 65 536-char
+# limit; the 🔴 section is never truncated.
+# ---------------------------------------------------------------------------------------------
+
+[[flight]]
+text = '''
+**Cross-provider review** is the sole arming gate and is holding: it rejected registry #681
+(forgeable body-marker evidence), caught a live self-merge, and a long run of consecutive reviews
+found substantive defects that green CI had missed.
+'''
+
+[[flight]]
+text = '''
+**solid-server-rs → sparq migration** (`sq-gg0qq`): `sparq-lws-core` landed; the WAC bypass closes
+in the P1 child with mandatory adversarial review.
+'''
+
+[[flight]]
+text = '''
+**Testing/correctness program** (`sq-3dyje`): substrate/core/engine proptests, 6 fuzz targets,
+UPDATE-differential vs Oxigraph, RDFC-1.0 determinism — all landed. Key finding retained: the
+nightly `cargo-mutants` matrix had been measuring **empty feature-gated crates**, so the
+"553 survivors" figure was a measurement artifact.
+'''
+
+[[flight]]
+text = '''
+**bd → GitHub issues migration** is live and driving the fleet; `bd` remains the local historical
+tracker.
+'''

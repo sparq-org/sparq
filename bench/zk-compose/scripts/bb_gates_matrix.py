@@ -195,6 +195,11 @@ def main() -> int:
         "integer": "filter_value_dl_int",
         "double": "filter_value_dl_f64",
         "decimal": "filter_value_dl_decimal",
+        # [OPUS-5] sq-wz99x: the dateTime/date lane. Like decimal it has NO
+        # blake3-token string-lane counterpart (there is no filter_datetime_d*
+        # member), so the entry carries the value-lane cost alone — no ratio is
+        # emitted, and none is fabricated.
+        "datetime": "filter_value_dl_datetime",
     }
     comparison = {}
     for datatype, value_member in value_lane_ref.items():

@@ -38,7 +38,7 @@ evaluation algorithm pseudocode + open-problem hooks the PoC must respect, not s
 The de-dup/coverage claims are kept bounded (predicate-only direction; structural-layer only),
 NOT overclaimed. -->
 
-GitHub issue: [#940](https://github.com/jeswr/sparq/issues/940).
+GitHub issue: [#940](https://github.com/sparq-org/sparq/issues/940).
 
 ## 0. The request (verbatim)
 
@@ -1145,8 +1145,21 @@ core spine; **P5, P6, P7** depend on P3/P4; **P7 (privacy) is hard-gated on `sq-
    GZIP seam, MSB-first clear-index — distinct from the LSB-first ZK `StatusListSnapshot`
    mirror), `admit_with_status` gates the REAL admission path **fail-closed on
    set/unknown/stale**, and `justify_status_decision` renders the minimal PROV-O allow/deny
-   justification. Open residue (captured beads): verifying the status-list VC's own issuer
-   signature; incremental (non-re-materialise) revocation. [OPUS-4.8]
+   justification. The status-list VC's OWN issuer signature is verified by the opt-in
+   `VerifyingLiveStatusCheck` (`sq-pfae.13`, fail-closed on unsigned/bad-sig/wrong-key).
+   **Incremental revocation is bounded, not delivered (`sq-pfae.14`).** `StatusDelta::between`
+   diffs two snapshots of one list across an **epoch bump** and names the changed slots, so the
+   caller re-runs the UNCHANGED gate over only the affected grants. It is a *selection* over two
+   **input** snapshots — no verdict, no derived-fact read, no in-reasoner retraction — so the
+   input-stratified / one-side-bound seeding discipline (`sq-tu4e`) is untouched; a not-newer,
+   coverage-changed, or over-limit delta falls back to the full re-check (fail-closed). The skip
+   contract needs BOTH halves — `valid_at(now, max_age)` (a whole-list freshness precondition,
+   since staleness is a property of the snapshot, not of a slot) AND `!affects(entry)` — under
+   which a skipped entry satisfies `verdict(prev) admits ⇒ verdict(next) admits`. **Open
+   residue:** this does NOT close the §4.4 stale-authority window — an unchanged bit still ages
+   into `Stale` and `affects` will not flag it, which is why `valid_at` is required; a delta
+   binds exactly one status list; and deep-chain delegation revocation (§4.4) remains full
+   re-materialisation. [OPUS-4.8] [OPUS-5]
 7. **P7 — Privacy/ZK admission feasibility (design + caveated prototype, G4).** Show the
    trust-graph derivation can run under sparq's ZK estate to give ZKAP-equivalent unlinkable
    predicate access. ZKAPs-grade unlinkability needs the **three-part composite** (§5.3): the
@@ -1158,7 +1171,19 @@ core spine; **P5, P6, P7** depend on P3/P4; **P7 (privacy) is hard-gated on `sq-
    P3 + `sq-qhy4`. Open problem: `sq-wvne`.*
 8. **P8 — Cost/decidability spike (prototype).** Bound admission-rule evaluation cost and
    confirm one-side-bound seeding everywhere; work-box timings are non-canonical. *Blocked-on:
-   P1–P4.*
+   P1–P4.* **ANALYSED** (`sq-pfae.9`, [`research/trust-admission-cost-decidability.md`](trust-admission-cost-decidability.md)):
+   the bound is **argued, not machine-checked**, for a stated six-condition fragment (safety
+   + no head existentials + ground IRI predicates in premise *and* conclusion + no
+   term-minting builtin on a recursive cycle + no scope re-entry + no compound term
+   constructed in a conclusion), under which data complexity is PTIME; outside it the path is
+   **undecidable** — `reason_n3` carries no budget and `wire::derive_grants` validates
+   nothing. The last two conditions are load-bearing, not tidying: a variable conclusion
+   predicate is range-restricted yet breaks the `|P|·|A|²` bound, and a recursive
+   list-/quoted-triple-valued head breaks termination outright with no blank node and no
+   builtin. One-side-bound seeding is
+   **confirmed for the v1 admission path and refuted as a blanket claim** (two shipped rules
+   violate it, both bounded and polynomial). **Enforcement is NOT shipped**: the fragment is
+   one the path happens to stay inside, not one it is held inside.
 
 ### 6.2 LWS/Solid-WG proposal framing
 
@@ -1282,6 +1307,14 @@ prior draft phrased as settled are open problems.
   *unanalysed* termination risk is **recursive / unbound-join admission rules over external-graph
   extents in the full evaluator** — P8 (`sq-pfae` P8) must bound *that* path (`sq-tu4e`). No
   formal complexity bound is proven here.
+  **Superseded in two places by the P8 analysis** (`sq-pfae.9`,
+  [`research/trust-admission-cost-decidability.md`](trust-admission-cost-decidability.md) §0):
+  (a) the seeding blow-up is **not** confined to the incremental path — its canonical recorded
+  instance is a *full-evaluator* rule in `crates/sparq-solid/rules/common.n3`, hand-split for
+  exactly this reason; (b) since `sq-zgbso.4` the production materialiser runs the **compiled**
+  id-level evaluator, not the text engine, which now survives there only as the differential
+  test oracle. The formal bound is in that record; termination and seeding cost are shown there
+  to be **independent** properties, which this paragraph conflates.
 - **F — Conflicting-fact deny-on-disagreement is reachable.** A positive join over two
   disagreeing issuer-tagged facts derives a conflict/prohibition witness, and existing
   deny-overrides defeats the competing grant without NAF. Only the alternative “grant iff no

@@ -49,6 +49,9 @@ VENVDIR="$SANDBOX/beir-venv"; CARGOHOME="$SANDBOX/cargo-home"
 RESULTS="$REPO/bench/competitor-results"
 mkdir -p "$REPO/scripts/bench" "$BIN" "$SANDBOX/home" "$CARGOHOME/bin"
 cp "$SCRIPT" "$REPO/scripts/bench/"
+# The gather sources the durable-egress library from its own directory (sq-ffaa9); it is
+# inert here (no BENCH_RESULTS_S3_URI), but it must be present for the source to succeed.
+cp "$ROOT/scripts/bench/bench-result-egress.sh" "$REPO/scripts/bench/"
 
 # ---- scenario stub for scripts/gather-competitors.sh (behavior via STUB_GC_MODE) ----
 cat > "$REPO/scripts/gather-competitors.sh" <<'STUB'
@@ -67,6 +70,16 @@ sparq()  { envfile "sparq-text"      "beir-ir-${BEIR_CUT}" 21 40 "$sf"; }
 case "${STUB_GC_MODE:-fail}" in
   fail)           exit 1 ;;                    # total failure: nothing written
   lucene-only)    lucene; exit 1 ;;            # sparq-text half died mid-gather
+  # The BOX DIES after the first cut: cut 1 writes both envelopes normally, then the
+  # next cut's invocation SIGKILLs the gather (its parent) — the self-terminating-box
+  # shape. $out is wiped between runs, so the marker resets with it.
+  die-after-first)
+    if [ -e "$out/.stub-cut-done" ]; then
+      kill -KILL "$PPID" 2>/dev/null
+      sleep 5   # give the signal time to land; never hang if the kill did not work
+      exit 1
+    fi
+    lucene; sparq; : > "$out/.stub-cut-done"; exit 0 ;;
   invalid-lucene) printf '{truncated' > "$lf"; sparq; exit 0 ;;
   both)           lucene; sparq; exit 0 ;;
   empty)          printf '{}\n' > "$lf"; printf '{}\n' > "$sf"; exit 0 ;;                    # parses, no scored evidence
@@ -80,6 +93,9 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/apt-get"
 printf '#!/usr/bin/env bash\necho "stub openjdk 21"\nexit 0\n' > "$BIN/java"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/curl"
 printf '#!/usr/bin/env bash\nexit "${STUB_CARGO_RC:-0}"\n' > "$BIN/cargo"
+# aws shadow: records argv so a case can assert WHICH envelopes were uploaded and WHEN.
+# No account, no network — the durable-egress library only ever shells out to this.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${AWS_STUB_LOG:-/dev/null}"\nexit 0\n' > "$BIN/aws"
 cp "$BIN/cargo" "$CARGOHOME/bin/cargo"   # the script prepends $CARGO_HOME/bin later
 # touch shadow: fail on demand (case 6 forces the GATHER_DONE touch to fail);
 # execs the real touch otherwise so the success path still creates the sentinel.
@@ -123,7 +139,8 @@ run_gather() {  # run_gather <provision:yes|no> <cargo_rc> <gc_mode> <logfile> [
   set +e
   env HOME="$SANDBOX/home" PATH="$BIN:$PATH" CARGO_HOME="$CARGOHOME" \
       SENTINEL_DIR="$SBROOT" BEIR_VENV_DIR="$VENVDIR" BEIR_DATA_DIR="$SANDBOX/beir-data" \
-      BEIR_CUTS="scifact" BEIR_K=100 \
+      BEIR_CUTS="${STUB_BEIR_CUTS:-scifact}" BEIR_K=100 \
+      BENCH_RESULTS_S3_URI="${STUB_S3_URI:-}" AWS_STUB_LOG="${AWS_STUB_LOG:-/dev/null}" \
       STUB_GC_MODE="$mode" STUB_CARGO_RC="$cargo_rc" STUB_TOUCH_RC="${STUB_TOUCH_RC:-0}" \
       bash "$REPO/scripts/bench/canonical-beir-gather-instance.sh" > "$logf" 2>&1
   rc=$?
@@ -241,6 +258,43 @@ rc="$(run_gather yes 0 fail "$SANDBOX/s9.log" "$stale")"
 [ "$rc" != 0 ] && ok || bad "stale pre-existing envelopes must not certify a failed gather (got rc=$rc)"
 [ ! -e "$SBROOT/GATHER_DONE" ] && ok || bad "stale envelopes must NOT emit GATHER_DONE"
 check_meta "stale reuse" "failed" "false"
+
+# ---- 10. DURABLE EGRESS IS INCREMENTAL (sq-ffaa9, PR #4681 review round 2) ----------
+# The box DIES partway through: cut 1 lands both envelopes, then cut 2's invocation
+# SIGKILLs the gather. The completed cut must ALREADY be in S3 — the whole point of the
+# channel on a self-terminating box. Before this, the only bench_egress_push sat in the
+# end-of-gather console-dump loop, which a killed box never reaches, so every completed
+# envelope was lost; a grep for the function name could not tell the two apart, which is
+# why this case asserts the recorded UPLOAD instead.
+AWS_STUB_LOG="$SANDBOX/aws.log"; : > "$AWS_STUB_LOG"
+rc="$(STUB_BEIR_CUTS="scifact trec-covid" STUB_S3_URI="s3://bkt/gathers/run1" \
+      AWS_STUB_LOG="$AWS_STUB_LOG" run_gather yes 0 die-after-first "$SANDBOX/s10.log")"
+[ "$rc" != 0 ] && ok || bad "a gather killed mid-run must not exit 0 (got rc=$rc)"
+[ ! -e "$SBROOT/GATHER_DONE" ] && ok || bad "a gather killed mid-run must not leave GATHER_DONE"
+grep -qa 'ENVELOPE-BEGIN' "$SANDBOX/s10.log" \
+  && bad "the killed gather somehow reached its end-of-run dump loop — the case proves nothing" || ok
+for e in lucene-anserini sparq-text; do
+  if grep -q "^s3 cp .*${e}-beir-ir-scifact-.*\.json s3://bkt/gathers/run1/${e}-beir-ir-scifact-.*\.json$" "$AWS_STUB_LOG"; then
+    ok
+  else
+    bad "completed cut's $e envelope was never uploaded before the box died; aws log: $(cat "$AWS_STUB_LOG")"
+  fi
+done
+grep -q 'trec-covid' "$AWS_STUB_LOG" \
+  && bad "uploaded an envelope for a cut that never completed" || ok
+
+# ---- 11. the incremental sweep does not RE-upload on the success path ---------------
+# Every cut pushes as it finishes and the end-of-gather sweep is a RETRY pass, so a
+# clean run must upload each envelope EXACTLY once (a per-cut push plus an unconditional
+# final push would double every upload).
+: > "$AWS_STUB_LOG"
+rc="$(STUB_S3_URI="s3://bkt/gathers/run2" AWS_STUB_LOG="$AWS_STUB_LOG" \
+      run_gather yes 0 both "$SANDBOX/s11.log")"
+[ "$rc" = 0 ] && ok || bad "egress-enabled success path must still exit 0 (got rc=$rc)"
+for e in lucene-anserini sparq-text gather-meta; do
+  n=$(grep -c "^s3 cp .*/${e}[^ ]*\.json s3://bkt/gathers/run2/" "$AWS_STUB_LOG" || true)
+  [ "$n" = 1 ] && ok || bad "success path uploaded the $e envelope $n times, want exactly 1"
+done
 
 echo ""
 echo "test_beir_gather_sentinel: ${pass} passed, ${fail} failed."

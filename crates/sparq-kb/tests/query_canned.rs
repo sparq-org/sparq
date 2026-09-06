@@ -65,6 +65,7 @@ fn registry_is_complete_and_named() {
     for name in [
         "schema-classes",
         "schema-properties",
+        "facade-terms",
         "findings-about",
         "finding-provenance",
         "finding-quality-dqv",
@@ -98,6 +99,58 @@ fn introspect_schema_classes() {
         Some("task"),
         "Task must be the largest class"
     );
+}
+
+/// The **facade card** (sq-mztg8.4, FO-bridge Phase 5) must surface the ratified
+/// schema.org-as-top read-path facade that [`canned::SCHEMA_CLASSES`] — filtered to the
+/// `pkg:` namespace — cannot show. It reads the asserted `pkg.ttl` bridge axioms, so it
+/// answers on the plain (unclosed) load path.
+#[test]
+fn introspect_facade_terms_surfaces_the_schema_org_facade() {
+    let r = run(&canned::FACADE_TERMS, None);
+    assert!(
+        !r.rows.is_empty(),
+        "the facade card must not be empty — pkg.ttl asserts schema.org bridge axioms"
+    );
+    // (pkg term, facade term) pairs, by local name.
+    let pairs: Vec<(String, String)> = r
+        .rows
+        .iter()
+        .map(|row| (term_str(&row[0]), term_str(&row[2])))
+        .collect();
+    // The class bridge the FO-KM schema.org-as-top arm is built on, plus a
+    // skos:closeMatch enum bridge and the confidence alignment — three distinct bridge
+    // predicates, so the query is not accidentally matching only one of them.
+    for (pkg_term, facade_term) in [
+        ("task", "action"),                    // rdfs:subClassOf
+        ("open", "potentialactionstatus"),     // skos:closeMatch (status enum)
+        ("confidence", "rating"),              // skos:closeMatch (datatype property)
+    ] {
+        assert!(
+            pairs.contains(&(pkg_term.to_string(), facade_term.to_string())),
+            "facade card missing the pkg:{pkg_term} -> schema:{facade_term} bridge; got {pairs:?}"
+        );
+    }
+    // Every row is a pkg: term bridged onto a schema.org term — the card carries the
+    // CHOSEN facade only, never an unrelated vocabulary (prov:/dcterms:/fabio:/…).
+    for row in &r.rows {
+        let subject = match &row[0] {
+            Some(Term::NamedNode(n)) => n.as_str().to_string(),
+            other => panic!("facade-card subject must be an IRI; got {other:?}"),
+        };
+        let facade = match &row[2] {
+            Some(Term::NamedNode(n)) => n.as_str().to_string(),
+            other => panic!("facade-card object must be an IRI; got {other:?}"),
+        };
+        assert!(
+            subject.starts_with("https://sparq.dev/ns/pkg#"),
+            "facade card must only bridge FROM pkg: terms; got {subject}"
+        );
+        assert!(
+            facade.starts_with("http://schema.org/"),
+            "facade card must only bridge ONTO the ratified schema.org facade; got {facade}"
+        );
+    }
 }
 
 #[test]

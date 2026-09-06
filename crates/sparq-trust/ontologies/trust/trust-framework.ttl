@@ -27,6 +27,15 @@
 # rename/rehome every term. See the design record §9.3 (upstream home / namespace) and
 # the honest-limitations §7.
 #
+# BECAUSE the base is shared, a `trustx:` local name that repeats a `trust:` local name is
+# THE SAME IRI, not a homonym — so every local name minted here MUST be disjoint from
+# `trust.ttl`'s. `trustx:certificationScope` is deliberately NOT called `scope`: `trust:scope`
+# (rule applicability, `rdfs:domain trust:TrustRule`) already owns that IRI, and a second
+# `rdfs:domain trustx:Certification` axiom on it would, under RDFS entailment, type EVERY
+# subject of the property as BOTH — every scoped trust rule a `trustx:Certification`, and
+# every scoped certification a `trust:TrustRule` (issue #3801). The disjointness is enforced by the
+# `no_trustx_term_collides_with_a_trust_core_term` structural test.
+#
 # *** HONESTY (load-bearing — trust-expression program discipline). ***
 # Framework-anchored trust is ANCHORED, NOT PROVEN. A `trustx:Certification` bottoms out
 # in the framework operator's signed trusted-list / register artifacts — it is a trust
@@ -66,7 +75,7 @@ trust:. Framework trust is ANCHORED (the framework operator's signed artifacts),
 proven; no cryptographic soundness/privacy guarantee is asserted (sq-qhy4 open, MPC
 semi-honest). Companion: research/trust-expression-spec.md §3.4 / §7."""@en ;
   owl:imports <https://sparq.dev/ns/trust> ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/1592> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/1592> ;
   rdfs:comment "Placeholder namespace shared with trust:; a WG would rename/rehome every term."@en .
 
 # =============================================================================
@@ -84,7 +93,7 @@ trustx:TrustRequirements a rdfs:Class, owl:Class ;
 
 trustx:question a rdf:Property, owl:ObjectProperty ;
   rdfs:label "question"@en ;
-  rdfs:comment "Binds the trust requirements to the SPARQL query they scope (the query's identifying IRI). Makes a trust-requirements graph reusable across queries by naming which one it applies to (design §3.2)."@en ;
+  rdfs:comment "Names the question (an opaque identifying IRI) a trust-requirements document was authored for, making the document reusable by reference. A correlation label only: this vocabulary defines no canonical resolution or digest scheme from the IRI to a query string, so verifying that a given SPARQL query IS the named question is owned by whoever authenticates the request — e.g. a signature over (query, requirements, nonce) or a trusted publication of the question (design §3.2, §7.7)."@en ;
   rdfs:domain trustx:TrustRequirements ;
   rdfs:range rdfs:Resource ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
@@ -139,7 +148,7 @@ trustx:Framework a rdfs:Class, owl:Class ;
 
 trustx:Certification a rdfs:Class, owl:Class ;
   rdfs:label "Certification"@en ;
-  rdfs:comment "A time-windowed, authority-signed attestation that an issuer is certified under a framework. A Trusted-List entry or a DIATF-register entry IS a trustx:Certification in this model. Groups the certified issuer (trustx:certifies), the framework (trustx:underFramework), the scope (trustx:scope), the validity window (trustx:validFrom / trustx:validUntil), and the signature/attestation binding. Certifications are status-checked exactly like credentials — same positive-attestation machinery (design §3.4 / §6 case 7)."@en ;
+  rdfs:comment "A time-windowed, authority-signed attestation that an issuer is certified under a framework. A Trusted-List entry or a DIATF-register entry IS a trustx:Certification in this model. Groups the certified issuer (trustx:certifies), the framework (trustx:underFramework), the scope (trustx:certificationScope), the validity window (trustx:validFrom / trustx:validUntil), and the signature/attestation binding. Certifications are status-checked exactly like credentials — same positive-attestation machinery (design §3.4 / §6 case 7)."@en ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
 trustx:certifies a rdf:Property, owl:ObjectProperty ;
@@ -156,30 +165,30 @@ trustx:underFramework a rdf:Property, owl:ObjectProperty ;
   rdfs:range trustx:Framework ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
-trustx:scope a rdf:Property, owl:ObjectProperty ;
+trustx:certificationScope a rdf:Property, owl:ObjectProperty ;
   rdfs:label "certification scope"@en ;
-  rdfs:comment "What the issuer is certified to issue. Ranges over (i) trustx:AnyServiceScope (service-level — the honest DIATF granularity: DIATF certifies a SERVICE, not an attribute list), (ii) an attestation type / eIDAS Attestation Rulebook IRI, or (iii) a predicate set / SHACL shape — reusing trust:'s existing trust:forPredicate → trust:forShape desugaring rather than inventing a second scoping idiom (design §3.4). A hardwired attribute-level scope would misdescribe DIATF; omitting scope could not express 'only issued what certified to issue' (survey finding 1)."@en ;
+  rdfs:comment "What the issuer is certified to issue. Ranges over (i) trustx:AnyServiceScope (service-level — the honest DIATF granularity: DIATF certifies a SERVICE, not an attribute list), (ii) an attestation type / eIDAS Attestation Rulebook IRI, or (iii) a predicate set / SHACL shape — reusing trust:'s existing trust:forPredicate → trust:forShape desugaring rather than inventing a second scoping idiom (design §3.4). A hardwired attribute-level scope would misdescribe DIATF; omitting scope could not express 'only issued what certified to issue' (survey finding 1). NAMED certificationScope, not scope: the trustx: prefix shares trust:'s base IRI, so trustx:scope WOULD BE trust:scope (rule applicability, domain trust:TrustRule) — one IRI carrying two conflicting rdfs:domain axioms (issue #3801)."@en ;
   rdfs:domain trustx:Certification ;
   rdfs:range rdfs:Resource ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
 trustx:validFrom a rdf:Property, owl:DatatypeProperty ;
   rdfs:label "valid from"@en ;
-  rdfs:comment "Start of the certification's (or status attestation's) validity window (inclusive). Time-windowed by construction so a certification is checked at the evaluation instant exactly like a credential status (design §3.3 / §3.4)."@en ;
-  rdfs:domain trustx:Certification ;
+  rdfs:comment "Start of the certification's (or status attestation's) validity window (inclusive). Time-windowed by construction so a certification is checked at the evaluation instant exactly like a credential status (design §3.3 / §3.4). The domain is the UNION of the two window-carrying classes: a bare rdfs:domain trustx:Certification would, under RDFS entailment, type every trustx:StatusAttestation as a trustx:Certification — a class this model expects to carry trustx:certifies / trustx:underFramework / trustx:certificationScope, none of which a status attestation has (issue #3801)."@en ;
+  rdfs:domain [ a owl:Class ; owl:unionOf ( trustx:Certification trustx:StatusAttestation ) ] ;
   rdfs:range xsd:dateTime ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
 trustx:validUntil a rdf:Property, owl:DatatypeProperty ;
   rdfs:label "valid until"@en ;
-  rdfs:comment "End of the certification's (or status attestation's) validity window (inclusive). A certification whose window does not cover the evaluation instant yields no admissible binding — fail-closed by construction, never by negation (design §3.3)."@en ;
-  rdfs:domain trustx:Certification ;
+  rdfs:comment "End of the certification's (or status attestation's) validity window (inclusive). A certification whose window does not cover the evaluation instant yields no admissible binding — fail-closed by construction, never by negation (design §3.3). Domain is the same Certification ⊔ StatusAttestation union as trustx:validFrom, since both classes carry the window (issue #3801)."@en ;
+  rdfs:domain [ a owl:Class ; owl:unionOf ( trustx:Certification trustx:StatusAttestation ) ] ;
   rdfs:range xsd:dateTime ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
 trustx:AnyServiceScope a rdfs:Class, owl:Class ;
   rdfs:label "Any-service scope"@en ;
-  rdfs:comment "The coarsest, service-level trustx:scope value: 'everything this certified service issues'. The HONEST DIATF granularity — DIATF certifies a service, not an attribute type (survey finding 1). A certification with this scope is scope-conformant for any contributing statement from the issuer; a spec that omitted this value could not faithfully describe DIATF."@en ;
+  rdfs:comment "The coarsest, service-level trustx:certificationScope value: 'everything this certified service issues'. The HONEST DIATF granularity — DIATF certifies a service, not an attribute type (survey finding 1). A certification with this scope is scope-conformant for any contributing statement from the issuer; a spec that omitted this value could not faithfully describe DIATF."@en ;
   rdfs:isDefinedBy <https://sparq.dev/ns/trust-framework> .
 
 # =============================================================================

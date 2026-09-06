@@ -110,6 +110,40 @@ a wrong answer. The measured verdict lives in **`RESULTS.md`** (the sanctioned n
   expected count; the no-FO arm returns 0) — run from the repo root:
   `python3 bench/fo-km/validate_tasks.py` (needs the `close` feature).
 
+## Metric 3 — LLM ontological-commitment stability (`STABILITY.md`)
+
+A second, separate harness in this directory implements **Metric 3** of
+`research/fo-llm-bridge.md` §4.2 / §6 Phase 6 (bead `sq-mztg8.3`): the
+**Köhler–Neuhaus cross-session contradiction probe**, re-run per model, asking whether the
+FO choice changes the LLM's *ontological-commitment stability* rather than its exec
+accuracy. It reuses this directory's overlays as its arm definitions but shares nothing
+else — Metric 1's `tasks.jsonl`, `analyze.py` and `RESULTS.md` are untouched by it.
+
+```bash
+python3 bench/fo-km/build_probes.py --check              # the 12-probe battery
+python3 bench/fo-km/build_probes.py --emit-prompt gufo   # the exact per-session brief
+python3 bench/fo-km/stability_analyze.py                 # self-check: assert the grader
+python3 bench/fo-km/stability_analyze.py bench/fo-km/metric3-sessions.jsonl
+```
+
+With no session file the grader **asserts** its own contract and exits nonzero on any
+mismatch: hand-computed fixtures pin every reported quantity (including missing,
+duplicate, out-of-vocabulary and `UNDECIDABLE` answers), and every published column of
+the committed 45-session table is re-derived from `metric3-sessions.jsonl`.
+
+- `stability_probes.jsonl` — 12 forced-choice probes over a closed label set
+  (`OCCURRENT`/`CONTINUANT`/`ABSTRACT`/`UNDECIDABLE`), stratified **SC** (the 4 PKG classes
+  the overlays type, as generic/instance pairs) and **US** (subjects no overlay types).
+- `build_probes.py` — authors the battery and renders the exact per-arm session brief
+  (arms: `ungrounded` / `gufo` / `schema-org`).
+- `stability_analyze.py` — the deterministic grader, no model in the loop: cross-session
+  contradiction rate, dissent, within-session generic/instance inconsistency, a
+  decisiveness guard, and per-arm scaffold adherence.
+- `metric3-sessions.jsonl` — the raw session answers the record is derived from.
+- **`STABILITY.md` is the measured record.** It is a **PILOT**: the bead carries
+  `needs-maintainer-steer` on the grading protocol and N, and `STABILITY.md` § Open
+  questions lists what is genuinely blocked.
+
 ## Honest scope
 
 - This is **Metric 1** (the AGENT). It is **MEASURED** — see `RESULTS.md` for the verdict
@@ -118,6 +152,8 @@ a wrong answer. The measured verdict lives in **`RESULTS.md`** (the sanctioned n
   hypothesis). Metric 2 (the KGE closure-prior MRR via `eval.rs`
   `run_ablation_multiseed_paired`) needs a canonical/EC2 box and is a separate,
   **EC2-deferred** phase (bead **sq-p5ro8**); a formal FO could rank differently there
-  (design §5.1).
+  (design §5.1). **Metric 3** (above) measures a third, independent construct —
+  commitment *stability*, not task accuracy — and its pilot verdict does not read on the
+  Metric-1 facade decision.
 - The closure-build CPU/wall cost is **non-canonical** and is never charged as a token
   cost (design §5.1).

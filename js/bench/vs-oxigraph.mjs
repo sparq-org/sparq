@@ -46,6 +46,46 @@ function bench(label, fn, repeat = 3) {
   console.log(`  ${label.padEnd(28)} ${best.toFixed(1).padStart(8)} ms  (${result} rows)`);
 }
 
+function measure(fn, repeat = 3) {
+  fn();
+  let best = Infinity;
+  let result;
+  for (let i = 0; i < repeat; i++) {
+    const [ms, out] = time(fn);
+    if (ms < best) [best, result] = [ms, out];
+  }
+  return { ms: best, result };
+}
+
+async function measureAsync(fn, repeat = 3) {
+  await fn();
+  let best = Infinity;
+  let result;
+  for (let i = 0; i < repeat; i++) {
+    const t0 = performance.now();
+    const out = await fn();
+    const ms = performance.now() - t0;
+    if (ms < best) [best, result] = [ms, out];
+  }
+  return { ms: best, result };
+}
+
+function share(rawMs, wrappedMs) {
+  return wrappedMs === 0 ? 0 : Math.max(0, (wrappedMs - rawMs) / wrappedMs);
+}
+
+function consumeResultStream(streamPromise) {
+  return streamPromise.then((stream) => new Promise((resolve, reject) => {
+    let rows = 0;
+    stream
+      .on('data', () => {
+        rows++;
+      })
+      .on('end', () => resolve(rows))
+      .on('error', reject);
+  }));
+}
+
 const nt = makeNTriples(N);
 console.log(`dataset: ${N.toLocaleString()} triples (${(nt.length / 1e6).toFixed(1)} MB N-Triples)\n`);
 
@@ -60,6 +100,34 @@ console.log(`dataset: ${N.toLocaleString()} triples (${(nt.length / 1e6).toFixed
   }
   bench('count (no materialise)', () => store.count(QUERIES['full scan (count rows)']));
   console.log(`  heapBytes ≈ ${(store.heapBytes() / 1e6).toFixed(1)} MB\n`);
+
+  const wrapperShare = {};
+  for (const [label, query] of Object.entries(QUERIES)) {
+    const raw = measure(() => store.queryJson(query).length);
+    const bindingsStream = measure(() => [...store.queryBindingsStream(query)].length);
+    const bindings = measure(() => store.query(query).length);
+    const resultStream = await measureAsync(() => consumeResultStream(store.queryBindings(query)));
+    wrapperShare[label] = {
+      raw_query_json_ms: raw.ms,
+      query_materialised_ms: bindings.ms,
+      query_bindings_stream_ms: bindingsStream.ms,
+      query_bindings_result_stream_ms: resultStream.ms,
+      wrapper_share_materialised: share(raw.ms, bindings.ms),
+      wrapper_share_stream: share(raw.ms, bindingsStream.ms),
+      wrapper_share_result_stream: share(raw.ms, resultStream.ms),
+    };
+  }
+  const ask = 'ASK { ?s ?p ?o }';
+  const boolean = measure(() => store.queryBoolean(ask));
+  const count = measure(() => store.count(QUERIES['full scan (count rows)']));
+  console.log(JSON.stringify({
+    advisory: true,
+    canonical: false,
+    note: 'Single-process wrapper-layer measurements; directional only. queryBoolean/count avoid SPARQL-JSON and RDF/JS term materialisation.',
+    triples: N,
+    select: wrapperShare,
+    cheap_paths: { query_boolean_ms: boolean.ms, count_ms: count.ms },
+  }, null, 2));
   store.free();
 }
 

@@ -26,29 +26,67 @@ use crate::{Audience, Condition, Decision, Effect, IntentRow, Request};
 
 // ── WAC oracle ──────────────────────────────────────────────────────────────────────
 
-/// Evaluate a request against an intent table using WAC semantics.
+/// Evaluate a request against an intent table using WAC semantics —
+/// **nearest-ACL-document-wins** (bead `sq-o4orz` / `sq-kvvcl.2`).
 ///
-/// WAC rules:
-/// - `Scope::Subtree` intents apply to the resource if the resource URI starts with
-///   the intent's `resource_uri` (nearest-ancestor selection).
-/// - `Condition ≠ None` intents are UNSUPPORTED in WAC and are skipped.
-/// - `Effect::Deny` intents are UNSUPPORTED in WAC and are skipped.
-/// - Fail-closed: absence of a matching Allow → [`Decision::Deny`].
+/// # Why this is not a `starts_with` union
+/// WAC does **not** accumulate ancestor grants the way ACP does (design record
+/// §2.1/§4: "WAC nearest-ancestor vs ACP cumulative inheritance"). A resource `R` is
+/// governed by exactly **one** ACL document — `R.acl` if it exists, otherwise the ACL of
+/// the *nearest* ancestor container that has one — and a closer ACL **fully shadows**
+/// every farther one, grants included. Unioning all matching ancestors (the previous
+/// behaviour) over-approximates `Allow`, which showed up in the live driver
+/// (`bench/ac/live`) as an oracle=Allow / engine=Deny **under-share** divergence.
+///
+/// # The ACL-document model over the intent table
+/// The intent table is model-agnostic, so the ACL-document layout is re-derived here from
+/// exactly what [`crate::compile_wac`] emits — never by calling it:
+/// - a WAC-**expressible** row (`Effect::Allow`, `Condition::None`, and not an unbounded
+///   `Audience::AllExcept(vec![])`; each of those three compiles to an empty policy)
+///   materializes an authorization in the ACL document of its own `resource_uri`. An
+///   inexpressible row therefore does **not** bring an ACL document into existence and so
+///   cannot shadow an ancestor either;
+/// - `Scope::Resource` → `acl:accessTo <resource_uri>`: applies to that resource only,
+///   and only when that resource's *own* ACL document is the effective one;
+/// - `Scope::Subtree` → `acl:default <resource_uri>` **plus** `acl:accessTo <resource_uri>`:
+///   `default` reaches the container's **members** (and only when that container's ACL
+///   document is the effective one — a container is not a member of itself, which is why
+///   `default` alone would leave the container itself unreachable), while `accessTo`
+///   reaches the container resource. Together they make `Scope::Subtree` mean "this
+///   container and everything under it".
+///
+/// # Other WAC rules (unchanged)
+/// - `Condition ≠ None` rows are UNSUPPORTED in WAC and are skipped.
+/// - `Effect::Deny` rows are UNSUPPORTED in WAC and are skipped.
+/// - `Audience::AllExcept(vec![])` (the unbounded-exclusion placeholder) is UNSUPPORTED in
+///   WAC and is skipped; a *bounded* `AllExcept` enumerates its allows and is expressible.
+/// - Fail-closed: no governing ACL document, or no matching Allow inside it →
+///   [`Decision::Deny`].
 pub(crate) fn evaluate_wac(request: &Request, intents: &[IntentRow]) -> Decision {
     use crate::Scope;
 
+    // Nearest-ACL resolution: the single ACL document that governs this resource.
+    let Some((governed, is_own)) = wac_effective_acl(&request.resource, intents) else {
+        return Decision::Deny; // no ACL document governs the resource — fail-closed
+    };
+
     for intent in intents {
-        // WAC has no deny and no conditions — skip unsupported rows.
-        if intent.effect == Effect::Deny || intent.condition != Condition::None {
+        if !wac_expressible(intent) {
             continue;
         }
 
-        // Scope check: resource must match.
-        let resource_matches = match intent.scope {
-            Scope::Resource => request.resource == intent.resource_uri,
-            Scope::Subtree => request.resource.starts_with(&intent.resource_uri),
-        };
-        if !resource_matches {
+        // A row living in any OTHER ACL document is shadowed by the effective one.
+        if intent.resource_uri != governed {
+            continue;
+        }
+
+        // Within the effective document: in the resource's OWN ACL every row targets the
+        // resource, because BOTH scopes emit `acl:accessTo <own IRI>` (see
+        // [`crate::compile_wac`]). Only an INHERITED document needs the `acl:default`
+        // membership test, and only `Scope::Subtree` emits that `default`.
+        let applies = is_own
+            || (intent.scope == Scope::Subtree && wac_is_member(governed, &request.resource));
+        if !applies {
             continue;
         }
 
@@ -64,6 +102,84 @@ pub(crate) fn evaluate_wac(request: &Request, intents: &[IntentRow]) -> Decision
     }
 
     Decision::Deny // fail-closed
+}
+
+/// Is this intent row expressible in WAC — i.e. does it materialize an authorization
+/// (and therefore an ACL document) at all?
+///
+/// Mirrors **every** empty-policy return in [`crate::compile_wac`] — the two early returns
+/// (`Condition ≠ None`, `Effect::Deny`) *and* the unbounded `Audience::AllExcept(vec![])`
+/// return inside the audience match. All three compile to an EMPTY policy, so none of them
+/// creates an ACL document. This matters for nearest-ACL resolution: an inexpressible row
+/// must not shadow the ancestor ACL that really governs the resource.
+///
+/// Keep this list in lockstep with `compile_wac`; a missed case makes the oracle invent a
+/// shadowing ACL document the compiler never emitted.
+fn wac_expressible(intent: &IntentRow) -> bool {
+    if intent.effect != Effect::Allow || intent.condition != Condition::None {
+        return false;
+    }
+    // An empty exclusion set is the "unbounded" placeholder — inexpressible in WAC.
+    !matches!(intent.audience, Audience::AllExcept(ref excl) if excl.is_empty())
+}
+
+/// The IRI of the ACL document sited at `iri`, if any WAC-expressible row puts one there.
+/// Borrowed from the intent table so the caller's result outlives the ancestry cursor.
+fn wac_acl_doc_at<'a>(iri: &str, intents: &'a [IntentRow]) -> Option<&'a str> {
+    intents
+        .iter()
+        .find(|i| wac_expressible(i) && i.resource_uri == iri)
+        .map(|i| i.resource_uri.as_str())
+}
+
+/// Resolve the **effective** (nearest-wins) ACL document governing `resource`.
+///
+/// Returns `(governed_iri, is_own)`: the IRI whose ACL document governs the resource, and
+/// whether that document is the resource's *own* ACL (`true`) or one inherited from an
+/// ancestor container (`false`). `None` — fail-closed — when neither the resource nor any
+/// ancestor has an ACL document.
+fn wac_effective_acl<'a>(resource: &str, intents: &'a [IntentRow]) -> Option<(&'a str, bool)> {
+    if let Some(own) = wac_acl_doc_at(resource, intents) {
+        return Some((own, true));
+    }
+    let mut cursor = resource.to_string();
+    while let Some(parent) = wac_parent_container(&cursor).map(str::to_owned) {
+        if let Some(hit) = wac_acl_doc_at(&parent, intents) {
+            return Some((hit, false));
+        }
+        cursor = parent;
+    }
+    None
+}
+
+/// The Solid slash-semantics parent container of an IRI, derived here independently of any
+/// sparq crate (the oracle must never link the system under test).
+///
+/// Strip exactly one trailing `/` (so `…/c/` parents to `…/`, not to itself), then cut at
+/// the last `/` that is still inside the path. `None` at or above the authority root.
+fn wac_parent_container(iri: &str) -> Option<&str> {
+    let scheme_end = iri.find("://")? + 3;
+    let host_end = scheme_end + iri.get(scheme_end..)?.find('/')?;
+    let trimmed = iri.strip_suffix('/').unwrap_or(iri);
+    if trimmed.len() <= host_end {
+        return None; // already the authority root container
+    }
+    let cut = trimmed.rfind('/')?;
+    if cut < host_end {
+        return None;
+    }
+    Some(&iri[..=cut])
+}
+
+/// Is `resource` a member (structural descendant) of the container `container`?
+///
+/// A container's own IRI is NOT a member of itself — `acl:default` reaches members, not
+/// the container resource. Containers are named with a trailing `/` in Solid slash
+/// semantics, so a strict prefix relation over that boundary is the membership test; an
+/// intent whose `resource_uri` is not slash-terminated names a plain resource, which the
+/// parent chain can never reach, and so governs nothing by inheritance.
+fn wac_is_member(container: &str, resource: &str) -> bool {
+    container.ends_with('/') && resource != container && resource.starts_with(container)
 }
 
 /// Check whether the request's agent/client matches a WAC audience.
@@ -384,9 +500,153 @@ pub(crate) fn evaluate(
 #[cfg(test)]
 mod tests {
     use super::{
-        BENCH_EVAL_INSTANT, BENCH_GRANTED_PURPOSE, evaluate_condition, temporal_in_window,
+        BENCH_EVAL_INSTANT, BENCH_GRANTED_PURPOSE, evaluate_condition, evaluate_wac,
+        temporal_in_window, wac_effective_acl, wac_is_member, wac_parent_container,
     };
-    use crate::Condition;
+    use crate::{
+        AccessMode, Audience, Condition, Decision, Effect, IntentRow, Request, Scope,
+    };
+
+    // ── WAC nearest-ACL-document-wins helpers (bead `sq-o4orz` / `sq-kvvcl.2`) ────────
+    //
+    // These pin the ACL-document resolution directly, including the fail-closed edges the
+    // four generators never produce (authority root, scheme-less IRI, non-slash container).
+
+    const POD: &str = "https://pod.ex/u/";
+    const ALICE: &str = "https://alice.ex/card#me";
+    const BOB: &str = "https://bob.ex/card#me";
+
+    /// A WAC-expressible `Allow` row granting `audience` read at `resource_uri`.
+    fn row(audience: Audience, scope: Scope, resource_uri: &str) -> IntentRow {
+        IntentRow {
+            audience,
+            scope,
+            mode: AccessMode::read_only(),
+            condition: Condition::None,
+            effect: Effect::Allow,
+            resource_uri: resource_uri.to_string(),
+        }
+    }
+
+    fn read_req(agent: &str, resource: &str) -> Request {
+        Request {
+            agent: agent.to_string(),
+            client: None,
+            resource: resource.to_string(),
+            mode: AccessMode::read_only(),
+        }
+    }
+
+    #[test]
+    fn parent_container_walks_to_the_authority_root_and_stops() {
+        assert_eq!(wac_parent_container("https://pod.ex/a/b/doc"), Some("https://pod.ex/a/b/"));
+        // A trailing slash is stripped exactly once, so a container parents ABOVE itself.
+        assert_eq!(wac_parent_container("https://pod.ex/a/b/"), Some("https://pod.ex/a/"));
+        assert_eq!(wac_parent_container("https://pod.ex/a/"), Some("https://pod.ex/"));
+        // At/above the authority root there is no parent — the walk terminates.
+        assert_eq!(wac_parent_container("https://pod.ex/"), None);
+        // Fail-closed on shapes the walk cannot reason about.
+        assert_eq!(wac_parent_container("urn:sparq:auth"), None);
+        assert_eq!(wac_parent_container("not-an-iri"), None);
+    }
+
+    #[test]
+    fn membership_excludes_the_container_itself_and_non_slash_containers() {
+        assert!(wac_is_member("https://pod.ex/c/", "https://pod.ex/c/doc"));
+        assert!(wac_is_member("https://pod.ex/c/", "https://pod.ex/c/sub/doc"));
+        // A container is NOT a member of itself (`acl:default` reaches members only).
+        assert!(!wac_is_member("https://pod.ex/c/", "https://pod.ex/c/"));
+        // A non-slash `resource_uri` names a plain resource; the parent chain, which only
+        // ever yields slash-terminated IRIs, can never reach it, so it inherits to nothing.
+        assert!(!wac_is_member("https://pod.ex/c", "https://pod.ex/c/doc"));
+        // Prefix-but-not-descendant must not match.
+        assert!(!wac_is_member("https://pod.ex/c/", "https://pod.ex/other"));
+    }
+
+    #[test]
+    fn effective_acl_prefers_the_resource_own_document_then_the_nearest_ancestor() {
+        let doc = "https://pod.ex/u/a/doc";
+        let intents = vec![
+            row(Audience::Agent(ALICE.to_string()), Scope::Subtree, POD),
+            row(Audience::Agent(BOB.to_string()), Scope::Resource, doc),
+        ];
+        // Own ACL wins and is flagged as own.
+        assert_eq!(wac_effective_acl(doc, &intents), Some((doc, true)));
+        // A sibling with no own ACL falls back to the nearest ancestor that has one.
+        assert_eq!(
+            wac_effective_acl("https://pod.ex/u/a/other", &intents),
+            Some((POD, false))
+        );
+        // Nothing anywhere up the chain → fail-closed.
+        assert_eq!(wac_effective_acl("https://elsewhere.ex/x/y", &intents), None);
+    }
+
+    #[test]
+    fn nearest_acl_shadows_the_ancestor_grant() {
+        let shadowed = "https://pod.ex/u/a/bobs-doc";
+        let inherited = "https://pod.ex/u/a/plain-doc";
+        let intents = vec![
+            // Pod-root subtree grant to alice.
+            row(Audience::Agent(ALICE.to_string()), Scope::Subtree, POD),
+            // `bobs-doc` carries its OWN ACL, naming only bob.
+            row(Audience::Agent(BOB.to_string()), Scope::Resource, shadowed),
+        ];
+
+        // The closer ACL fully shadows the pod-root grant — alice is DENIED even though the
+        // ancestor grant's URI is a prefix of the resource. This is the exact case a
+        // `starts_with` union got wrong (oracle=Allow vs engine=Deny under-share).
+        assert_eq!(evaluate_wac(&read_req(ALICE, shadowed), &intents), Decision::Deny);
+        assert_eq!(evaluate_wac(&read_req(BOB, shadowed), &intents), Decision::Allow);
+
+        // A resource with NO own ACL still inherits the pod-root grant.
+        assert_eq!(evaluate_wac(&read_req(ALICE, inherited), &intents), Decision::Allow);
+        assert_eq!(evaluate_wac(&read_req(BOB, inherited), &intents), Decision::Deny);
+    }
+
+    #[test]
+    fn an_inexpressible_row_creates_no_acl_document_and_cannot_shadow() {
+        let doc = "https://pod.ex/u/a/doc";
+        for inexpressible in [
+            // WAC has no deny — `compile_wac` emits an EMPTY policy, so no ACL document.
+            IntentRow { effect: Effect::Deny, ..row(Audience::Public, Scope::Resource, doc) },
+            // WAC has no usage conditions — likewise empty.
+            IntentRow {
+                condition: Condition::Purpose("https://ex.dev/p".to_string()),
+                ..row(Audience::Public, Scope::Resource, doc)
+            },
+            // An UNBOUNDED `AllExcept` (empty exclusion set) is the third empty-policy
+            // return in `compile_wac` — inside the audience match, not an early return.
+            row(Audience::AllExcept(vec![]), Scope::Resource, doc),
+        ] {
+            let intents = vec![
+                row(Audience::Agent(ALICE.to_string()), Scope::Subtree, POD),
+                inexpressible,
+            ];
+            // The row materializes nothing, so the pod-root ACL still governs `doc`.
+            assert_eq!(wac_effective_acl(doc, &intents), Some((POD, false)));
+            assert_eq!(evaluate_wac(&read_req(ALICE, doc), &intents), Decision::Allow);
+        }
+    }
+
+    #[test]
+    fn a_subtree_row_grants_the_container_resource_itself() {
+        // `compile_wac` emits `acl:accessTo` alongside `acl:default` for a subtree row, so
+        // the container itself is reachable — otherwise a container-targeted request would
+        // be denied for everyone and the U2 project-container lane would go vacuously Deny.
+        let intents = vec![row(Audience::Agent(ALICE.to_string()), Scope::Subtree, POD)];
+        assert_eq!(evaluate_wac(&read_req(ALICE, POD), &intents), Decision::Allow);
+        assert_eq!(evaluate_wac(&read_req(BOB, POD), &intents), Decision::Deny);
+    }
+
+    #[test]
+    fn wac_is_fail_closed_when_no_acl_document_governs_the_resource() {
+        let intents = vec![row(Audience::Public, Scope::Resource, "https://pod.ex/u/a/doc")];
+        // Public grant exists, but it governs a DIFFERENT resource with no ancestry link.
+        assert_eq!(
+            evaluate_wac(&read_req(ALICE, "https://other.ex/z"), &intents),
+            Decision::Deny
+        );
+    }
 
     #[test]
     fn none_condition_is_always_satisfied() {

@@ -1,4 +1,4 @@
-// [FABLE-5] #2323: integration tests for the `@jeswr/solid-server/fastify` plugin — a REAL
+// [FABLE-5] #2323: integration tests for the `@sparq-org/solid-server/fastify` plugin — a REAL
 // Fastify instance driving the REAL wasm pod (no stubs), via fastify's bundled inject()
 // (light-my-request), so no listener socket is needed.
 //

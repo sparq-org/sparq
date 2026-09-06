@@ -3,6 +3,46 @@
 // The README carries the format rationale (multi-member gzip / multi-frame zstd),
 // the no-wasm-dep guard, and the runnable API-sketch doctest below.
 #![doc = include_str!("../README.md")]
+// [OPUS-5] sq-98w7z.2: the gzip-backend verdict lives HERE rather than in the README
+// because that README is a gate-capped internal stub (`check-readme-template.py`), and
+// the template rule's own guidance is to put verbose detail in rustdoc. Appending a
+// `#![doc]` block keeps it on the same rustdoc front page as the README.
+#![doc = r#"
+## Gzip encoder backend
+
+| feature | backend | notes |
+|---|---|---|
+| *(default)* | `miniz_oxide` | pure Rust; keeps the better ratio at `-1` |
+| `zlib-rs` | zlib-rs | pure Rust; much faster encoder at `-6` |
+| `zlib-ng` | zlib-ng (C) | native only — safe here because this crate never enters the wasm graph |
+
+flate2 resolves these by **precedence, not by the order they are listed**: a C
+backend (`zlib-ng`) outranks `zlib-rs`, which outranks `miniz_oxide`. Enabling
+`zlib-ng` and `zlib-rs` together therefore silently yields `zlib-ng`, and
+`--all-features` resolves to `zlib-ng`. A backend has to be exercised on its own
+(`--features zlib-rs`); an `--all-features` run does **not** cover it.
+
+Measured verdict (`sq-98w7z.2`, A/B over the [`CompressedSink`] and
+[`SingleMemberGzipSink`] gzip paths — figures recorded in the bead, not restated
+here, per the repository's no-baked-benchmark-numbers rule):
+
+- At **`-6`** `zlib-rs` encodes substantially faster for a negligible ratio cost.
+  This is the level the D4 measurement found could not keep up with the result
+  serializer, so it is the level worth switching.
+- At **`-1`** it also encodes faster but gives up noticeably more ratio, and the
+  loss grows the more repetitive the payload — a trade, not a free win.
+
+Both backends hold the format invariants these sinks rest on: byte-valid RFC 1952
+output, `Z_FULL_FLUSH` segments that concatenate into a single member, and a
+correct combined CRC32 — note that `flate2::Crc` (including `combine`) also
+switches implementation with the feature. Checked by round-tripping each
+backend's output through flate2's strict single-member `GzDecoder`, plus direct
+assertions on the fixed RFC 1952 header bytes. Be precise about what that buys:
+because flate2 picks decoder and CRC by the same backend precedence, the
+round-trip runs under the backend it is testing, so it is a self-consistency
+check, **not** an implementation-independent interoperability check. Validating
+the wire against a separate gzip implementation is not yet covered.
+"#]
 #![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
 
 use std::collections::BTreeMap;

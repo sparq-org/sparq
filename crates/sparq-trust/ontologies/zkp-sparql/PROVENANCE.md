@@ -22,8 +22,20 @@ The sparq-authored extension graphs reuse those stable namespaces:
 
 | Extension file | Namespace extended | Authorising work |
 |----------------|--------------------|------------------|
-| `secprop-ext.ttl` | `https://w3id.org/zkp-sparql/sec-prop#` | bead `sq-5oru9`, issue #1001 |
+| [`secprop-ext.ttl`](../../../sparq-secprop-vocab/ontologies/secprop-ext.ttl) (**moved**, see below) | `https://w3id.org/zkp-sparql/sec-prop#` | bead `sq-5oru9`, issue #1001 |
 | `sigimpl-ext.ttl` | `https://w3id.org/zkp-sparql/sig-impl#` | issue #2832 |
+
+**`secprop-ext.ttl` no longer lives in this directory.** Issue #3705 moved it to
+[`crates/sparq-secprop-vocab/ontologies/`](../../../sparq-secprop-vocab/ontologies/), together
+with the Rust `const &str` IRI table that names every one of its terms and the drift test that
+pins the two — a vocabulary and its constants belong in the same crate, and holding them apart
+left a cross-package `include_str!` that broke `cargo package` for `sparq-zk`. Nothing about its
+provenance changed: it is a sparq-authored *extension* of the `sec-prop:` namespace vendored here,
+it is still ours to edit, and this record still governs the namespace it extends. The move touched
+no vendored file — `vocab/*.yaml.ld` and `shapes/*.shapes.ttl` remain byte-for-byte at origin SHA
+`0fe80ea7d858de9f02bd29df29f6e50cdada14a0`, so the verbatim-diff guarantee below is intact.
+See [`crates/sparq-secprop-vocab/ontologies/PROVENANCE.md`](../../../sparq-secprop-vocab/ontologies/PROVENANCE.md),
+which points back here.
 
 ## Origin
 

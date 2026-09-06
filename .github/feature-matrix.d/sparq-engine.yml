@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -58,6 +63,28 @@
 - name: "sparq-engine (service)"
   crate: "sparq-engine"
   features: "service"
+  test: true
+
+# [OPUS-5] sq-lsp7k.2.2: LOCAL rows-returning SERVICE handlers. The whole
+# `service_local` module, the executor's local intercept + the `service_local` in-src
+# unit tests and tests/federation_features/service_local.rs are behind the default-OFF
+# `service-local` feature, so ci.yml's feature-less `nextest archive` compiles them
+# EMPTY — these two legs are the ONLY thing that runs them (the sq-vya1 GUARD).
+# TWO legs, because the two states are genuinely different code:
+#   * `service-local` ALONE compiles the `all(service-local, not(service))` dispatch arm
+#     (local handlers with NO HTTP/TLS stack) and asserts an unregistered IRI is still
+#     the plain "unsupported graph pattern" error.
+#   * `service,service-local` compiles the intercept-then-fall-through arm and asserts
+#     the SSRF egress filter still judges every registry MISS, plus that the SERVICE
+#     bind-join declines for a locally-handled IRI.
+- name: "sparq-engine (service-local)"
+  crate: "sparq-engine"
+  features: "service-local"
+  test: true
+
+- name: "sparq-engine (service + service-local)"
+  crate: "sparq-engine"
+  features: "service,service-local"
   test: true
 
 # [OPUS-4.8] sq-vya1: SPARQL window functions + the custom-aggregate registry.

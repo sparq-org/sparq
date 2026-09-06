@@ -55,6 +55,20 @@ backup = ["sparq-engine/serialize-rdf"]
 # self-contained FNV-1a; framing/IO is std-only). No HTTP, no async runtime (library-first
 # §6.1). sparq-server's `GET /streams` HTTP poll endpoint is a SEPARATE later opt-in.
 change-stream = ["sparq-engine/serialize-rdf"]
+# [OPUS-5] sq-l6zks (gh-3216): `change-sink` (default OFF) — the SEPARATE, HEAVIER opt-in the
+# `change-stream` comment above defers: the external-broker seam over that durable log. It adds
+# a `ChangeSink` trait, a stable JSON broker-message encoding (the same per-change entry shape
+# `GET /streams` emits), a resumable `BrokerRelay` pump carrying a durable delivered-through
+# watermark, and one in-tree `NatsSink` (core-NATS publish). "Heavier" is about CAPABILITY, not
+# dependency weight: this is the only thing in the crate that can open a network socket (plain
+# TCP, std-only), and pointing a relay at a broker is a data-egress decision — so it must never
+# ride along with `change-stream`. It still adds NO external dependency (no broker client, no
+# async runtime, no HTTP — library-first §6.1 holds), which is exactly why there is no in-tree
+# KAFKA client: a correct Kafka producer means `rdkafka`'s C library (and `async-nats` means a
+# tokio runtime), so Kafka — and TLS, SASL, retries, batching — is reached by implementing
+# `ChangeSink` over the host's own client, the same posture sparq-server's `AuditSink` takes.
+# Implies `change-stream` (the relay reads that log; the log stays the source of truth).
+change-sink = ["change-stream"]
 # [OPUS-4.8] sq-jluc: the response-bytes result cache (research/concurrent-serving.md
 # §5 row 2 + §6.3) — OPT-IN and OFF by default. It is a LEAN feature: it adds NO new
 # dependency (the cache key/map reuse the in-tree `rustc-hash` and `std::hash`; the
@@ -82,8 +96,8 @@ rustc-hash.workspace = true
 # O(graph) fork, `update_in_place` for the O(batch) delta-overlay path. The ring
 # and `Writer` stay generic over the snapshot/update types; only `GraphApplier`
 # touches these. (This crate never enters sparq-wasm's graph — guard above.)
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 # Commutativity batching (Wave A2 §6.5): conservative write-footprint analysis of
 # SPARQL Update text (`Footprint::of_sparql`). Workspace-patched to the vendored
 # W3C-conformance fork, same as the engine — both parsers must agree on syntax.

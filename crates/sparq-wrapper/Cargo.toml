@@ -18,15 +18,25 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # [GPT-5.6] sq-1rg2q: proposed rdfjs/wrapper parity remains explicitly opt-in.
 default = []
-proposed-distinct = []
+# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the async events proposal lands.
+proposed-async-events = []
+# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the async node proposal lands.
+proposed-async-node = []
+# [SONNET-4.6] sq-1rg2q.8: streaming async store wrapper (rdfjs/wrapper #10, #97).
+proposed-async-store = []
 proposed-cardinality = []
 proposed-codecs = []
-proposed-observe = []
+proposed-distinct = []
 # [GPT-5.6] sq-1rg2q.6: read-many/write-one named-graph views (rdfjs/wrapper #95).
 proposed-graph-scope = []
+# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the graph-scope events proposal lands.
+proposed-graph-scope-events = []
+# [SONNET-4.6] sq-1rg2q.11: cycle-safe JSON projection (rdfjs/wrapper #23).
+proposed-json = []
+proposed-observe = []
 # [FABLE-5] sq-1rg2q.2: typed focus kinds + bound node factories (rdfjs/wrapper #83-#87).
 proposed-typed-focus = []
 
 [dependencies]
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true

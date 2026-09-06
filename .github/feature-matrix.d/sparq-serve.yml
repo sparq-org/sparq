@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -33,4 +38,23 @@
 - name: "sparq-serve (change-stream — durable replayable CDC stream)"
   crate: "sparq-serve"
   features: "change-stream"
+  test: true
+
+# [OPUS-5] sq-l6zks (gh-3216): the EXTERNAL-BROKER sink seam over that durable log — the
+# `ChangeSink` trait, the JSON broker-message encoding, the resumable `BrokerRelay` pump (durable
+# delivered-through watermark) and the in-tree std-only `NatsSink`. The whole `change_sink` module
+# and its `change_sink::tests` unit suite are behind the default-OFF `change-sink` feature, so the
+# default-feature workspace test run compiles them EMPTY and runs ZERO of them — the same
+# silent-skip gap (#1171) the `change-stream` leg above closes, for the new surface. `change-sink`
+# implies `change-stream` and adds NO new external dependency (no broker client, no async runtime,
+# no HTTP), so this leg stays cheap. It runs `clippy --all-targets -D warnings` with the feature ON
+# plus `cargo test`, which drives the load-bearing invariants: the at-least-once watermark is
+# DURABLE (a restarted relay resumes instead of replaying), a sink failure never advances the
+# watermark past the record the broker refused, a watermark that retention has trimmed past fails
+# the pump CLOSED, a re-base gap record reaches the broker as an explicit REBASE marker (never an
+# empty commit), and the NATS publisher's protocol framing (byte-length PUB, PING/PONG flush
+# barrier, `-ERR` surfaced, unpublishable subjects rejected before anything is written).
+- name: "sparq-serve (change-sink — external-broker CDC sink seam)"
+  crate: "sparq-serve"
+  features: "change-sink"
   test: true

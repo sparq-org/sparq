@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::{jwks_provider, KeyKit, BASE_URL};
-use rustls_pemfile::certs;
 use solid_oidc_verifier::config::VerifierConfig;
 use solid_oidc_verifier::replay::InMemoryReplayStore;
 use solid_oidc_verifier::verifier::Verifier;
@@ -39,6 +38,7 @@ use sparq_lws_core::rate_limit::RateLimiter;
 use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient};
 use sparq_lws_core::tls::{build_rustls_config, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
@@ -52,7 +52,7 @@ const CA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test-
 fn h2_client_config() -> ClientConfig {
     let pem = std::fs::read(CA_PATH).expect("read fixture CA");
     let mut roots = RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         let cert: CertificateDer<'_> = cert.expect("parse fixture CA");
         roots.add(cert).expect("add fixture CA");
     }

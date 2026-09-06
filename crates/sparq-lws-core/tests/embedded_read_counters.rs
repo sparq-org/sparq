@@ -1,7 +1,8 @@
 // AUTHORED-BY Claude Fable 5
-//! P1.6 (beyond-50k `docs/design/beyond-50k-throughput.md` §4) — the **embedded-sparq benchmark
-//! config that exercises the backend round-trip counters** on the READ path. The seam-level counters
-//! (`docs/design/backend-read-path.md` §7, `tests/read_path_counters.rs`) are re-proven here against
+//! P1.6 (beyond-50k — `research/lws-design-records.md` §7; RSS
+//! `docs/design/beyond-50k-throughput.md` §4) — the **embedded-sparq benchmark config that
+//! exercises the backend round-trip counters** on the READ path. The seam-level counters
+//! (`research/lws-design-records.md` §7, `tests/read_path_counters.rs`) are re-proven here against
 //! the REAL in-process `EmbeddedSparqClient` engine — so the deterministic per-operation backend
 //! round-trip counts are the observability the NEXT phase (round-trip reduction) targets, and a
 //! regression that adds a round-trip on the embedded path fails.

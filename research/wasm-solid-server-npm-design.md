@@ -79,7 +79,7 @@ Five wasm crates share one pattern — `sparq-wasm`, `sparq-reason-wasm`,
   (`sparq-wasm/Cargo.toml:70`) is the template.
 - Build/publish: `js/package.json` scripts run
   `wasm-pack build ../crates/<crate> --target web --profile release-wasm`; npm
-  scope is **`@jeswr/sparq`** (`js/package.json:2`) (a second `@sparq-org` scope
+  scope is **`@sparq-org/sparq`** (`js/package.json:2`) (a second `@sparq-org` scope
   also exists). CI: `.github/workflows/js.yml` (gating wasm-pack build+test) and
   `.github/workflows/publish.yml` (OIDC trusted-publishing to npm + SLSA
   provenance, `--access public`). A new bundle adds a `build:lws-wasm` script +
@@ -147,7 +147,7 @@ routing/middleware semantics:
   layer stack), only if (a) hits a wasm-bindgen-futures/async-trait snag.
 
 The npm package is a **Node wrapper** exposing `startSolidServer(opts)` (and an
-`npx @jeswr/solid-server` bin) that boots a Node `http` listener and routes each
+`npx @sparq-org/solid-server` bin) that boots a Node `http` listener and routes each
 request into the wasm handler; storage is in-wasm-memory for v1. TLS, if wanted,
 is terminated in Node/a proxy — never in wasm.
 
@@ -204,8 +204,8 @@ build points, of which we ship the useful three —
 | --- | --- | --- |
 | native full | `sparql-endpoint` (default) | the `solid-server` binary (default) |
 | native core | `--no-default-features` (or without `sparql-endpoint`) | `solid-server` core / a `core` CI test target |
-| wasm full | `wasm,sparql-endpoint` | `@jeswr/solid-server` (default bundle) |
-| wasm core | `wasm` (no `sparql-endpoint`) | `@jeswr/solid-server` **core** variant / a `build:lws-wasm-core` script |
+| wasm full | `wasm,sparql-endpoint` | `@sparq-org/solid-server` (default bundle) |
+| wasm core | `wasm` (no `sparql-endpoint`) | `@sparq-org/solid-server` **core** variant / a `build:lws-wasm-core` script |
 
 INVARIANT: `sparql-endpoint` gates **route + handler only** — the `Store`'s own
 SPARQL-backed methods (used internally by LDP/WAC where relevant) are unaffected;
@@ -268,13 +268,13 @@ ACCEPTANCE TEST, depends_on}. cfg-gating soundness → `fable`; JS host + packag
    `wasm-bindgen-test` issues a PUT then GET of an LDP resource against the wasm
    handler and the bytes round-trip; a WAC-denied request returns 401/403.
    depends_on: 2.
-4. **Node host + npm package: `startSolidServer(opts)` + `npx @jeswr/solid-server`
+4. **Node host + npm package: `startSolidServer(opts)` + `npx @sparq-org/solid-server`
    bin routing a Node HTTP listener into the wasm handler; in-memory storage;
    `package.json` + `build:lws-wasm` script; wire into `js.yml`/`publish.yml`.**
    (crate: `js/` package + `sparq-lws-wasm` glue; tier: `gpt`.) INVARIANT: no TLS
    in wasm (Node/proxy terminates); package README states the honest v1 scope
    (local-dev, in-memory, (un)authenticated). ACCEPTANCE: `npm install` +
-   `npx @jeswr/solid-server` boots a listener; a `curl`/`fetch` PUT then GET of a
+   `npx @sparq-org/solid-server` boots a listener; a `curl`/`fetch` PUT then GET of a
    Turtle resource round-trips; the CI `js` leg builds the bundle. depends_on: 3.
 5. **Smoke test: install → spin up → a Solid LDP request round-trips (CI leg).**
    (crate: `js/` tests; tier: `gpt`.) INVARIANT: the smoke test runs in the
@@ -298,9 +298,9 @@ ACCEPTANCE TEST, depends_on}. cfg-gating soundness → `fable`; JS host + packag
 - **v1 auth stance:** OK to ship the first npm demo as **unauthenticated /
   static-token** (no OIDC network), with real OIDC as bead 6? This is the honest
   minimal-scope path around the aws-lc-rs blocker.
-- **npm scope + name:** `@jeswr/sparq` is the existing scope. Publish as
-  `@jeswr/solid-server` (proposed `npx` target) or under `@sparq-org`? I've
-  written the plan against `@jeswr/solid-server`.
+- **npm scope + name:** `@sparq-org/sparq` is the existing scope. Publish as
+  `@sparq-org/solid-server` (proposed `npx` target) or under `@sparq-org`? I've
+  written the plan against `@sparq-org/solid-server`.
 - **Storage location for v1:** in-wasm-memory (simplest, proposed) vs a JS-fs
   `Store` from the start? I've proposed in-memory for v1, JS-fs as bead 7.
 - **Verifier-wasm dependency:** bead 6 (real OIDC) is contingent on

@@ -271,6 +271,11 @@ version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "RustCrypto/dalek AEAD+X25519 stack pulled in by the opt-in, publish=false sparq-e2ee-ng crate (XChaCha20-Poly1305 + X25519 wrap); no trusted-import audit available upstream. [SONNET-4.6]"
 
+[[exemptions.chacha20]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+notes = "Yank-clearing patch upgrade from chacha20 0.10.0; the prior release is covered by the imported ISRG audit. [GPT-5.6]"
+
 [[exemptions.chacha20poly1305]]
 version = "0.10.1"
 criteria = "safe-to-deploy"
@@ -672,7 +677,7 @@ criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge feature (p256 path); no upstream audit covers this exact version [OPUS-4.8]"
 
 [[exemptions.h2]]
-version = "0.4.15"
+version = "0.4.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.h3]]
@@ -1161,6 +1166,11 @@ version = "0.13.2"
 criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; direct dep of the OFF-by-default vc-bridge feature (needs safe-to-deploy — subsumes the solid-server-rs sq-gg0qq.1 DEV-ONLY ES256 test-token usage which only needs safe-to-run); no upstream audit covers this exact version [OPUS-4.8]"
 
+[[exemptions.p384]]
+version = "0.13.1"
+criteria = "safe-to-deploy"
+notes = "RustCrypto-org crate; direct dep of the OFF-by-default vc-bridge feature (the ecdsa-rdfc-2019 P-384/SHA-384 profile, sq-txg1y). Deliberately the 0.13 line so it shares the already-exempted ecdsa/elliptic-curve/primeorder/sha2 with p256 — it adds NO other package to the lockfile. No upstream audit covers this exact version [OPUS-5]"
+
 [[exemptions.parking]]
 version = "2.2.1"
 criteria = "safe-to-deploy"
@@ -1464,11 +1474,6 @@ criteria = "safe-to-deploy"
 [[exemptions.rustls-native-certs]]
 version = "0.8.4"
 criteria = "safe-to-deploy"
-
-[[exemptions.rustls-pemfile]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-notes = "solid-server-rs import pre-flight (sq-gg0qq.1): PEM cert-chain/key parse for the incoming mTLS serve path; archived-but-stable (see the deny.toml RUSTSEC-2025-0134 ignore + VEX entry); follow-up migrates to rustls-pki-types PemObject. [FABLE-5]"
 
 [[exemptions.rustls-pki-types]]
 version = "1.14.1"

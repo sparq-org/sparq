@@ -441,3 +441,259 @@ async fn decide_is_read_auth_gated() {
         .unwrap();
     assert_eq!(resp.status(), 200);
 }
+
+// ---------------------------------------------------------------------------
+// [SONNET-4.6] sq-snopa.8 — the STATEFUL lane (`"source":"server"`).
+//
+// Everything above authorises over a dataset supplied in the request BODY. These tests boot a
+// server whose OWN loaded store IS the pod and assert that `"source":"server"` decides over it:
+// the same allow/deny contract, no `"dataset"` in the body, and — the load-bearing new
+// invariant — that an `.acl` WRITE is picked up, because the cached authorization view is keyed
+// by the ring generation and every commit publishes a new one.
+// ---------------------------------------------------------------------------
+
+/// Boots a server whose OWN loaded store is `WAC_NQUADS` (rather than the throwaway `BOOT`
+/// graph), with `solid_authz` on — the pod the stateful lane authorises over.
+async fn spawn_pod_server() -> String {
+    let graph = Graph::load_dataset(WAC_NQUADS, "nquads").unwrap();
+    let config = ServerConfig {
+        solid_authz: true,
+        ..ServerConfig::default()
+    };
+    let app = router(AppState::with_config(graph, config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// A `"source":"server"` decide body — note the deliberate ABSENCE of `"dataset"`.
+fn server_decide_body(agent: Option<&str>, resource: &str, mode: &str) -> serde_json::Value {
+    let mut session = serde_json::Map::new();
+    if let Some(a) = agent {
+        session.insert("agent".into(), a.into());
+    }
+    serde_json::json!({
+        "source": "server",
+        "session": session,
+        "resource": resource,
+        "mode": mode,
+        "view": "wac",
+    })
+}
+
+/// The stateful lane decides over the SERVER'S OWN store: a granted agent is allowed (with the
+/// FR-5 provenance), and an anonymous session over the same store is a fail-closed 403.
+#[tokio::test]
+async fn stateful_decide_reads_the_servers_own_store() {
+    let base = spawn_pod_server().await;
+
+    let resp = client()
+        .post(format!("{base}/authz/decide"))
+        .json(&server_decide_body(
+            Some("https://alice.ex/card#me"),
+            "https://pod.ex/notes/n1",
+            "read",
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "alice's grant lives in the server's own store");
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["allow"], serde_json::Value::Bool(true));
+    assert_eq!(body["governingAcl"], "https://pod.ex/.acl");
+
+    // FAIL-CLOSED: anonymous over the SAME server store is an authoritative deny.
+    let resp = client()
+        .post(format!("{base}/authz/decide"))
+        .json(&server_decide_body(None, "https://pod.ex/notes/n1", "read"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 403);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["allow"], serde_json::Value::Bool(false));
+}
+
+/// THE HEADLINE GUARD (sq-snopa.8's "re-materialise on ACL change"): bob is denied, an `.acl`
+/// WRITE grants him Read, and the very next stateful decision ALLOWS him — proving the cached
+/// per-generation view was invalidated by the commit rather than serving a stale grant set.
+///
+/// MUTATION SPOT-CHECK: delete the `state.current()` generation comparison in
+/// `build_server_view` (i.e. always return the cached entry) and the post-write assertion below
+/// goes red — the second decision would still see bob's pre-write deny.
+#[tokio::test]
+async fn stateful_view_rematerialises_after_an_acl_write() {
+    let base = spawn_pod_server().await;
+    let bob = "https://bob.ex/card#me";
+    let decide = |body: serde_json::Value| {
+        let base = base.clone();
+        async move {
+            client()
+                .post(format!("{base}/authz/decide"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // 1. Bob has no grant yet — a definitive deny, which also WARMS the generation-0 cache.
+    let resp = decide(server_decide_body(Some(bob), "https://pod.ex/notes/n1", "read")).await;
+    assert_eq!(resp.status(), 403, "bob starts with no grant");
+
+    // 2. Write a Read authorization for bob into the pod's `.acl` graph.
+    let update = r#"
+        INSERT DATA {
+          GRAPH <https://pod.ex/.acl> {
+            <https://pod.ex/.acl#bob>
+              <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> ;
+              <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> ;
+              <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> ;
+              <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> .
+          }
+        }
+    "#;
+    let resp = client()
+        .post(format!("{base}/sparql"))
+        .header("content-type", "application/sparql-update")
+        .body(update)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 204, "the ACL write must commit");
+
+    // 3. The next stateful decision must see the NEW grant (a new generation => a re-materialise).
+    let resp = decide(server_decide_body(Some(bob), "https://pod.ex/notes/n1", "read")).await;
+    assert_eq!(
+        resp.status(),
+        200,
+        "the ACL write must re-materialise the cached authorization view"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["allow"], serde_json::Value::Bool(true));
+
+    // 4. And the write did not widen anything else: an anonymous session is still denied.
+    let resp = decide(server_decide_body(None, "https://pod.ex/notes/n1", "read")).await;
+    assert_eq!(resp.status(), 403, "the re-materialised view stays fail-closed");
+}
+
+/// `/authz/query` over the server's own store is access-controlled per session, exactly as the
+/// stateless lane is over a body dataset.
+#[tokio::test]
+async fn stateful_query_is_access_controlled_over_the_servers_own_store() {
+    let base = spawn_pod_server().await;
+    let query = "SELECT ?title WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?title } }";
+
+    let resp = client()
+        .post(format!("{base}/authz/query"))
+        .json(&serde_json::json!({
+            "source": "server",
+            "session": { "agent": "https://alice.ex/card#me" },
+            "query": query,
+            "view": "wac",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let rows = body["results"]["bindings"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "the authorised session sees the granted row");
+
+    // FAIL-CLOSED: anonymous sees ZERO rows — never the whole loaded store.
+    let resp = client()
+        .post(format!("{base}/authz/query"))
+        .json(&serde_json::json!({
+            "source": "server",
+            "session": {},
+            "query": query,
+            "view": "wac",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let rows = body["results"]["bindings"].as_array().unwrap();
+    assert_eq!(
+        rows.len(),
+        0,
+        "an anonymous session must NOT see the server's loaded store"
+    );
+}
+
+/// `/authz/wac-allow` advertises over the server's own store, and a grant-less session still
+/// advertises nothing.
+#[tokio::test]
+async fn stateful_wac_allow_advertises_over_the_servers_own_store() {
+    let base = spawn_pod_server().await;
+    let body = |session: serde_json::Value| {
+        serde_json::json!({
+            "source": "server",
+            "session": session,
+            "resource": "https://pod.ex/notes/n1",
+            "view": "wac",
+        })
+    };
+
+    let resp = client()
+        .post(format!("{base}/authz/wac-allow"))
+        .json(&body(serde_json::json!({ "agent": "https://alice.ex/card#me" })))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let out: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(out["wacAllow"], r#"user="read",public="""#);
+
+    let resp = client()
+        .post(format!("{base}/authz/wac-allow"))
+        .json(&body(serde_json::json!({})))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let out: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(out["wacAllow"], r#"user="",public="""#);
+}
+
+/// FAIL-CLOSED: a body naming BOTH pods (`"source":"server"` AND a `"dataset"`) is ambiguous
+/// about which one it means, so it is refused rather than silently resolved to either.
+#[tokio::test]
+async fn stateful_source_rejects_an_ambiguous_body_dataset() {
+    let base = spawn_pod_server().await;
+    let resp = client()
+        .post(format!("{base}/authz/decide"))
+        .json(&serde_json::json!({
+            "source": "server",
+            "dataset": WAC_NQUADS,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/notes/n1",
+            "mode": "read",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400, "an ambiguous body must be refused");
+}
+
+/// FAIL-CLOSED: an unknown `"source"` keyword is a 400 on the wire, never an inferred default.
+#[tokio::test]
+async fn stateful_unknown_source_keyword_is_refused() {
+    let base = spawn_pod_server().await;
+    let resp = client()
+        .post(format!("{base}/authz/decide"))
+        .json(&serde_json::json!({
+            "source": "elsewhere",
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/notes/n1",
+            "mode": "read",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+}

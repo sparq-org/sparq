@@ -39,6 +39,19 @@
 #                                                         #   event awareness (see below)
 # Exit non-zero (with a diagnostic on stderr) on any malformed fragment.
 #
+# THE TWO-FILE SCOPE RULE ([SONNET-4.6] issue #2384). The rule keys off the emitted
+# leg-NAME set, nothing else. Adding, renaming or removing a leg is a TWO-FILE change:
+# the crate fragment AND the gate-name golden
+# `scripts/tests/feature-matrix-legnames.golden.txt`, which test_feature_matrix_assemble.py
+# compares byte-for-byte. Any bead / issue / PR that changes the emitted leg-name set MUST
+# also scope the golden, or its own spec forbids the update it requires. A fragment edit
+# that CANNOT change a `name:` — `features`, `test`, `tier`, `tier-reason` or comments —
+# leaves the name set untouched and stays a SINGLE-file change; do not scope the golden
+# into it. Regenerate the golden (never hand-edit):
+#   python3 scripts/assemble-feature-matrix.py --names \
+#     > scripts/tests/feature-matrix-legnames.golden.txt
+# See `.github/feature-matrix.d/README.md` for the full contract.
+#
 # TIER + EVENT AWARENESS (bead sq-ldg8c; design research/feature-matrix-pyramid.md §3/§5).
 # A fragment leg MAY carry an optional `tier:` field (plus an optional reviewed
 # `tier-reason:` override the ENFORCER reads — the assembler only allows the key):
@@ -92,7 +105,10 @@ REQUIRED_KEYS = {"name", "crate", "features", "test"}
 # cache). When absent, a crate-source-size heuristic supplies the default — see
 # leg_weight(). The weight only steers bin-packing (--grouped); it never changes
 # WHICH legs run or their gate-critical `opt-in <name>` check-run names.
-OPTIONAL_KEYS = {"tier", "tier-reason", "weight"}
+# [OPUS-5] `test-reason` is a second enforcer-only key: a written justification on a
+# `test: false` leg for why that (crate, feature)'s coverage lives outside `cargo test`.
+# Like `tier-reason` the assembler only ALLOWS it; feature-matrix-tiers.py reads it.
+OPTIONAL_KEYS = {"tier", "tier-reason", "test-reason", "weight"}
 VALID_TIERS = ("test", "check")
 
 # [FABLE-5] CI-economy grouping (maintainer directive 2026-07-18): bin-pack the
@@ -174,8 +190,8 @@ def load_legs():
                 sys.exit(1)
             keys = set(leg.keys())
             # [SONNET-4.6] sq-ldg8c: REQUIRED_KEYS must all be present; extras are allowed
-            # ONLY from OPTIONAL_KEYS (tier / tier-reason). Any other key is still a HARD
-            # error (the pre-tier behaviour, minus the two now-permitted optional keys).
+            # ONLY from OPTIONAL_KEYS (tier / tier-reason / test-reason / weight). Any other
+            # key is still a HARD error (the pre-tier behaviour, minus the optional keys).
             missing = REQUIRED_KEYS - keys
             extra = keys - REQUIRED_KEYS - OPTIONAL_KEYS
             if missing or extra:

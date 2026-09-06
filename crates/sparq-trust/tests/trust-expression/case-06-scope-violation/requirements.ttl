@@ -1,0 +1,11 @@
+# Design §6 case 6 — the "issuers only issue what they are certified to issue"
+# check. Scope conformance is asserted EXPLICITLY here (rather than relying on the
+# absent-defaults-to-true parse) because it is the clause under test.
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tr:scope> a trustx:TrustRequirements ;
+    trustx:question                 <urn:question:jesse-attributes> ;
+    trustx:trustsFramework          trustx:eIDAS2 ;
+    trustx:requiresScopeConformance true ;
+    trustx:requiresValidStatusAt    "2026-07-05T00:00:00Z"^^xsd:dateTime .

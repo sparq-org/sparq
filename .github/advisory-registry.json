@@ -1,6 +1,41 @@
 {
  "_doc": "Advisory-job registry. [OPUS-5] sparq-org/sparq#3773 made this file LOAD-BEARING: it is the ONLY thing that can make a check-run non-gating. scripts/ci_summary_gate.py excludes a check-run from the `gate` verdict IFF its name is a key here (whole-name, case-insensitive; a ${{ ... }} expression in a key matches its runtime expansion); everything else GATES, whatever it is called. Before #3773 the gate INFERRED advisory status from the job name matching \\b(advisory|informational)\\b, which silently neutralised four real gates. Every entry needs {owner_bead, promotion_criteria, registered, workflow, job_id}: workflow+job_id is the STABLE IDENTITY the declaration binds to, and check-advisory-registry.py C4 fails if that job's current YAML name is not exactly the key — so renaming a job can never silently flip whether it gates (the renamed job GATES, fail-closed, and C4 REDs until the declaration is updated). A job that intentionally runs a gate-classified command (python/shell/node/npm — C3, now language-agnostic) must also carry gate_script_waiver. C2 keeps requiring that any job whose NAME carries an advisory/informational token be declared here or lose the misleading token. Maintained by scripts/check-advisory-registry.py. PROMOTING a lane = deleting its entry.",
  "jobs": {
+  "review-lane blind-spot alarm": {
+   "workflow": "review-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-huwr8",
+   "promotion_criteria": "NEVER promotable — promoting it would INVERT its purpose. This is a DETECTOR: it REDs when it finds PRs that no review producer can reach, and it REDs fail-loud when the detector itself breaks. Neither condition is a property of the commit being gated, so gating on it would block every merge on an unrelated repo-wide backlog — the exact pressure that gets an alarm muted, which is the one outcome that destroys the signal. Registered because the lane was SILENTLY GATING: its header claimed it 'can never enter the ci-summary / gate poll set' on the premise that it creates no check-run on a PR head or merge-group ref, but ci-summary.yml ALSO runs on push to main (timeout-minutes: 80) and this workflow's scheduled run puts its check-run on exactly that head SHA. MEASURED 2026-07-27: ci_summary_gate.py render_verdict() over the real 477-check-run set for main head cb0c6739c listed `review-lane blind-spot alarm: failure` as a GATING failure. Delete this entry only if the workflow is removed.",
+   "registered": "2026-07-27"
+  },
+  "CI execution-latency alarm": {
+   "workflow": "ci-latency-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-1lc4i",
+   "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — this is a DETECTOR of repo-wide CI EXECUTION LATENCY (cron firing deficit, queue wait, execution overrun). Every condition it REDs on is a property of the runner fleet and the scheduler, never of the commit under test, so gating on it would block every merge whenever CI is merely slow — which is exactly the pressure that gets an alarm muted, the one outcome that destroys the signal. It also REDs fail-loud (exit 2) when the detector itself breaks or its scan set is empty. Declared for the same silent-gating reason as its sibling lanes (sq-huwr8): it is scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. Delete this entry only if the workflow is removed.",
+   "registered": "2026-07-28"
+  },
+  "formal-lane no-verdict alarm": {
+   "workflow": "formal-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-63ups",
+   "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — a detector that REDs when a nightly formal lane stopped producing verdicts is reporting on the LANE's health, not on the commit under test, so it must never gate a merge. Same silent-gating defect (sq-huwr8): scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. Delete this entry only if the workflow is removed.",
+   "registered": "2026-07-27"
+  },
+  "HEAVY-set drift alarm": {
+   "workflow": "heavy-set-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-6vshe.7",
+   "promotion_criteria": "NEVER promotable, same reason as `formal-lane no-verdict alarm` — this is a DETECTOR of DRIFT between ci.yml's hand-maintained `jobs.test.env.HEAVY` filterset and the measured per-test wall-times. Every condition it REDs on is a property of the repository's accumulated test-time distribution (a test that got slow weeks ago, an atom left behind by a rename), never of the commit under test, so gating on it would block an unrelated PR on a shard-balance chore — the pressure that gets an alarm muted, which is strictly worse than no alarm because it still looks like coverage. It also REDs fail-loud (exit 2) when the detector itself breaks: HEAVY unreadable/ambiguous, an empty event stream, or test events carrying no exec_time (the case where it would otherwise report a permanent false all-clear). Declared for the same silent-gating reason as its sibling lanes (sq-huwr8): it is scheduled on main, so its check-run lands on the same head SHA the push-triggered ci-summary gate polls. No gate_script_waiver: scripts/heavy_set_alarm.py carries no gate-ish filename token and is not a gate script — it asserts nothing about the commit, only about shard balance. Delete this entry only if the workflow is removed.",
+   "registered": "2026-08-03"
+  },
+  "nightly selection-bug alarm": {
+   "workflow": "selection-alarm.yml",
+   "job_id": "alarm",
+   "owner_bead": "sq-va7at",
+   "promotion_criteria": "NEVER promotable, same reason as `review-lane blind-spot alarm` — the lane is declared fail-OPEN by design (research/change-based-test-selection.md §6.1) and correlates a past nightly failure against selection skips, which is not a property of the commit being gated. Same silent-gating defect (sq-huwr8): it fires via workflow_run on CI-on-main completions, so its check-run lands on a main head SHA that a push-triggered ci-summary gate polls (OBSERVED on cb0c6739c, conclusion skipped). Delete this entry only if the workflow is removed.",
+   "registered": "2026-07-27"
+  },
   "changed-code mutation review (advisory)": {
    "workflow": "mutants-diff.yml",
    "job_id": "mutants-diff",
@@ -40,7 +75,7 @@
    "workflow": "docs-quality.yml",
    "job_id": "quick-advisory",
    "owner_bead": "sq-5fd1",
-   "promotion_criteria": "per-step (sq-6vshe.20 consolidation of the former markdownlint-advisory / vale / external-links jobs): a step promotes by MOVING into the quick-gates job — markdownlint-advisory once the whole-repo backlog (bench/, .claude/) is fully clean; vale once the prose-style backlog on README/skills/docs/crates is clean and the vale ruleset has settled; external-links never promotes (network-flaky by nature — dead external links must never block a merge)",
+   "promotion_criteria": "per-step (sq-6vshe.20 consolidation of the former markdownlint-advisory / vale / external-links jobs): a step promotes by MOVING into the quick-gates job — markdownlint-advisory once the whole-repo backlog (bench/, .claude/) is fully clean; vale once the prose-style backlog on README/skills/docs/crates is clean and the vale ruleset has settled; external-links never promotes (network-flaky by nature — dead external links must never block a merge); docs-duplication (sq-lrju — jscpd over README/skills/docs/research/book per the repo-root .jscpd.json) promotes ONLY on its exact half: a gating step must assert zero FENCED-CODE clones (the per-fence sub-format classes, verified exact and currently at zero) and must NOT gate the `markdown` prose class, whose findings were verified by hand to include pairs whose own --reporters console-full snippets are entirely different text, so gating the blended threshold-0 verdict would red every merge on a tool precision defect",
    "registered": "2026-07-11"
   },
   "mutation ratchet (cargo-mutants, advisory)": {
@@ -181,11 +216,18 @@
    "promotion_criteria": "not promotable to a gate: the ring runs post-hoc via workflow_run (on ci-summary completion), never on a PR/merge_group head commit, so it produces no gating check-run by design (sparq-org/sparq#3474 moved it here so the REGISTRY_RING_TOKEN doorbell is unreachable from PR-head content); it only notifies the registry doorbell after a gating-leg failure and must never gate a PR",
    "registered": "2026-07-18"
   },
+  "ring registry dispatcher": {
+   "workflow": "batch-merge.yml",
+   "job_id": "ring",
+   "owner_bead": "sq-4966",
+   "promotion_criteria": "NEVER promotable. This job is a fire-and-forget cross-repo DOORBELL: it dispatches jeswr/agent-account-registry so a freed merge-queue slot is picked up now rather than on the registry's next ~10-min cron. Whether that dispatch succeeds is a property of an EXTERNAL repository's endpoint and of a credential's presence — never a property of the commit under test — so gating on it would block sparq merges on another repo's availability. Same shape and same rationale as `merge-group doorbell (advisory)`. DECLARED as part of #4966, which made a MISSING REGISTRY_RING_TOKEN fail LOUD (exit 1) instead of fail-soft to a green run: the job runs on `push: branches: [main]`, so its check-run lands on the main head SHA that the push-triggered `ci-summary / gate` polls (the sq-huwr8 refutation — MEASURED present on main head 2cbf37359). Undeclared, that new hard failure would have redded `ci-summary / gate` on EVERY push to main (50-103 push runs/day), which AGENTS.md treats as a stop-the-line condition — a manufactured outage rather than an alarm. This declaration is what keeps the failure LOUD (the run reds, named and countable) without letting it gate. No gate_script_waiver: the job invokes no script at all, only an inline `gh workflow run`. Delete this entry only if the job is removed.",
+   "registered": "2026-07-29"
+  },
   "release-plz / Release-PR (advisory)": {
    "workflow": "release-plz.yml",
    "job_id": "release-plz-pr",
    "owner_bead": "sq-lonae",
-   "promotion_criteria": "advisory while the repo/org setting 'Allow GitHub Actions to create and approve pull requests' is disabled (GITHUB_TOKEN cannot open the Release-PR: known 403, live run 29988505600, contained loudly via captured-output signature + side-effect-free probe). Promote when a maintainer enables that setting or configures the ORCHESTRATOR_APP_ID/_PRIVATE_KEY secrets (batch-merge.yml App-token pattern): drop the ' (advisory)' name token, remove the 403-containment step, and delete this entry",
+   "promotion_criteria": "advisory while NO privileged forge token is provisioned, so the job falls back to GITHUB_TOKEN, which cannot open the Release-PR while 'Allow GitHub Actions to create and approve pull requests' is disabled (known 403, live run 29988505600, contained loudly via captured-output signature + side-effect-free probe). [OPUS-5] sq-iwnnf / #3273 pre-wired the durable fix in-repo: the job's forge token is App token (ORCHESTRATOR_APP_ID/_PRIVATE_KEY) || RELEASE_PLZ_TOKEN || GITHUB_TOKEN, and the containment refuses to tolerate the 403 once either privileged secret exists — so provisioning one is the only remaining step and needs no further workflow edit. Promote once a privileged secret is provisioned (or that repo setting is enabled) AND a main run is observed opening/updating the Release-PR: drop the ' (advisory)' name token, remove the 403-containment step, and delete this entry. [OPUS-5] That observation is now AUTOMATIC and does not depend on anyone remembering: on every SUCCESSFUL run the job re-runs the same side-effect-free PR-creation probe and, the moment it returns 422 instead of 403 (authorization passed, so PR-creation is unblocked), emits a `::warning title=release-plz Release-PR promotion unblocked (sq-lonae)` annotation naming the three edits above. The probe is needed even on success because `release-plz release-pr` also exits 0 when there is nothing to release",
    "registered": "2026-07-23"
   },
   "merge-queue dequeued feedback (advisory)": {
@@ -194,6 +236,29 @@
    "owner_bead": "registry jeswr/agent-account-registry#563 item 3 (durable fix for registry#556)",
    "promotion_criteria": "permanently advisory BY DESIGN: this job runs on pull_request_target [dequeued] (write-only, no PR-head checkout) AFTER a gate verdict exists on the head SHA, and its writes (disable-auto + review:changes swap + comment) are orchestration feedback, not a merge-worthiness verdict — a feedback hiccup must never red a later gate evaluation on the same SHA. Promote never; delete this entry only if the workflow is removed",
    "registered": "2026-07-24"
+  },
+  "merge-group doorbell (advisory)": {
+   "workflow": "merge-group-doorbell.yml",
+   "job_id": "doorbell",
+   "owner_bead": "sparq-org/sparq#4652 follow-up — event-driven entry point for the zero-dispatch merge-group watchdog",
+   "promotion_criteria": "permanently advisory BY DESIGN, for the same reason as `merge-queue dequeued feedback (advisory)`: it runs on pull_request_target [enqueued, dequeued], i.e. AFTER a gate verdict already exists on the head SHA (a PR cannot be enqueued before it is green), it never checks out or executes anything, and its single action is one `gh workflow run` that rings the merge-group watchdog. Ringing a queue watchdog is not a statement about the commit's merge-worthiness, so a doorbell hiccup must never red a later gate evaluation on that same SHA. No gate_script_waiver: the job invokes no script at all. Promote never; delete this entry only if the workflow is removed",
+   "registered": "2026-07-28"
+  },
+  "lws-cth preflight (advisory)": {
+   "workflow": "lws-cth.yml",
+   "job_id": "preflight",
+   "owner_bead": "sq-gg0qq.7",
+   "promotion_criteria": "Promotable in principle — this job IS hermetic (shellcheck + a filesystem-only config consistency check, no Docker/network/Keycloak). It is declared advisory only because it lives in a workflow_dispatch-ONLY workflow: a manual dispatch against a PR branch would otherwise leave a GATING check-run on that head SHA, which is the silent-gating trap this registry's _doc describes. Promote by moving the `check-conformance-config.py` invocation into a lane that already runs per-PR (e.g. the docs-quality shellcheck job), at which point this entry and the preflight job here are both deleted.",
+   "gate_script_waiver": "Runs `shellcheck` and `python3 crates/sparq-lws-core/conformance/check-conformance-config.py`, both gate-classified by C3. Neither is a repo-wide gate script: the python check validates ONLY this harness's own committed config against itself (C1-C6, self-tested via --self-test) and the shellcheck target is this harness's own run.sh. Nothing outside crates/sparq-lws-core/conformance/ is assessed, so an advisory verdict here cannot mask a real gate.",
+   "registered": "2026-07-28"
+  },
+  "lws-cth harness (advisory)": {
+   "workflow": "lws-cth.yml",
+   "job_id": "harness",
+   "owner_bead": "sq-gg0qq.7",
+   "promotion_criteria": "NOT promotable while the harness's prerequisites are external. The Solid CTH needs Docker, network egress, a live Keycloak realm at localhost:8080 with the conformance-alice/bob DPoP service-account clients, and an ath-patched CTH image (the published harness omits the RFC 9449 DPoP `ath` claim and cannot authenticate against this server). A GitHub-hosted runner has none of those, so a gating leg could only ever be red, and the run is long + Docker-heavy + network-bound — exactly the shape that causes CI congestion collapse if it reaches the per-PR path. Promote only if the whole stack (realm + patched image) becomes reproducible on a runner the required gate can depend on. Delete this entry only if the workflow is removed.",
+   "gate_script_waiver": "Runs `cargo build --release -p sparq-lws-core` and `./crates/sparq-lws-core/conformance/run.sh`, gate-classified by C3. run.sh IS a real ratchet — it fails when the generated CTH score drops below the floor in conformance/baseline.json — but it asserts nothing about any other surface, and it is unrunnable without the external stack above, so it cannot stand in for a gate that would otherwise run.",
+   "registered": "2026-07-28"
   }
  }
 }

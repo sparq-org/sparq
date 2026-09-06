@@ -442,13 +442,23 @@ profile, so there is no path to extract results from the instance.
 wheels for Python 3.10, 3.11, 3.12 on PyPI. The install on AL2023 python3.11 would succeed.
 The benchmark likely ran and produced results, but they are unrecoverable.
 
-**Root cause for permanent NOT-RUN status:** No result retrieval mechanism available with the
+**Root cause for the NOT-RUN status:** No result retrieval mechanism available with the
 current IAM permissions (no S3, no SSM with instance profile, no instance metadata tag
 write, no serial console). A canonical run requires either:
 - An IAM instance profile with `s3:PutObject` on a results bucket (maintainer action), OR
 - Enabling EC2 serial console access at the account level
   (`ec2:EnableSerialConsoleAccess`), OR
 - SSH key pair at launch time.
+
+**Harness status (sq-ffaa9, [OPUS-5]):** the first option is now implemented on the repo
+side — `scripts/bench/bench-result-egress.sh` uploads each envelope to a run-scoped S3
+prefix, and the three `scripts/bench/canonical-*-bench.sh` launchers attach the instance
+profile and sync the prefix back, opt-in via `BENCH_IAM_PROFILE` + `BENCH_RESULTS_S3`. The bucket,
+role and instance profile themselves are still a **maintainer action** — run
+`scripts/bench/bootstrap-bench-iam.sh` with credentials that can create them (see
+`scripts/bench/README.md`). Until that has been run in the account, this gather stays
+NOT-RUN; the AWS-side calls in the bootstrap script are documented-untested here because
+CI has no AWS account.
 
 **Impact:** sparq-vectors' `DiskAnnIndex` (Vamana) cannot be positioned against the
 DiskANN reference library until a canonical run is executed. The like-for-like comparison

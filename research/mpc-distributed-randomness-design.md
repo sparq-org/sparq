@@ -5,9 +5,15 @@ re-review when Fable returns. Date: 2026-07-19. Bead sq-yyro (parent MPC epic sq
 
 # Distributed randomness (PRSS / honest-majority coin-toss) + dealer-less VSS
 
-**Status:** Deep-research design record + code seam (NO full implementation). Author: Opus 4.8
-(Fable unavailable — flag for re-review). Date: 2026-07-19. Bead **sq-yyro** (parent MPC epic
-**sq-pwr**; issue #2989, parent #2629).
+**Status:** Deep-research design record + code seam. Author: Opus 4.8 (Fable unavailable — flag
+for re-review). Date: 2026-07-19. Bead **sq-yyro** (parent MPC epic **sq-pwr**; issue #2989,
+parent #2629).
+
+**Implementation status (updated 2026-08-01, issue #3531).** The record was authored *before* any
+dealer-less implementation existed and the tier statements below are written in that voice. Since
+then the **PRSS online generator has landed** (`crate::prss`, §5 item 1) on a **simulated** seed
+setup. §4a is the authoritative accounting of what is and is not implemented; where the
+"as authored" text below conflicts with it, §4a wins.
 
 **Scope.** How sparq-mpc replaces its **single-trusted-dealer randomness simulation** with a
 **dealer-less** correlated-randomness layer suitable for a real federation: (1) the choice
@@ -30,14 +36,16 @@ implementations are follow-on beads behind the seam this record specifies.
   authenticated-sharing layer. The `r = 0` defense composes with (and in the malicious tier
   *depends on*) that layer; this record states the interface, not the MAC construction.
 
-**The achieved tier, stated up front (not over-claimed).** This is a **design record + a compiling
-code seam** ([`crate::randomness`]). It ships **NO** dealer-less crypto: PRSS, the coin-toss, and
-dealer-less VSS remain honest `NotYetImplemented`-gated behind the seam. The one thing that
-changes in code is that the correlated-randomness contract is now an explicit trait with an
-honest `RandomnessModel` self-description, so the current single-dealer path is *labelled* as the
+**The achieved tier, stated up front (not over-claimed) — as authored, 2026-07-19; see §4a for
+what has since landed.** This record is a **design record + a compiling code seam**
+([`crate::randomness`]). *At the time of writing* it shipped **NO** dealer-less crypto: PRSS, the
+coin-toss, and dealer-less VSS were all honest `NotYetImplemented`-gated behind the seam. The one
+thing that changed in code was that the correlated-randomness contract became an explicit trait
+with an honest `RandomnessModel` self-description, so the single-dealer path is *labelled* as the
 simulation it is (`RandomnessModel::TrustedDealerSim`, `deployable() == false`) rather than
-silently masquerading as a federation-ready source. No security claim is made or strengthened
-here; `sq-qhy4` external sign-off remains pending for the whole crate.
+silently masquerading as a federation-ready source. No security claim was made or strengthened
+here; `sq-qhy4` external sign-off remains pending for the whole crate — and, per §4a, it remains
+pending *after* the PRSS generator landed, which is why no variant is `deployable()` yet.
 
 ---
 
@@ -258,8 +266,9 @@ The seam is a single new module carrying:
   `share`. This is the honest label: the dealer *knows* the mask, so it is a simulation, not a
   federation-ready source. Making the contract explicit is the whole point of the seam — the
   dealer-less impls slot in behind it without touching the join/compare/oblivious callers.
-- **No PRSS/coin-toss/VSS implementor ships.** Those are follow-on beads (below). The seam adds
-  NO fake dealer-less crypto; it only names the contract and labels the simulation.
+- **No PRSS/coin-toss/VSS implementor ships *with the seam itself*.** Those are follow-on beads
+  (below); the seam adds NO fake dealer-less crypto, it only names the contract and labels the
+  simulation. The PRSS implementor has since landed behind this trait — §4a.
 
 **Why a trait `ShamirDealer` implements (not free functions / an unused stub).** Implementing the
 trait for the existing dealer makes the seam *used* (no dead code), pins the exact call-shape the
@@ -269,11 +278,63 @@ same trait — swapped in by `RandomnessModel`, never by concrete type.
 
 ---
 
+## 4a. Implementation status (authoritative; updated 2026-08-01, issue #3531)
+
+What has actually landed behind the seam, separated from what the sections above *specify*.
+
+**Implemented — the PRSS ONLINE GENERATOR (`crate::prss`, §5 item 1, partial).**
+`PrssRandomness: DistributedRandomness` reports `RandomnessModel::Prss` and generates degree-`t`
+sharings by the real `Σ_A PRF(k_A, ctr)·f_A` rule with **zero online rounds**. Each party's share
+is summed over that party's own seed view; the generation path is *instrumented* so a test records
+which seeds each party's share touched and requires that set to be exactly the complement of `A`
+(a leak that is arithmetically invisible — coefficient `f_A(x_i) = 0` — still goes red). The
+`C(n, t)` seed count is capped by `prss::MAX_PRSS_SEEDS`, refusing `n ≥ 10` fail-closed and naming
+the §2.2 coin-toss fallback. This answers §6 Q1 for this crate: the ceiling is set at `n ≤ 9`.
+
+**PRF instantiation (the construction's PRF assumption, made concrete).** `PRF(k_A, ctr)` is a
+domain-separated SHA-512 key derivation — `SHA-512("sparq-mpc/prss/v1/prf" ‖ k_A ‖ ctr)`, all
+inputs fixed-length so distinct `(k_A, ctr)` pairs cannot collide by concatenation ambiguity —
+keying a fresh ChaCha20 stream from which one field element is drawn by the crate's uniform
+rejection sampler (no modulo bias). The construction needs a PRF keyed by `k_A` and indexed by
+`ctr` whose outputs are computationally indistinguishable from uniform `F_p` to a party lacking
+`k_A`; a keyed-hash-to-stream instantiation is the standard way to meet it, and it reuses the same
+ChaCha20 generator the masking CSPRNG already relies on (sq-1vt), so it introduces no primitive
+the crate was not already trusting at the computational tier. This is an *engineering* argument
+from standard primitives, **not** a proof and **not** an audited reduction — the pseudorandomness
+caveat of §2.1 cons 2 applies unchanged, and `sq-qhy4` external sign-off is pending.
+
+**NOT implemented — the gaps that keep this non-deployable.**
+- **Setup is a SIMULATED one-time trusted setup, not dealer-less key agreement.** The `C(n, t)`
+  replicated seeds are drawn locally from OS entropy. §6 Q3 is still open, and the real
+  replicated-seed distribution is not built.
+- **The `r ≠ 0` check is CENTRAL, a simulation artefact.** The rejection evaluates
+  `r = Σ_A PRF(k_A, ctr)` directly, which is possible only because this in-process simulation
+  holds every seed; no party can do it. The distributed zero-test of §1 part 1 / §5 item 4 is the
+  replacement and has not landed, so `shared_nonzero_mask` stays **semi-honest-only**.
+- **Dealer-less VSS is absent.** `PrssRandomness::vss_own_input` returns `NotYetImplemented`:
+  PRSS generates correlated randomness, it does not verifiably share a holder's own input (§3,
+  §5 item 3).
+- **No malicious-tier property.** Nothing detects a party emitting a wrong share; §5 item 4 is
+  untouched.
+- **In-process simulation.** All `n` shares are computed in one process, which holds every seed.
+  What is demonstrated is protocol *structure* — which seed may enter which share, and that the
+  output is a correct degree-`t` sharing — never process or network isolation.
+- **Coin-toss (§5 item 2) and caller wiring (§5 item 5) are untouched.**
+
+**Deployment status: unchanged.** `RandomnessModel::Prss.deployable()` is still `false`, so
+`require_deployable()` refuses this source exactly as it refuses the single-dealer simulation.
+Acceptance stays tied to a *validated* construction (§5 item 5), never to the self-reported label,
+and the crate remains research-grade and externally unaudited (`sq-qhy4` pending).
+
+---
+
 ## 5. Follow-on beads (implementation, behind the seam)
 
 1. **PRSS setup + generator** (small-`n` honest-majority): replicated-seed distribution + the
    `Σ_A PRF(k_A, ctr)·f_A` degree-`t` generator; a `PrssRandomness: DistributedRandomness`
    reporting `RandomnessModel::Prss`. Seed-count guard fails closed for large `n`.
+   **Status: PARTIALLY LANDED** (#3531) — the generator and the seed-count guard ship; the
+   replicated-seed *distribution* is still a simulated trusted setup. See §4a.
 2. **Distributed coin-toss** (general-`n` / setup-free fallback): commit-open (or VSS-summed)
    joint randomness; `CoinTossRandomness: DistributedRandomness`.
 3. **Dealer-less honest-majority VSS** for `vss_own_input` in the malicious tier (pairwise
@@ -296,6 +357,9 @@ same trait — swapped in by `RandomnessModel`, never by concrete type.
 
 1. **PRSS seed-count ceiling.** At what `n` does `C(n, t)` force the coin-toss fallback for THIS
    deployment? (Flatmates `n = 4` → `C(4,1) = 4` seeds; fine. `n = 9` → 126; borderline.)
+   **Answered in code** (#3531): `prss::MAX_PRSS_SEEDS` puts the ceiling at the borderline case —
+   `n ≤ 9` builds, `n ≥ 10` (`C(10,4) = 210`) is refused fail-closed pointing at the coin-toss.
+   Whether the *federation* wants the ceiling that high is still a deployment question.
 2. **LAN vs WAN (shared with the security-models doc §9.2).** If v1 is WAN, PRSS's
    non-interactivity is decisive and the coin-toss round-cost is a real tax; if LAN, either works.
 3. **Setup trust for PRSS.** The replicated-seed setup is itself a small dealer-less protocol (or

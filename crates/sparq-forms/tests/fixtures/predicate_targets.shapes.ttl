@@ -1,0 +1,33 @@
+# Predicate-target applicability (sq-vfcxv): sh:targetSubjectsOf and
+# sh:targetObjectsOf join the switcher, ranked BELOW dash:applicableToClass.
+# ex:EmployeeShape is the negative control — the focus node has no ex:worksFor.
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dash: <http://datashapes.org/dash#> .
+@prefix ex: <http://example.org/> .
+
+ex:PersonCardShape a sh:NodeShape ;
+  dash:applicableToClass ex:Person ;
+  sh:name "Person card" ;
+  sh:property [
+    sh:path ex:name ; sh:name "Name" ; sh:order 1 ;
+    sh:datatype xsd:string ; sh:minCount 1 ; sh:maxCount 1 ;
+  ] .
+
+ex:KnowerShape a sh:NodeShape ;
+  sh:targetSubjectsOf ex:knows ;
+  sh:name "Knower" ;
+  sh:property [
+    sh:path ex:knows ; sh:name "Knows" ; sh:class ex:Person ;
+  ] .
+
+ex:KnownShape a sh:NodeShape ;
+  sh:targetObjectsOf ex:knows ;
+  sh:name "Known by others" ;
+  sh:property [
+    sh:path [ sh:inversePath ex:knows ] ; sh:name "Known by" ;
+  ] .
+
+ex:EmployeeShape a sh:NodeShape ;
+  sh:targetSubjectsOf ex:worksFor ;
+  sh:name "Employee" .

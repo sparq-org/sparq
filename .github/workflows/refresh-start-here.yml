@@ -1,0 +1,104 @@
+# refresh-start-here — keep the maintainer front door (#1135) honest, structurally.
+# [OPUS-5] sparq-org/sparq#4145.
+#
+# WHY. #1135 says "auto-maintained" and never was: it was refreshed by hand, and on 2026-07-26 it
+# was 13 days stale with SEVEN already-resolved entries still being presented to the maintainer as
+# work needing them. This workflow is the structural half of the fix — `scripts/render-start-here.py`
+# re-renders the body from `orchestration/start-here.toml` plus LIVE GitHub state, so a closed or
+# merged item drops out by construction rather than because somebody remembered.
+#
+# TRIGGERS.
+#   * schedule — four times a day, the backstop that catches everything (label counts, a PR that has
+#     newly rotted to CONFLICTING, an item closed while this workflow was failing).
+#   * issues/pull_request `closed` — prompt removal, so a resolved ask disappears within a minute
+#     instead of waiting for the next cron.
+#   * workflow_dispatch — manual re-render.
+#
+# COST. An on-close run passes `--if-ref`, so a close event for something the front door does not
+# list exits before making a single API call. That matters: at the 60-merges/hour target, a full
+# render per PR close would spend ~2400 requests/hour against GITHUB_TOKEN's 1000/hour/repository
+# budget, and the run that got rate-limited would be the one that mattered.
+#
+# LEAST PRIVILEGE. The workflow-level default is read-only; the one job adds `issues: write` (it
+# edits #1135) and `pull-requests: read` (it reads mergeable/mergeStateStatus). It never needs
+# `contents: write` — a downgrade of `issues` to `read`, or an escalation of `contents` to `write`,
+# reds scripts/tests/test_start_here_render.py::TestRefreshWorkflowWiring.
+#
+# TRUST NOTE on the `pull_request` trigger. For `pull_request` events GitHub runs the workflow file
+# as it exists on the PR, so a SAME-REPO PR that edits this file runs its own version on close with
+# `issues: write`. That blast radius is bounded to editing issues, which anyone who can push a
+# branch here can already do with their own token — and fork PRs (the untrusted case) are skipped by
+# the job `if` below AND get a read-only token regardless. If that ever stops being acceptable, drop
+# the `pull_request` trigger and rely on `issues: [closed]` plus the cron; prompt PR removal is a
+# latency nicety, not a correctness requirement.
+#
+# NOT A GATE. This is a scheduled maintenance job, not a PR check; the renderer's own hermetic
+# `--self-test` plus scripts/tests/test_start_here_render.py run as part of the gating
+# `routing-self-tests` workflow, which is where a broken renderer must fail.
+name: refresh-start-here
+
+on:
+  schedule:
+    # 05:23 / 11:23 / 17:23 / 23:23 UTC — off the hour, so this never queues behind the top-of-hour
+    # cron pile-up.
+    - cron: "23 5,11,17,23 * * *"
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One renderer at a time. cancel-in-progress is ON deliberately: the render is idempotent and
+  # last-writer-wins, so under a merge burst the newest state should win rather than a queue of
+  # stale renders draining one by one. The `schedule` trigger above is what makes that safe — a
+  # cancelled run costs at most a few hours of staleness in the worst case, and the next close
+  # event re-triggers anyway.
+  group: refresh-start-here
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    name: Refresh START HERE (#1135)
+    runs-on: ubuntu-latest
+    # A `pull_request` close event from a FORK gets a read-only GITHUB_TOKEN, so `gh issue edit`
+    # could never succeed and the job would red on every external contributor's PR. Skip those;
+    # the cron still catches the state change. Deleting this guard turns every fork-PR close into
+    # a permanent red — TestRefreshWorkflowWiring::test_fork_pull_request_events_are_skipped.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      issues: write # it edits #1135 — the only write this job has
+      pull-requests: read # mergeable / mergeStateStatus for the gated-PR table
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Self-test the renderer (hermetic — no network, no writes)
+        # Runs BEFORE the live render: a malformed orchestration/start-here.toml or a broken drop
+        # rule must fail here, not half-way through rewriting the maintainer's front door.
+        run: python3 scripts/render-start-here.py --self-test
+
+      - name: Render #1135 from orchestration/start-here.toml + live state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Only the (integer) issue/PR number and the repository slug are interpolated.
+          ref=""
+          case "${{ github.event_name }}" in
+            issues) ref="${{ github.repository }}#${{ github.event.issue.number }}" ;;
+            pull_request) ref="${{ github.repository }}#${{ github.event.pull_request.number }}" ;;
+          esac
+          if [ -n "$ref" ]; then
+            # Cost guard: exits without a single API call when $ref is not on the front door.
+            python3 scripts/render-start-here.py --if-ref "$ref"
+          else
+            python3 scripts/render-start-here.py
+          fi

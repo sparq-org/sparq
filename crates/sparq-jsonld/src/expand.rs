@@ -557,7 +557,19 @@ fn expand_keyword(
                 frame_expansion,
                 false,
             )?;
-            let items = as_array(expanded.unwrap_or_else(|| Json::Arr(Vec::new())));
+            // §5.1.2 step 13.4.13: "ensuring that the result is an array", then EVERY
+            // element must be a node object. A DROPPED expansion (`None` — a free-floating
+            // scalar, value object, or list object under the null active property) is not
+            // an empty array: arrayifying null yields a one-element array whose element is
+            // not a node object, so it is an `invalid @included value`. Collapsing it to
+            // `[]` instead would vacuously accept `@included: "string"` / `{"@value": …}` /
+            // `{"@list": […]}` (W3C expand/in07, in08, in09), which the suite requires to
+            // raise. Matches jsonld.js (`_asArray(null)` → `[null]`, `_isSubject(null)`
+            // false) and pyld.
+            let items = match expanded {
+                Some(j) => as_array(j),
+                None => vec![json_null()],
+            };
             for item in &items {
                 if !is_node_object(item) {
                     return Err(JsonLdError::new(E::InvalidIncludedValue));
@@ -954,7 +966,11 @@ fn cleanup(
         if members.iter().any(|(k, _)| !ALLOWED.contains(&k.as_str())) {
             return Err(JsonLdError::new(E::InvalidValueObject));
         }
-        if has(&members, "@type") && has(&members, "@language") {
+        // §5.1.2 step 15.1: the value object "must not contain an `@type` entry if it
+        // contains either `@language` or `@direction` entries" — a typed literal cannot
+        // also carry a language tag OR a base direction (W3C expand/di09 pins the
+        // `@direction` half).
+        if has(&members, "@type") && (has(&members, "@language") || has(&members, "@direction")) {
             return Err(JsonLdError::new(E::InvalidValueObject));
         }
         // A value object's `@type` is a SINGLE value in the JSON-LD data model
@@ -999,9 +1015,16 @@ fn cleanup(
             if let Some(t) = obj_get(&members, "@type") {
                 // [FABLE-5] sq-oy1f.29 — a frame value pattern's @type alternative may
                 // also be the wildcard `{}` or `@json`.
+                // §5.1.2 step 15.4: the value of `@type` must be an IRI — a blank node
+                // identifier is NOT one, so a `_:`-datatyped literal is an
+                // `invalid typed value` (W3C expand/er40). Blank-node datatypes are only
+                // meaningful under the `GeneralizedRdf` optional feature, which sparq does
+                // not opt into (those suite cases are the `requires` skip bucket).
+                // Frame expansion keeps admitting a blank node so a frame can pattern-match
+                // one (json-ld11-framing §2.2 value patterns).
                 let type_ok = |e: &Json| match e {
                     Json::Str(s) => {
-                        is_absolute_iri(s) || is_blank_node(s) || (frame_expansion && s == "@json")
+                        is_absolute_iri(s) || (frame_expansion && (is_blank_node(s) || s == "@json"))
                     }
                     Json::Obj(m) => frame_expansion && m.is_empty(),
                     _ => false,

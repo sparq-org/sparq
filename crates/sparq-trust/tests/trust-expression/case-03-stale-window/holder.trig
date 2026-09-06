@@ -1,0 +1,19 @@
+# Design §6 case 3 — STALE WINDOW. A positive status attestation exists and covers
+# the bundle, but its window [2026-06-01, 2026-06-10] does NOT contain the
+# verifier-chosen instant t = 2026-07-05. Freshness is a verifier parameter in TR,
+# never a spec constant (design §7.4), so the holder cannot widen it.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:dvla.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-06-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-06-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}

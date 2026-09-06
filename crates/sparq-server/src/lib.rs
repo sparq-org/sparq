@@ -13,7 +13,7 @@ pub mod negotiate;
 /// distroless (no shell, no `curl`/`wget`), so the server probes its own loopback `/health`
 /// endpoint and exits `0`/non-zero for the container runtime. The response classifier
 /// ([`health_probe::probe_healthy`]) is pure + always compiled/unit-tested; the async TCP
-/// runner ([`health_probe::run_probe`]) is gated on `server` (it uses tokio). See the module
+/// runner (`health_probe::run_probe`) is gated on `server` (it uses tokio). See the module
 /// docs for the distroless constraint that forces this in-binary approach.
 pub mod health_probe;
 
@@ -32,13 +32,13 @@ pub mod service_config;
 /// `--cors-allow-origin-file` / `SPARQ_CORS_ALLOW_ORIGIN`, exact-origin matcher). Pure
 /// (no async), always compiled + unit-tested. EMPTY by default = NO CORS headers (the
 /// historical, safe posture for a data API); an operator opts specific first-party
-/// browser origins back in. Enforced by the [`http::harden`] middleware. See the module
+/// browser origins back in. Enforced by the `http::harden` middleware. See the module
 /// docs for the deliberately-conservative policy (no `*`, no credentials).
 pub mod cors_config;
 
 /// [OPUS-4.8] (sq-toze.34, epic sq-toze) **Request-log redaction** — keeps SPARQL query / update
 /// text out of the `--verbose` request log (a PII/privacy exposure: `GET /sparql?query=…` puts
-/// the full query in the logged URI). On by default ([`ServerConfig::redact_logs`]); opt out with
+/// the full query in the logged URI). On by default (`ServerConfig::redact_logs`); opt out with
 /// `--log-full-requests` / `SPARQ_LOG_FULL_REQUESTS=1`. Log-CONTENT redaction, not anonymity — see
 /// the module docs for the metadata boundary that remains. Always compiled + unit-tested.
 pub mod redact;
@@ -178,7 +178,7 @@ pub use http::ShaclShapes;
 pub use http::RestoreGuard;
 
 /// [OPUS-4.8] (sq-4w18) The SERVICE egress allowlist config type, re-exported at the
-/// crate root next to [`ServerConfig`].
+/// crate root next to `ServerConfig`.
 pub use service_config::ServiceAllowlist;
 
 /// [OPUS-4.8] (sq-9xoh) The per-request SERVICE egress allowlist override hook type, re-exported
@@ -191,7 +191,7 @@ pub use service_config::ServiceAllowlist;
 pub use http::ServiceAllowOverride;
 
 /// [OPUS-4.8] (sq-o7o0, ASVS V14.5.3) The first-party CORS origin allowlist config type,
-/// re-exported at the crate root next to [`ServerConfig`].
+/// re-exported at the crate root next to `ServerConfig`.
 pub use cors_config::CorsAllowlist;
 
 /// [OPUS-4.8] (sq-uqh, Wave B) Re-exported for consumers (and tests) that introspect a

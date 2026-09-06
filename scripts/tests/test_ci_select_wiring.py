@@ -57,10 +57,12 @@ BENCH_YML = REPO_ROOT / ".github" / "workflows" / "bench.yml"  # [SONNET-4.6] sq
 SELECT_YML = REPO_ROOT / ".github" / "workflows" / "ci-select.yml"
 GATE_PY = REPO_ROOT / "scripts" / "ci_summary_gate.py"
 CI_SELECT_PY = REPO_ROOT / "scripts" / "ci_select.py"  # [OPUS-4.8] sq-fmx4u.6
+COVERAGE_GATE_PY = REPO_ROOT / "scripts" / "coverage-gate.py"  # [SONNET-4.6] sq-6vshe.17
 OWNERSHIP_TOML = REPO_ROOT / "ci" / "path-ownership.toml"  # [OPUS-4.8] sq-fmx4u.6
 # [OPUS-4.8] path-aware CI audit: the merge_group changed-files gates.
 CONTAINER_SCAN_YML = REPO_ROOT / ".github" / "workflows" / "container-scan.yml"
 SUPPLY_CHAIN_YML = REPO_ROOT / ".github" / "workflows" / "supply-chain.yml"
+CODEQL_YML = REPO_ROOT / ".github" / "workflows" / "codeql.yml"  # [OPUS-5] sq-g25hr
 
 FAIL_CLOSED_DISJUNCT = "needs.select.outputs.mode != 'selected'"
 NEEDLE_RE = re.compile(
@@ -82,6 +84,18 @@ def _gate_module():
     spec = importlib.util.spec_from_file_location("ci_summary_gate", GATE_PY)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["ci_summary_gate"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _coverage_gate_module():
+    # [SONNET-4.6] sq-6vshe.17: import the coverage ratchet gate to read
+    # COVERAGE_ALARM_LANE — the single source of truth for the demoted-lane token the
+    # ci.yml filer must file the post-merge coverage alarm under. (Hyphenated filename,
+    # so it has to be loaded by path.)
+    spec = importlib.util.spec_from_file_location("coverage_gate", COVERAGE_GATE_PY)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["coverage_gate"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -132,7 +146,7 @@ _TOKEN_RE = re.compile(
     r"""\s*(?:
         (?P<str>'(?:[^']|'')*')
       | (?P<op>&&|\|\||==|!=|!|\(|\)|,)
-      | (?P<word>[A-Za-z_][A-Za-z0-9_.\-]*)
+      | (?P<word>[A-Za-z_][A-Za-z0-9_.\-*]*)
     )""",
     re.VERBOSE,
 )
@@ -166,6 +180,27 @@ def _truthy(value) -> bool:
     if value == "":
         return False
     return True
+
+
+def _walk(node, parts):
+    """Resolve a dotted context path against `node`.
+
+    [OPUS-5] #3508 adds GitHub's OBJECT-FILTER syntax `a.*.b`: it maps the
+    remaining path over an array (or an object's values) and yields an ARRAY of
+    the results — the shape that makes
+    `contains(github.event.pull_request.labels.*.name, 'fuzz-full')` work. An
+    absent path yields null (falsy), exactly as in GitHub, so a payload with no
+    `labels` key makes every such `contains(...)` false rather than erroring.
+    """
+    for idx, part in enumerate(parts):
+        if part == "*":
+            items = list(node.values()) if isinstance(node, dict) else list(node or [])
+            rest = parts[idx + 1:]
+            return [v for v in (_walk(item, rest) for item in items) if v is not None]
+        if not isinstance(node, dict) or part not in node:
+            return None  # an absent context value is null (falsy), as in GitHub
+        node = node[part]
+    return node
 
 
 class _GhExpr:
@@ -259,15 +294,19 @@ class _GhExpr:
             if isinstance(haystack, list):
                 return needle in haystack
             return str(needle) in str(haystack or "")
+        # [SONNET-4.6] sq-6vshe.17: `always()` is GitHub's "run even if a needed job
+        # failed" status function — TRUE on every non-cancelled run, which is exactly the
+        # case these tests evaluate. Modelling it lets the always()-composed verdict jobs
+        # (the `coverage` aggregate, the demoted-lane filers) be checked BEHAVIOURALLY
+        # instead of by substring. `cancelled()`/`failure()`/`success()` stay unsupported
+        # on purpose — no job `if:` under test uses them, and guessing a value for them
+        # would silently mis-evaluate a real guard.
+        if fn == "always":
+            return True
         raise GhExprError(f"unsupported function {fn}()")
 
     def _lookup(self, path):
-        node = self.ctx
-        for part in path.split("."):
-            if not isinstance(node, dict) or part not in node:
-                return None  # an absent context value is null (falsy), as in GitHub
-            node = node[part]
-        return node
+        return _walk(self.ctx, path.split("."))
 
 
 def _marker_expr_of(name: str) -> str:
@@ -289,14 +328,30 @@ def render_job_name(name: str, ctx: dict) -> str:
     return name.replace(expr, str(value))
 
 
-def pr_event(*, draft=False, action="synchronize", label=None, event="pull_request"):
-    """A synthetic `github` context for a pull_request (or other) event."""
+def pr_event(*, draft=False, action="synchronize", label=None, labels=None,
+             event="pull_request"):
+    """A synthetic `github` context for a pull_request (or other) event.
+
+    `label` is the SINGLE label of a labeled/unlabeled event payload;
+    `labels` ([OPUS-5] #3508) is the PR's standing label set, which the draft
+    escapes read via `github.event.pull_request.labels.*.name`. Omitting
+    `labels` leaves the key absent — the unlabelled-PR case.
+    """
     ctx = {"event_name": event, "event": {}}
     if event == "pull_request":
         ctx["event"] = {"action": action, "pull_request": {"draft": draft}}
         if label is not None:
             ctx["event"]["label"] = {"name": label}
+        if labels is not None:
+            ctx["event"]["pull_request"]["labels"] = [{"name": n} for n in labels]
     return {"github": ctx}
+
+
+def eval_job_if(cond: str, ctx: dict) -> bool:
+    """Evaluate a job `if:` the way GitHub does — the condition is an implicit
+    expression (no `${{ }}` wrapper), and its truthiness decides whether the job
+    runs. Returns True == the job RUNS."""
+    return _truthy(_GhExpr(" ".join(str(cond).split()), ctx).parse())
 
 
 class TestWiring(unittest.TestCase):
@@ -1157,6 +1212,286 @@ class TestHeavyRecallMergeGroupDemotion(unittest.TestCase):
         )
 
 
+class TestCoverageMergeGroupDemotion(unittest.TestCase):
+    """[SONNET-4.6] sq-6vshe.17 (research/ci-mergequeue-speedup-2026-07.md §3.4a): the
+    instrumented per-crate coverage MEASUREMENT is DEMOTED off the merge_group blocking
+    path — it was the entry POLE whenever change-based selection skipped the test shards.
+    Coverage is a RATCHET, not a correctness test, so a floor regression slipping through a
+    queued BATCH is detectable + recoverable post-merge; that is the whole soundness
+    argument, and it only holds if the enforcement points below stay wired.
+
+    Pinned invariants (each asserted BEHAVIOURALLY by evaluating the live `if:`, so a
+    mutated expression REDs rather than a substring drifting):
+      * the measure legs SKIP on merge_group;
+      * they still RUN on a non-draft PR head (the PRIMARY gate) and on push-to-main —
+        the push leg is the sq-6vshe.14 EXEMPTION: if a future push-run skip lands and
+        does not exempt coverage, this test REDs, whether it narrows the legs' EVENT
+        envelope or (the shape §3.1 actually specifies) adds a `queue-validated` pre-job
+        upstream of them;
+      * the fast no-compile FLOOR gates (`coverage-floors`) STILL RUN on merge_group, so a
+        batch can never LOWER a committed floor (the "floor is never silently lowered"
+        half of the invariant);
+      * the `coverage` aggregate still CONCLUDES on merge_group, so the ci-summary gate
+        never sees a dangling expected check;
+      * a post-merge measure-leg failure auto-files via the demoted-lane filer, under the
+        SAME lane token coverage-gate.py reads back for the ratchet-advance pause."""
+
+    # The regex the coverage-demoted-filer uses (in ci.yml) to find a FAILED DEMOTED
+    # measure leg by job name. Kept in sync with the workflow's `--jq ... test("...")`.
+    _DEMOTED_LEG_RE = re.compile(r"^coverage (ratchet \(shard |engine )")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ci = _load(CI_YML)
+        cls.cov_gate = _coverage_gate_module()
+
+    # The measure legs whose instrumented run left the queue.
+    DEMOTED_JOBS = ("coverage-measure", "coverage-engine-run")
+
+    # [OPUS-5] issue #5149: the upstream jobs each demoted leg may depend on — FROZEN,
+    # because "one more upstream job" is exactly the shape a push-run skip takes. See
+    # test_measure_legs_take_no_new_upstream_gate for why the event assertions cannot
+    # catch that shape on their own. Widen this ONLY with the exemption decided.
+    ALLOWED_UPSTREAM = {
+        "coverage-measure": {"changes", "coverage-floors", "select"},
+        "coverage-engine-run": {"changes", "coverage-floors", "select"},
+        "coverage-engine-merge": {"coverage-engine-run"},
+    }
+
+    # `needs.<job-id>.…` references inside a job-level `if:`.
+    _NEEDS_REF_RE = re.compile(r"needs\.([A-Za-z0-9_-]+)\.")
+
+    def _runs(self, job_id, *, event="pull_request", draft=False, mode="full",
+              affected="[]", rust_changed="true"):
+        """Evaluate a coverage job's live `if:` against a synthetic payload."""
+        ctx = pr_event(event=event, draft=draft)
+        ctx["needs"] = {
+            "changes": {"outputs": {"rust_changed": rust_changed}},
+            "select": {"outputs": {"mode": mode, "affected": affected}},
+        }
+        return eval_job_if(self.ci["jobs"][job_id].get("if", ""), ctx)
+
+    # ---- the demotion itself -------------------------------------------------
+    def test_measure_legs_skip_on_merge_group(self):
+        for job_id in self.DEMOTED_JOBS:
+            self.assertFalse(
+                self._runs(job_id, event="merge_group"),
+                f"ci.yml:{job_id} must SKIP on the merge_group ref (sq-6vshe.17): the "
+                f"instrumented shards were the entry pole and coverage is a recoverable "
+                f"ratchet, not a correctness gate",
+            )
+
+    def test_measure_legs_still_run_on_a_pr_head_and_on_push_to_main(self):
+        """The demotion's soundness rests ENTIRELY on these two enforcement points
+        surviving: the PR head is the primary gate, and push-to-main is what catches the
+        batch-stacking case (two PRs individually >= floor merging to < floor).
+
+        The `push` half is the EVENT-dimension half of the sq-6vshe.14 COORDINATION PIN:
+        that lever skips queue-validated re-validation on push to main, and coverage must
+        be EXEMPT from it (post-merge, off the queue's critical path). This assertion REDs
+        if the exemption is dropped by narrowing the legs' EVENT envelope; the other shape
+        the lever can take — a new upstream gate job — is caught by
+        `test_measure_legs_take_no_new_upstream_gate` below, which is the assertion that
+        actually fires for the design in §3.1."""
+        for job_id in self.DEMOTED_JOBS:
+            self.assertTrue(
+                self._runs(job_id, event="pull_request", draft=False),
+                f"ci.yml:{job_id} must still MEASURE on a non-draft PR head — that is the "
+                f"primary coverage gate after the merge_group demotion",
+            )
+            self.assertTrue(
+                self._runs(job_id, event="push"),
+                f"ci.yml:{job_id} must still MEASURE on push-to-main — it is the "
+                f"post-merge enforcement point the demotion depends on, and is EXEMPT "
+                f"from the sq-6vshe.14 push-run skip",
+            )
+
+    def test_measure_legs_take_no_new_upstream_gate(self):
+        """[OPUS-5] issue #5149 — the sq-6vshe.14 coordination pin, STRUCTURAL half.
+
+        `sq-6vshe.14` is specified (`research/ci-mergequeue-speedup-2026-07.md` §3.1) as a
+        cheap `push`-event pre-job (`queue-validated`) whose output makes pure-validation
+        legs skip on a SHA the queue already validated. Wired onto a coverage leg, that
+        shape is INVISIBLE to the event assertions above, in BOTH of its variants:
+
+          * as an `if:` conjunct — an absent context path evaluates to null exactly as on
+            GitHub, so a fresh `needs.queue-validated.outputs.skip != 'true'` is TRUE
+            under those synthetic payloads and the leg still LOOKS like it runs on push;
+          * as a `needs:` entry ALONE, with no `if:` change at all — a `push`-event
+            pre-job is itself conditional, and a skip propagates through `needs:` unless
+            the dependent uses a status function, which none of these legs does.
+
+        Either variant silently removes the post-merge measurement the sq-6vshe.17
+        demotion rests on. So the upstream set is FROZEN: whoever lands the lever REDs
+        here, on the leg, with the exemption in front of them as a decision — which is the
+        whole point of pinning it rather than discovering it."""
+        for job_id, allowed in self.ALLOWED_UPSTREAM.items():
+            job = self.ci["jobs"][job_id]
+            needs = job.get("needs", [])
+            needs = [needs] if isinstance(needs, str) else list(needs)
+            self.assertEqual(
+                set(needs), allowed,
+                f"ci.yml:{job_id}: its `needs:` is now {sorted(needs)}, not "
+                f"{sorted(allowed)}. A conditional upstream job SKIPS this leg with it "
+                f"(no status function here), and this leg is the post-merge coverage "
+                f"enforcement point. If this is the sq-6vshe.14 push-run skip: EXEMPT — "
+                f"keep it out of the skip, then update ALLOWED_UPSTREAM deliberately.",
+            )
+            new_refs = set(self._NEEDS_REF_RE.findall(str(job.get("if", "")))) - allowed
+            self.assertEqual(
+                new_refs, set(),
+                f"ci.yml:{job_id}: its `if:` now gates on {sorted(new_refs)} — a NEW "
+                f"upstream guard on a demoted coverage leg. Same rule: the push-to-main "
+                f"measurement is what the sq-6vshe.17 demotion trades against, so it is "
+                f"EXEMPT from the sq-6vshe.14 skip (and from any successor lever). Exempt "
+                f"the leg, then update ALLOWED_UPSTREAM deliberately.",
+            )
+
+    def test_engine_merge_skips_when_its_partitions_are_demoted(self):
+        """`coverage-engine-merge` has no event guard of its own — it must inherit the
+        demotion through `needs.coverage-engine-run.result == 'success'`. Evaluated with a
+        `skipped` upstream so a future rewrite to `!= 'failure'` (which would run the
+        merge over ZERO partitions and emit a false-low report) REDs here."""
+        cond = self.ci["jobs"]["coverage-engine-merge"].get("if", "")
+        for upstream in ("skipped", "cancelled", "failure"):
+            self.assertFalse(
+                eval_job_if(cond, {"needs": {"coverage-engine-run": {"result": upstream}}}),
+                f"coverage-engine-merge must not run when coverage-engine-run is "
+                f"'{upstream}'",
+            )
+        self.assertTrue(
+            eval_job_if(cond, {"needs": {"coverage-engine-run": {"result": "success"}}}),
+            "coverage-engine-merge must still run when its partitions succeeded",
+        )
+
+    # ---- what the queue KEEPS ------------------------------------------------
+    def test_floor_gates_still_run_on_merge_group(self):
+        """The fast, no-compile floor gates (test-presence / floor MONOTONICITY /
+        shard-partition) are NOT demoted: they cost well under a minute and they are what
+        makes "no committed floor is ever silently lowered" true of a QUEUED BATCH too.
+        Demoting these would break the stated invariant, not just the wall-clock."""
+        self.assertTrue(
+            self._runs("coverage-floors", event="merge_group"),
+            "coverage-floors must STILL run on merge_group — it is the batch-level "
+            "guarantee that no committed floor is lowered (sq-neq8 monotonicity)",
+        )
+        self.assertNotIn(
+            "merge_group", str(self.ci["jobs"]["coverage-floors"].get("if", "")),
+            "coverage-floors must carry NO merge_group exclusion",
+        )
+
+    def test_aggregate_still_concludes_on_merge_group(self):
+        """The `coverage` aggregate must still produce a TERMINAL check-run on the
+        merge_group ref (green off the skipped measure legs), or the ci-summary gate would
+        be left with an expected-but-missing coverage check."""
+        cond = str(self.ci["jobs"]["coverage"].get("if", ""))
+        self.assertIn("always()", cond,
+                      "the coverage aggregate must keep always() so it always concludes")
+        ctx = pr_event(event="merge_group")
+        ctx["needs"] = {}
+        self.assertTrue(eval_job_if(cond, ctx),
+                        "the coverage aggregate must still run on merge_group so the gate "
+                        "sees one terminal coverage verdict, never a dangling check")
+        # And its aggregation must keep counting a `skipped` measure leg as satisfied —
+        # that is what makes the demotion green rather than red.
+        body = "\n".join(str(s.get("run", "")) for s in self.ci["jobs"]["coverage"]["steps"])
+        self.assertIn("success|skipped", body,
+                      "the aggregate must treat a skipped (demoted) leg as satisfied")
+
+    # ---- the post-merge alarm + the advance pause ----------------------------
+    def test_advance_pause_step_wired_into_the_floor_gates(self):
+        """"Blocks further ratchet advances until green": the fast floor job must invoke
+        `coverage-gate.py --check-advance-allowed`, and needs only `issues: read` to probe
+        the alarm."""
+        job = self.ci["jobs"]["coverage-floors"]
+        body = "\n".join(str(s.get("run", "")) for s in job["steps"])
+        self.assertIn("--check-advance-allowed", body,
+                      "coverage-floors must run the ratchet-ADVANCE pause "
+                      "(scripts/coverage-gate.py --check-advance-allowed)")
+        self.assertIn("--check-monotonic", body,
+                      "the ratchet-DIRECTION gate (sq-neq8) must survive alongside it")
+        perms = job.get("permissions", {})
+        self.assertEqual(perms.get("issues"), "read",
+                         "the advance pause probes for an open alarm issue")
+        self.assertNotEqual(perms.get("issues"), "write",
+                            "the floor job must not gain write scope — the filer owns it")
+
+    def test_demoted_filer_job_wired(self):
+        """The demotion protocol requires a full-form-failure auto-filer so the demoted
+        lane cannot silently rot. Pin the safety-net job's existence, its
+        push-to-main-only guard, its scoped write perms, and its use of the filer."""
+        job = self.ci["jobs"].get("coverage-demoted-filer")
+        self.assertIsNotNone(job, "missing the coverage demoted-lane safety-net job")
+        cond = str(job.get("if", ""))
+        self.assertIn("github.event_name == 'push'", cond,
+                      "safety-net must run on push-to-main only")
+        self.assertIn("refs/heads/main", cond, "safety-net must be main-only")
+        self.assertIn("needs.coverage.result", cond,
+                      "safety-net must gate on the coverage aggregate's result")
+        needs = job.get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        self.assertIn("coverage", needs, "safety-net must need the coverage aggregate")
+        perms = job.get("permissions", {})
+        self.assertEqual(perms.get("contents"), "write",
+                         "safety-net needs contents:write to append+push the bead")
+        self.assertEqual(perms.get("issues"), "write",
+                         "safety-net needs issues:write to file the GitHub issue")
+        self.assertEqual(perms.get("actions"), "read",
+                         "safety-net needs actions:read to inspect this run's jobs")
+        body = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
+        self.assertIn("scripts/ci-file-demoted-lane-failure.py", body,
+                      "safety-net must invoke the generic demoted-lane filer")
+        self.assertIn("--self-test", body,
+                      "safety-net must self-test the filer before using it")
+        # It must NOT fire on a merge_group / PR run (the demotion is only about main).
+        for event in ("merge_group", "pull_request", "schedule"):
+            ctx = pr_event(event=event)
+            ctx["needs"] = {"coverage": {"result": "failure"}}
+            self.assertFalse(eval_job_if(cond, ctx),
+                             f"the safety-net must not fire on a {event} run")
+
+    def test_filer_lane_token_matches_the_coverage_gate_module(self):
+        """The filer files the alarm under `--lane <token>`; coverage-gate.py reads the
+        SAME token back to decide whether to pause ratchet advances. If they drift, the
+        alarm is filed but the pause never triggers (silent half-protocol)."""
+        lane = self.cov_gate.COVERAGE_ALARM_LANE
+        body = "\n".join(str(s.get("run", ""))
+                         for s in self.ci["jobs"]["coverage-demoted-filer"]["steps"])
+        self.assertIn(f'--lane "{lane}"', body,
+                      f"the filer must file the alarm under the lane token "
+                      f"coverage-gate.py reads ({lane!r})")
+
+    def test_filer_leg_detection_regex_matches_the_real_demoted_job_names(self):
+        """The safety-net detects a failed DEMOTED leg by matching its JOB NAME. If a leg
+        is renamed and this regex is not, the filer would silently never fire (silent rot)
+        — and if the regex over-reaches to `coverage-floors` or the aggregate, a normal red
+        main build would be mis-filed as a demotion finding. Pin BOTH directions against
+        the real names GitHub renders."""
+        must_match = []
+        for job_id, var in (("coverage-measure", "shard"), ("coverage-engine-run", "part")):
+            tmpl = self.ci["jobs"][job_id]["name"]
+            for val in self.ci["jobs"][job_id]["strategy"]["matrix"][var]:
+                must_match.append(tmpl.replace("${{ matrix.%s }}" % var, str(val)))
+        must_match.append(self.ci["jobs"]["coverage-engine-merge"]["name"])
+        for real in must_match:
+            self.assertRegex(
+                real, self._DEMOTED_LEG_RE,
+                f"the filer's demoted-leg regex must match job name {real!r}")
+        # NEGATIVE half: the still-queued floor gates, the aggregate verdict, the nightly
+        # tier and the filer itself must NOT be read as demoted legs.
+        for job_id in ("coverage-floors", "coverage", "coverage-nightly",
+                       "coverage-demoted-filer"):
+            self.assertNotRegex(
+                self.ci["jobs"][job_id]["name"], self._DEMOTED_LEG_RE,
+                f"the filer regex must not match {job_id} — a red there is a normal red "
+                f"main build, not a demoted-lane finding")
+        # The regex literal must still be the one the workflow actually runs.
+        body = "\n".join(str(s.get("run", ""))
+                         for s in self.ci["jobs"]["coverage-demoted-filer"]["steps"])
+        self.assertIn("^coverage (ratchet \\\\(shard |engine )", body,
+                      "the workflow's --jq regex must match the one pinned here")
+
+
 class TestDraftTierWiring(unittest.TestCase):
     """[FABLE-5] Draft-tier CI (docs/branch-protection.md §Draft-tier CI): draft
     PR heads run a REDUCED matrix — coverage / bench / CodeQL / heavy shards
@@ -1202,6 +1537,7 @@ class TestDraftTierWiring(unittest.TestCase):
         wfdir = REPO_ROOT / ".github" / "workflows"
         cls.ci = _load(CI_YML)
         cls.bench = _load(BENCH_YML)
+        cls.fuzz = _load(FUZZ_YML)  # [OPUS-5] #3508
         cls.sel = _load(SELECT_YML)
         cls.codeql = _load(wfdir / "codeql.yml")
         cls.vfo = _load(wfdir / "vectorized-feature-off.yml")
@@ -1255,6 +1591,58 @@ class TestDraftTierWiring(unittest.TestCase):
                       "bench.yml:bench must skip entirely on draft PR heads")
         self.assertIn(FAIL_CLOSED_DISJUNCT, cond,
                       "the selection disjunction must survive the draft guard")
+
+    def test_fuzz_job_skips_on_draft_heads(self):
+        """[OPUS-5] #3508 — the review-fix loop re-pushes a draft head many times
+        per PR and nothing in it reads a corpus-replay result, yet the job pays a
+        nightly-toolchain install + a `cargo fuzz build` of every target every
+        time. So the `fuzz` job is draft-skipped like bench/coverage and the
+        `ready_for_review` run re-replays at full tier. Asserted BEHAVIOURALLY by
+        evaluating the live `if:` (not by substring), because the two label
+        escapes are the part that a substring check would happily let rot."""
+        cond = self.fuzz["jobs"]["fuzz"].get("if", "")
+        self.assertIn(FAIL_CLOSED_DISJUNCT, str(cond),
+                      "the selection disjunction must survive the draft guard")
+
+        # mode=full => the selection disjunct is TRUE, so the draft guard alone
+        # decides. (mode=full is what push/schedule/dispatch always produce.)
+        def runs(**kw):
+            ctx = pr_event(**kw)
+            ctx["needs"] = {"select": {"outputs": {"mode": "full", "affected": "[]"}}}
+            return eval_job_if(cond, ctx)
+
+        self.assertFalse(runs(draft=True),
+                         "fuzz.yml:fuzz must SKIP on an unlabelled draft PR head")
+        self.assertFalse(runs(draft=True, labels=["review:changes"]),
+                         "an unrelated label must not resurrect the lane on a draft")
+        # FAIL-OPEN off the PR path: push / schedule / dispatch are byte-identical
+        # to before, so the randomized full-form runs (and the demotion auto-bead
+        # protocol they feed) are untouched.
+        for event in ("push", "schedule", "workflow_dispatch"):
+            self.assertTrue(runs(event=event), f"{event} must still run the fuzz lane")
+        self.assertTrue(runs(draft=False), "a non-draft PR head must still run it")
+        # LABEL ESCAPES. `fuzz-full` selects this job's RANDOMIZED budget (the
+        # budget step reads it), so a bare draft skip would silently neuter the
+        # label on exactly the drafts where a maintainer applies it.
+        for lbl in ("ci-full", "fuzz-full"):
+            self.assertTrue(runs(draft=True, labels=[lbl]),
+                            f"the {lbl} label must override the draft skip")
+        # The escapes compose with the #2546 label-trigger guard: a review:* flip
+        # stays a no-op on a draft even though the PR carries fuzz-full.
+        self.assertFalse(runs(draft=True, labels=["fuzz-full"],
+                              action="labeled", label="review:changes"),
+                         "a non-ci-full/fuzz-full label FLIP must stay a no-op")
+
+    def test_differential_smoke_is_not_draft_skipped(self):
+        """The sibling job in fuzz.yml is the wrong-answer gate, and a
+        wrong-answer regression IS review-relevant — #3508 scopes out the
+        corpus-replay lane only. Pinned so a later sweep does not quietly widen
+        the draft skip to a correctness gate."""
+        cond = str(self.fuzz["jobs"]["differential-smoke"].get("if", ""))
+        self.assertNotIn("draft", cond,
+                         "differential-smoke (the wrong-answer gate) must keep "
+                         "running on draft heads — see docs/branch-protection.md "
+                         "§Draft-tier CI")
 
     def test_codeql_analyze_skips_on_draft_heads(self):
         cond = str(self.codeql["jobs"]["analyze"].get("if", ""))
@@ -1813,29 +2201,40 @@ class TestSupplyChainMergeGroupGate(unittest.TestCase):
 
 class TestMergeGroupChangeClassGate(unittest.TestCase):
     """[FABLE-5] merge-group change-class gate (extends #3420/#3421 to the
-    rust_changed layer): the ci.yml + feature-matrix.yml `changes` decide steps
-    classify the queued batch's diff via `scripts/ci_select.py --classify-only`
-    instead of hard-forcing rust_changed=true on merge_group, so a docs-only/
-    orchestration-only batch skips the rust_changed-only lanes (lint / msrv /
-    geiger / docker-smoke / coverage-floors; feature-matrix setup / check-tier /
-    fedclient-boundary) with ATTRIBUTED skips. Pins the SHAPE:
+    rust_changed layer): the ci.yml + feature-matrix.yml + codeql.yml `changes`
+    decide steps classify the queued batch's diff via `scripts/ci_select.py
+    --classify-only` instead of hard-forcing rust_changed=true on merge_group, so a
+    provably-inert batch skips the rust_changed-only lanes (lint / msrv / geiger /
+    docker-smoke / coverage-floors; feature-matrix setup / check-tier /
+    fedclient-boundary; the CodeQL rust analysis) with ATTRIBUTED skips. Pins the
+    SHAPE:
       * the merge_group branch exists and is FAIL-SAFE (defaults true, the #3421
         fetch guard, `|| cls=engine` on the classifier invocation);
       * classification is DELEGATED to scripts/ci_select.py (single source of
         truth) — no duplicated grep path list in the step;
-      * the skip-class set is EXACTLY {docs-only, orchestration-only}, spelled
-        with the classifier module's own tokens (engine/mixed/unknown => full);
+      * the skip-class set is EXACTLY ci_select.py `_INERT_CLASSES`, spelled with
+        the classifier module's own tokens (engine/mixed/unknown => full);
       * ci.yml's docker_changed is class-gated the same way;
       * fuzz.yml needs no such layer (its heavy jobs are select-gated and
         ci-select passes the merge_group SHA pair) and bench.yml has no
         merge_group trigger at all (pinned elsewhere) — this layer must NOT
-        creep into them as a redundant/conflicting second gate."""
+        creep into them as a redundant/conflicting second gate.
+
+    [OPUS-5] sq-g25hr added codeql.yml to the gated set (the ~20-40min CodeQL
+    analysis was the longest merge_group pole for a zero-Rust batch) and widened
+    `_INERT_CLASSES` with `deploy-only` + `inert-mixed`.
+
+    [OPUS-5] #5249 widened it once more with `map-safe` — an ownership-map
+    `safe = true` verdict, which the CLOSURE layer already honoured (empty affected
+    set) while the CLASS layer still said `engine`, so a site-only batch ran the full
+    Rust matrix + CodeQL despite the two layers looking at the same diff."""
 
     @classmethod
     def setUpClass(cls):
         cls.ci = _load(CI_YML)
         cls.fm = _load(FM_YML)
         cls.fuzz = _load(FUZZ_YML)
+        cls.codeql = _load(CODEQL_YML)
         cls.select_mod = _ci_select_module()
 
     def _decide(self, wf, wf_name):
@@ -1845,8 +2244,11 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
         self.fail(f"{wf_name} missing the `Decide rust_changed` step")
 
     def _both(self):
+        # Every workflow whose merge_group batch is class-gated. (Name kept for the
+        # existing call sites; sq-g25hr made it three.)
         return (("ci.yml", self._decide(self.ci, "ci.yml")),
-                ("feature-matrix.yml", self._decide(self.fm, "feature-matrix.yml")))
+                ("feature-matrix.yml", self._decide(self.fm, "feature-matrix.yml")),
+                ("codeql.yml", self._decide(self.codeql, "codeql.yml")))
 
     def test_merge_group_branch_present_and_fail_safe(self):
         for wf_name, step in self._both():
@@ -1899,23 +2301,51 @@ class TestMergeGroupChangeClassGate(unittest.TestCase):
                              f"{wf_name}: the merge_group branch must NOT re-encode the "
                              "class path sets as a grep — no duplicated path lists")
 
-    def test_skip_class_set_is_exactly_docs_and_orchestration(self):
-        # The case-arm must skip on EXACTLY the two proven-inert classes, spelled
-        # with the classifier module's own tokens; the wildcard arm must force the
-        # full run (engine/mixed/any unknown token => rust=true).
-        docs = self.select_mod._CLASS_DOCS
-        orch = self.select_mod._CLASS_ORCHESTRATION
-        self.assertEqual((docs, orch), ("docs-only", "orchestration-only"),
-                         "classifier tokens drifted — update the workflow case-arms in "
-                         "lock-step (they match on these literal strings)")
+    def test_skip_class_set_is_exactly_the_inert_classes(self):
+        # The case-arm must skip on EXACTLY the proven-inert classes, spelled with
+        # the classifier module's own tokens; the wildcard arm must force the full
+        # run (engine/mixed/any unknown token => rust=true).
+        inert = self.select_mod._INERT_CLASSES
+        self.assertEqual(
+            inert,
+            ("orchestration-only", "docs-only", "deploy-only", "map-safe", "inert-mixed"),
+            "classifier tokens drifted — update the workflow case-arms in lock-step "
+            "(they match on these literal strings)")
+        # The arm is spelled docs-first for readability; assert on the SET so a
+        # re-ordering of _INERT_CLASSES is not a spurious failure, and on the exact
+        # arm text so an extra/renamed token cannot sneak in.
         for wf_name, step in self._both():
             run = str(step.get("run", ""))
-            self.assertIn(f"{docs}|{orch}) rust=false", run,
-                          f"{wf_name}: the skip case-arm must cover exactly {docs}|{orch}")
+            arms = re.findall(r"^\s*([a-z|-]+)\) rust=false", run, re.MULTILINE)
+            self.assertEqual(
+                len(arms), 1,
+                f"{wf_name}: expected exactly one skip case-arm, found {arms}")
+            self.assertEqual(
+                set(arms[0].split("|")), set(inert),
+                f"{wf_name}: the skip case-arm {arms[0]!r} must cover exactly the "
+                f"classifier's inert classes {inert}")
             self.assertIn("*) rust=true", run,
                           f"{wf_name}: the wildcard arm must force the full run")
-            self.assertNotIn("mixed) rust=false", run, wf_name)
-            self.assertNotIn("engine) rust=false", run, wf_name)
+            # `mixed` (engine + something inert) and `engine` must NEVER skip — this
+            # is the "a code change cannot be mislabelled as docs-only" obligation.
+            self.assertNotIn("mixed", arms[0].replace("inert-mixed", ""), wf_name)
+            self.assertNotIn("engine", arms[0], wf_name)
+
+    def test_codeql_merge_group_is_class_gated_not_force_true(self):
+        # [OPUS-5] sq-g25hr: the regression this bead fixes — codeql.yml used to
+        # hard-force rust_changed=true on merge_group, paying the full ~20-40min
+        # analysis for a zero-Rust batch. push/schedule MUST still force true.
+        step = self._decide(self.codeql, "codeql.yml")
+        run = str(step.get("run", ""))
+        self.assertIn('"${EVENT_NAME}" = "merge_group"', run,
+                      "codeql.yml: merge_group must be class-gated, not lumped into "
+                      "the force-true else-branch")
+        self.assertIn('echo "rust_changed=true" >> "$GITHUB_OUTPUT"', run,
+                      "codeql.yml: the off-PR/off-merge_group else-branch must still "
+                      "force the full analysis (push-to-main + the weekly schedule)")
+        analyze_if = str(self.codeql["jobs"]["analyze"].get("if", ""))
+        self.assertIn("needs.changes.outputs.rust_changed == 'true'", analyze_if,
+                      "codeql.yml: the analyze job must gate on the changes output")
 
     def test_ci_docker_changed_is_class_gated_with_rust(self):
         run = str(self._decide(self.ci, "ci.yml").get("run", ""))

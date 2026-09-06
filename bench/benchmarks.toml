@@ -657,6 +657,25 @@ records_to  = "stdout; analysis research/custom-parsers-D4-compressed-serializat
 status      = "ok"
 
 [[benchmark]]
+# [OPUS-5] (sq-98w7z.3) A DEPENDENCY A/B, not a sparq benchmark: it compares two
+# oxttl revisions against each other, with no sparq crate in the loop. It lives here
+# so the comparison is reproducible rather than a one-off in a research record.
+id          = "oxttl-prefix-alloc"
+name        = "oxttl prefixed-name expansion A/B (released vs oxigraph git)"
+category    = "parse"
+measures    = "Turtle parse wall (s, MB/s, Mtriples/s, min-of-N) and DETERMINISTIC allocation counts (allocs/reallocs per parse and per triple) for oxttl 0.2.3 vs an arbitrary oxigraph commit; plus an order-sensitive FNV digest over every parsed triple as the byte/count-identical differential"
+invoke      = "cd bench/parse/oxttl-prefix-alloc && ./ab.sh   # --corpus <file.ttl>, --iters N, --attribute <oxigraph-sha>; HARNESS_TOOLCHAIN=<tc> to override the pinned toolchain"
+source      = "bench/parse/oxttl-prefix-alloc/{README.md,ab.sh,src/main.rs}; released/ and upstream/ wrapper manifests sharing one [[bin]] path"
+dataset     = "data/ (gitignored): deterministic wd:/wdt:-shaped prefixed Turtle from `gen 60` (~60MB, ~1.92M triples), standing in for the gitignored sq-wrn61 wikidata-slice.ttl; --corpus takes the real slice"
+quiet_box_sensitive = true
+pinning     = "oxttl =0.2.3 exactly on the released leg and a pinned git rev on the upstream leg (never a branch); fat LTO to match shipped sparq-cli; feature legs mimalloc / rdf-12 / count-alloc"
+records_to  = "stdout; analysis research/oxttl-prefixed-name-alloc-2026-07.md"
+# Internal dependency-comparison harness like parse-baseline/dict-baseline — it measures
+# a third-party crate, not a sparq capability, so it is not a dashboard card.
+featured    = false
+status      = "ok"
+
+[[benchmark]]
 id          = "wikidata-8b"
 name        = "Wikidata full-truthy (~8-9.4B) low-resource external build"
 category    = "ingest"
@@ -936,11 +955,11 @@ name        = "Foundational-ontology KM-task A/B (Metric 1) over the PKG"
 category    = "inference"
 measures    = "per-arm agent KM-task accuracy (gold count/keys per task) + token cost across no-FO / gUFO / DOLCE-DUL / schema.org overlays; each FO-typed query answered under owl-rl closure of the overlay's rdfs:subClassOf axioms, the no-FO arm cannot answer (the FO-win construction). NOT a perf claim — the closure-build CPU/wall cost is non-canonical and never charged as a token cost"
 invoke      = "python3 bench/fo-km/validate_tasks.py   # proves every task discriminates (each FO arm answers expected count, no-FO returns 0; needs the `close` feature). Per-arm: cargo run -p sparq-kb --features close --bin pkg-query -- --extra-graph bench/fo-km/overlays/<arm>.ttl --close owl-rl --sparql '<FO-typed query from tasks.jsonl>'"
-source      = "bench/fo-km/{README.md,tasks.jsonl,build_tasks.py,validate_tasks.py,overlays/*.ttl}; crates/sparq-kb (pkg-query --extra-graph, load_pkg_with_extra / close::load_pkg_closed_with_extra)"
+source      = "bench/fo-km/{README.md,tasks.jsonl,build_tasks.py,validate_tasks.py,overlays/*.ttl}; crates/sparq-kb (pkg-query --extra-graph, load_pkg_with_extra / close::load_pkg_closed_with_extra). Metric 3 (ontological-commitment stability, sq-mztg8.3) is a separate harness in the same directory: bench/fo-km/{build_probes.py,stability_probes.jsonl,stability_analyze.py,metric3-sessions.jsonl} — it reuses the overlays as arm definitions and shares nothing else"
 dataset     = "the shipped PKG (crates/sparq-kb PKG_ONTOLOGY + PKG_INSTANCES) plus one minimal FO-taxonomy overlay TTL per arm (bench/fo-km/overlays/, vendored in-repo); 16 stratified FO-exercising tasks (bench/fo-km/tasks.jsonl)"
 quiet_box_sensitive = false  # result-fidelity (accuracy / gold-count match), not wall-clock; closure-build cost is non-canonical
 pinning     = "tasks.jsonl + the overlay TTLs are committed; regenerate tasks via build_tasks.py"
-records_to  = "bench/fo-km/RESULTS.md (PR #1108)"
+records_to  = "bench/fo-km/RESULTS.md (Metric 1, PR #1108); bench/fo-km/STABILITY.md (Metric 3 pilot, sq-mztg8.3 — PILOT, needs-maintainer-steer on grading protocol + N)"
 # featured = false: internal Metric-1 harness; ships the harness, not the verdict (the A/B run +
 # pre-registered kill-criteria are the orchestrator's next step). Dashboard promotion is a
 # DISPOSITION deferred to a maintainer (no perf claim; design research/foundational-ontology-km-benchmark.md §7).
@@ -1821,15 +1840,19 @@ status      = "ok"
 id          = "graphalytics"
 name        = "LDBC Graphalytics validation-gated comparison (sparq-algos vs igraph / NetworKit)"
 category    = "scaling"
-measures    = "per-algorithm wall time for PageRank / BFS / WCC / LPA on a pinned graph corpus, validated against LDBC Graphalytics ground truth; LDBC validation oracle required before trusting timing; export cost reported separately"
-invoke      = "TBD — implementing bead sq-hmd7l.13"
-source      = "TBD — bench/graphalytics/; scripts/bench-adapters/graph_analytics_adapter.py"
-dataset     = "TBD — LDBC Graphalytics datagen corpus (pinned seed + scale); ground-truth files committed or sha256-pinned"
+measures    = "per-algorithm VALIDATION-OUTPUT agreement against a Graphalytics reference, asserted BEFORE any timing is reported (PR: relative epsilon; WCC/CDLP: equivalence of partitioning — the official rule), then per-algorithm wall time for the sparq / igraph / NetworKit legs; the sparq leg additionally splits materialize / load / project (store -> adjacency view, NO export) from export_edgelist (what handing the same graph to an embedded library would cost), so the differentiator and its cost are always reported together"
+invoke      = "bash bench/graphalytics/run.sh --smoke   # acceptance: sparq leg on the committed fixture, exit 0 = PR + WCC gates green\n              GX_DATA_DIR=/data/graphalytics GX_DATASET=example-directed bash bench/graphalytics/run.sh   # full panel on a real LDBC dataset (competitor columns if python-igraph / networkit are installed)"
+source      = "bench/graphalytics/{run.sh,gx.py,README.md}; crates/sparq-algos/examples/graphalytics.rs (sparq leg); scripts/bench-adapters/graph_analytics_adapter.py (igraph / NetworKit leg)"
+dataset     = "gather: an LDBC Graphalytics dataset with its SHIPPED reference outputs (fetched, never committed). smoke: bench/graphalytics/data/smoke-directed — a 10-vertex sparq-authored fixture in the Graphalytics FORMAT (NOT an LDBC-distributed dataset), committed because it is a fixture rather than a corpus; shaped so dangling-mass redistribution and an isolated vertex are load-bearing"
 quiet_box_sensitive = true
-pinning     = "TBD — corpus sha256 + igraph + NetworKit pinned versions at gather time"
-records_to  = "TBD — bench/competitor-results/<engine>-graphalytics-<UTC>.json (git-ignored)"
-featured    = false  # registry stub; implementing bead sq-hmd7l.13
-status      = "planning"
+pinning     = "algorithm parameters (pr.damping-factor, pr.num-iterations, cdlp.max-iterations) come from the dataset's own .properties and are REQUIRED — the runner errors rather than defaulting a conformance parameter. The committed reference outputs are re-derived from an INDEPENDENT from-the-spec Python oracle and diffed on every run (GX_SKIP_ORACLE_CROSSCHECK=1 opts out), and run.sh self-tests the validator against known-wrong and known-equivalent answers before trusting it. igraph / NetworKit resolved versions are printed by the adapter and recorded per gather"
+records_to  = "bench/competitor-results/<engine>-graphalytics-<UTC>.json (git-ignored); first-read record: research/gap-graphalytics-2026-07.md (flagged NON-canonical)"
+featured    = false  # external-competitor differential harness; the committed smoke is the sparq-only self-test
+# Phase 1 only: the harness + validation gate are green on the committed fixture. NO
+# competitor numbers have been gathered, and BFS / LCC / SSSP are honest FEATURE GAPS that
+# emit a GAP row rather than a fabricated one. CDLP is a recorded semantic divergence
+# (sparq's label propagation is asynchronous; Graphalytics CDLP is synchronous).
+status      = "ok"
 
 # [SONNET-4.6] sq-hmd7l.8 — EL classification vs ELK on real ontologies
 [[benchmark]]

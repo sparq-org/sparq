@@ -11,9 +11,9 @@ without re-deriving it. All paths are repo-relative; all CI job names match
 
 | Artifact | Path | What it is |
 |---|---|---|
-| VEX (source of truth) | `supply-chain/vex.cdx.json` | CycloneDX 1.5 VEX; 1 vulnerability (`RUSTSEC-2025-0134`), `not_affected`. (`RUSTSEC-2024-0436` paste was dropped once the GPU stack stopped pulling `paste`.) |
+| VEX (source of truth) | `supply-chain/vex.cdx.json` | CycloneDX 1.5 VEX; 4 vulnerabilities — `RUSTSEC-2024-0436` (paste) / `RUSTSEC-2025-0141` (bincode) `not_affected`, `RUSTSEC-2026-0194` + `RUSTSEC-2026-0195` (quick-xml) honestly `exploitable`. ([OPUS-5] sq-5ah3p dropped `RUSTSEC-2025-0134` `rustls-pemfile` from both sides: the mTLS PEM parse moved to `rustls-pki-types`' `PemObject`, so the archived crate left the tree.) |
 | SBOM+VEX generator | `scripts/gen-sbom-vex.sh` | Produces per-binary SBOM + version-stamped VEX into `./sbom/` for the release. |
-| Dependency policy | `deny.toml` | cargo-deny advisories/bans/sources/licenses; `[advisories].ignore` = the 2 RUSTSEC IDs the VEX mirrors. |
+| Dependency policy | `deny.toml` | cargo-deny advisories/bans/sources/licenses; `[advisories].ignore` = the 4 RUSTSEC IDs the VEX mirrors 1:1. |
 | cargo-vet config | `supply-chain/config.toml`, `supply-chain/audits.toml`, `supply-chain/imports.lock` | Trusted import sets + exemptions; gates new unaudited deps. |
 
 ## 2. The CI / release wiring (cite these job + step names)
@@ -199,25 +199,26 @@ advisory. The check asserts set equality and fails (exit 1) on any unjustified o
 
 ```sh
 # the gate (parses deny.toml via tomllib + the VEX via json; robust to the {id,reason} ignore form)
-python3 scripts/check-vex-deny-drift.py        # -> "VEX ↔ deny.toml in sync: 2 advisory id(s) match 1:1."
+python3 scripts/check-vex-deny-drift.py        # -> "VEX ↔ deny.toml in sync: 4 advisory id(s) match 1:1."
 python3 scripts/tests/test_vex_deny_drift.py   # hermetic self-test (11 cases incl. the drift-fail paths)
 ```
 
 Wired as `.github/workflows/supply-chain.yml#vex-deny-sync` (job name
 `VEX ↔ deny.toml sync (GS-5) — GATING`; no `advisory`/`informational` whole word, so ci-summary gates
-it). Recorded this branch: both = `{RUSTSEC-2025-0134}` — **in sync** (no drift to
-resolve). (`RUSTSEC-2024-0436` paste/sq-l8bv was removed from both sides once the GPU stack stopped
-pulling `paste`.) Negative test: temporarily dropping either deny.toml ignore makes the check exit 1 and name
+it). Recorded this branch: both = `{RUSTSEC-2024-0436, RUSTSEC-2025-0141, RUSTSEC-2026-0194,
+RUSTSEC-2026-0195}` — **in sync** (no drift to resolve). ([OPUS-5] sq-5ah3p removed
+`RUSTSEC-2025-0134` from both sides in one change, which is exactly the edit shape this gate exists to
+police.) Negative test: temporarily dropping any one of the four deny.toml ignores makes the check exit 1 and name
 the offending id. A genuinely-intended one-sided entry is recorded with a reason in the script's
 `JUSTIFIED_DRIFT` allow-list (empty today).
 
 ## 5. Provenance verification (for a consumer)
 
 ```sh
-gh attestation verify sparq-cli-<ver>.sbom.cdx.json --repo jeswr/sparq   # SLSA provenance on the SBOM
+gh attestation verify sparq-cli-<ver>.sbom.cdx.json --repo sparq-org/sparq   # SLSA provenance on the SBOM
 shasum -a 256 -c SHA256SUMS                                              # release-asset integrity
 cargo audit bin sparq-server                                            # read the embedded manifest (cargo-auditable)
-cosign verify-attestation ghcr.io/jeswr/sparq@<digest> ...              # image SBOM + provenance
+cosign verify-attestation ghcr.io/sparq-org/sparq@<digest> ...              # image SBOM + provenance
 ```
 
 These are the consumer-facing verification steps a downstream high-security integrator runs; they
@@ -226,7 +227,7 @@ correspond to SIG-1/SIG-2, DEP-5, and SIG-3 respectively.
 > **Operating-effectiveness status (release-gated controls):** all four commands above are
 > **unrunnable today** — `release.yml` triggers only on `push: tags: v*`, and the repo has **no
 > `v*` tags, no GitHub Releases, and no Sigstore attestations yet** (verified `git tag -l 'v*'` → 0,
-> `gh release list` → empty, `gh api repos/jeswr/sparq/attestations/...` → 404, 2026-06-15). The
+> `gh release list` → empty, `gh api repos/sparq-org/sparq/attestations/...` → 404, 2026-06-15). The
 > SIG-*/PUB-*/VEX-4/DEP-5 controls are therefore **verified at the configuration level (workflow
 > wiring reviewed and correct), not at the operating level** — no attested SBOM/VEX artifact has ever
 > been produced. An external auditor must re-verify these by cutting (or observing) the first `v*`
@@ -262,14 +263,14 @@ ci-summary gates it), which runs the self-test then the live regenerate→normal
 
 ## 7. JS / npm SBOM — shipped clients (GS-3 — [OPUS-4.8], sq-toze.27; [GPT-5.6], sq-epbw4)
 
-The published npm package `@jeswr/sparq` and the shared `@sparq/client` code bundled into the
+The published npm package `@sparq-org/sparq` and the shared `@sparq/client` code bundled into the
 site/GUI artifacts have dedicated CycloneDX 1.5 SBOMs, closing their JS supply-chain surfaces.
 
 **Scope decision (honest):**
 
 | Workspace | npm name | Shipped? | SBOM'd? | Why |
 |---|---|---|---|---|
-| `js/` | `@jeswr/sparq` | **published to npm** | **YES** | the consumable WASM client; its lockfile tree is a real supply-chain surface |
+| `js/` | `@sparq-org/sparq` | **published to npm** | **YES** | the consumable WASM client; its lockfile tree is a real supply-chain surface |
 | `packages/sparq-client/` | `@sparq/client` (`"private": true`) | **bundled into site/GUI artifacts** | **YES** | its runtime tree includes the lazy zstd and bzip2 codecs shipped to browser consumers |
 | `site/` | `sparq-site` (`"private": true`) | never (GitHub-Pages demo) | **NO** (intentional) | not a shipped artifact; dev/showcase tree (Next.js/React/bb.js) covered by npm Dependabot |
 
@@ -283,15 +284,15 @@ root workspace lock and no dependency resolution):
 
 | Artifact | Tree | Components (this branch) | Audience |
 |---|---|---|---|
-| `sparq-js-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | **1** — `pkg:npm/fzstd@0.1.1` | what a CONSUMER of `@jeswr/sparq` installs (matches the published-tarball dep surface) |
-| `sparq-js-dev-<ver>.sbom.cdx.json` | full build tree | `@jeswr/sparq` runtime plus build dependencies | BUILD-time surface (SSDF parity with the Rust full-tree SBOM) |
+| `sparq-js-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | **1** — `pkg:npm/fzstd@0.1.1` | what a CONSUMER of `@sparq-org/sparq` installs (matches the published-tarball dep surface) |
+| `sparq-js-dev-<ver>.sbom.cdx.json` | full build tree | `@sparq-org/sparq` runtime plus build dependencies | BUILD-time surface (SSDF parity with the Rust full-tree SBOM) |
 | `sparq-js-client-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | `fzstd`, `seek-bzip`, browser `buffer`, and their closure | codec dependencies bundled on demand into browser artifacts |
 | `sparq-js-client-dev-<ver>.sbom.cdx.json` | full build tree | `@sparq/client` runtime plus build dependencies | full shared-client build surface |
 
 **Validity:** all are VALIDATED against the official CycloneDX 1.5 JSON schema — cyclonedx-npm's built-in
 `--validate` (default on) plus an independent `jsonschema` check against
 `CycloneDX/specification` `bom-1.5.schema.json` (+ referenced `spdx`/`jsf` schemas): **VALID**, root
-root components `pkg:npm/%40jeswr/sparq@0.1.0` and `pkg:npm/%40sparq/client@0.1.0`, all component
+root components `pkg:npm/%40sparq-org/sparq@0.1.0` and `pkg:npm/%40sparq/client@0.1.0`, all component
 purls `pkg:npm/…`. The generator also fails unless the shared-client runtime SBOM contains both
 lazy codecs. Wired as the per-PR GATING
 job `.github/workflows/supply-chain.yml#js-sbom` (uploads `sbom-js-cyclonedx`) + the per-release step
@@ -313,7 +314,7 @@ one where the class is undeterminable.
 | Component class | Raw `bom-ref` signal | `supplier.name` | `supplier.url` | `publisher` | Rationale |
 |---|---|---|---|---|---|
 | crates.io-published dependency | `registry+https://github.com/rust-lang/crates.io-index#…` | `crates.io` | `https://crates.io/crates/<name>` | the crate's `author` where present (144/166); else absent | crates.io is the distributor / supplier-of-record |
-| first-party workspace crate | `path+file…/crates/sparq-*#…` (+ the root component & its build-target sub-components) | `Jesse Wright` | `https://github.com/jeswr/sparq` | — (these crates carry no `author` in raw output) | the project authors + ships these; matches the VEX top-level `metadata.supplier` |
+| first-party workspace crate | `path+file…/crates/sparq-*#…` (+ the root component & its build-target sub-components) | `Jesse Wright` | `https://github.com/sparq-org/sparq` | — (these crates carry no `author` in raw output) | the project authors + ships these; matches the VEX top-level `metadata.supplier` |
 | vendored `[patch.crates-io]` crate (today only `spargebra`) | `path+file…/vendor/<name>#…` | `crates.io` | `https://crates.io/crates/<name>` | its `author` (`Tpt <…>`) | a crates.io-published crate vendored as a patch replacement → crates.io is its supplier-of-record, **NOT** the sparq project (attributing it to sparq would be fabrication) |
 | anything else | — | **omitted** | — | — | not determinable → omitted honestly per NTIA's omit/mark-unknown guidance. **None occurs today**, so coverage is **100%** |
 
@@ -334,7 +335,7 @@ one where the class is undeterminable.
   "purl": "pkg:cargo/aho-corasick@1.1.4" }
 ```
 
-The first-party `sparq-core` gets `supplier {name:"Jesse Wright", url:["https://github.com/jeswr/sparq"]}`;
+The first-party `sparq-core` gets `supplier {name:"Jesse Wright", url:["https://github.com/sparq-org/sparq"]}`;
 the vendored `spargebra` gets `supplier {name:"crates.io", url:["https://crates.io/crates/spargebra"]}` +
 `publisher "Tpt <thomas@pellissier-tanon.fr>"` (NOT attributed to sparq).
 

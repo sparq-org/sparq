@@ -280,6 +280,17 @@ EVIDENCE_PATH = "site/src/data/paper-evidence.json"
 # Only these string fields are PROSE; every other string (and all numbers) is structured data.
 EVIDENCE_PROSE_FIELDS = frozenset({"note", "_comment"})
 
+# [OPUS-5] sparq-org/sparq#4145. PUBLISHED prose that does not live in a `*.md`/`*.typ` file.
+# `orchestration/start-here.toml` is the curated source of the maintainer front door (#1135):
+# every line of `ask`/`what`/`process`/`flight` in it is rendered VERBATIM into an issue body by
+# scripts/render-start-here.py, so it is exactly the surface this gate exists for — and it sat
+# outside SCAN_GLOBS (`*.md`, `*.typ`) entirely. Listed explicitly rather than by widening
+# SCAN_GLOBS to `*.toml`, which would sweep in every Cargo.toml / deny.toml in the workspace,
+# where a bare number is configuration and not a claim. Its content is line-shaped prose, so it
+# takes the ordinary markdown scan (fenced blocks and the ALLOW_LINE_SUBSTRINGS escape included).
+# Pinned by test_start_here_render.py::test_the_front_door_toml_is_inside_the_perf_number_gate.
+EXTRA_SCAN_PATHS = ("orchestration/start-here.toml",)
+
 
 def scan_evidence_json(path: str) -> list[tuple[int, str, str]]:
     """Scan the prose (`note`/`_comment`) fields of paper-evidence.json (bead sq-4hga).
@@ -344,6 +355,13 @@ def main() -> int:
         help="exit non-zero if any finding remains (use once a scope is clean to ratchet it HARD)",
     )
     ap.add_argument(
+        # [OPUS-5] #4145: print the RESOLVED default scan list and exit. Emitted from the same
+        # `files` variable the scan loop below consumes, so a coverage test cannot pass against
+        # a gate that has stopped scanning the file (which is the whole point of asking it).
+        "--list-scanned", action="store_true",
+        help="print the resolved default scan list (one path per line) and exit 0",
+    )
+    ap.add_argument(
         "paths", nargs="*",
         help="optional explicit paths to scan (default: all git-tracked markdown + the "
              "paper-factory .typ sources, minus the bench/research/changelog "
@@ -358,6 +376,17 @@ def main() -> int:
     # gets the same field-aware dispatch below.
     if not args.paths and os.path.exists(EVIDENCE_PATH) and EVIDENCE_PATH not in files:
         files = [*files, EVIDENCE_PATH]
+    # [OPUS-5] #4145: published prose outside SCAN_GLOBS — see EXTRA_SCAN_PATHS.
+    if not args.paths:
+        files = [*files, *(p for p in EXTRA_SCAN_PATHS
+                           if os.path.exists(p) and p not in files)]
+
+    if args.list_scanned:
+        for path in sorted(files):
+            if not args.paths and is_exempt_path(path):
+                continue
+            print(path)
+        return 0
 
     total = 0
     read_errors = 0  # [OPUS-4.8] unreadable files — never silently skipped

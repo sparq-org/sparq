@@ -1,7 +1,7 @@
 # Trust-graph authorisation for Solid/LWS — 2026-07 estate audit + remaining-scope decomposition
 
 Status: **design-for-review decomposition record** (epic `sq-pfae`, issue
-[#940](https://github.com/jeswr/sparq/issues/940)). This record does NOT restate the model
+[#940](https://github.com/sparq-org/sparq/issues/940)). This record does NOT restate the model
 design — that is [`research/solid-trust-graph-authz-design.md`](solid-trust-graph-authz-design.md)
 (merged, maintainer-reviewed, `sq-pfae.1`). Its job is three things: (1) an honest audit of
 what the epic has ALREADY shipped versus what the brief's "trust-graph authorisation" still
@@ -85,7 +85,7 @@ vocabulary and merged gates — not a new model. That is what this record decomp
 A trust edge is a `trustx:Certification`: a **signed, time-windowed, status-checked,
 scope-attenuating** attestation by an *anchor authority* that an issuer may act as a
 source for statements **within the intersection** of the anchor's own authority and the
-certification's `trustx:scope`. An edge is **never blanket trust**, and it confers
+certification's `trustx:certificationScope`. An edge is **never blanket trust**, and it confers
 nothing by itself — authority flows only from a **local, Control-gated anchor rule**:
 
 ```turtle
@@ -101,7 +101,7 @@ nothing by itself — authority flows only from a **local, Control-gated anchor 
 [] a trustx:Certification ;
    trustx:certifies      <https://gov.example/issuer> ;
    trustx:underFramework <https://eidas.example/trusted-list> ;
-   trustx:scope          [ ... shape/attribute-list the issuer is certified for ... ] ;
+   trustx:certificationScope [ ... shape/attribute-list the issuer is certified for ... ] ;
    trustx:validFrom "..." ; trustx:validUntil "..." .
 ```
 

@@ -2471,7 +2471,12 @@ class TestUnsatisfiableHoldFastFail(unittest.TestCase):
     def test_a_readied_pr_is_not_declared_unsatisfiable(self):
         """(d) The PR reads NON-draft: the ready_for_review full-tier re-runs may
         still be registering, so the hold is satisfiable and the detector must stand
-        down. The pre-#3781 budget-exhaustion belt then renders the refusal."""
+        down. The pre-#3781 budget-exhaustion belt then renders the refusal.
+
+        [OPUS-5] #4614 ask 2 confirms this as DECIDED, not an oversight: the idle
+        head gets no exit of its own, because the exit is licensed by a causal fact
+        (only a non-draft payload produces a full-tier select) that does not hold
+        here — the successor may merely be late."""
         fetch_draft = counting(False)
         code, out = run(tiny_cfg(), self._stuck(),
                         tier_ctx=draft_ctx(fetch_draft, run_tier="full"))
@@ -2544,6 +2549,58 @@ class TestUnsatisfiableHoldFastFail(unittest.TestCase):
         code, out = run(tiny_cfg(), [[R(SELECT_DRAFT), GREEN]], tier_ctx=ctx)
         self.assertEqual(code, 0, out)
         self.assertEqual(fetch_draft.state["calls"], 0)
+
+
+class TestUnsatHoldRemedyIsStated(unittest.TestCase):
+    """[OPUS-5] #4614 ask 1 (carry-over from the superseded #3765) — BOTH draft-tier
+    refusals must say that re-running the gate is futile.
+
+    Re-running `ci-summary` re-runs no SELECTING workflow, so a bare `gh run rerun`
+    cannot make the missing full-tier select appear. Without that sentence an
+    automated repair lane — whose reflex for any RED is "re-run it" — burns runner
+    time on a verdict its re-run cannot move. The sentence must reach the reader, so
+    these assert the RENDERED message, not just the constant's existence."""
+
+    # The distinguishing clause: "re-running THIS workflow re-runs no selecting
+    # workflow". Asserting on it (not on the constant name) is what makes these
+    # tests go red if the tail is dropped, blanked, or reworded into vagueness.
+    CLAIM = "re-runs no selecting workflow"
+
+    def test_the_unsatisfiable_hold_red_carries_the_futility_remedy(self):
+        """Site 1: the #3781 fail-fast RED."""
+        cfg = tiny_cfg()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.run_gate(cfg, scripted([[R(SELECT_DRAFT, rid=1), GREEN]]),
+                              lambda: 0, sleep_fn=lambda s: None,
+                              tier_ctx=draft_ctx(counting(True), run_tier="full"))
+        text = out.getvalue()
+        self.assertEqual(code, 1, text)
+        self.assertIn("UNSATISFIABLE draft-tier hold", text)
+        self.assertIn(self.CLAIM, text)
+        self.assertIn("Do not re-run `ci-summary` for this verdict.", text)
+
+    def test_the_stale_draft_tier_belt_carries_the_futility_remedy(self):
+        """Site 2: render_verdict's stale-draft-tier belt — the budget-exhaustion
+        refusal an idle head reaches (rule 4), which a repair lane sees just as
+        often as site 1."""
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.render_verdict(
+                [R(SELECT_DRAFT, rid=1), GREEN], "",
+                g.TierContext(run_tier="full", event_name="pull_request"))
+        text = out.getvalue()
+        self.assertEqual(code, 1, text)
+        self.assertIn("stale draft-tier run, full run pending", text)
+        self.assertIn(self.CLAIM, text)
+
+    def test_an_ordinary_failing_leg_does_not_carry_it(self):
+        """The tail is scoped to the two draft-tier refusals. A plain failing leg IS
+        cleared by a re-run (a flake re-runs green), so telling that reader not to
+        re-run would be wrong — this catches a blanket append."""
+        code, out = run(tiny_cfg(), [[RED, GREEN]])
+        self.assertEqual(code, 1, out)
+        self.assertNotIn(self.CLAIM, out)
 
 
 class TestMergeGroupChangeClassAccounting(unittest.TestCase):

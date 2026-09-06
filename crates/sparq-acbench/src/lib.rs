@@ -424,7 +424,12 @@ pub struct CompiledPolicy {
 /// Compile one [`IntentRow`] to WAC triples (`acl:Authorization` shape).
 ///
 /// # WAC semantics
-/// - `Scope::Subtree` → `acl:default` placement at the container.
+/// - `Scope::Subtree` → `acl:default` **and** `acl:accessTo` at the container. `acl:default`
+///   alone reaches only the container's *members*, never the container resource itself, so a
+///   `default`-only authorization would leave the container unreadable by the very principal
+///   the intent names. Emitting both is the standard Solid container-authorization pattern and
+///   is what makes `Scope::Subtree` mean "this container **and** everything under it" under
+///   the nearest-ACL-document-wins resolution the WAC oracle implements (bead `sq-o4orz`).
 /// - `Audience::AllExcept(excl)` → enumerated `acl:agent` for all agents not in `excl`.
 ///   If `excl` is unbounded (empty = placeholder), returns [`Expressibility::Unsupported`]
 ///   and no triples.
@@ -474,8 +479,14 @@ pub fn compile_wac(row: &IntentRow) -> CompiledPolicy {
             ));
         }
         Scope::Subtree => {
+            // `default` reaches the container's members; `accessTo` reaches the container
+            // resource itself. Both are needed for "the container and its subtree" — see
+            // the WAC-semantics note on this function.
             triples.push(format!(
                 "{auth_id} <http://www.w3.org/ns/auth/acl#default> {resource} ."
+            ));
+            triples.push(format!(
+                "{auth_id} <http://www.w3.org/ns/auth/acl#accessTo> {resource} ."
             ));
         }
     }

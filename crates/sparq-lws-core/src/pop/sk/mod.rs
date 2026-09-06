@@ -1,9 +1,10 @@
 // AUTHORED-BY Claude Fable 5
 //! PoP **Tier 2 — DPoP-SK**: negotiated symmetric session keys for DPoP-bound requests.
 //!
-//! Design: [`docs/design/high-throughput-pop-auth.md`](../../../docs/design/high-throughput-pop-auth.md)
-//! §4–§6; normative spec: **DPoP-SK** (<https://jeswr.github.io/dpop-sk-spec/> — the CG-shaped
-//! draft whose Appendix-A worked example this implementation reproduces byte-for-byte in tests).
+//! Design: `research/lws-design-records.md` §7 + §8 (RSS `docs/design/high-throughput-pop-auth.md`
+//! §4–§6, not in this tree); normative spec: **DPoP-SK** (<https://jeswr.github.io/dpop-sk-spec/> —
+//! the CG-shaped draft whose Appendix-A worked example this implementation reproduces byte-for-byte
+//! in tests).
 //!
 //! ## What it does
 //! Removes the per-request ES256 verify floor for opted-in clients: ONE ordinary RFC 9449 DPoP

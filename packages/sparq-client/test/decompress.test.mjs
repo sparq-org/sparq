@@ -1,3 +1,7 @@
+// CI coverage (#3006): this suite runs in the GATING gui.yml `shared TS client typecheck`
+// job (`npm test` in packages/sparq-client), NOT in js.yml — js.yml runs the js/,
+// rdfjs-conformance, eyereasoner-compat and solid-server suites only, so its verdict says
+// nothing about the codec paths below. A green js.yml is not evidence that these pass.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -21,9 +25,27 @@ const ZSTD_SAMPLE = fromBase64(
 const BZIP2_SAMPLE = fromBase64(
   "QlpoOTFBWSZTWY3OZasAABVZgAAQUAGQFTrW/0AgAEhJSNNPU0xAGTQSUjQND1ANqPUxGHuVZwTkaIZFEddogtTCXlT66GleyLURCPEOyHFdV0VRbCJMiR9NEIZ+Efi7kinChIRucy1Y",
 );
-// A multi-block reference bzip2 stream with a large decoded output.
+// A reference bzip2 stream with a large decoded output. It is a SINGLE huffman block
+// (one 0x314159265359 block header): 1.1 MB of one repeated byte collapses to ~22 kB
+// under bzip2's initial run-length pass, far inside the 900 kB block size. It covers
+// output-buffer growth, not block iteration — BZIP2_MULTIBLOCK_SAMPLE covers that (#3006).
 const BZIP2_LARGE_SAMPLE = fromBase64(
   "QlpoOTFBWSZTWQiXvEUACGyBCKAAAgAACCAAMMwFKaaKUGwlKDxdyRThQkAiXvEU",
+);
+// A genuinely MULTI-block reference stream: 250 kB of the repeating lowercase alphabet
+// compressed at level 1 (100 kB blocks), so the decoder must iterate three blocks and
+// concatenate them in order. Generated with a reference bzip2 encoder; the decoded bytes
+// are reproduced independently below rather than being asserted against a stored digest.
+const BZIP2_MULTIBLOCK_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
+const BZIP2_MULTIBLOCK_LENGTH = 250_000;
+const BZIP2_MULTIBLOCK_SAMPLE = fromBase64(
+  "QlpoMTFBWSZTWc5xShkAB4KBgD////AwAPgCgAADJkFAAAGTIClVDQMmgDRprIFWW1QKtygVYKBV" +
+    "vUCrgoFXFQKuSgVc1AqxUCrJQKsZAq6SBVnIFXWQKu0gVd5Aq8SBV5kCr1IFXuQKvkgVaSBV9kCr" +
+    "9IFWsgVfzFBWSZTWa8Ub8MAWh4BgD////AwAPgCgAADJkFAAAGTIClVDQMmgDRprIFWyQKtsgVbp" +
+    "AqwkCrfIFXCQKuMgVcpAq5yBVjIFWUgVaZqBV1UCrsoFXdQKvCgVeVAq9KBV7UCr4oFWigVYyBV9" +
+    "kCr9IFWsgVfzFBWSZTWaul8S4AUrEBgD////AwANtEUAAAZMgTVVADTIaDIBSqgaDTIBpo/SCrZI" +
+    "Ktsgq3SCrfIocEqhxSqHJKoc0qh0kFXQgqxIKupBVkQVZkFXYgq7kFXggq8kFXogq9kFXwgqx0IQ" +
+    "1SqH1Kofkqh/F3JFOFCQzEgGzg==",
 );
 
 async function compressNative(text, format) {
@@ -128,7 +150,7 @@ test("bzip2 decodes a reference stream through the lazy browser codec", async ()
   assert.equal(decoder.decode(result.bytes), SAMPLE);
 });
 
-test("bzip2 decodes a large multi-block stream without truncation", async () => {
+test("bzip2 decodes a large stream without truncation", async () => {
   const result = await decompressDatasetBytes(
     BZIP2_LARGE_SAMPLE,
     "large.nt.bz2",
@@ -138,11 +160,37 @@ test("bzip2 decodes a large multi-block stream without truncation", async () => 
   assert.equal(result.bytes.at(-1), 0x61);
 });
 
+test("bzip2 concatenates every block of a multi-block stream in order", async () => {
+  // Round-trip against an independently reconstructed expectation: the decoded stream must
+  // equal the alphabet cycle byte for byte, so a decoder that dropped, reordered or
+  // truncated any of the three blocks fails on content and not merely on length.
+  const expected = encoder.encode(
+    BZIP2_MULTIBLOCK_ALPHABET.repeat(
+      Math.ceil(BZIP2_MULTIBLOCK_LENGTH / BZIP2_MULTIBLOCK_ALPHABET.length),
+    ).slice(0, BZIP2_MULTIBLOCK_LENGTH),
+  );
+  const result = await decompressDatasetBytes(
+    BZIP2_MULTIBLOCK_SAMPLE,
+    "alphabet.nt.bz2",
+  );
+  assert.equal(result.codec, "bzip2");
+  assert.equal(result.innerName, "alphabet.nt");
+  assert.equal(result.bytes.length, BZIP2_MULTIBLOCK_LENGTH);
+  assert.deepEqual(result.bytes, expected);
+});
+
 test("the filename extension selects a codec when magic is unavailable", async () => {
   await assert.rejects(
     decompressDatasetBytes(encoder.encode("not bzip2"), "dataset.nt.bz2"),
     (error) => {
+      // The extension must route these bytes to the bzip2 decoder rather than the
+      // magic-sniffing fallback...
       assert.doesNotMatch(String(error), /Unrecognised compressed payload/);
+      // ...and the rejection must come FROM that decoder. Accepting any error at all let a
+      // codec that could not even be loaded pass this test, so a missing seek-bzip install
+      // read as a decode regression in the two tests above rather than as an install
+      // problem visible here too (#3006).
+      assert.notEqual(error.code, "ERR_MODULE_NOT_FOUND");
       return true;
     },
   );

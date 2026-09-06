@@ -1,0 +1,48 @@
+# Design §6 case 6 — SCOPE VIOLATION. A certified issuer that over-issued. The
+# eIDAS 2 certification is impeccable — valid at t, status-covered at t — but its
+# `trustx:certificationScope` is `foaf:age` ONLY. The issuer nevertheless attested a `foaf:name`
+# statement, which the framework never certified it to issue.
+#
+# Both bundles are present, both attributed to the same certified issuer, both
+# status-covered at t. The ONLY thing separating them is the certification scope, so
+# the manifest pairs a NoBinding entry (asking `foaf:name`) with an Admitted entry
+# (asking `foaf:age`) over this one fixture: scope conformance FILTERS per statement,
+# it does not blanket-reject the issuer.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:qtsp.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:bundle:name> prov:wasAttributedTo <did:web:qtsp.example> ;
+    trustx:coveredBy <urn:status:name> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:status:name> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:cert:qtsp> a trustx:Certification ;
+    trustx:certifies      <did:web:qtsp.example> ;
+    trustx:underFramework trustx:eIDAS2 ;
+    trustx:certificationScope foaf:age ;
+    trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:coveredBy      <urn:status:cert> .
+
+<urn:status:cert> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}
+
+GRAPH <urn:bundle:name> {
+    <urn:person:jesse> foaf:name "Jesse" .
+}

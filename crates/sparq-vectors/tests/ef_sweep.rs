@@ -37,12 +37,23 @@ fn rand_vec(state: &mut u64, dim: usize) -> Vec<f32> {
 
 /// Build a small in-memory store (no file) and return the `VectorIndex`.
 /// N=5000, DIM=32, non-contiguous ids (id = i*7+3) to exercise the binary-search index.
+///
+/// [SONNET-4.6] (sq-ey95c) The scratch path carries a per-call counter as well as the pid:
+/// `cargo test` runs the tests in this binary on parallel threads of ONE process, so a
+/// pid-only name would have every test (and every call within a test) create, mmap and unlink
+/// the SAME file concurrently.
 fn build_test_store_and_index() -> (VectorStore, VectorIndex) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
     const N: usize = 5_000;
     const DIM: usize = 32;
 
-    let path = std::env::temp_dir()
-        .join(format!("sparq-ef-sweep-{}-{}.spqv", std::process::id(), 0xEF_u64));
+    let path = std::env::temp_dir().join(format!(
+        "sparq-ef-sweep-{}-{}.spqv",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let mut store = VectorStore::create(&path, DIM).unwrap();
     let mut state = 0xABCD_EF01_u64;
     for i in 0..N {
@@ -195,5 +206,105 @@ fn nearest_with_ef_cache_reuse_is_deterministic() {
         queries.iter().map(|q| index.nearest_with_ef(q, K, ALT_EF)).collect();
 
     assert_eq!(first, second, "cache reuse must produce identical results");
+    drop(store);
+}
+
+// --- 5. Concurrent secondary path (sq-ey95c) --------------------------------------------
+
+/// [SONNET-4.6] (sq-ey95c) The secondary (`ef != build_ef`) path must be usable from many
+/// threads at once: the ef cache is an `RwLock` over `Arc`-handled maps and the search runs
+/// with no lock held, so a shared `&VectorIndex` has to be `Sync`. This is a compile-time
+/// assertion — if the cache ever regresses to a non-`Sync` shape it fails to build.
+#[test]
+fn vector_index_is_shareable_across_threads() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<VectorIndex>();
+}
+
+/// Concurrent `nearest_with_ef` at the SAME non-default ef: every thread must agree with every
+/// other AND with a serial query on the SAME index afterwards. Only one of the racing threads
+/// wins the lazy build, so this pins the contract that the losers search the winner's cached map
+/// rather than their own discarded one — a per-thread map would show up as disagreement here.
+///
+/// [SONNET-4.6] (sq-ey95c) The baseline is deliberately the same `index`, NOT a rebuilt one:
+/// `instant-distance`'s build is not bit-reproducible even at a fixed seed (see the caveat on
+/// `nearest_with_ef`), so comparing against a second `build_with` would be flaky by construction.
+#[test]
+fn concurrent_nearest_with_ef_same_level_is_consistent() {
+    const DIM: usize = 32;
+    const K: usize = 10;
+    const QUERIES: usize = 25;
+    const THREADS: usize = 8;
+    const ALT_EF: usize = 32; // non-default (build ef = 50) → forces the secondary path
+
+    let (store, index) = build_test_store_and_index();
+    let mut q_state = 0x0BAD_F00D_u64;
+    let queries: Vec<Vec<f32>> = (0..QUERIES).map(|_| rand_vec(&mut q_state, DIM)).collect();
+
+    // All THREADS race the same (cold) ef level, so all but one lose the lazy-build race.
+    let observed: Vec<Vec<Vec<(u32, f32)>>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let (index, queries) = (&index, &queries);
+                s.spawn(move || {
+                    queries.iter().map(|q| index.nearest_with_ef(q, K, ALT_EF)).collect()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    // Post-race serial reference over the now-warm cache.
+    let after: Vec<Vec<(u32, f32)>> =
+        queries.iter().map(|q| index.nearest_with_ef(q, K, ALT_EF)).collect();
+
+    for (t, got) in observed.iter().enumerate() {
+        assert_eq!(
+            got, &after,
+            "thread {} saw a different map than the cached one at ef={}",
+            t, ALT_EF
+        );
+    }
+    drop(store);
+}
+
+/// Concurrent `nearest_with_ef` at DIFFERENT ef levels: each thread's results must match the
+/// same index's serial answer for its OWN level, so a build at one ef level can neither corrupt
+/// nor be mistaken for another. Threads outnumber levels, so levels are contended too.
+#[test]
+fn concurrent_nearest_with_ef_mixed_levels_are_consistent() {
+    const DIM: usize = 32;
+    const K: usize = 10;
+    const QUERIES: usize = 15;
+    // Non-default levels only (build ef = 50); repeated so several threads share a level.
+    const EF_LEVELS: &[usize] = &[16, 32, 64, 128, 16, 32, 64, 128];
+
+    let (store, index) = build_test_store_and_index();
+    let mut q_state = 0x1234_5678_u64;
+    let queries: Vec<Vec<f32>> = (0..QUERIES).map(|_| rand_vec(&mut q_state, DIM)).collect();
+
+    let observed: Vec<Vec<Vec<(u32, f32)>>> = std::thread::scope(|s| {
+        let handles: Vec<_> = EF_LEVELS
+            .iter()
+            .map(|&ef| {
+                let (index, queries) = (&index, &queries);
+                s.spawn(move || {
+                    queries.iter().map(|q| index.nearest_with_ef(q, K, ef)).collect()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    // Post-race serial reference per level, over the same (now warm) index.
+    for (i, &ef) in EF_LEVELS.iter().enumerate() {
+        let after: Vec<Vec<(u32, f32)>> =
+            queries.iter().map(|q| index.nearest_with_ef(q, K, ef)).collect();
+        assert_eq!(
+            observed[i], after,
+            "concurrent results at ef={} (thread {}) differ from the cached map's answer",
+            ef, i
+        );
+    }
     drop(store);
 }

@@ -4,7 +4,7 @@ and the Interfaces line from the README's `interfaces` ANCHOR — so the docs gu
 longer drift from the README. The README keeps those per-surface guides as REPO-RELATIVE
 `skills/<x>/SKILL.md` links (required by the lychee internal-links gate); the book's
 `link-fixup` preprocessor (scripts/mdbook-rewrite-links.py, wired in book.toml) rewrites
-them to mount-portable github.com/jeswr/sparq/blob/main URLs at build time, which is what
+them to mount-portable github.com/sparq-org/sparq/blob/main URLs at build time, which is what
 resolves the relative-vs-portable conflict that previously forced a hand-maintained table
 of absolute URLs here.
 
@@ -48,9 +48,9 @@ Two capabilities are **research scaffolds**. They are honest models of the proto
 numbers as indicative, not as an audited cryptographic guarantee. The two maturity caveats below
 are single-sourced verbatim (build-time `{{#include}}`) from their canonical guides, so they
 cannot drift from the source of truth — see the
-[zk-query-proofs guide](https://github.com/jeswr/sparq/blob/main/skills/zk-query-proofs/SKILL.md),
-the [mpc guide](https://github.com/jeswr/sparq/blob/main/skills/mpc/SKILL.md), and
-[SECURITY.md](https://github.com/jeswr/sparq/blob/main/SECURITY.md) for the full scope.
+[zk-query-proofs guide](https://github.com/sparq-org/sparq/blob/main/skills/zk-query-proofs/SKILL.md),
+the [mpc guide](https://github.com/sparq-org/sparq/blob/main/skills/mpc/SKILL.md), and
+[SECURITY.md](https://github.com/sparq-org/sparq/blob/main/SECURITY.md) for the full scope.
 
 **Zero-knowledge query proofs** —
 

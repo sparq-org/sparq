@@ -55,7 +55,9 @@ The maintainer wants (verbatim intent, 2026-07):
 - **shaclcjs strict-mode leak (measured):** with `extendedSyntax:false` the `% … %`
   property escape and trailing-turtle statements are still accepted — only the `;`
   annotations and `a` keyword are guarded. A conformant strict parser must reject them;
-  concrete first upstream fix (sq-tonhr.5).
+  concrete first upstream fix (sq-tonhr.5) — **filed as jeswr/shaclcjs#199, open and
+  awaiting maintainer review**; leak and fix re-verified 2026-07-27, see
+  [`docs/upstream-proposals.md`](../docs/upstream-proposals.md) § D.
 
 ## 2. The Shuttle value proposition
 
@@ -117,7 +119,10 @@ Never replace a parser blind. Every Shuttle-generated parser:
    non-vacuity** (a seeded divergent parser must be caught).
 3. **Is benchmark-gated**: bench/parse competitor rows vs the incumbent (and external
    reference parsers) on the canonical corpus, canonical runs on quiet EC2 per
-   feedback-ec2-benchmarks; the deterministic `parse_ns_per_byte` CI floor stays gated.
+   feedback-ec2-benchmarks; the `parse_ns_per_byte` CI floor stays watched as an advisory
+   timing signal (tracked/warned, non-blocking — it is the sole `mode: noise` metric in
+   `bench/perf-baseline.json`; every `mode: auto` metric there hard-fails
+   `scripts/perf-gate.py`).
 4. **Default flips per-syntax, only on a documented verdict** (sq-tonhr.11): conformance
    set-identity evidence + bench ≥ incumbent on BOTH 1T and 16T, each flip its own PR,
    incumbent kept reachable behind a fallback feature for ≥ one release, maintainer
@@ -155,7 +160,11 @@ anonymous bnodes doc-scoped fresh.
   sparq's layer.
 - **Licences:** rdf-shuttle MIT, shaclcjs MIT (fixtures vendorable), sparq MIT —
   maintainer-owned on both sides, no friction. shaclc-1.2 has **no LICENSE**; fix
-  upstream before vendoring anything from it (sq-tonhr.5).
+  upstream before vendoring anything from it (sq-tonhr.5) — MIT LICENSE filed as
+  jeswr/shaclc-1.2#3, **still open as of 2026-07-27**, so the no-vendoring
+  constraint still holds. Conformance pairs filed alongside it as
+  jeswr/shaclc-1.2#4; both tracked in
+  [`docs/upstream-proposals.md`](../docs/upstream-proposals.md) § D.
 
 ## 6. SHACL-CS specifics
 

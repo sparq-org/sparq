@@ -47,10 +47,21 @@
 //! is automatically re-materialized (epoch bump → session cache dropped), so a changed
 //! rule takes effect on the next query/update — the design doc's
 //! "after any acl/acr/group-doc write, re-materialize" requirement (§4.4).
+//!
+//! `.acl`/`.acr` documents are recognized by naming convention. A **group document** is
+//! not: `https://pod.ex/groups` is an ordinary resource IRI. It is recognized instead by
+//! REFERENCE — the store hands [`check`] the set of graphs the current access-control
+//! documents name via `acl:agentGroup` ([`crate::loader::referenced_group_docs`]), and a
+//! write to any of them re-materializes just as an `.acl` write does. Before that set was
+//! threaded through, a statically-targeted `INSERT DATA`/`DELETE DATA` on a group document
+//! silently left the auth view stale: a removed `vcard:hasMember` kept granting access
+//! until something else forced a re-materialization.
 
 use crate::loader::{ACL_SUFFIX, ACR_SUFFIX};
 use crate::{AuthIndex, Mode, Session};
 use oxrdf::{NamedNode, Term, Variable};
+use rustc_hash::FxHashSet;
+use sparq_engine::QueryBudget;
 use spargebra::algebra::{GraphPattern, GraphTarget, QueryDataset};
 use spargebra::term::{GraphName, GraphNamePattern};
 use spargebra::{GraphUpdateOperation, Query, SparqlParser, Update};
@@ -66,6 +77,29 @@ enum Need {
     /// `auth:write` on those graphs to `acl:Control` holders, so this is Control-gated
     /// without a special case (see the module docs).
     Write,
+}
+
+/// Why [`resolve_var_graphs`] could not produce a precise per-graph requirement set.
+/// [FABLE-5] sq-yhlf0.
+enum Bail {
+    /// Fall back to the conservative all-graphs wildcard at this [`Need`] — the historic
+    /// behaviour for an un-evaluable WHERE or a blank-node graph binding. Sound: a superset
+    /// of the real write set can only deny, never leak.
+    Wildcard(Need),
+    /// The binding SELECT exhausted the caller's [`QueryBudget`], carrying the engine's
+    /// `"query budget exceeded (…)"` message. NOT a wildcard fallback: the wildcard is the
+    /// *cheap* check, so falling back could permit an update whose apply must then re-run
+    /// the very WHERE that just ran out of budget. Surfaced as a deny instead — fail-closed
+    /// and honest about which limit tripped.
+    Budget(String),
+}
+
+/// Whether `e` is the engine's cooperative-budget abort (`"query budget exceeded (timeout)"`
+/// / `(max-rows)` / `(max-bytes)` / `(cancelled)`) rather than an ordinary evaluation error.
+/// String-matched because the engine reports errors as `String`; this mirrors how
+/// `sparq-server`'s HTTP layer maps the same aborts to status codes. [FABLE-5] sq-yhlf0.
+fn is_budget_error(e: &str) -> bool {
+    e.contains("query budget exceeded")
 }
 
 /// A `DELETE/INSERT … WHERE` operation with at least one `GRAPH ?var` template slot,
@@ -100,9 +134,9 @@ struct WriteReqs {
     /// back): the actor must be able to write every named graph in the store, in this
     /// mode, or the update is denied.
     wildcard: Option<Need>,
-    /// Graph names the analysis saw mentioned as write targets that are `.acl`/`.acr` or
-    /// group documents — a successful update touching any of these triggers a
-    /// re-materialization. (Static targets only; a wildcard always re-materializes.)
+    /// The update is known to touch an auth-view input (an `.acl`/`.acr` or group
+    /// document) — a successful update sets this so the caller re-materializes. Raised by
+    /// [`check`] from the resolved target set and by any wildcard/variable-graph target.
     rematerialize_hint: bool,
 }
 
@@ -111,12 +145,23 @@ fn is_control_graph(iri: &str) -> bool {
     iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX)
 }
 
-/// Whether writing `iri` should trigger re-materialization: `.acl`/`.acr` documents
-/// (the rules themselves). Group documents have no naming convention, so the caller
-/// ALSO re-materializes on every wildcard update (which could touch a group doc), and a
-/// deployment changing a group document goes through the explicit `materialize_*` path.
-fn affects_auth_view(iri: &str) -> bool {
-    is_control_graph(iri)
+/// Whether writing `iri` should trigger re-materialization — i.e. whether `iri` is an
+/// INPUT of the materialized auth view. Two kinds:
+///
+/// - `.acl`/`.acr` documents (the rules themselves), recognized by naming convention;
+/// - **group documents**, recognized by REFERENCE: a graph some access-control document
+///   names via `acl:agentGroup` ([`crate::loader::referenced_group_docs`]). A group
+///   document has no naming convention — `https://pod.ex/groups` looks like any other
+///   resource — so the only sound way to spot one is to ask what the current
+///   authorization documents point at. Adding or removing a `vcard:hasMember` triple
+///   there changes who holds a grant, so it must re-materialize exactly as an `.acl`
+///   write does.
+///
+/// A wildcard update re-materializes unconditionally (it could touch either kind), and a
+/// group document that becomes referenced only by a LATER `.acl` write is covered by that
+/// `.acl` write's own re-materialization.
+fn affects_auth_view(iri: &str, group_docs: &FxHashSet<String>) -> bool {
+    is_control_graph(iri) || group_docs.contains(iri)
 }
 
 /// The need for a static named-graph target. Writing an `.acl`/`.acr` graph always needs
@@ -130,12 +175,12 @@ fn need_for_graph(iri: &str, base: Need) -> Need {
     }
 }
 
-/// Record a static named-graph target with the appropriate need.
+/// Record a static named-graph target with the appropriate need. Whether the target is an
+/// auth-view input is decided later, in [`check`], over the FULL `reqs.graphs` set (which
+/// by then also holds the precisely-resolved `GRAPH ?var` targets) — `analyze` has no
+/// access to the store's referenced-group-document set.
 fn push_graph(reqs: &mut WriteReqs, n: &NamedNode, base: Need) {
     let need = need_for_graph(n.as_str(), base);
-    if affects_auth_view(n.as_str()) {
-        reqs.rematerialize_hint = true;
-    }
     reqs.graphs.push((n.clone(), need));
 }
 
@@ -295,8 +340,10 @@ fn rescope_dataset(graph: &sparq_core::Graph, u: &QueryDataset) -> QueryDataset 
 /// [OPUS-4.8] sq-biss.
 ///
 /// `Ok(reqs)` is the precise per-graph requirement set: write is needed only on the
-/// graphs `?var` actually binds to. `Err(need)` means the resolution must fall back to
-/// the conservative all-graphs wildcard at `need` (fail-closed); the caller raises it.
+/// graphs `?var` actually binds to. [`Bail::Wildcard`] means the resolution must fall back
+/// to the conservative all-graphs wildcard at that `Need` (fail-closed); the caller raises
+/// it. [`Bail::Budget`] means the binding SELECT ran out of the caller's [`QueryBudget`] —
+/// a hard deny, never a fallback (see [`Bail`]).
 ///
 /// # Soundness — why the WHERE runs over the FULL store, not the actor's read view
 ///
@@ -341,17 +388,27 @@ fn rescope_dataset(graph: &sparq_core::Graph, u: &QueryDataset) -> QueryDataset 
 ///
 /// Fail-closed cases that still fall back to the wildcard (rather than risk a hole):
 ///
-/// - the WHERE cannot be evaluated (parse/serialize/engine error) — `Err(need)`;
+/// - the WHERE cannot be evaluated (parse/serialize/engine error) — `Bail::Wildcard(need)`;
 /// - a slot binds to a **blank-node** graph name: the engine *would* write to it
 ///   ([`gnp_subst`] accepts blank nodes), but the auth view only ever grants write on
-///   named graphs, so write can never be proven — `Err(need)`.
+///   named graphs, so write can never be proven — `Bail::Wildcard(need)`.
 ///
 /// Bindings the engine *drops* (an unbound variable, or a literal/triple where a graph
 /// name is required — [`gnp_subst`] returns `None`) produce no write and are ignored.
+///
+/// # Budget ([FABLE-5] sq-yhlf0)
+///
+/// The binding SELECT is a real query evaluation on the WRITE path, so it runs under the
+/// caller's `budget` — an unlimited budget (every non-budgeted entry point) is byte-for-byte
+/// the previous behaviour. It is deliberately NOT folded into the `Bail::Wildcard` fallback:
+/// the wildcard is a *cheaper* check that could still permit the update, and the apply would
+/// then re-evaluate the same exhausted WHERE. Reporting the exhaustion is both honest and
+/// fail-closed — nothing is mutated.
 fn resolve_var_graphs(
     graph: &sparq_core::Graph,
     r: &VarGraphResolve,
-) -> Result<Vec<(NamedNode, Need)>, Need> {
+    budget: &QueryBudget,
+) -> Result<Vec<(NamedNode, Need)>, Bail> {
     // The strongest need across this operation's slots is the fallback level (and the
     // floor for any escalation): if we must give up, give up at the level that protects
     // every slot.
@@ -371,8 +428,10 @@ fn resolve_var_graphs(
         },
         base_iri: None,
     };
-    let Ok(result) = sparq_engine::query(graph, &select.to_string()) else {
-        return Err(fallback); // un-evaluable WHERE → conservative
+    let result = match sparq_engine::query_with_budget(graph, &select.to_string(), budget) {
+        Ok(r) => r,
+        Err(e) if is_budget_error(&e) => return Err(Bail::Budget(e)),
+        Err(_) => return Err(Bail::Wildcard(fallback)), // un-evaluable WHERE → conservative
     };
 
     // Column index of each slot variable in the result (a projected variable absent from
@@ -392,7 +451,7 @@ fn resolve_var_graphs(
                 }
                 // A blank-node graph name IS written by the engine but can never be
                 // authorized → fail closed to the wildcard.
-                Some(Term::BlankNode(_)) => return Err(fallback),
+                Some(Term::BlankNode(_)) => return Err(Bail::Wildcard(fallback)),
                 // Unbound, or a literal/triple term: the engine drops the quad
                 // (`gnp_subst` → None), so no write happens — nothing to authorize.
                 _ => {}
@@ -459,11 +518,18 @@ pub(crate) struct Permit {
 /// Authorize an update string for `session` against `auth` over the dataset `graph`,
 /// WITHOUT mutating anything. `Ok(Permit)` means every target is writable; `Err(msg)`
 /// is a deny (fail-closed) and the caller must not apply the update.
+///
+/// `budget` bounds the ONE evaluation this check may perform — the `GRAPH ?var` binding
+/// SELECT of [`resolve_var_graphs`]. Everything else here is static algebra analysis plus
+/// per-graph auth-index lookups, so the whole check is bounded once that query is
+/// ([FABLE-5] sq-yhlf0). Pass [`QueryBudget::unlimited`] for the historic behaviour.
 pub(crate) fn check(
     graph: &sparq_core::Graph,
     auth: &AuthIndex,
     session: &Session,
     sparql: &str,
+    group_docs: &FxHashSet<String>,
+    budget: &QueryBudget,
 ) -> Result<Permit, String> {
     let upd = SparqlParser::new().parse_update(sparql).map_err(|e| e.to_string())?;
     let mut reqs = analyze(&upd);
@@ -484,24 +550,30 @@ pub(crate) fn check(
     // so resolved targets are authorized on exactly the same footing as static ones.
     // (Resolve first, then fold in — `resolve_var_graphs` borrows `reqs.var_graphs`, the
     // folding mutates the rest of `reqs`.)
-    let resolutions: Vec<Result<Vec<(NamedNode, Need)>, Need>> =
-        reqs.var_graphs.iter().map(|r| resolve_var_graphs(graph, r)).collect();
+    let resolutions: Vec<Result<Vec<(NamedNode, Need)>, Bail>> =
+        reqs.var_graphs.iter().map(|r| resolve_var_graphs(graph, r, budget)).collect();
     for res in resolutions {
         match res {
             Ok(resolved) => {
-                // A precisely-resolved variable-graph op still re-materializes on success:
-                // its targets are not statically known to avoid `.acl`/`.acr` AND group
-                // documents (the latter have no naming convention — affects_auth_view
-                // can't catch them), and re-materialization is only a cost, never a
-                // security hole. Match the conservative path's "any dynamic write
-                // re-materializes" guarantee. [OPUS-4.8] sq-biss.
+                // A precisely-resolved variable-graph op still re-materializes on success,
+                // unconditionally. The `affects_auth_view` sweep at the end of `check`
+                // would now catch its resolved `.acl`/`.acr` and referenced-group-document
+                // targets anyway, but this stays as belt-and-braces: it also covers a
+                // target that is not YET a referenced group document, and
+                // re-materialization is only a cost, never a security hole. Matches the
+                // conservative path's "any dynamic write re-materializes" guarantee.
+                // [OPUS-4.8] sq-biss; [SONNET-4.6] issue #55.
                 if !resolved.is_empty() {
                     reqs.rematerialize_hint = true;
                 }
                 reqs.graphs.extend(resolved);
             }
             // Fail-closed: fall back to demanding write on every store graph.
-            Err(need) => raise_wildcard(&mut reqs, need),
+            Err(Bail::Wildcard(need)) => raise_wildcard(&mut reqs, need),
+            // Fail-closed AND honest: the binding SELECT ran out of budget, so the precise
+            // set is unknown and the apply would have to re-run the same WHERE. Deny with
+            // the engine's own budget message; nothing has been mutated. [FABLE-5] sq-yhlf0.
+            Err(Bail::Budget(e)) => return Err(e),
         }
     }
 
@@ -534,6 +606,15 @@ pub(crate) fn check(
                 ));
             }
         }
+    }
+
+    // Auth-view inputs among the permitted targets — the `.acl`/`.acr` documents AND the
+    // group documents the current access-control documents reference. Raised over the
+    // whole resolved set (static + precisely-resolved `GRAPH ?var` targets) rather than
+    // per-push, so a group-document write triggers re-materialization on exactly the same
+    // footing as an `.acl` write.
+    if reqs.graphs.iter().any(|(g, _)| affects_auth_view(g.as_str(), group_docs)) {
+        reqs.rematerialize_hint = true;
     }
 
     let rematerialize = reqs.rematerialize_hint || reqs.wildcard.is_some();
@@ -572,7 +653,7 @@ fn need_label(n: Need) -> &'static str {
 mod differential_writeset_tests {
     use super::*;
     use sparq_core::Graph;
-    use sparq_engine::{update_in_place_capturing, QueryBudget, UpdateEffect};
+    use sparq_engine::{update_in_place_capturing, UpdateEffect};
     use std::collections::BTreeSet;
 
     /// A tiny PSS-shaped pod: two resource graphs (`r1`, `r2`) each holding a `title`; only
@@ -652,7 +733,7 @@ mod differential_writeset_tests {
         );
         let mut out = BTreeSet::new();
         for r in &reqs.var_graphs {
-            match resolve_var_graphs(graph, r) {
+            match resolve_var_graphs(graph, r, &QueryBudget::unlimited()) {
                 Ok(resolved) => {
                     for (n, _need) in resolved {
                         out.insert(n.as_str().to_owned());

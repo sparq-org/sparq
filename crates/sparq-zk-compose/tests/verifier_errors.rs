@@ -19,6 +19,9 @@
 // fail-closed defaults (empty == trusts nothing) are asserted, not just executed.
 
 use sparq_zk::verify::VerifyError;
+// [OPUS-5] sq-rsd3v.7: the two UNBUILT completeness halves, as the refusal message
+// and this test's needles must agree on them.
+use sparq_zk_compose::derivation::COMPLETENESS_UNDER_ENTAILMENT_UNBUILT;
 use sparq_zk_compose::manifest::{CircuitId, EntailmentRegime, StatusListSnapshot};
 use sparq_zk_compose::verifier::{
     CheckError, EntailmentPolicy, HolderRegistry, RevocationPolicy,
@@ -120,6 +123,34 @@ fn check_error_display_covers_query_correctness_reasons() {
     assert_display_carries(
         &CheckError::AttributionMalformed { proof: 0, expected: 2, got: 1 },
         &["2", "1"],
+    );
+    // [OPUS-5] sq-q9r5e follow-up: the explicit pattern→scan mapping's rejections.
+    assert_display_carries(
+        &CheckError::PatternScanArityMismatch { patterns: 2, declared: 1 },
+        &["pattern_scans", "2", "1"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanUnbound { pattern: 1 },
+        &["pattern_scans", "1"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanMismatch { pattern: 0, proof: 4 },
+        &["pattern_scans", "0", "4"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanUndeclared { proof: 3 },
+        &["pattern_scans", "3"],
+    );
+    // [OPUS-5] #5240: within-pattern repeated-variable slot equality.
+    assert_display_carries(
+        &CheckError::RepeatedSlotMismatch {
+            pattern: 0,
+            proof: 1,
+            row: 2,
+            variable: "v".into(),
+            slots: (0, 2),
+        },
+        &["v", "pattern", "row"],
     );
 }
 
@@ -286,6 +317,21 @@ fn check_error_display_covers_holder_pop_and_entailment_reasons() {
         &CheckError::UngroundedDerivationAntecedent { step: 1, antecedent: 0 },
         &["1", "0"],
     );
+    // [OPUS-5] sq-rsd3v.7: the completeness-under-entailment refusal must name the
+    // regime AND BOTH unbuilt halves (the closure-sweep and the saturation proof) —
+    // a relying party that asked for completeness has to be able to read WHY it
+    // cannot have it, and that the accept it did not get would only ever have been
+    // soundness of derivation. The needles come from the single source of truth so
+    // the message cannot drift away from the documented obligation.
+    assert_display_carries(
+        &CheckError::CompletenessUnderEntailmentUnavailable { regime: "rdfs" },
+        &[
+            "rdfs",
+            "sq-rsd3v.7",
+            COMPLETENESS_UNDER_ENTAILMENT_UNBUILT[0],
+            COMPLETENESS_UNDER_ENTAILMENT_UNBUILT[1],
+        ],
+    );
     // sq-rsd3v.6: the message must name owl:sameAs and the bead, so an operator
     // reading a rejection knows the refusal is deliberate (equality reasoning
     // needs the separate canonicalisation member) rather than a shape bug.
@@ -357,6 +403,47 @@ fn entailment_policy_default_is_simple_only_and_owl_subsumes_rdfs() {
     assert_ne!(EntailmentPolicy::simple_only().with_rdfs(), owl);
     // EntailmentRegime is Copy/Eq — touch it so the import is load-bearing.
     assert_eq!(EntailmentRegime::Simple, EntailmentRegime::Simple);
+}
+
+/// [OPUS-5] sq-rsd3v.7: the completeness-under-entailment dial is a DISTINCT
+/// dimension of the policy, not a re-spelling of regime acceptance — demanding
+/// completeness must not be satisfiable by opting into a regime. Asserted on the
+/// builder identities (the refusal behaviour itself is asserted end-to-end in
+/// `e2e.rs`, where a manifest actually reaches `bind_entailment`).
+#[test]
+fn completeness_demand_is_orthogonal_to_regime_acceptance() {
+    let base = EntailmentPolicy::simple_only().with_owl();
+    let demanding = base.clone().require_completeness_under_entailment();
+    assert_ne!(
+        base, demanding,
+        "requiring completeness must be observable in the policy — accepting Owl \
+         does not supply completeness (sq-rsd3v.7 is UNBUILT)"
+    );
+    // Idempotent, and it never widens regime acceptance.
+    assert_eq!(
+        demanding.clone().require_completeness_under_entailment(),
+        demanding,
+        "the dial is a set-once requirement, not a counter"
+    );
+    assert_ne!(
+        EntailmentPolicy::simple_only().require_completeness_under_entailment(),
+        demanding,
+        "the dial must not imply with_owl (it accepts no regime it did not already)"
+    );
+    // The default policy demands nothing (so no existing relying party changes
+    // behaviour) — the honest default stays "Simple-only, no completeness demand".
+    assert_eq!(EntailmentPolicy::default(), EntailmentPolicy::simple_only());
+    assert_ne!(
+        EntailmentPolicy::default(),
+        EntailmentPolicy::simple_only().require_completeness_under_entailment()
+    );
+    // Both unbuilt halves are named, and the saturation half — the one with no
+    // precedent anywhere in sparq — is explicitly among them.
+    assert_eq!(COMPLETENESS_UNDER_ENTAILMENT_UNBUILT.len(), 2);
+    assert!(
+        COMPLETENESS_UNDER_ENTAILMENT_UNBUILT.iter().any(|h| h.contains("saturation")),
+        "the fixpoint-saturation obligation must be named, never elided"
+    );
 }
 
 #[test]

@@ -35,13 +35,32 @@ mmap = ["dep:memmap2"]
 # [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
 # (subject/object) leading column of a BLOCK-COMPRESSED permutation. The directory's
 # first-triple already gives an implicit min/max zone map that prunes RANGE scans, but for
-# an EQUALITY-BOUND leading column whose id overlaps several blocks' [min,max] spans, only a
-# Bloom filter can skip the blocks that cannot contain it. OFF by default so the lean default
+# an EQUALITY-BOUND leading column the zone map still leaves a candidate block that must be
+# decoded just to find it holds no matching row; the Bloom filter drops that decode when the id
+# is provably absent. ([SONNET-4.6] sq-v8ixk measured the block-SKIP opportunity, on synthetic
+# high-NDV columns, to be on ABSENT-key lookups: a PRESENT id is already zone-map-pruned to ~one
+# block. Skip counts only — no latency result is claimed. See `compress::block_bloom`.)
+# OFF by default so the lean default
 # / wasm build pays no filter bytes; it is a pure-std bitset (NO new dependency). Zero false
 # negatives by construction, so results are identical to the feature-off path — only fewer
 # blocks decoded. The filter is in-RAM only and never serialised, so the on-disk SPQCPRM1
 # format is unchanged. See `compress::block_bloom`.
 block-bloom = []
+# [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): OPT-IN Elias-Fano and
+# Partitioned-Elias-Fano column codecs (`eliasfano` module) supporting **compressed seek** —
+# `next_geq(target)` answered directly on the compressed data, which the incumbent
+# delta+varint block codec cannot do (it must decode a whole block to seek).
+#
+# THIS IS A MEASUREMENT-GATED PROTOTYPE. It is deliberately NOT routed as a `PermData` variant
+# and no join calls it: the survey's own honest risk is that EF's pointer-chasing select/rank
+# LOSES to a linear varint walk on cache-resident streaming scans, so adoption is conditional on
+# the A/B (seek latency, scan throughput, bytes moved, heap) in
+# `eliasfano::tests::measure_ef_vs_block_varint` — which is NATIVE-ONLY (it times with
+# `std::time::Instant`, absent on wasm32), so the wasm32 half of the comparison is UNRESOLVED and
+# must be answered before adoption. OFF by default so the shipped store keeps the
+# incumbent codec bit-exactly and the lean default / wasm bundle links none of it. Pure `std` —
+# NO new dependency.
+elias-fano = []
 # [FABLE-5] sq-7d3dj.32.2.6 / sq-7d3dj.32.2.7: SPQCPRM2 frame-of-reference col2-reset
 # encoding. The SPQCPRM1 block stream writes a col2 that resets after a middle-column
 # change (`reset_d1`) as an ABSOLUTE varint; sq-7d3dj.32.2.4 attribution found that bucket

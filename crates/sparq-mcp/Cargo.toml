@@ -23,6 +23,15 @@ readme = "README.md"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+# [SONNET-4.6] sq-5xgxe (gh #3218) The shipped MCP server binary. `required-features`
+# keeps it out of the DEFAULT build (and out of a default `--all-targets`): it needs the
+# `stdio` transport, which is itself opt-in, so `cargo build -p sparq-mcp` still compiles
+# only the library. Build/run it with `--features stdio`.
+[[bin]]
+name = "sparq-mcp"
+path = "src/main.rs"
+required-features = ["stdio"]
+
 [features]
 # The transport-agnostic dispatch core (`McpServer::handle_message`, the tool
 # schemas, JSON-RPC framing types) is ALWAYS compiled — it is pure serde_json over
@@ -33,22 +42,53 @@ rustdoc-args = ["--cfg", "docsrs"]
 # (a server binary opts in) and uses only `std::io`, so it pulls no new dependency;
 # gating it keeps the library surface a pure data-transform for embedders that wire
 # their own transport. [OPUS-4.8]
-default = []
+# [SONNET-4.6] sq-mc06h: `algebra-rewrite` and `dp-planner` are in the DEFAULT set —
+# sparq-mcp is a NATIVE engine-embedding user surface with no bundle-size floor, so the
+# same binary-crate reasoning that put them in sparq-cli / sparq-server / sparq-py applies
+# here: an agent's `query`/`construct` tool call must execute the same plans the CLI and
+# the canonical benchmarks measure, not a rewrite-dark/greedy-GOO variant. Both forward a
+# sparq-engine opt-in that is `[]` (zero new dependencies, no `unsafe`) and is
+# RESULT-EQUIVALENT, so the default dependency graph and every tool's answer are unchanged
+# — only which plan runs. The sparq-engine LIBRARY default stays OFF (lean library
+# consumers choose explicitly), and an embedder who wants the unoptimised engine can build
+# this crate with `--no-default-features`. (`sparq-wasm` deliberately does NOT get this: it
+# has a bundle-size floor. See the bead for the per-surface decision.)
+default = ["algebra-rewrite", "dp-planner"]
 stdio = []
+# [SONNET-4.6] sq-mc06h: forwards sparq-engine's opt-in pre-execution algebra rewrite pass
+# (#1735 / sq-7d3dj.30.1) — the result-equivalent `FILTER(?v = <iri>)` constant substitution
+# + `FILTER(!bound) → Minus` anti-join applied before evaluation. IRI constants ONLY (a
+# literal equality is left verbatim — the sq-lr2ii avoidance contract). The pass's soundness
+# revert-witnesses run in the `sparq-engine (algebra-rewrite)` feature-matrix leg;
+# `tests/planner_features_default.rs` is this crate's tripwire that the forwarding works and
+# the default set keeps it lit.
+algebra-rewrite = ["sparq-engine/algebra-rewrite"]
+# [SONNET-4.6] sq-mc06h: forwards sparq-engine's opt-in DPccp join-order planner
+# (sq-7d3dj.30.5 / #1732). Once compiled it is DEFAULT-ON inside the engine (the
+# `Install::Default` state), so every connected BGP a tool call evaluates with 3..=63
+# patterns that fits the connected-subgraph budget is planned as a cost-optimal BUSHY tree
+# instead of by greedy GOO — no `with_dp_planner` call is needed on the tool path, and a
+# caller can still opt out per-scope via `sparq_engine::without_dp_planner`. Result-
+# equivalent (join ORDER only); the invariant is asserted exhaustively by sparq-engine's
+# `tests/query_features/dp_planner_differential.rs` in its own feature-matrix leg.
+dp-planner = ["sparq-engine/dp-planner"]
 # [GPT-5.6] sq-bvkn6: JSON-LD ingest for the Solid resource_put path. OFF by
 # default; forwarding sparq-core's opt-in parser keeps the lean MCP build free of
 # oxjsonld while allowing application/ld+json pod documents when requested.
 jsonld = ["sparq-core/jsonld"]
-# [OPUS-4.8] sq-jxjgr: the opt-in server-side natural-language `ask` tool. OFF by default —
+# [OPUS-4.8] sq-jxjgr: the opt-in server-side natural-language tools. OFF by default —
 # it pulls in `sparq-nlq` (and through it the configurable LLM backends), so the default
 # `sparq-mcp` build stays a thin, model-free wrapper exactly as before. The structured
-# `shapes`/`introspect` tools are the no-LLM default; `nlq` only adds the `ask` tool, which
-# embeds a CONFIGURABLE LLM call (no model is bundled; the backend is read from the env). It
-# enables sparq-nlq's two configurable backends (`live` = Anthropic, `nlq-endpoint` =
-# OpenAI-compatible) plus `citations` so the `ask` answer can carry in-graph provenance.
-# The `citations` feature on THIS crate is exposed only to forward sparq-nlq's so the
-# all-features rustdoc/clippy lane compiles the citation path. [OPUS-4.8]
-nlq = ["dep:sparq-nlq", "sparq-nlq/live", "sparq-nlq/nlq-endpoint", "citations"]
+# `shapes`/`introspect` tools are the no-LLM default; `nlq` adds only NL tools, each of
+# which embeds a CONFIGURABLE LLM call (no model is bundled; the backend is read from the
+# env). It enables sparq-nlq's two configurable backends (`live` = Anthropic,
+# `nlq-endpoint` = OpenAI-compatible) plus `citations` so the `ask` answer can carry
+# in-graph provenance. The `citations` feature on THIS crate is exposed only to forward
+# sparq-nlq's so the all-features rustdoc/clippy lane compiles the citation path.
+# [SONNET-4.6] sq-sj1f9: the same feature also lights the TRANSLATE-ONLY `nl_query` tool
+# (NL→SPARQL, validated but never executed). It shares the `ask` backend resolution and
+# `sparq-nlq` grounding, so one gate covers the whole NL tool surface — no second flag.
+nlq = ["dep:sparq-nlq", "sparq-nlq/live", "sparq-nlq/nlq-endpoint", "citations", "dep:spargebra"]
 citations = ["sparq-nlq?/citations"]
 # [FABLE-5] sq-u16eq: the opt-in pod-backed server (`SolidMcpServer`) — LDP
 # container/resource CRUD tools (resource_get/container_list, plus gated
@@ -56,9 +96,15 @@ citations = ["sparq-nlq?/citations"]
 # semantics per the MCP-Solid proposal draft (site/specs/mcp-solid.typ §6.4/§7.3/§9.3).
 # OFF by default — it pulls in `sparq-solid` (the access-control library whose PodStore
 # backs the pod dataset + authorization view); the default sparq-mcp build stays the
-# thin single-graph wrapper. `oxrdf` comes along only for named-graph Term/NamedNode
-# handling (it is already sparq-solid's public-API vocabulary — no new external dep).
-solid = ["dep:sparq-solid", "dep:oxrdf"]
+# thin single-graph wrapper. (`oxrdf` — sparq-solid's public-API vocabulary — is no
+# longer listed here: [SONNET-4.6] sq-sjey1 made it an unconditional dependency, see below.)
+# [SONNET-4.6] sq-wbsf5 adds `dep:oxttl` — the Turtle WRITER behind `resource_get`'s
+# `text/turtle` content negotiation. It stays OPTIONAL so the DEFAULT build's dependency
+# graph is unchanged; and even with `solid` on the compiled delta is zero, because `oxttl`
+# is already an unconditional dependency of `sparq-core` (every sparq-mcp build has always
+# compiled it) — naming it here only makes the existing edge explicit. Turtle serving
+# therefore needs no second feature flag of its own: `solid` IS the opt-in.
+solid = ["dep:sparq-solid", "dep:oxttl"]
 # [FABLE-5] sq-lsp7k.10: the opt-in NAMED-PARAMETERIZED-TEMPLATE tools (`template_list` +
 # `template_invoke`) over `sparq_engine::templates` (the #901 injection-safe `params`
 # algebra binding underneath). The embedder registers validated templates on
@@ -81,32 +127,49 @@ text = ["dep:sparq-text"]
 # tool — shape-aware form derivation shares the validator's caller-supplied-shapes
 # parsing path, so ONE gate covers the whole SHACL tool surface (no second flag to
 # co-enable). `sparq-forms` is an in-workspace path dep (no supply-chain delta).
-shacl = ["dep:sparq-shacl", "dep:sparq-forms", "dep:oxrdf"]
+shacl = ["dep:sparq-shacl", "dep:sparq-forms"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1" }
 # [OPUS-4.8] sq-jxjgr: the NL→SPARQL loop powering the opt-in `ask` tool. OPTIONAL — pulled
 # in ONLY by the `nlq` feature (default off), so the default build never compiles it and the
 # core/engine stay lean. A reviewed cargo-vet exemption covers the new edge (sparq-mcp ->
 # sparq-nlq under the feature).
-sparq-nlq = { path = "../sparq-nlq", version = "0.1.0", optional = true }
+sparq-nlq = { path = "../sparq-nlq", version = "0.1.1", optional = true }
+# [SONNET-4.6] sq-sj1f9: the SPARQL parser the translate-only `nl_query` tool validates
+# with (and hands to `sparq_nlq::guard::forbidden_constructs`, which takes parsed algebra).
+# OPTIONAL, pulled in only by the `nlq` feature. ZERO supply-chain delta: it is the
+# workspace's vendored spargebra, already an unconditional dependency of `sparq-engine`.
+spargebra = { workspace = true, optional = true }
 # [FABLE-5] sq-u16eq: the pod store + WAC/ACP authorization view backing the opt-in
 # `solid` feature's LDP resource tools. OPTIONAL — pulled in ONLY by that feature, so the
 # default build never compiles it (in-workspace path dep; no supply-chain delta).
-sparq-solid = { path = "../sparq-solid", version = "0.1.0", optional = true }
+sparq-solid = { path = "../sparq-solid", version = "0.1.1", optional = true }
 # [FABLE-5] sq-lsp7k.10: the BM25 literal index behind the opt-in `text` feature's
 # `text_search` tool. OPTIONAL + lean (`default-features = false`: pure index only — no
 # engine rewrite seam, no rayon), so the default build never compiles it.
-sparq-text = { path = "../sparq-text", version = "0.1.0", optional = true, default-features = false }
+sparq-text = { path = "../sparq-text", version = "0.1.1", optional = true, default-features = false }
 # [GPT-5.6] sq-lsp7k.22: optional validator behind the `shacl` tool feature.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", optional = true }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", optional = true }
 # [FABLE-5] sq-lsp7k.1.6: headless FormDescription derivation behind the SAME `shacl`
 # feature (the `describe_form` tool). OPTIONAL — the default build never compiles it.
-sparq-forms = { path = "../sparq-forms", version = "0.1.0", optional = true }
-oxrdf = { workspace = true, optional = true }
+sparq-forms = { path = "../sparq-forms", version = "0.1.1", optional = true }
+# [SONNET-4.6] sq-sjey1: UNCONDITIONAL, and deliberately so — the `resources/list`
+# surface must read `Graph::named`, whose keys are `oxrdf::Term`s, in the DEFAULT build.
+# This adds no compilation and no supply-chain delta: `oxrdf` is already an unconditional
+# dependency of `sparq-core`, so every sparq-mcp build has always compiled it; naming it
+# directly only makes the existing edge explicit — the build delta is exactly zero, so the
+# "keep the default build lean" rule is not bent.
+oxrdf = { workspace = true }
+# [SONNET-4.6] sq-wbsf5: the Turtle WRITER (`oxttl::TurtleSerializer`, the oxigraph writer,
+# so the negotiated `text/turtle` body is guaranteed well-formed). OPTIONAL — pulled in only
+# by the `solid` feature, whose `resource_get` is the sole caller. Zero supply-chain and zero
+# compiled delta: `oxttl` is already an unconditional dependency of `sparq-core` (and this
+# crate's own dev-dependency), so naming it only makes the existing edge explicit.
+oxttl = { workspace = true, optional = true }
 # The MCP wire format is JSON-RPC 2.0; serde_json (already ubiquitous in the tree —
 # sparq-engine/introspect/nlq all use it) is the only dependency the framing needs.
 serde = { version = "1", features = ["derive"] }
@@ -115,3 +178,11 @@ serde_json = "1"
 [dev-dependencies]
 # The round-trip tests load a graph from Turtle text.
 oxttl.workspace = true
+# [SONNET-4.6] sq-mc06h: `tests/planner_features_default.rs` parses a query so it can assert
+# the `algebra-rewrite` pass actually rewrites the trigger shape (and leaves a literal
+# equality verbatim). TEST-ONLY — it does not touch the shipped dependency graph — and zero
+# supply-chain delta either way: the workspace-pinned `spargebra` is already an unconditional
+# dependency of `sparq-engine`, so every sparq-mcp build has always compiled it. (It also
+# appears as an OPTIONAL normal dependency above, pulled in only by the `nlq` feature; the
+# dev entry is what makes it available to tests in the DEFAULT, nlq-off configuration.)
+spargebra = { workspace = true }

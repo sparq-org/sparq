@@ -2,11 +2,59 @@
 
 This tree started as a byte-identical copy of the `spargebra-0.4.6` sources from
 crates.io (the only non-upstream change in the base commit is a `[workspace]`
-table in `Cargo.toml`, required for the `[patch.crates-io]` path patch). Every
-change below is a surgical parser fix, each verified against the W3C SPARQL
-test suite (w3c/rdf-tests @ `f25dbc0`) and prepared as an upstream PR against
-oxigraph/oxigraph — see `docs/upstream-proposals.md` at the repo root. Drop
-this vendored tree once the fixes land in a released spargebra.
+table in `Cargo.toml`, required for the `[patch.crates-io]` path patch).
+
+Patches **§1–§6** are surgical spec-conformance parser fixes, each verified
+against the W3C SPARQL test suite (w3c/rdf-tests @ `f25dbc0`) and prepared as an
+upstream PR against oxigraph/oxigraph — see `docs/upstream-proposals.md` at the
+repo root. Patches **§7–§10** are sparq-local (a build guard, DoS hardening, a
+custom-aggregate fix, and a vendor extension); §10 is explicitly *not* an
+upstream candidate. Retiring this tree therefore takes more than an upstream
+release — see the release watch below.
+
+## Upstream release watch (bead `sq-98w7z.8`)
+
+Re-check with **`python3 scripts/check-spargebra-release.py`** (exit `0` = still
+blocked, `10` = released, `2` = indeterminate). Append a dated row here each
+time the bead is picked up.
+
+| checked | newest stable `spargebra` on crates.io | upstream main | verdict |
+|---|---|---|---|
+| 2026-06-11 | 0.4.6 | fixes on main, unreleased (`dabda10`, `c29be03`) | blocked — keep tree |
+| 2026-07-27 | **0.4.6** (unchanged) | `lib/spargebra` = `0.5.0-dev` | blocked — keep tree, re-deferred |
+
+**2026-07-27 check.** No release above 0.4.6 exists. Evidence: the crates.io
+sparse index tops out at `0.4.6` (every higher entry is a pre-release of an
+*older* line); oxigraph's released tag `v0.5.9` still ships `lib/spargebra` at
+version `0.4.6`; upstream `main` set the crate to `0.5.0-dev` on 2026-07-19
+(`a3d8311e`). The six conformance fixes remain unreleased, so the published
+crate is still buggy and this tree stays.
+
+Three findings that change the shape of the eventual retirement — the bead's
+original scope line (`vendor/spargebra/**` + the root patch table + `Cargo.lock`)
+is **incomplete**:
+
+1. **13 manifests depend on this tree, not 1.** The root `Cargo.toml` uses
+   `[patch.crates-io]`, but `bench/*` (11 manifests) and
+   `zk/xpath/differential` are *separate workspaces* that the root patch table
+   never reaches — each pins `path = ".../vendor/spargebra"` directly and has to
+   be repointed at the registry version by hand.
+2. **The next release is `0.5.0`, not `0.4.7`** — a semver-major bump. The root
+   requirement `spargebra = { version = "0.4", … }` will not resolve it, and
+   spargebra 0.5.0 will pull a newer `oxrdf` than this tree's `=0.3.3` pin.
+   Since `spargebra::Query` embeds oxrdf term types across every crate seam, a
+   duplicate `oxrdf` major in the lock is a hard type error, not a warning.
+3. **§7–§10 have no upstream home.** An upstream release does not make this tree
+   droppable by itself: each sparq-local patch must be re-landed on the release,
+   upstreamed, or consciously dropped along with its dependents. §8 (parser
+   recursion-depth cap) guards the unauthenticated `/sparql` endpoint against
+   stack-overflow DoS (threat-model B2 / T-PARSE-DoS, bead `sq-v5dg`), so
+   dropping it silently is a security regression; §10 (`MULTIPLICITY()`) is
+   depended on by `sparq-engine` evaluation.
+
+The invariant is unchanged: after unvendoring, the W3C conformance ratchet
+(`ci.yml` → `conformance`, currently 0-fail) must not regress. A new failure
+means the release is missing a fix — keep the tree and report it upstream.
 
 ## 1. Reject nested aggregate functions
 

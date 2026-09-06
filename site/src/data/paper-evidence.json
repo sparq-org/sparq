@@ -149,7 +149,7 @@
       "note": "Number of distinct conformance suites the central scoreboard registers and ratchets across crates (W3C SPARQL, inference, SHACL core, SHACL-SPARQL, OGC GeoSPARQL, Solid WAC decision parity, Solid ACP decision parity)."
     },
     "memsafety.unsafe_sites_total": {
-      "value": 91,
+      "value": 92,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",
@@ -205,7 +205,7 @@
       "note": "[GPT-5.6] Total first-party crates in the workspace. Deterministic structural count. The forbid-in-src set (50) and the unsafe-bearing set (8) overlap on sparq-py + sparq-lws-core and 4 crates carry neither, so the two do NOT partition the 60 cleanly — see evidence.md MS-1. NOTE: doc-anchor is existence-strength only (verbatim quote presence); the `ls -d` count in `source` is the machine source of truth."
     },
     "memsafety.unsafe_sites_core": {
-      "value": 50,
+      "value": 51,
       "unit": "unsafe-sites",
       "environment": "canonical",
       "kind": "unsafe-count-ratchet-ceiling",

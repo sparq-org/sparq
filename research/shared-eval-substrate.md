@@ -57,7 +57,9 @@ Everything else in the brief checks out and is load-bearing:
   snapshot (the file is now 11 411 lines) but the structure is exactly as claimed.
 - The deterministic perf ratchets are real and currently pinned (verified in
   `bench/perf-baseline.json`): `wasm_bundle_bytes = 1686907`, `store_bytes_per_triple = 92`,
-  `dict_bytes_per_term = 53`, `parse_ns_per_byte = 4.9721`. The brief's older figure of 1656470
+  `dict_bytes_per_term = 53`. `parse_ns_per_byte = 4.9721` is pinned alongside them but is
+  wall-clock-derived (`mode: noise`) — an advisory timing signal (tracked/warned,
+  non-blocking), not a deterministic ratchet. The brief's older figure of 1656470
   is stale — the floor was re-baselined to **1686907** (#1286, 2026-06-29). **Use 1686907.**
 - `Graph::from_parts(dict, triples)` (`sparq-core/src/lib.rs:1114`) is the existing seam the
   reasoners already use to hand materialised closures back as a queryable graph.

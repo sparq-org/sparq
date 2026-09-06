@@ -66,7 +66,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
   neighbour variable is searched as a *filtered* ANN over its join-connected sub-BGP,
   with the derived `IdMask` cached by sub-BGP + graph fingerprint (any graph change
   misses the cache). A per-query cost model picks pre- vs post-filter; both return the
-  **byte-identical** top-k.
+  **byte-identical** top-k. The same feature carries **hybrid retrieval + reranking**: the *provisional* `vec:hybrid` predicate (`( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )`) fuses the dense k-NN with caller-supplied arms (lexical, structural, …) by deterministic weighted RRF, binds the per-arm **rank provenance** (`"vector=1;text=3;rerank=2"`), and optionally runs an out-of-process `Reranker` under an explicit fail-open / fail-closed policy. Arms and reranker are caller closures/traits, so the crate depends on none of them. **No lift is claimed:** whether fusion or reranking helps is an empirical, per-corpus question measured by `hybrid::ablate` (dense / sparse / structural / fused / reranked rows); the pinned-corpus run is not in-tree.
 - **Graph-staleness guard** — `.spqv`/`.spqg` headers embed a dictionary **fingerprint**
   (thread-count-stable); the checked query paths reject a mismatch instead of serving wrong
   neighbours. **Id-keyed staleness contract (sq-wlzi):** a passing `check_graph` is **necessary but

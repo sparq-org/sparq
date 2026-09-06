@@ -74,6 +74,79 @@ _TRANSIENT_MARKERS = (
     "temporary failure in name resolution",
     "unexpected eof",
     "request timed out",
+    # [OPUS-5] sparq #4795. `gh` decodes every API response with Go's encoding/json, so a
+    # TRUNCATED OR EMPTY response body surfaces not as an HTTP status but as the decoder's
+    # own text. It is the same transport class as "unexpected eof" one line up — the body
+    # ended early — and it is NOT reachable from an auth/validation refusal, because 401 /
+    # 403 / 404 / 422 all return a well-formed JSON error document that gh reports as
+    # "HTTP <code>: …" instead. MEASURED, run 30355033945 job 90261152943 (auto-arm,
+    # 2026-07-28T11:30Z), during a GitHub GraphQL 5xx episode:
+    #     attempt 1/3: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)   -> retried
+    #     attempt 2/3: unexpected end of JSON input                                 -> FATAL
+    # One incident, one query, and the run's COLOUR depended on which surface string the
+    # platform happened to emit on the second attempt: the sibling scheduled run five
+    # minutes later (30355432064) drew "HTTP 502" three times, exhausted the bounded budget
+    # and took the documented ::warning + exit-0 sweep path. Without this marker the third
+    # attempt is never made and a cron-covered sweep reds main's commit instead.
+    "unexpected end of json input",
+    # [OPUS-5] sparq #4795. HTTP/2 RST_STREAM from the peer — Go's net/http2 wording. The
+    # most frequent uncovered string in the census below, and the same physical event as
+    # "connection reset" above, just named at the h2 framing layer instead of the socket
+    # layer. Keyed on the PREFIX because both the stream number and the error code vary
+    # (CANCEL / INTERNAL_ERROR / REFUSED_STREAM / PROTOCOL_ERROR / ENHANCE_YOUR_CALM);
+    # pinning "; cancel;" would just be the next mole. Not reachable from an auth or
+    # validation decision — those never reach the h2 error path at all.
+    #   CAVEAT, recorded deliberately: ENHANCE_YOUR_CALM is genuine THROTTLING, not a blip.
+    #   Bounded 10s/30s backoff is still the right response and the 3-attempt cap still
+    #   applies, but a SUSTAINED throttle now exhausts into the sweep's ::warning + exit-0
+    #   path rather than reddening. That is the same trade every marker here makes.
+    "stream error: stream id",
+)
+
+# ------------------------------------------------------------------- census (#4795)
+# Why this list is organised by LAYER, and what the evidence for the two 2026-07-28
+# additions is.
+#
+# MEASURED over 2026-07-21 -> 2026-07-28 across every non-skipped auto-arm + re-arm-sweeper
+# run (denominator 942 executed runs, 65 failed). Of the failures that were `gh` READ
+# failures, 8 (16.3%) carried a string this allow-list did not name:
+#
+#     stream error: stream ID <n>; <CODE>; received from peer      6 runs
+#     unexpected end of JSON input                                 2 runs
+#
+# All 9 genuinely non-transient failures in the same window were SELF-DESCRIBING — an
+# explicit permission or validation message, every one of them on the MUTATION path, which
+# this helper never wraps. None degraded into a transport or decoder string. That is the
+# evidence that admitting these two markers cannot swallow the auth/validation class.
+#
+# THE STRUCTURAL POINT, which matters more than either string: `gh` surfaces ONE physical
+# event — "the response did not arrive intact" — at THREE layers, and this list had only
+# ever enumerated two of them:
+#
+#     HTTP status layer   http 502 / 503 / 504 and their prose spellings
+#     transport layer     connection reset/refused, i/o timeout, tls handshake, unexpected
+#                         eof, context deadline, DNS, request timed out, and now
+#                         `stream error: stream id` (HTTP/2 framing)
+#     decoder layer       `unexpected end of json input` (Go encoding/json on a truncated
+#                         or empty body) — the layer that was entirely absent
+#
+# The tell was already sitting in the list: "unexpected eof" is the TRANSPORT name for
+# truncation and its DECODER name was missing. So the next gap to look for is a LAYER
+# nobody has named, not a string nobody has typed. Retry makes this worse rather than
+# better: 29 of 34 post-helper transient episodes ran to a third attempt, so each
+# degradation window now takes ~3 draws from the surface-string distribution instead of 1
+# — which is exactly how run 30355033945 died (502 on attempt 1, truncation on attempt 2).
+#
+# :func:`run_gh_read` therefore ANNOTATES an unclassified failure that lands mid-incident,
+# so the next gap reports itself in the run log instead of costing another log excavation.
+UNCLASSIFIED_MID_INCIDENT_WARNING = (
+    "::warning title=gh-retry hit an UNCLASSIFIED failure mid-incident::{label} attempt "
+    "{attempt}/{attempts} failed with text that is NOT in the transient allow-list, "
+    "immediately after a CLASSIFIED transient failure on the SAME call — the sparq #4795 "
+    "shape, one platform incident surfacing at a layer this list does not name. The call "
+    "was failed loudly (unclassified stays fatal). If the text below names a transport or "
+    "decoder failure rather than an auth/validation refusal, it belongs in "
+    "_TRANSIENT_MARKERS: {detail!r}"
 )
 
 # gh subcommand pairs this helper accepts as reads (fail-closed: everything not
@@ -264,6 +337,10 @@ def run_gh_read(
     emit = log or (lambda message: print(message, file=sys.stderr))
     command = ["gh", *[str(arg) for arg in argv]]
     label = " ".join(command[:4])
+    # [OPUS-5] #4795: has THIS call already seen a failure the allow-list DID name? If so,
+    # a later unclassified failure is evidence of an allow-list gap rather than of a real
+    # error, and it gets annotated (never reclassified — see below).
+    saw_classified_transient = False
     for attempt in range(1, attempts + 1):
         result = run(command, capture_output=True, text=True, check=False)
         if result.returncode == 0:
@@ -274,7 +351,19 @@ def run_gh_read(
             or "unknown gh failure"
         )
         if not is_transient(detail):
+            # [OPUS-5] #4795: OBSERVABILITY ONLY — the classification is unchanged and the
+            # call still fails loudly on the very next line. Deliberately NOT "everything
+            # after a transient is transient": that would swallow a genuine auth loss
+            # mid-incident, which is the one class this helper exists to keep loud.
+            if saw_classified_transient:
+                emit(
+                    UNCLASSIFIED_MID_INCIDENT_WARNING.format(
+                        label=label, attempt=attempt, attempts=attempts, detail=detail
+                    )
+                )
             raise GhFatalError(f"{label} failed (non-transient): {detail}")
+        # Reached only when the allow-list DID name this failure.
+        saw_classified_transient = True
         if attempt == attempts:
             raise GhTransientExhausted(
                 f"{label} failed transiently on every attempt "
@@ -341,12 +430,104 @@ def self_test() -> None:
     assert sleeps == [10.0, 30.0], sleeps
     assert not isinstance(GhTransientExhausted("x"), GhFatalError)
 
+    # [OPUS-5] #4795 REGRESSION, AT THE CALL SITE — one platform incident may present a
+    # DIFFERENT surface string on each attempt, and the bounded budget must survive the
+    # mixture. This is the exact interleaving measured in auto-arm run 30355033945:
+    # a 502 on attempt 1, then gh's JSON decoder reporting a truncated body on attempt 2.
+    # Before the "unexpected end of json input" marker, attempt 2 raised GhFatalError,
+    # attempt 3 was never made, and a cron-covered sweep redded main's commit.
+    fake = _FakeRun(
+        [
+            (1, "", "HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)"),
+            (1, "", "unexpected end of JSON input"),
+            (0, "[]", ""),
+        ]
+    )
+    sleeps = []
+    out = run_gh_read(read, run=fake, sleep=sleeps.append, log=lambda _m: None)
+    assert out == "[]", out
+    assert len(fake.calls) == 3, fake.calls  # the third attempt MUST be made
+    assert sleeps == [10.0, 30.0], sleeps
+
+    # …and the leniency is bounded to the transport class ONLY: a genuine auth/validation
+    # refusal arriving DURING a transient episode still fails loudly on the spot. "Some
+    # failure after a 502 is transient" must never become "every failure after a 502 is".
+    fake = _FakeRun(
+        [
+            (1, "", "HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)"),
+            (1, "", "HTTP 403: Resource not accessible by integration"),
+            (0, "[]", ""),
+        ]
+    )
+    sleeps = []
+    logged: list[str] = []
+    try:
+        run_gh_read(read, run=fake, sleep=sleeps.append, log=logged.append)
+    except GhFatalError as error:
+        assert "403" in str(error), error
+    else:
+        raise AssertionError("a 403 mid-episode must still raise GhFatalError")
+    assert len(fake.calls) == 2, fake.calls  # stopped at the 403; never reached attempt 3
+    assert sleeps == [10.0], sleeps
+    # …and #4795's annotation FIRED for it: the operator sees the candidate string in the
+    # run log without excavating. Annotating is not reclassifying — the raise above stands.
+    annotations = [line for line in logged if "UNCLASSIFIED failure mid-incident" in line]
+    assert len(annotations) == 1, logged
+    assert "Resource not accessible by integration" in annotations[0], annotations
+
+    # The annotation is CONDITIONED on a prior classified transient. A fatal failure on the
+    # FIRST attempt is an ordinary loud failure and must NOT be annotated — otherwise the
+    # signal that says "allow-list gap" would fire on every 404 and mean nothing.
+    fake = _FakeRun([(1, "", "HTTP 404: Not Found (repos/x)")])
+    logged = []
+    try:
+        run_gh_read(read, run=fake, sleep=lambda _s: None, log=logged.append)
+    except GhFatalError:
+        pass
+    else:
+        raise AssertionError("HTTP 404 must raise GhFatalError")
+    assert not [line for line in logged if "UNCLASSIFIED failure mid-incident" in line], logged
+
+    # [OPUS-5] #4795: the HTTP/2 RST_STREAM family — 6 measured occurrences, the most
+    # frequent uncovered string. The stream number and the error CODE both vary, so the
+    # marker must survive every code the peer can send, not just the one we happened to see.
+    for code in ("CANCEL", "INTERNAL_ERROR", "REFUSED_STREAM", "PROTOCOL_ERROR",
+                 "ENHANCE_YOUR_CALM", "NO_ERROR"):
+        text = f"stream error: stream ID 7; {code}; received from peer"
+        assert is_transient(text), text
+    fake = _FakeRun(
+        [
+            (1, "", "stream error: stream ID 1; CANCEL; received from peer"),
+            (0, "[]", ""),
+        ]
+    )
+    sleeps = []
+    assert run_gh_read(read, run=fake, sleep=sleeps.append, log=lambda _m: None) == "[]"
+    assert len(fake.calls) == 2, fake.calls
+    assert sleeps == [10.0], sleeps
+
     # Case-insensitive transient classification; auth/validation classes are fatal.
     assert is_transient("HTTP 502 Bad Gateway")
     assert is_transient("Post https://api.github.com/graphql: i/o TIMEOUT")
+    # [OPUS-5] #4795: gh's own JSON-decode failure on a truncated/empty body, in the
+    # casing gh actually emits ("JSON" upper) and lowercased — the classifier folds case.
+    assert is_transient("unexpected end of JSON input")
+    assert is_transient("unexpected end of json input")
     assert not is_transient("HTTP 403: Resource not accessible by integration")
     assert not is_transient("HTTP 422: Validation Failed")
     assert not is_transient("GraphQL: Could not resolve to a node")
+    # A well-formed API refusal is NOT the truncated-body class, even though both are
+    # JSON-adjacent: gh reports these as an HTTP status, never as a decoder error.
+    assert not is_transient("HTTP 401: Bad credentials")
+    assert not is_transient("HTTP 404: Not Found (repos/x)")
+    # [OPUS-5] #4795: the marker must name the DECODER FAILURE, not the word "json". These
+    # are gh's own deterministic usage errors — a caller asking for a field that does not
+    # exist. Retrying them wastes the whole 40s budget and then, in a cron sweep, exits 0
+    # with a ::warning, so a permanent argv bug would masquerade as a platform blip
+    # forever. A marker broad enough to swallow them is a REGRESSION, not a fix.
+    assert not is_transient('unknown JSON field: "titel"')
+    assert not is_transient("Unknown JSON field: mergeStateStatuss")
+    assert not is_transient("invalid JSON field for pr list: nope")
 
     # Mutation guard: every arm/label/merge shape is refused BEFORE gh is invoked.
     refused = [

@@ -60,6 +60,25 @@ hatch.
   graph when requested) whose insert/remove operations target one configured
   named graph. This proposal follows rdfjs/wrapper draft PR #95 and is not
   landed upstream. <!-- [GPT-5.6] sq-1rg2q.6 -->
+- `proposed-async-store` adds `proposed::async_store::AsyncStore`, the same
+  focus/traverse shape over a remote or disk-backed backend. Traversal streams
+  each term as a wrapped node instead of collecting a result set, dropping a
+  stream drops the backend stream and never polls it again (which cancels the
+  traversal for a backend honouring the trait's laziness and drop-cancellation
+  contract), and no async runtime is pulled in. This
+  proposal follows rdfjs/wrapper issue #10 and draft PR #97 and is not landed
+  upstream. <!-- [SONNET-4.6] sq-1rg2q.8 -->
+- `proposed-json` adds `proposed::json::JsonProjection`, a JSON projection of a
+  focus node and its outgoing reachable subgraph that is total on cyclic graphs
+  (a repeated node becomes a `{"@ref": …}` term reference under an explicit
+  `RepeatedFocus` policy) and deterministic (predicates sorted by IRI, objects
+  by N-Triples form), and that keeps each literal's datatype, language tag, and
+  base direction. This proposal follows rdfjs/wrapper open PR #23 and is not
+  landed upstream. <!-- [SONNET-4.6] sq-1rg2q.11 -->
+- The reserved `proposed-graph-scope-events`, `proposed-async-node`, and
+  `proposed-async-events` seams are default-off placeholders. Their APIs are
+  intentionally empty until the corresponding proposal work lands.
+  <!-- [SONNET-4.6] sq-1rg2q.1 -->
 - All crate features are off by default, and the dependency on `sparq-core`
   disables its default features to keep this capability isolated.
 
@@ -67,6 +86,8 @@ hatch.
 
 - [`skills/rdf-wrapper/SKILL.md`](../../skills/rdf-wrapper/SKILL.md) — usage
   recipes and the feature matrix.
+- [`docs/proposed/README.md`](docs/proposed/README.md) — status index for each
+  default-off proposal feature.
 - [rdfjs/wrapper](https://github.com/rdfjs/wrapper) — object-mapping prior art.
 - [Grapoi](https://github.com/rdf-ext/grapoi) and
   [Clownface](https://github.com/zazuko/clownface) — traversal ergonomics.

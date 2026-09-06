@@ -171,6 +171,15 @@ crates = ["sparq-conformance"]
 pattern = "bench/reason-diff/rl/**"
 crates = ["sparq-reason-diff"]
 
+# [OPUS-5] sq-3xsx0: the competitor Datalog encodings (Nemo `.rls`, VLog `.dlog`)
+# whose OWL-RL rules must stay set-identical to sparq's own closure. sparq-reason's
+# datalog_intersection_arity.rs reads both files at runtime (an
+# env!("CARGO_MANIFEST_DIR")-relative read) to assert `cls-int1` is the arity-generic
+# list walk, so an encoding edit must re-run that guard.
+[[map]]
+pattern = "bench/reason-encodings/**"
+crates = ["sparq-reason"]
+
 # ZK-compose gate-count + SPARQL-feature catalog fixtures (committed JSON),
 # include_str!'d by sparq-zk-compose's gate_count/sparql_catalog tests.
 [[map]]
@@ -196,12 +205,15 @@ crates = ["sparq-conformance"]
 # [FABLE-5] sq-tonhr.2: the COMMITTED cargo-fuzz seed corpus (fuzz/seeds/<target>/),
 # read via an env!("CARGO_MANIFEST_DIR")-relative path by sparq-conformance's parser
 # differential harness (tests/parser_differential.rs) as a known-tricky-input corpus
-# for the sparq-vs-oxttl line-syntax cross-check. The out-of-workspace fuzz/ crate
-# also consumes these seeds, but it is not a workspace member, so this map lists
-# the workspace-crate readers only (the fuzz lane itself is seeded via [lanes]).
+# for the sparq-vs-oxttl line-syntax cross-check. sparq-canon reads one seed of the
+# same corpus with `include_str!` (tests/fuzz_seed_dedup.rs), pinning the RDFC-1.0
+# set-semantics reproducer in the stable `cargo test` gate. The out-of-workspace
+# fuzz/ crate also consumes these seeds, but it is not a workspace member, so this
+# map lists the workspace-crate readers only (the fuzz lane itself is seeded via
+# [lanes]).
 [[map]]
 pattern = "fuzz/seeds/**"
-crates = ["sparq-conformance"]
+crates = ["sparq-conformance", "sparq-canon"]
 
 # [FABLE-5] sq-1s2.4 (PR #3622): the browser age-gate's precomputed `operand_enc`
 # anchors, read at runtime by sparq-zk-compose's build-time drift guard
@@ -226,26 +238,22 @@ crates = ["sparq-zk-compose"]
 # (prefix-ownership already covers it) but harmless and documents every reader.
 # ---------------------------------------------------------------------------
 
-# sparq-zk's #[cfg(test)] module include_str!s sparq-trust's shared secprop-ext
-# vocab (crates/sparq-zk/src/secprop.rs) to assert the two crates' sec-prop IRIs
-# agree. sparq-trust DEPENDS ON sparq-zk (crates/sparq-trust/Cargo.toml), so a
-# sparq-zk -> sparq-trust dep would be a cycle: additional-readers instead.
-# [FABLE-5] sq-mgxz8 (PR #3440): sparq-policy's cross-crate dimension-IRI drift
-# guards (crates/sparq-policy/src/secprop.rs #[cfg(test)]) also include_str! this
-# vocab; the no-crate-edge choice is deliberate (the lean policy crate must not
-# grow a sparq-trust/sparq-zk edge just for a compile-time drift test), so the
-# monotone readers union attributes the read instead.
-[[map]]
-pattern = "crates/sparq-trust/ontologies/zkp-sparql/**"
-readers = ["sparq-zk", "sparq-trust", "sparq-policy"]
-
-# [FABLE-5] sq-mgxz8 (PR #3440): sparq-policy's drift guard also include_str!s
-# sparq-zk's per-method secprop annotation graph (secprop-methods.ttl) to catch
-# a dimension-IRI typo/rename across the estate. Same rationale as above — no
-# crate edge for a compile-time drift test; additional-readers instead.
-[[map]]
-pattern = "crates/sparq-zk/ontologies/**"
-readers = ["sparq-policy"]
+# [OPUS-5] sq-3705 RETIRED two `readers` entries here — the secprop vocabulary
+# ones. They existed because sparq-zk and sparq-policy `include_str!`d
+# sparq-trust's shared `secprop-ext.ttl` (and sparq-policy also read sparq-zk's
+# `secprop-methods.ttl`) across package boundaries: sparq-trust DEPENDS ON
+# sparq-zk, so the reverse edge was a cycle, and the lean sparq-policy could not
+# take a sparq-trust edge at all. A statically unattributable out-of-crate read
+# is exactly what the monotone readers union is for.
+#
+# The reads are gone. The vocabulary now lives in `crates/sparq-secprop-vocab`, a
+# ZERO-dependency LEAF that sparq-trust, sparq-policy and sparq-zk each depend on
+# (optionally, behind their own default-OFF secprop features), and the annotation
+# graph's drift guard moved into sparq-zk, the crate that owns the graph. So a
+# change to the vocabulary or to `crates/sparq-zk/ontologies/**` is attributed by
+# the ORDINARY reverse-dependency closure over real cargo edges — the selector
+# reaches all three without a map entry. Do not re-add them; re-adding one would
+# mean a cross-package `include_str!` came back (see sq-3705).
 
 # sparq-reason's compiled-vs-interpreted N3 equivalence + incremental tests read
 # sparq-solid's WAC/ACP/ODRL-spike rule corpus READ-ONLY from ../sparq-solid/rules
@@ -277,6 +285,16 @@ readers = ["sparq-acbench"]
 # re-verifies this every run (a crate that starts reading a safe path FAILS the
 # audit, forcing a re-evaluation). Docs/site lanes still run — they are separate
 # workflows, not gated by this selector.
+#
+# [OPUS-5] #5249: a `safe = true` verdict is now inert for BOTH selector layers.
+# It always emptied the affected CLOSURE; since #5249 `ci_select.classify_change`
+# reads this list too, so such a path also classifies `map-safe` (one of
+# `_INERT_CLASSES`) instead of `engine` — which is what lets a merge_group batch
+# confined to safe paths skip the rust_changed-only lanes and the CodeQL analysis.
+# Adding an entry here therefore now affects the change CLASS as well: hold it to
+# the same audit bar. FIRST-MATCH-WINS still applies (the sq-1s2.4 zk-anchor
+# entries above keep `site/src/lib/zk-prover.ts` engine-classified), and a `safe`
+# entry can still never rescue a §4.1 trigger or a `crates/`-owned path.
 # ---------------------------------------------------------------------------
 
 # Design records / research notes. No crate compiles or reads research/.
@@ -307,6 +325,22 @@ safe = true
 # The bead task database. Task-tracking only; no crate reads .beads/.
 [[map]]
 pattern = ".beads/**"
+safe = true
+
+# [OPUS-5] sq-g25hr: deployment manifests (k8s / helm / terraform / bicep / PaaS
+# + their READMEs and smoke scripts). AUDIT-PROVEN inert for the RUST matrix: no
+# workspace crate include_str!/include_bytes!/reads deploy/, and this safe entry
+# makes that an ENFORCED claim — scripts/ci_audit_inputs.py fails the moment a
+# crate starts reading a safe-listed path. deploy/ is NOT unowned in CI overall:
+# deploy-lint.yml (yamllint/kubeconform), deploy-terraform-lint.yml,
+# container-scan.yml, and the pure-python test_release_container_multiarch.py /
+# test_dependabot_coverage.py checks all read it, and every one of those lives in a
+# workflow this selector does not gate — so they still run on a deploy-only PR.
+# Mirrored in ci_select.py `_DEPLOY_ONLY` (which also covers the two
+# `.github/workflows/deploy-*.yml` files, unreachable from this map because
+# `.github/` is a §4.1 full-run trigger that wins before the map is consulted).
+[[map]]
+pattern = "deploy/**"
 safe = true
 
 # [FABLE-5] sq-63ups: the formal-verification manifest (proof suites -> verified

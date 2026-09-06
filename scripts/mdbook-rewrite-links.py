@@ -15,7 +15,7 @@
 # This preprocessor closes that gap: at book-build time it rewrites repo-relative
 # markdown links in the (already-assembled, post-`{{#include}}`) chapter text to the
 # mount-portable canonical form
-#     https://github.com/jeswr/sparq/blob/main/<path>
+#     https://github.com/sparq-org/sparq/blob/main/<path>
 # so the SAME content renders correctly under BOTH mounts (raw GitHub view of the
 # source file AND the mdBook site) WITHOUT the source files having to carry absolute
 # URLs that the lychee gate cannot offline-resolve. Single source of truth stays in
@@ -33,7 +33,8 @@
 #     reference definitions whose target is a REPO-RELATIVE path (no scheme, not
 #     starting with `/`, `#`, `mailto:`, etc.) that points at a tracked repo file —
 #     i.e. begins with one of the allow-listed top-level prefixes below, or is a
-#     bare root-level `*.md` (README.md, AGENTS.md, SECURITY.md, ...).
+#     bare root-level `*.md` (README.md, AGENTS.md, SECURITY.md,
+#     inference-conformance-report.md, ...).
 #   * Anchor-only (`#frag`), absolute-URL (`http(s)://`, `//`), root-absolute (`/x`),
 #     and `mailto:`/`tel:` targets are left exactly as-is.
 #   * A trailing `#fragment` on a rewritten path is preserved.
@@ -47,13 +48,22 @@ import json
 import re
 import sys
 
-GITHUB_BLOB_BASE = "https://github.com/jeswr/sparq/blob/main/"
+GITHUB_BLOB_BASE = "https://github.com/sparq-org/sparq/blob/main/"
 
 # Repo-relative targets we rewrite: a path under one of these tracked top-level dirs,
 # or a bare root-level *.md file. Kept explicit (not "any relative path") so we never
 # rewrite an intra-book chapter link like `./getting-started/install.md`.
 _DIR_PREFIXES = ("skills/", "crates/", "docs/", "research/", "bench/", "vendor/", "compliance/", "assets/")
-_ROOT_MD = re.compile(r"[A-Z][A-Za-z0-9_.-]*\.md\Z")  # README.md, AGENTS.md, ... (root-level)
+# Root-level markdown, ANY case (issue #5021): the class was `[A-Z]`, which matched
+# README.md / AGENTS.md but NOT a lowercase root-level doc such as
+# inference-conformance-report.md — that link survived the preprocessor unrewritten and
+# then 404'd under the book mount (README.md had to carry it as an absolute URL to work
+# around it; research/docs-site-single-sourcing-anti-drift.md §8). Case is not a property
+# of "is this a root-level repo doc", so it must not decide the rewrite.
+# NOTE the standing convention this relies on: an intra-book link to a SIBLING chapter must
+# be written `./chapter.md`, not bare `chapter.md` — `./` is what marks it as book-internal
+# (see _is_repo_relative). Every book/src chapter already writes them that way.
+_ROOT_MD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*\.md\Z")  # README.md, inference-conformance-report.md, ...
 
 # An mdBook chapter is plain markdown. Match the link TARGET inside:
 #   inline:    [text](TARGET)            and [text](TARGET "title")
@@ -128,10 +138,82 @@ def _walk(section) -> None:
         _walk(sub)
 
 
+# --------------------------------------------------------------------------------------
+# Hermetic self-test (repo convention: `--self-test` over inline fixtures, no network, no
+# files, no subprocess). Runs in docs-quality.yml's HARD quick-gates bucket on every PR —
+# docs.yml only fires on its own path filter, and a preprocessor regression is silent
+# (mdBook exits 0 and just emits a dead link). Both directions: what MUST be rewritten and
+# what MUST be left alone.
+# --------------------------------------------------------------------------------------
+B = GITHUB_BLOB_BASE
+
+_REWRITE_CASES = [
+    # (input, expected) — REWRITTEN
+    # Issue #5021 — the lowercase root-level doc. Narrowing _ROOT_MD back to `[A-Z]`
+    # reds exactly this case.
+    ("see [report](inference-conformance-report.md)", f"see [report]({B}inference-conformance-report.md)"),
+    ("[ref]: inference-conformance-report.md", f"[ref]: {B}inference-conformance-report.md"),
+    ("[a](README.md)", f"[a]({B}README.md)"),
+    ("[a](AGENTS.md#hygiene)", f"[a]({B}AGENTS.md#hygiene)"),
+    ("[a](skills/cli/SKILL.md)", f"[a]({B}skills/cli/SKILL.md)"),
+    ("[a](research/roadmap.md)", f"[a]({B}research/roadmap.md)"),
+    # UNTOUCHED
+    ("[a](./getting-started/install.md)", "[a](./getting-started/install.md)"),
+    ("[a](./capabilities.md)", "[a](./capabilities.md)"),
+    ("[a](../introduction.md)", "[a](../introduction.md)"),
+    ("[a](#status)", "[a](#status)"),
+    ("[a](/README.md)", "[a](/README.md)"),
+    ("[a](https://example.org/x.md)", "[a](https://example.org/x.md)"),
+    ("[a](mailto:x@example.org)", "[a](mailto:x@example.org)"),
+    ("[a](deny.toml)", "[a](deny.toml)"),  # root-level, but not markdown → out of scope
+    ("`[a](README.md)`", "`[a](README.md)`"),  # inline code span
+    ("```\n[a](README.md)\n```", "```\n[a](README.md)\n```"),  # fenced block
+    # Idempotent: an already-absolute link is a no-op on a second pass.
+    (f"[a]({B}inference-conformance-report.md)", f"[a]({B}inference-conformance-report.md)"),
+]
+
+
+def _self_test() -> int:
+    failures = []
+    for src, want in _REWRITE_CASES:
+        got = rewrite_content(src)
+        if got != want:
+            failures.append(f"  rewrite_content({src!r})\n    got  {got!r}\n    want {want!r}")
+
+    # End-to-end: the [context, book] walk mutates nested chapters in place.
+    book = {
+        "sections": [
+            {
+                "Chapter": {
+                    "content": "[a](inference-conformance-report.md)",
+                    "sub_items": [{"Chapter": {"content": "[b](README.md)", "sub_items": []}}],
+                }
+            },
+            {"Separator": None},
+        ]
+    }
+    for section in book["sections"]:
+        _walk(section)
+    top = book["sections"][0]["Chapter"]
+    if top["content"] != f"[a]({B}inference-conformance-report.md)":
+        failures.append(f"  chapter walk: got {top['content']!r}")
+    if top["sub_items"][0]["Chapter"]["content"] != f"[b]({B}README.md)":
+        failures.append(f"  sub-chapter walk: got {top['sub_items'][0]['Chapter']['content']!r}")
+
+    if failures:
+        print("mdbook-rewrite-links self-test: FAIL", file=sys.stderr)
+        print("\n".join(failures), file=sys.stderr)
+        return 1
+    print(f"mdbook-rewrite-links self-test: PASS ({len(_REWRITE_CASES)} link cases + chapter walk)")
+    return 0
+
+
 def main() -> int:
     # `supports <renderer>` handshake: we support all renderers.
     if len(sys.argv) > 1 and sys.argv[1] == "supports":
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        return _self_test()
 
     context_and_book = json.load(sys.stdin)
     # stdin is the 2-element array [context, book]; we mutate and emit `book`.

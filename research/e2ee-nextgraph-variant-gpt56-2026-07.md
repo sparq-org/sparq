@@ -7,15 +7,27 @@
 [`e2ee-queryable-options.md`](./e2ee-queryable-options.md), not a claim about shipped
 sparq or NextGraph compatibility.
 
+> **Reconciled 2026-07-26 (sq-1vbdy).** The "NG profile" below is **not a rival profile**:
+> it is the **v0 wire binding** of the canonical **Profile BR** framed in
+> [`e2ee-queryable-nextgraph-variant-2026-07.md`](./e2ee-queryable-nextgraph-variant-2026-07.md).
+> §4, §5, §6 and §8 are canonical as that binding; §8.3's `"or-set-quads-v0"` CRDT token is
+> **superseded** by the frozen `sparq-crdt-delta/1` format of
+> [`sparql-crdt-gpt56-2026-07.md`](./sparql-crdt-gpt56-2026-07.md) / `site/specs/sparql-crdt.typ`
+> — the E2EE layer defines no CRDT of its own. See the contradiction ledger and the
+> one-CRDT binding contract in
+> [`e2ee-program-reconciliation-2026-07.md`](./e2ee-program-reconciliation-2026-07.md).
+>
 > **Honesty and audit boundary.** Every confidentiality, integrity, authorization,
 > revocation, and convergence property below is **designed/intended**, not proven.
 > The construction has not received an external cryptographic review. Production use
 > remains gated by **sq-qhy4**. In particular, this record does not call an encrypted
 > broker “zero knowledge,” does not claim cryptographic soundness, and does not turn
 > local SPARQL into ciphertext-side query evaluation. The rigorous comparison belongs
-> in [`e2ee-privacy-threat-model-2026-07.md`](./e2ee-privacy-threat-model-2026-07.md),
+> in [`e2ee-queryable-nextgraph-variant-2026-07.md`](./e2ee-queryable-nextgraph-variant-2026-07.md),
 > owned by the independent privacy reviewer; this record only identifies the protocol's
-> disclosure boundary.
+> disclosure boundary. (That record is the privacy/threat-model authority this section
+> defers to; the placeholder filename originally written here was never authored —
+> corrected 2026-07-26, sq-1vbdy.)
 
 ## 1. Decision
 
@@ -218,7 +230,7 @@ NG MUST NOT be described as hiding access patterns, membership, volume, or timin
    or wasm `Store`. An implementation may incrementally update a private local store,
    but the normative result is the deterministic dataset at the accepted frontier.
 6. **Query.** The application passes SPARQL directly to local `sparq-engine` or
-   `@jeswr/sparq`. No query protocol message is defined. Results remain local unless
+   `@sparq-org/sparq`. No query protocol message is defined. Results remain local unless
    the application explicitly exports them.
 7. **Edit/publish.** Local edits become CRDT operations, then a signed commit. The client
    encrypts/chunks it, uploads absent blocks, and sends `PublishEvent`. The broker checks

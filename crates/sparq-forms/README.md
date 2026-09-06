@@ -41,8 +41,10 @@ assert_eq!(field.widget.editor.as_deref(),
 
 - **Shape selection** — `sh:targetNode`, `sh:targetClass` / implicit class
   targets (matched against the focus node's `rdf:type` with `rdfs:subClassOf`
-  closure), `dash:applicableToClass`, plus an explicit override; every
-  applicable shape lands in the description's shape-switcher list.
+  closure), `dash:applicableToClass`, the `sh:targetSubjectsOf` /
+  `sh:targetObjectsOf` predicate targets (ranked last), plus an explicit
+  override; every applicable shape lands in the description's shape-switcher
+  list, strongest rationale first.
 - **Field enumeration & layout** — one field per property shape: `sh:path`
   (including `sh:inversePath` incoming-reference fields), `sh:name` /
   `sh:description` with `rdfs:label`/`rdfs:comment` fallbacks, fractional

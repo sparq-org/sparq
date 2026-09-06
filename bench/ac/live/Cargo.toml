@@ -35,7 +35,15 @@ publish = false
 sparq-acbench = { path = "../../../crates/sparq-acbench" }
 # The SYSTEM UNDER TEST — explicitly linked here, never in bench/ac/. This is the
 # isolation contract: the oracle is structurally independent; this driver is the live lane.
-sparq-solid = { path = "../../../crates/sparq-solid" }
+#
+# [SONNET-4.6] issue #4415 — `odrl-bridge` is enabled HERE (a `publish = false` bench
+# binary), never in a core crate: the opt-in feature is what lets the ODRL W2/W4 lanes
+# run real ODRL decisions through `PodStore::materialize_odrl_policy`. sparq-core /
+# sparq-engine / the default sparq-solid build are untouched and stay lean.
+sparq-solid = { path = "../../../crates/sparq-solid", features = ["odrl-bridge"] }
+# The ODRL evaluator the bridge consumes — the driver needs `Policy`/`Request`/
+# `parse_policy_str` directly to translate acbench's compiled ODRL N-Triples.
+sparq-policy = { path = "../../../crates/sparq-policy" }
 # sparq-core: Graph::load_dataset; sparq-engine: QueryResult.
 sparq-core = { path = "../../../crates/sparq-core", default-features = false }
 sparq-engine = { path = "../../../crates/sparq-engine", default-features = false }

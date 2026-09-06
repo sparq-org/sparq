@@ -11,7 +11,9 @@
 # are sound grants.
 #
 # Loader-synthesized inputs (besides common.n3's): <R> solidx:ownAcr <R.acr> ;
-# <A> solidx:isWebId true for concrete agent IRIs seen in ACR/group docs.
+# <A> solidx:isWebId true for concrete agent IRIs seen in ACR/group docs;
+# [SONNET-4.6] sq-ysv3u <A> solidx:holdsVc <C> for each ALREADY-VERIFIED credential
+# requirement <C> the caller asserts agent <A> satisfies (the acp:vc trusted channel).
 #
 # Outputs (stratum B's inputs): ?pol solidx:appliesToResource ?r (ACP §"Effective
 # Policies": own accessControl + cumulative ancestor memberAccessControl);
@@ -60,19 +62,48 @@
 => { ?m solidx:issuerValP ?i . } .
 
 # ── accept-sets: downward-closed over the principal lattice ────────────────────────────
-{ ?m solidx:agentValP ?a . } => { ?m solidx:acceptsAgentP ?a . } .
+# [SONNET-4.6] sq-ysv3u: the agent dimension is now computed in TWO steps.
+# `solidx:rawAgentP` is the accept-set the `acp:agent` attribute alone yields (these five
+# rules are the pre-acp:vc `acceptsAgentP` rules, renamed and otherwise UNCHANGED);
+# `solidx:acceptsAgentP` is that set intersected with the `acp:vc` credential constraint
+# (the block below). For a matcher with NO `acp:vc` — i.e. every matcher in a pod that does
+# not credential-gate — the second step is the identity, so the auth view is byte-identical
+# to the pre-acp:vc rule set.
+{ ?m solidx:agentValP ?a . } => { ?m solidx:rawAgentP ?a . } .
 # no agent attribute at all -> agent-unconstrained -> accepts the top
 { ?m solidx:isMatcher true . ?UNSCOPED log:notIncludes { ?m acp:agent ?x . } . }
-=> { ?m solidx:acceptsAgentP auth:Public . } .
-{ ?m solidx:acceptsAgentP auth:Public . }
-=> { ?m solidx:acceptsAgentP auth:Authenticated . } .
-{ ?m solidx:acceptsAgentP auth:Authenticated . ?a solidx:isCandAgent true . }
-=> { ?m solidx:acceptsAgentP ?a . } .
+=> { ?m solidx:rawAgentP auth:Public . } .
+{ ?m solidx:rawAgentP auth:Public . }
+=> { ?m solidx:rawAgentP auth:Authenticated . } .
+{ ?m solidx:rawAgentP auth:Authenticated . ?a solidx:isCandAgent true . }
+=> { ?m solidx:rawAgentP ?a . } .
 # [OPUS-4.8] sq-3jtd.5: a provenance matcher accepts its provenance agent (the creator/owner)
 # in the agent dimension, so the resource-scoped provenance candidate is not allOf-rejected
 # by its own matcher in stratum B. Resource-scoping is enforced separately by the grant's
 # provForResource join — this accept-set fact is agent-only and carries no resource binding.
-{ ?m solidx:provMatcher ?kind . ?m solidx:provAgent ?w . } => { ?m solidx:acceptsAgentP ?w . } .
+{ ?m solidx:provMatcher ?kind . ?m solidx:provAgent ?w . } => { ?m solidx:rawAgentP ?w . } .
+
+# ── [SONNET-4.6] sq-ysv3u: acp:vc — the CREDENTIAL constraint on the agent dimension ────
+# `?m acp:vc ?c` requires the context agent to HOLD a verified credential satisfying the
+# requirement `?c`. ACP attributes are conjunctive ACROSS attributes and disjunctive WITHIN
+# one, so a matcher's agent accept-set is (its acp:agent accept-set) ∩ (the holders of ANY
+# of its acp:vc requirements) — which is exactly the rawAgentP/acceptsAgentP split above.
+#
+# `?a solidx:holdsVc ?c` is a TRUSTED, ALREADY-VERIFIED fact: the loader synthesizes it from
+# the caller-supplied `VerifiedCredentials` map and from NOWHERE else — never from pod or
+# `.acr` content (loader.rs's solidx: reserved-predicate guard drops any forged one). This is
+# the "verify outside the reasoner, match inside it" split the design record mandates
+# (research/solid-vocab-gaps-design.md §2): no signature is ever checked in the rules.
+#
+# FAIL-CLOSED BY CONSTRUCTION: with no credential supplied, no `holdsVc` fact exists, so an
+# acp:vc matcher's acceptsAgentP is EMPTY — it rejects every candidate in allOf, never
+# satisfies anyOf, and never fires as a noneOf exception. (Before this block acp:vc was an
+# UNRECOGNIZED attribute, so such a matcher looked agent-unconstrained and accepted
+# auth:Public: a credential-gated policy granted EVERYONE, anonymous included.)
+{ ?m solidx:rawAgentP ?a . ?UNSCOPED log:notIncludes { ?m acp:vc ?v . } . }
+=> { ?m solidx:acceptsAgentP ?a . } .
+{ ?m solidx:rawAgentP ?a . ?m acp:vc ?c . ?a solidx:holdsVc ?c . }
+=> { ?m solidx:acceptsAgentP ?a . } .
 
 { ?m solidx:clientValP ?c . } => { ?m solidx:acceptsClientP ?c . } .
 { ?m solidx:isMatcher true . ?UNSCOPED log:notIncludes { ?m acp:client ?x . } . }
@@ -92,6 +123,19 @@
 { ?pol solidx:hasMatcher ?m . ?m solidx:agentValP ?a . }  => { ?pol solidx:candAgent ?a . } .
 { ?pol solidx:hasMatcher ?m . ?m solidx:clientValP ?c . } => { ?pol solidx:candClient ?c . } .
 { ?pol solidx:hasMatcher ?m . ?m solidx:issuerValP ?i . } => { ?pol solidx:candIssuer ?i . } .
+# [SONNET-4.6] sq-ysv3u: an acp:vc matcher can only ever accept a CONCRETE holder (the
+# lattice tops hold no credential), so each holder of one of its requirements must enter the
+# candidate set — exactly as a concrete `acp:agent` WebID does via agentValP above. Without
+# this the holder would never be enumerated and the matcher could never grant.
+{ ?pol solidx:hasMatcher ?m . ?m acp:vc ?c . ?a solidx:holdsVc ?c . ?a solidx:isWebId true . }
+=> { ?pol solidx:candAgent ?a . } .
+# A noneOf matcher deliberately generates NO candidates (see the matcher registry above), so
+# the rule just above cannot reach it — yet its accept-set must still contain the holders, or
+# a credential-gated EXCEPTION would except nobody. Marking the holder isCandAgent directly is
+# what the agent-unconstrained accept-set closure needs, and it is grant-neutral: candidate
+# TRIPLES are minted from ?pol solidx:candAgent (above), never from isCandAgent alone.
+{ ?m solidx:isMatcher true . ?m acp:vc ?c . ?a solidx:holdsVc ?c . ?a solidx:isWebId true . }
+=> { ?a solidx:isCandAgent true . } .
 { ?pol solidx:hasMatcher ?m . }
 => { ?pol solidx:candAgent auth:Public . ?pol solidx:candClient auth:AnyClient .
      ?pol solidx:candIssuer auth:AnyIssuer . } .

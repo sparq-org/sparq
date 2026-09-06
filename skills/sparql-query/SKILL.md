@@ -135,6 +135,11 @@ Extension functions (SPARQL 17.6) and dataset views:
 - `FunctionRegistry::new()` + `.register(iri, |args: &[Term]| -> Result<Term, String>)`;
   `query_with_functions(&Graph, &str, &FunctionRegistry)` (+ `_and_budget`); `with_functions(&reg, ||
   …)` scopes the registry over ANY other entry point.
+- *(opt-in `service-local`)* the ROWS-returning twin of the scalar registry above:
+  `LocalServiceRegistry::new()` + `.register(iri, |req: &LocalServiceRequest| ->
+  Result<LocalServiceRows, String>)`, scoped by `with_local_services(&reg, || …)`. A registered
+  IRI is answered IN PROCESS at `SERVICE <iri> { … }`, before any HTTP transport. See
+  "Local SERVICE handlers" below.
 - `DatasetView { base: &Graph, named: Arc<FxHashSet<Term>>, default: DefaultGraphMode }`;
   `query_view` / `ask_view` / `count_view` / `query_json_view` (+ `_with_budget`), or
   `with_view(&v, || …)`.
@@ -285,6 +290,70 @@ let r = query_with_functions(&g,
 // To use the registry with ANOTHER entry point: with_functions(&reg, || sparq_engine::ask(&g, q))
 ```
 
+**Local `SERVICE` handlers** (opt-in `service-local` feature; `sq-lsp7k.2.2`) — the ROWS-returning
+extension seam. `FunctionRegistry` is scalar (terms in, ONE term out); some extensions must return a
+whole RELATION, and SPARQL already has the syntax for "evaluate this group elsewhere and join the
+solutions back". Register a handler under a SERVICE IRI and the executor answers
+`SERVICE <iri> { … }` from it — **before** any HTTP transport is constructed — interning the
+returned rows against the query's dictionaries exactly as `VALUES` does and joining them into the
+surrounding query:
+
+```rust
+// Cargo.toml: sparq-engine = { version = "0.1", features = ["service-local"] }
+use oxrdf::{Literal, Term, Variable};
+use sparq_engine::{query, with_local_services, LocalServiceRegistry, LocalServiceRows};
+
+let mut reg = LocalServiceRegistry::new();
+reg.register("urn:ex:squares", |_req| {
+    // The request describes the SERVICE group: .service() / .vars() / .patterns() / .query().
+    let n = Variable::new("n").unwrap();
+    let sq = Variable::new("sq").unwrap();
+    let rows = (1i64..=3)
+        .map(|i| vec![Some(Term::from(Literal::from(i))), Some(Term::from(Literal::from(i * i)))])
+        .collect();
+    Ok(LocalServiceRows::new(vec![n, sq], rows))
+});
+let r = with_local_services(&reg, || {
+    query(&g, "SELECT ?n ?sq WHERE { SERVICE <urn:ex:squares> { ?n <urn:ex:sq> ?sq } }")
+}).unwrap();
+```
+
+- **Request.** `LocalServiceRequest::{service, vars, query, patterns}`. `vars()` is the group's
+  in-scope variables (first-occurrence order); `query()` is the group rendered as
+  `SELECT * WHERE { … }` — byte-for-byte what the HTTP transport would have POSTed; `patterns()` is
+  the table-function argument channel — the group decomposed into `LocalServicePattern { subject,
+  predicate, object }` of `LocalServiceSlot::{Term, Var}`, where the CONSTANT slots are the
+  pre-bound arguments. Decomposition is all-or-nothing: it is non-empty ONLY for a flat BGP, EMPTY
+  for any richer group (OPTIONAL/UNION/FILTER/sub-SELECT/paths/triple terms), so a handler can
+  never mistake a partial view for the whole group. Such a handler works from `query()`.
+- **Response.** `LocalServiceRows { vars, rows }` (`new` / `empty` / `validate`); each row is
+  `vars.len()` cells wide with `None` for UNBOUND, over a SUBSET of `req.vars()`. A duplicate header
+  variable, a ragged row, or a column NOT in scope in the SERVICE group is reported as a SERVICE
+  failure, never silently mangled: the relation must be one the group itself could have produced, or
+  an out-of-scope column would join against a same-named variable of the SURROUNDING query. The
+  EMPTY relation makes the surrounding join empty — it is NOT the join identity.
+- **Errors / `SILENT`.** A handler `Err` is a hard query error; under `SERVICE SILENT` it is
+  swallowed and yields the join identity so the surrounding solutions survive — identical to how a
+  remote failure degrades. Terms interned before a swallowed failure are rolled back and their
+  byte-budget charge refunded, so `SILENT` is resource-neutral.
+- **Egress / SSRF.** The intercept is upstream of the transport, so a handled SERVICE performs no
+  network I/O and the default-deny egress allowlist is never consulted — there is nothing to
+  consult it about. This can only ever REMOVE outbound reach: an IRI that MISSES the registry falls
+  through to the unchanged `service` HTTP path where the allowlist still applies in full.
+  Registering an IRI therefore SHADOWS the remote endpoint of the same IRI for the install's scope.
+  A handler is arbitrary in-process code, exactly like a `FunctionRegistry` closure — the engine
+  neither sandboxes it nor polices sockets IT opens; that is the application's choice, made when it
+  linked the handler in.
+- **Composition.** `service-local` and `service` are independent and compose; `service-local` alone
+  gives local handlers with NO HTTP/TLS stack compiled (an unregistered IRI is then the same
+  "unsupported graph pattern" error the fully-feature-off build gives it). The registry is
+  thread-local and propagated into the engine's rayon workers, so a `SERVICE` nested under
+  `FILTER EXISTS` still sees it.
+- **v1 scope-outs.** Only a CONCRETE `SERVICE <iri>` dispatches locally — `SERVICE ?ep { … }` keeps
+  its existing behaviour even when `?ep` binds a registered IRI. No bindings are pushed INTO a
+  handler: the SERVICE bind-join (`VALUES` pushdown) explicitly DECLINES for a registered IRI, so
+  the handler is evaluated once, unbound, and the outer join happens locally.
+
 **Custom aggregate registry** (opt-in `window-functions` feature) — register a Rust closure as a
 named aggregate IRI, then call it from a real SPARQL `GROUP BY`. Unlike a scalar extension function,
 the closure FOLDS the group's per-member values (`None` ≡ unbound for that member) into one term:
@@ -407,7 +476,11 @@ over a computed expression.
 
 **Budgets / timeouts / ASK-style early exit** — a `QueryBudget` is checked cooperatively at coarse
 sites; tripping it fails with `"query budget exceeded (timeout)"` / `"... (max-rows)"` /
-`"... (max-bytes)"` / `"... (cancelled)"`:
+`"... (max-bytes)"` / `"... (cancelled)"`. The budget bounds result SERIALISATION as well as
+evaluation (`sq-yfcu2`): a SELECT-JSON body whose deadline falls due while the (already
+materialised) result is being written out is reported as the budget error, not returned as a
+complete-but-late result — on the streamed entry points some chunks may already have reached the
+sink when the trip is detected:
 
 ```rust
 use sparq_engine::QueryBudget;
@@ -607,12 +680,14 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   `f64::NAN` sentinel for a non-numeric cell, with a gather-free fast path for an all-inline-integer
   column — the SIMD enabler, M4 Phase 2 `sq-pntvh.2`), a numeric FILTER comparison kernel
   (`DataChunk::select_numeric` → a `SelVec`), a **compare-over-decoded-column** kernel
-  (`DataChunk::select_decoded`, the branchless auto-vectorising compare that consumes the decode
-  kernel's output — M4 Phase 3 `sq-pntvh.3`), and a selection/gather kernel
+  (`DataChunk::select_decoded`, the contiguous-memory, auto-vectorisable compare that consumes the
+  decode kernel's output — M4 Phase 3 `sq-pntvh.3`), and a selection/gather kernel
   (`DataChunk::apply_selection`). When off, zero columnar code compiles and the default native + wasm
   builds are byte-identical (no new dependencies; no `unsafe`).
-  **`query`/`query_json`/etc. return byte-identical results whether the feature is on or off** — it
-  is a perf optimisation, never a semantics change. The first evaluator wiring landed in Phase 3
+  **`query`/`query_json`/etc. return identical results whether the feature is on or off** — the same
+  bindings/rows in the same order (byte-identical for the serialising entry points such as
+  `query_json`; `query` returns a structured result, so the equality is over its rows, not bytes).
+  It is a perf optimisation, never a semantics change. The first evaluator wiring landed in Phase 3
   (`sq-pntvh.3`): a **columnar residual-FILTER seam** inside `apply_filter` (Seam A) that, for an
   eligible single sargable-numeric residual `?v OP const`, decodes the column once and runs the
   **hybrid tri-mask** (`src/chunk_select.rs`, bead `sq-y5ew5`): each lane is classified Confident

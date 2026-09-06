@@ -13,13 +13,13 @@ pub mod blob;
 // blob keys), so a hit can never be stale — see the module docs.
 pub mod body_cache;
 // Deterministic backend round-trip counters at the SparqClient/BlobStore seams (read-1 of the
-// read-path perf plan — docs/design/backend-read-path.md §7). Decorators used by the pinned
-// counter tests + the bench harness; zero-cost when not wired in.
+// read-path perf plan — `research/lws-design-records.md` §7). Decorators used by the pinned counter
+// tests + the bench harness; zero-cost when not wired in.
 pub mod counting;
-// The in-process embedded SPARQ backend (`embedded-sparq` feature, ON BY DEFAULT — sq-gg0qq.3):
-// the FIRST-CLASS `SparqClient` impl now that this crate lives in the sparq workspace. Build with
-// `--no-default-features` for the engine-free profile (the in-memory double only). See
-// [`embedded`] + decisions/0001-embed-sparq-in-process.md.
+// The in-process embedded SPARQ backend (`embedded-sparq` feature, ON BY DEFAULT — sq-gg0qq.3): the
+// FIRST-CLASS `SparqClient` impl now that this crate lives in the sparq workspace. Build with
+// `--no-default-features` for the engine-free profile (the in-memory double only). See [`embedded`]
+// + `research/lws-design-records.md` §3.
 #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
 pub mod embedded;
 // The live SPARQL-over-HTTP client (opt-in `http-sparq` feature — sq-gg0qq.3): the REMOTE
@@ -202,11 +202,10 @@ pub trait Store: Send + Sync {
     /// path.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
-    /// ONE combined read-plan lookup for the read path (read-2 —
-    /// `docs/design/backend-read-path.md` §3.1): the target's authoritative metadata + the
-    /// presence/etag of every ACL candidate, in a single index round-trip. See
-    /// [`SparqClient::read_plan`] for the contract (candidate ordering, the two IRI roles,
-    /// fail-closed on any backend error).
+    /// ONE combined read-plan lookup for the read path (read-2 — `research/lws-design-records.md`
+    /// §7): the target's authoritative metadata + the presence/etag of every ACL candidate, in a
+    /// single index round-trip. See [`SparqClient::read_plan`] for the contract (candidate
+    /// ordering, the two IRI roles, fail-closed on any backend error).
     ///
     /// The DEFAULT implementation loops [`meta`](Store::meta) (one round-trip per IRI) so every
     /// [`Store`] impl — including the handler-level test doubles — keeps its exact per-IRI

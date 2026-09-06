@@ -72,9 +72,27 @@ example) composes six stages, each already existing in isolation:
 | 1 | **Holder local eval** | `holder::Holder::evaluate_local` | each party evaluates a query fragment over its OWN graph via `sparq-engine`; raw graphs never leave | no (local only) |
 | 2 | **Share** | `MpcBackend::share_private_input` (Shamir, `shamir.rs`) | secret-share each private value (e.g. salary) as a **degree-`t` Shamir** sharing over `n` parties, `t=⌊(n−1)/2⌋` — any `t` shares reveal nothing about the secret, `t+1` valid shares reconstruct it | no |
 | 3 | **Join** | `join::DisclosedKeyJoin` (clear IRIs) / `join::HiddenValueJoin` (`secure_equal`) | equi-join; hidden-value variant opens `m=(a−b)·r` per pair | **YES — the danger open (§3)** |
-| 4 | **Secure aggregate** | `MpcBackend::run_secure` (`shamir.rs`, zero-round local add) | cumulative SUM over hidden shares | no (linear, local) |
+| 4 | **Secure aggregate** | `MpcBackend::run_secure` (`shamir.rs`, zero-round local add) | cumulative SUM over hidden shares | no (linear, local) — **but the threshold DISCLOSURE that follows it in `pipeline.rs` step 4 (`compare::disclose_threshold_verdict`) does open, see below** |
 | 5 | **Reconstruct** | open of the DISCLOSED result only, from `t+1` valid degree-`t` shares | open the final aggregate / verdict bit | yes — the *intended* output open |
 | 6 | **Proof** | `proof::ProofStatement` / `CollaborativeProof` | attach a ZK/collaborative proof of correct evaluation | **stub — `NotYetImplemented` (§4)** |
+
+**Correction carried by the sibling record (`sq-aaop`).** The stage table above is accurate for
+`run_secure` itself, but it **understates the pipeline's mid-protocol opens**: `pipeline.rs` step 4
+also runs `compare::disclose_threshold_verdict`, which opens **64** field elements per verdict (61
+square-protocol opens for the Rabbit mask's solved bits, one Rabbit masked open `c = (x+r) mod p`,
+one masked-product zero-test inside the in-protocol range proof, and the verdict bit). Each is
+individually well-masked and one of them is only *statistically* simulatable. The open inventory for
+that path, a simulator per open, and the composed error budget are in
+[`mpc-simulator-sketch.md`](./mpc-simulator-sketch.md) §2–§4; §3 of *this* record covers one of the
+four distinct open shapes it enumerates.
+
+The same sibling record corrects stage **5** in the other direction: in `pipeline::run_federated`
+step 5 reconstructs **nothing**. The disclosed join result comes from the crypto-free
+`DisclosedKeyJoin` (never secret-shared) and the verdict bit was already opened in step 4, so that
+path never calls `MpcBackend::reconstruct_disclosed`. The stage-5 row above describes the *general*
+disclosed-output shape — real, and reached by other callers — not a step of `run_federated`. Note
+also that the sibling's inventory is scoped to `run_federated` specifically, **not** to every
+production semi-honest API; its §2.4 lists the reconstruction surfaces it excludes.
 
 Load-bearing facts (all `origin/main`): the crate is an **in-process multi-party simulation** (every
 party is a function call — NO real network, NO concurrent sessions, NO broadcast, NO round counter);
@@ -149,7 +167,7 @@ results, **not** established realizations.
 | 1 Holder eval | `F_local`: emit a fragment result over the party's own graph | trivial (local computation, no interaction) | outputs feeding stage 2/3 must be exactly what `F_local` defines — no side-channel from engine timing (out of model) |
 | 2 Share | `F_share`: distribute a degree-`t` Shamir sharing over `n` parties (`t=⌊(n−1)/2⌋`) | Shamir secrecy: any `t` shares are independent of the secret, while `t+1` valid shares reconstruct it (Shamir'79); a distributed dealing protocol + view simulation is future work | randomness must be a CSPRNG (`rng.rs`, `SecureRng::from_os`) — a deterministic PRNG breaks privacy; `insecure-test-rng` off by default |
 | 3 Join | `F_join`: output the join, **leaking the match bit per pair** (L2) | masked-opening lemma: the honest opened `m` is simulatable from the match bit (§3); realization of `F_join` pending a distributed protocol + simulator | **the leak MUST be in `F_join`** — the downstream aggregate composes against a functionality that *already leaked the match structure*; a `LeakageProfile` should surface it |
-| 4 Aggregate | `F_sum`: threshold sum, open nothing | linear ops are local & perfectly private (no interaction) | none new (zero-round); but any *chained* multiplication (degree reduction) adds an open → re-enters §3's obligation |
+| 4 Aggregate | `F_sum`: threshold sum, open nothing | linear ops are local & perfectly private (no interaction) | none new for the SUM (zero-round); the **threshold disclosure** that follows it opens (see the §0 correction) and its `F_thresh` must leak BOTH the `> τ` verdict and the in-range clause of the in-protocol range proof ([`mpc-simulator-sketch.md`](./mpc-simulator-sketch.md) §3.5); any *chained* multiplication (degree reduction) adds an open → re-enters §3's obligation |
 | 5 Reconstruct | `F_open`: open the DISCLOSED result only | opening from `t+1` valid degree-`t` shares is the intended output | the reconstructed value must be a *function of the ideal outputs*, not of intermediate shares |
 | 6 Proof | `F_prove`: prove correct evaluation, leak nothing about honest witnesses | **UNBUILT + coZK-gated (§4)** | **validate the extended witness before proving** (2025/1026) — the unfilled composition obligation |
 
@@ -275,11 +293,15 @@ LIVE privacy-claims gate; any ZK/MPC soundness statement stays research-grade / 
   would be overclaim.
 - **Semi-honest default.** The §3 justification is semi-honest; the malicious-opener hole at minimal
   `n = 2t+1` is real and is closed only by the IT-MAC upgrade, not by this record.
-- **Sibling bead `sq-aaop`.** Listed with `sq-wj4k` in the roadmap as "the composition / UC posture
-  design records." This record covers the composition-obligations + which-results-apply framing for the
-  MPC pipeline; if `sq-aaop` is retained as a distinct slice it should cover the *formal simulator
-  sketch / paper-grade write-up* rather than re-state this posture (avoid duplication — one source of
-  truth).
+- **Sibling bead `sq-aaop` — LANDED as [`mpc-simulator-sketch.md`](./mpc-simulator-sketch.md).**
+  Listed with `sq-wj4k` in the roadmap as "the composition / UC posture design records." This record
+  covers the composition-obligations + which-results-apply framing for the MPC pipeline; `sq-aaop`
+  took the distinct slice reserved for it — the *formal simulator sketch / paper-grade write-up*
+  (the model, the ideal functionalities with their leakage written out, the open inventory of one
+  fixed entry point — `pipeline::run_federated` — with a simulator and simulation quality per open,
+  the excluded-surface list that bounds that scope, the hybrid composition with a concrete error
+  budget, the unfilled-obligation ledger, and `F_prove^{val}` as the functionality-level statement
+  of validate-before-prove). One source of truth: it extends this record and does not re-state it.
 - **Surface a `LeakageProfile`.** §2/§3's "carry the leak downstream" obligation wants a machine-readable
   per-operator leakage descriptor so a federation can reason about residual composed leakage; that is an
   implementation follow-up, tracked separately (out of scope for this doc-only record).

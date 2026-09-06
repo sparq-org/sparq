@@ -196,6 +196,43 @@ analyticdb-v:
     volume: 13
     issue: 12
 
+magic-sets:
+  type: article
+  title: "Magic Sets and Other Strange Ways to Implement Logic Programs"
+  author:
+    - Bancilhon, François
+    - Maier, David
+    - Sagiv, Yehoshua
+    - Ullman, Jeffrey D.
+  date: 1986
+  parent:
+    type: proceedings
+    title: "Proceedings of the 5th ACM SIGACT-SIGMOD Symposium on Principles of Database Systems (PODS)"
+
+semijoin:
+  type: article
+  title: "Using Semi-Joins to Solve Relational Queries"
+  author:
+    - Bernstein, Philip A.
+    - Chiu, Dah-Ming W.
+  date: 1981
+  parent:
+    type: periodical
+    title: "Journal of the ACM"
+    volume: 28
+    issue: 1
+
+rdf3x-sip:
+  type: article
+  title: "Scalable Join Processing on Very Large RDF Graphs"
+  author:
+    - Neumann, Thomas
+    - Weikum, Gerhard
+  date: 2009
+  parent:
+    type: proceedings
+    title: "Proceedings of the 2009 ACM SIGMOD International Conference on Management of Data"
+
 rdf3x:
   type: article
   title: "RDF-3X: a RISC-style engine for RDF"

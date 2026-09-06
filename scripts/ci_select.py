@@ -154,13 +154,40 @@ _ORCHESTRATION_SAFE: list[str] = [
 ]
 
 
-def _orchestration_safe_match(path: str) -> bool:
-    """[OPUS-4.8] Is `path` on the audited orchestration-only inert allowlist?
-    A "/"-suffixed entry is a directory prefix; else an exact path. Consulted
-    BEFORE _trigger_match so it is the sole rescue from a .github/scripts trigger;
-    it can only ever REMOVE a path from the full set for a proven-inert path (a
-    non-matching path still hits the trigger => full)."""
-    for entry in _ORCHESTRATION_SAFE:
+# [OPUS-5] sq-g25hr: DEPLOYMENT-MANIFEST surfaces — the k8s/helm/terraform/bicep/
+# PaaS manifests under deploy/ plus the two lint workflows that are their ONLY CI
+# consumers. Same allowlist shape and same inertness obligation as
+# _ORCHESTRATION_SAFE above (a "/"-suffixed entry is a directory prefix, else an
+# exact repo-relative path), kept as a SEPARATE list purely so the audit trail can
+# say "deploy-only" rather than mislabelling terraform as orchestration.
+#
+# WHY IT IS INERT for the Rust matrix: no workspace crate reads deploy/ (no
+# include_str!/include_bytes!/CARGO_MANIFEST_DIR-relative read — the
+# `deploy/**  safe = true` entry in ci/path-ownership.toml makes that an ENFORCED
+# claim: scripts/ci_audit_inputs.py FAILS if any crate ever starts reading a
+# safe-listed path). deploy/ IS read by deploy-lint.yml / deploy-terraform-lint.yml
+# / container-scan.yml / release.yml and by two pure-python checks that live in
+# docs-quality.yml + supply-chain.yml (test_release_container_multiarch.py,
+# test_dependabot_coverage.py) — all of which are SEPARATE workflows this selector
+# does not gate, so they keep running on a deploy-only PR. This list therefore only
+# ever removes deploy paths from the *Rust* full set.
+#
+# The two workflow files are on this list (and consulted BEFORE _trigger_match) for
+# the same reason the orchestration workflow files are: they live under `.github/`,
+# which is otherwise an unconditional full-run trigger, and neither runs
+# cargo build/test/clippy/coverage/bench/fuzz/CodeQL. `DeployOnlyInertnessTests`
+# in scripts/tests/test_ci_select.py pins both properties.
+_DEPLOY_ONLY: list[str] = [
+    "deploy/",
+    ".github/workflows/deploy-lint.yml",
+    ".github/workflows/deploy-terraform-lint.yml",
+]
+
+
+def _allowlist_match(path: str, allowlist: list[str]) -> bool:
+    """Is `path` on `allowlist`? A "/"-suffixed entry is a directory prefix; else
+    an exact repo-relative path."""
+    for entry in allowlist:
         if entry.endswith("/"):
             if path == entry.rstrip("/") or path.startswith(entry):
                 return True
@@ -169,13 +196,69 @@ def _orchestration_safe_match(path: str) -> bool:
     return False
 
 
+def _orchestration_safe_match(path: str) -> bool:
+    """[OPUS-4.8] Is `path` on the audited orchestration-only inert allowlist?
+    A "/"-suffixed entry is a directory prefix; else an exact path. Consulted
+    BEFORE _trigger_match so it is the sole rescue from a .github/scripts trigger;
+    it can only ever REMOVE a path from the full set for a proven-inert path (a
+    non-matching path still hits the trigger => full)."""
+    return _allowlist_match(path, _ORCHESTRATION_SAFE)
+
+
+def _deploy_only_match(path: str) -> bool:
+    """[OPUS-5] sq-g25hr: is `path` on the audited deployment-manifest allowlist?
+    Same pre-trigger position and same fail-safe posture as
+    _orchestration_safe_match — a non-matching path still hits the trigger => full."""
+    return _allowlist_match(path, _DEPLOY_ONLY)
+
+
 # Change-class labels emitted for the audit trail (design: the gate renders an
 # explicit "skipped-by-class" attribution). PURELY DESCRIPTIVE of the diff — the
 # skip decision itself is still the sound mode/affected math below.
 _CLASS_ENGINE = "engine"
 _CLASS_ORCHESTRATION = "orchestration-only"
 _CLASS_DOCS = "docs-only"
+# [OPUS-5] sq-g25hr: deployment manifests only (deploy/** + the two deploy lint
+# workflows) — see _DEPLOY_ONLY.
+_CLASS_DEPLOY = "deploy-only"
+# [OPUS-5] #5249: the path resolves to an ownership-map `safe = true` verdict — the
+# SAME audit-proven inertness the closure layer already honours (a safe-listed path
+# contributes no crate, so its closure is empty). Before this class existed the two
+# layers disagreed about the same diff: `site/**` is `safe = true` in
+# ci/path-ownership.toml ("Owns its own CI lane (pages.yml)"), so a site-only
+# merge_group batch selected an EMPTY affected closure yet classified `engine` and
+# paid the full Rust matrix + CodeQL analysis. The class now reads the map, so
+# "inert" means one thing in both layers. Covers whatever the map safe-lists and the
+# built-in allowlists do not — today `site/**` and `ci/formal-verification.toml`
+# (research/docs are docs-only, .beads/ is orchestration, deploy/ is deploy-only,
+# each matched by an earlier arm).
+_CLASS_MAP_SAFE = "map-safe"
+# [OPUS-5] sq-g25hr: EVERY changed path is on a proven-inert surface, but they span
+# MORE THAN ONE of {orchestration, docs, deploy}. This used to collapse into
+# `mixed` — the same token an engine+docs diff produces — so the consumers' skip
+# case-arm could not distinguish "provably nothing for the Rust matrix" from
+# "some Rust changed too" and conservatively ran the full suite. That is exactly
+# the observed cloud-deploy class (deploy/** + deploy/**/README.md +
+# .github/workflows/deploy-*.yml spans deploy AND, once other prose is touched,
+# docs). The union of inert surfaces is inert — each component is INDEPENDENTLY
+# proven not to be read by the Rust matrix, and inertness composes — so this class
+# is as skippable as its pure counterparts. `mixed` now means EXACTLY "engine +
+# something inert", which is the only reading that must run the full suite.
+_CLASS_INERT_MIXED = "inert-mixed"
 _CLASS_MIXED = "mixed"
+
+# The classes that PROVE the Rust matrix has nothing to do. The workflow `changes`
+# pre-jobs (ci.yml / feature-matrix.yml / codeql.yml) case on exactly these tokens
+# and treat every other token — including an unrecognised one — as a full run.
+# scripts/tests/test_ci_select_wiring.py pins the workflow case-arms against this
+# tuple so the two cannot drift.
+_INERT_CLASSES: tuple[str, ...] = (
+    _CLASS_ORCHESTRATION,
+    _CLASS_DOCS,
+    _CLASS_DEPLOY,
+    _CLASS_MAP_SAFE,
+    _CLASS_INERT_MIXED,
+)
 
 # Docs-only surfaces: pure prose/markdown that no Rust build/test reads. NOTE a
 # crate-owned README.md/*.md is deliberately NOT docs-only — it can be pulled into a
@@ -189,33 +272,80 @@ _DOCS_ONLY_PREFIXES: list[str] = [
 ]
 
 
-def classify_change(changed_paths: list[str]) -> str:
+def _map_safe_match(path: str, map_entries: list[dict]) -> bool:
+    """[OPUS-5] #5249: does `path` resolve to an ownership-map `safe = true` verdict?
+
+    (Calls `_trigger_match` / `apply_ownership_map`, defined further down — resolved
+    at call time.) This is the CLASS layer reading the same map the closure layer
+    already reads, so the two share one notion of "inert". It is FIRST-MATCH-WINS via
+    `apply_ownership_map`, so an earlier `crates = [...]` entry wins and returns False
+    — e.g. `site/src/lib/zk-prover.ts` (attributed to sparq-zk-compose by sq-1s2.4)
+    stays engine while the rest of `site/**` is inert.
+
+    FAIL-CLOSED on every uncertainty (design §2 — absence of proof means run):
+      * no map loaded (absent/unreadable) => False, i.e. exactly the pre-#5249 class;
+      * a §4.1 full-run trigger or a `crates/`-owned path is never consulted against
+        the map at all — the selector resolves triggers (step 1) and crate-prefix
+        ownership (step 2) BEFORE the map (step 3), and this mirrors that order so a
+        map entry can never rescue a path the selector itself would not rescue;
+      * a malformed entry (`apply_ownership_map` raises) => False.
+    """
+    if not map_entries:
+        return False
+    # Mirrors the selector's normative step order. Every workspace member lives under
+    # `crates/` (root Cargo.toml `members`), so the prefix is a conservative stand-in
+    # for crate-prefix ownership — which the classifier cannot compute, having no
+    # cargo metadata by design (--classify-only pays no toolchain cost).
+    if path.startswith("crates/") or _trigger_match(path) is not None:
+        return False
+    try:
+        verdict = apply_ownership_map(path, map_entries)
+    except SelectorError:
+        return False
+    return verdict is not None and verdict[0] == "safe"
+
+
+def classify_change(changed_paths: list[str], map_entries: list[dict] | None = None) -> str:
     """[OPUS-4.8] Pure change-class of a diff (WHAT surfaces changed), for the audit
     trail. Orthogonal to `mode` (HOW MUCH runs) — this only LABELS; the sound skip
-    math is unchanged. Fail-closed: any path that is neither orchestration-safe nor
-    docs-only makes the class `engine` (or `mixed` if it also has orch/docs paths),
-    so a class is never MORE permissive than the mode. Empty diff => engine (a
-    non-PR/full event carries no diff and runs everything anyway)."""
-    seen_orch = seen_docs = seen_other = False
+    math is unchanged. Fail-closed: any path that is on NONE of the proven-inert
+    allowlists (orchestration-safe / docs-only / deploy-only / ownership-map
+    `safe = true`) makes the class `engine` (or `mixed` if the diff also has inert
+    paths), so a class is never MORE permissive than the mode. Empty diff => engine
+    (a non-PR/full event carries no diff and runs everything anyway).
+
+    [OPUS-5] sq-g25hr: a diff confined to inert surfaces but SPANNING more than one
+    of them is `inert-mixed`, not `mixed` — see _CLASS_INERT_MIXED. `mixed` now
+    means exactly "at least one engine path plus something inert".
+
+    [OPUS-5] #5249: `map_entries` (the ci/path-ownership.toml `[[map]]` array) is
+    OPTIONAL — omit it and the classifier behaves exactly as before, which is the
+    conservative direction. Pass it and an audit-proven `safe = true` path is inert
+    at the class layer too (see _map_safe_match / _CLASS_MAP_SAFE)."""
+    map_entries = map_entries or []
+    seen_inert: set[str] = set()
+    seen_other = False
     for path in changed_paths:
         path = path.strip()
         if not path:
             continue
         if _orchestration_safe_match(path):
-            seen_orch = True
+            seen_inert.add(_CLASS_ORCHESTRATION)
         elif any(path == p.rstrip("/") or path.startswith(p) for p in _DOCS_ONLY_PREFIXES):
-            seen_docs = True
+            seen_inert.add(_CLASS_DOCS)
+        elif _deploy_only_match(path):
+            seen_inert.add(_CLASS_DEPLOY)
+        elif _map_safe_match(path, map_entries):
+            seen_inert.add(_CLASS_MAP_SAFE)
         else:
             seen_other = True
     if seen_other:
         # Any engine/unclassified path present. Pure-engine vs mixed is informational.
-        return _CLASS_MIXED if (seen_orch or seen_docs) else _CLASS_ENGINE
-    if seen_orch and seen_docs:
-        return _CLASS_MIXED
-    if seen_orch:
-        return _CLASS_ORCHESTRATION
-    if seen_docs:
-        return _CLASS_DOCS
+        return _CLASS_MIXED if seen_inert else _CLASS_ENGINE
+    if len(seen_inert) > 1:
+        return _CLASS_INERT_MIXED
+    if seen_inert:
+        return next(iter(seen_inert))
     return _CLASS_ENGINE
 
 
@@ -316,7 +446,7 @@ class Selection:
     changed_crates: list[str] = field(default_factory=list)
     file_owners: list[tuple[str, str]] = field(default_factory=list)  # (path, owner-label)
     all_members: list[str] = field(default_factory=list)
-    # [OPUS-4.8] change-class of the diff (engine|orchestration-only|docs-only|mixed):
+    # [OPUS-4.8] change-class of the diff (see classify_change / _INERT_CLASSES):
     # the audit-trail label for WHY the Rust lanes were (or were not) skipped. Part of
     # the JSON contract so the gate + tooling can render "skipped-by-class: <class>".
     change_class: str = "engine"
@@ -540,7 +670,9 @@ def select(
     map_entries = map_entries or []
     ws = parse_workspace(meta)
     all_members = sorted(ws.members)
-    change_class = classify_change(changed_paths)
+    # [OPUS-5] #5249: the class layer reads the SAME map as the closure layer below,
+    # so a `safe = true` path cannot be inert for the closure and `engine` for the class.
+    change_class = classify_change(changed_paths, map_entries)
 
     def full(reason: str) -> Selection:
         return Selection(
@@ -564,6 +696,16 @@ def select(
         # pure-orchestration diff selects an empty closure and every Rust lane skips.
         if _orchestration_safe_match(path):
             file_owners.append((path, "ORCH-SAFE"))
+            continue
+        # [OPUS-5] sq-g25hr: the DEPLOY-manifest carve-out, same position and same
+        # rationale as the orchestration one above — it is the only rescue for the
+        # two `.github/workflows/deploy-*.yml` files from the `.github/` full-run
+        # trigger, and it contributes no crate, so a deploy-only diff selects an
+        # empty closure. `deploy/**` alone would also be rescued by the
+        # `safe = true` map entry below (like `.beads/**`, which is on both), but
+        # listing it here keeps the selection and the CLASS on one path list.
+        if _deploy_only_match(path):
+            file_owners.append((path, "DEPLOY-SAFE"))
             continue
         trig = _trigger_match(path)
         if trig is not None:
@@ -613,10 +755,8 @@ def select(
         # on it; still surface it as changed but with an empty member set.
         reason = "changed in-repo package(s) have no member dependents"
     elif not changed_crates:
-        if change_class == _CLASS_ORCHESTRATION:
-            reason = "skipped-by-class: orchestration-only — no Rust matrix affected"
-        elif change_class == _CLASS_DOCS:
-            reason = "skipped-by-class: docs-only — no Rust matrix affected"
+        if change_class in _INERT_CLASSES:
+            reason = f"skipped-by-class: {change_class} — no Rust matrix affected"
         else:
             reason = "all changed paths are SAFE-listed or non-crate; no crate affected"
     else:
@@ -763,7 +903,7 @@ def render_summary(sel: Selection) -> str:
     # [OPUS-4.8] Explicit change-class attribution line so the audit trail shows WHY
     # the Rust lanes were skipped (or not). No silent skips.
     lines.append(f"**Change-class:** `{sel.change_class}`")
-    if sel.change_class in (_CLASS_ORCHESTRATION, _CLASS_DOCS) and sel.mode == "selected":
+    if sel.change_class in _INERT_CLASSES and sel.mode == "selected":
         lines.append(
             f"> skipped-by-class: `{sel.change_class}` — every changed path is proven "
             "inert for the Rust matrix, so the engine test/clippy/coverage/bench/fuzz/"
@@ -807,24 +947,52 @@ def _write_outputs(sel: Selection, output_file: str | None, summary_file: str | 
 
 
 # --- classify-only mode (merge-group change-class gating; #3420/#3421 follow-up)
+def _classify_map_entries(map_file: str | None, repo_root: str | None) -> list[dict]:
+    """[OPUS-5] #5249: BEST-EFFORT ownership-map load for --classify-only.
+
+    Degrades to `[]` — i.e. the pre-#5249 classifier, in which no map path is inert
+    and a `safe = true` path classifies `engine` (a full run) — whenever the map is
+    absent, unreadable or malformed. That is deliberately weaker than the selector's
+    fail-CLOSED `load_ownership_map` raise: here the whole classification is at stake,
+    and tainting an orchestration-only batch to `engine` because an unrelated map
+    entry is malformed would be a regression. Degrading to `[]` can only ever run
+    MORE (§2), never less, so it is fail-safe in the direction that matters.
+    """
+    try:
+        if map_file is None and repo_root is not None:
+            candidate = os.path.join(repo_root, "ci", "path-ownership.toml")
+            map_file = candidate if os.path.exists(candidate) else None
+        return load_ownership_map(map_file)
+    except Exception:
+        return []
+
+
 def _classify_only_main(args: argparse.Namespace, output_file: str | None,
                         summary_file: str | None) -> int:
     """[FABLE-5] merge-group change-class: compute ONLY `classify_change` over the
-    diff — no cargo metadata, no toolchain, no ownership map — so the cheap
-    workflow `changes` pre-jobs (ci.yml / feature-matrix.yml) can class-gate their
+    diff — no cargo metadata, no toolchain — so the cheap workflow `changes`
+    pre-jobs (ci.yml / feature-matrix.yml / codeql.yml) can class-gate their
     `rust_changed` output on the MERGE-GROUP batch diff without duplicating the
-    orchestration-safe / docs-only path lists (this file stays the single source
-    of truth). Contract with the workflow step:
+    orchestration-safe / docs-only / deploy-only path lists (this file stays the
+    single source of truth). Contract with the workflow step:
 
       * stdout is EXACTLY ONE line: the class token
-        (engine|orchestration-only|docs-only|mixed) — the shell consumer `case`s
-        on it and treats ANY unrecognised value as engine (run everything);
+        (engine|orchestration-only|docs-only|deploy-only|map-safe|inert-mixed|mixed)
+        — the shell consumer `case`s on the _INERT_CLASSES tokens and treats ANY
+        other value, including an unrecognised one, as engine (run everything);
       * `change_class=<class>` is appended to --output-file/$GITHUB_OUTPUT and a
         one-line attribution to the step summary (audit trail, never gating);
       * FAIL-SAFE (design §4.3, the #3421 posture): --full, any event other than
         pull_request/merge_group, a missing base, an unresolvable diff, or ANY
         internal error => class `engine`, exit 0 — the consumer then runs the
         full matrix (cost, never soundness).
+
+    [OPUS-5] #5249: the ownership map IS read here now (it was not before) so a
+    `safe = true` path classifies `map-safe` instead of `engine` — the class layer
+    and the closure layer must not disagree about the same diff. The added cost is
+    one small TOML parse (plus, on the hermetic --changed-file path only, the
+    `git rev-parse --show-toplevel` that locates it); still no cargo metadata and no
+    toolchain, which is the whole point of this entry point.
     """
     change_class = _CLASS_ENGINE
     reason = ""
@@ -834,15 +1002,15 @@ def _classify_only_main(args: argparse.Namespace, output_file: str | None,
         elif args.event not in ("pull_request", "merge_group"):
             reason = f"{args.event} event: no PR/batch diff => class engine"
         else:
+            repo_root = _resolve_repo_root(args.repo_root)
             if args.changed_file:
                 with open(args.changed_file, encoding="utf-8") as fh:
                     changed = [ln for ln in fh.read().splitlines() if ln.strip()]
             else:
                 if not args.base:
                     raise SelectorError("--base is required for a diff-based classify")
-                repo_root = _resolve_repo_root(args.repo_root)
                 changed = git_changed_paths(args.base, args.head, repo_root)
-            change_class = classify_change(changed)
+            change_class = classify_change(changed, _classify_map_entries(args.map_file, repo_root))
             reason = f"classified {len(changed)} changed path(s)"
     except Exception as exc:  # fail-safe boundary: ANY error => engine (full run)
         change_class = _CLASS_ENGINE

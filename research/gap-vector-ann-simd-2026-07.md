@@ -199,7 +199,18 @@ work box under a **disk-pressure emergency** (the box hit 99% during the run —
   in the several-minutes range, i.e. *approaching* hnswlib's ~374s territory — but this is an
   **extrapolation from 200k, not a 1M measurement**, and is explicitly NOT claimed as a parity
   result. A canonical 1M build/recall number belongs to the quiet-box re-run (`sq-hmd7l.26`); a
-  build-time-only 1M re-measure on this box is deferred to `sq-ose80.2` (below) once disk frees.
+  build-time-only 1M re-measure is `sq-ose80.2` (below).
+
+> **[SONNET-4.6] (sq-pm6i2) Status: the extrapolation above is STILL an extrapolation.** The
+> harness the re-measure needs is now committed — `crates/sparq-vectors/examples/hnsw_build_scaling`
+> (runbook: `bench/vector/README.md`) — which times `VectorIndex::build_with` ONLY, dropping the
+> `nearest_exact` oracle that made the abandoned run expensive, and streams the corpus into the
+> `.spqv` store (with `$SPARQ_VECTORS_TMP`) so it does not repeat the disk-pressure failure. The
+> **measurement itself has NOT been taken**: it requires the SIFT1M base vectors (not
+> redistributable in-repo) on the dedicated quiet bench box, and a build time from any other box
+> would be non-canonical — i.e. it would not replace this extrapolation. Until that run lands, the
+> 1M figures in this section remain extrapolated and must not be cited as measured. (The §7.3
+> table itself is a 200k measurement and is unaffected.)
 
 **Shipped fix (`crates/sparq-vectors/src/ann.rs`):** two opt-in `HnswConfig` presets —
 `HnswConfig::fast_build()` (`ef_construction=40`) and `HnswConfig::high_recall()`
@@ -239,9 +250,13 @@ by `tests/recall.rs::build_time_presets_preserve_the_recall_floor` (real build p
   memcpy per build. Investigate building from `Arc<[NPoint]>` / a single shared buffer, or only
   retaining the points when a secondary-ef build is actually requested.
 - **sq-ose80.2** (P3, NEW): re-measure the **1M×128 SIFT** build time (efc=40 vs 100 vs 200,
-  build-time-ONLY — no brute-force oracle) on this box once disk frees, to replace the §7.3
-  extrapolation with a measured 1M point. The oracle-bound recall harness is the slow part; a
-  build-only timer avoids it. The canonical recall+QPS 1M run stays `sq-hmd7l.26`.
+  build-time-ONLY — no brute-force oracle), to replace the §7.3 extrapolation with a measured 1M
+  point. The oracle-bound recall harness is the slow part; a build-only timer avoids it. The
+  canonical recall+QPS 1M run stays `sq-hmd7l.26`.
+  **[SONNET-4.6] (sq-pm6i2) Harness landed, measurement OPEN:** the build-only timer is committed
+  as `crates/sparq-vectors/examples/hnsw_build_scaling` (`--smoke` self-tests it without a
+  dataset). What remains is purely an *execution* step — run it over SIFT1M on the **canonical
+  quiet box**, since a build time measured anywhere else cannot replace the extrapolation.
 
 ---
 

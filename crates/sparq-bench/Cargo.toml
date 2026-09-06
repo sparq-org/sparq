@@ -12,12 +12,40 @@ sparq-core = { path = "../sparq-core", features = ["mmap", "dict-spill"] }
 # SHIPPED configuration — the sparq-cli / sparq-server binaries default-light the engine's
 # pre-execution algebra rewrite pass (#1735). The fuzzer's `equality` category generates the
 # exact `FILTER(?v = <iri>)` trigger shape (fuzz.rs gen_query, IRI arm), so the rewrite-ON
-# path is oracle-checked every night. (`FILTER(!bound)` — rewrite (b)'s trigger — is not
-# generated yet; its coverage is tests/rewrite_pass.rs via the feature-matrix leg.) Harness
-# crate, `publish = false`; the engine LIBRARY default stays OFF.
+# path is oracle-checked every night. [SONNET-4.6] (sq-avd75) rewrite (b)'s trigger —
+# `OPTIONAL { B } FILTER(!bound(?v))` — is now generated too, by the `antijoin` category
+# (which also carries a no-shared-variable shape the pass must DECLINE), so BOTH halves of
+# the pass are oracle-checked rather than only tests/rewrite_pass.rs's fixed fixtures on the
+# feature-matrix leg. Harness crate, `publish = false`; the engine LIBRARY default stays OFF.
 sparq-engine = { path = "../sparq-engine", features = ["algebra-rewrite"] }
 # Reference engine to compare against (in-memory; no RocksDB).
 oxigraph = { version = "0.5", default-features = false, features = ["rdf-12"] }
+# [FABLE-5] (sq-hodke) RDFC-1.0, for the UPDATE differential's blank-node-ISOMORPHISM
+# adjudication: once the generator emits blank nodes, sorted N-Quads stops being a
+# canonical form (sparq labels them `_:fbN` from a process counter, Oxigraph from a hash,
+# and sparq's two update paths disagree with EACH OTHER), so the comparator relabels every
+# snapshot to its RDFC-1.0 canonical form first. `rdf12-triple-terms` is required because
+# the generator also emits RDF-1.2 triple terms, which the standard W3C profile fails
+# closed on; the comparator uses only that feature's CONSTRAINED `*_ground_terms` entry
+# points, which are exactly RDFC-1.0 with triple terms as opaque constants (they fail
+# closed on a blank node nested inside a triple term — an invariant the generator upholds
+# with an `isBlank` FILTER guard and `tests::no_nested_blank_nodes_in_triple_terms` pins).
+# Harness crate, `publish = false`; nothing in the shipped build gains a dependency.
+sparq-canon = { path = "../sparq-canon", features = ["rdf12-triple-terms"] }
+# [OPUS-5] (sq-qcnn.5) The ENGINE-INDEPENDENT value-level comparator library (node A of
+# research/differential-testing-value-level.md, bead sq-qcnn.4): exact arbitrary-precision
+# integer/decimal equality, canonical doubles incl. INF/NaN, UTC-normalised temporals, the
+# solution-MULTISET and ORDER-BY-equivalence-class comparators, and RDFC-1.0 blank-node
+# isomorphism. The query differential (`fuzz.rs`) routes BOTH engines' answers through it, so
+# every value decision is made by code that depends on NO sparq crate — canonicalising both
+# sides through sparq's own numeric tower / term comparator would make any bug there CANCEL and
+# the differential would go blind exactly where it must see. Harness crate, `publish = false`.
+sparq-difftest = { path = "../sparq-difftest" }
+# The oxrdf 0.3 term model both engines already render through — used by the comparator to
+# rewrite `xsd:integer` lexicals STRUCTURALLY (never by string surgery) for the adjudicated
+# `update-oxigraph-integer-lexical-canonicalization` class. Already in the dependency graph
+# via sparq-core/sparq-engine/sparq-canon; this adds nothing new to the tree.
+oxrdf = { workspace = true }
 libc = "0.2"
 serde_json = "1"
 

@@ -1,0 +1,19 @@
+# Design §6 case 4 — UNTRUSTED ISSUER. Everything the status stratum can supply is
+# in order: the bundle is covered by an attestation whose window contains t. The
+# ONLY defect is attribution — the statement was attested by an issuer the verifier
+# did not enumerate and no framework certifies (TR names no framework at all).
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:forger.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}

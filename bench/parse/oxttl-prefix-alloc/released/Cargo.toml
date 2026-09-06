@@ -1,0 +1,46 @@
+# [OPUS-5] sq-98w7z.3 — BASELINE leg of the oxttl prefixed-name A/B.
+#
+# Thin wrapper: no source of its own, it compiles ../src/main.rs against the
+# newest oxttl RELEASE on crates.io. Its twin is ../upstream/Cargo.toml, which
+# compiles the same file against oxigraph git. Standalone `[workspace]` (the
+# bench/parse isolation pattern) so nothing here reaches the root workspace,
+# the Cargo.lock, or the wasm build.
+[package]
+name = "oxttl-prefix-alloc-released"
+version = "0.0.0"
+edition = "2021"
+publish = false
+# Reported verbatim in every result row — this is how a row says which oxttl it
+# measured. Keep it accurate when the pin below moves.
+description = "0.2.3 (crates.io release)"
+
+[workspace]
+
+[dependencies]
+# Pinned EXACTLY, not "0.2": the whole point of this package is to be the
+# known-released side of the comparison, so a silent patch bump would quietly
+# change what the baseline means.
+oxttl = "=0.2.3"
+oxrdf = "=0.3.3"
+# Optional: the allocator `sparq-cli ingest` ships with. See ../README.md.
+mimalloc = { version = "0.1", optional = true }
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+count-alloc = []
+# The feature set the sparq workspace actually enables on oxttl
+# (root Cargo.toml: `oxttl = { version = "0.2", features = ["rdf-12"] }`),
+# so the A/B can be run in the configuration production ships.
+rdf-12 = ["oxttl/rdf-12", "oxrdf/rdf-12"]
+
+[[bin]]
+name = "oxttl-prefix-alloc-released"
+path = "../src/main.rs"
+
+# Match the shipped sparq-cli profile so the comparison is made on the codegen
+# the production binary actually gets.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

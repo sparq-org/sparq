@@ -20,6 +20,11 @@
 # ONLY the sparq-specific `forge-suite` (the verifier-soundness estate over crates/sparq-zk*,
 # which compiles zk/compose — and now transitively fetches the released sparq_ieee754 git dep).
 #
+# [SONNET-4.6] sq-3x7dl.14.2: the PROOF-M1 xpath differential oracle lives in its OWN
+# workflow, `.github/workflows/xpath-differential.yml`, NOT here. Do not re-add an xpath job
+# to this file: this lane's paths filter drives the ~60-minute `forge-suite`, so adding
+# `zk/xpath/**` would run the whole forge suite on a PR that only touched that harness.
+#
 # TRIGGER (deliberately OFF the fast per-PR critical path — the toolchain install +
 # real proving is slow):
 #   • schedule (nightly 04:23 UTC)  — the standing safety net.

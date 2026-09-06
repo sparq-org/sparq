@@ -37,7 +37,12 @@ graph. Policy triples are the sum of the compiled policy records for that model.
 Skipped rows are explicit unavailable workload/model combinations, not oracle
 passes. They include absent W2/W3 fixtures, ODRL live evaluation requiring the
 separate `odrl-bridge` feature, and the known consortium temporal-oracle
-divergence. Every exercised lane had zero mismatches; the live lanes detected no
+divergence.
+
+> **Addendum (issue #4415).** The 8 skipped `live W2/W4` lanes above were the ODRL
+> ones; `bench/ac/live` now enables `odrl-bridge` and runs them, so a re-run of this
+> command records 24 passed / 0 skipped for that driver. The table is left as the
+> record of the 2026-07-19 run it describes and was **not** re-measured. Every exercised lane had zero mismatches; the live lanes detected no
 over-share. The emitted WAC under-share and ACP group-oracle notices are advisory
 known divergences and did not weaken the fail-closed over-share check.
 

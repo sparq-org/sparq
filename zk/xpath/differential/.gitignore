@@ -1,0 +1,11 @@
+# [SONNET-4.6] sq-3x7dl.14.2: the harness lock is deliberately NOT committed.
+#
+# This is a DETACHED cargo project whose deps are in-repo path deps (sparq-engine ->
+# sparq-core -> …). Those manifests bump on lanes that never run this harness, so a
+# committed lock drifts silently on main and would fail an innocent PR — the sq-q134e
+# lesson from bench/zk-compose/family_curve. The driver script correspondingly does NOT
+# pass --locked. Reproducibility of the ORACLE comes from the pinned workspace deps the
+# path crates already carry, not from a second lock here.
+Cargo.lock
+
+# (zk/.gitignore already covers target/.)

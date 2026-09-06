@@ -1,0 +1,5 @@
+{
+  "pr": 4342,
+  "date": "2026-07-26",
+  "reason": "[OPUS-5] issue #2908: the query budget now bounds the SELECT-JSON SERIALIZE step, not just evaluation. `eval_select_json_emit` in the always-compiled `crates/sparq-engine/src/exec.rs` gains a cooperative mid-serialize re-check (`budget::exhausted` every 1024 rows in the serial loop) plus a post-serialization `budget::check` gate, so a deadline or cancellation falling due while a materialised result set is being serialised is reported as the budget error instead of returning a late-but-complete body. Those calls sit outside every `#[cfg(feature = ...)]` block and the serial branch is the one wasm takes (sparq-engine is pulled with default-features = false, so `parallel` is off), hence the feature-OFF sparq-wasm bundle bytes move. This is that deliberate correctness fix, not leakage from the default-OFF `vectorized` feature. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
+}

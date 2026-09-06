@@ -218,11 +218,14 @@ mod epsg_full {
     }
 
     #[test]
-    fn northing_easting_projected_registry_definitions_stay_refused() {
-        // proj4rs consumes (easting, northing) and PROJ.4 strings carry no
-        // EPSG axis metadata, so a projected registry entry is accepted only
-        // when its WKT proves that order. EPSG:2180 (ETRS89 / Poland CS92)
-        // and EPSG:3044 (ETRS89 / UTM zone 32N (N-E)) are officially
+    fn projected_definitions_whose_wkt_and_proj4_axes_disagree_stay_refused() {
+        // proj4rs reads a projected definition's two coordinates in the
+        // directions its `+axis=` parameter declares (absent = easting then
+        // northing), so an entry is accepted only when its WKT declares that
+        // SAME pair in that same order.
+        //
+        // No `+axis=`, no AXIS nodes: EPSG:2180 (ETRS89 / Poland CS92) and
+        // EPSG:3044 (ETRS89 / UTM zone 32N (N-E)) are officially
         // NORTHING/EASTING per the EPSG registry — feeding their wktLiteral
         // coordinates to proj4rs verbatim would silently transpose them (for
         // 3044, the independent witness is curated EPSG:25832: the SAME
@@ -232,9 +235,174 @@ mod epsg_full {
         assert!(proj4_definition(3044).is_none());
         let g = parse_wkt_literal(&format!("<{EPSG}/3044> POINT(5432790 514940)")).unwrap();
         assert!(matches!(to_crs84(&g), Err(GeoError::Unsupported(m)) if m.contains("EPSG:3044")));
-        // West/south-axis grids (South African LO, `+axis=wsu`) are refused
-        // too: their WKT declares AXIS west/south, not easting/northing.
-        assert!(proj4_definition(2048).is_none());
+
+        // The no-AXIS bucket is 1249 projected entries, and 1241 of them are
+        // northing-first exactly like 2180/3044 above — but the remaining 8
+        // are NOT, so the bucket as a whole is not swappable. See
+        // `registry_entries_with_an_empty_wkt_stay_refused` below.
+
+        // No `+axis=`, but AXIS[…,NORTH],AXIS[…,EAST]: a pure TRANSPOSE of
+        // what proj4rs would read. EPSG:8433 (Macao 1920 / Macao Grid) and
+        // EPSG:8441 (Tananarive / Laborde Grid) are the registry's only two.
+        // A transpose COULD be normalised by swapping (x, y), but neither of
+        // these is evaluable here anyway — 8433 carries no datum information
+        // on an International-1924 ellipsoid, and 8441 needs `+proj=labrd`,
+        // which proj4rs does not implement — so no swap is implemented and
+        // both stay refused rather than silently transposed.
+        assert!(proj4_definition(8433).is_none());
+        assert!(proj4_definition(8441).is_none());
+
+        // No `+axis=`, but AXIS[…,SOUTH],AXIS[…,WEST]: the registry's PROJ.4
+        // column is the east/north variant of the projection while its WKT
+        // column carries the official south/west order, so the two DISAGREE
+        // and neither can be trusted. EPSG:2065 / 5513 (S-JTSK Krovak) and
+        // EPSG:8044 / 8045 (Gusterberg / St. Stephen Cassini grids) — all
+        // refused, in contrast to EPSG:8352 below, which spells the matching
+        // `+axis=swu` out.
+        for code in [2065, 5513, 8044, 8045] {
+            assert!(proj4_definition(code).is_none(), "EPSG:{code}");
+        }
+    }
+
+    #[test]
+    fn registry_entries_with_an_empty_wkt_stay_refused() {
+        // crs-definitions 0.5.0 ships eight entries whose `wkt` string is
+        // EMPTY. They fall into the same "projected, no AXIS node" bucket as
+        // the 1241 genuinely northing-first codes, but for an unrelated
+        // reason — there is no WKT at all to carry an AXIS node — and all
+        // eight are officially EASTING/NORTHING per the EPSG registry's
+        // coordinate-system axis table (EPSG v11.022; see
+        // research/epsg-no-axis-projected-axis-order.md).
+        //
+        // They are therefore precisely the codes that a "no AXIS node means
+        // northing-first, so swap (x, y)" shortcut would silently transpose,
+        // and each is refused by the axis rule ALONE — the grid-shift and
+        // datum-less filters all pass them — so no other honesty filter is
+        // standing behind it. EPSG:8857/8858/8859 (WGS 84 / Equal Earth) are
+        // the sharpest case: plain `+datum=WGS84`, nothing else to object to.
+        for code in [3993, 6200, 6201, 6202, 6966, 8857, 8858, 8859] {
+            assert!(proj4_definition(code).is_none(), "EPSG:{code}");
+            let g = parse_wkt_literal(&format!("<{EPSG}/{code}> POINT(0 0)")).unwrap();
+            let named = format!("EPSG:{code}");
+            assert!(
+                matches!(to_crs84(&g), Err(GeoError::Unsupported(m)) if m.contains(&named)),
+                "EPSG:{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn wsu_lo_grid_matches_the_curated_utm_witness() {
+        // EPSG:2052 (Hartebeesthoek94 / Lo27) is a southern-African Gauss
+        // conformal grid: transverse Mercator about 27°E with k=1 and no
+        // false origin, written (Y = WESTING, X = SOUTHING) — the registry
+        // spells that out as `+axis=wsu` plus AXIS[…,WEST],AXIS[…,SOUTH], so
+        // the axis rule accepts it and proj4rs negates both axes itself.
+        //
+        // The independent witness is the CURATED EPSG:32735 (WGS 84 / UTM
+        // zone 35S), whose worked example the curated table already carries.
+        // UTM zone 35's central meridian is 27°E — the SAME meridian — and
+        // Hartebeesthoek94 is WGS84 (`+ellps=WGS84 +towgs84=0,…`), so UTM 35S
+        // is exactly this transverse Mercator scaled by k=0.9996 with a
+        // 500 km false easting and a 10 000 km false northing:
+        //
+        //     E_utm = 500000    - 0.9996 * Y     (Y is a WESTING)
+        //     N_utm = 10000000  - 0.9996 * X     (X is a SOUTHING)
+        //
+        // The two paths must therefore land on the same CRS84 point. Feeding
+        // (Y, X) to proj4rs as (easting, northing) — i.e. dropping the
+        // `+axis=wsu` negation — would instead mirror the point about both
+        // the central meridian and the equator.
+        let (westing, southing) = (-60_000.0, 2_900_000.0);
+        let (lon, lat) = point(2052, westing, southing);
+        let (wlon, wlat) =
+            point(32735, 500_000.0 - 0.9996 * westing, 10_000_000.0 - 0.9996 * southing);
+        assert!((lon - wlon).abs() < 1e-9, "lon {lon} vs witness {wlon}");
+        assert!((lat - wlat).abs() < 1e-9, "lat {lat} vs witness {wlat}");
+        // Sanity: a negative westing is EAST of the 27°E central meridian,
+        // and a positive southing is south of the equator (Gauteng).
+        assert!((lon - 27.6).abs() < 0.01 && (lat - -26.21).abs() < 0.01, "({lon}, {lat})");
+    }
+
+    #[test]
+    fn cape_lo_grid_matches_its_own_utm_zone_witness() {
+        // Same worked example one datum over, so the rule is exercised on a
+        // definition that is NOT WGS84-coincident: EPSG:22287 (Cape / Lo27)
+        // is Clarke 1880 with `+towgs84=-136,-108,-292`, and EPSG:22235
+        // (Cape / UTM zone 35S) is the same datum, same ellipsoid, same 27°E
+        // central meridian with easting/northing axes — so the identical
+        // algebraic relation holds and both sides carry the same datum shift.
+        let (westing, southing) = (-60_000.0, 2_900_000.0);
+        let (lon, lat) = point(22287, westing, southing);
+        let (wlon, wlat) =
+            point(22235, 500_000.0 - 0.9996 * westing, 10_000_000.0 - 0.9996 * southing);
+        assert!((lon - wlon).abs() < 1e-9, "lon {lon} vs witness {wlon}");
+        assert!((lat - wlat).abs() < 1e-9, "lat {lat} vs witness {wlat}");
+    }
+
+    #[test]
+    fn schwarzeck_lo_grid_reads_westing_then_southing() {
+        // EPSG:29375 (Schwarzeck / Lo22/15, Namibia) has no easting/northing
+        // twin to cross-check against, so the witness is the grid's own
+        // definition: origin at (22°S, 15°E), k=1, and coordinates in German
+        // legal metres (`+to_meter=1.0000135965`, a 1.4 m effect over 100 km).
+        //
+        // Its origin (0, 0) is that graticule intersection, displaced only by
+        // the Schwarzeck 3-parameter datum shift (|616, 97, -251| ~ 700 m,
+        // under 0.01°).
+        let (lon0, lat0) = point(29375, 0.0, 0.0);
+        assert!((lon0 - 15.0).abs() < 0.01, "origin lon {lon0}");
+        assert!((lat0 - -22.0).abs() < 0.01, "origin lat {lat0}");
+
+        // 100 km of WESTING must move ~100/(111.32*cos 22°) = 0.969° WEST at
+        // essentially unchanged latitude; 100 km of SOUTHING must move
+        // ~100/110.70 = 0.903° SOUTH at essentially unchanged longitude
+        // (110.70 km is the length of a meridian degree at 22°). Reading the
+        // pair as (easting, northing) would move each the opposite way, and
+        // transposing them would swap which coordinate moves at all.
+        let (lon_w, lat_w) = point(29375, 100_000.0, 0.0);
+        assert!(((lon0 - lon_w) - 0.969).abs() < 0.005, "westing lon delta {}", lon0 - lon_w);
+        assert!((lat_w - lat0).abs() < 0.01, "westing moved in latitude: {lat_w} vs {lat0}");
+        let (lon_s, lat_s) = point(29375, 0.0, 100_000.0);
+        assert!(((lat0 - lat_s) - 0.903).abs() < 0.005, "southing lat delta {}", lat0 - lat_s);
+        assert!((lon_s - lon0).abs() < 0.01, "southing moved in longitude: {lon_s} vs {lon0}");
+    }
+
+    #[test]
+    fn the_axis_rule_admits_every_axis_consistent_registry_entry() {
+        // The 29 registry entries that carry an explicit `+axis=` parameter
+        // ALL declare a WKT axis order matching it, so the rule admits every
+        // one of them: the ten Hartebeesthoek94 Lo grids, the ten Cape Lo
+        // grids, the eight Schwarzeck Lo grids (`+axis=wsu`), and EPSG:8352
+        // (`+axis=swu`).
+        let wsu = [2046, 2047, 2048, 2049, 2050, 2051, 2052, 2053, 2054, 2055]
+            .into_iter()
+            .chain([22275, 22277, 22279, 22281, 22283, 22285, 22287, 22289, 22291, 22293])
+            .chain([29371, 29373, 29375, 29377, 29379, 29381, 29383, 29385]);
+        for code in wsu {
+            let def = proj4_definition(code).unwrap_or_else(|| panic!("EPSG:{code} refused"));
+            assert!(def.contains("+axis=wsu"), "EPSG:{code}: {def}");
+            // Accepted AND evaluable: every one is a transverse Mercator,
+            // which proj4rs implements.
+            let g = parse_wkt_literal(&format!("<{EPSG}/{code}> POINT(0 0)")).unwrap();
+            assert!(to_crs84(&g).is_ok(), "EPSG:{code}");
+        }
+        // EPSG:8352 (S-JTSK [JTSK03] / Krovak) is admitted on the same
+        // grounds — its `+axis=swu` matches AXIS[…,SOUTH],AXIS[…,WEST]. It is
+        // not EVALUABLE here, though: proj4rs gates its Krovak projection
+        // behind an optional feature this crate does not enable, so the
+        // transform fails loudly. That gap is upstream of the axis rule and
+        // pre-dates it — the already-admitted easting/northing twin
+        // EPSG:8353 fails identically.
+        assert!(proj4_definition(8352).is_some_and(|d| d.contains("+axis=swu")));
+        for code in [8352, 8353] {
+            let g = parse_wkt_literal(&format!("<{EPSG}/{code}> POINT(0 0)")).unwrap();
+            let named = format!("EPSG:{code}");
+            assert!(
+                matches!(to_crs84(&g), Err(GeoError::Parse(m)) if m.contains(&named)),
+                "EPSG:{code}"
+            );
+        }
     }
 
     #[test]

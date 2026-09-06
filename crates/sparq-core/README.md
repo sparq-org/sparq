@@ -52,8 +52,17 @@ assert_eq!(count, 1);
   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
 - **Out-of-core store** — query datasets larger than RAM from a memory-mapped on-disk store,
   with optional block compression and near-zero resident heap. The opt-in `block-bloom` feature
-  adds per-block Bloom filters on high-NDV columns to skip blocks on equality-bound point lookups
-  (result-equivalent, never serialised).
+  adds per-block Bloom filters on high-NDV columns to skip the block decode on equality-bound
+  point lookups for an id that is ABSENT from the permutation (result-equivalent, never
+  serialised; for a PRESENT id the zone map already narrows the candidate window to about one
+  block, so there is little left to skip).
+- **Compressed-seek column codecs (prototype)** — the opt-in `elias-fano` feature adds
+  Elias-Fano and Partitioned-Elias-Fano codecs whose `next_geq(target)` answers a successor
+  query *directly on the compressed data*, without the whole-block decode the varint block codec
+  needs. It is a measurement-gated spike: not routed into the store, not called by any join, and
+  carrying its own **native-only** A/B harness against the incumbent codec (it times with
+  `std::time::Instant`, so the `wasm32` half of the comparison is unresolved). Pure `std`, no new
+  dependency.
 - **Named graphs & RDF 1.2** — full quad storage and
   [triple terms](https://www.w3.org/TR/rdf12-concepts/).
 - **Thread-safe sharing** — `Graph` is `Send + Sync`, so one store serves many server threads;

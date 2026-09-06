@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-iwhl8 (#1116) — the RDF/JS Stream-spec surface for `@jeswr/sparq`:
+// [OPUS-4.8] sq-iwhl8 (#1116) — the RDF/JS Stream-spec surface for `@sparq-org/sparq`:
 // a browser-safe quad `Stream`, and a `Source` / `Sink` / `Store` adapter over a
 // {@link SparqStore} so the engine is usable wherever an RDF/JS Stream interface is expected
 // (https://rdf.js.org/stream-spec/). This completes the term/factory/dataset surface with the
@@ -10,14 +10,84 @@
 // `end` EventEmitter). The stream PULLS the next quad from that iterator on demand, so a very
 // large `match` is never held whole on the JS side. It does this WITHOUT pulling in
 // `node:events`, so it runs unchanged in the browser.
+//
+// [SONNET-4.6] sq-y9v8n hardens the WRITE half of that surface, symmetrically:
+//   * `import`/`remove` apply the incoming stream in `chunkSize` batches (default 1024) instead
+//     of buffering every quad, so a huge parser stream costs one chunk of JS heap, not all of it;
+//     `chunkSize: 0` restores the all-or-nothing single-delta form.
+//   * every mutation (`import`/`remove`/`removeMatches`/`deleteGraph`) returns a
+//     `QuadStream.pending()` out-channel, so `end` fires when the delta has ACTUALLY been
+//     applied — a plain `new QuadStream()` auto-emits `end` on the next microtask, which let a
+//     consumer's `end` handler observe the store before the write landed.
+//   * `deleteGraph` validates its argument (see `toGraphName`) rather than letting a `Variable`
+//     graph fall through to `match`'s "every graph" wildcard and delete the whole dataset.
 import type * as RDF from '@rdfjs/types';
 import { DefaultGraph, NamedNode } from './terms.js';
 import type { SparqStore } from './store.js';
 
 const DEFAULT_GRAPH = new DefaultGraph();
 
+/**
+ * [SONNET-4.6] sq-y9v8n — default quads-per-delta while CONSUMING an incoming quad `Stream`
+ * ({@link SparqSource.import} / {@link SparqSource.remove}). Bounds the JS-side buffer to one
+ * chunk instead of the whole stream, while still batching enough quads that each
+ * {@link SparqStore.applyDelta} stays an O(batch) overlay write rather than a per-quad call.
+ */
+const DEFAULT_CHUNK_SIZE = 1024;
+
 /** RDF/JS `match()` term position: a concrete term, or `null`/`undefined` for a wildcard. */
 type MatchTerm = RDF.Term | null | undefined;
+
+/** Options controlling how a {@link SparqSource} consumes an incoming quad `Stream`. */
+export interface SparqSourceOptions {
+  /**
+   * Quads applied per delta while consuming an incoming stream ({@link SparqSource.import} /
+   * {@link SparqSource.remove}). Defaults to 1024.
+   *
+   * - `n > 0` — apply every `n` buffered quads (plus the remainder on `end`), so at most `n`
+   *   quads are held on the JS side no matter how long the stream is. Quads applied before a
+   *   later `error` STAY applied (the same incremental contract as N3.js's `Store.import`).
+   * - `0` — buffer the WHOLE stream and apply it as ONE delta on `end`, so nothing is written
+   *   if the stream errors part-way. All-or-nothing, at the cost of holding every quad.
+   *
+   * Chunking bounds MEMORY; it is not back-pressure. An RDF/JS `Stream` pushes `data` events and
+   * sparq's apply is synchronous, so there is no await point at which the producer could be
+   * slowed down — the win is that the JS heap never holds more than one chunk.
+   */
+  chunkSize?: number;
+}
+
+/** Normalizes anything thrown into an `Error` for an RDF/JS `error` event. */
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * Validates + normalizes an RDF/JS `Store.deleteGraph` argument into the graph term the
+ * store's `match`/delta primitives address, throwing on an argument that cannot NAME a graph.
+ *
+ * The string form follows the convention RDF/JS consumers inherit from N3.js's `termFromId`
+ * (which is what N3's own `Store.deleteGraph(graph)` accepts): `''` is the DEFAULT graph and any
+ * other string is a named-graph IRI. sparq diverges from N3 in one place — N3 reads a leading
+ * `_:` as a blank-node graph name, whereas sparq treats the whole string as an IRI; pass an
+ * actual `BlankNode` term for a blank-node-named graph.
+ *
+ * A `Variable` is rejected rather than treated as a wildcard: {@link SparqStore.match} reads a
+ * variable graph position as "every graph", so silently accepting one would turn
+ * `deleteGraph(someVariable)` into a delete of the ENTIRE dataset — the destructive reading of an
+ * ambiguous argument. `Literal`/`Quad`/`null`/`undefined` are rejected for the same reason (they
+ * would otherwise match nothing and report a successful no-op delete).
+ */
+function toGraphName(graph: RDF.Quad_Graph | string): RDF.Quad_Graph {
+  if (typeof graph === 'string') return graph === '' ? DEFAULT_GRAPH : new NamedNode(graph);
+  const termType: string | undefined = (graph as { termType?: string } | null | undefined)?.termType;
+  if (termType === 'NamedNode' || termType === 'BlankNode' || termType === 'DefaultGraph') {
+    return graph as RDF.Quad_Graph;
+  }
+  throw new TypeError(
+    `deleteGraph() cannot name a graph with a ${String(termType ?? typeof graph)} — pass a NamedNode/BlankNode/DefaultGraph term, an IRI string, or '' for the default graph`,
+  );
+}
 
 /**
  * An event listener registered on {@link QuadStream}. The RDF/JS Stream events this class emits
@@ -55,6 +125,26 @@ export class QuadStream {
   constructor(source: Iterable<RDF.Quad> = []) {
     this.#iterator = source[Symbol.iterator]();
     queueMicrotask(() => this.#flush());
+  }
+
+  /**
+   * [SONNET-4.6] sq-y9v8n — an OUT-CHANNEL stream: one that carries no quads and emits NOTHING
+   * on its own, so the producer decides when `end`/`error` fires.
+   *
+   * A plain `new QuadStream()` auto-emits `end` on the next microtask (correct for an empty quad
+   * source). Using that as the return value of a *mutation* — `import` / `remove` /
+   * `removeMatches` / `deleteGraph` — makes the consumer's `end` listener fire on that microtask,
+   * i.e. BEFORE the mutation the consumer is waiting for has been applied. Whenever the work
+   * finishes later than that first microtask (any stream that emits on a timer, a fetch, or a
+   * parser), `await`-ing `end` then observing the store reads STALE state. Those methods return
+   * a `pending()` stream and emit `end` themselves once the delta is actually applied.
+   */
+  static pending(): QuadStream {
+    const stream = new QuadStream();
+    // Suppress the queued auto-flush: `#flush` is a no-op once `#flushed` is set, so the
+    // constructor's microtask does nothing and only the producer's explicit `emit` is seen.
+    stream.#flushed = true;
+    return stream;
   }
 
   /** Pulls the next quad from the underlying source, or `null` once exhausted (per the spec). */
@@ -141,9 +231,16 @@ function asStream(s: QuadStream): RDF.Stream<RDF.Quad> {
  */
 export class SparqSource implements RDF.Store<RDF.Quad> {
   readonly #store: SparqStore;
+  readonly #chunkSize: number;
 
-  constructor(store: SparqStore) {
+  /**
+   * @param store the backing {@link SparqStore} (stays the source of truth).
+   * @param options see {@link SparqSourceOptions} — `chunkSize` sets the default quads-per-delta
+   *   for {@link import} / {@link remove} (1024; `0` buffers the whole stream).
+   */
+  constructor(store: SparqStore, options: SparqSourceOptions = {}) {
     this.#store = store;
+    this.#chunkSize = normalizeChunkSize(options.chunkSize, DEFAULT_CHUNK_SIZE);
   }
 
   /** The backing {@link SparqStore} — the full SPARQL + delta surface. */
@@ -162,58 +259,130 @@ export class SparqSource implements RDF.Store<RDF.Quad> {
   }
 
   /**
-   * RDF/JS `Sink.import` / `Store` insert: consumes the quad `Stream`, buffering its quads and
-   * applying them as one O(batch) delta on `end`. Returns an EventEmitter that emits `end` once
-   * the batch is applied (or `error` if it fails) — the spec's fire-and-forget consume contract.
+   * RDF/JS `Sink.import` / `Store` insert: consumes the quad `Stream` and applies its quads as
+   * O(batch) deltas — one per `chunkSize` quads, so a very large stream is never held whole on
+   * the JS side (see {@link SparqSourceOptions.chunkSize}, and pass `0` for the all-or-nothing
+   * single-delta-on-`end` form). Returns an EventEmitter that emits `end` once every quad has
+   * been applied, or `error` if the source stream or an apply fails.
+   *
+   * Because chunks land WHILE the source stream is still emitting, do not `import` a stream that
+   * reads from the same store you are importing into unless you set `chunkSize: 0`.
+   *
+   * @param options per-call override of the constructor's {@link SparqSourceOptions}.
    */
-  import(stream: RDF.Stream<RDF.Quad>): RDF.Stream<RDF.Quad> {
-    return this.#consume(stream, (quads) => this.#store.addQuads(quads));
+  import(stream: RDF.Stream<RDF.Quad>, options: SparqSourceOptions = {}): RDF.Stream<RDF.Quad> {
+    return this.#consume(stream, (quads) => this.#store.addQuads(quads), options);
   }
 
-  /** RDF/JS `Store.remove`: consumes the quad `Stream` and removes its quads as one O(batch) delta. */
-  remove(stream: RDF.Stream<RDF.Quad>): RDF.Stream<RDF.Quad> {
-    return this.#consume(stream, (quads) => this.#store.removeQuads(quads));
+  /**
+   * RDF/JS `Store.remove`: consumes the quad `Stream` and removes its quads as O(batch) deltas,
+   * chunked exactly as {@link import} is.
+   *
+   * @param options per-call override of the constructor's {@link SparqSourceOptions}.
+   */
+  remove(stream: RDF.Stream<RDF.Quad>, options: SparqSourceOptions = {}): RDF.Stream<RDF.Quad> {
+    return this.#consume(stream, (quads) => this.#store.removeQuads(quads), options);
   }
 
-  /** RDF/JS `Store.removeMatches`: removes every quad matching the pattern; signals `end` when done. */
+  /**
+   * RDF/JS `Store.removeMatches`: removes every quad matching the pattern; emits `end` once the
+   * removal has been applied (never before it — see {@link QuadStream.pending}).
+   *
+   * Unlike {@link import}, this materialises the matched quads before removing them: the removal
+   * would otherwise mutate the store while its own match cursor is still being drained.
+   */
   removeMatches(subject?: MatchTerm, predicate?: MatchTerm, object?: MatchTerm, graph?: MatchTerm): RDF.Stream<RDF.Quad> {
-    const out = new QuadStream();
+    const out = QuadStream.pending();
     queueMicrotask(() => {
       try {
         const toRemove = this.#store.match(subject, predicate, object, graph);
         if (toRemove.length > 0) this.#store.removeQuads(toRemove);
         out.emit('end');
       } catch (err) {
-        out.emit('error', err instanceof Error ? err : new Error(String(err)));
+        out.emit('error', toError(err));
       }
     });
     return asStream(out);
   }
 
   /**
-   * RDF/JS `Store.deleteGraph`: removes every quad in the given graph. A `NamedNode`/`BlankNode`
-   * (or a non-empty string IRI) targets that named graph; `DefaultGraph` or `''` targets the
-   * default graph. Signals `end` when the batch is applied.
+   * RDF/JS `Store.deleteGraph`: removes every quad in the given graph, emitting `end` once the
+   * removal has been applied. A `NamedNode`/`BlankNode` term (or a non-empty string, read as a
+   * named-graph IRI) targets that named graph; a `DefaultGraph` term or `''` targets the default
+   * graph — the same string convention N3.js's `Store.deleteGraph` accepts, bar a leading `_:`
+   * (sparq reads that as an IRI, not a blank-node graph name; pass a `BlankNode` term instead).
+   *
+   * An argument that cannot NAME a graph — a `Variable` (which the store's `match` would read as
+   * "every graph", making this delete the whole dataset), a `Literal`, or a missing argument —
+   * emits `error` and deletes nothing.
    */
   deleteGraph(graph: RDF.Quad_Graph | string): RDF.Stream<RDF.Quad> {
-    const g: RDF.Quad_Graph =
-      typeof graph === 'string' ? (graph === '' ? DEFAULT_GRAPH : new NamedNode(graph)) : graph;
-    return this.removeMatches(undefined, undefined, undefined, g);
+    let graphName: RDF.Quad_Graph;
+    try {
+      graphName = toGraphName(graph);
+    } catch (err) {
+      const out = QuadStream.pending();
+      // Deferred so the caller's `.on('error', …)` — attached after this returns — still sees it.
+      queueMicrotask(() => out.emit('error', toError(err)));
+      return asStream(out);
+    }
+    return this.removeMatches(undefined, undefined, undefined, graphName);
   }
 
-  #consume(stream: RDF.Stream<RDF.Quad>, apply: (quads: RDF.Quad[]) => void): RDF.Stream<RDF.Quad> {
-    const out = new QuadStream();
-    const buffered: RDF.Quad[] = [];
-    stream.on('data', (quad: RDF.Quad) => buffered.push(quad));
-    stream.on('error', (err: Error) => out.emit('error', err));
+  /**
+   * Drives an incoming quad `Stream` into `apply`, in `chunkSize`-quad batches (or one batch on
+   * `end` when `chunkSize` is 0). At most one chunk is buffered on the JS side.
+   */
+  #consume(
+    stream: RDF.Stream<RDF.Quad>,
+    apply: (quads: RDF.Quad[]) => void,
+    options: SparqSourceOptions,
+  ): RDF.Stream<RDF.Quad> {
+    const out = QuadStream.pending();
+    const chunkSize = normalizeChunkSize(options.chunkSize, this.#chunkSize);
+    let buffered: RDF.Quad[] = [];
+    let failed = false;
+
+    /** Terminates the consume with `error`, once — no `end` follows, and no further applies. */
+    const fail = (err: unknown): void => {
+      if (failed) return;
+      failed = true;
+      buffered = [];
+      out.emit('error', toError(err));
+    };
+
+    stream.on('data', (quad: RDF.Quad) => {
+      if (failed) return;
+      buffered.push(quad);
+      if (chunkSize === 0 || buffered.length < chunkSize) return;
+      const chunk = buffered;
+      buffered = [];
+      try {
+        apply(chunk);
+      } catch (err) {
+        fail(err);
+      }
+    });
+    stream.on('error', (err: Error) => fail(err));
     stream.on('end', () => {
+      if (failed) return;
       try {
         if (buffered.length > 0) apply(buffered);
+        buffered = [];
         out.emit('end');
       } catch (err) {
-        out.emit('error', err instanceof Error ? err : new Error(String(err)));
+        fail(err);
       }
     });
     return asStream(out);
   }
+}
+
+/** Validates a {@link SparqSourceOptions.chunkSize}, falling back to `fallback` when unset. */
+function normalizeChunkSize(chunkSize: number | undefined, fallback: number): number {
+  if (chunkSize === undefined) return fallback;
+  if (!Number.isSafeInteger(chunkSize) || chunkSize < 0) {
+    throw new RangeError(`chunkSize must be a non-negative safe integer (0 = buffer the whole stream), got ${String(chunkSize)}`);
+  }
+  return chunkSize;
 }

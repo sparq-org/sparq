@@ -387,6 +387,34 @@ compile-gate); K3 is **EC2/canonical-box only** and is the gate on the rich-FO b
 5. **Facade selection (depends on Phase 1).** If gist wins K2, promote a coherent gist (or
    schema.org) facade for the PKG read-path; otherwise keep schema.org-as-top. Update
    `pkg.ttl` bridge axioms + the schema-card generator accordingly.
+
+   > **RESOLVED — the "otherwise" branch (bead `sq-mztg8.4`).** The facade **stays
+   > schema.org-as-top**, taken on the evidence rather than by preference. K2 has never
+   > been able to fire: Phase 1 (`sq-givgo`) has **not landed** — `bench/fo-km/overlays/`
+   > carries only `no-fo` / `gufo` / `dolce-dul` / `schema-org`, with **no gist (or BFO)
+   > overlay** — so **gist has never been measured** against this PKG at any model tier,
+   > and cannot have matched-or-beaten schema.org. Metric 2 (`sq-p5ro8`) remains
+   > EC2-deferred and sign-unstable, and in any case reads on the rich-FO **backbone**
+   > (K3), not on the facade. This is consistent with the independent
+   > schema.org-as-top ratification of `sq-mztg8.5`
+   > (`research/provenance-driven-genai-kb.md` §6 item 5).
+   >
+   > **What changed, concretely.** `pkg.ttl`'s bridge axioms are *unchanged* (they already
+   > assert the schema.org facade). The real gap was the second half of the acceptance
+   > clause: the schema-card generator showed the agent **none** of the facade. The PKG's
+   > introspect card is the canned `schema-classes` / `schema-properties` pair, and
+   > `schema-classes` filters to `STRSTARTS(STR(?class), STR(pkg:))` — so the ratified
+   > `schema:` vocabulary, which Metric 1 says the agent grounds *most* reliably, was
+   > invisible at introspect time. A new `facade-terms` canned query
+   > (`crates/sparq-kb/src/query/canned.rs`) now surfaces the asserted
+   > `rdfs:subClassOf` / `rdfs:subPropertyOf` / `skos:closeMatch` bridges from `pkg:` onto
+   > `schema:`. It is **additive** — `schema-classes` is untouched, because its
+   > `pkg:`-only filter is load-bearing (§7 of the FO-KM design record notes the class
+   > card gets *noisier* under closure), so there is no canned-query or SHACL regression.
+   >
+   > **Reopen trigger:** `sq-givgo` lands a measured gist arm. Note that promoting gist is
+   > *also* a facade-identity **values call** (§7 open question 3) needing maintainer
+   > steer — so even a K2 win would not be self-executing. [OPUS-5]
 6. **(Stretch) LLM ontological-commitment stability probe (new bead).** Instrument Metric 3
    (Köhler–Neuhaus-style cross-session contradiction), re-run per model.
 

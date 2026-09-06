@@ -445,8 +445,10 @@ fn decode_varint(bytes: &[u8]) -> Option<(u64, &[u8])> {
     None // truncated
 }
 
-/// Lowercase-hex encode.
-fn to_hex(bytes: &[u8]) -> String {
+/// Lowercase-hex encode. `pub(crate)` so the `expression` module's
+/// [`crate::expression::ChallengeNonce::generate`] renders its CSPRNG draw with
+/// the same encoder rather than a second copy of it (`expression` implies `did`).
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         // Positional args (CodeQL rust/unused-variable false-positive avoidance).

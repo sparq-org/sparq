@@ -3,7 +3,8 @@
 # WHAT THIS PUBLISHES: the Next.js static export served ROOT-RELATIVE (basePath '') at the custom domain
 # https://sparq.jeswr.org/ (org-migration cutover, sq-uj38w),
 # PLUS the existing benchmark dashboard preserved at /dev/, PLUS the DISTINCT
-# operational GUI frontend (gui/app) hosted at /app/. The dashboard tree
+# operational GUI frontend (gui/app) hosted at /app/, PLUS the mdBook guide at /guide/
+# ([OPUS-5] issue #5022 — see "THE mdBOOK GUIDE AT /guide/" below). The dashboard tree
 # (`dev/`) lives on the `benchmark-data` branch (written by bench.yml); this workflow
 # fetches that tree and OVERLAYS it into the export's `out/dev/` before upload, so a
 # single Pages artifact serves the showcase root, the unchanged dashboard at
@@ -39,12 +40,21 @@
 # committing out/ onto benchmark-data — was rejected: it couples site source to the data
 # branch and races bench.yml's root index.html seed.)
 #
-# OPEN PRODUCT DECISION (sq-svtt, NOT a settings flip): Pages has ONE deploy slot and this
-# workflow owns the / root. The mdBook guide (sq-w9sr/sq-h0tr) wants a published
-# home too; until that root question is decided (guide at /guide subpath vs at root vs a
-# merged deploy), docs.yml deliberately ships NO deploy job (build-validate only) so a
-# second deploy-pages cannot race + overwrite this showcase. That decision does not block
-# or affect the current live deploy.
+# THE mdBOOK GUIDE AT /guide/ ([OPUS-5] issue #5022 — the product decision, now MADE):
+# Pages has ONE deploy slot and this workflow owns the / root, so the mdBook guide
+# (sq-w9sr/sq-h0tr) could not simply grow its own deploy job — a second `deploy-pages`
+# would race this one last-writer-wins. Of the three options in
+# research/docs-site-single-sourcing-anti-drift.md §7, (a) is chosen: the guide is built
+# HERE and overlaid into THIS artifact at out/guide/, exactly like the dev/bench*
+# dashboards and the /app GUI. One producer, one deploy slot, no race, and no live URL
+# moves (the showcase keeps /, the dashboards keep /dev/bench*, the GUI keeps /app/).
+# (b) guide-at-root and (c) two deploy workflows are rejected there with reasons.
+#
+# docs.yml keeps its build-VALIDATE role: it runs on PRs that touch the guide or any
+# source it embeds, and still ships NO deploy job. Both lanes build through the SAME
+# scripts/build-guide.sh and pin the SAME mdbook version, so what PRs validate is what
+# ships; scripts/check-guide-publish-wiring.py gates that end-to-end wiring (mdbook-pin
+# parity, shared builder, overlay dir ↔ book.toml `site-url` ↔ this job's smoke check).
 
 name: pages
 
@@ -246,11 +256,28 @@ jobs:
       # 0.23.0 is the version lycheeverse/lychee-action@v2.8.0 ships, so behaviour matches the
       # markdown gate.
       - name: Install lychee
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: lychee@0.23.0
       - name: Link-check the static-export HTML (lychee --offline)
         run: bash scripts/check-site-links.sh site/out
+
+      # ---- Build the mdBook guide for the /guide/ mount ----
+      # [OPUS-5] issue #5022 — the guide's publish half. docs.yml validates the same guide on
+      # PRs but deliberately ships no deploy job (one Pages slot, owned here); this is where it
+      # actually reaches the web. The mdbook version below MUST equal docs.yml's pin — the two
+      # lanes are only equivalent if they build with the same renderer, and
+      # scripts/check-guide-publish-wiring.py fails the build if they diverge.
+      - name: Install mdbook (pinned)
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: mdbook@0.4.40
+      # Shared with docs.yml so the validate lane and the publish lane cannot drift. The script
+      # carries the load-bearing detail: mdBook exits 0 on a broken {{#include}}/anchor
+      # (rust-lang/mdBook#1094), so it greps the build log for [ERROR] — without that, an anchor
+      # rename in README.md/SKILL.md would PUBLISH a guide full of raw include directives, green.
+      - name: Build the mdBook guide
+        run: bash scripts/build-guide.sh book
 
       # ---- Preserve the existing benchmark dashboard(s) at /dev/ ----
       # [OPUS-4.8] sq-zngy — fold ALL `dev/bench*` subtrees (not just dev/bench).
@@ -339,6 +366,59 @@ jobs:
           fi
           echo "OK: operational GUI overlaid at out/app/" >> "$GITHUB_STEP_SUMMARY"
 
+      # ---- Overlay the mdBook guide at /guide/ ----
+      # [OPUS-5] issue #5022 — place the rendered guide (book/book) into out/guide/, mirroring
+      # the dev/bench* and /app overlays: another sub-tree of the SAME single Pages artifact, so
+      # there is still exactly ONE producer for the one Pages deploy slot.
+      #
+      # Runs AFTER the lychee link-check, which checks only the SITE's own export. The guide is a
+      # separate first-party render with its own link shape (mdBook resolves chapter links
+      # relatively, and the `link-fixup` preprocessor rewrites the {{#include}}d repo-relative
+      # links to absolute github.com URLs, which lychee --offline cannot resolve anyway); its
+      # broken-include gate is the [ERROR] grep in scripts/build-guide.sh, not lychee.
+      #
+      # UNLIKE the /app overlay there is NO placeholder route to replace here — the site export
+      # has no /guide route — so an out/guide that ALREADY exists means the site grew one and
+      # this step would silently clobber it. That is a hard failure, not a merge.
+      - name: Overlay mdBook guide (out/guide/)
+        working-directory: site
+        run: |
+          set -euo pipefail
+          guide_out="$GITHUB_WORKSPACE/book/book"
+          if [ ! -f "$guide_out/index.html" ]; then
+            echo "::error::mdBook render missing ($guide_out/index.html) — the guide build step did not produce book/book/"
+            exit 1
+          fi
+          if [ -e out/guide ]; then
+            echo "::error::out/guide already exists BEFORE the guide overlay — the site export now has its own /guide route, which this overlay would silently clobber. Pick a different mount or drop the site route (issue #5022)."
+            exit 1
+          fi
+          echo "Overlaying mdBook render -> out/guide/"
+          mkdir -p out/guide
+          # Plain `cp -a` (not the /app overlay's `rsync -a --delete`): that overlay mirrors
+          # ONTO a pre-existing placeholder tree and needs --delete to clear its orphans. Here
+          # the guard above has already proven out/guide did not exist, so there is nothing to
+          # delete and a copy is the whole operation.
+          cp -a "$guide_out/." out/guide/
+          # MOUNT ASSERTION: mdBook stamps book.toml's `site-url` into the guide's OWN 404.html
+          # as <base href="...">. GitHub Pages serves that directory-level 404 for /guide/<typo>,
+          # so if the baked base href ever stops matching the sub-path we overlay to, every asset
+          # on that page resolves against the wrong root. Assert the two agree here, at the point
+          # where the mount is actually chosen.
+          if grep -q '<base href="/guide/">' out/guide/404.html; then
+            echo "OK: guide 404.html carries <base href=\"/guide/\"> matching the overlay mount"
+          else
+            echo "::error::out/guide/404.html does not carry <base href=\"/guide/\"> — book.toml's [output.html] site-url has drifted from the /guide/ mount, so the guide's 404 page would 404 its own assets"
+            exit 1
+          fi
+          # NOTE (measured): a second "no raw {{#include}} survived into the HTML" scan was tried
+          # here and REMOVED — it false-positives on the guide's own legitimate prose, which
+          # discusses the single-sourcing mechanism by name (book/src comments and the README
+          # `features-core` anchor both write `{{#include}}` in running text). The broken-include
+          # guard is the `[ERROR]` log grep in scripts/build-guide.sh, which runs before this step
+          # and whose teeth are pinned in scripts/tests/test_build_guide.sh.
+          echo "OK: mdBook guide overlaid at out/guide/" >> "$GITHUB_STEP_SUMMARY"
+
       # [OPUS-4.8] sq-zngy — ARTIFACT-LEVEL smoke check (NOT a live-URL check).
       # This step asserts the ASSEMBLED Pages output dir (site/out, the exact tree handed to
       # upload-pages-artifact below) rather than probing the live https://sparq.jeswr.org/dev/...
@@ -387,6 +467,24 @@ jobs:
             fi
           else
             echo "::warning::dev/bench-ec2 not yet present on benchmark-data (bench-ec2.yml has not pushed) — skipping its artifact assertion this run"
+          fi
+          # [OPUS-5] issue #5022 — the mdBook guide at /guide/. These are HARD requirements: the
+          # guide is now a published surface, and an artifact that reaches deploy without it
+          # would 404 the guide silently. index.html is the mount's entry point; 404.html is the
+          # directory-level 404 GitHub Pages serves under /guide/; css/general.css proves the
+          # html backend's asset tree came across (an entry point with no theme assets renders
+          # as unstyled text). Deliberately NOT asserting searchindex.json: it exists only while
+          # `[output.html.search]` is enabled, so it would turn an unrelated book.toml toggle
+          # into a failed deploy.
+          for f in out/guide/index.html out/guide/404.html out/guide/css/general.css; do
+            if [ -f "$f" ]; then echo "OK present: ${f#out/}"; else echo "::error::missing required guide artifact file: ${f#out/}"; fail=1; fi
+          done
+          # The entry point must be the mdBook render, not a stray file that happens to sit at
+          # that path (e.g. a half-overlaid tree, or a future site route colliding with /guide).
+          if grep -q 'Book generated using mdBook' out/guide/index.html 2>/dev/null; then
+            echo "OK: out/guide/index.html is an mdBook render"
+          else
+            echo "::error::out/guide/index.html is not an mdBook render — the guide overlay did not land"; fail=1
           fi
           [ "$fail" -eq 0 ] || { echo "::error::Pages artifact smoke check failed — see errors above"; exit 1; }
           echo "OK: Pages artifact smoke check passed" >> "$GITHUB_STEP_SUMMARY"

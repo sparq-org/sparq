@@ -160,3 +160,40 @@ python3 scripts/bench-adapters/vector_lib_adapter.py --smoke  # must exit 0
 First-read results are in `research/gap-vector-2026-07.md` (NON-CANONICAL work-box run;
 canonical re-run is sq-hmd7l.26). ScaNN and DiskANN-ref were NOT-RUN on this gather;
 see the gap record §5 for reasons and follow-up beads.
+
+## Gather-tier: build-time-only HNSW scaling (sq-ose80.2)
+
+<!-- [SONNET-4.6] sq-pm6i2 -->
+`research/gap-vector-ann-simd-2026-07.md` §7.3 records the 1M×128 HNSW build cost as an
+**extrapolation from a measured 200k curve**, because the run that would have measured it was
+abandoned under disk pressure — and because the expensive part of that harness is the
+brute-force `nearest_exact` **recall oracle**, not the build. `examples/hnsw_build_scaling`
+drops the oracle and times **only** `VectorIndex::build_with`, which is what §7.3 actually
+needs, so the 1M point costs a build instead of a build plus an O(n_query × n_base) scan.
+
+It emits no recall and no QPS column and adds **no gate** — it is a measurement harness, not a
+per-commit runner (`run.sh` is unchanged). SIFT1M is not redistributable in-repo, so the
+operator supplies the base vectors in the same raw f32 format `sift_ef_sweep` reads (`u32` LE
+`n`, `u32` LE `dim`, then `n × dim` `f32` LE). **The `.fvecs` → raw-f32 converter is not
+committed** — `scripts/bench-adapters/vector_lib_adapter.py::read_vecs` parses the TEXMEX
+distribution format but does not emit this one, so the conversion is currently operator glue.
+
+```sh
+cargo build --release -p sparq-vectors --example hnsw_build_scaling --features approx-ann
+# self-test on a tiny synthetic corpus — no dataset needed:
+target/release/examples/hnsw_build_scaling --smoke
+# the sq-ose80.2 measurement — 1M SIFT base vectors at the three shipped HnswConfig presets:
+SPARQ_VECTORS_TMP=/data/scratch \
+  target/release/examples/hnsw_build_scaling /data/ann/sift/base.bin 1000000 40,100,200
+```
+
+`$SPARQ_VECTORS_TMP` places the temporary `.spqv` store (`n × dim × 4` bytes — ~512 MB at
+1M×128; the §7.3 run died on a full `/tmp`). Output is TSV
+(`n dim ef_construction preset store_s build_s vec_per_s`), flushed per row so a long run
+reports incrementally, with a footer recording the corpus and thread count.
+
+**Build wall-clock is NON-CANONICAL unless it ran on the dedicated quiet bench box** under the
+quiet-box protocol; on a shared box the *ranking* of the `ef_construction` levels transfers
+where the absolute seconds do not. A measured 1M point replaces the §7.3 extrapolation only
+when it comes from the canonical box, and does not go into markdown as a hard-coded number
+(AGENTS.md) — it belongs in the gap record's own measurement table with its provenance.

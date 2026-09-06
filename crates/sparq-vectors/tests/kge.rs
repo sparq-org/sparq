@@ -16,8 +16,8 @@
 
 use sparq_reason::Profile;
 use sparq_vectors::eval::{
-    run_ablation, run_weight_ablation, synthetic_gufo_ttl, synthetic_provenance_ttl,
-    synthetic_relational_ttl, EvalConfig, Splits,
+    run_ablation, run_pooling_ablation, run_weight_ablation, synthetic_gufo_ttl,
+    synthetic_provenance_ttl, synthetic_relational_ttl, EvalConfig, Splits,
 };
 use sparq_vectors::provenance::WeightMode;
 use sparq_vectors::structure::close_for_vectorise;
@@ -228,4 +228,78 @@ fn provenance_weight_changes_the_trained_model() {
         max_abs_diff > 1e-4,
         "provenance-weighting must change the trained embeddings (max|Δ|={max_abs_diff})"
     );
+}
+
+// ---- Phase-4 confidence-weighted POOLING ablation (sq-w2af4) -----------------------------------
+
+/// [OPUS-5] The same load-bearing NO-OP invariant for the POOLING axis: over a provenance-free
+/// graph the weighted pool is the uniform mean, so both arms produce identical embeddings and the
+/// paired MRR/Hits@10 delta is EXACTLY zero. (Confidence-weighted pooling must never change a plain
+/// graph — the design's "defaulting to 1.0 when no provenance exists" guarantee.)
+#[test]
+fn pooling_ablation_is_exact_noop_on_provenance_free_graph() {
+    let ttl = synthetic_relational_ttl(200, 3);
+    let cfg = EvalConfig::small(13);
+    let ab = run_pooling_ablation(&ttl, "turtle", cfg, &[1, 2, 3], 0.25).unwrap();
+    assert_eq!(ab.mrr.mean, 0.0, "provenance-free MRR delta must be exactly 0");
+    assert_eq!(ab.mrr.std, 0.0, "no spread when both arms are identical");
+    assert_eq!(ab.hits10.mean, 0.0, "provenance-free Hits@10 delta must be exactly 0");
+    assert_eq!(ab.off.mrr.mean, ab.on.mrr.mean, "arms must coincide on a plain graph");
+}
+
+/// [OPUS-5] The pooling ablation runs END-TO-END on the provenance-annotated slice (parse → close →
+/// split → train once → pool OFF+ON → rank), producing a well-formed paired delta over multiple
+/// seeds. NO numeric lift is asserted — this is the instrument, not a claim; the honest verdict may
+/// be "no measured lift, abandon".
+#[test]
+fn pooling_ablation_runs_on_provenance_slice() {
+    let ttl = synthetic_provenance_ttl(160, 5);
+    let mut cfg = EvalConfig::small(21);
+    cfg.train.epochs = 40;
+    let seeds = [1u64, 2, 3, 4];
+    let ab = run_pooling_ablation(&ttl, "turtle", cfg, &seeds, 0.25).unwrap();
+    assert_eq!(ab.off.mrr.n, seeds.len(), "one OFF sample per seed");
+    assert_eq!(ab.on.mrr.n, seeds.len(), "one ON sample per seed");
+    assert!(ab.off.queries.mean > 0.0, "must score some held-out queries");
+    assert!(ab.mrr.mean.is_finite() && ab.mrr.se.is_finite());
+    let _adopt = ab.mrr_significant_at(2.0); // n>=2 → a real boolean
+    assert_eq!(ab.mrr.n, seeds.len());
+}
+
+/// [OPUS-5] Proof the pooling weights actually BITE: on the annotated slice the two arms score
+/// differently (the weighted sketch is a genuinely different augmentation, not a silently-ignored
+/// flag) — while a `blend` of `0.0` collapses both arms to the untouched model, so the delta is
+/// exactly zero by construction. Together these show the ablation measures the pooling axis and
+/// nothing else.
+///
+/// The bite comes specifically from the slice's **statement-level** provenance: the pool is keyed
+/// by the asserting triple, so without reified statements every one of a subject's edges shares its
+/// head weight and the two arms would be identical. That precondition is asserted rather than
+/// assumed, so this test cannot quietly go vacuous.
+#[test]
+fn pooling_weights_change_the_scored_model_and_blend_zero_is_a_noop() {
+    let ttl = synthetic_provenance_ttl(160, 11);
+    let mined = sparq_vectors::provenance::ProvenanceWeights::mine(
+        &sparq_core::Graph::load_str(&ttl, "turtle").unwrap(),
+    );
+    assert!(
+        mined.annotated_statements() > 0,
+        "precondition: the slice must carry per-statement provenance for this axis to bite"
+    );
+    let mut cfg = EvalConfig::small(5);
+    cfg.train.epochs = 40;
+    let seeds = [1u64, 2];
+
+    let zero = run_pooling_ablation(&ttl, "turtle", cfg, &seeds, 0.0).unwrap();
+    assert_eq!(zero.mrr.mean, 0.0, "blend=0 leaves both arms at the untouched model");
+
+    let blended = run_pooling_ablation(&ttl, "turtle", cfg, &seeds, 0.5).unwrap();
+    assert!(
+        blended.off.mrr.mean != blended.on.mrr.mean || blended.mrr.std > 0.0,
+        "confidence-weighted pooling must produce a different scored model on an annotated graph"
+    );
+
+    // A malformed blend is rejected, never silently coerced.
+    assert!(run_pooling_ablation(&ttl, "turtle", cfg, &seeds, -1.0).is_err());
+    assert!(run_pooling_ablation(&ttl, "turtle", cfg, &seeds, f32::NAN).is_err());
 }

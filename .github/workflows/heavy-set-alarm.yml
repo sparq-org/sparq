@@ -1,0 +1,118 @@
+# heavy-set-alarm — the ci.yml `HEAVY` load-aware-shard DRIFT alarm.
+# [OPUS-5] sq-6vshe.7 phase 4 (sparq-org/sparq#5563). 🤖 SPARQ agent.
+#
+# WHAT: ci.yml's `test` job splits the suite by LOAD, not count — the measured-heavy
+# recall tests get dedicated shards and the uniform remainder is count-partitioned across
+# three bulk shards. All of that rests on one hand-maintained env, `jobs.test.env.HEAVY`,
+# whose documented upkeep path is a HUMAN noticing a `SLOW [> Ns]` marker in a shard log
+# and editing the filterset. Nothing enforced it, so a newly-slow test silently rejoined a
+# bulk shard and re-skewed the split; the only symptom is a slower merge queue, which
+# nobody attributes back to this env.
+#
+# This lane replaces that human read with a MEASUREMENT. Once a week it runs the whole
+# workspace under nextest's machine-readable `libtest-json-plus` event stream (the same
+# mechanism miri.yml already uses) and hands the per-test wall-times to
+# scripts/heavy_set_alarm.py, which asks whether `HEAVY` is still the measured heavy set.
+# On drift it REDs and files ONE deduped, self-identified issue naming each offending test
+# and its class (UNDECLARED / MISSING / DEMOTED). It never touches `bd` or `.beads` — CI
+# writing the bead store is forbidden repo-wide; the orchestrator reconciles alarm issues
+# into beads out-of-band, exactly as selection-alarm.yml / formal-alarm.yml do.
+#
+# NOT A GATE (same posture as formal-alarm.yml / selection-alarm.yml): scheduled on main,
+# files issues, blocks NO merge. That holds ONLY because this job is DECLARED in
+# `.github/advisory-registry.json` — since #3773 the sole mechanism that makes a check-run
+# non-gating. The tempting wrong premise (sq-huwr8) is "it creates no check-run on a PR
+# head, so the gate cannot see it": ci-summary.yml ALSO runs on `push: branches: [main]`,
+# so a scheduled run on main lands its check-run on exactly the head SHA that gate polls,
+# and the gate waits for the name set to stabilise. Pinned by
+# scripts/tests/test_alarm_lanes_non_gating.py, which discovers `*alarm*.yml` from disk.
+#
+# FAIL-LOUD: the script exits 2 (red) when the DETECTOR breaks rather than reporting a
+# false all-clear — `HEAVY` unreadable, an empty event stream, or test events carrying no
+# `exec_time` at all. A drift alarm that measures nothing while reporting "no drift" is
+# worse than no alarm, so that case is loud by construction.
+#
+# All actions are SHA-pinned (code-scanning / Scorecard posture). The script is self-tested
+# hermetically as the first step of every run (a broken detector reds the run before it is
+# trusted to measure anything).
+name: heavy-set-alarm
+
+on:
+  # Weekly, Mondays 08:19 UTC. Weekly (not nightly) because this lane pays a FULL
+  # workspace build + test run purely to measure, the drift it watches accumulates over
+  # weeks, and one open issue is the standing pressure either way. The slot is clear of
+  # every other cron in this repo and sits after the nightly band has drained, so it never
+  # contends for their runner window.
+  schedule:
+    - cron: "19 8 * * 1"
+  # Manual run for validation / triage.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heavy-set-alarm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  alarm:
+    name: HEAVY-set drift alarm
+    runs-on: ubuntu-latest
+    # A full workspace build + test run, with headroom over the measured shard budget so a
+    # merely slow runner produces a verdict rather than a silent cancellation — the exact
+    # failure mode formal-alarm.yml exists to catch on the nightly formal lanes.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # file the drift issue (idempotent, labelled, one per subject)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # FIRST: a broken detector must red before it is trusted to measure anything.
+      # Hermetic (no cargo, no gh, no network) and stdlib-only, so it costs seconds.
+      - name: Self-test the alarm (hermetic fixtures)
+        run: python3 scripts/heavy_set_alarm.py --self-test
+      # Same reclaim the ci.yml shards do: this job builds the whole workspace on a runner
+      # that starts with only ~14 GB free.
+      - name: Free runner disk before build + measure
+        run: ./scripts/ci-free-disk.sh
+      - name: Rust (preinstalled stable)
+        # CI-economy, same rationale as ci.yml: the runner image ships a rustup stable
+        # toolchain, so `rustup default` never triggers a toolchain download.
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+      # THE MEASUREMENT. Three flags are load-bearing:
+      #   * `--features approx-ann,filtered-ann,vec-predicate` MIRRORS ci.yml's
+      #     `cargo nextest archive` line. The shards run that archive, so measuring a
+      #     different feature set would measure a different test POPULATION and could
+      #     report drift against tests the shards never run (or miss ones they do).
+      #   * `--all-targets`, likewise, matches the archive's target set.
+      #   * `--no-fail-fast` so a single failing test cannot truncate the run and leave the
+      #     remaining tests unmeasured — this job is a stopwatch, not a test gate.
+      # Test FAILURES are deliberately not this lane's business (ci.yml gates them on every
+      # PR), so nextest's exit code is tolerated; what must never be tolerated is a missing
+      # or timing-less stream, and the script REDs (exit 2) on exactly that. nextest writes
+      # the JSON events to stdout interleaved with its human output; the parser skips
+      # non-JSON lines, as scripts/miri_classify_verdict.py does.
+      - name: Measure per-test wall-time across the workspace
+        env:
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+        run: |
+          cargo nextest run --workspace --all-targets \
+            --features approx-ann,filtered-ann,vec-predicate \
+            --no-fail-fast \
+            --message-format libtest-json-plus --message-format-version 0.1 \
+            > heavy-set-events.jsonl \
+            || echo "::warning title=measurement run had test failures::nextest exited non-zero; the timing stream is still analysed (test failures are ci.yml's gate, not this alarm's). An UNUSABLE stream reds the next step."
+      - name: Is ci.yml HEAVY still the measured heavy set?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/heavy_set_alarm.py --events heavy-set-events.jsonl

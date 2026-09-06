@@ -1,0 +1,94 @@
+# [SONNET-4.6] sq-gg0qq.7 — Solid Conformance Test Harness (CTH) lane for sparq-lws-core.
+#
+# OPT-IN BY CONSTRUCTION: `workflow_dispatch` ONLY. There is deliberately no `pull_request`, `push`,
+# `merge_group` or `schedule` trigger, for three reasons:
+#
+#  1. The harness needs Docker, network egress, a live Keycloak realm at localhost:8080 with the
+#     conformance-alice/bob DPoP service-account clients, and an `ath`-patched CTH image. A
+#     GitHub-hosted runner has none of those, so a PR-triggered leg could only ever be red.
+#  2. `ci-summary` treats EVERY check-run on the head SHA as GATING unless it is declared in
+#     `.github/advisory-registry.json` — including a check-run left by a manual dispatch against a PR
+#     branch, and including a scheduled run whose check-run lands on the main head SHA that the
+#     push-triggered gate polls (the silent-gating trap documented in that registry). Both jobs here
+#     are therefore DECLARED advisory as well as dispatch-only: belt and braces.
+#  3. CI congestion collapse — the harness is a long, Docker-heavy, network-bound run. Keeping it off
+#     the per-PR path is the whole point; `concurrency` below additionally caps it to ONE run at a
+#     time repo-wide, and does NOT cancel in progress (a half-torn-down harness leaves stray
+#     containers).
+#
+# See crates/sparq-lws-core/conformance/README.md for the apparatus and the external prerequisites.
+name: lws-cth
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_harness:
+        description: "Run the actual CTH harness (needs a runner with Docker + the Keycloak realm + the ath-patched image). Off = preflight only."
+        type: boolean
+        default: false
+      runner:
+        description: "Runner label for the harness job. ubuntu-latest CANNOT satisfy the prerequisites; use a self-hosted runner that has the stack."
+        type: string
+        default: ubuntu-latest
+      sparq_backend:
+        description: "SPARQ data-path backend for the run (memory = the conformance baseline; embedded = the in-process engine)."
+        type: choice
+        options: [memory, embedded]
+        default: memory
+
+# Cap the lane to a single concurrent run repo-wide. `cancel-in-progress: false` on purpose: cancelling
+# mid-run orphans the socat sidecar container and the detached server process.
+concurrency:
+  group: lws-cth
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Hermetic, cheap, no Docker: lint the harness script and validate that the committed config and the
+  # pinned floor still agree with each other and with the crate. This is the part of the lane that can
+  # be trusted to run anywhere, and it is what catches the realistic rot (a renamed binary, a
+  # TestSubject/`--target` mismatch, a baseline whose suite arithmetic stopped adding up).
+  preflight:
+    name: lws-cth preflight (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: shellcheck run.sh
+        run: shellcheck crates/sparq-lws-core/conformance/run.sh
+
+      - name: validate the pinned baseline + config wiring
+        run: python3 crates/sparq-lws-core/conformance/check-conformance-config.py
+
+  harness:
+    name: lws-cth harness (advisory)
+    needs: preflight
+    if: ${{ inputs.run_harness }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    env:
+      PSS_SPARQ_BACKEND: ${{ inputs.sparq_backend }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: build the server binary
+        run: cargo build --release -p sparq-lws-core
+
+      # run.sh pre-flights every external prerequisite (Keycloak realm, ath-patched CTH image, Docker)
+      # and fails with an actionable message if the runner does not have them. It then ratchets the
+      # generated score against conformance/baseline.json, so a regression fails this step.
+      - name: run the Solid CTH
+        run: ./crates/sparq-lws-core/conformance/run.sh
+
+      - name: upload the EARL + HTML reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lws-cth-reports-${{ inputs.sparq_backend }}
+          path: crates/sparq-lws-core/conformance/reports/
+          if-no-files-found: warn

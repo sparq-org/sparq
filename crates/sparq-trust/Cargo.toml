@@ -12,8 +12,8 @@ categories.workspace = true
 readme = "README.md"
 # Research-stage proof-of-concept (epic sq-pfae, issue #940). The ZK estate it
 # composes with is externally UNAUDITED (sq-qhy4); this crate verifies an issuer
-# signature but does NOT deliver unlinkable/anonymous presentation. NOT published.
-publish = false
+# signature but does NOT deliver unlinkable/anonymous presentation. [GPT-5.6]
+# Published only as the default-off dependency used by sparq-server and sparq-solid.
 
 [[example]]
 name = "admission_cost"
@@ -52,7 +52,14 @@ store = []
 # vendored `sec-prop:` ontology lacks (sq-5oru9; design §4.2). Dependency-free — it
 # is `const &str` data + a TTL drift test, strictly additive (no new dep, no new edge
 # onto the lean default build).
-secprop-vocab = []
+# [OPUS-5] sq-3705: those constants + the Turtle + the drift test now live ONCE in
+# the ZERO-dependency `sparq-secprop-vocab` leaf (this crate depends on sparq-zk, so
+# sparq-zk could not import them back — a cycle; sparq-policy could not either without
+# giving up its lean graph). `secprop` re-exports the leaf, so the public surface
+# `sparq_trust::secprop::SECX_…` is unchanged and the "no new dep on the lean default
+# build" property still holds: the leaf has NO dependencies of its own and is pulled
+# in only by this default-OFF feature.
+secprop-vocab = ["dep:sparq-secprop-vocab"]
 # [FABLE-5] sq-6syab.2 — the `trustx:` certification-scope vocabulary (`framework_vocab`
 # module + `trust-framework.ttl`): the trust-expression program's layer for expressing
 # framework-certified-issuer trust and issuer certification scope (issue #1592; design
@@ -71,6 +78,29 @@ framework-vocab = []
 # over the RDFC-1.0 signature primitive this crate already carries — NO new dependency,
 # strictly additive (the lean default build is byte-identical with it OFF).
 cert-graph = ["framework-vocab"]
+# [FABLE-5] sq-6syab.4 — holder-side trust-expression contract evaluation, CLEAR path
+# (`expression` module; issue #1592, design `research/trust-expression-spec.md` §3.1–3.5):
+# parse the verifier→holder request (query + trust-requirements graph + nonce), generate
+# the §3.1 normative reference rewrite Q→Q' (conjoining issuer membership / positive
+# status-attestation validity at t / certification-scope conformance), evaluate Q' via
+# `sparq-engine` over the holder's attested named-graph dataset, and assemble the
+# provenance-encoded response (RDF 1.2 reifier normative form + the named-graph/PROV-O
+# runnable-today mapping). REUSES (does not duplicate) the status-list positive-status
+# machinery, the secprop/ODRL `admissible()` pre-check, the `did` issuer binding, and the
+# `framework-vocab` trustx: terms — hence the implied features. Pulls `sparq-engine`
+# (default-features OFF) + the vendored `spargebra` parser ONLY behind this default-OFF
+# feature: the lean default build is byte-identical with it OFF. Fail-closed: no
+# admissible derivation ⇒ no binding; the response provenance suffices for an independent
+# verifier re-check (Q' over R).
+expression = [
+    "framework-vocab",
+    "status-list",
+    "did",
+    "secprop-admissibility",
+    "dep:sparq-engine",
+    "dep:spargebra",
+    "dep:getrandom",
+]
 # [OPUS-4.8] sq-ufsi9 — the N3 proof-admissibility ruleset over `sparq-reason` (the
 # §4.3 ODRL → admissible-proof-set reduction: strongerThan-closure / atLeast /
 # overDimension / satisfies, plus the Rust default-deny universal). Pure N3-text data
@@ -118,15 +148,15 @@ status-list = []
 status-list-flate2 = ["status-list", "dep:flate2"]
 
 [dependencies]
-sparq-core = { path = "../sparq-core", default-features = false }
-sparq-reason = { path = "../sparq-reason", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", default-features = false }
 # RDFC-1.0 canonical unit the ZK estate already commits over (step 1 of the gate).
-sparq-canon = { path = "../sparq-canon" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.1" }
 # The CHECKED issuer signature over the RDFC-1.0 commitment (step 2). The ZK estate
 # is research-grade and externally UNAUDITED (sq-qhy4) — see the crate docs.
-sparq-zk = { path = "../sparq-zk" }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1" }
 # The `forShape` statement-type primitive (forPredicate desugars to it; step 3).
-sparq-shacl = { path = "../sparq-shacl", default-features = false }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `did` feature only. Parses a fetched `did:web` DID document (JSON). The
 # `did:key` path needs no JSON; the default build pulls neither.
@@ -135,6 +165,26 @@ serde_json = { version = "1", optional = true }
 # spec-mandated GZIP `encodedList` payload (`sq-pfae.7`). The plain `status-list` feature is
 # dependency-free over a caller-supplied decoder; the default build pulls neither.
 flate2 = { version = "1", optional = true }
+# OPTIONAL — `expression` feature only (sq-6syab.4). The SPARQL engine that evaluates the
+# §3.1 reference rewrite Q' over the holder's attested named-graph dataset, and the vendored
+# SPARQL parser that fail-closed-scopes the supported query fragment (ASK/SELECT over one
+# basic graph pattern). default-features OFF on the engine so the opt-in build stays as lean
+# as the engine allows; the DEFAULT sparq-trust build pulls neither (strict additivity).
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", optional = true, default-features = false }
+spargebra = { workspace = true, optional = true }
+# OPTIONAL — `expression` feature only (issue #4621). The OS CSPRNG behind
+# `ChallengeNonce::generate`, the verifier-side construction path for the
+# challenge-response freshness binding. Same 0.4 line — and same `fill()` API — the
+# `sparq-zk` salt mint already draws from, and `sparq-zk` is an UNCONDITIONAL
+# dependency of this crate, so this adds no new edge to the workspace dependency
+# graph at all; the default sparq-trust build pulls no new code either way.
+getrandom = { version = "0.4", optional = true }
+# OPTIONAL — `secprop-vocab` feature only (sq-3705). The shared `sec-prop:`/`secx:` IRI
+# constants + the canonical `secprop-ext.ttl`, single-sourced in a ZERO-dependency leaf
+# so `sparq-zk` (which this crate depends on) and the lean `sparq-policy` can share them
+# without a cycle. It has no dependencies of its own, so the opt-in build grows by the
+# `const &str` table alone and the default build pulls nothing.
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.1", optional = true }
 
 # Test-only: parse-validate the published machine-readable vocabulary
 # `ontologies/trust/trust.ttl` so the Turtle a working group reads stays valid

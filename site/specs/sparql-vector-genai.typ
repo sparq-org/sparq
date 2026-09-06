@@ -1,16 +1,20 @@
 // [FABLE-5] sq-rvgr2.4 — SPARQL Vector & GenAI Extension, an Unofficial Proposal Draft.
 // Revision 2 (review round 1): normativity decoupled from implementation status.
+// Revision 3 ([SONNET-4.6] sq-vv2l0): the Editor's-note TODOs for code-level details confirmed
+// against crates/sparq-vectors and resolved into the text.
 //
-// GROUNDING. Every statement about the sparq implementation is grounded in the read-only
-// estate recon for the vector/GenAI surface (research/specs/vector-genai-estate-recon.md,
-// branch docs/fable-program-recon-records): the built-and-tested surface of the opt-in
-// sparq-vectors crate plus the adjacent sparq-nlq / sparq-introspect crates. Normative
-// requirements in this revision are NOT gated on build status: the normative sections state
-// what a conforming implementation MUST do, and the informative implementation-status section
-// reports which requirements the current sparq build satisfies. Designs offered for a FUTURE
-// revision are labelled with a "Proposal" aside; code-level details the recon digest does not
-// pin are marked with an "Editor's note" (a TODO to confirm against the implementation)
-// rather than guessed.
+// GROUNDING. Revisions 1-2 were grounded ONLY in the read-only estate recon for the
+// vector/GenAI surface (research/specs/vector-genai-estate-recon.md, branch
+// docs/fable-program-recon-records) — the built-and-tested surface of the opt-in sparq-vectors
+// crate plus the adjacent sparq-nlq / sparq-introspect crates — and marked what that prose
+// digest could not pin with an "Editor's note" rather than guessing. Revision 3 checked those
+// notes against the crate sources; two of them changed a verdict rather than confirming one
+// (VG-MET-2 is NOT satisfied; VG-GOV-2 is unsatisfiable from this repository), and both are
+// recorded as such. Normative requirements are NOT gated on build status: the normative
+// sections state what a conforming implementation MUST do, and the informative
+// implementation-status section reports which requirements the current sparq build satisfies.
+// Designs offered for a FUTURE revision are labelled with a "Proposal" aside; a detail this
+// draft deliberately leaves to a future revision keeps an "Editor's note".
 //
 // HONESTY. This draft cites NO measured performance or accuracy figures: every measurement in
 // the underlying estate is work-box non-canonical, and the spec factory's build-boundary
@@ -295,10 +299,18 @@ on adoption.
   publishing an equivalence mapping from `vec:` terms to their successors and to maintaining
   the vendor namespace, deprecated, for existing data and queries.
 
-#ednote[
-  No namespace document is published at the namespace IRI today (@sec-impl-status).
-  Publishing one — and choosing the machine-readable form of the per-term revision annotation
-  — is a precondition for any revision beyond this draft.
+#note[
+  #strong[Dereferenceability, confirmed against the deployment.] No namespace document is
+  published at the namespace IRI, and none can be published from the sparq repository as it
+  stands: the project's site is served from a #emph[different] host than the one the namespace
+  IRI names, and the repository carries no route or asset that answers at `sparq.dev` at all.
+  The namespace IRI therefore does not dereference. Satisfying VG-GOV-2 requires either serving
+  the namespace document at the IRI this specification already fixed, or re-basing the
+  vocabulary onto a host the project demonstrably serves — and the second option collides with
+  the persistence rule above, which is exactly the liability a vendor-administered namespace
+  carries. A Working or Community Group adopting this document inherits the choice
+  (@sec-open). The machine-readable form of the per-term revision annotation remains unchosen
+  independently of where the document is served.
 ]
 
 = Vector search graph patterns <sec-patterns>
@@ -332,12 +344,14 @@ The parenthesised forms are #strong[ordinary SPARQL RDF collections] — syntact
 - The subject of `vec:search` MUST be a two-element collection, exactly `( ?node ?score )`.
   #rid("VG-GRM-2")
 - The neighbour position (`?node`) MUST be a variable. #rid("VG-GRM-3")
+- The score position of `vec:search` (`?score`) MUST likewise be a variable. #rid("VG-GRM-4")
 
-#ednote[
-  The grounding digest pins a hard error for a non-variable #emph[neighbour] position; it does
-  not capture whether a non-variable #emph[score] position is likewise a hard error or is
-  handled otherwise. To be confirmed against the implementation before this draft advances.
-]
+Both subject positions carry the same requirement for the same reason: each names a binding the
+pattern #emph[produces]. A constant in either position asks the processor to produce a binding
+for something that is already fixed, which cannot mean what its author intended — so it is an
+error (VG-ERR-2, VG-ERR-7), not a filter and not an empty result. In particular a constant in the
+score position MUST NOT be read as a similarity threshold; thresholding is expressed by an
+ordinary `FILTER` over the bound score variable.
 
 == Argument typing <sec-typing>
 
@@ -363,7 +377,8 @@ each of the following cases:
 + either argument list has the wrong number of elements; #rid("VG-ERR-4")
 + the query vector's dimension does not equal the store's dimension; #rid("VG-ERR-5")
 + an argument list is malformed, dangling, or cyclic (the `rdf:first`/`rdf:rest` structure
-  does not form a well-formed finite list). #rid("VG-ERR-6")
+  does not form a well-formed finite list); #rid("VG-ERR-6")
++ the score position of `vec:search` is not a variable (@sec-patterns). #rid("VG-ERR-7")
 
 Failing loudly is a design decision: every one of these conditions indicates a query that
 cannot mean what its author intended, and returning an empty (or worse, partial) result would
@@ -544,6 +559,39 @@ On vectors normalised this way the cosine relates to Euclidean distance by
 `cos = 1 − d²/2`, which is how an implementation may derive it from a Euclidean-native index
 (informative).
 
+#note[
+  #strong[Where sparq normalises, confirmed against the implementation.] The two requirements
+  above bite differently on the two execution modes, and the sparq build satisfies them
+  unevenly.
+
+  On the #emph[answer-exact] path nothing is normalised at either end. The primary `.spqv`
+  container persists each vector exactly as it was supplied — the write path validates
+  dimension, finiteness, and non-zeroness, and rejects an all-zero vector, but it does not
+  rescale — so #strong[VG-MET-2 is not satisfied]. Instead the exact scan computes the cosine
+  with both norms taken at comparison time, which is scale-invariant: the #emph[scores] are
+  identical to those the normalised regime would produce, so VG-MET-3 is satisfied in effect
+  rather than as a distinct query-time step. The residue of VG-MET-2 is therefore not about
+  score values but about #emph[interchange]: a consumer that reads a `.spqv` and compares the
+  raw `f32` rows itself — with a dot product, or through a Euclidean-native index via the
+  `cos = 1 − d²/2` identity above — gets wrong answers from an unnormalised container, and the
+  container declares nothing that would warn it (the VG-MET-1 gap of @sec-impl-status).
+
+  On the #emph[approximate] path normalisation is explicit, but at #emph[index]-build time
+  rather than store-build time: the in-memory graph caches L2-normalised copies of the store's
+  vectors, the persisted `.spqg` node records hold the normalised vector (@sec-formats), and the
+  query vector is normalised before the search — an all-zero query has no direction and yields
+  no results, agreeing with VG-DEG-2 and with the exact path. That regime satisfies VG-MET-3
+  literally and satisfies VG-MET-2's intent one container removed from where this specification
+  places it.
+
+  The gap this leaves is not that vectors are compared wrongly today; it is that "L2-normalised"
+  is a property of neither the persisted primary container nor any declaration it carries, so
+  nothing detects a store whose rows were never normalised being handed to a consumer that
+  assumes they were. Closing it means normalising on the `.spqv` write path, or recording the
+  normalisation regime in the provenance record and enforcing it — the latter being what
+  VG-PROV-1 already REQUIRES.
+]
+
 == Cross-metric and cross-normalisation comparison
 
 A processor MUST NOT evaluate a query against a store under a metric or normalisation regime
@@ -659,19 +707,82 @@ writes version 2 by default and does not yet satisfy VG-PROV-1.
 == Sibling containers
 
 #emph[This subsection is informative.] Three sibling containers exist in the sparq estate and
-share the same magic-plus-version discipline:
+share the same magic-plus-version discipline — a four-byte ASCII magic, a `u32` version, and
+little-endian integers throughout. Their layouts are recorded here as confirmed against the
+implementation, so a future revision can adopt or delegate them from a known starting point
+rather than from a blank.
 
-- `.spqg` (magic `SPQG`): an on-disk DiskANN/Vamana proximity graph for approximate mode.
-- `.spqd` (magic `SPQD`): a crash-durable incremental delta sidecar (add, remove, update,
-  compact), tied to the store generation it patches.
-- `.spqs` (magic `SPQS`): a self-describing schema header for structure-aware vectorisation
-  (typed-literal encoder blocks, each carrying the per-block `Metric` tag noted in
-  @sec-metric).
+`.spqg` (magic `SPQG`, version 2): an on-disk DiskANN/Vamana proximity graph for approximate
+mode.
 
-Their byte-level layouts are not pinned by this draft's grounding digest and are therefore
-#strong[not part of this revision's normative surface]: a format whose bytes are unspecified
-cannot carry conformance language. A future revision must either specify the layouts
-(confirmed against the implementation) or delegate them to a named container registry.
+```text
+0   magic        b"SPQG"                              4 bytes
+4   version      u32 = 2                              4
+8   dim          u32                                  4
+12  degree R     u32   (max out-neighbours)           4
+16  count        u64   (nodes)                        8
+24  medoid       u32   (entry-point slot)             4
+28  enc_tag      u32   (0 = none, 1 = PQ cache)       4
+32  fingerprint  dict_len u64, triples u64, hash u64  24   (@sec-staleness)
+56  nodes        count × node record
+
+node record: id u32 | degree u32 | vector [dim] f32 | nbrs [R] u32 (slot indices)
+optional PQ section (present iff enc_tag = 1, appended after the nodes):
+  magic b"SPQP" | cb_len u64 | codebook [cb_len] bytes | stride u32 | codes
+```
+
+A version-1 `.spqg` has the same first 32 bytes and no fingerprint block; it still opens, and
+is reported as unverifiable rather than silently assumed fresh. Note that the per-node vector
+is stored #strong[L2-normalised] — the observation that pins the normalisation question of
+@sec-metric.
+
+`.spqd` (magic `SPQD`, version 1): a crash-durable incremental delta sidecar, tied to the store
+generation it patches.
+
+```text
+0   magic         b"SPQD"                              4 bytes
+4   version       u32 = 1                              4
+8   dim           u32                                  4
+12  append_count  u64                                  8
+20  tomb_count    u64                                  8
+28  reserved      zero                                 4
+32  fingerprint   base graph fingerprint               24   (@sec-staleness)
+56  appends       append_count × (id u32, [dim] f32)
+    tombstones    tomb_count × (id u32)
+```
+
+The header fingerprint is the base generation the delta is keyed against, so replaying a delta
+onto a base of a different generation is rejected rather than silently mis-keyed; an all-zero
+block decodes as unbound, exactly as the `.spqv` fingerprint block does. The decoder recomputes
+the exact expected total length from the header and rejects a file that is shorter #emph[or]
+longer, so a truncated or trailing-garbage sidecar is a descriptive error rather than a short
+replay.
+
+`.spqs` (magic `SPQS`, version 2): a self-describing schema header for structure-aware
+vectorisation.
+
+```text
+0   magic     b"SPQS"                              4 bytes
+4   version   u32 = 2                              4
+8   dim       u32   (total structured row width)   4
+12  n_blocks  u32                                  4
+16  blocks    n_blocks × block record
+
+block record (v2, 14 bytes): encoder u8 | metric u8 | offset u32 | width u32 | weight f32
+block record (v1, 10 bytes): as v2 without the trailing fusion weight
+```
+
+Each block carries the per-block `Metric` tag noted in @sec-metric. The parser re-validates that
+the blocks partition `[0, dim)` contiguously with no gap or overlap and cross-checks the
+recomputed width against the stored `dim` field, so a header that lies about its own dimension
+is rejected. A version-1 header parses with every fusion weight defaulted.
+
+These layouts remain #strong[outside this revision's normative surface] — not now because their
+bytes are unknown, but because each is an implementation-internal acceleration or sidecar format
+carrying its own independent version line, and a conformance class for them would freeze
+implementation detail that the query semantics of this specification do not depend on. A future
+revision must decide deliberately: adopt one or more of them normatively, or delegate all three
+to a named container registry.
 
 == Graph fingerprint and staleness contract <sec-staleness>
 
@@ -767,11 +878,14 @@ is defined]; within a query, hybrid behaviour today is what you compose yourself
 
 = Provenance-weighted retrieval <sec-pkg>
 
-#emph[This section is informative.] It cannot be normative in this revision because the
-assurance vocabulary's `secx:` prefix is not pinned to a full namespace IRI by the grounding
-digest — a vocabulary term whose IRI is unknown cannot carry conformance language. A future
-revision must either state the full IRIs (confirmed against the implementation) or remove
-the vocabulary from the specification.
+#emph[This section is informative.] The `secx:` prefix is now pinned against the implementation
+(below), so the original blocker — a vocabulary term whose IRI is unknown cannot carry
+conformance language — is cleared. A different one has taken its place: the implementation
+recognises #emph[two] namespaces for the assurance classes and designates neither as canonical,
+and a normative section cannot require recognition of an alias set without saying which IRI a
+conforming producer writes. A future revision must designate one form canonical (retaining the
+other as a recognised-on-input alias, or dropping it) before this section can carry conformance
+language.
 
 Retrieval over a knowledge graph whose triples carry assurance metadata can weight candidates
 by how well-supported they are. The sparq implementation's reader recognises the following
@@ -783,22 +897,35 @@ vocabulary:
   table.header[Term][Meaning],
   [`pkg:confidence` (`https://sparq.dev/ns/pkg#confidence`)], [a numeric confidence asserted
     for a statement],
-  [`pkg:assurance`], [an assurance class; recognised objects are `secx:Proven`,
-    `secx:Claimed`, and `secx:Conjectured`],
-  [`prov:wasDerivedFrom`], [PROV-O derivation #cite("PROV-O"), used to trace a statement to
-    its source],
-  [`pkg:discoveredFrom`], [the discovery channel a statement arrived through],
+  [`pkg:assurance` (`https://sparq.dev/ns/pkg#assurance`)], [an assurance class; recognised
+    objects are `secx:Proven`, `secx:Claimed`, and `secx:Conjectured`],
+  [`prov:wasDerivedFrom` (`http://www.w3.org/ns/prov#wasDerivedFrom`)], [PROV-O derivation
+    #cite("PROV-O"), used to trace a statement to its source],
+  [`pkg:discoveredFrom` (`https://sparq.dev/ns/pkg#discoveredFrom`)], [the discovery channel a
+    statement arrived through — a sub-property of `prov:wasDerivedFrom`, scanned in addition to
+    the super-property so lineage resolves on a graph whose sub-to-super entailment has not been
+    materialised],
 )
+
+The `secx:` prefix, confirmed against the implementation, is #strong[two] namespaces rather than
+one: the reader recognises each assurance class under both
+`https://sparq.dev/ns/secx#` and `https://w3id.org/zkp-sparql/sec-prop#`, so
+`https://sparq.dev/ns/secx#Proven` and `https://w3id.org/zkp-sparql/sec-prop#Proven` are treated
+alike, and correspondingly for `Claimed` and `Conjectured`. The first is a sparq vendor form
+carried by the project's own fixtures; the second is the `w3id.org` form of the sec-prop
+extension the vocabulary reuses for this axis. Neither is designated canonical, which is why
+this section stays informative.
 
 The triple weight is computed as
 `w(t) = clamp(assurance_mult × confidence × source_reliability, floor, 1.0)` and the reader
 is #strong[fail-open]: on a plain graph carrying none of this vocabulary every weight is 1.0
 and retrieval is unchanged.
 
-#ednote[
-  The full namespace IRI bound to the `secx:` prefix must be confirmed against the
-  implementation (the grounding digest does not pin it) before any future revision can make
-  this section normative or implementable from the text alone.
+#note[
+  The fail-open default is a security property as much as an ergonomic one, and it cuts both
+  ways: it means an attacker who cannot write the vocabulary cannot #emph[suppress] retrieval
+  either, but also that omitting the vocabulary silently restores uniform weighting. See
+  VG-SEC-3 in @sec-security.
 ]
 
 #note[
@@ -898,12 +1025,44 @@ grounding estate takes no position beyond this warning.)
 bounded, finite-checked parsing of foreign arrays — and the fail-closed provider-response
 validation (@sec-embedding) are this extension's parsing attack surface controls.
 
-#ednote[
-  The trust model for #emph[opening] an untrusted `.spqv` container (as opposed to importing
-  foreign numeric data) is not pinned by the grounding digest — e.g. whether every header
-  field and index entry is bounds-checked against the mapped length. It must be documented
-  before this draft advances; the sibling containers (informative, @sec-formats) need the
-  same treatment if a future revision specifies them.
+#strong[Opening an untrusted container.] Importing foreign numeric data (VG-IMP-1) and
+#emph[opening a container] are distinct attack surfaces, and this revision states the second
+normatively:
+
+- A processor opening a vector store from an untrusted source MUST validate the container
+  before any vector read: the magic and version; every length-prefixed header block against the
+  remaining length; the total file length against the size implied by the declared dimension and
+  count, computed so that an overflowing declaration is rejected rather than wrapping; and every
+  entry of the identifier index, so that identifiers are strictly ascending and every slot is in
+  range and used exactly once. After that pass no subsequent read may depend on further
+  validation. #rid("VG-SEC-4")
+- A successful open MUST NOT be treated as evidence of a container's authenticity or
+  provenance. Validation establishes well-formedness only. #rid("VG-SEC-5")
+
+VG-SEC-5 is the sharper of the two. A #emph[well-formed] `.spqv` is entirely attacker-authorable:
+its vectors are arbitrary, and its embedded graph fingerprint (@sec-staleness) is a plain header
+field, so a hostile store can be made to pass the staleness check against a graph it was never
+built from and then return whatever neighbours its author chose. The fingerprint is an integrity
+control against #emph[accident] — a stale or mismatched store — and not against an adversary.
+Deployments that accept stores from outside their trust boundary need an authenticity control of
+their own (a signature over the container bytes, or transport the store never leaves), and this
+draft does not specify one.
+
+#note[
+  The sparq implementation satisfies VG-SEC-4 for the primary container: the header, the exact
+  total length under checked arithmetic, and the whole identifier index are validated eagerly on
+  open — from a memory map and from an in-memory byte buffer alike, through the same validator —
+  so the vector data itself, which is left to be paged in lazily, is reached only behind an index
+  already proved consistent. Big-endian targets are rejected outright rather than
+  byte-swapped. The property that this validator neither panics nor reads out of bounds for
+  #emph[any] input buffer carries a bounded model-checking proof over all buffers up to a small
+  size, complementing coverage-guided fuzzing, a deterministic corruption sweep, and
+  sanitiser runs, which reach further but only on the inputs they happen to generate. The
+  sibling containers of @sec-formats are validated in the same style — exact-length checks with
+  descriptive errors rather than short reads — though without the model-checking proof.
+
+  Nothing in the estate addresses VG-SEC-5: sparq has no signature over, or authenticated
+  channel for, a `.spqv` container.
 ]
 
 #strong[Integrity via the staleness contract.] Serving vectors against the wrong dictionary
@@ -952,8 +1111,17 @@ over:
 + #strong[Named / multi-vector stores and in-query hybrid.] Both are future-revision designs
   (@sec-hybrid).
 + #strong[Container bindings.] The byte-level binding of the provenance record (a version-3
-  `.spqv` header), the sibling-container layouts, and the `secx:` namespace IRI all need to
-  be pinned against the implementation or delegated to a registry (@sec-formats, @sec-pkg).
+  `.spqv` header) still needs to be pinned or delegated to a registry (@sec-formats). The
+  sibling-container layouts are now recorded (@sec-formats) but the adopt-or-delegate decision
+  is open, and the `secx:` vocabulary is now pinned to two namespaces (@sec-pkg) of which one
+  must be designated canonical.
++ #strong[Namespace dereferenceability.] The namespace IRI this document fixes is not served by
+  the project (@sec-governance), so VG-GOV-2 cannot be satisfied without either serving it or
+  re-basing the vocabulary against the persistence rule of VG-GOV-1.
++ #strong[Container authenticity.] VG-SEC-5 (@sec-security) states that a valid container is not
+  an authentic one, but this draft specifies no authenticity mechanism. Whether one belongs in
+  this specification — a signature block in the container, or an out-of-band obligation — is
+  open.
 + #strong[Calibrated confidence.] Upgrading the asserted-assurance band of @sec-grounded to a
   measured, calibrated confidence requires a reliability evaluation that does not yet exist.
 
@@ -980,7 +1148,7 @@ assertion's identifier is retired, not reassigned. The groups:
   [`VG-FMT`, `VG-STAL`, `VG-IMP`], [@sec-formats], [container layout, staleness, import],
   [`VG-EMB`], [@sec-embedding], [embedding acquisition],
   [`VG-GG`], [@sec-grounded], [grounded generation],
-  [`VG-SEC`], [@sec-security], [deployment obligations],
+  [`VG-SEC`], [@sec-security], [deployment obligations and container trust],
 )
 
 == Conformance test suite
@@ -1000,24 +1168,30 @@ inventory.
 #emph[This section is informative.] It reports, per assertion group, whether the current
 sparq build satisfies this revision. It was originally derived from the project's read-only
 estate recon digest (`research/specs/vector-genai-estate-recon.md`) rather than a fresh code
-audit — this revision was deliberately authored without opening crate sources — so rows
-marked #emph[unconfirmed] must be confirmed against the implementation before this draft
-advances. Exception: the `VG-GOV-3`, `VG-TIE-1`, `VG-MET-4`, and `VG-PROV-5` rows record
-behaviour implemented and tested in the crates #emph[after] that digest was taken, and are
-maintained against the code.
+audit — the first revision was deliberately authored without opening crate sources. The rows
+that revision marked #emph[unconfirmed] have since been checked against the crate sources, and
+the `VG-GOV-3`, `VG-TIE-1`, `VG-MET-4`, and `VG-PROV-5` rows record behaviour implemented and
+tested after the digest was taken; the table below is maintained against the code. Two of those
+checks changed a verdict rather than merely confirming one: `VG-MET-2` moved from
+#emph[unconfirmed] to #emph[not satisfied] (@sec-metric), and `VG-GOV-2` is now known to be
+unsatisfiable from this repository rather than merely unimplemented (@sec-governance).
 
 #table(
   columns: 3,
   align: (left, left, left),
   table.header[Assertions][sparq status][Notes],
   [`VG-VOC-1`], [Implemented, tested], [unrecognised `vec:` IRIs are a hard query error],
-  [`VG-GOV-1..2`], [Not satisfied], [no namespace document is published at the `vec:` IRI,
-    and the machine-readable per-term revision annotation is unchosen],
+  [`VG-GOV-1`], [Satisfied], [no term has been removed or redefined; this is revision 1],
+  [`VG-GOV-2`], [Not satisfied — unsatisfiable as the estate stands], [the `vec:` namespace IRI
+    is not served by the project's site, which publishes under a different host, and the
+    repository carries no asset that would answer at it; the machine-readable per-term revision
+    annotation is separately unchosen (@sec-governance)],
   [`VG-GOV-3`], [Implemented, tested], [the build states vocabulary revision 1 in its crate
     documentation and names it in the VG-VOC-1 unrecognised-term hard error],
-  [`VG-PAT-1..3`, `VG-GRM-1..3`, `VG-TYP-1..2`, `VG-ERR-1..6`], [Implemented, tested],
-    [except: behaviour for a non-variable #emph[score] position is unconfirmed (editor's
-    note, @sec-patterns)],
+  [`VG-PAT-1..3`, `VG-GRM-1..4`, `VG-TYP-1..2`, `VG-ERR-1..7`], [Implemented, tested],
+    [both `vec:search` subject positions go through one bare-variable requirement, so a
+    non-variable #emph[score] position is a hard query error exactly as a non-variable
+    neighbour position is (VG-GRM-4 / VG-ERR-7) — confirmed and pinned by a test],
   [`VG-ORD-1..2`], [Implemented], [unordered `VALUES`-equivalent multiset semantics],
   [`VG-TIE-1`], [Implemented, tested], [boundary-tie membership by ascending N-Triples key on
     both answer-exact paths (unfiltered and mask-filtered); a candidate containing a blank
@@ -1027,15 +1201,25 @@ maintained against the code.
     by the serialisation grammar],
   [`VG-DEG-1..2`], [Implemented, tested], [absent seed and all-zero query yield zero
     solutions],
-  [`VG-DEG-3`], [Unconfirmed], [behaviour at `k = 0` is not pinned by the grounding digest],
+  [`VG-DEG-3`], [Implemented, tested], [`k` is typed as a non-negative integer, so `0` parses
+    and reaches the search, where both answer-exact entry points return the empty result — not
+    an error — for `vec:nearest` and `vec:search`, by vector seed and by node seed alike;
+    confirmed and pinned by a test],
   [`VG-MODE-1..4`], [Implemented], [exact full scan is the default; approximate backends are
     opt-in and documented as recall-below-one],
   [`VG-FILT-1..6`], [Implemented, tested], [mask derivation, post-filter equality, and
     fingerprint-keyed cache invalidation],
   [`VG-MET-1`], [Not satisfied], [no metric or normalisation regime is recorded anywhere;
     cosine is implicit in the mainline path],
-  [`VG-MET-2..3`], [Unconfirmed], [the digest pins cosine-over-L2-normalised but not
-    #emph[where] normalisation happens (store-build vs query time)],
+  [`VG-MET-2`], [Not satisfied (primary container)], [the `.spqv` write path persists vectors as
+    supplied — it validates dimension, finiteness, and non-zeroness but does not rescale — so
+    stored vectors are not L2-normalised before persistence. The `.spqg` proximity graph does
+    store normalised vectors, one container removed from where this assertion places the
+    requirement (@sec-metric)],
+  [`VG-MET-3`], [Satisfied], [explicitly on the approximate path (the query vector is normalised
+    before the search); in effect on the answer-exact path, whose cosine takes both norms at
+    comparison time and is therefore scale-invariant, yielding the scores the normalised regime
+    would yield (@sec-metric)],
   [`VG-MET-4`], [Implemented, tested (declared metrics)], [the mainline query surface rejects
     a store whose persisted provenance declares a non-cosine metric with a hard error; a
     legacy store carrying no record declares nothing, so nothing can be checked against it —
@@ -1062,14 +1246,26 @@ maintained against the code.
     uncalibrated],
   [`VG-SEC-1..3`], [Deployment obligations], [not machine-checkable per se; the HTTPS
     default of @sec-embedding is implemented],
+  [`VG-SEC-4`], [Implemented, tested], [header, exact total length under checked arithmetic, and
+    the whole identifier index are validated eagerly on open — from a memory map and from an
+    in-memory buffer through one validator; big-endian targets are refused. The
+    no-panic/no-out-of-bounds property carries a bounded model-checking proof alongside fuzz,
+    corruption-sweep, and sanitiser coverage (@sec-security)],
+  [`VG-SEC-5`], [Not addressed], [there is no signature over, and no authenticated channel for,
+    a `.spqv` container; a well-formed hostile store can carry arbitrary vectors #emph[and] a
+    forged graph fingerprint, so it passes the staleness check of @sec-staleness],
   [Proposals (@sec-hybrid, @sec-grounded)], [Not built], [in-query fusion, rerank,
     multi-vector stores, constrained decoding — outside the normative surface],
 )
 
 Summary: the sparq build conforms to the retrieval core of this revision (patterns, modes,
-filtered answer-safety, staleness, import, embedding acquisition, grounded generation) but
-#strong[does not conform to this revision as a whole]. The known deltas are `VG-GOV-1..2`,
-`VG-MET-1`, and `VG-PROV-1..4`, plus the unconfirmed rows above.
+filtered answer-safety, staleness, import, embedding acquisition, container validation, grounded
+generation) but #strong[does not conform to this revision as a whole]. No row is unconfirmed any
+longer. The known deltas are `VG-GOV-2`, `VG-MET-1`, `VG-MET-2`, `VG-PROV-1..4`, and `VG-SEC-5`
+— and they are one story rather than five: the estate does not record what its vectors are, so
+it cannot enforce that they are comparable (`VG-MET-1`, `VG-MET-2`, `VG-PROV-1..4`), cannot
+publish what its terms mean (`VG-GOV-2`), and cannot attest where a container came from
+(`VG-SEC-5`).
 
 = References
 

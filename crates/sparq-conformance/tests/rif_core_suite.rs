@@ -101,7 +101,12 @@ mod gated {
     // same-node fires, ?x=<t> substitution end-to-end, head-var bound-by-substitution,
     // chained-equality collapse, substitution-created distinct-ground fail-closed) —
     // the measured `RIF-Core expressivity assertions N` count with the new tests.
-    pub const RIF_CORE_FLOOR: usize = 73;
+    // [SONNET-4.6] sq-anyad — raised 73 → 76: the distinct-ground Equal item of
+    // `equal_atom_audit` went from ONE fail-closed assertion to FOUR (value-equal
+    // numerics validate, value-equal numerics FIRE through the closure, value-unequal
+    // numerics are vacuous, non-numeric pairs still fail closed) as the NUMERIC half of
+    // the value-space deferral landed on the sq-v5evr comparator.
+    pub const RIF_CORE_FLOOR: usize = 76;
 
     /// RIF surface DOCUMENTED out-of-scope for this front-end (the honest move: a
     /// floor reflecting reality + a recorded gap, never a faked pass). Mirrors
@@ -706,7 +711,9 @@ mod gated {
     /// 1. Equal in a conclusion is rejected (non-vacuous — fact head and rule head).
     /// 2. Ground-identity body Equal is trivially true and eliminated at lowering
     ///    (the rule fires as if the atom were absent).
-    /// 3. Distinct ground constants in a body Equal are fail-closed (pending sq-v5evr).
+    /// 3. Distinct ground constants in a body Equal: NUMERIC ones are decided by the
+    ///    shared substrate comparator (value-equal fires, value-unequal is vacuous);
+    ///    NON-numeric ones stay fail-closed (sq-anyad).
     /// 4. Variable / mixed body Equal (`?x=?y`, `?x=t`) is resolved by compile-time
     ///    substitution / unification (sq-26vwp), NOT an owl:sameAs triple pattern:
     ///    V2 same-node unification fires without a sameAs assertion; V1 an asserted
@@ -714,7 +721,7 @@ mod gated {
     ///    chained equalities collapse correctly; a substitution-created distinct
     ///    ground fails closed.
     ///
-    /// [SONNET-4.6] sq-pbz04.5.4 / [OPUS-4.8] sq-26vwp
+    /// [SONNET-4.6] sq-pbz04.5.4 / [OPUS-4.8] sq-26vwp / [SONNET-4.6] sq-anyad
     fn equal_atom_audit(t: &mut Tally) {
         // --- 1. Equal in a CONCLUSION is rejected ---
         // (a) as a fact head
@@ -767,30 +774,59 @@ mod gated {
             "rule with ground-identity body Equal fires correctly",
         );
 
-        // --- 3. Distinct ground constants in body Equal are fail-closed ---
-        // "1"^^xsd:integer = "1.0"^^xsd:decimal requires value-space equality
-        // (sq-v5evr); the validator must reject rather than guess.
+        // --- 3. Distinct ground constants in body Equal: the NUMERIC half is DECIDED,
+        // the non-numeric half stays fail-closed. [SONNET-4.6] sq-anyad
         let xsd_prefix = "http://www.w3.org/2001/XMLSchema#";
-        let mut d3 = Document::new();
-        d3.push(Rule::implies(
-            vec![Atom::Member { obj: var("x"), class: iri("C") }],
-            vec![
-                Atom::Member { obj: var("x"), class: iri("D") },
-                Atom::Equal {
-                    left: Term::Lit {
-                        lex: "1".into(),
-                        datatype: format!("{}integer", xsd_prefix),
-                    },
-                    right: Term::Lit {
-                        lex: "1.0".into(),
-                        datatype: format!("{}decimal", xsd_prefix),
-                    },
-                },
-            ],
-        ));
+        let lit = |lex: &str, dt: &str| Term::Lit {
+            lex: lex.to_string(),
+            datatype: format!("{}{}", xsd_prefix, dt),
+        };
+        // `?x # C :- ?x # D , <l> = <r>` over the single fact `<a> # D`.
+        let ground_equal_doc = |l: Term, r: Term| {
+            let mut d = Document::new();
+            d.push(Rule::fact(Atom::Member { obj: iri("a"), class: iri("D") }));
+            d.push(Rule::implies(
+                vec![Atom::Member { obj: var("x"), class: iri("C") }],
+                vec![
+                    Atom::Member { obj: var("x"), class: iri("D") },
+                    Atom::Equal { left: l, right: r },
+                ],
+            ));
+            d
+        };
+        // (3a) `"1"^^xsd:integer = "1.0"^^xsd:decimal` is value-space TRUE via the shared
+        // substrate comparator (Num::cmp_relational, sq-v5evr/#1646) — eliminated like
+        // `t = t`, so the rule FIRES. Exercised through the REAL closure path.
+        let d3 = ground_equal_doc(lit("1", "integer"), lit("1.0", "decimal"));
         t.ok(
-            matches!(d3.validate(), Err(RifError::DistinctGroundEqual { .. })),
-            "distinct ground constants in body Equal fail-closed pending sq-v5evr",
+            d3.validate().is_ok(),
+            "value-equal numeric ground constants in body Equal validate (sq-anyad)",
+        );
+        {
+            let mut dict3 = Dict::new();
+            let c3 = d3.closure(&mut dict3).expect("closure succeeds");
+            t.ok(
+                has(&dict3, &c3, &ns("a"), RDF_TYPE, &ns("C")),
+                "1^^integer = 1.0^^decimal is value-space TRUE, so the rule fires",
+            );
+        }
+        // (3b) `1 = 2` is value-space FALSE: the body is unsatisfiable, so the rule is
+        // VACUOUS — the closure succeeds and simply derives nothing.
+        let d3b = ground_equal_doc(lit("1", "integer"), lit("2", "integer"));
+        {
+            let mut dict3b = Dict::new();
+            let c3b = d3b.closure(&mut dict3b).expect("closure succeeds");
+            t.ok(
+                !has(&dict3b, &c3b, &ns("a"), RDF_TYPE, &ns("C")),
+                "1 = 2 is value-space FALSE, so the rule derives nothing (vacuous)",
+            );
+        }
+        // (3c) The still-DEFERRED half: a non-numeric literal pair (pred:boolean-equal)
+        // is not decidable by the numeric tower and stays fail-closed.
+        let d3c = ground_equal_doc(lit("true", "boolean"), lit("1", "boolean"));
+        t.ok(
+            matches!(d3c.validate(), Err(RifError::DistinctGroundEqual { .. })),
+            "non-numeric distinct ground constants fail closed (pred:boolean-equal, sq-anyad)",
         );
 
         // --- 4. Variable / mixed body Equal via COMPILE-TIME substitution (sq-26vwp) ---

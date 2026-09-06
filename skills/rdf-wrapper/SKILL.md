@@ -62,19 +62,63 @@ Typed accessors are strict:
 All return `Result<_, AccessError>`; do not silently coerce a mismatched RDF
 datatype.
 
-Six explicitly experimental features implement proposals that remain unlanded
-in rdfjs/wrapper:
+Eleven explicitly experimental, default-off features track proposals that
+remain unlanded in rdfjs/wrapper:
 
 ```toml
 sparq-wrapper = { version = "0.1", features = [
-  "proposed-distinct",
+  "proposed-async-events",
+  "proposed-async-node",
+  "proposed-async-store",
   "proposed-cardinality",
   "proposed-codecs",
+  "proposed-distinct",
   "proposed-graph-scope",
+  "proposed-graph-scope-events",
+  "proposed-json",
   "proposed-observe",
   "proposed-typed-focus",
 ] }
 ```
+
+The async events, async node, and graph-scope events features currently
+expose reserved, empty modules; enabling them adds no API.
+Every other proposal feature is implemented. `proposed-distinct` is exposed as
+inherent `Dataset` methods in the crate root rather than through a `proposed::`
+module. See the
+[per-feature proposal status pages](references/README.md) for the
+implemented and reserved feature inventory. <!-- [SONNET-4.6] sq-1rg2q.1 -->
+
+`proposed-async-store` adds `sparq_wrapper::proposed::async_store` — the
+wrapper shape over a store whose reads are not synchronous (an HTTP endpoint, a
+Solid pod, an out-of-core on-disk index), based on rdfjs/wrapper
+[issue #10](https://github.com/rdfjs/wrapper/issues/10) and
+[draft PR #97](https://github.com/rdfjs/wrapper/pull/97). Implement
+`AsyncStoreBackend` for the backend, then use `AsyncStore` exactly like `Store`.
+
+`AsyncNode::out` / `AsyncNode::r#in` return a `NodeStream` that wraps each term
+into an `AsyncNode` as it arrives: the first node is observable before the
+backend finishes producing, and there is deliberately no `collect`. Building a
+stream polls nothing; dropping one drops the backend stream, so the wrapper
+never polls or drains it again. `NodeStream::next` is cancellation-safe — the
+wrapper buffers nothing of its own.
+
+Whether a dropped traversal also stops in-flight *remote* work is the backend's
+half of the contract: `AsyncStoreBackend` requires an implementation to start no
+I/O before the stream or future it returned is first polled, and to abandon that
+work on drop. Honour it and a partially consumed remote result set is abandoned
+rather than drained; a backend that instead spawns the request eagerly keeps it
+running, because the wrapper holds no handle to it.
+
+The crate depends on no async runtime and contains no executor: `TermStream` is
+`futures_core::Stream` narrowed to `Result<Term, AsyncStoreError>` over
+`std::task` alone, so any executor can drive it and a backend built on the
+async ecosystem forwards to its own stream in one line. A `!Unpin` backend
+stream should be exposed as `Pin<Box<S>>`, which implements `TermStream`.
+`add`/`has`/`delete` validate the subject position synchronously (a literal
+subject is rejected before the backend is asked to do anything) and return the
+backend future, so the call site reads `store.add(s, p, o)?.await?`.
+<!-- [SONNET-4.6] sq-1rg2q.8 -->
 
 `proposed-graph-scope` adds a read-many/write-one `GraphScope` based on
 rdfjs/wrapper draft PR #95. Its reads are the deduplicated projection of
@@ -201,6 +245,10 @@ assert!(store.unsubscribe(subscription));
 `decode_i128` round-trip the full Rust `i128` range as exact `xsd:integer`
 literals. The decoder accepts only that exact datatype and returns
 `CodecError::InvalidInteger` for malformed or out-of-range lexical forms.
+Because `xsd:integer` fixes XML Schema's `whiteSpace` facet to `collapse`,
+boundary whitespace is normalized away before the lexical-to-value mapping, so
+`" 7"^^xsd:integer` decodes as `7` — matching how the query engine values a
+padded numeric lexical — while interior whitespace such as `"+ 1"` is rejected.
 `encode_lang_string` validates a BCP47 language tag and produces an
 `rdf:langString`; `decode_lang_string` returns an owned `LangString` containing
 both `value` and `language`, so a round trip cannot discard the tag. Datatype,
@@ -270,6 +318,54 @@ predicate-wide `subjects()` / `objects()` helpers are available only on the IRI
 focus returned by `NodeFactory::iri`. Match an `AnyNode` variant to recover
 those kind-specific methods, or call `into_node()` to erase the focus kind and
 return to the untyped wrapper.
+
+`proposed-json` adds `sparq_wrapper::proposed::json::JsonProjection`, which
+projects a focus node and its outgoing reachable subgraph to one compact JSON
+string ([open PR #23](https://github.com/rdfjs/wrapper/pull/23)). RDF graphs
+cycle, so the projection never simply recurses: a node it has already met is
+emitted as the reference `{"@ref": "<term>"}`, whose term is the same stable
+identifier the expanded node carries in `@id` (an IRI as itself, any other term
+in N-Triples form). `RepeatedFocus::OnCycle`, the default, references only
+ancestors of the node being written, so a diamond is expanded once per path;
+`RepeatedFocus::OnRepeat` references every node expanded earlier in the
+document, so each node is expanded at most once. `with_max_depth` bounds
+recursion depth (default `DEFAULT_MAX_DEPTH`), truncating to the same reference
+form. <!-- [SONNET-4.6] sq-1rg2q.11 -->
+
+Output is deterministic — predicates in lexicographic IRI order, each
+predicate's objects in lexicographic N-Triples order — so projecting the same
+store twice is byte-identical and the result is diffable. Literals are value
+objects that keep their metadata: `@value` plus `@type` for a typed literal, or
+`@language` (plus `@direction` for an RDF 1.2 directional literal) for a
+language-tagged one, whose datatype the tag implies. No value is coerced to a
+bare JSON string, number, or boolean, so `"1"^^xsd:integer` and `"1"` stay
+distinguishable.
+
+```rust
+use oxrdf::NamedNode;
+use sparq_core::Graph;
+use sparq_wrapper::proposed::json::JsonProjection;
+use sparq_wrapper::Store;
+
+let graph = Graph::load_str(
+    "@prefix ex: <http://example.org/> .\n\
+     ex:a ex:knows ex:b .\n\
+     ex:b ex:knows ex:a ; ex:label \"Bee\"@en .",
+    "turtle",
+)?;
+let store = Store::borrowed(&graph);
+let a = NamedNode::new("http://example.org/a")?;
+
+let json = JsonProjection::new().project(&store.node(a.clone()));
+assert_eq!(json, JsonProjection::new().project(&store.node(a)));
+assert!(json.contains(r#"{"@ref":"http://example.org/a"}"#)); // cycle closed
+assert!(json.contains(r#"{"@value":"Bee","@language":"en"}"#)); // tag kept
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Only outgoing predicates in the default graph are followed, matching `Node::out`.
+A focus absent from the graph projects to a node object with no predicates, and
+a literal focus projects to its value object, so the call is total for any term.
 
 SHACL-to-Rust struct generation is not part of M1. Reuse `sparq-shacl`'s
 `ShapesModel` for that work; do not invent a second SHACL parser.

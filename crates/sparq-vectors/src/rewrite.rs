@@ -36,7 +36,10 @@
 //! - `?node vec:nearest ( <query> <k> )` — bind `?node` to the `<k>` nearest
 //!   neighbours (best first) of the query;
 //! - `( ?node ?score ) vec:search ( <query> <k> )` — the same, additionally
-//!   binding `?score` to each neighbour's cosine similarity (`xsd:double`).
+//!   binding `?score` to each neighbour's cosine similarity (`xsd:double`);
+//! - `( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )` — **hybrid retrieval**:
+//!   the dense ranking fused with the caller's other retrieval arms, optionally
+//!   reranked (see the `vec:hybrid` section below).
 //!
 //! is REMOVED and replaced by an inline [`Values`](GraphPattern::Values) table
 //! of the search hits — the neighbour graph nodes (and, for `vec:search`, their
@@ -77,8 +80,63 @@
 //!
 //! The store is per-graph (dictionary-local ids), so hits come from the store
 //! you pass — typically the one built against the default graph.
+//!
+//! ## `vec:hybrid` — hybrid retrieval + reranking
+//!
+//! [SONNET-4.6] (sq-lhcot.4) `vec:hybrid` is the in-query surface for **hybrid retrieval**: this
+//! crate's dense k-NN fused, by deterministic weighted RRF, with the caller's other retrieval
+//! arms (a lexical/BM25 index, `sparq-sim`'s structural similarity, a business ranking), then
+//! optionally passed through an out-of-process second-stage [`Reranker`](crate::hybrid::Reranker).
+//! The arms and the reranker are supplied in a [`HybridConfig`], so the crate depends on none of
+//! them; the predicate is reachable only through the hybrid entry points ([`query_vec_hybrid`],
+//! [`prepare_vec_hybrid`], [`rewrite_query_hybrid`]) — a `vec:hybrid` pattern in a plain
+//! [`query_vec`] is a hard error rather than a silently dense-only answer.
+//!
+//! The subject is a **prefix-optional** list — a bare `?node`, or `( ?node ?score )`,
+//! `( ?node ?score ?rank )`, `( ?node ?score ?rank ?prov )` — binding, in order:
+//!
+//! - `?node` — the retrieved entity;
+//! - `?score` — the **final-stage** score (`xsd:double`): the fused RRF score, or the reranker's
+//!   own score when a reranker rescored the row. The two are different scales;
+//! - `?rank` — the 1-based final rank (`xsd:integer`). `VALUES` rows carry no order through
+//!   joins, so this is the join-safe ordering key: `ORDER BY ?rank`;
+//! - `?prov` — the **rank provenance** (`xsd:string`): which arm ranked the row and where, e.g.
+//!   `"vector=1;text=3;rerank=2"` ([`FusedHit::provenance`](crate::hybrid::FusedHit::provenance),
+//!   parsed back by [`parse_provenance`](crate::hybrid::parse_provenance)).
+//!
+//! The `( <query> <k> )` argument list takes the two `vec:nearest` forms plus one more, so a
+//! text arm can be driven by an actual text query:
+//!
+//! - a node IRI — neighbours of that entity (seed excluded), as `vec:nearest`;
+//! - a **plain** literal — a comma-separated query vector, as `vec:nearest`;
+//! - a **language-tagged** literal (`"machine learning"@en`) — a natural-language query. The
+//!   language tag is what makes the form unambiguous against the vector literal. It requires a
+//!   [`HybridConfig::query_embedder`](crate::hybrid::HybridConfig::query_embedder); without one
+//!   it is a hard error, never a silently dense-less fusion.
+//!
+//! `<k>` is the number of FINAL results; each arm is over-fetched
+//! ([`HybridConfig::candidates`](crate::hybrid::HybridConfig::candidates)) so fusion has
+//! consensus evidence to work with and the reranker sees a wider pool.
+//!
+//! **Provisional surface.** `vec:hybrid` is implemented here ahead of the corresponding
+//! amendment to the SPARQL Vector+GenAI extension draft, so [`vocab::VOCAB_REVISION`] is
+//! deliberately NOT bumped — the term is listed in [`vocab::PROVISIONAL`] instead, and its
+//! shape may change when the spec revision lands.
+//!
+//! **No lift is claimed.** Fusion and reranking are mechanisms; whether either improves
+//! retrieval on a given corpus is an empirical question, answered by
+//! [`hybrid::ablate`](crate::hybrid::ablate) on that corpus.
 
 use crate::ann::{nearest_exact, nearest_exact_tiebreak};
+// [SONNET-4.6] (sq-lhcot.4) The `vec:hybrid` fusion core: named weighted-RRF arms with per-rank
+// provenance + the out-of-process second-stage reranker and its fail-open/fail-closed policy. Same
+// `vec-predicate` feature — the module ships with the query surface it exists to serve and adds no
+// dependency.
+#[cfg(feature = "filtered-ann")]
+use crate::hybrid::MAX_ARM_PAGE;
+use crate::hybrid::{
+    apply_rerank, fuse_arms, ArmQuery, ArmRanking, FusedHit, HybridConfig, VECTOR_ARM,
+};
 use crate::spqv_provenance::Metric;
 use crate::store::VectorStore;
 use crate::vocab;
@@ -92,7 +150,7 @@ use rustc_hash::FxHashMap;
 use spargebra::algebra::GraphPattern;
 use spargebra::term::{GroundTerm, NamedNodePattern, TermPattern, TriplePattern, Variable};
 use spargebra::Query;
-use sparq_core::dict::Id;
+use sparq_core::dict::{is_inline, Id, NO_ID};
 use sparq_core::Graph;
 use sparq_engine::{PreparedQuery, QueryBudget, QueryResult};
 
@@ -199,6 +257,57 @@ pub fn query_vec(graph: &Graph, sparql: &str, store: &VectorStore) -> Result<Que
     sparq_engine::query_prepared(graph, &prepare_vec(graph, sparql, store)?)
 }
 
+/// [SONNET-4.6] (sq-lhcot.4) [`query_vec`] with the **hybrid** retrieval arms + optional
+/// second-stage reranker `cfg` supplies, so the query may use `vec:hybrid` (see the module docs).
+/// `vec:nearest`/`vec:search` behave exactly as through [`query_vec`]; a query with no
+/// `vec:hybrid` pattern is unaffected by `cfg`.
+pub fn query_vec_hybrid(
+    graph: &Graph,
+    sparql: &str,
+    store: &VectorStore,
+    cfg: &HybridConfig<'_>,
+) -> Result<QueryResult, String> {
+    sparq_engine::query_prepared(graph, &prepare_vec_hybrid(graph, sparql, store, cfg)?)
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) [`query_vec_hybrid`] under a cooperative [`QueryBudget`].
+pub fn query_vec_hybrid_with_budget(
+    graph: &Graph,
+    sparql: &str,
+    store: &VectorStore,
+    cfg: &HybridConfig<'_>,
+    budget: &QueryBudget,
+) -> Result<QueryResult, String> {
+    sparq_engine::query_prepared_with_budget(
+        graph,
+        &prepare_vec_hybrid(graph, sparql, store, cfg)?,
+        budget,
+    )
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) The prepare-time twin of [`query_vec_hybrid`]: parse + rewrite
+/// (running the arms and the second stage now, exactly as [`prepare_vec`] runs the k-NN now) into
+/// a [`PreparedQuery`]. Re-prepare after the graph, the store, or any arm's index changes.
+pub fn prepare_vec_hybrid(
+    graph: &Graph,
+    sparql: &str,
+    store: &VectorStore,
+    cfg: &HybridConfig<'_>,
+) -> Result<PreparedQuery, String> {
+    prepare_with(graph, sparql, store, &ExactSearch { store }, Some(cfg))
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) [`rewrite_query`] with the hybrid arms available, so `vec:hybrid`
+/// patterns rewrite too.
+pub fn rewrite_query_hybrid(
+    query: Query,
+    graph: &Graph,
+    store: &VectorStore,
+    cfg: &HybridConfig<'_>,
+) -> Result<Query, String> {
+    rewrite_query_with(query, graph, store, &ExactSearch { store }, Some(cfg))
+}
+
 /// [`query_vec`] under a cooperative [`QueryBudget`].
 pub fn query_vec_with_budget(
     graph: &Graph,
@@ -218,7 +327,7 @@ pub fn prepare_vec(
     sparql: &str,
     store: &VectorStore,
 ) -> Result<PreparedQuery, String> {
-    prepare_with(graph, sparql, store, &ExactSearch { store })
+    prepare_with(graph, sparql, store, &ExactSearch { store }, None)
 }
 
 /// [OPUS-4.8] (sq-z589, epic sq-3183) [`query_vec`] but with the **unfiltered** k-NN run through an
@@ -281,7 +390,7 @@ pub fn prepare_vec_approx(
     if index.fingerprint().is_some() {
         index.check_graph(store, graph)?;
     }
-    prepare_with(graph, sparql, store, &ApproxSearch { index })
+    prepare_with(graph, sparql, store, &ApproxSearch { index }, None)
 }
 
 /// Shared prepare body: staleness-guard the store, parse, then rewrite every `vec:` pattern with
@@ -291,6 +400,7 @@ fn prepare_with(
     sparql: &str,
     store: &VectorStore,
     searcher: &dyn UnfilteredSearch,
+    hybrid: Option<&HybridConfig<'_>>,
 ) -> Result<PreparedQuery, String> {
     // [OPUS-4.8] Opportunistic staleness guard: the store is keyed by `graph`'s
     // dictionary ids, so a store built against a DIFFERENT graph would silently
@@ -326,7 +436,7 @@ fn prepare_with(
         .parse_query(sparql)
         .map_err(|e| e.to_string())?;
     Ok(PreparedQuery::from(rewrite_query_with(
-        query, graph, store, searcher,
+        query, graph, store, searcher, hybrid,
     )?))
 }
 
@@ -335,7 +445,7 @@ fn prepare_with(
 /// passes through unchanged. The unfiltered k-NN uses the exact full scan — for the approximate
 /// index path use [`query_vec_approx`] / [`prepare_vec_approx`].
 pub fn rewrite_query(query: Query, graph: &Graph, store: &VectorStore) -> Result<Query, String> {
-    rewrite_query_with(query, graph, store, &ExactSearch { store })
+    rewrite_query_with(query, graph, store, &ExactSearch { store }, None)
 }
 
 /// Threaded form of [`rewrite_query`]: `searcher` is the unfiltered k-NN backend (exact scan or an
@@ -345,6 +455,7 @@ fn rewrite_query_with(
     graph: &Graph,
     store: &VectorStore,
     searcher: &dyn UnfilteredSearch,
+    hybrid: Option<&HybridConfig<'_>>,
 ) -> Result<Query, String> {
     let pattern = match &mut query {
         Query::Select { pattern, .. }
@@ -352,7 +463,7 @@ fn rewrite_query_with(
         | Query::Describe { pattern, .. }
         | Query::Ask { pattern, .. } => pattern,
     };
-    rewrite_pattern(pattern, graph, store, searcher)?;
+    rewrite_pattern(pattern, graph, store, searcher, hybrid)?;
     Ok(query)
 }
 
@@ -362,19 +473,20 @@ fn rewrite_pattern(
     graph: &Graph,
     store: &VectorStore,
     searcher: &dyn UnfilteredSearch,
+    hybrid: Option<&HybridConfig<'_>>,
 ) -> Result<(), String> {
     match p {
         GraphPattern::Bgp { patterns } => {
             let patterns = std::mem::take(patterns);
-            *p = rewrite_bgp(patterns, graph, store, searcher)?;
+            *p = rewrite_bgp(patterns, graph, store, searcher, hybrid)?;
         }
         GraphPattern::Join { left, right }
         | GraphPattern::LeftJoin { left, right, .. }
         | GraphPattern::Union { left, right }
         | GraphPattern::Minus { left, right }
         | GraphPattern::Lateral { left, right } => {
-            rewrite_pattern(left, graph, store, searcher)?;
-            rewrite_pattern(right, graph, store, searcher)?;
+            rewrite_pattern(left, graph, store, searcher, hybrid)?;
+            rewrite_pattern(right, graph, store, searcher, hybrid)?;
         }
         GraphPattern::Filter { inner, .. }
         | GraphPattern::Graph { inner, .. }
@@ -385,7 +497,9 @@ fn rewrite_pattern(
         | GraphPattern::Reduced { inner }
         | GraphPattern::Slice { inner, .. }
         | GraphPattern::Group { inner, .. }
-        | GraphPattern::Service { inner, .. } => rewrite_pattern(inner, graph, store, searcher)?,
+        | GraphPattern::Service { inner, .. } => {
+            rewrite_pattern(inner, graph, store, searcher, hybrid)?
+        }
         // No BGPs inside: property paths and inline VALUES pass through.
         GraphPattern::Path { .. } | GraphPattern::Values { .. } => {}
     }
@@ -410,6 +524,31 @@ struct KnnReq {
     k: usize,
 }
 
+/// [SONNET-4.6] (sq-lhcot.4) The query a `vec:hybrid` request searches by — the two [`QueryArg`]
+/// forms plus the natural-language one a lexical arm can actually use.
+enum HybridQueryArg {
+    /// A node IRI whose stored vector is the dense query (and which is excluded from its own
+    /// neighbours).
+    Node(NamedNode),
+    /// An explicit dense query vector, from a plain comma-separated literal.
+    Vector(Vec<f32>),
+    /// `(text, language tag)` from a language-tagged literal. The dense arm needs a configured
+    /// query embedder for this form.
+    Text(String, String),
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) One `vec:hybrid` request found in a BGP. `score`/`rank`/`prov` are
+/// the optional trailing subject-list positions, in that order (a position can only be present if
+/// every earlier one is).
+struct HybridReq {
+    node: Variable,
+    score: Option<Variable>,
+    rank: Option<Variable>,
+    prov: Option<Variable>,
+    query: HybridQueryArg,
+    k: usize,
+}
+
 /// Splits a BGP's `vec:` magic patterns out, runs the k-NN search, and joins
 /// the `VALUES` hit tables onto the remaining ordinary patterns. The collection
 /// (`rdf:first`/`rdf:rest`) triples that spargebra emitted for the argument
@@ -419,6 +558,7 @@ fn rewrite_bgp(
     graph: &Graph,
     store: &VectorStore,
     searcher: &dyn UnfilteredSearch,
+    hybrid: Option<&HybridConfig<'_>>,
 ) -> Result<GraphPattern, String> {
     // Index the rdf:first/rdf:rest triples by their (blank-node) list-cell
     // subject so the magic-predicate handlers can walk each `( … )` chain.
@@ -426,6 +566,9 @@ fn rewrite_bgp(
 
     let mut rest: Vec<TriplePattern> = Vec::with_capacity(patterns.len());
     let mut reqs: Vec<KnnReq> = Vec::new();
+    // [SONNET-4.6] (sq-lhcot.4) `vec:hybrid` requests are collected separately: they bind a
+    // different (wider) row shape and are resolved through the fusion pipeline, not the plain k-NN.
+    let mut hybrid_reqs: Vec<HybridReq> = Vec::new();
     // [OPUS-4.8] Blank-node-subject rdf:first/rdf:rest cells are the lowered
     // form of `( … )` argument lists. They are only an implementation detail of
     // a `vec:` predicate, so we *defer* the decision to drop them: they are
@@ -454,13 +597,30 @@ fn rewrite_bgp(
         match iri {
             vocab::NEAREST => reqs.push(parse_nearest(tp, &lists)?),
             vocab::SEARCH => reqs.push(parse_search(tp, &lists)?),
+            // [SONNET-4.6] (sq-lhcot.4) The hybrid arms + reranker live in the caller's
+            // `HybridConfig`, which only the `*_hybrid` entry points carry. Reaching `vec:hybrid`
+            // without one must be a HARD error: silently answering with the dense arm alone would
+            // return a well-formed ranking that is not the hybrid ranking the query asked for.
+            vocab::HYBRID => {
+                if hybrid.is_none() {
+                    return Err(
+                        "vec: vec:hybrid needs the retrieval arms in a HybridConfig — use \
+                         query_vec_hybrid / prepare_vec_hybrid / rewrite_query_hybrid (plain \
+                         query_vec carries no arms, and answering with the dense arm alone would \
+                         not be the hybrid ranking)"
+                            .to_string(),
+                    );
+                }
+                hybrid_reqs.push(parse_hybrid(tp, &lists)?);
+            }
             _ => {
                 // [SONNET-4.6] (sq-tb9p0) VG-GOV-3: the VG-VOC-1 hard error states the highest
                 // vocabulary revision this build implements, so a query written against a NEWER
                 // spec revision's term fails with the version gap named, not just "unknown".
                 return Err(format!(
-                    "vec: unknown magic predicate <{}> (supported: vec:nearest, vec:search; \
-                     this build implements vec: vocabulary revision {})",
+                    "vec: unknown magic predicate <{}> (supported: vec:nearest, vec:search, and \
+                     the PROVISIONAL vec:hybrid; this build implements vec: vocabulary revision \
+                     {})",
                     iri,
                     vocab::VOCAB_REVISION
                 ))
@@ -470,7 +630,7 @@ fn rewrite_bgp(
 
     // No `vec:` request in this BGP: it (and any RDF-collection cells in it)
     // must pass through completely unchanged.
-    if reqs.is_empty() {
+    if reqs.is_empty() && hybrid_reqs.is_empty() {
         rest.extend(deferred_lists.into_iter().cloned());
         return Ok(GraphPattern::Bgp { patterns: rest });
     }
@@ -512,16 +672,71 @@ fn rewrite_bgp(
             variables,
             bindings,
         };
-        out = match out {
-            // An all-magic BGP leaves an empty Bgp behind: drop the unit table.
-            GraphPattern::Bgp { ref patterns } if patterns.is_empty() => values,
-            other => GraphPattern::Join {
-                left: Box::new(values),
-                right: Box::new(other),
-            },
-        };
+        out = join_values(out, values);
     }
+
+    // [SONNET-4.6] (sq-lhcot.4) The hybrid requests: fuse the dense arm with the caller's arms,
+    // optionally rerank, and inline the resulting rows the same way.
+    // `hybrid_reqs` is non-empty only when a config was supplied (the match above rejects a
+    // `vec:hybrid` pattern without one), so this `if let` can never skip a pending request.
+    if let Some(cfg) = hybrid {
+        for req in hybrid_reqs {
+            #[cfg(feature = "filtered-ann")]
+            let hits = run_hybrid(&req, graph, store, searcher, cfg, &mask_constraint)?;
+            #[cfg(not(feature = "filtered-ann"))]
+            let hits = run_hybrid(&req, graph, store, searcher, cfg)?;
+
+            let mut variables = vec![req.node];
+            for v in [&req.score, &req.rank, &req.prov].into_iter().flatten() {
+                variables.push(v.clone());
+            }
+            let mut bindings: Vec<Vec<Option<GroundTerm>>> = Vec::with_capacity(hits.len());
+            for hit in hits {
+                // Same rule as the k-NN path: a neighbour that resolves to a blank node cannot appear
+                // in a VALUES row, so it is skipped — and `?rank` is assigned over the SURVIVING rows
+                // so the bound ranks stay a gap-free 1..n.
+                let Some(node) = term_to_ground(graph.dict.term(hit.id)) else {
+                    continue;
+                };
+                let mut row = vec![Some(node)];
+                if req.score.is_some() {
+                    row.push(Some(GroundTerm::Literal(Literal::from(hit.score))));
+                }
+                if req.rank.is_some() {
+                    row.push(Some(GroundTerm::Literal(Literal::from(
+                        bindings.len() as i64 + 1,
+                    ))));
+                }
+                if req.prov.is_some() {
+                    row.push(Some(GroundTerm::Literal(Literal::new_simple_literal(
+                        hit.provenance(),
+                    ))));
+                }
+                bindings.push(row);
+            }
+            out = join_values(
+                out,
+                GraphPattern::Values {
+                    variables,
+                    bindings,
+                },
+            );
+        }
+    }
+
     Ok(out)
+}
+
+/// Joins an inlined hit table onto the BGP's surviving patterns. An all-magic BGP leaves an empty
+/// `Bgp` behind, whose unit table is dropped rather than joined.
+fn join_values(out: GraphPattern, values: GraphPattern) -> GraphPattern {
+    match out {
+        GraphPattern::Bgp { ref patterns } if patterns.is_empty() => values,
+        other => GraphPattern::Join {
+            left: Box::new(values),
+            right: Box::new(other),
+        },
+    }
 }
 
 /// True for a *synthetic* list-cell triple — a `rdf:first`/`rdf:rest` triple
@@ -639,6 +854,83 @@ fn parse_search(tp: &TriplePattern, lists: &ListCells) -> Result<KnnReq, String>
     })
 }
 
+/// [SONNET-4.6] (sq-lhcot.4) Parses `( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )`.
+/// The subject is prefix-optional: a bare `?node`, or a 1- to 4-element list binding
+/// `?node`, `?score`, `?rank`, `?prov` in that order. Every position must be a variable.
+fn parse_hybrid(tp: &TriplePattern, lists: &ListCells) -> Result<HybridReq, String> {
+    // A bare variable subject is the minimal `?node vec:hybrid ( … )` form; anything else must be
+    // a `( … )` list (a non-list, non-variable subject is reported by `ListCells::elements`).
+    let subj: Vec<&TermPattern> = match &tp.subject {
+        TermPattern::Variable(_) => vec![&tp.subject],
+        other => lists.elements(other)?,
+    };
+    if subj.is_empty() || subj.len() > 4 {
+        return Err(format!(
+            "vec: the subject of vec:hybrid must be ?node or a 1- to 4-element list \
+             ( ?node ?score ?rank ?prov ), got {} element(s)",
+            subj.len()
+        ));
+    }
+    let names = [
+        "the first vec:hybrid subject element (?node)",
+        "the second vec:hybrid subject element (?score)",
+        "the third vec:hybrid subject element (?rank)",
+        "the fourth vec:hybrid subject element (?prov)",
+    ];
+    let mut vars = Vec::with_capacity(subj.len());
+    for (t, what) in subj.iter().zip(names) {
+        vars.push(require_var(t, what)?);
+    }
+    let mut vars = vars.into_iter();
+    let node = vars.next().expect("the list is non-empty");
+    let (query, k) = parse_hybrid_obj_args(&tp.object, lists)?;
+    Ok(HybridReq {
+        node,
+        score: vars.next(),
+        rank: vars.next(),
+        prov: vars.next(),
+        query,
+        k,
+    })
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) Decodes `vec:hybrid`'s `( <query> <k> )` object argument list.
+fn parse_hybrid_obj_args(
+    o: &TermPattern,
+    lists: &ListCells,
+) -> Result<(HybridQueryArg, usize), String> {
+    let args = lists.elements(o)?;
+    let [query, k] = args.as_slice() else {
+        return Err(format!(
+            "vec: the argument list must be ( <query> <k> ) — exactly two elements, got {}",
+            args.len()
+        ));
+    };
+    Ok((parse_hybrid_query_arg(query)?, parse_k(k)?))
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) `<query>` → an entity IRI, a dense query vector (a PLAIN literal of
+/// comma-separated floats, as `vec:nearest`), or a natural-language query (a LANGUAGE-TAGGED
+/// literal). The language tag is the disambiguator: it is what distinguishes `"1,2"@en` (the text
+/// "1,2") from `"1,2"` (a 2-dimensional query vector), so neither form can be mistaken for the
+/// other.
+fn parse_hybrid_query_arg(t: &TermPattern) -> Result<HybridQueryArg, String> {
+    match t {
+        TermPattern::NamedNode(n) => Ok(HybridQueryArg::Node(n.clone())),
+        TermPattern::Literal(l) => match l.language() {
+            Some(lang) => Ok(HybridQueryArg::Text(
+                l.value().to_string(),
+                lang.to_string(),
+            )),
+            None => Ok(HybridQueryArg::Vector(parse_vector_literal(l)?)),
+        },
+        other => Err(format!(
+            "vec: the vec:hybrid query argument must be a node IRI, a vector literal, or a \
+             language-tagged text literal, got {other}"
+        )),
+    }
+}
+
 /// Decodes the `( <query> <k> )` object argument list shared by both predicates.
 fn parse_obj_args(o: &TermPattern, lists: &ListCells) -> Result<(QueryArg, usize), String> {
     let args = lists.elements(o)?;
@@ -655,27 +947,32 @@ fn parse_obj_args(o: &TermPattern, lists: &ListCells) -> Result<(QueryArg, usize
 fn parse_query_arg(t: &TermPattern) -> Result<QueryArg, String> {
     match t {
         TermPattern::NamedNode(n) => Ok(QueryArg::Node(n.clone())),
-        TermPattern::Literal(l) => {
-            let v: Result<Vec<f32>, _> = l
-                .value()
-                .split(',')
-                .map(|s| s.trim().parse::<f32>())
-                .collect();
-            let v = v.map_err(|_| {
-                format!(
-                    "vec: the query literal must be a comma-separated list of floats, got \"{}\"",
-                    l.value()
-                )
-            })?;
-            if v.is_empty() {
-                return Err("vec: the query vector literal is empty".to_string());
-            }
-            Ok(QueryArg::Vector(v))
-        }
+        TermPattern::Literal(l) => Ok(QueryArg::Vector(parse_vector_literal(l)?)),
         other => Err(format!(
             "vec: the query argument must be a node IRI or a vector literal, got {other}"
         )),
     }
+}
+
+/// A query-vector literal → its floats. [SONNET-4.6] (sq-lhcot.4) Split out of
+/// [`parse_query_arg`] so `vec:hybrid` reuses the identical parse (and identical errors) for its
+/// plain-literal form.
+fn parse_vector_literal(l: &Literal) -> Result<Vec<f32>, String> {
+    let v: Result<Vec<f32>, _> = l
+        .value()
+        .split(',')
+        .map(|s| s.trim().parse::<f32>())
+        .collect();
+    let v = v.map_err(|_| {
+        format!(
+            "vec: the query literal must be a comma-separated list of floats, got \"{}\"",
+            l.value()
+        )
+    })?;
+    if v.is_empty() {
+        return Err("vec: the query vector literal is empty".to_string());
+    }
+    Ok(v)
 }
 
 /// `<k>` → a non-negative integer.
@@ -825,6 +1122,301 @@ fn run_knn(
             Ok(searcher.search(v, req.k))
         }
     }
+}
+
+/// [SONNET-4.6] (sq-lhcot.4) Resolves one `vec:hybrid` request into its final ranked hits.
+///
+/// The pipeline is exactly three deterministic stages:
+///
+/// 1. **Arms.** The built-in dense arm runs through the SAME path `vec:search` takes — including,
+///    with `filtered-ann`, the BGP-derived candidate mask and the VG-TIE-1 boundary tie-break — so
+///    hybrid retrieval inherits the k-NN semantics rather than reimplementing them. Each of the
+///    caller's arms is then asked for the same number of candidates. Every arm is over-fetched
+///    (`cfg.candidates(k)`) so fusion has consensus evidence beyond the final `k`. Every arm's
+///    ids are then checked against the graph dictionary (`check_arm_ids`) and, with
+///    `filtered-ann`, restricted to the SAME BGP-derived mask the dense arm searched under — the
+///    mask is an admissibility constraint on the answer, not a dense-arm optimisation. An arm the
+///    mask leaves short is re-asked for a deeper page rather than truncated to whatever survived
+///    (see [`run_aux_arms`]), so its ranking really is its top candidates over the admissible
+///    domain, not over the first page it happened to return.
+/// 2. **Fusion.** Weighted RRF over the named arms, recording which arm ranked each hit and where
+///    ([`fuse_arms`]).
+/// 3. **Second stage.** The optional out-of-process [`Reranker`](crate::hybrid::Reranker), under
+///    its fail-open / fail-closed policy; without one the fused list is simply truncated to `k`.
+///
+/// A muted dense arm (`vector_weight == 0.0`) is not searched at all — a pure sparse/structural
+/// fusion pays no vector cost.
+fn run_hybrid(
+    req: &HybridReq,
+    graph: &Graph,
+    store: &VectorStore,
+    searcher: &dyn UnfilteredSearch,
+    cfg: &HybridConfig<'_>,
+    #[cfg(feature = "filtered-ann")] constraint: &[TriplePattern],
+) -> Result<Vec<FusedHit>, String> {
+    let candidates = cfg.candidates(req.k);
+
+    // Resolve the query into the dense k-NN request plus the view the arms and the reranker see.
+    // `dense` is None only when a seed entity has no stored vector: the dense arm then contributes
+    // nothing and the remaining arms still answer (the dense arm degrades, never correctness).
+    let (knn_query, seed, text, dense) = match &req.query {
+        HybridQueryArg::Node(iri) => {
+            let dense = graph
+                .id_of(&Term::NamedNode(iri.clone()))
+                .and_then(|id| store.get(id))
+                .map(<[f32]>::to_vec);
+            (QueryArg::Node(iri.clone()), Some(iri.clone()), None, dense)
+        }
+        HybridQueryArg::Vector(v) => {
+            check_dim(v.len(), store.dim(), "the query vector literal")?;
+            (QueryArg::Vector(v.clone()), None, None, Some(v.clone()))
+        }
+        HybridQueryArg::Text(t, lang) => {
+            let v = cfg.embed_query(t, lang)?;
+            check_dim(v.len(), store.dim(), "the configured query embedder")?;
+            (
+                QueryArg::Vector(v.clone()),
+                None,
+                Some((t.clone(), lang.clone())),
+                Some(v),
+            )
+        }
+    };
+
+    let arm_query = ArmQuery {
+        seed: seed.as_ref(),
+        text: text.as_ref().map(|(t, l)| (t.as_str(), l.as_str())),
+        vector: dense.as_deref(),
+    };
+
+    let dense_ranked: Vec<(Id, f64)> = if cfg.dense_weight() == 0.0 {
+        Vec::new()
+    } else {
+        let knn = KnnReq {
+            node: req.node.clone(),
+            score: None,
+            query: knn_query,
+            k: candidates,
+        };
+        #[cfg(feature = "filtered-ann")]
+        let hits = run_knn(&knn, graph, store, searcher, constraint)?;
+        #[cfg(not(feature = "filtered-ann"))]
+        let hits = run_knn(&knn, graph, store, searcher)?;
+        hits.into_iter().map(|(id, s)| (id, f64::from(s))).collect()
+    };
+
+    let mut arms = vec![ArmRanking::new(
+        VECTOR_ARM,
+        cfg.dense_weight(),
+        dense_ranked,
+    )];
+
+    #[cfg(feature = "filtered-ann")]
+    let aux = run_aux_arms(cfg, graph, &arm_query, candidates, &req.node, constraint)?;
+    #[cfg(not(feature = "filtered-ann"))]
+    let aux = run_aux_arms(cfg, graph, &arm_query, candidates)?;
+    arms.extend(aux);
+
+    let fused = fuse_arms(&arms, cfg.rrf_constant(), candidates)?;
+    match cfg.second_stage() {
+        Some((reranker, policy)) => {
+            apply_rerank(reranker, policy, &arm_query, fused, req.k)
+        }
+        None => {
+            let mut fused = fused;
+            fused.truncate(req.k);
+            Ok(fused)
+        }
+    }
+}
+
+/// [OPUS-4.8] (review #4519) Runs the auxiliary arms, validating every id each returns and — with
+/// `filtered-ann` — returning each arm's ranking OVER THE ADMISSIBLE CANDIDATES.
+///
+/// Without `filtered-ann` there is no mask, so this is one pass: ask each arm for `candidates`
+/// results and check the ids it returned.
+#[cfg(not(feature = "filtered-ann"))]
+fn run_aux_arms(
+    cfg: &HybridConfig<'_>,
+    graph: &Graph,
+    query: &ArmQuery<'_>,
+    candidates: usize,
+) -> Result<Vec<ArmRanking>, String> {
+    let aux = cfg.run_arms(query, candidates)?;
+    // An auxiliary arm is a CALLER closure — an out-of-process service, a separate index — so the
+    // ids it returns are untrusted input to this query. Check them against the dictionary domain
+    // before anything downstream consumes them.
+    for arm in &aux {
+        check_arm_ids(graph, arm)?;
+    }
+    Ok(aux)
+}
+
+/// [OPUS-4.8] (review #4519, round 5) The number of inline-integer literal ids — the sub-domain
+/// `[INLINE_BASE, INLINE_BASE + 2^30)` that [`check_arm_ids`] admits alongside the `1..=dict.len()`
+/// stored-term ids. `run_aux_arms`'s paging backstop has to bound that whole domain, so it needs
+/// the size of the inline half. `sparq-core` does not export it, so it is restated here and pinned
+/// against `is_inline` by `the_inline_domain_matches_the_dictionary`.
+#[cfg(feature = "filtered-ann")]
+const INLINE_DOMAIN: usize = 1 << 30;
+
+/// [OPUS-4.8] (review #4519, round 2) Runs the auxiliary arms and restricts each to the
+/// BGP-derived candidate mask, **paging an arm deeper when the restriction leaves it short**.
+///
+/// The mask is an ADMISSIBILITY constraint on the answer, not a dense-arm optimisation: an id the
+/// surrounding BGP cannot bind contributes no solution. Fusing auxiliary arms UNRESTRICTED would
+/// let such ids occupy the fused top-k — and the truncation to `k` happens before the join, so a
+/// qualifying lower-ranked candidate they evict is lost for good rather than merely reordered — as
+/// well as inflating the RRF ranks (and therefore the scores and `?prov` entries) of the hits that
+/// do qualify.
+///
+/// # Why one masked pass is not enough
+///
+/// Masking a single `candidates`-long response can only COMPACT the prefix the arm chose to
+/// return; it cannot make the arm rank over the admissible domain. With `k = 1` and the default
+/// over-fetch, an arm that ranks five inadmissible ids above the sole admissible one returns just
+/// the first four, masking empties it, and the one real answer is lost — the exact failure the
+/// mask exists to prevent, moved one step later. So when the mask leaves an arm short we re-ask
+/// THAT arm for a deeper page (doubling), which is the [`ArmFn`](crate::hybrid::ArmFn) paging
+/// contract: a prefix-consistent, exhaustion-honest arm converges on its true top-`candidates`
+/// over the admissible domain — what the dense arm's filtered search already returns.
+///
+/// The alternative — handing the mask to the arm so it can filter at its own source — would put a
+/// graph-internal id-set into the public arm signature and require every out-of-process arm to
+/// honour it; the paging protocol keeps admissibility enforced HERE, where it is not optional.
+///
+/// # Termination
+///
+/// Each round doubles the request, and stops at the first of: enough admissible hits
+/// (`>= candidates`); every admissible id already collected (`>= mask.len()`, so a deeper page
+/// cannot add one); the arm returned fewer results than asked for (exhausted); or the request
+/// reached the per-request CEILING — which is a hard, arm-named error, not a quiet short answer.
+///
+/// The ceiling is the smaller of two bounds, and never below the `candidates` page the caller
+/// explicitly asked every arm for:
+///
+/// - **Correctness** — an arm's ids are distinct ([`validate_arms`](crate::hybrid::validate_arms))
+///   and drawn from the domain [`check_arm_ids`] admits (the dictionary ids PLUS the
+///   inline-integer literal ids), so no arm can return more than `dict.len() + INLINE_DOMAIN`
+///   results and a deeper page than that cannot exist. The inline half is not slack:
+///   [`derive_mask`] admits an inline id whenever `?node` is bound in an object position to an
+///   integer literal, so an ADMISSIBLE id genuinely can sit beyond `dict.len()` in an arm's
+///   ranking — bounding at `dict.len()` would stop while such an id was still unreached, losing it
+///   (review #4519, round 5).
+/// - **Safety** — [`MAX_ARM_PAGE`], because each request makes the arm MATERIALIZE a `Vec` of that
+///   size and ship it here. The correctness bound is ~1.07e9 wide, so doubling towards it would let
+///   a small filtered `vec:hybrid` query ask a valid arm for hundreds of millions of results and
+///   exhaust the arm, the transport or this process (review #4519, round 6).
+///
+/// Reaching the safety cap means the arm kept padding full pages while the mask admitted almost
+/// none of them, so its top candidates over the admissible domain cannot be established within a
+/// bounded budget. Answering anyway would silently drop admissible hits — exactly the loss this
+/// loop exists to prevent — so it fails closed and names the arm instead. An exhaustion-honest arm
+/// never sees the cap: it stops at its first short page.
+#[cfg(feature = "filtered-ann")]
+fn run_aux_arms(
+    cfg: &HybridConfig<'_>,
+    graph: &Graph,
+    query: &ArmQuery<'_>,
+    candidates: usize,
+    node: &Variable,
+    constraint: &[TriplePattern],
+) -> Result<Vec<ArmRanking>, String> {
+    if cfg.arm_count() == 0 {
+        // Nothing to restrict, so do not pay the constraining sub-BGP evaluation for it.
+        return Ok(Vec::new());
+    }
+    let Some(mask) = derive_mask(node, constraint, graph)? else {
+        // `?node` is unconstrained: every id is admissible and one pass is exact.
+        let aux = cfg.run_arms(query, candidates)?;
+        for arm in &aux {
+            check_arm_ids(graph, arm)?;
+        }
+        return Ok(aux);
+    };
+
+    // The correctness bound is the WHOLE domain an arm may legitimately rank — the dictionary ids
+    // and the inline-integer literal ids `check_arm_ids` also admits — because an admissible id can
+    // be an inline one; `dict.len()` alone is NOT that domain. But that domain is ~1.07e9 wide and
+    // every request costs a materialized `Vec`, so the SAFETY cap wins: escalation stops at
+    // `MAX_ARM_PAGE`, and only the caller's own `candidates` page may exceed it.
+    let domain = graph.dict.len().saturating_add(INLINE_DOMAIN);
+    let ceiling = candidates.max(MAX_ARM_PAGE.min(domain));
+    (0..cfg.arm_count())
+        .map(|i| {
+            let mut want = candidates;
+            loop {
+                let arm = cfg.run_arm(i, query, want)?;
+                check_arm_ids(graph, &arm)?;
+                let ArmRanking { arm, weight, ranked } = arm;
+                let returned = ranked.len();
+                let ranked: Vec<(Id, f64)> = ranked
+                    .into_iter()
+                    .filter(|(id, _)| mask.contains(*id))
+                    .collect();
+                if ranked.len() >= candidates || ranked.len() >= mask.len() || returned < want {
+                    return Ok(ArmRanking { arm, weight, ranked });
+                }
+                if want >= ceiling {
+                    // Fail closed: the arm padded a full page of `want` results of which only
+                    // `ranked.len()` are admissible, so its true top candidates over the admissible
+                    // domain are still unknown — and a deeper page is not affordable.
+                    return Err(format!(
+                        "vec:hybrid: the {:?} arm returned all {} results asked for without \
+                         signalling exhaustion, and only {} of them are admissible under the \
+                         surrounding BGP; paging it deeper would exceed the {}-result per-request \
+                         cap, so its top candidates over the admissible domain cannot be \
+                         established. Make the arm exhaustion-honest (return fewer results than \
+                         asked once it has no more) or constrain the query further",
+                        arm,
+                        want,
+                        ranked.len(),
+                        ceiling
+                    ));
+                }
+                want = want.saturating_mul(2).min(ceiling);
+            }
+        })
+        .collect()
+}
+
+/// [OPUS-4.8] (review #4519) Rejects an auxiliary arm's result whose id is not a term of `graph`'s
+/// dictionary — a valid 1-based dictionary id (`1..=dict.len()`) or an inline-integer literal id.
+///
+/// An arm is a caller closure, so its ids are untrusted: an out-of-process service answering from
+/// a stale or foreign index can return anything. Left unchecked such an id flows all the way to
+/// `graph.dict.term(id)`, which resolves an out-of-domain id to the dictionary's wrong-but-safe
+/// OUT-OF-RANGE PLACEHOLDER (a blank node) — and a blank node cannot appear in a `VALUES` row, so
+/// the hit is silently dropped from the inlined table. That is exactly the failure mode
+/// [`validate_arms`](crate::hybrid::validate_arms) already refuses for a duplicated id: a
+/// malformed arm response quietly changing the answer. Fail closed instead, naming the arm so the
+/// operator knows which service to fix.
+fn check_arm_ids(graph: &Graph, arm: &ArmRanking) -> Result<(), String> {
+    let len = graph.dict.len();
+    for &(id, _) in &arm.ranked {
+        // An inline-integer id encodes its literal value directly and is resolvable against any
+        // dictionary; every other id must index a stored term.
+        if id == NO_ID || (!is_inline(id) && id as usize > len) {
+            return Err(format!(
+                "vec:hybrid: the {:?} arm returned id {}, which is not a term in this graph's \
+                 dictionary (valid ids are 1..={}, or an inline-integer literal id)",
+                arm.arm, id, len
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects a query vector whose dimension does not match the store's; `what` names the source of
+/// the vector so the error points at the right thing to fix.
+fn check_dim(got: usize, want: usize, what: &str) -> Result<(), String> {
+    if got != want {
+        return Err(format!(
+            "vec:hybrid: {} produced {} dims but the store has {}",
+            what, got, want
+        ));
+    }
+    Ok(())
 }
 
 /// [OPUS-4.8] (sq-3tjd, epic sq-3183) Builds the candidate [`IdMask`] for `node` from the
@@ -1092,7 +1684,22 @@ fn pattern_vars(tp: &TriplePattern) -> Vec<Variable> {
 #[cfg(all(test, feature = "filtered-ann"))]
 mod mask_cache_tests {
     use super::*;
-    use sparq_core::dict::Id;
+    use sparq_core::dict::{Id, INLINE_BASE};
+
+    /// [OPUS-4.8] (review #4519, round 5) `INLINE_DOMAIN` restates a `sparq-core` invariant that
+    /// crate does not export, and `run_aux_arms`'s paging backstop is only sound if it is exact:
+    /// too small and an admissible inline id past the bound is never paged to. Pin it against the
+    /// dictionary's own `is_inline` — the last inline id must be inline, the next one must not be.
+    #[test]
+    fn the_inline_domain_matches_the_dictionary() {
+        let last = INLINE_BASE + (INLINE_DOMAIN as Id - 1);
+        assert!(is_inline(last), "id {} must be the last inline id", last);
+        assert!(
+            !is_inline(INLINE_BASE + INLINE_DOMAIN as Id),
+            "the inline sub-domain must hold exactly {} ids",
+            INLINE_DOMAIN
+        );
+    }
 
     /// A constraining sub-BGP `?node <kind> :Car` over the given variable name.
     fn car_constraint(node: &str) -> (Variable, Vec<TriplePattern>) {

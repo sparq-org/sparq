@@ -54,7 +54,11 @@ use crate::hashes::{h2, TYPE_CODE_LITERAL};
 /// Numeric order: a negative is always `<` a non-negative; among negatives the
 /// LARGER magnitude is the SMALLER value; among non-negatives the larger
 /// magnitude is the larger value. All six predicates evaluated unconditionally.
-fn signed_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op: u32) -> bool {
+// [OPUS-5] sq-rsd3v.3 (#2946): `pub(crate)` so the N3 `math:` comparison gadget
+// (`crate::n3`) reuses this verdict VERBATIM rather than restating the signed
+// order -- design record sec 4.3 ("reuse the EXISTING filter_int / filter_signed /
+// decimal comparison circuits verbatim"). Behaviour unchanged.
+pub(crate) fn signed_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op: u32) -> bool {
     // lt := value < bound, eq := value == bound, over the signed order.
     let eq = (v_neg == b_neg) & (v_mag == b_mag);
     let lt = if v_neg & !b_neg {
@@ -88,13 +92,19 @@ fn signed_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op: u32) -> 
 
 /// Re-derive the term encoding of a typed literal whose lexical bytes are the
 /// `LEN`-byte `lexical` array, with the comptime datatype suffix
-/// `"^^<...#<datatype>>"` of length `SLEN`. Asserts `h2(LITERAL, hs) ==
-/// operand_enc`. The token is `'"' + lexical + '"' + suffix`.
-fn assert_literal_binding<let LEN: u32, let SLEN: u32>(
-    operand_enc: Field,
+/// `"^^<...#<datatype>>"` of length `SLEN`. The token is
+/// `'"' + lexical + '"' + suffix`.
+///
+/// Returns the encoding rather than asserting it, so a caller that must MASK
+/// the binding (the N3 builtin gadget, whose operand slots are only live for a
+/// builtin atom) can compare it under a condition. [`assert_literal_binding`]
+/// is the unconditional form the FILTER lane uses.
+// [OPUS-5] sq-rsd3v.3 (#2946): split out of `assert_literal_binding` -- the
+// hashing is unchanged, only the assert moved to the caller.
+fn literal_encoding<let LEN: u32, let SLEN: u32>(
     lexical: [u8; LEN],
     suffix: [u8; SLEN],
-) {
+) -> Field {
     let mut token: [u8; LEN + SLEN + 2] = [0; LEN + SLEN + 2];
     token[0] = 34; // '"'
     for i in 0..LEN {
@@ -111,7 +121,88 @@ fn assert_literal_binding<let LEN: u32, let SLEN: u32>(
     for i in 1..32 {
         hs = hs * 256 + (digest[i] as Field);
     }
-    assert_eq(h2(TYPE_CODE_LITERAL, hs), operand_enc, "operand encoding mismatch");
+    h2(TYPE_CODE_LITERAL, hs)
+}
+
+/// As [`literal_encoding`], but asserts the re-derived encoding equals
+/// `operand_enc`.
+fn assert_literal_binding<let LEN: u32, let SLEN: u32>(
+    operand_enc: Field,
+    lexical: [u8; LEN],
+    suffix: [u8; SLEN],
+) {
+    assert_eq(literal_encoding(lexical, suffix), operand_enc, "operand encoding mismatch");
+}
+
+/// Decode a witnessed signed `xsd:integer` operand and RE-DERIVE its term
+/// encoding: check the magnitude digits are canonical, reconstruct the
+/// magnitude, reject `-0`, and rebuild the canonical N-Triples token. Returns
+/// `(encoding, neg, magnitude)` with `-0` normalised to `(false, 0)`, which is
+/// what [`signed_verdict`] consumes.
+///
+/// The encoding is what makes the returned value TRUSTWORTHY: because the
+/// digits are canonical, the term encoding determines the numeric value
+/// uniquely and vice versa, so a prover can neither read one encoding as two
+/// values nor emit a second encoding for one value. The CALLER asserts the
+/// encoding matches the operand it claims to be -- unconditionally in the
+/// FILTER lane ([`filter_signed_int_check`]), under a mask in the N3 builtin
+/// gadget (`crate::n3`), whose operand slots are live only for a builtin atom.
+///
+/// Extracted from [`filter_signed_int_check`] so both lanes bind operands
+/// through the SAME code path -- one implementation, no drift. The assert ORDER
+/// is preserved exactly (digits, leading zero, `-0`, then the caller's binding)
+/// so each `should_fail_with` test still pins the clause it names.
+///
+/// Note the canonical-digit asserts constrain only the WITNESS, never the
+/// claimed operand, so they are safe to run unmasked; a caller that leaves an
+/// operand slot unused must still supply canonical padding digits.
+// [OPUS-5] sq-rsd3v.3 (#2946): extraction only -- no behaviour change.
+pub(crate) fn signed_int_encoding<let MD: u32>(
+    neg: bool,
+    mag_digits: [u8; MD],
+) -> (Field, bool, u64) {
+    std::static_assert(MD >= 1, "at least one magnitude digit");
+    std::static_assert(MD <= 19, "magnitude must fit u64");
+
+    // Canonical magnitude digits: ASCII, no leading zero unless MD == 1.
+    for i in 0..MD {
+        assert((mag_digits[i] >= 48) & (mag_digits[i] <= 57), "not a decimal digit");
+    }
+    if MD > 1 {
+        assert(mag_digits[0] != 48, "non-canonical leading zero");
+    }
+
+    // The magnitude value.
+    let mut mag: u64 = 0;
+    for i in 0..MD {
+        mag = mag * 10 + ((mag_digits[i] - 48) as u64);
+    }
+    // No "-0": a negative sign on a zero magnitude is not a canonical xsd:integer
+    // lexical form (and would be a second encoding of 0).
+    if neg {
+        assert(mag != 0, "negative zero is not canonical");
+    }
+
+    // Rebuild the canonical token. The lexical part is the optional '-' then the
+    // magnitude digits; we build a fixed-length array with a leading byte that is
+    // either '-' (0x2D) for negatives or the first digit for non-negatives, by
+    // branching the rebuild over the comptime-free `neg`. To keep one comptime
+    // token length we derive BOTH candidate encodings and select the witnessed
+    // sign's (constant shape; the unselected hash is still paid).
+    let suffix: [u8; 44] = "^^<http://www.w3.org/2001/XMLSchema#integer>".as_bytes();
+
+    // Non-negative candidate lexical = mag_digits.
+    let unsigned_enc = literal_encoding(mag_digits, suffix);
+    // Negative candidate lexical = '-' + mag_digits.
+    let mut signed_lex: [u8; MD + 1] = [0; MD + 1];
+    signed_lex[0] = 45; // '-'
+    for i in 0..MD {
+        signed_lex[i + 1] = mag_digits[i];
+    }
+    let signed_enc = literal_encoding(signed_lex, suffix);
+
+    let enc = if neg { signed_enc } else { unsigned_enc };
+    (enc, neg & (mag != 0), mag)
 }
 
 /// Hidden-operand FILTER over a committed SIGNED `xsd:integer`.
@@ -134,52 +225,14 @@ pub fn filter_signed_int_check<let MD: u32>(
     neg: bool,
     mag_digits: [u8; MD],
 ) {
-    std::static_assert(MD >= 1, "at least one magnitude digit");
-    std::static_assert(MD <= 19, "magnitude must fit u64");
     assert(op <= OP_NE, "unknown comparison operator");
 
-    // Canonical magnitude digits: ASCII, no leading zero unless MD == 1.
-    for i in 0..MD {
-        assert((mag_digits[i] >= 48) & (mag_digits[i] <= 57), "not a decimal digit");
-    }
-    if MD > 1 {
-        assert(mag_digits[0] != 48, "non-canonical leading zero");
-    }
+    // Canonical-digit checks, magnitude decode and `-0` rejection -- shared
+    // verbatim with the N3 `math:` gadgets.
+    let (enc, v_neg, mag) = signed_int_encoding(neg, mag_digits);
+    assert_eq(enc, operand_enc, "operand encoding mismatch");
 
-    // The magnitude value.
-    let mut mag: u64 = 0;
-    for i in 0..MD {
-        mag = mag * 10 + ((mag_digits[i] - 48) as u64);
-    }
-    // No "-0": a negative sign on a zero magnitude is not a canonical xsd:integer
-    // lexical form (and would be a second encoding of 0).
-    if neg {
-        assert(mag != 0, "negative zero is not canonical");
-    }
-
-    // Operand binding: rebuild the canonical token. The lexical part is the
-    // optional '-' then the magnitude digits; we build a fixed-length array with
-    // a leading byte that is either '-' (0x2D) for negatives or the first digit
-    // for non-negatives, by branching the rebuild over the comptime-free `neg`.
-    // To keep one comptime token length we build BOTH candidate tokens and bind
-    // the selected one (constant shape; the unselected hash is still paid but the
-    // assert only fires for the witnessed sign).
-    let suffix: [u8; 44] = "^^<http://www.w3.org/2001/XMLSchema#integer>".as_bytes();
-
-    // Non-negative candidate lexical = mag_digits.
-    if !neg {
-        assert_literal_binding(operand_enc, mag_digits, suffix);
-    } else {
-        // Negative candidate lexical = '-' + mag_digits.
-        let mut signed_lex: [u8; MD + 1] = [0; MD + 1];
-        signed_lex[0] = 45; // '-'
-        for i in 0..MD {
-            signed_lex[i + 1] = mag_digits[i];
-        }
-        assert_literal_binding(operand_enc, signed_lex, suffix);
-    }
-
-    let result = signed_verdict(neg & (mag != 0), mag, bound_neg & (bound != 0), bound, op);
+    let result = signed_verdict(v_neg, mag, bound_neg & (bound != 0), bound, op);
     assert_eq(result, expected, "filter verdict mismatch");
 }
 

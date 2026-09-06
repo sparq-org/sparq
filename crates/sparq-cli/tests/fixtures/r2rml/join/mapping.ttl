@@ -1,0 +1,22 @@
+# [OPUS-5] (sq-u1z86) rr:parentTriplesMap + rr:joinCondition across two CSV logical tables —
+# the CSV adaptation of the W3C R2RML many-to-one join cases (SQL logical tables replaced by
+# CSV files). The child's `Sport` column keys into the parent's `ID`, and the generated object
+# is the PARENT's subject IRI. SQL join semantics on NULL hold: student 11's key matches no
+# sport and student 12's key is NULL, so neither generates an ex:plays triple.
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+@prefix ex: <http://example.com/> .
+<#Sports> a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "sport" ] ;
+  rr:subjectMap [ rr:template "http://example.com/sport/{ID}" ; rr:class ex:Sport ] ;
+  rr:predicateObjectMap [ rr:predicate ex:label ; rr:objectMap [ rr:column "Label" ] ] .
+<#Students> a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "student" ] ;
+  rr:subjectMap [ rr:template "http://example.com/student/{ID}" ; rr:class ex:Student ] ;
+  rr:predicateObjectMap [ rr:predicate ex:name ; rr:objectMap [ rr:column "Name" ] ] ;
+  rr:predicateObjectMap [
+    rr:predicate ex:plays ;
+    rr:objectMap [
+      rr:parentTriplesMap <#Sports> ;
+      rr:joinCondition [ rr:child "Sport" ; rr:parent "ID" ]
+    ]
+  ] .

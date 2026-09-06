@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sparq-core", "crates/sparq-engine", "crates/sparq-cli", "crates/sparq-bench", "crates/sparq-wasm", "crates/sparq-reason", "crates/sparq-reason-wasm", "crates/sparq-text-wasm", "crates/sparq-server", "crates/sparq-http3", "crates/sparq-serve", "crates/sparq-conformance", "crates/sparq-py", "crates/sparq-shacl", "crates/sparq-shacl-wasm", "crates/sparq-hdt", "crates/sparq-sim", "crates/sparq-geo", "crates/sparq-introspect", "crates/sparq-nlq", "crates/sparq-vectors", "crates/sparq-rsp", "crates/sparq-rsp-wasm", "crates/sparq-gpu", "crates/sparq-solid", "crates/sparq-policy", "crates/sparq-parse", "crates/sparq-text", "crates/sparq-canon", "crates/sparq-zk", "crates/sparq-zk-compose", "crates/sparq-mpc", "crates/sparq-prov", "crates/sparq-fedplan", "crates/sparq-fedplan-mpc", "crates/sparq-fedclient", "crates/sparq-algos", "crates/sparq-trust", "crates/sparq-kb", "crates/sparq-terse", "crates/sparq-reason-el", "crates/sparq-reason-ql", "crates/sparq-reason-dl", "crates/sparq-vc", "crates/sparq-mcp", "crates/sparq-arrow", "crates/sparq-substrate", "crates/sparq-jsonld", "crates/sparq-engine-serialize", "crates/sparq-engine-service", "crates/sparq-difftest", "crates/sparq-metamorph", "crates/sparq-reason-diff", "crates/sparq-acbench", "crates/sparq-lws-core", "crates/sparq-lws-wasm", "crates/sparq-forms", "crates/sparq-wac-oracle", "crates/sparq-jsonld-registry", "crates/sparq-wrapper", "crates/sparq-shaclc", "crates/sparq-e2ee-ng", "crates/sparq-crdt", "crates/sparq-conformance-floors"]
+members = ["crates/sparq-core", "crates/sparq-engine", "crates/sparq-cli", "crates/sparq-bench", "crates/sparq-wasm", "crates/sparq-reason", "crates/sparq-reason-wasm", "crates/sparq-text-wasm", "crates/sparq-server", "crates/sparq-http3", "crates/sparq-serve", "crates/sparq-conformance", "crates/sparq-py", "crates/sparq-shacl", "crates/sparq-shacl-wasm", "crates/sparq-hdt", "crates/sparq-sim", "crates/sparq-geo", "crates/sparq-introspect", "crates/sparq-nlq", "crates/sparq-vectors", "crates/sparq-rsp", "crates/sparq-rsp-wasm", "crates/sparq-gpu", "crates/sparq-solid", "crates/sparq-policy", "crates/sparq-parse", "crates/sparq-text", "crates/sparq-canon", "crates/sparq-zk", "crates/sparq-zk-compose", "crates/sparq-mpc", "crates/sparq-prov", "crates/sparq-fedplan", "crates/sparq-fedplan-mpc", "crates/sparq-fedclient", "crates/sparq-algos", "crates/sparq-trust", "crates/sparq-kb", "crates/sparq-terse", "crates/sparq-reason-el", "crates/sparq-reason-ql", "crates/sparq-reason-dl", "crates/sparq-vc", "crates/sparq-mcp", "crates/sparq-arrow", "crates/sparq-substrate", "crates/sparq-jsonld", "crates/sparq-engine-serialize", "crates/sparq-engine-service", "crates/sparq-difftest", "crates/sparq-metamorph", "crates/sparq-reason-diff", "crates/sparq-acbench", "crates/sparq-lws-core", "crates/sparq-lws-wasm", "crates/sparq-forms", "crates/sparq-wac-oracle", "crates/sparq-jsonld-registry", "crates/sparq-wrapper", "crates/sparq-wrapper-shacl", "crates/sparq-wrapper-gen", "crates/sparq-wrapper-integration", "crates/sparq-shaclc", "crates/sparq-e2ee-ng", "crates/sparq-crdt", "crates/sparq-conformance-floors", "crates/sparq-secprop-vocab"]
 # `fuzz` is the cargo-fuzz harness (bead sq-ovnf): it requires a NIGHTLY toolchain
 # (libFuzzer codegen), so it is excluded from the workspace to keep the STABLE
 # `cargo build`/`cargo test`/`clippy --workspace` gate from ever trying to compile it.
@@ -13,15 +13,23 @@ exclude = ["vendor/spargebra", "fuzz", "gui/src-tauri"]
 # CI runners without those libs. The GUI is built/linted/typechecked in its own path-scoped
 # `.github/workflows/gui.yml` lane (which installs the system deps). [OPUS-4.8]
 
-# Vendored spargebra 0.4.6 with surgical W3C-conformance parser fixes (see
-# vendor/spargebra/SPARQ-PATCHES.md and docs/upstream-proposals.md — each fix is
-# prepared as an upstream PR against oxigraph/oxigraph). Drop this patch once the
-# fixes land upstream in a released spargebra.
+# Vendored spargebra 0.4.6: six surgical W3C-conformance parser fixes (§1–§6, each
+# prepared as an upstream PR against oxigraph/oxigraph) plus four sparq-local patches
+# (§7–§10) — see vendor/spargebra/SPARQ-PATCHES.md and docs/upstream-proposals.md.
+#
+# Retirement is bead sq-98w7z.8; re-check upstream with
+# `python3 scripts/check-spargebra-release.py`. Last checked 2026-07-27: crates.io
+# still tops out at 0.4.6, so this patch stays. Dropping it is NOT a one-line change —
+# bench/* and zk/xpath/differential are separate workspaces this patch table does not
+# reach (they pin `path = ".../vendor/spargebra"` directly), the next upstream release
+# is a semver-major 0.5.0 that this `version = "0.4"` requirement will not resolve, and
+# §7–§10 have no upstream home (§8 is /sparql DoS hardening). Read the release-watch
+# section of SPARQ-PATCHES.md before starting.
 [patch.crates-io]
 spargebra = { path = "vendor/spargebra" }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 # [OPUS-4.8] (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
@@ -54,7 +62,10 @@ oxjsonld = { version = "0.2", features = ["rdf-12"] }
 oxrdfxml = { version = "0.2", features = ["rdf-12"] }
 # SPARQL syntax -> algebra (we build the planner + physical execution ourselves).
 spargebra = { version = "0.4", features = ["sparql-12", "sep-0006"] }
-# Fast hashing / maps.
+# Fast hashing / maps. These are the NEWEST side of a duplicate pair in Cargo.lock;
+# the lagging copies are held by third-party crates. Blockers are surveyed once, in
+# `deny.toml` § [bans] (the duplicate-version blocker registry) — read that before
+# re-investigating a `multiple-versions` warning.
 rustc-hash = "2"
 hashbrown = "0.17"
 # Inline small rows (avoid a heap allocation per solution row).

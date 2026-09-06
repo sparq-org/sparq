@@ -1,0 +1,12 @@
+{
+  "path": ["README.md", "skills", "docs", "research", "book/src"],
+  "format": ["markdown"],
+  "ignore": ["**/node_modules/**", "**/target/**"],
+  "minTokens": 80,
+  "minLines": 5,
+  "mode": "strict",
+  "threshold": 0,
+  "reporters": ["console", "json", "threshold"],
+  "output": "target/jscpd",
+  "noTips": true
+}

@@ -94,7 +94,7 @@ This is the load-bearing table. Each feature below cites which row it stands on.
 | P5 | Hidden-issuer set-membership (`pk_i ∈ K`) | **wired, NOT-yet-sound** (`sq-qhy4`) | `issuer.rs`; `issuer.nr`; `verifier.rs:3002` |
 | P6 | Hidden-holder PoK (`hpk = hsk·G`, digest match) | **wired, NOT-yet-sound** (`sq-qhy4`) | `holder.nr`; `verifier.rs:3158` |
 | A1 | In-circuit ZK-over-hidden-antecedent derivation (`sq-rsd3v.2`) | **relation landed, NOT-yet-sound (`sq-qhy4`); no zk-trace mapper, no compiled member, no dispatch** (§3.3 Status) | `derivation.nr` |
-| A2 | Witnessed-rule-shape N3 derivation step (`sq-rsd3v.3`) | **GREENFIELD Noir — does not exist** | — (§4 deliverable) |
+| A2 | Witnessed-rule-shape N3 derivation step (`sq-rsd3v.3`) | **relation + host mirror landed; NOT-yet-sound (`sq-qhy4`), NOT `bb`-measured, NOT manifest-dispatched, no `ProofStep`→slot mapper** (§4.4) | `n3.nr`; `n3.rs` |
 | A3 | Single-use nullifier (computed in-circuit) (`sq-rsd3v.1`) | **ABSENT — new circuit-soundness surface** | — (§6 deliverable) |
 | A4 | Delegation chain-carry + per-request key-proof (`sq-rsd3v.4`) | **ZERO substrate today** | — (§5 deliverable) |
 | A5 | `sparq-trust` admission gate (`admit`) (`sq-rsd3v.8`) | **PoC only** (`sq-pfae.10`, PR #966); not the generalised gate | `crates/sparq-trust` (PoC) |
@@ -373,6 +373,33 @@ closure-sweep over the flat full graph, AND (ii) a **fixpoint-SATURATION proof**
 in sparq and is NOT claimed.** A relying party that needs "the answer set is
 complete under entailment" cannot get it from this design today.
 
+**The deferral is now ENFORCED, not prose-only** (`sq-rsd3v.7`, landed): the two
+obligations cannot be conflated by reading an accept.
+`EntailmentPolicy::require_completeness_under_entailment()`
+(`crates/sparq-zk-compose/src/verifier.rs`) is how a relying party DECLARES it needs
+"no entailed answer is missing", and the verifier's entailment gate then REFUSES —
+fail-closed, before any other entailment check, with
+`CheckError::CompletenessUnderEntailmentUnavailable` — every non-`Simple` manifest.
+The refusal message names both missing halves from the single source of truth
+`derivation::COMPLETENESS_UNDER_ENTAILMENT_UNBUILT`, so the honest scope cannot decay
+into a doc only one side remembers. Precisely what the refusal asserts: *no accepted
+proof under that policy rests on entailment whose completeness sparq cannot check* —
+nothing more. Two limits are deliberate and documented in the API:
+
+- a `Simple` manifest is NOT refused (no entailment closure for completeness to range
+  over), but passing one is **not** a completeness assertion either — that rests on
+  the `scan.nr` per-pattern sweep and the rest of the not-externally-audited verifier
+  (`sq-qhy4`);
+- an off-circuit materialised closure presented as `Simple` over the materialised
+  graph (§3.6(a) trusted-materialiser mode) is INVISIBLE to the dial: there the regime
+  field is honestly `Simple` and entailment is trusted to the materialiser's
+  signature — a different trust model the relying party must evaluate itself.
+
+When the RE-ENTRY TRIGGER of §3.6(c) fires (a documented huge-closure case PLUS a
+verifier demanding full completeness; `research/zkp-performance-landscape.md` §5
+trigger 4), the unconditional refusal is precisely what a real check replaces. Until
+then it is the honest answer, and soundness-first (`sq-rsd3v.2`/`.3`) is the path.
+
 ---
 
 ## 4. Feature 2 — query over N3-rule datasets (`sq-rsd3v.3`)
@@ -433,6 +460,56 @@ with completeness, `sq-rsd3v.7`); `math:quotient` / `exponentiation` / floats;
 decomposition; `log:semantics` / `log:includes`; backward rules that don't reduce
 to a forward closure; any rule whose closure is unbounded. A rule outside the
 subset MUST be rejected, not silently approximated.
+
+### 4.4 Status (`sq-rsd3v.3`, row A2)
+
+The in-circuit RELATION landed as `zk/compose/compose_core/src/n3.nr`
+(`n3_derivation_check`), with the host mirror + commitment builder at
+`crates/sparq-zk-compose/src/n3.rs` (`N3Slot` / `N3Builtin` / `N3Premise` /
+`N3Rule` / `N3RuleSet` / `N3SubsetError`). What it states:
+
+- **§4.1 move 1 (whose rules).** `rules_root` is a PUBLIC input, recomputed
+  in-circuit by folding every witnessed rule shape (`rule_leaf` → `commit_fold`),
+  so a fired rule must be one the rule author committed. Signing that root is the
+  existing `sq-z9l` `issuer.nr` machinery and is NOT restated by this member.
+- **§4.1 move 2 (witnessed shape).** Each pattern slot is `(kind, konst, var)`;
+  the conclusion must be the rule's conclusion pattern under a substitution that
+  is CONSISTENT by construction (the substitution is an array indexed by variable
+  id, so one variable cannot take two values in a firing).
+- **Grounding.** Every JOIN premise atom chains to a strictly earlier node's
+  conclusion; leaves anchor to committed-graph membership, so the antecedents
+  stay hidden (the row-A1 privacy property, inherited).
+- **Safety is enforced in-circuit, and it is load-bearing.** The substitution is
+  a private witness, so an unbound conclusion variable would let the prover CHOOSE
+  the derived triple. `rule_subset_check` runs a BINDING SCHEDULE over the
+  witnessed shape (join atoms bind their variable slots; arithmetic builtins
+  require bound inputs and bind their output; comparisons bind nothing) and
+  refuses any rule whose conclusion uses an unbound variable.
+- **Builtin whitelist.** The `math:` comparisons reuse `filter_signed`'s
+  `signed_verdict` and its canonical-`xsd:integer` operand binding VERBATIM (both
+  were extracted to `pub(crate)` for exactly this, with the FILTER lane's assert
+  order preserved); `sum`/`difference`/`product` are exact field equations, sound
+  because every magnitude is `< 2^64` against a `~2^254` modulus, and fail CLOSED
+  (no canonical witness) when a true result leaves the representable range.
+- **Fail-closed outside the subset, structurally.** `N3RuleSet::commit` runs
+  `admit` BEFORE it folds, so an out-of-subset rule graph has **no root** and can
+  never reach the circuit; the circuit independently re-checks the same conditions
+  so a hand-rolled witness cannot bypass the host gate.
+
+**What is NOT built (do not read the above as more than it says):** the
+off-circuit witness generator that maps `sparq-reason`'s `reason_n3_proof` /
+`n3_proof_tree` `ProofStep`s onto these slots; a compiled
+`n3_k{K}_n{N}_r{R}_m{M}` bin package; its `bb gates` cost measurement (so **NO**
+cost figure is claimed — repo policy forbids an unmeasured one); and any
+`ProofManifest` / `CircuitId` / `verify_manifest` dispatch that would bind such a
+proof. Nothing here makes the composition verifier sound, and the whole member
+inherits §3's caveats — research-grade, **NOT externally audited (`sq-qhy4`)**.
+As with `derivation.nr` (§3.3) and `sameas.nr` (§3.5.1), the Noir `#[test]`
+accept/forge suite in `compose_core/src/tests.nr` is compiled by the zk lane but
+**executed by no CI lane** (nothing runs `nargo test`), so it is a
+maintainer-run suite, not a standing gate. The soundness obligation this member
+discharges is derivation-SOUNDNESS only; COMPLETENESS under entailment remains
+§3.7 / `sq-rsd3v.7`, unbuilt and not claimed.
 
 ---
 

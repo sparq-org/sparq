@@ -1,13 +1,14 @@
 // AUTHORED-BY Claude Opus 4.8
 //! Skip-crypto opt 3 (PUBLIC-read skip) — adversarial end-to-end tests through the assembled router.
 //!
-//! These execute the REAL router (CORS → public-read skip → auth → handler) over the in-memory store
-//! and pin the security invariants of `decisions/0002`. The HARD SCOPE LIMIT the WAC-Allow conformance
-//! suite enforces is load-bearing: the skip fires ONLY for a GET/HEAD that carries NEITHER an
-//! `Authorization` NOR a `DPoP` header; a CREDENTIALED read is never short-circuited (so an
-//! authenticated owner of a public resource sees their full `WAC-Allow user=` modes, and a forged
-//! token is rejected, not served). A malformed `DPoP` header (even without `Authorization`) keeps the
-//! auth path's canonical 400.
+//! These execute the REAL router (CORS → public-read skip → auth → handler) over the in-memory
+//! store and pin the security invariants of `research/lws-design-records.md` §5 (RSS
+//! `decisions/0002`). The HARD SCOPE LIMIT the WAC-Allow conformance suite enforces is
+//! load-bearing: the skip fires ONLY for a GET/HEAD that carries NEITHER an `Authorization` NOR a
+//! `DPoP` header; a CREDENTIALED read is never short-circuited (so an authenticated owner of a
+//! public resource sees their full `WAC-Allow user=` modes, and a forged token is rejected, not
+//! served). A malformed `DPoP` header (even without `Authorization`) keeps the auth path's
+//! canonical 400.
 //!
 //! - **INV-1 anonymous-equivalence:** the skip path's FULL response (status + EVERY header + body) is
 //!   byte-identical to the FORCED full-anonymous path (no `Authorization` + a present `DPoP` header,

@@ -39,6 +39,13 @@ pub mod driver;
 pub mod holder;
 pub mod issuer;
 pub mod manifest;
+// [OPUS-5] sq-rsd3v.3: witnessed-rule-shape N3 derivation — the host mirror of
+// the in-circuit relation, the fail-closed PROVABLE-SUBSET admission gate, and
+// the rule-graph commitment (the rule author as ISSUER, so a proof says WHOSE
+// rules). SEPARATE from `derivation` because an N3 rule set is DATASET-SUPPLIED,
+// not a fixed public table. Research-grade, NOT externally audited (sq-qhy4);
+// no manifest/dispatch wiring and no compiled member yet.
+pub mod n3;
 pub mod revocation;
 // [OPUS-5] sq-rsd3v.6: owl:sameAs EQUALITY reasoning — the host mirror of the
 // in-circuit union-find canonicalisation gadget, plus its witness builder.
@@ -67,6 +74,10 @@ pub use manifest::{BranchWitness, FragmentManifest};
 pub use derivation::{regime_admits, DerivationStep, EntailmentRule};
 // [OPUS-5] sq-rsd3v.6: the owl:sameAs canonicalisation witness + host re-check.
 pub use sameas::{CanonEntry, CanonError, CanonTable, OWL_SAME_AS};
+// [OPUS-5] sq-rsd3v.3: the N3 witnessed-rule-shape types + the fail-closed
+// provable-subset gate. `N3RuleSet::commit` admits BEFORE it folds, so an
+// out-of-subset rule graph has no root and can never reach the circuit.
+pub use n3::{N3Builtin, N3Premise, N3Rule, N3RuleSet, N3Slot, N3SubsetError, MATH_NS};
 // [OPUS-4.8] sq-cfmv: the fail-closed (method × circuit) dispatch resolver.
 #[cfg(feature = "dual-leaf")]
 pub use dispatch::{resolve_circuit, resolve_circuit_for_scheme, DispatchError};

@@ -42,6 +42,16 @@
 // The CR6 reachability side-condition is untouched (this module only READS the saturation the
 // existing `classify::saturate` produced). Unsupported assertion / key / NPA shapes stay counted
 // skips (`Report::skipped_assertions`, fail-closed) — never a guessed typing/equality/clash.
+//
+// [SONNET-4.6] sq-vkq9u — the `abox` × `cdomain` seam. With BOTH features on, a
+// `DataPropertyAssertion` whose literal lies in the exact numeric tier is no longer a skip:
+// `extract::decode_abox` internalizes `a q 5` as `{a} ⊑ ∃q.{5}` over the point range CR9 mints
+// (`{5}` is the SAME concept a TBox `DataHasValue 5` / `DataOneOf 5` / faceted `[5, 5]` resolves
+// to), so CR8 containment carries an asserted VALUE into the TBox's data-range obligations and the
+// typings / inconsistencies below read off it with no change to THIS module. Sound because
+// `a q v` asserts `(a^I, v) ∈ q^I` and `v ∈ {v}^D`. The NPA/key readoffs are UNAFFECTED: both
+// still match data positives against ASSERTED triples (the honest incompleteness noted above),
+// not against the rescued existentials.
 
 use crate::extract::{self, AboxNpa, ExtractOpts};
 use crate::normal::{Concept, Names, Normal, BOTTOM, TOP};
@@ -127,9 +137,11 @@ impl Realization {
         self.hierarchy.is_inconsistent()
     }
 
-    /// The extraction/classification [`Report`] — `skipped_assertions` is the count of
-    /// data-property / non-EL assertions DEFERRED (fail-closed), `unsatisfiable_classes` the TBox
-    /// named-class clashes.
+    /// The extraction/classification [`Report`] — `skipped_assertions` is the count of assertions
+    /// DEFERRED (fail-closed): a non-EL class expression, a structural-bnode object, or a
+    /// data-property value with no minted point range (every literal without `cdomain`; a
+    /// non-exact-numeric one with it — see [SONNET-4.6] sq-vkq9u in the module docs).
+    /// `unsatisfiable_classes` is the TBox named-class clash count.
     pub fn report(&self) -> Report {
         self.hierarchy.report()
     }
@@ -674,7 +686,7 @@ mod tests {
         );
     }
 
-    // --- DataPropertyAssertion is a fail-closed counted skip (cdomain rescue deferred). --------
+    // --- DataPropertyAssertion: a counted skip, or the `cdomain` point-range rescue. -----------
     #[test]
     fn data_property_assertion_is_a_counted_skip() {
         let ttl = format!(
@@ -685,8 +697,15 @@ mod tests {
         let (dict, triples) = parse(&ttl);
         let r = realize(&dict, &triples);
         assert!(!r.is_inconsistent());
+        // WITHOUT `cdomain` there is no value tower to mint `{30}` on, so the assertion stays a
+        // fail-closed counted skip. WITH it, [SONNET-4.6] sq-vkq9u internalizes `{alice} ⊑
+        // ∃age.{30}` and nothing is skipped — the rescue's own oracles live in
+        // tests/abox_cdomain.rs (that feature CONJUNCTION is its own feature-matrix leg).
+        #[cfg(not(feature = "cdomain"))]
         assert_eq!(r.report().skipped_assertions, 1, "the data-property assertion is skipped");
-        // The class assertion still classifies the individual.
+        #[cfg(feature = "cdomain")]
+        assert_eq!(r.report().skipped_assertions, 0, "sq-vkq9u rescues `:age 30` as ∃age.{{30}}");
+        // The class assertion still classifies the individual, in either feature state.
         let (alice, person) = (iri(&dict, "http://ex/alice"), iri(&dict, "http://ex/Person"));
         assert!(r.type_assertions().contains(&(alice, person)));
     }

@@ -24,7 +24,7 @@
           {
             "type": "agent",
             "agent": "sparq-perf-reviewer",
-            "model": "opus",
+            "model": "claude-opus-5",
             "timeout": 300,
             "statusMessage": "PERFORMANCE-discretion gate: reviewing PR before arm…",
             "prompt": "You are the sparq PERFORMANCE-discretion gate (the sparq-perf-reviewer agent). This is a PreToolUse hook on Bash. The tool call being gated is:\n\n$ARGUMENTS\n\nFIRST: inspect tool_input.command. If it is NOT a PR-arming command — i.e. it is NOT a `gh pr merge` that arms a PR for the merge train (look for `gh pr merge` with `--auto`) — then this is out of your scope: immediately ALLOW it untouched. Return exactly:\n{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"allow\", \"permissionDecisionReason\": \"not a PR-arming command; perf gate not applicable\"}}\n\nIf it IS a `gh pr merge … --auto` arming command: parse the PR number from it, then perform your full perf-discretion review per your agent definition — decide perf_affecting, and if so perf_ok (regression risk + every perf claim evidenced, honesty rules: work-box timings NON-canonical, NO hard-coded perf numbers in markdown, numbers trace to real evidence, deterministic-floor regressions are real). End with your verdict JSON block, then the hookSpecificOutput decision: allow when perf_affecting=false or perf_ok=true; DENY (with a clear 🤖 SPARQ perf-reviewer reason naming the concern and that the maintainer should review) when perf_affecting=true and perf_ok=false, or when you cannot determine perf-impact (fail toward maintainer discretion). Surface canonical-number (perf-baseline floor / published-results) changes in evidence even on allow."

@@ -1,0 +1,14 @@
+# Generated corpora (tens of MB) and build output — never committed.
+data/
+# One target dir per feature combination, so a count-alloc build never
+# overwrites the timed one: target/, target-count/, target-mi/, target-rdf12/…
+target*/
+# Throwaway per-commit attribution wrappers minted by ab.sh --attribute.
+.attrib/
+# Per-leg --json results ab.sh compares to enforce the equivalence invariant,
+# and the stub docs its --self-test mutates.
+.ab-results/
+.ab-selftest/
+# The two legs resolve different dependency graphs on purpose; a committed lock
+# would freeze the git leg to one rev and defeat --attribute.
+Cargo.lock

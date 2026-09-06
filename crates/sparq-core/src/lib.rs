@@ -7,6 +7,13 @@ pub mod compress;
 pub mod dict;
 #[cfg(feature = "dict-spill")]
 pub mod dictspill;
+// [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): the OPT-IN Elias-Fano
+// / Partitioned-Elias-Fano column codecs with compressed `next_geq` seek. OFF by default — it is
+// a MEASUREMENT-GATED prototype plus its A/B harness, deliberately NOT routed as a `PermData`
+// variant and not called by any join, so the shipped store keeps the varint block codec
+// bit-exactly and the lean default / wasm build pays nothing. Pure `std`, no new dependency.
+#[cfg(feature = "elias-fano")]
+pub mod eliasfano;
 #[cfg(feature = "mmap")]
 pub mod extsort;
 // [OPUS-4.8] (sq-7d3dj.18) Prefix-memoized IRI-validation fast path in FRONT of the full

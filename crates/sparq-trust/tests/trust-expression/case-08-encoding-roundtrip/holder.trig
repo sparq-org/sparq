@@ -1,0 +1,35 @@
+# Design §6 case 8 — ENCODING ROUND-TRIP. Two bundles from two enumerated issuers,
+# each covered by its own positive status attestation at t.
+#
+# The response `R` is emitted in both encodings of design §4: the NORMATIVE RDF 1.2
+# reifier form (a) and the mechanically lossless named-graph + PROV-O mapping (b),
+# whose fixed correspondence is `reifier node <-> graph IRI`. The runner asserts that
+# correspondence in both directions over this response, and re-runs `Q'` over (b) as
+# an independent verifier would. sparq parses triple terms but cannot yet MATCH them
+# in SPARQL (design §7.5), which is why (b) is the form the re-check evaluates.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:dvla.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:bundle:name> prov:wasAttributedTo <did:web:registry.example> ;
+    trustx:coveredBy <urn:status:name> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:status:name> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-02T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-09T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}
+
+GRAPH <urn:bundle:name> {
+    <urn:person:jesse> foaf:name "Jesse" .
+}

@@ -72,48 +72,126 @@ fn generate_u1_oracle_fail_closed() {
     }
 }
 
-/// Owner-always-allowed invariant: the pod owner must be granted Allow on every
-/// resource under WAC (the canonical owner-centric Solid pod shape).
+/// WAC **nearest-ACL-document-wins** vs ACP **cumulative** ancestor inheritance — the
+/// headline model divergence U1 exists to exercise (design record §2.2 "WAC
+/// nearest-ancestor vs ACP cumulative inheritance"; bead `sq-o4orz` / `sq-kvvcl.2`).
+///
+/// U1 gives the pod owner a `Scope::Subtree` full-control grant at the pod root, and every
+/// resource ALSO carries its own resource-scoped intent — i.e. its own `.acl` document.
+/// Under WAC that own document fully shadows the pod-root grant, so the owner is allowed
+/// exactly on the resources whose own ACL names the owner (the `Private` ones) and DENIED
+/// on the rest. Under ACP the ancestor grant accumulates, so the owner is allowed
+/// everywhere. Getting this wrong in the `Allow` direction is precisely the oracle=Allow /
+/// engine=Deny under-share the live driver (`bench/ac/live`) reported before `sq-o4orz`.
+///
+/// Both arms are asserted non-empty, so a regression to a `starts_with` union (which would
+/// make every WAC decision `Allow`) turns this test red rather than vacuous.
 #[test]
-fn owner_always_allowed_wac() {
-    use sparq_acbench::{AccessMode, AcModel, Decision, personal, GenParams, Request};
+fn owner_wac_shadowed_by_nearest_acl_while_acp_inherits() {
+    use sparq_acbench::{
+        oracle_acp, oracle_wac, personal, AccessMode, AcModel, Audience, Decision, GenParams,
+        Request, Scope,
+    };
     let params = GenParams::smoke();
     let ds = personal::generate(&params);
 
-    // Extract owner URI from the first WAC expected decision.
-    // The owner is the agent that has Allow on ALL resources.
-    let owner_ed = ds
-        .expected_decisions
-        .iter()
-        .find(|e| e.model == AcModel::Wac && e.decision == Decision::Allow)
-        .expect("U1 must produce at least one Allow decision");
-    let owner_uri = &owner_ed.request.agent;
-
-    // Collect all unique resource URIs from the intent table.
-    let resource_uris: Vec<String> = ds
+    // The owner is the agent named by the pod-root `Scope::Subtree` grant (U1's first intent).
+    let owner_uri = match &ds
         .intents
         .iter()
-        .map(|r| r.resource_uri.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
+        .find(|r| r.scope == Scope::Subtree)
+        .expect("U1 must emit a pod-root subtree grant")
+        .audience
+    {
+        Audience::Agent(a) => a.clone(),
+        other => panic!("U1's pod-root subtree grant must be an Agent audience, got {:?}", other),
+    };
+    let owner_audience = Audience::Agent(owner_uri.clone());
 
-    for resource_uri in &resource_uris {
+    // Every resource that carries its own `.acl` (a resource-scoped intent).
+    let own_acl_resources: std::collections::BTreeSet<String> = ds
+        .intents
+        .iter()
+        .filter(|r| r.scope == Scope::Resource)
+        .map(|r| r.resource_uri.clone())
+        .collect();
+    assert!(
+        !own_acl_resources.is_empty(),
+        "U1 must emit resource-scoped intents"
+    );
+
+    let (mut shadowed, mut owner_named) = (0_usize, 0_usize);
+    for resource_uri in &own_acl_resources {
+        // Does this resource's OWN ACL document reach the owner? U1 emits exactly four
+        // per-resource audiences; the exhaustive match makes a new variant fail loudly
+        // here rather than silently mis-partition the two arms below.
+        let names_owner = ds
+            .intents
+            .iter()
+            .filter(|r| r.scope == Scope::Resource && &r.resource_uri == resource_uri)
+            .any(|r| match &r.audience {
+                // `PublicProfile` — a public grant reaches every agent, owner included.
+                Audience::Public => true,
+                // `Private` — the owner is named directly.
+                a @ Audience::Agent(_) => a == &owner_audience,
+                // `Shared` (friend group) / `AppRestricted` (agent+client pair): neither
+                // reaches the owner.
+                Audience::Group(_) | Audience::ClientRestricted { .. } => false,
+                other => panic!(
+                    "U1 emitted an unexpected per-resource audience {:?} — \
+                     update this test's owner-reachability expectation",
+                    other
+                ),
+            });
+
         let req = Request {
             agent: owner_uri.clone(),
             client: None,
             resource: resource_uri.clone(),
             mode: AccessMode::read_only(),
         };
-        // Owner must be allowed for every resource that the owner owns
-        // (pod root subtree intent covers all resources in the pod).
-        let decision = sparq_acbench::oracle_wac(&req, &ds.intents);
-        // The owner subtree grant covers any URI starting with the pod root.
-        // Resources in the pod start with the pod base URI, so all should be Allow.
+
+        let want_wac = if names_owner { Decision::Allow } else { Decision::Deny };
         assert_eq!(
-            decision,
+            oracle_wac(&req, &ds.intents),
+            want_wac,
+            "WAC nearest-ACL: resource {} own-ACL-names-owner={}", resource_uri, names_owner
+        );
+        // ACP accumulates the pod-root ancestor grant, so the owner is allowed regardless.
+        assert_eq!(
+            oracle_acp(&req, &ds.intents),
             Decision::Allow,
-            "Owner must have WAC Allow on resource {resource_uri}"
+            "ACP cumulative inheritance must still allow the owner on {}", resource_uri
+        );
+
+        if names_owner {
+            owner_named += 1;
+        } else {
+            shadowed += 1;
+        }
+    }
+
+    assert!(
+        owner_named > 0,
+        "non-vacuity: U1 must produce resources whose own ACL names the owner"
+    );
+    assert!(
+        shadowed > 0,
+        "non-vacuity: U1 must produce resources whose own ACL shadows the pod-root owner grant \
+         — otherwise this test cannot distinguish nearest-ACL from cumulative inheritance"
+    );
+
+    // The generator's own expected-decision table must agree (no stale ground truth).
+    for ed in ds
+        .expected_decisions
+        .iter()
+        .filter(|e| e.model == AcModel::Wac && e.request.agent == owner_uri)
+    {
+        assert_eq!(
+            oracle_wac(&ed.request, &ds.intents),
+            ed.decision,
+            "expected_decisions disagrees with the WAC oracle for {:?}",
+            ed.request
         );
     }
 }

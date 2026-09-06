@@ -109,6 +109,11 @@ pub(crate) struct Resolved {
     /// Literal-`owl:hasValue` restriction node → its POINT-range concept (the caller
     /// wraps it as `∃p.{v}` using the node's `owl:onProperty`).
     pub node_exists: FxHashMap<Id, Concept>,
+    /// [SONNET-4.6] sq-vkq9u (`abox` + `cdomain`): data-property-assertion LITERAL id → its
+    /// POINT-range concept (the caller wraps it as `{a} ⊑ ∃q.{v}`). Only ever populated for the
+    /// literals handed in as `abox_points`; a literal outside the exact numeric tier is ABSENT,
+    /// so the caller keeps its fail-closed counted skip.
+    pub lit_point: FxHashMap<Id, Concept>,
     /// `d ⊑ ⊥` (CR7) and `d1 ⊑ d2` (CR8) over the minted concepts.
     pub axioms: Vec<Normal>,
 }
@@ -116,9 +121,16 @@ pub(crate) struct Resolved {
 /// Resolves the pre-screened concrete-domain candidates into minted range concepts +
 /// CR7/CR8 axioms. `ranges` = `(node, owl:onDatatype object, owl:withRestrictions list
 /// head)`; `points` = singleton-`DataOneOf` `(node, literal)`; `exists_points` =
-/// literal-`hasValue` `(restriction node, literal)`; `list` walks an RDF list. A candidate
-/// that is not supported is simply ABSENT from the output maps (the caller's decode then
-/// records the ordinary skip) — deferral, never a guessed verdict.
+/// literal-`hasValue` `(restriction node, literal)`; [SONNET-4.6] sq-vkq9u `abox_points` =
+/// the bare LITERALS of `DataPropertyAssertion`s to rescue as point ranges (empty unless the
+/// caller asked for ABox internalization); `list` walks an RDF list. A candidate that is not
+/// supported is simply ABSENT from the output maps (the caller's decode then records the
+/// ordinary skip) — deferral, never a guessed verdict.
+// The four candidate slices are DELIBERATELY separate parameters: each is pre-screened by its own
+// arm of `extract::resolve_cdomain`'s strictness guard, and collapsing them would let a caller mix
+// a `hasValue` node into the faceted-range set. Same rationale as the two `#[allow]`s in
+// classify.rs. [SONNET-4.6] sq-vkq9u
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve(
     dict: &Dict,
     triples: &[[Id; 3]],
@@ -126,15 +138,21 @@ pub(crate) fn resolve(
     ranges: &[(Id, Id, Id)],
     points: &[(Id, Id)],
     exists_points: &[(Id, Id)],
+    abox_points: &[Id],
     list: impl Fn(Id) -> Vec<Id>,
 ) -> Resolved {
     let mut out = Resolved {
         node_range: FxHashMap::default(),
         node_exists: FxHashMap::default(),
+        lit_point: FxHashMap::default(),
         axioms: Vec::new(),
     };
-    if ranges.is_empty() && points.is_empty() && exists_points.is_empty() {
-        return out; // O(1) fast path: no concrete-domain structure in the TBox.
+    if ranges.is_empty()
+        && points.is_empty()
+        && exists_points.is_empty()
+        && abox_points.is_empty()
+    {
+        return out; // O(1) fast path: no concrete-domain structure in the TBox or ABox.
     }
     let facets = FacetVocab::intern(dict);
     // Walk each withRestrictions list once, then index every facet node's triples in ONE
@@ -198,7 +216,20 @@ pub(crate) fn resolve(
             out.node_exists.insert(node, c);
         }
     }
-    out.axioms = emit(&mint.minted);
+    // [SONNET-4.6] sq-vkq9u: the ABox `DataPropertyAssertion` points, minted LAST — so whenever
+    // `abox_points` is empty every TBox-driven concept id (and therefore the whole
+    // `Classifier::classify` surface) is exactly what it was before this parameter existed. A
+    // literal whose canonical value equals an already-minted key SHARES that concept via the
+    // `Mint` dedup, which is what makes `{5}` from `a q 5` and the TBox's `[5, 5]` /
+    // `DataHasValue 5` / `DataOneOf 5` the SAME concept.
+    let outers = mint.minted.len();
+    for &lit in abox_points {
+        if let Some(key) = point_value(dict, lit) {
+            let c = mint.get(names, key);
+            out.lit_point.insert(lit, c);
+        }
+    }
+    out.axioms = emit(&mint.minted, outers);
     out
 }
 
@@ -424,15 +455,27 @@ pub(crate) fn contains(outer: &NormRange, inner: &NormRange) -> bool {
 /// CR7/CR8 as ordinary `Normal` axioms over the minted range concepts: `d ⊑ ⊥` for the
 /// EMPTY range (CR5 then propagates the clash to any class with an `∃p.d` obligation) and
 /// `d1 ⊑ d2` for every PROVEN containment (CR1/CR3/CR4 then thread them through
-/// data-property existentials exactly like class fillers). O(k²) over DISTINCT ranges.
-fn emit(minted: &[(Concept, NormRange)]) -> Vec<Normal> {
+/// data-property existentials exactly like class fillers).
+///
+/// `outers` is the length of the `minted` PREFIX whose ranges may act as the CONTAINING side;
+/// entries at or beyond it are [SONNET-4.6] sq-vkq9u's ABox `DataPropertyAssertion` POINTS, and
+/// restricting the inner loop to the prefix keeps the cost O(k·outers) instead of O(k²) — an
+/// ABox may assert hundreds of thousands of distinct values, where a full square would dominate
+/// the whole classification. The restriction is output-EQUIVALENT, not an approximation: a point
+/// `{v}` can only contain a NON-EMPTY range that is `{v}` itself (an inner `[l, h] ⊆ {v}` forces
+/// `l = h = v`, and `finalize`/`point_value` canonicalize that to the SAME `NormRange`, which
+/// `Mint` dedups to the SAME concept — so the `i != j` guard already excluded it), and an EMPTY
+/// inner range never reaches the inner loop at all (it is `⊑ ⊥` and `continue`s above).
+/// `emit(minted, minted.len())` is therefore the unrestricted form, and the unit test
+/// `abox_points_never_act_as_containing_ranges` asserts the two agree on a mixed set.
+fn emit(minted: &[(Concept, NormRange)], outers: usize) -> Vec<Normal> {
     let mut out = Vec::new();
     for (i, (ci, ki)) in minted.iter().enumerate() {
         if *ki == NormRange::Empty {
             out.push(Normal::Sub(*ci, BOTTOM));
             continue;
         }
-        for (j, (cj, kj)) in minted.iter().enumerate() {
+        for (j, (cj, kj)) in minted[..outers].iter().enumerate() {
             if i != j && contains(kj, ki) {
                 out.push(Normal::Sub(*ci, *cj));
             }
@@ -795,12 +838,38 @@ mod tests {
         let narrow = NormRange::Int { lo: Some(5), hi: Some(10) };
         let wide = NormRange::Int { lo: Some(0), hi: Some(20) };
         let minted = vec![(7u32, e), (8u32, narrow), (9u32, wide)];
-        let ax = emit(&minted);
+        let ax = emit(&minted, minted.len());
         assert!(ax.contains(&Normal::Sub(7, BOTTOM)), "empty range ⊑ ⊥ (CR7)");
         assert!(ax.contains(&Normal::Sub(8, 9)), "narrow ⊑ wide (CR8)");
         assert!(!ax.contains(&Normal::Sub(9, 8)), "wide ⊑ narrow must NOT be emitted");
         assert!(!ax.contains(&Normal::Sub(8, BOTTOM)), "a satisfiable range is not ⊥");
         assert_eq!(ax.len(), 2);
+    }
+
+    #[test]
+    fn abox_points_never_act_as_containing_ranges() {
+        // [SONNET-4.6] sq-vkq9u: the equivalence `emit`'s `outers` cutoff relies on — restricting
+        // the CONTAINING side to the TBox prefix must not lose a single axiom. Mixed set: an empty
+        // range, a wide range, and two ABox points (one INSIDE the wide range, one outside, plus a
+        // non-integral one). The restricted and unrestricted forms must agree exactly.
+        let minted = vec![
+            (7u32, NormRange::Empty),
+            (8u32, NormRange::Int { lo: Some(0), hi: Some(20) }),
+            // the ABox-point suffix:
+            (9u32, NormRange::Int { lo: Some(5), hi: Some(5) }),
+            (10u32, NormRange::Int { lo: Some(99), hi: Some(99) }),
+            (11u32, NormRange::Dec { lo: Some((55, 1, false)), hi: Some((55, 1, false)) }),
+        ];
+        let restricted = emit(&minted, 2);
+        let full = emit(&minted, minted.len());
+        assert_eq!(restricted, full, "the `outers` cutoff must be output-equivalent");
+        assert!(restricted.contains(&Normal::Sub(9, 8)), "{{5}} ⊑ [0, 20] (CR8)");
+        assert!(!restricted.contains(&Normal::Sub(10, 8)), "99 ∉ [0, 20]");
+        // A point is never a proper OUTER: no axiom names 9/10/11 on the right.
+        assert!(
+            !restricted.iter().any(|a| matches!(a, Normal::Sub(_, sup) if *sup >= 9)),
+            "a point can only contain itself, which `Mint` dedups away"
+        );
     }
 
     #[test]
@@ -942,7 +1011,7 @@ mod tests {
             .collect();
         ranges.sort_unstable();
         let mut names = Names::new();
-        let out = resolve(&dict, &triples, &mut names, &ranges, &[], &[], walk);
+        let out = resolve(&dict, &triples, &mut names, &ranges, &[], &[], &[], walk);
         // n1 and n2 dedup to ONE concept; n3 is empty; n4 (string base) is deferred.
         assert_eq!(out.node_range.len(), 3, "n4 must be ABSENT (deferred)");
         assert_eq!(out.node_range[&node("n1")], out.node_range[&node("n2")]);
@@ -953,5 +1022,50 @@ mod tests {
             !out.axioms.contains(&Normal::Sub(out.node_range[&node("n1")], BOTTOM)),
             "a satisfiable range must NOT be ⊑ ⊥ (a flipped verdict here is unsound)"
         );
+    }
+
+    #[test]
+    fn resolve_mints_abox_points_and_defers_out_of_tier_literals() {
+        // [SONNET-4.6] sq-vkq9u: the `abox_points` half of `resolve` — the literals of
+        // `DataPropertyAssertion`s. Value-EQUAL literals (`5` and `5.0`) must share ONE concept;
+        // anything outside the exact numeric tier (a string, an xsd:double, a literal ill-formed
+        // for its own datatype) must be ABSENT so the caller keeps its fail-closed skip. With no
+        // TBox range in play there is nothing to contain a point, so NO axiom is emitted.
+        let ttl = r#"
+            @prefix : <http://ex/> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :a :int 5 .
+            :a :dec 5.0 .
+            :a :other 6 .
+            :a :str "five" .
+            :a :dbl "5.0"^^xsd:double .
+            :a :bad "300"^^xsd:byte .
+        "#;
+        let (dict, triples) = Graph::parse_to_triples(ttl, "turtle").expect("parse");
+        let obj = |pred: &str| {
+            let p = dict.lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                format!("http://ex/{}", pred),
+            )));
+            triples.iter().find(|t| t[1] == p).map(|t| t[2]).expect("triple")
+        };
+        let lits: Vec<Id> =
+            ["int", "dec", "other", "str", "dbl", "bad"].iter().map(|&p| obj(p)).collect();
+        let mut names = Names::new();
+        let out = resolve(&dict, &triples, &mut names, &[], &[], &[], &lits, |_| Vec::new());
+        assert_eq!(out.lit_point.len(), 3, "only 5, 5.0 and 6 are in the exact tier");
+        assert_eq!(
+            out.lit_point[&obj("int")],
+            out.lit_point[&obj("dec")],
+            "{{5}} and {{5.0}} are the SAME value space, so ONE concept"
+        );
+        assert_ne!(out.lit_point[&obj("int")], out.lit_point[&obj("other")]);
+        for deferred in ["str", "dbl", "bad"] {
+            assert!(
+                !out.lit_point.contains_key(&obj(deferred)),
+                "{deferred} is outside the exact tier — no point may be minted for it"
+            );
+        }
+        assert!(out.axioms.is_empty(), "distinct points relate to nothing (no TBox range here)");
+        assert!(out.node_range.is_empty() && out.node_exists.is_empty());
     }
 }

@@ -71,12 +71,46 @@ jobs:
               --body "> 🤖 automation — this issue is from a non-collaborator, so it is **quarantined** (\`trust:untrusted\`) and its content is not acted on. A maintainer can approve it by adding a 👍 reaction (the promote cron picks it up)." || true
           fi
 
+      # [OPUS-5] FAIL-CLOSED LABEL WRITES (review of PR #4211).
+      #
+      # This step used to be `for l in $add; do gh issue edit … --add-label "$l" || true; done`.
+      # `gh issue edit --add-label` does NOT create a missing label — it fails with
+      # "'<name>' not found". With one edit PER label and `|| true` on each, a missing ROUTING
+      # label (a `role:*`) silently no-opped while the sibling `status:ready` write in the SAME
+      # loop succeeded. The issue was then promoted as if its role had been written, and
+      # scripts/route-resolve.py — finding no `role:` label — fell through to `[defaults]`.
+      # That is FAIL-OPEN on the dispatch path, and it is what turned a missing `role:gui` label
+      # into a silently INVERTED routing preference for the whole GUI backlog.
+      #
+      # Two changes make it fail-closed:
+      #   1. every label the static pass can emit is ENSURED to exist first (idempotent create,
+      #      restricted to the closed role:/status:/needs: set triage.py actually emits, so this
+      #      can never mint an arbitrary label);
+      #   2. the whole delta goes in ONE `gh issue edit` call, so it is ALL-OR-NOTHING — a failed
+      #      write can no longer leave `status:ready` set without the role label it was paired
+      #      with. `|| true` is gone from that call, so with `set -euo pipefail` a write failure
+      #      REDS the run instead of being discarded. The create is best-effort on purpose (an
+      #      already-existing label reports an error): the ADD is the hard gate that decides.
       - name: Static triage (trusted author)
         if: steps.trust.outputs.trusted == '1'
         run: |
+          set -euo pipefail
           labels=$(gh issue view "$NUM" -R "$REPO" --json labels --jq '[.labels[].name]|join(",")')
           out=$(python3 scripts/triage.py --labels "$labels" --type task)
           add=$(printf '%s\n' "$out" | sed -n 's/^ADD: //p')
           rem=$(printf '%s\n' "$out" | sed -n 's/^REMOVE: //p')
-          for l in $add; do gh issue edit "$NUM" -R "$REPO" --add-label "$l" || true; done
-          for l in $rem; do gh issue edit "$NUM" -R "$REPO" --remove-label "$l" || true; done
+          ensure_label() {
+            case "$1" in
+              role:*|status:*|needs:*) ;;
+              *) echo "refusing to auto-create unexpected label '$1'" >&2; return 0 ;;
+            esac
+            gh label create "$1" -R "$REPO" --color ededed \
+              --description "orchestration routing label (auto-created by triage)" \
+              >/dev/null 2>&1 || true
+          }
+          args=()
+          for l in $add; do ensure_label "$l"; args+=(--add-label "$l"); done
+          for l in $rem; do args+=(--remove-label "$l"); done
+          if [ "${#args[@]}" -gt 0 ]; then
+            gh issue edit "$NUM" -R "$REPO" "${args[@]}"
+          fi

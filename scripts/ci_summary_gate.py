@@ -372,6 +372,23 @@ _SUPERSEDABLE = ("cancelled", "stale")
 # pins the workflow job name against this regex so the two cannot drift apart.
 SELECT_RE = re.compile(r"change-based test selection")
 
+# [OPUS-5] #4614 (carry-over from the superseded #3765): the shared REMEDY tail for
+# both draft-tier refusals — the #3781 unsatisfiable-hold fast fail and
+# render_verdict's stale-draft-tier belt. Each is a verdict about WHICH CHECK-RUNS
+# EXIST on the head SHA, and re-running the ci-summary workflow re-runs no SELECTING
+# workflow, so a bare `gh run rerun` cannot make the missing full-tier select appear
+# — it re-reads the same evidence. Saying so IN the message is the point: an
+# automated repair lane whose reflex for any RED is "re-run it" otherwise burns
+# runner time on a verdict its re-run cannot move.
+UNSAT_HOLD_REMEDY = (
+    "NOTE FOR AUTOMATED REPAIR LANES: re-running this `ci-summary` gate does not "
+    "clear this state. The verdict is a function of which check-runs exist on this "
+    "head SHA, and re-running THIS workflow re-runs no selecting workflow — so the "
+    "missing full-tier select cannot appear as a result of the re-run. Only a "
+    "`ready_for_review` event (`gh pr ready`) or a new head commit re-runs the "
+    "selecting workflows. Do not re-run `ci-summary` for this verdict."
+)
+
 # [FABLE-5] PR #3511 review finding 1 (HIGH): STRUCTURAL AWAIT of the trusted
 # feature-matrix reporter. The privileged reporter runs in the separate,
 # default-branch-owned .github/workflows/feature-matrix-report.yml on a
@@ -1546,7 +1563,7 @@ def render_verdict(runs: list[dict], summary_path: str = "", tier_ctx: TierConte
                 "(ci/bench/feature-matrix/fuzz share one select name — one full-tier "
                 "select must never release the hold for the others). A draft-tier leg "
                 "set must never admit a non-draft PR to the merge queue "
-                "(docs/branch-protection.md §Draft-tier CI).",
+                "(docs/branch-protection.md §Draft-tier CI). " + UNSAT_HOLD_REMEDY,
                 summary_path,
             )
             print("::error::ci-summary failed — stale draft-tier leg set on a non-draft head.")
@@ -1908,6 +1925,20 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         # registration lag. An UNREADABLE draft state does NOT fire either: the gate
         # keeps polling exactly as before (a false RED here would be a new failure mode,
         # while the pre-#3781 behaviour of burning the budget is merely slow).
+        #
+        # [OPUS-5] #4614 ask 2 — DECIDED, NOT AN OVERSIGHT: the idle-head case (the PR
+        # reads NON-DRAFT, or the draft read fails) gets NO exit of its own; it polls to
+        # the absolute budget and then REDs via render_verdict's stale-draft-tier belt.
+        # The exit above is licensed by a CAUSAL fact — a full-tier select is produced
+        # only by a non-draft pull_request payload, so while the PR is a draft the
+        # successor provably cannot register. No such fact is available for a non-draft
+        # or unreadable head: the successor may simply be late, and the only evidence on
+        # offer (e.g. #3765's `_probe_head_activity` head-activity probe, counting
+        # non-terminal Actions runs on the head SHA) is CIRCUMSTANTIAL — it would trade
+        # a slow-but-correct verdict for a new false-RED failure mode. Burning the
+        # budget is merely slow; a false RED on a PR with zero failing legs is a
+        # regression. Prior art if this is ever revisited: closed branch
+        # `fable/gate-unsatisfiable-hold-3758` at `dc92b4af` (see #3765).
         if (
             awaiting_full
             and pending == 0
@@ -1933,7 +1964,8 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
                         "ready` fires ready_for_review, which re-runs every selecting "
                         "workflow at FULL tier), or push a new head. A worker PR that "
                         "the review pipeline re-drafts mid-gate hits this whenever the "
-                        "re-draft lands inside the gate's polling window.",
+                        "re-draft lands inside the gate's polling window. "
+                        + UNSAT_HOLD_REMEDY,
                         cfg.summary_path,
                     )
                     for n in sorted(set(stale)):

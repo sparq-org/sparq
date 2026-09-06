@@ -19,6 +19,63 @@
 //! Each is entered **only** after a runtime `is_*_feature_detected!` check confirms the ISA
 //! extension is present, and reads exactly `a.len()` lanes with a scalar tail for the
 //! remainder — no out-of-bounds access. The public [`l2_sq_dist`] wrapper is safe.
+//!
+//! **Non-vacuity.** Every numeric guard in this module is arch-GENERIC — it calls the
+//! dispatcher and checks it against an f64 reference, which the *scalar fallback* satisfies
+//! just as well as an intrinsic kernel does. So a host missing the ISA extension runs the whole
+//! suite green with the kernel never executed. `active_kernel` states the dispatch decision
+//! once so a test can assert WHICH kernel ran, and `simd::tests` fails closed on an x86_64 host
+//! that would leave `l2_sq_avx2` unexecuted (`SPARQ_VECTORS_REQUIRE_SIMD` overrides the arming).
+//! [SONNET-4.6] #5065. The NEON half is #5028, closed out-of-tree instead: the
+//! `.github/workflows/vectors-aarch64.yml` lane supplies a real aarch64 host and fails closed on
+//! a missing `asimd`. There is no in-tree NEON equivalent of the x86_64 guard below.
+
+/// Which distance kernel `l2_sq_dist` dispatches to on this host.
+///
+/// Only the variants reachable on the target arch exist, so there is no unconstructible variant
+/// to `allow(dead_code)` away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), allow(dead_code))]
+pub(crate) enum Kernel {
+    /// The NEON kernel, `l2_sq_neon`.
+    #[cfg(target_arch = "aarch64")]
+    Neon,
+    /// The AVX2 + FMA kernel, `l2_sq_avx2`.
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+    /// The portable fallback, `l2_sq_scalar`.
+    Scalar,
+}
+
+/// The kernel `l2_sq_dist` resolves to on this host, from runtime CPU feature detection.
+///
+/// **Single source of truth for the dispatch decision:** `l2_sq_dist` branches on this
+/// function's answer, so a test asserting `active_kernel() == Kernel::Avx2` is asserting the
+/// very condition that selects the kernel — it cannot drift into re-stating a *different*
+/// predicate that happens to agree today (#5065).
+///
+/// Cost is unchanged: the `is_*_feature_detected!` macros memoise their answer in a
+/// process-global after the first call, which is what the previous inline `if` already did.
+/// On a target with no intrinsic kernel (e.g. `wasm32`) this always answers `Scalar` and
+/// nothing branches on it — hence the `dead_code` allow, scoped to exactly those targets.
+#[inline]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), allow(dead_code))]
+pub(crate) fn active_kernel() -> Kernel {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return Kernel::Neon;
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+        {
+            return Kernel::Avx2;
+        }
+    }
+    Kernel::Scalar
+}
 
 /// Squared-Euclidean distance `Σ (aᵢ − bᵢ)²` — the metric the HNSW graph ranks with (unit
 /// vectors, so it is rank-equivalent to cosine; see `ann`'s module docs). Dispatches to the
@@ -33,20 +90,21 @@ pub(crate) fn l2_sq_dist(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "l2_sq_dist over mismatched dims");
     #[cfg(target_arch = "aarch64")]
     {
-        if std::arch::is_aarch64_feature_detected!("neon") {
-            // SAFETY: guarded by the runtime `neon` detection immediately above; the kernel reads
-            // exactly `a.len()`/`b.len()` (equal by the debug_assert) f32 lanes via `vld1q_f32`
-            // in 4-wide steps plus a scalar tail, so every load is in-bounds.
+        if active_kernel() == Kernel::Neon {
+            // SAFETY: `active_kernel` answers `Neon` ONLY inside a successful runtime
+            // `is_aarch64_feature_detected!("neon")`, so the ISA extension is present; the kernel
+            // reads exactly `a.len()`/`b.len()` (equal by the debug_assert) f32 lanes via
+            // `vld1q_f32` in 4-wide steps plus a scalar tail, so every load is in-bounds.
             return unsafe { l2_sq_neon(a, b) };
         }
     }
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
-        {
-            // SAFETY: guarded by the runtime `avx2`+`fma` detection immediately above; the kernel
-            // reads exactly `a.len()` f32 lanes via `_mm256_loadu_ps` (unaligned load) in 8-wide
-            // steps plus a scalar tail, so every load is in-bounds.
+        if active_kernel() == Kernel::Avx2 {
+            // SAFETY: `active_kernel` answers `Avx2` ONLY inside a successful runtime
+            // `is_x86_feature_detected!("avx2") && …("fma")`, so both extensions are present; the
+            // kernel reads exactly `a.len()` f32 lanes via `_mm256_loadu_ps` (unaligned load) in
+            // 8-wide steps plus a scalar tail, so every load is in-bounds.
             return unsafe { l2_sq_avx2(a, b) };
         }
     }
@@ -164,6 +222,8 @@ unsafe fn l2_sq_avx2(a: &[f32], b: &[f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    use super::{active_kernel, Kernel};
     use super::{l2_sq_dist, l2_sq_scalar};
 
     /// The reference squared distance — the mathematical definition, computed left-to-right in
@@ -233,6 +293,76 @@ mod tests {
             let d = l2_sq_dist(&a, &b);
             let s = l2_sq_scalar(&a, &b);
             assert!((d - s).abs() <= 1e-4 * dim as f32, "dim {}: simd {} vs scalar {}", dim, d, s);
+        }
+    }
+
+    /// Whether a host that leaves the arch's intrinsic kernel UNEXECUTED must fail this run
+    /// rather than skip it.
+    ///
+    /// Armed by `CI` — GitHub Actions sets it on every lane, so the x86_64 test lanes fail
+    /// closed with no edit to `ci.yml`'s shared nextest matrix (which is out of this crate's
+    /// scope). `SPARQ_VECTORS_REQUIRE_SIMD` forces it either way: `1` to demand kernel
+    /// execution on a dev box, `0` to accept scalar-only coverage on a runner that genuinely
+    /// lacks the ISA extension.
+    ///
+    /// Never armed under Miri: its `is_x86_feature_detected!` answers from an interpreter shim,
+    /// not the host CPU, so a `false` there says nothing about the real runner.
+    #[cfg(target_arch = "x86_64")]
+    fn simd_execution_is_required() -> bool {
+        if cfg!(miri) {
+            return false;
+        }
+        match std::env::var("SPARQ_VECTORS_REQUIRE_SIMD") {
+            Ok(v) => !matches!(v.trim(), "" | "0" | "false"),
+            Err(_) => std::env::var_os("CI").is_some(),
+        }
+    }
+
+    /// [SONNET-4.6] #5065 — NON-VACUITY GUARD for the x86_64 AVX2+FMA kernel.
+    ///
+    /// The guards above are arch-generic: they check the dispatcher against an f64 reference,
+    /// and `l2_sq_scalar` satisfies them exactly as well as `l2_sq_avx2` does. So on a host
+    /// without AVX2+FMA the module goes green with the intrinsic kernel never executed — and
+    /// the `l2_sq_avx2` row of `compliance/memsafety/unsafe-register.md`, whose evidence IS
+    /// this module's numeric agreement, would be resting on a run that never touched it.
+    /// #5028 closed that hole for NEON by giving the kernel a real aarch64 host plus a
+    /// fail-closed `asimd` preflight; this is the x86_64 half, in-tree rather than in the
+    /// shared CI matrix.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx2_kernel_is_the_one_the_dispatcher_actually_ran() {
+        let kernel = active_kernel();
+        if kernel != Kernel::Avx2 {
+            assert!(
+                !simd_execution_is_required(),
+                "this x86_64 host does not advertise avx2+fma, so l2_sq_dist took the {:?} \
+                 fallback and l2_sq_avx2 was NEVER EXECUTED — every simd::tests guard on this \
+                 run, and the unsafe-register row that cites them, is vacuous for that kernel. \
+                 Move the lane onto an AVX2-capable runner, or set SPARQ_VECTORS_REQUIRE_SIMD=0 \
+                 to knowingly accept scalar-only coverage here.",
+                kernel
+            );
+            eprintln!("skipping: this host has no avx2+fma, l2_sq_dist dispatches to {:?}", kernel);
+            return;
+        }
+        // AVX2 is what the dispatcher selects, so these calls DO execute `l2_sq_avx2` — as did
+        // every `l2_sq_dist` call in the tests above. Re-check its numerics on the remainder
+        // classes that split across the 16-lane body, the 8-wide drain and the scalar tail.
+        let mut st = 0x5065_u64;
+        for dim in [0usize, 1, 7, 8, 9, 16, 17, 31, 32, 33, 128, 257] {
+            let a: Vec<f32> = (0..dim).map(|_| randf(&mut st)).collect();
+            let b: Vec<f32> = (0..dim).map(|_| randf(&mut st)).collect();
+            let got = l2_sq_dist(&a, &b);
+            let refv = reference_l2_sq(&a, &b) as f32;
+            let tol = 1e-4 * (dim as f32).max(1.0);
+            assert!(
+                (got - refv).abs() <= tol,
+                "dim {}: avx2 {} vs ref {} (tol {})",
+                dim,
+                got,
+                refv,
+                tol
+            );
         }
     }
 }

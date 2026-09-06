@@ -1,7 +1,9 @@
 // AUTHORED-BY Claude Fable 5
-//! read-1 (`docs/design/backend-read-path.md` §7): PINNED deterministic backend round-trip counts
-//! per read operation, measured end-to-end through the assembled router (auth → WAC → LDP → store)
-//! with the counting decorators at the `SparqClient`/`BlobStore` seams.
+//! read-1 (`research/lws-design-records.md` §7; RSS `docs/design/backend-read-path.md` §7 — bare
+//! `§N` references below are sections of that RSS document, which is not in this tree): PINNED
+//! deterministic backend round-trip counts per read operation, measured end-to-end through the
+//! assembled router (auth → WAC → LDP → store) with the counting decorators at the
+//! `SparqClient`/`BlobStore` seams.
 //!
 //! These are the §1.1 RTT-model counts made executable: **exact integer pins** (the repo's
 //! perf-gate discipline — deterministic metrics hard-gated, wall-clock advisory, never asserted).

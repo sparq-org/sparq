@@ -39,6 +39,32 @@
 #                             not CI). A deliberate, reviewed regression must pass --allow-
 #                             lower. New crates and RAISED floors always pass.
 #
+#   --check-advance-allowed   [SONNET-4.6] sq-6vshe.17: the RATCHET-ADVANCE PAUSE. The
+#                             coverage MEASUREMENT is demoted off the merge_group blocking
+#                             path (PR + push-to-main still measure), so `main` is an
+#                             enforcement point — and while the post-merge coverage alarm
+#                             issue is OPEN, RAISING a floor is unverifiable book-keeping
+#                             (the numbers a raise cites are the numbers in doubt). FAIL
+#                             (exit 1) iff this branch raises a floor AND that alarm is
+#                             open. Fail-OPEN on any probe error, and it NEVER blocks the
+#                             recovery path (lowering under --allow-lower).
+#
+# THE `seed_pending` FLAG (sq-iwf3c) [SONNET-4.6]
+# -----------------------------------------------
+# A floor entry may carry `"seed_pending": true`. It means: THIS FLOOR WAS NOT MEASURED
+# OVER THE SURFACE THE GATE NOW MEASURES — it was carried forward across a change that
+# WIDENED the crate's denominator (e.g. scripts/coverage.sh starting to compile in an
+# opt-in feature's module), by an author who had no way to run llvm-cov. A carried-forward
+# floor is not merely unproven: if the wider surface actually measures HIGHER, the entry
+# silently installs a floor LOOSER than the seed procedure (floor(measured) - MARGIN)
+# would give, and the ratchet quietly loses ground.
+# `--check` therefore ENFORCES the seed procedure for such an entry instead of trusting a
+# note: it recomputes floor(measured) - MARGIN and FAILS if that exceeds the committed
+# floor, printing the exact number to write. If it does NOT exceed it, the measurement
+# CONFIRMS the carried-forward floor and the gate prints that as evidence and passes.
+# Either way CI — not the PR author's promise — is what settles it, and `--seed` clears
+# the flag automatically because it rebuilds each entry from the measurement.
+#
 # THE MAX-REMEASURE PRINCIPLE (sq-x4jy) [OPUS-4.8]
 # ------------------------------------------------
 # llvm-cov instrumentation only ever UNDERCOUNTS: when a test process aborts/OOMs or a
@@ -64,7 +90,7 @@
 # WHY a margin: line% drifts a little with toolchain bumps / nondeterministic test
 # ordering. MARGIN=2 (points) keeps the gate meaningful without flaking. The floor is
 # the ratchet of record — raise it deliberately as coverage grows.
-import argparse, json, math, os, subprocess, sys
+import argparse, json, math, os, subprocess, sys, tempfile
 
 MARGIN = 2  # percentage points of slack below the measured value
 
@@ -164,6 +190,11 @@ def seed(summary_path, floor_path, allow_lower):
             chosen = proposed; lowered.append(f"{crate} {prev}->{chosen}")
         else:
             chosen = prev; kept.append(crate)  # ratchet: never auto-lower
+        # Rebuilt from the measurement, so a `seed_pending` flag on the previous entry is
+        # DELIBERATELY dropped here: this floor has now been seeded from a real run over
+        # the current denominator, which is exactly what the flag was waiting for.
+        # [SONNET-4.6] sq-iwf3c. (The nightly/merged branch above keeps it — it seeds
+        # `nightly_floor` only and leaves the base floor unproven.)
         entry = {"floor": chosen}
         if note: entry["note"] = note
         # preserve a previously-seeded nightly_floor when seeding from a per-commit summary
@@ -196,6 +227,12 @@ def seed(summary_path, floor_path, allow_lower):
             "BINARIES (which run as `cargo run`, not `cargo test`) into that crate's llvm-cov "
             "report. Seeding from a nightly summary raises `nightly_floor`; seeding from a "
             "per-commit summary raises the base `floor`. Neither seed touches the other.",
+            "[SONNET-4.6] sq-iwf3c: an entry with `seed_pending: true` carries a floor "
+            "that was NOT measured over the surface the gate now measures (it was carried "
+            "forward across a change that WIDENED the crate's denominator). --check "
+            "recomputes floor(measured) - MARGIN for such an entry and FAILS if that "
+            "exceeds the committed floor — so a carried-forward floor can never be looser "
+            "than the measurement supports. --seed clears the flag.",
             "Regenerate after a deliberate coverage rise: scripts/coverage.sh && "
             "scripts/coverage-gate.py --seed target/coverage/coverage-summary.json "
             "(per-commit -> base floor); COVERAGE_TIER=nightly scripts/coverage.sh && "
@@ -227,10 +264,22 @@ def check(summary_path, floor_path, require_all):
     # the nightly/per-commit --check-robust invocations do NOT pass. An unmeasured crate
     # with an effective floor of 0 (the ARTIFACT_ZERO crates) is not %-gated anyway, so
     # its measure-failure is reported but not fatal (the test-presence gate guards it).
+    #
+    # [SONNET-4.6] sq-3dr4t: a third shape joins those two — INHERITED. Under enforced
+    # changed-cone coverage (COVERAGE_CONE, see scripts/coverage.sh) a crate outside the
+    # PR's reverse-dep closure is deliberately not measured, and coverage.sh records it in
+    # the summary's `cone.inherited` list. Such a crate is a MISSING crate (same
+    # non-fatal-without---require-all semantics — its floor verdict is inherited from
+    # main's last full run) but it is reported under its own label so an INTENDED skip is
+    # never indistinguishable from a crate that silently fell out of this tier.
     s = load(summary_path); floors = load(floor_path)["crates"]
     measured = s["crates"]
     tier = s.get("tier")            # [OPUS-4.8] sq-bjct: tier-aware nightly_floor
+    cone_inherited = set((s.get("cone") or {}).get("inherited") or [])
     fails, missing, unmeasured, oks = [], [], [], []
+    # [SONNET-4.6] sq-iwf3c: (crate, measured, committed floor, seed-procedure floor) for
+    # each `seed_pending` entry that this tier actually measured — see the header.
+    pending = []
     for crate, fentry in sorted(floors.items()):
         floor = effective_floor(fentry, tier)
         row = measured.get(crate)
@@ -240,16 +289,25 @@ def check(summary_path, floor_path, require_all):
             unmeasured.append((crate, floor)); continue
         val = row["lines_pct"]
         if val + 1e-9 < floor:
+            # A sub-floor crate is reported as the ordinary floor breach it is, with no
+            # seed line: its seed cannot be stale anyway, since val < floor implies
+            # floor(val) - MARGIN < floor.
             fails.append((crate, val, floor))
         else:
             oks.append((crate, val, floor))
+            if isinstance(fentry, dict) and fentry.get("seed_pending"):
+                pending.append((crate, val, floor, max(0, math.floor(val) - MARGIN)))
     # A crate that failed to MEASURE but carries a real (>0) effective floor is a hard
     # failure regardless of --require-all; a floor-0 (artifact) crate is not %-gated.
     unmeasured_gated = [(c, f) for c, f in unmeasured if f > 0]
     for crate, val, floor in oks:
         print(f"  ok   {crate:<20} {val:6.2f}% >= floor {floor}")
     for crate, floor in missing:
-        print(f"  --   {crate:<20} MISSING (not in this tier's summary)")
+        if crate in cone_inherited:
+            print(f"  --   {crate:<20} INHERITED (outside the PR's changed cone — "
+                  f"unchanged since main; floor {floor} verdict carried forward)")
+        else:
+            print(f"  --   {crate:<20} MISSING (not in this tier's summary)")
     for crate, floor in unmeasured:
         if floor > 0:
             print(f"  FAIL {crate:<20} UNMEASURED (measure step errored) "
@@ -259,7 +317,27 @@ def check(summary_path, floor_path, require_all):
                   f"— floor 0, not %-gated")
     for crate, val, floor in fails:
         print(f"  FAIL {crate:<20} {val:6.2f}% < floor {floor}")
-    bad = bool(fails) or bool(unmeasured_gated) or (require_all and bool(missing))
+    # [SONNET-4.6] sq-iwf3c: a carried-forward floor is settled HERE, by the measurement.
+    stale_seeds = [t for t in pending if t[3] > t[2]]
+    for crate, val, floor, proposed in pending:
+        if proposed > floor:
+            print(f"  FAIL {crate:<20} seed_pending: measured {val:.2f}% over the CURRENT "
+                  f"denominator seeds floor {proposed}, but the carried-forward floor is "
+                  f"{floor} — the committed floor is LOOSER than the measurement supports")
+        else:
+            print(f"  ok   {crate:<20} seed_pending CONFIRMED: measured {val:.2f}% seeds "
+                  f"floor {proposed} <= committed floor {floor} — the carried-forward "
+                  f"floor is valid over the current denominator; drop the "
+                  f"\"seed_pending\" flag and record this measurement in the note")
+    bad = bool(fails) or bool(unmeasured_gated) or bool(stale_seeds) \
+        or (require_all and bool(missing))
+    if stale_seeds:
+        print(f"::error::{len(stale_seeds)} crate(s) carry \"seed_pending\" but measure "
+              f"ABOVE their carried-forward floor: "
+              + "; ".join(f"set bench/coverage-floor.json crates.{c}.floor = {p} "
+                          f"(floor({v:.2f}) - {MARGIN}), drop \"seed_pending\", and record "
+                          f"the measurement in the note"
+                          for c, v, _f, p in stale_seeds))
     if fails:
         print(f"::error::coverage regressed below the floor for {len(fails)} crate(s)")
     if unmeasured_gated:
@@ -269,9 +347,11 @@ def check(summary_path, floor_path, require_all):
     if require_all and missing:
         print(f"::error::{len(missing)} floor crate(s) absent from the summary "
               f"(--require-all): {', '.join(c for c, _ in missing)}")
+    n_inherited = sum(1 for c, _ in missing if c in cone_inherited)
     print(f"\ncoverage gate: {len(oks)} ok / {len(fails)} fail / "
           f"{len(unmeasured)} unmeasured ({len(unmeasured_gated)} gated) / "
-          f"{len(missing)} missing")
+          f"{len(missing) - n_inherited} missing / {n_inherited} inherited (changed cone) / "
+          f"{len(pending)} seed_pending ({len(stale_seeds)} stale)")
     return 1 if bad else 0
 
 # --- pure aggregation primitives (unit-tested by --self-test) -----------------
@@ -355,6 +435,131 @@ def dropped_crates(base_floors, new_floors):
     (its coverage is no longer gated at all), so --check-monotonic treats it as a regression
     unless --allow-lower is given."""
     return sorted(c for c in base_floors if c not in new_floors)
+
+
+def floor_advances(base_floors, new_floors):
+    """[SONNET-4.6] sq-6vshe.17: PURE — the exact MIRROR of floor_regressions: the list of
+    (label, base_floor, new_floor) rows where THIS branch RAISES a floor relative to
+    `base_floors`. Used by --check-advance-allowed to answer "does this branch advance the
+    ratchet?" without re-deriving the floor-file shape.
+
+    Deliberately NARROW — only a RAISE of a floor the base already had counts:
+      * a brand-NEW crate row is NOT an advance (adding a crate to the ratchet must stay
+        possible while the post-merge alarm is open — it gates something previously
+        un-gated, it does not move an existing bar);
+      * a newly-ADDED `nightly_floor` is likewise not an advance;
+      * a LOWERING is not an advance (floor_regressions owns that direction).
+    Keeping it narrow keeps the advance BLOCK's blast radius to exactly the operation the
+    demotion protocol pauses, and never blocks the RECOVERY path (a governed, reviewed
+    re-baseline that lowers a floor under --allow-lower)."""
+    out = []
+    for crate, bentry in sorted(base_floors.items()):
+        if crate not in new_floors:
+            continue  # dropped, not raised — floor_regressions/dropped_crates own it
+        nentry = new_floors[crate]
+        bf, nf = floor_of(bentry), floor_of(nentry)
+        if nf > bf:
+            out.append((crate, bf, nf))
+        bnf = bentry.get("nightly_floor") if isinstance(bentry, dict) else None
+        if bnf is not None:
+            nnf = nentry.get("nightly_floor") if isinstance(nentry, dict) else None
+            if nnf is not None and nnf > bnf:
+                out.append((f"{crate}.nightly_floor", bnf, nnf))
+    return out
+
+
+def advance_block_verdict(advances, alarm_open):
+    """[SONNET-4.6] sq-6vshe.17: PURE — the exit code for --check-advance-allowed.
+
+    The demotion protocol (research/ci-mergequeue-speedup-2026-07.md §3.4a) pauses
+    RATCHET ADVANCES while the post-merge coverage measurement on `main` is RED: until
+    main is green again the measured numbers a raise would be justified by are exactly the
+    numbers in doubt, so raising a floor then is unverifiable book-keeping.
+
+    BLOCK (exit 1) iff BOTH: (a) this branch raises a floor, AND (b) the alarm is KNOWN
+    open. `alarm_open is None` means the probe could not run (no `gh`, no token, API
+    error) => FAIL-OPEN (exit 0): an unavailable GitHub API must never block a PR whose
+    only sin is raising a floor, and the floor DIRECTION gate (--check-monotonic) plus the
+    measured --check are unaffected either way, so fail-open costs no soundness."""
+    if not advances:
+        return 0
+    if alarm_open is True:
+        return 1
+    return 0
+
+
+# The lane token the demoted-lane filer files the post-merge coverage alarm under
+# (scripts/ci-file-demoted-lane-failure.py --lane); the alarm issue title is
+# "[demoted-lane] lane=<lane>: full-form CI run failed".
+COVERAGE_ALARM_LANE = "coverage-ratchet-main"
+
+
+def open_alarm_issue_state(lane=COVERAGE_ALARM_LANE, log=print):
+    """[SONNET-4.6] sq-6vshe.17: probe GitHub for an OPEN post-merge coverage alarm issue.
+
+    Returns True (an open alarm exists), False (none), or None (the probe could not run —
+    the caller FAILS OPEN). Matches the filer's own dedupe query + title contract exactly
+    (scripts/ci-file-demoted-lane-failure.py find_open_issue), so the two cannot drift on
+    which issue counts as "the alarm"."""
+    marker = "[demoted-lane]"
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--state", "open",
+             "--search", f'in:title "{marker} lane={lane}"',
+             "--json", "number,title", "--limit", "10"],
+            capture_output=True, text=True, timeout=120, check=True)
+        items = json.loads(r.stdout or "[]")
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError) as e:
+        log(f"  note: could not probe the post-merge coverage alarm ({e}) — fail-OPEN")
+        return None
+    for item in items:
+        title = item.get("title", "")
+        if marker in title and f"lane={lane}" in title:
+            log(f"  OPEN post-merge coverage alarm: issue #{item['number']} — {title}")
+            return True
+    return False
+
+
+def check_advance_allowed(floor_path, base_ref, base_file, lane=COVERAGE_ALARM_LANE,
+                         probe=None, log=print):
+    """[SONNET-4.6] sq-6vshe.17: "no ratchet ADVANCE while post-merge coverage is RED".
+
+    The companion to --check-monotonic in the same fast, no-compile `coverage-floors` job:
+    monotonic forbids LOWERING a floor in any state; this forbids RAISING one while the
+    demoted post-merge coverage lane's alarm is open. Returns an exit code."""
+    new_floors = _load_floors_obj(load(floor_path))
+    if base_file is not None:
+        base_floors = _load_floors_obj(load(base_file))
+        src = base_file
+    else:
+        base_floors = _base_floors_from_git(base_ref, floor_path, log=log)
+        src = f"{base_ref}:{os.path.basename(floor_path)}"
+    if base_floors is None:
+        log("coverage advance gate: no base to compare — PASS")
+        return 0
+
+    advances = floor_advances(base_floors, new_floors)
+    log(f"==> coverage advance gate: comparing floors vs {src}")
+    if not advances:
+        log("  this branch raises no committed floor — nothing for the advance pause to "
+            "block. PASS")
+        return 0
+    for label, bf, nf in advances:
+        log(f"  RAISED   {label:<20} floor {bf} -> {nf}")
+    alarm_open = (probe or open_alarm_issue_state)(lane, log=log)
+    rc = advance_block_verdict(advances, alarm_open)
+    if rc == 0:
+        state = "none open" if alarm_open is False else "probe unavailable (fail-OPEN)"
+        log(f"  post-merge coverage alarm: {state} — the advance is allowed. PASS")
+        return 0
+    log(f"::error::coverage RATCHET ADVANCE paused: this branch raises "
+        f"{len(advances)} floor(s) while the post-merge coverage lane on `main` is RED "
+        f"(an open '[demoted-lane] lane={lane}' issue). The coverage MEASUREMENT is "
+        f"demoted off the merge queue (sq-6vshe.17), so main is the enforcement point — "
+        f"fix/close that alarm first, then re-push this raise. Nothing here lowers a "
+        f"floor; drop the raise from this PR to unblock it.")
+    log("coverage advance gate: FAIL")
+    return 1
 
 
 def merge_max(prev, new):
@@ -551,6 +756,10 @@ def main():
     g.add_argument("--check-monotonic", action="store_true",
                    help="[OPUS-4.8] sq-neq8: FAIL if the floor file LOWERS/DROPS any crate's "
                         "floor vs the base (origin/main); the ratchet only RISES")
+    g.add_argument("--check-advance-allowed", action="store_true",
+                   help="[SONNET-4.6] sq-6vshe.17: FAIL if the floor file RAISES a floor "
+                        "while the post-merge coverage alarm issue is OPEN (fail-OPEN on "
+                        "any probe error; never blocks a lowering)")
     ap.add_argument("--floor", default=os.path.join(os.path.dirname(__file__), "..",
                     "bench", "coverage-floor.json"))
     ap.add_argument("--allow-lower", action="store_true",
@@ -569,10 +778,15 @@ def main():
     ap.add_argument("--base-file", default=None,
                     help="--check-monotonic: compare against a base floor FILE on disk "
                          "instead of a git ref (overrides --base-ref)")
+    ap.add_argument("--alarm-lane", default=COVERAGE_ALARM_LANE,
+                    help="--check-advance-allowed: demoted-lane token of the post-merge "
+                         f"coverage alarm issue (default {COVERAGE_ALARM_LANE})")
     a = ap.parse_args()
     floor = os.path.abspath(a.floor)
     if a.check_monotonic:
         sys.exit(check_monotonic(floor, a.base_ref, a.base_file, a.allow_lower))
+    if a.check_advance_allowed:
+        sys.exit(check_advance_allowed(floor, a.base_ref, a.base_file, a.alarm_lane))
     if a.summary is None:
         ap.error("the 'summary' argument is required for "
                  "--seed/--check/--check-robust")
@@ -754,6 +968,60 @@ def self_test():
     assert floor_regressions({"core": {"floor": 90}},
                              {"core": {"floor": 90, "nightly_floor": 92}}) == []
 
+    # === ADVANCE PAUSE (sq-6vshe.17): floor_advances + advance_block_verdict ====
+    # [SONNET-4.6] floor_advances is the exact MIRROR of floor_regressions: only RAISES.
+    # Same fixtures as above: c is raised 90->95, b LOWERED, a equal, d new.
+    assert floor_advances(base, nw) == [("c", 90, 95)], floor_advances(base, nw)
+    # a LOWERING is never an advance (that direction belongs to floor_regressions).
+    assert floor_advances(b661, n661) == []
+    # a brand-NEW crate row is NOT an advance — adding a crate to the ratchet must stay
+    # possible while the alarm is open (it gates something previously un-gated).
+    assert floor_advances(base, {**base, "z": {"floor": 99}}) == []
+    # a DROPPED crate is not an advance either.
+    assert floor_advances(base, {"a": {"floor": 80}, "c": {"floor": 90}}) == []
+    # bare-int floor form on either side is handled (floor_of normalises).
+    assert floor_advances({"b": 83}, {"b": {"floor": 90}}) == [("b", 83, 90)]
+    # nightly_floor RAISE is an advance; ADDING one where base had none is not.
+    assert floor_advances(bnf, {"core": {"floor": 90, "nightly_floor": 95}}) \
+        == [("core.nightly_floor", 94, 95)]
+    assert floor_advances({"core": {"floor": 90}},
+                          {"core": {"floor": 90, "nightly_floor": 92}}) == []
+    # both directions at once on one crate: floor raised AND nightly_floor raised.
+    assert floor_advances({"core": {"floor": 90, "nightly_floor": 94}},
+                          {"core": {"floor": 91, "nightly_floor": 95}}) \
+        == [("core", 90, 91), ("core.nightly_floor", 94, 95)]
+
+    # advance_block_verdict: BLOCK iff (raises a floor) AND (alarm KNOWN open).
+    adv = [("c", 90, 95)]
+    assert advance_block_verdict(adv, True) == 1, "a raise + an OPEN alarm must BLOCK"
+    assert advance_block_verdict(adv, False) == 0, "a raise with no alarm is allowed"
+    assert advance_block_verdict(adv, None) == 0, "an unavailable probe must FAIL-OPEN"
+    # no advance => never blocked, whatever the alarm says (incl. the recovery path: a
+    # governed lowering under --allow-lower raises nothing, so it is never paused).
+    for st in (True, False, None):
+        assert advance_block_verdict([], st) == 0, "no raise must never block"
+
+    # check_advance_allowed end-to-end over the PURE seam (injected probe, no gh):
+    # a raise + open alarm FAILS; the same tree with no alarm PASSES.
+    with tempfile.TemporaryDirectory() as td:
+        bfp = os.path.join(td, "base-floor.json")
+        nfp = os.path.join(td, "coverage-floor.json")
+        with open(bfp, "w") as fh:
+            json.dump({"crates": {"a": {"floor": 80}}}, fh)
+        with open(nfp, "w") as fh:
+            json.dump({"crates": {"a": {"floor": 85}}}, fh)
+        assert check_advance_allowed(nfp, "origin/main", bfp,
+                                     probe=lambda lane, log=print: True, log=quiet) == 1
+        assert check_advance_allowed(nfp, "origin/main", bfp,
+                                     probe=lambda lane, log=print: False, log=quiet) == 0
+        assert check_advance_allowed(nfp, "origin/main", bfp,
+                                     probe=lambda lane, log=print: None, log=quiet) == 0
+        # No raise (identical floors) => the probe must not even be consulted.
+        assert check_advance_allowed(bfp, "origin/main", bfp,
+                                     probe=lambda lane, log=print: (_ for _ in ()).throw(
+                                         AssertionError("must not probe without a raise")),
+                                     log=quiet) == 0
+
     # === UNMEASURED vs MISSING in check() (sq-039g) [OPUS-4.8] ==================
     # The bug: a crate present in the summary with "measured": false (its coverage step
     # ERRORED — e.g. conformance fixtures absent -> sparq-conformance exit 2, or a
@@ -763,21 +1031,34 @@ def self_test():
     # its floor. Fix: an UNMEASURED crate with a non-zero (effective) floor ALWAYS fails;
     # a genuinely-MISSING crate keeps the --require-all semantics; a floor-0 unmeasured
     # crate (artifact) is reported but not fatal.
-    import tempfile, contextlib, io
-    def run_check(summary_crates, floor_crates, require_all, tier=None):
-        """Drive the real check() over tempfile summary + floor; return its exit code."""
+    # [SONNET-4.6] `tempfile` is now a MODULE-level import (the sq-6vshe.17 advance-pause
+    # scenarios above use it earlier in this same function; a function-local `import
+    # tempfile` here would make the name local for the WHOLE function body and turn those
+    # earlier uses into an UnboundLocalError).
+    import contextlib, io
+    def run_check(summary_crates, floor_crates, require_all, tier=None, cone=None,
+                  capture=None):
+        """Drive the real check() over tempfile summary + floor; return its exit code.
+        `cone` populates the summary's sq-3dr4t `cone` block; `capture` (a list) collects
+        check()'s stdout so a test can assert on the per-crate labels."""
         sdoc = {"crates": {k: (crate(*v) if isinstance(v, tuple) else crate(v))
                            for k, v in summary_crates.items()}}
         if tier is not None:
             sdoc["tier"] = tier
+        if cone is not None:
+            sdoc["cone"] = cone
         fdoc = {"crates": floor_crates}
         with tempfile.NamedTemporaryFile("w", suffix=".sum.json", delete=False) as sf, \
              tempfile.NamedTemporaryFile("w", suffix=".floor.json", delete=False) as ff:
             json.dump(sdoc, sf); sp = sf.name
             json.dump(fdoc, ff); fp = ff.name
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                return check(sp, fp, require_all)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = check(sp, fp, require_all)
+            if capture is not None:
+                capture.append(buf.getvalue())
+            return rc
         finally:
             os.unlink(sp); os.unlink(fp)
 
@@ -806,6 +1087,89 @@ def self_test():
     assert run_check({"sparq-core": (0, False)}, FLC, require_all=False,
                      tier="nightly") == 1, \
         "sparq-core failing to measure (fixtures absent) must FAIL the nightly gate"
+
+    # === INHERITED (enforced changed cone, sq-3dr4t) [SONNET-4.6] ================
+    # A crate the cone filter deliberately did not measure is absent from `crates`, so it
+    # keeps the MISSING pass/fail semantics — but it MUST be reported under its own label,
+    # or an intended skip is indistinguishable from a crate that silently fell out of the
+    # tier (exactly the sq-039g failure class, one level up).
+    CONE = {"filter": ["a"], "measured": ["a"], "inherited": ["b"]}
+    FLI = {"a": {"floor": 80}, "b": {"floor": 80}}
+    log_i = []
+    assert run_check({"a": 90.0}, FLI, require_all=False, cone=CONE, capture=log_i) == 0, \
+        "an inherited (outside-cone) crate must not fail the gate"
+    assert "b" in log_i[0] and "INHERITED" in log_i[0], \
+        f"the skipped crate must be labeled INHERITED, got:\n{log_i[0]}"
+    assert "MISSING" not in log_i[0], \
+        f"an inherited crate must NOT be reported as plain MISSING:\n{log_i[0]}"
+    assert "1 inherited (changed cone)" in log_i[0], \
+        f"the tally must count inherited crates separately:\n{log_i[0]}"
+    # WITHOUT the cone block the same absent crate is plain MISSING (proving the block,
+    # not something else, produces the label).
+    log_m = []
+    assert run_check({"a": 90.0}, FLI, require_all=False, capture=log_m) == 0
+    assert "MISSING" in log_m[0] and "INHERITED" not in log_m[0], \
+        f"an absent crate with no cone block stays MISSING:\n{log_m[0]}"
+    # An absent crate NOT listed in cone.inherited is still plain MISSING even when a cone
+    # block exists — the label follows the recorded list, not the mere presence of a cone.
+    log_p = []
+    assert run_check({"a": 90.0}, {"a": {"floor": 80}, "c": {"floor": 80}},
+                     require_all=False, cone=CONE, capture=log_p) == 0
+    assert "c" in log_p[0] and "MISSING" in log_p[0], \
+        f"a crate outside cone.inherited must stay MISSING:\n{log_p[0]}"
+    # An inherited crate that DID somehow get measured below floor still FAILS — the label
+    # is reporting only and can never rescue a real breach.
+    assert run_check({"a": 90.0, "b": 10.0}, FLI, require_all=False, cone=CONE) == 1, \
+        "a measured, below-floor crate must fail even if listed as inherited"
+
+    # --- `seed_pending`: a carried-forward floor is settled by the measurement (sq-iwf3c)
+    # [SONNET-4.6] The failure mode this closes: coverage.sh starts measuring a crate over
+    # a WIDER denominator, the floor is carried forward unmeasured, and --check happily
+    # passes it because it only ever compares measured-vs-floor. If the wider surface
+    # measures HIGHER, the entry has silently installed a floor LOOSER than the seed
+    # procedure (floor(measured) - MARGIN) gives, and the ratchet loses ground with no
+    # signal at all. With the flag, --check re-runs the seed procedure and FAILS on that.
+    FSP = {"p": {"floor": 90, "seed_pending": True}}
+    # measured 95.0 -> seed floor 93 > 90: the carried floor is too loose -> FAIL, even
+    # though 95.0 is comfortably ABOVE 90 (this is exactly what plain --check misses).
+    assert run_check({"p": 95.0}, FSP, require_all=False) == 1, \
+        "a seed_pending crate measuring above its seed floor must FAIL (stale seed)"
+    # ...and WITHOUT the flag the identical measurement passes — proving the flag, not
+    # some other rule, is what fails it.
+    assert run_check({"p": 95.0}, {"p": {"floor": 90}}, require_all=False) == 0, \
+        "the same measurement must PASS without seed_pending (flag is the cause)"
+    # measured 92.99 -> seed floor 90 == committed 90: the measurement CONFIRMS the
+    # carried-forward floor -> PASS (top of the confirming band).
+    assert run_check({"p": 92.99}, FSP, require_all=False) == 0, \
+        "a seed_pending crate whose measurement confirms its floor must PASS"
+    # 93.0 is the first value that seeds 91 > 90 -> FAIL (boundary of the band).
+    assert run_check({"p": 93.0}, FSP, require_all=False) == 1, \
+        "floor(93.0) - 2 = 91 > 90 -> stale seed"
+    # A seed_pending crate BELOW its floor still fails as an ordinary floor breach.
+    assert run_check({"p": 88.0}, FSP, require_all=False) == 1, \
+        "a seed_pending crate below its floor must still fail the ordinary floor check"
+    # A seed_pending crate that this tier did not MEASURE is not settleable here: the
+    # unmeasured/missing rules apply unchanged, never the seed check.
+    assert run_check({}, FSP, require_all=False) == 0, \
+        "a seed_pending crate absent from the summary keeps the MISSING semantics"
+    # The flag is tier-aware via effective_floor: nightly gates the (higher) nightly_floor,
+    # so the same 95.0 that is a stale seed against floor 90 CONFIRMS a nightly_floor 93.
+    FSPN = {"p": {"floor": 90, "nightly_floor": 93, "seed_pending": True}}
+    assert run_check({"p": 95.0}, FSPN, require_all=False, tier="nightly") == 0, \
+        "seed_pending compares against the EFFECTIVE (tier) floor"
+    # --seed rebuilds the entry from the measurement, which is what drops the flag.
+    with tempfile.NamedTemporaryFile("w", suffix=".sum.json", delete=False) as sf, \
+         tempfile.NamedTemporaryFile("w", suffix=".floor.json", delete=False) as ff:
+        json.dump({"crates": {"p": crate(95.0)}}, sf); sp = sf.name
+        json.dump({"crates": FSP}, ff); fp = ff.name
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            seed(sp, fp, allow_lower=False)
+        reseeded = load(fp)["crates"]["p"]
+    finally:
+        os.unlink(sp); os.unlink(fp)
+    assert reseeded["floor"] == 93, f"--seed must raise the floor to 93, got {reseeded}"
+    assert "seed_pending" not in reseeded, "--seed must clear the seed_pending flag"
 
     print("coverage-gate self-test: ALL ASSERTIONS PASSED")
     return 0

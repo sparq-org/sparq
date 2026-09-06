@@ -16,6 +16,17 @@ test('fromString parses and deduplicates', async () => {
   assert.ok(store.heapBytes() > 0);
 });
 
+test('fetch-style bytes ingest is result-equivalent to string ingest', async () => {
+  const response = new Response(new TextEncoder().encode(DATA));
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const fromBytes = await SparqStore.fromBytes(bytes, 'turtle');
+  const fromString = await SparqStore.fromString(DATA, 'turtle');
+  const query = 'SELECT ?s ?p ?o WHERE { ?s ?p ?o }';
+
+  assert.equal(fromBytes.size, fromString.size);
+  assert.equal(fromBytes.queryJson(query), fromString.queryJson(query));
+});
+
 test('fromString compressed returns identical results', async () => {
   const raw = await load();
   const cmp = await SparqStore.fromString(DATA, 'turtle', { compressed: true });

@@ -100,16 +100,88 @@ impl LiveReport {
     }
 }
 
-// ── ODRL skip reason ──────────────────────────────────────────────────────────────────
+// ── ODRL live lane: namespaces + the translation contract ─────────────────────────────
+//
+// [SONNET-4.6] issue #4415 — the three blockers that kept the ODRL W2/W4 lanes SKIPPED
+// are resolved HERE, in the driver, without moving acbench's ODRL ground truth and
+// without widening `sparq_solid::odrl_bridge`'s deliberately conservative fail-closed
+// action map:
+//
+//   1. Action-IRI mismatch. `compile_odrl` emits actions in `sparq:acl#{Read,Write,
+//      Control}`; `odrl_bridge::action_to_mode` only maps IRIs in the ODRL namespace,
+//      so a request presented with the acbench action would evaluate but never
+//      materialize, and a request presented as `odrl:read` would never evaluate.
+//      `normalize_odrl_ntriples` rewrites the ACTION IRI in the driver's own
+//      translation step (`acl#Read` -> `odrl:read`, `acl#Write` -> `odrl:modify`), so
+//      the compiled corpus, the ODRL oracle and the ODRE exporter are all unchanged.
+//   2. Per-request materialization. `PodStore::materialize_odrl_policy` APPENDS grants
+//      into the shared auth view, so grants accumulate across requests. The W2 lane
+//      builds a FRESH `PodStore` per request (`odrl_store_for_request`). Stated
+//      honestly: accumulation was MEASURED not to over-share on this corpus, and there
+//      is an argument for why — a bridged grant is `party auth:read target` with BOTH
+//      terms taken from the request itself, so a request by A on R can only ever add a
+//      grant keyed (A, R), and the `GRAPH <R'>` probe of a later (A', R') request is
+//      unaffected. The lane isolates anyway, so its fail-closed property does not rest
+//      on that argument continuing to hold for a future corpus or for a bridge change
+//      that widens what a grant is keyed by. The cost is real — rebuilding a fresh store
+//      per request adds benchmark overhead to the W2 ODRL lane — but that is
+//      non-canonical advisory time on a lane whose contract is its exit status. No number
+//      is quoted here: work-box timings are not canonical evidence and hard-coded
+//      performance numbers do not belong in the tree. W4 deliberately SHARES one store (see
+//      `run_w4_odrl_live`): it asserts concurrent-vs-single-threaded EQUALITY and makes
+//      no oracle over-share claim.
+//   3. No translation layer. `odrl_policies_for` + `normalize_odrl_ntriples` +
+//      `odrl_request_for` are it: acbench N-Triples -> `sparq_policy::Policy`, and
+//      an acbench `Request` -> `sparq_policy::Request`.
+//
+// WHAT THE TRANSLATION IS ALLOWED TO DO (soundness argument). Every rewrite below is
+// either exactly faithful to the ODRL oracle or strictly NARROWING, so the lane can
+// under-share but can never over-share — which is what makes the HARD fail-closed
+// over-share check meaningful:
+//
+//   * action IRI  — `acl#Read` -> `odrl:read`, `acl#Write` -> `odrl:modify`, anything
+//     else kept verbatim. Exactly one action survives per rule, because
+//     `sparq_policy::parse_policy` keeps only the first `odrl:action` of a rule; a rule
+//     that carries a read action is narrowed to its READ facet (this lane only ever
+//     asks for `Mode::Read`). A rule is NEVER left action-less, because a missing
+//     `odrl:action` parses as the `odrl:use` UMBRELLA, which permits `odrl:read` — that
+//     would be an over-share.
+//   * target hoist — `compile_odrl` puts `odrl:target` on the POLICY node, but
+//     `parse_policy` reads it off the RULE, and a rule with no target matches EVERY
+//     target. Hoisting the policy's target onto its rules is therefore a security
+//     necessity, not a convenience: without it every ODRL policy would grant on every
+//     resource.
+//   * assignee `odrl:All` / `odrl:AllAuthenticated` — dropped, so the rule applies to
+//     any party. Faithful: the ODRL oracle reads `Audience::Public` as "always" and
+//     `Audience::Authenticated` as "the agent IRI is non-empty", and every request the
+//     generators emit carries a concrete WebID.
+//
+// WHAT IT DELIBERATELY DOES NOT DO (each shows up as advisory UNDER-share, never as an
+// over-share, and each is reported honestly in the lane's advisory line):
+//
+//   * `Audience::Group` compiles to an `odrl:PartyCollection` assignee. Matching it
+//     needs `party odrl:partOf collection` evidence, which only the ORACLE's group
+//     rule knows — supplying it would make the lane test the oracle against itself.
+//     No evidence is supplied, so group intents grant nothing.
+//   * `Scope::Subtree` targets the container, so a request on a descendant needs
+//     `asset odrl:partOf container` evidence — same tautology argument, same choice.
+//   * `Condition::Temporal` / `Purpose` / `Count` need context the acbench `Request`
+//     IR does not carry (the oracle supplies pinned constants that are `pub(crate)`).
+//     No context is supplied, so a constrained rule is unprovable and denies.
+//     `Audience::ClientRestricted` IS covered: the request's own declared client is
+//     supplied as the `odrl:systemDevice` context value.
+//
+// ANTI-VACUITY. Because the ODRL store carries NO WAC/ACP policy triples at all, every
+// row the lane observes is provably a bridged ODRL grant. The lane FAILS (it does not
+// pass) if it never observes a single allow-with-rows — the ACP defect-1 lesson
+// recorded above, applied up front.
 
-/// The ODRL model is skipped in the W2/W4 live lanes: materializing ODRL permissions
-/// into the auth view requires the `sparq-solid/odrl-bridge` feature, which pulls in
-/// `sparq-policy`. This driver does not enable that feature (opt-in architecture). The
-/// ODRL by-construction oracle lane in `bench/ac/` validates ODRL correctness independently.
-const ODRL_SKIP_REASON: &str =
-    "W2/W4 live ODRL lane requires sparq-solid/odrl-bridge feature (pulls sparq-policy); \
-     the ODRL by-construction oracle lane in bench/ac/ (sq-i6du2.7) validates ODRL correctness \
-     — ODRL-live is a stretch goal for sq-kvvcl.2";
+/// The ODRL 2.2 namespace.
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+/// The `acl#Read` action IRI `compile_odrl` emits (see `normalize_odrl_ntriples`).
+const ACBENCH_ACL_READ: &str = "https://sparq.dev/vocab/acl#Read";
+/// The `acl#Write` action IRI `compile_odrl` emits.
+const ACBENCH_ACL_WRITE: &str = "https://sparq.dev/vocab/acl#Write";
 
 // ── Policy N-Quads helpers ────────────────────────────────────────────────────────────
 
@@ -203,6 +275,499 @@ fn build_store(
     Ok(store)
 }
 
+// ── ODRL translation layer (issue #4415 blocker 3) ────────────────────────────────────
+
+/// Split one acbench-compiled N-Triples line `<s> <p> <o> .` into its three lexical
+/// parts. `object` is returned RAW (still `<iri>` or `"lit"^^<datatype>`), because the
+/// rewrite only ever needs to compare/emit it verbatim.
+///
+/// Returns `None` for a line the compiler never emits (a blank-node subject, a
+/// non-IRI predicate, a missing terminator) — such a line is passed through untouched.
+fn split_ntriple(line: &str) -> Option<(&str, &str, &str)> {
+    let body = line.trim().strip_suffix('.')?.trim_end();
+    let (subject, rest) = body.strip_prefix('<')?.split_once('>')?;
+    let (predicate, object) = rest.trim_start().strip_prefix('<')?.split_once('>')?;
+    Some((subject, predicate, object.trim()))
+}
+
+/// The IRI inside an N-Triples object term, or `None` if the object is a literal.
+fn object_iri(object: &str) -> Option<&str> {
+    object.strip_prefix('<')?.strip_suffix('>')
+}
+
+/// The ODRL action IRI a rule should carry after translation, given every
+/// `odrl:action` object `compile_odrl` emitted for that rule.
+///
+/// Read wins (this lane only asks for `Mode::Read`), then write, then the first action
+/// verbatim. Never returns `None` for a non-empty input: an action-less rule would
+/// parse as the `odrl:use` umbrella, which permits `odrl:read` — an over-share.
+fn translated_action(actions: &[String]) -> Option<String> {
+    let has = |iri: &str| actions.iter().any(|a| object_iri(a) == Some(iri));
+    if has(ACBENCH_ACL_READ) {
+        return Some(format!("<{}read>", ODRL_NS));
+    }
+    if has(ACBENCH_ACL_WRITE) {
+        return Some(format!("<{}modify>", ODRL_NS));
+    }
+    actions.first().cloned()
+}
+
+/// Rewrite one acbench-compiled ODRL policy (N-Triples lines) into the shape
+/// `sparq_policy::parse_policy` reads faithfully.
+///
+/// See the translation contract at the top of this file for the soundness argument —
+/// every rewrite here is faithful to the ODRL oracle or strictly narrowing.
+fn normalize_odrl_ntriples(nquads: &[String]) -> String {
+    let action_pred = format!("{}action", ODRL_NS);
+    let target_pred = format!("{}target", ODRL_NS);
+    let assignee_pred = format!("{}assignee", ODRL_NS);
+    let permission_pred = format!("{}permission", ODRL_NS);
+    let prohibition_pred = format!("{}prohibition", ODRL_NS);
+    let all_party = format!("<{}All>", ODRL_NS);
+    let all_authenticated = format!("<{}AllAuthenticated>", ODRL_NS);
+
+    // Pass 1: collect the rule nodes, their actions, and every `odrl:target` statement.
+    // Targets are classified AFTER the scan, not during it, so the rewrite does not
+    // depend on `compile_odrl` emitting the policy's target before its rules.
+    let mut rule_nodes: Vec<String> = Vec::new();
+    let mut rule_actions: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut targets: Vec<(String, String)> = Vec::new();
+    for line in nquads {
+        let Some((subject, predicate, object)) = split_ntriple(line) else { continue };
+        if predicate == permission_pred || predicate == prohibition_pred {
+            if let Some(node) = object_iri(object) {
+                if !rule_nodes.iter().any(|n| n == node) {
+                    rule_nodes.push(node.to_string());
+                }
+            }
+        } else if predicate == action_pred {
+            rule_actions.entry(subject.to_string()).or_default().push(object.to_string());
+        } else if predicate == target_pred {
+            targets.push((subject.to_string(), object.to_string()));
+        }
+    }
+
+    // A target on a RULE node stays where it is; the one on the POLICY node is the
+    // default that gets hoisted onto every rule that lacks its own.
+    let mut rules_with_own_target: BTreeSet<String> = BTreeSet::new();
+    let mut policy_target: Option<String> = None;
+    for (subject, object) in targets {
+        if rule_nodes.iter().any(|n| n == &subject) {
+            rules_with_own_target.insert(subject);
+        } else if policy_target.is_none() {
+            policy_target = Some(object);
+        }
+    }
+
+    // Pass 2: emit everything except the action lines and the widening assignees.
+    let mut out: Vec<String> = Vec::new();
+    for line in nquads {
+        let Some((_, predicate, object)) = split_ntriple(line) else {
+            out.push(line.clone());
+            continue;
+        };
+        if predicate == action_pred {
+            continue; // re-emitted (exactly once per rule) below
+        }
+        if predicate == assignee_pred && (object == all_party || object == all_authenticated) {
+            continue; // `odrl:All`/`odrl:AllAuthenticated` -> unrestricted assignee
+        }
+        out.push(line.clone());
+    }
+
+    // Pass 3: one action per rule, plus the hoisted policy target.
+    for node in &rule_nodes {
+        if let Some(action) = rule_actions.get(node).and_then(|a| translated_action(a)) {
+            out.push(format!("<{}> <{}> {} .", node, action_pred, action));
+        }
+        if let Some(target) = &policy_target {
+            if !rules_with_own_target.contains(node) {
+                out.push(format!("<{}> <{}> {} .", node, target_pred, target));
+            }
+        }
+    }
+    out.join("\n")
+}
+
+/// Translate a use case's compiled ODRL policies into evaluable
+/// [`sparq_policy::Policy`] values.
+///
+/// Returns the parsed policies plus the number that could NOT be parsed.
+///
+/// **A dropped policy is NOT a safe under-share, and callers must fail closed on a
+/// non-zero count.** Deny-overrides in this pipeline is STORE-WIDE, not per-policy:
+/// `PodStore::materialize_odrl_policy` writes a matched Prohibition's deny into the
+/// shared `<urn:sparq:auth>` view and the session layer enforces `∪ allow ∖ ∪ deny`
+/// across every policy materialized into that store. So dropping a policy that carries a
+/// matching prohibition removes a deny that would otherwise have subtracted a DIFFERENT
+/// policy's allow — i.e. it can WIDEN effective access, the exact over-share the lanes
+/// exist to catch. Both ODRL lanes therefore treat `unparseable > 0` as a hard failure
+/// rather than an advisory count.
+fn odrl_policies_for(
+    policies: &[sparq_acbench::CompiledPolicy],
+) -> (Vec<sparq_policy::Policy>, usize) {
+    let mut parsed = Vec::new();
+    let mut unparseable = 0usize;
+    for policy in policies {
+        if policy.nquads.is_empty() {
+            continue;
+        }
+        let normalized = normalize_odrl_ntriples(&policy.nquads);
+        match sparq_policy::parse_policy_str(&normalized, "ntriples") {
+            Ok(p) => parsed.push(p),
+            Err(_) => unparseable += 1,
+        }
+    }
+    (parsed, unparseable)
+}
+
+/// Translate an acbench expected-decision row into the `sparq_policy::Request` the
+/// bridge evaluates.
+///
+/// The action is always `odrl:read`: the W2/W4 lanes issue `Mode::Read` queries, and
+/// `odrl_bridge`'s contract is that a SPARQL query is presented as `odrl:read`. The
+/// request's declared client is supplied as `odrl:systemDevice` context so an
+/// `Audience::ClientRestricted` intent is checked (not merely skipped).
+fn odrl_request_for(ed: &ExpectedDecision) -> sparq_policy::Request {
+    let mut request = sparq_policy::Request::new(format!("{}read", ODRL_NS))
+        .on(ed.request.resource.clone())
+        .by(ed.request.agent.clone());
+    if let Some(client) = &ed.request.client {
+        request = request.with(
+            format!("{}systemDevice", ODRL_NS),
+            sparq_policy::Value::Iri(client.clone()),
+        );
+    }
+    request
+}
+
+/// Build a FRESH `PodStore` holding ONLY the per-resource data graphs, then materialize
+/// every ODRL policy against `request` (issue #4415 blocker 2 — materialization
+/// isolation). Returns the store and the number of policies that materialized a grant.
+///
+/// The store carries no WAC/ACP policy triples at all, so any row it later returns is
+/// provably a bridged ODRL grant.
+fn odrl_store_for_request(
+    data_nquads: &str,
+    policies: &[sparq_policy::Policy],
+    request: &sparq_policy::Request,
+) -> Result<(PodStore, usize), String> {
+    let graph = Graph::load_dataset(data_nquads, "nquads")
+        .map_err(|e| format!("ODRL PodStore load error: {}", e))?;
+    let mut store = PodStore::new(graph);
+    let mut granted = 0usize;
+    for policy in policies {
+        if store.materialize_odrl_policy(policy, request).granted {
+            granted += 1;
+        }
+    }
+    Ok((store, granted))
+}
+
+/// The per-resource `GRAPH <resource> { ?s ?p ?o }` probe both ODRL lanes run.
+fn graph_probe(resource: &str) -> String {
+    format!("SELECT ?s ?p ?o WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}", resource)
+}
+
+/// The session an ODRL lane queries as.
+fn odrl_session(ed: &ExpectedDecision) -> Session<'_> {
+    Session {
+        agent: Some(ed.request.agent.as_str()),
+        client: ed.request.client.as_deref(),
+        issuer: None,
+        now: None,
+    }
+}
+
+// ── ODRL W2 live lane (issue #4415) ───────────────────────────────────────────────────
+
+/// Run the W2 live `query_as` lane for one use case under the ODRL model.
+///
+/// **Over-share check (HARD, fail-closed):** oracle=Deny must yield 0 rows. Each request
+/// is evaluated against its OWN freshly-built store, so a grant materialized for one
+/// (agent, resource) pair cannot leak into the next check.
+///
+/// **Anti-vacuity (HARD):** the lane FAILS if it never observes a bridged allow. A lane
+/// that grants nothing would otherwise pass trivially — the exact failure mode the ACP
+/// defect-1 fix above was written for.
+///
+/// **Under-share (ADVISORY):** oracle=Allow with no rows. Expected for group /
+/// subtree / condition-carrying intents, which the translation deliberately declines to
+/// supply world-state evidence for (see the translation contract above).
+fn run_w2_odrl_live(
+    uc: &str,
+    intents: &[IntentRow],
+    policy: &[sparq_acbench::CompiledPolicy],
+    expected_decisions: &[ExpectedDecision],
+) -> Outcome {
+    let filtered: Vec<&ExpectedDecision> = expected_decisions
+        .iter()
+        .filter(|e| e.model == AcModel::Odrl)
+        .collect();
+    if filtered.is_empty() {
+        return Outcome::Skipped { reason: format!("no expected decisions for {uc}/ODRL") };
+    }
+
+    let (policies, unparseable) = odrl_policies_for(policy);
+    if policies.is_empty() {
+        return Outcome::Failed {
+            mismatch: format!(
+                "W2 live {uc}/ODRL: no compiled ODRL policy could be translated \
+                 ({unparseable} unparseable) — the lane would be vacuous"
+            ),
+        };
+    }
+    // HARD fail-closed: a dropped policy may carry a matching PROHIBITION, and
+    // deny-overrides is store-wide (`∪ allow ∖ ∪ deny`), so continuing without it could
+    // let another policy's allow through — see `odrl_policies_for`.
+    if unparseable > 0 {
+        return Outcome::Failed {
+            mismatch: format!(
+                "W2 live {uc}/ODRL: {unparseable} compiled ODRL policy(ies) could not be \
+                 translated — a dropped policy may carry a prohibition whose deny would \
+                 have been subtracted from the shared auth view, so the over-share check \
+                 cannot be trusted (fail-closed, issue #4415)"
+            ),
+        };
+    }
+
+    let data_nquads = resource_data_nquads(intents).join("\n");
+    let start = std::time::Instant::now();
+    let mut checked = 0usize;
+    let mut allowed_with_rows = 0usize;
+    let mut under_share_advisory = 0usize;
+
+    for ed in &filtered {
+        let (store, granted) = match odrl_store_for_request(&data_nquads, &policies, &odrl_request_for(ed)) {
+            Ok(v) => v,
+            Err(e) => return Outcome::Failed { mismatch: format!("W2 live {uc}/ODRL: {e}") },
+        };
+        let result = match store.query_as(&odrl_session(ed), Mode::Read, &graph_probe(&ed.request.resource)) {
+            Ok(r) => r,
+            Err(e) => {
+                return Outcome::Failed {
+                    mismatch: format!(
+                        "W2 live {uc}/ODRL: query error for {} on {}: {e}",
+                        ed.request.agent, ed.request.resource
+                    ),
+                };
+            }
+        };
+
+        match ed.decision {
+            Decision::Allow => {
+                if result.rows.is_empty() {
+                    under_share_advisory += 1;
+                } else {
+                    allowed_with_rows += 1;
+                }
+            }
+            Decision::Deny => {
+                if !result.rows.is_empty() {
+                    return Outcome::Failed {
+                        mismatch: format!(
+                            "W2 live {uc}/ODRL: OVER-SHARE — oracle=Deny for agent={} \
+                             resource={} but engine returned {} row(s) after {granted} \
+                             bridged grant(s) (unauthorized data exposed — security failure)",
+                            ed.request.agent,
+                            ed.request.resource,
+                            result.rows.len()
+                        ),
+                    };
+                }
+            }
+        }
+        checked += 1;
+    }
+
+    // HARD anti-vacuity: a lane that never granted proves nothing about the bridge.
+    if allowed_with_rows == 0 {
+        return Outcome::Failed {
+            mismatch: format!(
+                "W2 live {uc}/ODRL: VACUOUS — {checked} check(s) ran but the ODRL bridge \
+                 materialized zero allow-rows, so the over-share check is trivially \
+                 satisfied and the lane proves nothing (issue #4415 anti-vacuity gate)"
+            ),
+        };
+    }
+
+    let wall_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    if under_share_advisory > 0 {
+        println!(
+            "# advisory: {uc}/ODRL W2-live under-share {under_share_advisory}/{checked}, \
+             {allowed_with_rows} bridged allow(s) \
+             (oracle=Allow, engine=Deny — group / subtree / condition intents supply no \
+             world-state evidence by design, issue #4415)"
+        );
+    }
+    Outcome::Passed { decisions: checked, wall_us_indicative: wall_us }
+}
+
+// ── ODRL W4 concurrent-reader lane (issue #4415) ──────────────────────────────────────
+
+/// Run W4 for the ODRL model: materialize the bridged grants for a fixed request sample
+/// into ONE `Arc<PodStore>`, then assert every concurrent reader agrees with the
+/// single-threaded reference.
+///
+/// This lane deliberately SHARES one store across the sample (unlike W2's fresh store
+/// per request). That is sound here because W4 asserts concurrent-vs-single-threaded
+/// EQUALITY and makes no oracle over-share claim: the reference row counts are read off
+/// the very same accumulated store the threads read. Accumulated grants are exactly
+/// what makes the shared read-side worth exercising.
+fn run_w4_odrl_live(
+    uc: &str,
+    intents: &[IntentRow],
+    policy: &[sparq_acbench::CompiledPolicy],
+    expected_decisions: &[ExpectedDecision],
+    n_threads: usize,
+) -> Outcome {
+    let filtered: Vec<&ExpectedDecision> = expected_decisions
+        .iter()
+        .filter(|e| e.model == AcModel::Odrl)
+        .take(20)
+        .collect();
+    if filtered.is_empty() {
+        return Outcome::Skipped { reason: format!("no expected decisions for W4 {uc}/ODRL") };
+    }
+
+    let (policies, unparseable) = odrl_policies_for(policy);
+    if policies.is_empty() {
+        return Outcome::Failed {
+            mismatch: format!("W4 live {uc}/ODRL: no compiled ODRL policy could be translated"),
+        };
+    }
+    // Same fail-closed rule as W2: a dropped prohibition changes what the SHARED store
+    // enforces, so the concurrent readers would agree on an unsound reference.
+    if unparseable > 0 {
+        return Outcome::Failed {
+            mismatch: format!(
+                "W4 live {uc}/ODRL: {unparseable} compiled ODRL policy(ies) could not be \
+                 translated — a dropped policy may carry a prohibition whose deny would \
+                 have been subtracted from the shared auth view (fail-closed, issue #4415)"
+            ),
+        };
+    }
+
+    // One store, every sampled request's grants materialized into it.
+    let graph = match Graph::load_dataset(&resource_data_nquads(intents).join("\n"), "nquads") {
+        Ok(g) => g,
+        Err(e) => {
+            return Outcome::Failed {
+                mismatch: format!("W4 live {uc}/ODRL: PodStore load error: {e}"),
+            };
+        }
+    };
+    let mut store = PodStore::new(graph);
+    for ed in &filtered {
+        let request = odrl_request_for(ed);
+        for p in &policies {
+            store.materialize_odrl_policy(p, &request);
+        }
+    }
+
+    let sessions: Vec<(String, Option<String>)> = filtered
+        .iter()
+        .map(|ed| (ed.request.agent.clone(), ed.request.client.clone()))
+        .collect();
+    let sparqls: Vec<String> =
+        filtered.iter().map(|ed| graph_probe(&ed.request.resource)).collect();
+    let req_pairs: Vec<(String, Mode)> = filtered
+        .iter()
+        .map(|ed| (ed.request.resource.clone(), Mode::Read))
+        .collect();
+
+    let session_for = |i: usize| Session {
+        agent: Some(sessions[i].0.as_str()),
+        client: sessions[i].1.as_deref(),
+        issuer: None,
+        now: None,
+    };
+
+    // Single-threaded reference, read off the SAME accumulated store.
+    let req_refs: Vec<(&str, Mode)> = req_pairs.iter().map(|(r, m)| (r.as_str(), *m)).collect();
+    let ref_decisions: Vec<bool> = store
+        .decide_batch(&session_for(0), &req_refs)
+        .iter()
+        .map(|d| d.allow)
+        .collect();
+    let ref_row_counts: Vec<usize> = sparqls
+        .iter()
+        .enumerate()
+        .map(|(i, sparql)| {
+            store.query_as(&session_for(i), Mode::Read, sparql).map_or(0, |r| r.rows.len())
+        })
+        .collect();
+
+    let shared = Arc::new(store);
+    let start = std::time::Instant::now();
+    let mut handles = Vec::with_capacity(n_threads);
+    for tid in 0..n_threads {
+        let shared = Arc::clone(&shared);
+        let ref_dec = ref_decisions.clone();
+        let ref_rows = ref_row_counts.clone();
+        let reqs = req_pairs.clone();
+        let sqls = sparqls.clone();
+        let sess = sessions.clone();
+        let uc_s = uc.to_string();
+
+        handles.push(std::thread::spawn(move || -> Result<usize, String> {
+            let req_refs: Vec<(&str, Mode)> = reqs.iter().map(|(r, m)| (r.as_str(), *m)).collect();
+            let mk = |i: usize| Session {
+                agent: Some(sess[i].0.as_str()),
+                client: sess[i].1.as_deref(),
+                issuer: None,
+                now: None,
+            };
+
+            let decisions = shared.decide_batch(&mk(0), &req_refs);
+            for (i, (d, want)) in decisions.iter().zip(ref_dec.iter()).enumerate() {
+                if d.allow != *want {
+                    return Err(format!(
+                        "W4 thread-{tid} {uc_s}/ODRL: decide_batch[{i}] concurrent={} expected={want}",
+                        d.allow
+                    ));
+                }
+            }
+
+            let mut n = decisions.len();
+            for (qi, sparql) in sqls.iter().enumerate() {
+                let result = match shared.query_as(&mk(qi), Mode::Read, sparql) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Err(format!("W4 thread-{tid} {uc_s}/ODRL: query[{qi}] error: {e}"));
+                    }
+                };
+                if result.rows.len() != ref_rows[qi] {
+                    return Err(format!(
+                        "W4 thread-{tid} {uc_s}/ODRL: query[{qi}] concurrent row count differs \
+                         from single-threaded reference: got {} rows, expected {}",
+                        result.rows.len(),
+                        ref_rows[qi]
+                    ));
+                }
+                n += result.rows.len();
+            }
+            Ok(n)
+        }));
+    }
+
+    let mut total = 0usize;
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(n)) => total += n,
+            Ok(Err(m)) => return Outcome::Failed { mismatch: m },
+            Err(_) => {
+                return Outcome::Failed {
+                    mismatch: format!("W4 {uc}/ODRL: a worker thread panicked (fail-closed)"),
+                };
+            }
+        }
+    }
+
+    let wall_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    Outcome::Passed { decisions: total, wall_us_indicative: wall_us }
+}
+
 // ── W2 live lane ──────────────────────────────────────────────────────────────────────
 
 /// Check whether the ACP oracle's Deny for `(agent, resource)` is a known
@@ -269,7 +834,7 @@ fn run_w2_live(
     expected_decisions: &[ExpectedDecision],
 ) -> Outcome {
     if *model == AcModel::Odrl {
-        return Outcome::Skipped { reason: ODRL_SKIP_REASON.to_string() };
+        return run_w2_odrl_live(uc, intents, policy, expected_decisions);
     }
     let ml = model_label(model);
     let filtered: Vec<&ExpectedDecision> =
@@ -401,7 +966,7 @@ fn run_w4_concurrent(
     n_threads: usize,
 ) -> Outcome {
     if *model == AcModel::Odrl {
-        return Outcome::Skipped { reason: ODRL_SKIP_REASON.to_string() };
+        return run_w4_odrl_live(uc, intents, policy, expected_decisions, n_threads);
     }
     let ml = model_label(model);
 
@@ -1293,5 +1858,354 @@ mod tests {
              agent={} resource={}",
             ed.request.agent, ed.request.resource
         );
+    }
+
+    // ── ODRL live-lane tests (issue #4415) ───────────────────────────────────────────
+    //
+    // One direct test per new function, plus the two properties the ODRL lane's
+    // fail-closed contract rests on: the target hoist (without it every ODRL rule
+    // matches every resource) and non-vacuity (without a bridged allow the over-share
+    // check is trivially satisfied).
+
+    use sparq_acbench::{
+        compile_odrl, AccessMode, Condition, Effect, Request as BenchRequest, Scope,
+    };
+
+    /// Build the read-only `Allow` intent the ODRL tests below compile.
+    fn odrl_test_intent(audience: Audience, resource: &str) -> IntentRow {
+        IntentRow {
+            audience,
+            scope: Scope::Resource,
+            mode: AccessMode::read_only(),
+            condition: Condition::None,
+            effect: Effect::Allow,
+            resource_uri: resource.to_string(),
+        }
+    }
+
+    /// Wrap an (agent, resource) pair as the `ExpectedDecision` the lane consumes.
+    fn odrl_test_decision(agent: &str, resource: &str, decision: Decision) -> ExpectedDecision {
+        ExpectedDecision {
+            request: BenchRequest {
+                agent: agent.to_string(),
+                client: None,
+                resource: resource.to_string(),
+                mode: AccessMode::read_only(),
+            },
+            model: AcModel::Odrl,
+            decision,
+        }
+    }
+
+    /// `split_ntriple` must decompose the exact line shape `compile_odrl` emits, and
+    /// decline anything else (which the rewrite then passes through untouched).
+    #[test]
+    fn test_split_ntriple() {
+        let (s, p, o) = split_ntriple("<https://a.ex/s> <https://a.ex/p> <https://a.ex/o> .")
+            .expect("well-formed line must split");
+        assert_eq!(s, "https://a.ex/s");
+        assert_eq!(p, "https://a.ex/p");
+        assert_eq!(o, "<https://a.ex/o>");
+
+        let (_, _, lit) = split_ntriple(
+            "<https://a.ex/s> <https://a.ex/p> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        )
+        .expect("literal object must split");
+        assert_eq!(lit, "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+
+        assert!(split_ntriple("_:b0 <https://a.ex/p> <https://a.ex/o> .").is_none());
+        assert!(split_ntriple("not a triple").is_none());
+    }
+
+    /// `object_iri` unwraps an IRI object and rejects a literal.
+    #[test]
+    fn test_object_iri() {
+        assert_eq!(object_iri("<https://a.ex/o>"), Some("https://a.ex/o"));
+        assert_eq!(object_iri("\"lit\""), None);
+    }
+
+    /// `translated_action` prefers read, then write, then the first action verbatim —
+    /// and NEVER returns `None` for a non-empty rule, because an action-less rule
+    /// parses as the `odrl:use` umbrella (which permits `odrl:read` — an over-share).
+    #[test]
+    fn test_translated_action_prefers_read_and_is_never_empty() {
+        let read = format!("<{}>", ACBENCH_ACL_READ);
+        let write = format!("<{}>", ACBENCH_ACL_WRITE);
+        let control = "<https://sparq.dev/vocab/acl#Control>".to_string();
+
+        assert_eq!(
+            translated_action(&[write.clone(), read.clone(), control.clone()]).as_deref(),
+            Some("<http://www.w3.org/ns/odrl/2/read>"),
+            "a rule carrying acl#Read must be narrowed to its odrl:read facet"
+        );
+        assert_eq!(
+            translated_action(&[write.clone(), control.clone()]).as_deref(),
+            Some("<http://www.w3.org/ns/odrl/2/modify>"),
+            "a write-only rule must map to odrl:modify (which does NOT permit read)"
+        );
+        assert_eq!(
+            translated_action(&[control.clone()]).as_deref(),
+            Some(control.as_str()),
+            "an unmappable action is kept verbatim, never dropped"
+        );
+        assert_eq!(translated_action(&[]), None);
+    }
+
+    /// SECURITY-CRITICAL: `compile_odrl` puts `odrl:target` on the POLICY node, but
+    /// `sparq_policy::parse_policy` reads it off the RULE and a target-less rule matches
+    /// EVERY target. The rewrite must hoist it, and the parsed rule must carry it.
+    #[test]
+    fn test_normalize_odrl_hoists_policy_target_onto_rules() {
+        let row = odrl_test_intent(
+            Audience::Agent("https://alice.ex/card#me".to_string()),
+            "https://pod.ex/res1",
+        );
+        let compiled = compile_odrl(&row);
+        let normalized = normalize_odrl_ntriples(&compiled.nquads);
+
+        let policy = sparq_policy::parse_policy_str(&normalized, "ntriples").expect("parse");
+        assert!(!policy.permissions.is_empty(), "the Allow intent must yield a permission");
+        for rule in &policy.permissions {
+            assert_eq!(
+                rule.target.as_deref(),
+                Some("https://pod.ex/res1"),
+                "every rule must carry the hoisted policy target — a target-less ODRL rule \
+                 matches every resource and would over-share"
+            );
+            assert_eq!(
+                rule.action.0, "http://www.w3.org/ns/odrl/2/read",
+                "the acbench acl#Read action must be translated to odrl:read"
+            );
+        }
+    }
+
+    /// `odrl:All` / `odrl:AllAuthenticated` assignees are dropped so the rule applies to
+    /// any party — the faithful reading of the oracle's `Public` / `Authenticated`.
+    #[test]
+    fn test_normalize_odrl_drops_open_assignees() {
+        for audience in [Audience::Public, Audience::Authenticated] {
+            let row = odrl_test_intent(audience.clone(), "https://pod.ex/res-open");
+            let compiled = compile_odrl(&row);
+            let normalized = normalize_odrl_ntriples(&compiled.nquads);
+            let policy = sparq_policy::parse_policy_str(&normalized, "ntriples").expect("parse");
+            assert!(!policy.permissions.is_empty(), "{audience:?} must yield a permission");
+            for rule in &policy.permissions {
+                assert_eq!(
+                    rule.assignee, None,
+                    "{audience:?} must translate to an unrestricted assignee; got {:?}",
+                    rule.assignee
+                );
+            }
+        }
+    }
+
+    /// A named-agent ODRL intent must actually GRANT through the bridge (non-vacuous)
+    /// and must NOT grant to anybody else (fail-closed over-share check) — the ODRL
+    /// counterpart of `test_acp_named_agent_non_vacuous_and_fail_closed`.
+    #[test]
+    fn test_odrl_named_agent_non_vacuous_and_fail_closed() {
+        let row = odrl_test_intent(
+            Audience::Agent("https://alice.ex/card#me".to_string()),
+            "https://pod.ex/res2",
+        );
+        let intents = [row.clone()];
+        let compiled = [compile_odrl(&row)];
+        let (policies, unparseable) = odrl_policies_for(&compiled);
+        assert_eq!(unparseable, 0, "the compiled ODRL policy must translate");
+        assert!(!policies.is_empty());
+
+        let data = resource_data_nquads(&intents).join("\n");
+
+        // alice is the assignee -> the bridge must materialize a grant and she sees rows.
+        let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res2", Decision::Allow);
+        let (store, granted) =
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice)).expect("store");
+        assert_eq!(granted, 1, "alice's ODRL permission must materialize exactly one grant");
+        let rows = store
+            .query_as(&odrl_session(&alice), Mode::Read, &graph_probe("https://pod.ex/res2"))
+            .expect("query alice")
+            .rows
+            .len();
+        assert!(
+            rows > 0,
+            "alice must see rows for her ODRL-permitted resource (non-vacuous bridged allow)"
+        );
+
+        // bob is not the assignee -> nothing materializes and he sees nothing.
+        let bob = odrl_test_decision("https://bob.ex/card#me", "https://pod.ex/res2", Decision::Deny);
+        let (store, granted) =
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&bob)).expect("store");
+        assert_eq!(granted, 0, "bob's request must materialize no grant (fail-closed)");
+        assert!(
+            store
+                .query_as(&odrl_session(&bob), Mode::Read, &graph_probe("https://pod.ex/res2"))
+                .expect("query bob")
+                .rows
+                .is_empty(),
+            "bob must NOT see rows for alice's ODRL resource (over-share = security failure)"
+        );
+    }
+
+    /// Harness anti-vacuity for the ODRL path: the ODRL store carries NO WAC/ACP policy
+    /// triples, so before any bridged grant it must deny everything. If this ever
+    /// returned rows, every ODRL allow observed by the lane would be meaningless.
+    #[test]
+    fn test_odrl_store_denies_before_any_bridged_grant() {
+        let row = odrl_test_intent(
+            Audience::Agent("https://alice.ex/card#me".to_string()),
+            "https://pod.ex/res3",
+        );
+        let data = resource_data_nquads(&[row]).join("\n");
+        let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res3", Decision::Deny);
+        // Zero policies -> zero bridged grants.
+        let (store, granted) = odrl_store_for_request(&data, &[], &odrl_request_for(&alice)).expect("store");
+        assert_eq!(granted, 0);
+        assert!(
+            store
+                .query_as(&odrl_session(&alice), Mode::Read, &graph_probe("https://pod.ex/res3"))
+                .expect("query")
+                .rows
+                .is_empty(),
+            "an ODRL store with no bridged grant must deny — otherwise the lane is fail-open"
+        );
+    }
+
+    /// A rule whose only action is WRITE must not satisfy the lane's `odrl:read`
+    /// request: `odrl:modify` does not permit `odrl:read`, so nothing materializes.
+    /// This is what stops the action rewrite from widening a write grant into a read.
+    #[test]
+    fn test_odrl_write_only_intent_grants_no_read() {
+        let mut row = odrl_test_intent(
+            Audience::Agent("https://alice.ex/card#me".to_string()),
+            "https://pod.ex/res4",
+        );
+        row.mode = AccessMode { read: false, write: true, control: false };
+        let compiled = [compile_odrl(&row)];
+        let (policies, _) = odrl_policies_for(&compiled);
+        let data = resource_data_nquads(&[row]).join("\n");
+        let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res4", Decision::Deny);
+        let (_, granted) =
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice)).expect("store");
+        assert_eq!(
+            granted, 0,
+            "a write-only ODRL permission must not materialize a READ grant"
+        );
+    }
+
+    /// Generator integration: the personal corpus' ODRL lane must be NON-VACUOUS —
+    /// at least one oracle=Allow case must actually return rows through the bridge.
+    /// Before issue #4415 this lane was recorded as Skipped; a regression that made it
+    /// grant nothing would otherwise still "pass" the over-share check.
+    #[test]
+    fn test_odrl_personal_generator_lane_is_non_vacuous() {
+        let params = GenParams::smoke();
+        let ds = personal::generate(&params);
+        let (policies, unparseable) = odrl_policies_for(&ds.odrl_policy);
+        assert_eq!(unparseable, 0, "every personal ODRL policy must translate");
+        let data = resource_data_nquads(&ds.intents).join("\n");
+
+        let allows: Vec<&ExpectedDecision> = ds
+            .expected_decisions
+            .iter()
+            .filter(|e| e.model == AcModel::Odrl && e.decision == Decision::Allow)
+            .collect();
+        assert!(!allows.is_empty(), "personal/ODRL must have Allow cases");
+
+        let with_rows = allows
+            .iter()
+            .filter(|ed| {
+                let (store, _) = odrl_store_for_request(&data, &policies, &odrl_request_for(ed))
+                    .expect("store");
+                store
+                    .query_as(&odrl_session(ed), Mode::Read, &graph_probe(&ed.request.resource))
+                    .map_or(0, |r| r.rows.len())
+                    > 0
+            })
+            .count();
+        assert!(
+            with_rows > 0,
+            "personal/ODRL must return rows for at least one oracle=Allow case — \
+             a zero here means the ODRL W2 lane is vacuous (issue #4415 anti-vacuity gate)"
+        );
+    }
+
+    /// The full W2 ODRL lane must PASS on the smoke corpus, and its `Passed` count must
+    /// equal the number of ODRL expected decisions (no silently skipped checks).
+    #[test]
+    fn test_run_w2_odrl_live_passes_on_smoke_corpus() {
+        let params = GenParams::smoke();
+        let ds = personal::generate(&params);
+        let expected =
+            ds.expected_decisions.iter().filter(|e| e.model == AcModel::Odrl).count();
+        match run_w2_odrl_live("personal", &ds.intents, &ds.odrl_policy, &ds.expected_decisions) {
+            Outcome::Passed { decisions, .. } => assert_eq!(
+                decisions, expected,
+                "the ODRL W2 lane must check every ODRL expected decision"
+            ),
+            other => panic!("personal/ODRL W2 lane must pass; got {other:?}"),
+        }
+    }
+
+    /// An intentionally malformed ODRL policy that `parse_policy_str` must reject. It is
+    /// shaped as a PROHIBITION on `resource`: the object of the `odrl:prohibition`
+    /// statement is an unterminated IRI, so the document does not parse.
+    fn unparseable_odrl_prohibition(resource: &str) -> sparq_acbench::CompiledPolicy {
+        sparq_acbench::CompiledPolicy {
+            model: AcModel::Odrl,
+            nquads: vec![
+                format!("<{}#policy-bad> <{}prohibition> <{}#proh .", resource, ODRL_NS, resource),
+                format!("<{}#proh> <{}target> <{}> .", resource, ODRL_NS, resource),
+                format!("<{}#proh> <{}action> <{}> .", resource, ODRL_NS, ACBENCH_ACL_READ),
+            ],
+            expressibility: sparq_acbench::Expressibility::Native,
+        }
+    }
+
+    /// Deny-overrides is STORE-WIDE (`∪ allow ∖ ∪ deny`), so a dropped policy is not a
+    /// safe under-share: silently discarding an unparseable PROHIBITION would leave a
+    /// different policy's allow in force and the lane would report a pass on a corpus it
+    /// did not actually enforce. Both ODRL lanes must FAIL instead.
+    #[test]
+    fn test_odrl_lanes_fail_closed_on_unparseable_prohibition() {
+        let resource = "https://pod.ex/res5";
+        let row = odrl_test_intent(
+            Audience::Agent("https://alice.ex/card#me".to_string()),
+            resource,
+        );
+        let intents = [row.clone()];
+        let allow = odrl_test_decision("https://alice.ex/card#me", resource, Decision::Allow);
+        let decisions = [allow];
+
+        // Control: the permission alone is parseable and the lane passes non-vacuously.
+        let good = [compile_odrl(&row)];
+        assert_eq!(odrl_policies_for(&good).1, 0, "the permission alone must translate");
+        assert!(
+            matches!(run_w2_odrl_live("t", &intents, &good, &decisions), Outcome::Passed { .. }),
+            "control: the allow-only corpus must pass, else this test proves nothing"
+        );
+
+        // Add a matching prohibition that does NOT parse. Dropping it would restore the
+        // control's pass while the corpus actually says deny.
+        let bad = [compile_odrl(&row), unparseable_odrl_prohibition(resource)];
+        let (policies, unparseable) = odrl_policies_for(&bad);
+        assert_eq!(unparseable, 1, "the malformed prohibition must fail to parse");
+        assert!(!policies.is_empty(), "the permission must still translate (drop-one, not all)");
+
+        match run_w2_odrl_live("t", &intents, &bad, &decisions) {
+            Outcome::Failed { mismatch } => assert!(
+                mismatch.contains("could not be translated"),
+                "W2 must fail with the fail-closed translation message; got {mismatch}"
+            ),
+            other => panic!(
+                "W2 must FAIL when a prohibition is dropped (dropping it can widen access); got {other:?}"
+            ),
+        }
+        match run_w4_odrl_live("t", &intents, &bad, &decisions, 2) {
+            Outcome::Failed { mismatch } => assert!(
+                mismatch.contains("could not be translated"),
+                "W4 must fail with the fail-closed translation message; got {mismatch}"
+            ),
+            other => panic!("W4 must FAIL on an unparseable ODRL policy; got {other:?}"),
+        }
     }
 }

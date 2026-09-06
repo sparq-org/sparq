@@ -794,6 +794,39 @@ pub enum CircuitId {
     // (`dual-leaf`), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDlDecimal,
+    /// `filter_value_dl_datetime` — DUAL-LEAF value-lane FILTER over a committed
+    /// `xsd:dateTime` OR `xsd:date` ([OPUS-5] sq-wz99x, the dateTime/date sibling
+    /// of [`Self::FilterValueDl`]; `research/zk-field-native-encoding.md` §13.5).
+    /// Structurally [`Self::FilterValueDlDecimal`] with a different value handle:
+    /// the `VALUE_HOOK` is the SIGNED SCALED EPOCH (milliseconds from
+    /// `1970-01-01T00:00:00Z` on the XSD proleptic-Gregorian `timeOnTimeline`, at
+    /// the lane-fixed sub-second scale `FS = 3`), so it reuses the member's
+    /// UNCHANGED signed fixed-point verdict with NO in-circuit blake3.
+    ///
+    /// ONE compiled member serves BOTH datatype classes. `xsd:date` is its own
+    /// lane only by its PUBLIC `datatype_const`
+    /// (`sparq_zk::dual_leaf_datetime::{datetime_datatype_const,
+    /// date_datatype_const}` — `blake3(IRI ‖ "@epochscale=3")`), which is folded
+    /// into `value_component`; a date's hook is the scaled epoch of its STARTING
+    /// instant and is therefore numerically EQUAL to the dateTime hook of that same
+    /// instant, so the lane constant is the only thing keeping the two apart (an
+    /// honest date witness rebinds to a different leaf under the dateTime constant
+    /// and fails the member's leaf assert). That is a BINDING argument resting on
+    /// Poseidon2 preimage resistance, NOT an audited soundness claim.
+    ///
+    /// The hookable DOMAIN (strict XSD-canonical `Z`-timezoned lexicals only) is
+    /// the host's §13.4 fail-closed predicate, not an in-circuit check — the same
+    /// division of labour the decimal member uses for its canonical fraction width.
+    /// LEGAL ONLY against `DualLeafV1` / `ValueOnlyV1` — fail-closed via
+    /// `crate::dispatch`.
+    ///
+    /// DOCUMENTED RISK: carries the INV-VL downgrade, and the whole §13 rule set is
+    /// itself an OPEN external-audit obligation (CR-G8 / sq-qhy4). NOT externally
+    /// audited; no soundness / privacy claim.
+    // [OPUS-5] sq-wz99x: dual-leaf value-lane dateTime/date FILTER member. Opt-in
+    // (`dual-leaf`), research-grade, NOT externally audited.
+    #[cfg(feature = "dual-leaf")]
+    FilterValueDlDateTime,
     /// `revoke_unset_d{depth}` — hidden-index status-list inclusion + bit-unset
     /// proof over a depth-`depth` Poseidon2 Merkle tree (sq-3e5 / sq-h2v). The
     /// proof's PUBLIC inputs are `challenge` + the status-list Merkle `root`; the
@@ -954,6 +987,11 @@ impl CircuitId {
             CircuitId::FilterValueDlF64 => "filter_value_dl_f64".to_string(),
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDlDecimal => "filter_value_dl_decimal".to_string(),
+            // [OPUS-5] sq-wz99x: the dateTime/date datatype-class sibling. ONE
+            // package for BOTH lanes — the lane lives in the public
+            // `datatype_const`, not the member name.
+            #[cfg(feature = "dual-leaf")]
+            CircuitId::FilterValueDlDateTime => "filter_value_dl_datetime".to_string(),
             CircuitId::RevokeUnset { depth } => format!("revoke_unset_d{depth}"),
             // [OPUS-5] sq-kndw: the (status-list depth, accepted-set depth) pair
             // names the compiled fully-hidden member, e.g. revoke_hidden_ref_d10_a4.
@@ -1208,6 +1246,47 @@ pub enum ProofInputs {
         /// The disclosed verdict.
         expected: bool,
     },
+    /// filter_value_dl_datetime: DUAL-LEAF value-lane FILTER over a committed
+    /// `xsd:dateTime` OR `xsd:date` ([OPUS-5] sq-wz99x). These fields are EXACTLY
+    /// the `pub` parameters of the `filter_value_dl_datetime` member `main`
+    /// (`zk/compose/filter_value_dl_datetime/src/main.nr`), in declaration order
+    /// AFTER the prepended `challenge`:
+    ///
+    /// ```text
+    /// [challenge, operand_enc, op, bound_neg, bound_scaled_epoch, datatype_const, expected]
+    /// ```
+    ///
+    /// `operand_enc` is the DUAL-LEAF `Enc` over the SIGNED SCALED EPOCH; the
+    /// `VALUE_HOOK` (sign + scaled epoch) and `lexical_component` are PRIVATE; the
+    /// FILTER's constant instant is carried sign-split + host-converted as
+    /// `(bound_neg, bound_scaled_epoch = |T_bound|` in milliseconds`)`, and
+    /// `datatype_const = blake3(<xsd:dateTime|xsd:date IRI> ‖ "@epochscale=3")` is
+    /// PUBLIC — it SELECTS the lane and folds the sub-second scale `FS` (the B4
+    /// bind). The dateTime and date lanes share this ONE member and are separated
+    /// by that constant alone. DOCUMENTED RISK: INV-VL downgrade, and the §13 rule
+    /// set is an OPEN external-audit obligation (CR-G8 / sq-qhy4); NOT externally
+    /// audited.
+    // [OPUS-5] sq-wz99x: dual-leaf dateTime/date value-lane FILTER inputs. Opt-in.
+    #[cfg(feature = "dual-leaf")]
+    #[serde(rename = "filter_value_dl_datetime")]
+    FilterValueDlDateTime {
+        id: CircuitId,
+        /// The hidden column's DUAL-LEAF dateTime/date term encoding (the scan-proof
+        /// anchor).
+        operand_enc: FieldHex,
+        op: FilterOp,
+        /// Sign of the FILTER's constant instant (`true` = pre-epoch).
+        bound_neg: bool,
+        /// `|T_bound|` in milliseconds — the FILTER constant on the same scaled-epoch
+        /// timeline as the value handle.
+        bound_scaled_epoch: u64,
+        /// `blake3(<datatype IRI> ‖ "@epochscale=3")` as a field — SELECTS the
+        /// dateTime lane ([`datetime_datatype_const`]) or the date lane
+        /// ([`date_datatype_const`]) and folds the scale.
+        datatype_const: FieldHex,
+        /// The disclosed verdict.
+        expected: bool,
+    },
     /// `join_eq_na{n_a}_nb{n_b}`: hidden cross-credential JOIN
     /// (sq-bwwl / sq-fi03, `research/zk-hidden-join-design.md` §2.2/§3.2). These
     /// fields are EXACTLY the `pub` parameters of the `join_eq` member `main`, in
@@ -1322,6 +1401,9 @@ impl ProofInputs {
             ProofInputs::FilterValueDlF64 { id, .. } => id,
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDlDecimal { id, .. } => id,
+            // [OPUS-5] sq-wz99x: dual-leaf dateTime/date value-lane FILTER.
+            #[cfg(feature = "dual-leaf")]
+            ProofInputs::FilterValueDlDateTime { id, .. } => id,
             // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN.
             ProofInputs::JoinEq { id, .. } => id,
             // [OPUS-4.8] sq-3kd2g.6: bounded-depth path reachability.
@@ -1367,6 +1449,63 @@ pub fn boolean_datatype_const() -> FieldHex {
     FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(
         sparq_zk::dual_leaf_boolean::XSD_BOOLEAN,
     )))
+}
+
+/// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:dateTime` value lane
+/// (sq-wz99x) — `blake3_field("<xsd:dateTime IRI>@epochscale=3")`, exactly the
+/// constant `sparq_zk::dual_leaf_datetime::encode_datetime` (the host half,
+/// sq-we9vs) folds into the committed leaf's `value_component`. It carries the
+/// lane-fixed sub-second scale `FS`, so a hook at one scale can never collide a
+/// hook at another (the B4 bind, the `@scale=` construction of the decimal lane).
+///
+/// Pair it with [`CircuitId::FilterValueDlDateTime`] /
+/// [`ProofInputs::FilterValueDlDateTime`]; build one with
+/// [`crate::build::build_filter_value_dl_datetime`].
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4), and the §13 rule set is itself an OPEN external-audit
+/// obligation. NOT externally audited; no soundness / privacy claim.
+// [OPUS-5] sq-wz99x: dateTime lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
+#[cfg(feature = "dual-leaf")]
+pub fn datetime_datatype_const() -> FieldHex {
+    FieldHex(field_to_hex(
+        &sparq_zk::dual_leaf_datetime::datetime_datatype_const(),
+    ))
+}
+
+/// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:date` value lane (sq-wz99x)
+/// — `blake3_field("<xsd:date IRI>@epochscale=3")`, the constant
+/// `sparq_zk::dual_leaf_datetime::encode_date` folds into the committed leaf.
+///
+/// # The date lane adds NO second Noir member
+///
+/// It shares [`CircuitId::FilterValueDlDateTime`] with the dateTime lane: that
+/// member's `datatype_const` is a PUBLIC input, and a date's `VALUE_HOOK` is the
+/// scaled epoch of the date's STARTING instant (midnight UTC — XSD orders dates by
+/// their starting moment), which lives in the SAME signed-`u64` domain the member
+/// already compares. So the lane is pure WIRING: host and verifier pick THIS
+/// constant instead of [`datetime_datatype_const`]`()`.
+///
+/// # Lane separation is the public `datatype_const`, and only that
+///
+/// A date's hook is NUMERICALLY EQUAL to the dateTime hook of the same starting
+/// instant (`"1970-01-02Z"` and `"1970-01-02T00:00:00Z"` both hook `86_400_000`),
+/// so the constant is the ONLY thing keeping the two terms apart. Because it is
+/// folded into `value_component = h3(VALUE_HOOK, DATATYPE_CONST, LANG_NONE)` and
+/// the two constants differ, an honest date witness recomputes a DIFFERENT leaf
+/// under the dateTime constant and fails the member's
+/// `assert_eq(leaf, operand_enc)` binding — and symmetrically. That is a BINDING
+/// argument resting on Poseidon2 preimage resistance, NOT an audited soundness
+/// claim.
+///
+/// DOCUMENTED RISK: as [`datetime_datatype_const`] (CR-G8 / sq-qhy4). NOT
+/// externally audited; no soundness / privacy claim.
+// [OPUS-5] sq-wz99x: date lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
+#[cfg(feature = "dual-leaf")]
+pub fn date_datatype_const() -> FieldHex {
+    FieldHex(field_to_hex(
+        &sparq_zk::dual_leaf_datetime::date_datatype_const(),
+    ))
 }
 
 /// One composed sub-proof: the circuit member, its public inputs, and the
@@ -1693,6 +1832,62 @@ pub struct ProofManifest {
     /// BGP pattern may draw from) — fed to `verify::recheck` for the Q6
     /// cross-graph bnode-join guard.
     pub attributions: Vec<Vec<usize>>,
+    /// [OPUS-5] sq-q9r5e follow-up: the EXPLICIT per-pattern answering-scan
+    /// declaration — `pattern_scans[pi]` is the set of `sub_proofs` indices of
+    /// the SCAN sub-proofs that answer query BGP pattern `pi`. Indexed per query
+    /// pattern in query order, exactly like [`Self::attributions`].
+    ///
+    /// # It carries NO verification weight — do not read it as one
+    /// The verifier resolves pattern→scan by constant MEMBERSHIP
+    /// (`crate::verifier`'s `scan_matches_pattern`) for EVERY obligation it
+    /// derives: the FILTER slot gate (`bind_query_correctness`), the cross-graph
+    /// attribution gate (`bind_attributions`), the Q6 namespace
+    /// (`global_attributions`) and `bind_joins` all ignore this field. A
+    /// declaration therefore CANNOT shrink what the verifier demands — a manifest
+    /// carrying one is never accepted where the same manifest without one is
+    /// rejected; it can only fail ADDITIONALLY, on the well-formedness checks
+    /// below.
+    ///
+    /// # Why it does not narrow (the residual this field is a placeholder for)
+    /// The reason to declare a mapping is the same-constant-layout over-demand:
+    /// two query patterns sharing a constant layout — `{ ?x <age> ?v . ?x <age>
+    /// ?c }`, both `(?, <age>, ?)` — are BOTH matched by BOTH scan sub-proofs, so
+    /// under `FILTER(?v >= 18)` the fail-closed sq-q9r5e / audit-L-1 rule demands
+    /// a true-verdict `?v >= 18` proof over the `5` of a genuine solution
+    /// `(?x = alice, ?v = 25, ?c = 5)`, which no honest prover can supply. Letting
+    /// the declaration narrow that obligation would fix the over-demand and open a
+    /// hole: SPARQL evaluates each pattern over EVERY compatible committed row and
+    /// the query text authorises no prover-chosen partition of the data, so the
+    /// prover could drop a constant-compatible scan's rows out of a pattern's
+    /// FILTER and attribution obligations by fiat while still disclosing them. The
+    /// well-formedness checks below pin only that the declaration is a TOTAL map
+    /// of scans to patterns; they establish nothing about whether an excluded scan
+    /// contributes to the claimed result. Narrowing needs what the flat manifest
+    /// cannot yet express — a claimed result row bound to the selected scan rows
+    /// with all shared-variable joins enforced — so it is NOT done, and the
+    /// over-demand stands (`crate::verifier`'s `check_pattern_scans` carries the
+    /// full argument).
+    ///
+    /// # It is DECLARED, not trusted — the verifier re-checks it
+    /// `crate::verifier`'s `check_pattern_scans` gate rejects a declaration
+    /// that is mis-sized (not one entry per query pattern), leaves a pattern
+    /// unanswered (empty entry), names a sub-proof that is out of range / not a
+    /// scan / whose bb-bound `pattern_is_const`/`pattern_const_enc` do NOT match
+    /// the pattern's constants, or leaves a scan sub-proof DANGLING (declared for
+    /// no pattern at all). Those are ADDITIONAL rejections, never a relaxation.
+    ///
+    /// # EMPTY = not declared
+    /// An empty vector means "no declaration" and skips the checks above; the
+    /// obligations are identical either way, so omitting the field neither weakens
+    /// nor strengthens any gate.
+    ///
+    /// Checked by the FLAT stage-1 gates only. The `extended-fragment` regime
+    /// defers all query-text term binding (see `verify_fragment_manifest`), so a
+    /// declaration is neither validated nor used there.
+    // [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping. Research-grade,
+    // NOT externally audited (sq-qhy4).
+    #[serde(default)]
+    pub pattern_scans: Vec<Vec<usize>>,
     /// Declared non-bnode join obligations (manifest side of the layer-3
     /// gate). `(variable, pattern_i, pattern_j)`.
     #[serde(default)]
@@ -1717,6 +1912,59 @@ pub struct ProofManifest {
     /// ([`CommitmentAttestation::status`]) this MUST be present and match it —
     /// an omitted `revocation` for a status-bound credential is REJECTED
     /// (fail-closed; the prover cannot drop the reference to skip the check).
+    ///
+    /// # SCALAR by design — ONE reference per presentation (sq-cuvmj)
+    /// This field, [`Self::hidden_revocation`] and [`Self::fully_hidden_revocation`]
+    /// are all scalar `Option`s: a manifest carries exactly ONE status reference and
+    /// at most one liveness proof over it. `crate::verifier::resolve_status_ref`
+    /// requires EVERY scan-covering commitment's issuer-signed
+    /// [`CommitmentAttestation::status`] to resolve to this ONE reference, so a
+    /// presentation carrying two credentials with DISTINCT `(list, index, version)`
+    /// references is structurally REJECTED
+    /// (`crate::verifier::CheckError::RevocationReferenceMismatch`).
+    ///
+    /// That rejection is FAIL-CLOSED, not a false-accept: a revoked second
+    /// credential cannot be smuggled past the liveness check by pointing
+    /// `revocation` at the live one (the review's attempt-5 construction —
+    /// `research/zk-bind-composition-review.md` §Finding B). It is, however, an
+    /// over-restriction: it limits hidden cross-credential JOINs
+    /// (`crate::verifier::bind_joins`) to credentials sharing an IDENTICAL
+    /// issuer-signed status slot — in practice intra-credential multi-graph joins.
+    /// See that gate's `# Cross-credential scope constraint` section.
+    ///
+    /// # Pre-registered obligations for any future `Vec` migration (sq-cuvmj)
+    /// Promoting these fields to `Vec` to support genuine multi-credential
+    /// presentations is a SOUNDNESS-CRITICAL change: four verifier sites currently
+    /// read the single reference and would each silently cover only ONE credential.
+    /// A migration owes a PER-COMMITMENT re-derivation at every one of them —
+    /// dropping any leaves a second credential's liveness UNCHECKED:
+    ///
+    /// 1. `crate::verifier::bind_issuer_attestations` / `resolve_status_ref` — must
+    ///    resolve the reference belonging to THE COMMITMENT under inspection, and
+    ///    must still reject a commitment whose attested status matches NO reference
+    ///    (an unmatched commitment must never fall through as "no status bound").
+    /// 2. `crate::verifier::bind_revocation` — must run the authoritative-snapshot,
+    ///    freshness and `bit[index] == 0` checks once PER reference, and reject if
+    ///    any referenced credential is revoked or stale (not "some reference is
+    ///    live").
+    /// 3. `crate::verifier::bind_hidden_revocation` /
+    ///    `bind_fully_hidden_revocation` — each proof must be bound to the
+    ///    ISSUER-SIGNED `index_commitment` / `ref_commitment` of ITS OWN reference,
+    ///    and every reference in a hidden mode must have a matching proof (the
+    ///    existing fail-closed `HiddenRevocationRequired` /
+    ///    `FullyHiddenRevocationRequired` rule, applied per reference rather than
+    ///    once).
+    /// 4. `crate::verifier::scan_referenced_messages` and
+    ///    `verify_holder_attestation_signature` — both recompute an issuer-signed
+    ///    MESSAGE that folds the status digest, so each must fold the digest of the
+    ///    reference for THAT commitment; using a global/first reference would make
+    ///    the hidden-issuer and holder-binding messages unverifiable (or, worse,
+    ///    verifiable under the wrong credential's status).
+    ///
+    /// The current single-reference invariant is pinned by
+    /// `crate::verifier::tests::two_credentials_with_distinct_status_refs_are_rejected`,
+    /// which a `Vec` migration must consciously revisit. Not externally audited
+    /// (sq-qhy4).
     #[serde(default)]
     pub revocation: Option<RevocationStatus>,
     /// Disclosed status-list snapshots (audit #12): the bitstrings the verifier
@@ -1753,6 +2001,11 @@ pub struct ProofManifest {
     /// is never disclosed. The clear `RevocationStatus.index`/snapshot path remains
     /// the interim check; this field is the additive privacy layer. See
     /// `crate::verifier::bind_hidden_revocation`.
+    ///
+    /// SCALAR for the same reason [`Self::revocation`] is — one hidden-index proof
+    /// per presentation, bound to the one issuer-signed reference. The
+    /// multi-credential consequence and the obligations any `Vec` migration owes
+    /// are pre-registered on [`Self::revocation`] (sq-cuvmj).
     // [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation proof (privacy upgrade).
     #[serde(default)]
     pub hidden_revocation: Option<HiddenIndexRevocation>,
@@ -1776,6 +2029,9 @@ pub struct ProofManifest {
     /// (`with_accepted_set_depth`) — with no accepted-set anchor the relying party
     /// has no root to bind the proof to and rejects. NOT externally audited
     /// (sq-qhy4).
+    ///
+    /// SCALAR for the same reason [`Self::revocation`] is; the `Vec`-migration
+    /// obligations are pre-registered on that field (sq-cuvmj).
     // [OPUS-5] sq-kndw: fully-hidden revocation proof. Opt-in, research-grade.
     #[serde(default)]
     pub fully_hidden_revocation: Option<FullyHiddenRevocation>,
@@ -2002,7 +2258,23 @@ pub struct HiddenIssuerAttestation {
     /// exists — the original sq-z9l behaviour). A hidden-ONLY commitment (no clear
     /// attestation) MUST carry the salt here, or the verifier cannot recompute `m`
     /// and rejects the entry as unreferenced (fail-closed).
+    ///
+    /// # Why the salt is not withheld (sq-93h, assessed — do not re-litigate)
+    /// Disclosing it adds NO cross-presentation linkability, because [`Self::commitment`]
+    /// — the SAME graph's `C(G)` — is disclosed in the clear on this very entry and is
+    /// byte-bound into every scan sub-proof's bb public inputs. Given the audit-#9
+    /// ISSUANCE discipline that a salt is never reused for two distinct graphs (an
+    /// issuance-side assumption — the verifier machine-checks only the within-manifest
+    /// instance of it, `SaltReused`), the `graph -> salt` partition REFINES the
+    /// `graph -> C(G)` one, so the salt is a dominated correlator: a coalition that can
+    /// link two presentations by salt can already link them by `C(G)`. Moving `m`-reconstruction
+    /// behind an in-circuit salt-commitment (the sq-ayv index-commitment analogue) would
+    /// therefore buy zero unlinkability for a new circuit member and VK. Full analysis,
+    /// including the separate (non-linkability) guess-confirmation residual and the
+    /// trip-wire that fires if `C(G)` ever stops being disclosed:
+    /// `research/zk-hidden-path-salt-disclosure.md`.
     // [OPUS-4.8] sq-xxg: salt for hidden-only `m` reconstruction.
+    // [OPUS-5] sq-93h: assessed NO-BUILD — dominated by the clear `commitment`.
     #[serde(default)]
     pub salt: Option<FieldHex>,
     /// The bb proof blob (hex), same `len|proof|len|pi|vk` layout as a
@@ -2381,6 +2653,7 @@ mod holder_binding_tests {
             key_set: vec![public_key_to_hex(&issuer.public_key())],
             commitment_attestations: vec![att],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -2660,6 +2933,7 @@ mod canonical_edge_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -2950,6 +3224,7 @@ mod path_schema_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],

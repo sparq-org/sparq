@@ -1,0 +1,46 @@
+@prefix solid-test: <https://github.com/solid/conformance-test-harness/vocab#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+
+# [SONNET-4.6] sq-gg0qq.7 — TestSubject for sparq-lws-core (the EXPERIMENTAL parallel-track Solid/LDP
+# server core). `--target=sparq-lws-core` selects this node. Ported from
+# jeswr/solid-server-rs@1e555b10; the subject was renamed from `solid-server-rs` to the crate it now
+# drives, and the per-suite SCORE claims in the upstream comments were dropped — the score is
+# GENERATED into the EARL report on every run and ratcheted against `conformance/baseline.json`,
+# never asserted in committed prose (see SCORE.md).
+#
+# It claims the LDP/Solid surface the server implements today (LDP CRUD, Turtle/JSON-LD content
+# negotiation, conditional + Range requests, n3-patch PATCH, storage description + /.well-known/solid
+# discovery, WebSocketChannel2023 notifications) AND the full Web Access Control suite — WAC is
+# implemented locally by the in-Rust engine in `src/authz`, evaluating `.acl` documents through the
+# `Store` seam.
+<sparq-lws-core>
+    a earl:Software, earl:TestSubject ;
+    doap:name "sparq-lws-core" ;
+    doap:release <sparq-lws-core#release> ;
+    doap:homepage <https://github.com/sparq-org/sparq> ;
+    doap:description "EXPERIMENTAL Solid/LDP server core: axum/hyper/tokio, SPARQ-authoritative metadata + access-control, object_store-backup bytes, DPoP/Solid-OIDC auth via solid-oidc-verifier."@en ;
+    doap:programming-language "Rust" ;
+
+    # --- Feature groups deliberately skipped (not applicable / unimplementable in this setup) -------
+    # ACP is not implemented — authorization is Web Access Control only. ACP is out of scope here.
+    solid-test:skip "acp" ;
+    # Group-based access (acl:agentGroup) resolution is a v1 follow-up; the WAC engine recognises the
+    # predicate but never grants on it (fail-closed), so group-membership scenarios are skipped.
+    solid-test:skip "wac-agent-group" ;
+    # `@http-redirect` CORS scenarios open `http://localhost:3000/...` (the harness substitutes
+    # `^https:` → `http:` WITHOUT changing the port) and expect a 301/308. The conformance setup runs
+    # the server on a single non-default port terminating TLS in-process, so it cannot also serve
+    # plain HTTP on the same port — the scenario assumes default 443/80. Skip rather than fail on an
+    # unimplementable-in-this-setup pattern.
+    solid-test:skip "http-redirect" ;
+
+    rdfs:comment "EXPERIMENTAL parallel track. DPoP-bound tokens required (RFC 9449); tokens are RFC 9068 at+jwt with a mandatory audience (the server base URL). Web Access Control is implemented by the local in-Rust engine in src/authz."@en .
+
+<sparq-lws-core#release>
+    doap:name "v0.1.0" ;
+    doap:revision "0.1.0" ;
+    doap:created "2026-06-22T00:00:00.000Z"^^xsd:dateTime .

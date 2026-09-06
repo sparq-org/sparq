@@ -96,13 +96,16 @@ impl std::error::Error for DispatchError {}
 /// the `value_component` (the numeric handle), available ONLY against a method
 /// that committed a value handle (`dual-leaf` / `value-only`). The dual-leaf
 /// FILTER members for the integer (sq-xojl), double, and decimal datatype classes
-/// (sq-2ezsx) are all value-lane members.
+/// (sq-2ezsx) are all value-lane members, as is the dateTime/date member
+/// ([OPUS-5] sq-wz99x — ONE member for BOTH lanes; the lane lives in the public
+/// `datatype_const`, so it needs no separate classification here).
 fn is_value_lane_member(id: &CircuitId) -> bool {
     matches!(
         id,
         CircuitId::FilterValueDl
             | CircuitId::FilterValueDlF64
             | CircuitId::FilterValueDlDecimal
+            | CircuitId::FilterValueDlDateTime
     )
 }
 
@@ -227,13 +230,26 @@ mod tests {
             resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDlDecimal),
             Ok(CircuitId::FilterValueDlDecimal)
         );
+        // [OPUS-5] sq-wz99x: the dateTime/date member (ONE member, BOTH lanes).
+        assert_eq!(
+            resolve_circuit(
+                CommitmentMethod::DualLeafV1,
+                &CircuitId::FilterValueDlDateTime
+            ),
+            Ok(CircuitId::FilterValueDlDateTime)
+        );
     }
 
     #[test]
     fn string_canonical_rejects_the_double_and_decimal_value_lane_siblings() {
         // [OPUS-4.8] sq-2ezsx: a string-canonical graph has no value handle, so the
         // double + decimal value-lane members are UNPROVABLE against it — fail-closed.
-        for id in [CircuitId::FilterValueDlF64, CircuitId::FilterValueDlDecimal] {
+        // [OPUS-5] sq-wz99x: and the dateTime/date member, for the same reason.
+        for id in [
+            CircuitId::FilterValueDlF64,
+            CircuitId::FilterValueDlDecimal,
+            CircuitId::FilterValueDlDateTime,
+        ] {
             let r = resolve_circuit(CommitmentMethod::StringCanonicalV1, &id);
             assert!(matches!(r, Err(DispatchError::IllegalPair { .. })));
         }
@@ -355,6 +371,7 @@ mod tests {
             CircuitId::FilterValueDl,
             CircuitId::FilterValueDlF64,
             CircuitId::FilterValueDlDecimal,
+            CircuitId::FilterValueDlDateTime,
             CircuitId::JoinEq { n_a: 16, n_b: 16 },
         ];
         for m in &methods {
@@ -406,6 +423,9 @@ mod tests {
         assert!(is_value_lane_member(&CircuitId::FilterValueDlDecimal));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlF64));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlDecimal));
+        // [OPUS-5] sq-wz99x: the dateTime/date member is value-lane, not identity.
+        assert!(is_value_lane_member(&CircuitId::FilterValueDlDateTime));
+        assert!(!is_identity_op_member(&CircuitId::FilterValueDlDateTime));
         assert!(is_identity_op_member(&CircuitId::Scan { k: 1, n: 16, r: 4 }));
         assert!(is_identity_op_member(&CircuitId::JoinEq { n_a: 16, n_b: 16 }));
         assert!(!is_value_lane_member(&CircuitId::Scan { k: 1, n: 16, r: 4 }));

@@ -133,11 +133,17 @@ Caveats that keep this honest (none block the GO):
 3. W3C-suite conformance (beyond the 22-pair identity + gen-js's 92/92) is
    deliberately a separate gate (sq-tonhr.2 ratchets) before any sparq
    wiring; equality-of-outcome-set vs oxttl remains the bar.
-4. gen-rs backend gaps that gate the *next* grammars, not this verdict:
+4. Backend gaps that gate the *next* grammars, not this verdict:
    `emit @graph` (needed for N-Quads/TriG) is not yet compiled; the
    FIRST-set bitmask supports ≤ 128 token kinds (array fallback needed
    beyond); `@maxdepth` is a fixed constant. Tracked as beads under
-   sq-tonhr.
+   sq-tonhr. **Superseded 2026-07-27 (sq-uyney) — see
+   [`shuttle-gen-rs-backend-gaps-2026-07.md`](./shuttle-gen-rs-backend-gaps-2026-07.md):**
+   the mask fallback and grammar-driven `@maxdepth` are both closed
+   upstream (verified + tested at `89bbe6d`, and output-neutral for
+   sparq's vendored SHACL-CS artifacts); `emit @graph` remains open and
+   is **not** a gen-rs-specific gap — gen-js refuses it identically, and
+   the declared `emits` header is read by neither backend.
 5. Single-thread comparison by design; parallelism composes at sparq's
    chunk layer and is measured at that integration (sq-tonhr.8), where the
    span-emission `(kind,start,end)` contract exists precisely so the

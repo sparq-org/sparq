@@ -23,7 +23,7 @@ yanked = "deny"
 # strict on what matters: a YANKED crate ALWAYS fails the gate, and every
 # vulnerability fails UNLESS it is one of the explicitly justified `ignore` ids
 # listed below. Four advisories are tolerated: two maintenance-status notices
-# (`paste`, `rustls-pemfile`) with no reported vulnerability, plus two quick-xml
+# (`paste`, `bincode`) with no reported vulnerability, plus two quick-xml
 # < 0.41 DoS advisories still present ONLY in a transitive copy. The gate re-flags
 # anything else (any new advisory, or a yanked crate).
 #
@@ -49,23 +49,18 @@ yanked = "deny"
 # vulnerability, and parquet currently offers no paste-free release. Track removal
 # in sq-cx4w2 and delete this ignore once parquet drops `paste`.
 #
-# RUSTSEC-2025-0134 (unmaintained `rustls-pemfile`, bead sq-g2xs) was dropped:
-# the federation HTTP client was migrated from ureq 2 → ureq 3, whose
-# `rustls-native-certs 0.8` no longer depends on the archived `rustls-pemfile`
-# (its code moved into `rustls-pki-types`' `PemObject`). The crate is now absent
-# from Cargo.lock, so the ignore is removed and the gate re-flags any regression
-# that reintroduces it.
-# RUSTSEC-2025-0134 (unmaintained `rustls-pemfile`) is RE-ADDED (it was removed by
-# sq-g2xs when ureq 3 dropped the crate from the tree): the solid-server-rs import
-# (epic sq-gg0qq, supply-chain pre-flight sq-gg0qq.1) reintroduces `rustls-pemfile 2`
-# for its mTLS serve path (PEM cert-chain/key parse into the DER types
-# `with_client_cert_verifier(..).with_single_cert(..)` needs). "Unmaintained" here
-# means ARCHIVED-BUT-STABLE — the crate's functionality moved into `rustls-pki-types`'
-# `PemObject`; there is no vulnerability. Follow-up bead sq-5ah3p (migration to
-# rustls-pki-types' PemObject during the import) removes this ignore again.
+# [OPUS-5] RUSTSEC-2025-0134 (unmaintained `rustls-pemfile`) has NO ignore here, and
+# must not regain one. It was dropped under sq-g2xs (ureq 2 → ureq 3 removed the crate
+# from the tree), re-added when the solid-server-rs import brought it back for the mTLS
+# PEM parse, and dropped again under sq-5ah3p — this time by migrating the parse itself:
+# `sparq-lws-core/src/tls.rs` and `sparq-server/src/main.rs` decode PEM through
+# `rustls-pki-types`' `PemObject` (reached via rustls' own `pki_types` re-export), which
+# is the maintained API the archived crate had been a thin shim over since its 2.x line.
+# No workspace crate declares it, it is absent from Cargo.lock, and the matching VEX
+# statement + cargo-vet exemption were removed in the same change. Anything that
+# reintroduces the crate now FAILS this gate, which is the intent.
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "paste is archived/unmaintained, an informational maintenance advisory with no reported vulnerability. It is reintroduced only through parquet 59 for sparq-arrow's default-OFF parquet feature, and parquet currently offers no paste-free release. Remove when parquet drops paste (follow-up bead sq-cx4w2)." },
-  { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is archived/unmaintained (functionality moved into rustls-pki-types PemObject) — an informational advisory, not a vulnerability. Re-added for the solid-server-rs import pre-flight (sq-gg0qq.1): the imported mTLS serve path parses PEM cert-chain/key via rustls-pemfile 2, exactly as upstream jeswr/solid-server-rs ships. Remove by migrating the imported code to rustls-pki-types PemObject (follow-up bead sq-5ah3p)." },
   { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 is permanently unmaintained, but the advisory reports no vulnerability and the release is considered complete by its former maintainers. It is pulled transitively by qwt 0.4.0 through hdt 0.7.3; sparq does not deserialize untrusted bincode input. Remove when hdt/qwt replaces bincode (tracked in the worker follow-up)." },
   # quick-xml 0.37.5 (oxigraph 0.5.x transitive) — see the justification above.
   { id = "RUSTSEC-2026-0194", reason = "quick-xml <0.41 quadratic-time duplicate-attribute DoS. Our own crates are on the patched 0.41; this tolerates ONLY the transitive quick-xml 0.37.5 pinned by the oxigraph 0.5.x stack (oxrdfxml/sparesults/spareval), for which no fixed upstream release exists yet. Availability-only, not memory-unsafety. Remove when oxigraph bumps quick-xml >=0.41. https://github.com/tafia/quick-xml/issues/969" },
@@ -142,6 +137,59 @@ exceptions = [
 [bans]
 # Surface (but do not fail on) duplicate versions of the same crate — useful
 # signal for dependency-tree bloat without blocking routine churn.
+#
+# DUPLICATE-VERSION BLOCKER REGISTRY (sq-98w7z.7, surveyed 2026-07-27, [OPUS-5])
+# -----------------------------------------------------------------------------
+# This is the single source of truth for WHY the duplicates this check reports
+# are still here. It exists so the next person who reads a `multiple-versions`
+# warning does not re-run the same survey. Duplicate versions are a COMPILE-TIME
+# and BINARY-SIZE cost, not a runtime hot-path cost — keep that claim honest.
+#
+# Survey method (re-run any of these to re-verify):
+#   cargo tree -d --workspace           # duplicates reachable on the host target
+#   cargo tree -i <crate>@<version>     # who pulls a lagging version
+#   cargo update --workspace --dry-run  # is a semver-compatible bump available?
+#
+# State at survey: 49 crate names carry more than one version in Cargo.lock, and
+# `cargo update --workspace --dry-run` locks ZERO packages — the tree is already
+# at its maximum semver-compatible resolution. Every workspace crate sits on the
+# NEWEST side of every duplicate pair it participates in; each lagging version is
+# held by a third-party crate that is itself at its latest published release. So
+# no duplicate can currently be removed without either an upstream release or a
+# major dependency bump that changes a public API (which needs its own bead).
+#
+# Per-family blockers for the families the epic named:
+#
+#  * hashbrown x4 (0.14.5 / 0.15.5 / 0.16.1 / 0.17.1) — the workspace is on 0.17.
+#      0.14.5 <- dashmap 6.2.1 (<- oxigraph 0.5.9 <- sparq-bench) and hdt 0.7.3
+#        (<- sparq-hdt). Both are the newest stable releases; dashmap 7 is
+#        release-candidate only. Unblocks when dashmap cuts a stable 7 AND
+#        oxigraph adopts it, or when hdt publishes past 0.7.3.
+#      0.15.5 <- wasmparser 0.244.0 alone, via wit-bindgen 0.51 <- wasip2/wasip3
+#        <- getrandom. That chain is `cfg(target_os = "wasi")`-only, so it is a
+#        LOCK-ONLY entry: it is never compiled for any target sparq builds and
+#        costs nothing today. Unblocks when wit-bindgen bumps its wasm-tools
+#        major (0.244 is the ceiling of wit-bindgen 0.51's requirement).
+#      0.16.1 <- gpu-allocator 0.28.0 and spade 2.15.1 (<- geo 0.33.1 <-
+#        sparq-geo). Both are the newest releases.
+#  * foldhash x2 (0.1.5 / 0.2.0) — 0.1.5 is reachable ONLY through hashbrown
+#      0.15.5, i.e. the same WASI-only chain, and disappears with it. sparq's own
+#      direct use (sparq-fedplan) is 0.2.
+#  * rustc-hash x2 (1.1.0 / 2.1.3) — 1.1.0 <- naga / naga-types / wgpu-core
+#      30.0.0 only, which is the newest wgpu. All 25 sparq crates are on 2.1.3.
+#  * oxrdf x2 (0.2.4 / 0.3.3) and oxttl x2 (0.1.8 / 0.2.3) — DELIBERATE and
+#      already documented in crates/sparq-canon/Cargo.toml. rdf-canon 0.15.3 (the
+#      newest release, and the validated RDFC-1.0 implementation) speaks oxrdf
+#      0.2, so sparq-canon carries the aliased `oxrdf02`/`oxttl01` bridge pair.
+#      The git-pinned `solid-oidc-verifier` (see [sources] below) independently
+#      pulls oxttl 0.1 -> oxrdf 0.2. BOTH must move before the pair collapses.
+#  * quick-xml x2 (0.37.5 / 0.41.0) — 0.37.5 <- oxrdfxml 0.2.3 and sparesults
+#      0.3.3, both the newest published releases. Every sparq crate is on 0.41.
+#
+# Why this stays "warn" and does not become "deny" + a skip list: the surveyed
+# set is entirely upstream-blocked, so denying would add a ~49-entry allowance
+# table and red this lane on routine churn without removing a single version.
+# Revisit if a NEW duplicate ever appears that sparq itself introduced.
 multiple-versions = "warn"
 # When duplicates exist, highlight the whole dependency tree for each.
 highlight = "all"

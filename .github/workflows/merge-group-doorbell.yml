@@ -1,0 +1,136 @@
+# [OPUS-5] sparq-org/sparq — the EVENT-DRIVEN entry point for the zero-dispatch
+# merge-group watchdog. 🤖 SPARQ agent.
+#
+# WHY THIS EXISTS: `.github/workflows/merge-group-watchdog.yml` already detects a dead
+# merge-group ref correctly. Its only problem was WHEN it runs. It was `schedule` +
+# `workflow_dispatch` only, and GitHub's cron is best-effort: MEASURED on this repo
+# 2026-07-28, the watchdog's 5-minutely cron produced THREE scheduled fires between
+# 13:19:03Z and 17:07:52Z against ~45 expected — a 93% loss, with a 140-minute gap.
+# The consequence is the outage this file fixes: PR #4810's group ref `38a9d875` was
+# created 15:58:00Z with zero check-suites, and the NEXT cron fire was 17:07:52Z —
+# 69.9 minutes later, i.e. after the ruleset's 60-minute CI_TIMEOUT would already have
+# reaped it. The queue was head-of-line blocked for 46m33s and a human cleared it.
+#
+# ── WHY THE PRODUCER IS *NOT* `merge_group` ──────────────────────────────────────
+# The obvious doorbell (fire from the event that builds the group) is DISQUALIFIED
+# TWICE OVER, and both halves were verified against live data rather than assumed:
+#
+#   (a) SUBSCRIBING WOULD MASK THE DETECTOR. On this repo a check-SUITE is created
+#       1:1 per dispatched workflow RUN — measured on group head `6b291b28`: 8
+#       `merge_group` workflow runs (ci, ci-summary, docs-quality, feature-matrix,
+#       flow-on-gates, pr-area-label, routing-self-tests, vectorized-feature-off) and
+#       exactly 8 check-suites, and the same 8/8 on `37aac5a4`, `e5a9d403`, `bef48bee`.
+#       A tenth `merge_group` subscriber would therefore put a NINTH suite on every
+#       group head, and the watchdog's whole predicate is `total_count == 0`. The
+#       masking would be TOTAL, not partial: the detector could never fire again.
+#
+#   (b) IT WOULD NOT FIRE ON THE FAILING POPULATION ANYWAY. All nine `merge_group`
+#       subscribers here carry a BARE trigger (no `types`, `paths` or `branches`), so
+#       no filter configuration can suppress some-but-not-all. MEASURED over the 42
+#       distinct group refs retained in the activity feed, the per-head `merge_group`
+#       run count is perfectly bimodal — {0 runs: 3 heads, 8 runs: 39 heads}, with no
+#       intermediate value. Zero therefore means the event reached NO workflow, i.e.
+#       Actions never dispatched it. A `merge_group`-triggered watchdog is dispatched
+#       by exactly the delivery that failed, so it would be absent precisely when
+#       needed.
+#
+# ── THE PRODUCER ACTUALLY CHOSEN, AND WHY IT IS COMPLETE ─────────────────────────
+# A merge-group ref is built when an entry enters the queue's build window. That has
+# exactly two causes: the entry is ADDED to the queue, or an entry AHEAD of it LEAVES
+# (merged or removed) and the rest rebuild. Those are the `enqueued` and `dequeued`
+# activity types of `pull_request_target` — both documented, and `dequeued` is already
+# proven in this repo by merge-queue-feedback.yml. So the pair is a COMPLETE cover of
+# "a new group ref was created", with one deliberate exception: a direct push to `main`
+# that bypasses the queue also rebases the queue. That case is left to the retained
+# cron, because a `push` leg would put a check-suite on a commit that is also a former
+# merge-group head and muddy the invariant in (a) for no measured benefit.
+#
+# MEASURED against all three dead refs of 2026-07-28 — the enqueue-to-dead-group delay:
+#     #4810  enqueued 15:58:00Z -> group 38a9d875 built 15:58:00Z    0 s
+#     #4773  enqueued 09:58:54Z -> group 76153a84 built 09:59:10Z   16 s
+#     #4709  enqueued 05:15:07Z -> group 98204656 built 05:15:09Z    2 s
+# Every dead group was built within 16 s of its own PR's `enqueued` event. Delivery
+# latency for this trigger class, measured live here on the `dequeued` half (n=8,
+# merge-queue-feedback.yml against the queue's own removal events): 3-6 s.
+#
+# ── WHY THIS WORKFLOW ITSELF CANNOT MASK ANYTHING ───────────────────────────────
+# `pull_request_target` runs attach their check-run to the PULL REQUEST'S head SHA,
+# never to the `gh-readonly-queue/...` group commit the watchdog inspects. Verified
+# empirically: PR #4810's head `fef71f12` carries `merge-queue dequeued feedback
+# (advisory)` among its 204 check-runs, while the four healthy group heads sampled above
+# carry exactly the 8 `merge_group` suites and nothing else. This workflow adds no
+# suite to any group head, so constraint (a) is satisfied by construction.
+#
+# ── GATE INTEGRATION ────────────────────────────────────────────────────────────
+# A `pull_request_target` leg DOES create a check-run on the PR head, and since #3773
+# the ci-summary gate no longer infers advisory status from job NAMES — the ONLY thing
+# that makes a check-run non-gating is an entry in `.github/advisory-registry.json`.
+# This job is registered there. It is permanently advisory BY DESIGN: it fires AFTER a
+# gate verdict already exists on the head SHA (a PR cannot be enqueued before it is
+# green), and ringing a queue watchdog is not a statement about the commit's
+# merge-worthiness. A doorbell hiccup must never red a later gate evaluation.
+#
+# ── SECURITY (pull_request_target) ──────────────────────────────────────────────
+# The classic `pull_request_target` pitfall is executing untrusted PR-head code with
+# the base repo's write token. This job does NOTHING of the sort, and the bar is lower
+# here than in merge-queue-feedback.yml:
+#   * it NEVER checks out anything — `actions/checkout` does not appear at all;
+#   * it runs no repository script, so no PR-contributed file is executed;
+#   * no `github.event` field is interpolated into any executable line. The dispatch is
+#     keyed only on `github.repository` and the repository's own default branch.
+# Its token holds `actions: write` and NOTHING else — enough to dispatch a workflow,
+# insufficient to write code, labels, comments or contents.
+#
+# The dispatched watchdog is pinned to the DEFAULT BRANCH, so the policy that actually
+# decides a dequeue is always the reviewed copy on `main`, never a PR's version of it.
+#
+# NOT A NEW DECISION. This file changes only the TIMING of an existing sweep. It carries
+# no predicate, no threshold and no dequeue: `merge-group-watchdog.py` still decides,
+# and still recovers only an entry it has POSITIVELY established has zero check-suites.
+name: merge-group doorbell
+
+on:
+  pull_request_target:
+    types: [enqueued, dequeued]
+  # Kept so the doorbell hand-off can be exercised on demand without waiting for a
+  # queue transition (this is how the hand-off was verified before merge).
+  workflow_dispatch:
+
+# Least privilege: dispatching a workflow needs `actions: write` and nothing else.
+# In particular NO `contents`, `pull-requests` or `checks` — this job must not be able
+# to touch code, labels or the queue itself. All of that stays in the watchdog, behind
+# its own predicate.
+permissions:
+  actions: write
+
+# Per-PR, and NOT cancel-in-progress: each queue transition must ring. The runs are
+# seconds long and the sweep they trigger is idempotent, so serialising a PR's own
+# enqueue/dequeue pair costs nothing and losing a ring to a cancellation would.
+concurrency:
+  group: merge-group-doorbell-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  doorbell:
+    # The `(advisory)` token is required by check-advisory-registry.py C2/C4 to match
+    # the registry key EXACTLY. Renaming this job without updating
+    # .github/advisory-registry.json makes it GATE (fail-closed) and reds C4.
+    name: merge-group doorbell (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # ONE API write. This is the whole job: the sweep, its permissions and its
+      # decision table all live in the watchdog, which runs unassociated with any PR.
+      # `workflow_dispatch` is a DOCUMENTED exception to the rule that GITHUB_TOKEN
+      # cannot trigger workflows ("workflow_dispatch and repository_dispatch events
+      # always create workflow runs"), so no PAT or App token is needed here.
+      - name: Ring the zero-dispatch watchdog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # The reviewed policy on main — never a PR's copy of the watchdog.
+          WATCHDOG_REF: ${{ github.event.repository.default_branch }}
+        run: >-
+          gh workflow run merge-group-watchdog.yml
+          --repo "$REPO"
+          --ref "$WATCHDOG_REF"

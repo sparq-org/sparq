@@ -22,7 +22,8 @@ these pass (CI enforces them — see [`docs/branch-protection.md`](./docs/branch
 - `cargo build --workspace` and `cargo test --workspace`.
 - `cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings`
   (run over the **full workspace** — feature unification surfaces lints a single-crate
-  check misses) and `cargo fmt --check`.
+  check misses). `cargo fmt --all --check` also runs in CI but is **informational, not a
+  gate** — see [The gates a change must pass](#the-gates-a-change-must-pass) below.
 - The W3C SPARQL / SHACL / inference **conformance ratchets** and the performance/
   coverage ratchets, all green.
 - If your change touches Cargo dependencies: `cargo audit` + `cargo deny check` (and the
@@ -152,8 +153,16 @@ A contribution lands only when the gate in **"The gate"** above is green: `cargo
 `cargo test`, `cargo clippy --workspace --all-targets -- -D warnings` (a hard gate),
 and the W3C conformance + performance/coverage ratchets (never lowered). `cargo fmt --all
 --check` also runs in CI but is currently **informational** (`continue-on-error: true`),
-to be flipped to a hard gate once the one-time `cargo fmt --all` reformat lands; format your
-code anyway.
+to be flipped to a hard gate once the one-time `cargo fmt --all` reformat lands.
+
+Until that reformat lands, `cargo fmt --all --check` **fails on files your change did not
+touch** — the workspace has never been formatted, so the diff it reports is pre-existing, not
+your regression. Format the code you touched (matching the surrounding committed style) and
+leave the rest; do not "fix" the check by running `cargo fmt --all`, which would produce a
+workspace-wide diff that collides with every open PR. The formatter *version* is pinned:
+`rust-toolchain.toml` fixes the channel and ships the `rustfmt` component, so the check is
+reproducible between CI and a local checkout even while it is non-blocking.
+
 Security-specific lanes also run: **CodeQL** SAST
 ([`codeql.yml`](./.github/workflows/codeql.yml), `security-and-quality` queries), **miri**,
 **fuzz**, **supply-chain**, and the **OpenSSF Scorecard** analysis

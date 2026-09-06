@@ -296,7 +296,22 @@ pinned `ql_dllite_suite` floor never regresses.**
   capture level); definitive CONSISTENT only for a fully-captured TBox with
   `consistency_uncaptured == 0` (`owl:complementOf` is never structurally captured — it is an
   equivalence-with-complement, stronger than a negative inclusion — so it stays fail-closed
-  Unknown). §6 condition 3 upgraded accordingly (`ql_condition3_consistency`): a
+  Unknown). **Amended (sq-fj8lj follow-up):** that last parenthetical holds only for a
+  NAMED-subject `A owl:complementOf B`. The **subClassOf-complement** spelling
+  `A rdfs:subClassOf [ owl:complementOf B ]` is QL's
+  `superClassExpression ::= ObjectComplementOf(subClassExpression)` production — i.e. exactly the
+  negative inclusion `A ⊑ ¬B`, with no stronger `¬B ⊑ A` half — and IS now structurally captured
+  into `TBox::neg_incl` (counted `consistency_relevant`, no longer `skipped`), which is what lets
+  a graph routed to sparq-reason-dl's QL dispatch branch reach a definitive **Consistent** rather
+  than only **Inconsistent**-or-Unknown. The cln(T) completeness argument is unchanged: the new
+  entries are the same `NegativeInclusion::Concept(Basic, Basic)` shape and compose the same
+  violation query, so no closure rule or witness shape is added (argued in
+  `crates/sparq-reason-ql/src/consistency.rs`). No suite case moves: the only `owl:complementOf`
+  occurrence in the pinned rdf-tests `sparql11/entailment` corpus is inside a QUERY
+  (`paper-sparqldl-Q3.rq`), never in a queried TBox — checked at pin
+  `f25dbc092c654d792974848e81bb519d7328f0e8` — and the DL-direct corpus was measured under
+  sq-fj8lj to dispatch ZERO rows to the QL branch at all (see `DL_DIRECT_FLOOR`).
+  §6 condition 3 upgraded accordingly (`ql_condition3_consistency`): a
   proven-CONSISTENT KB passes; proven-INCONSISTENT holds at the new `inconsistent-kb`
   taxonomy label (entailment-regime behaviour on an inconsistent graph is
   implementation-defined); Unknown stays `pending-consistency`. Measured at the current

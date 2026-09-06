@@ -375,11 +375,12 @@ jobs:
       # behind the remote tip (other merges land during the long bench job) so the direct `git push
       # HEAD:main` is rejected `! [rejected] HEAD -> main (fetch first)` (a non_fast_forward race), and
       # even past that race the `main` ruleset (id 17688455: pull_request + required_status_checks "gate"
-      # + code_scanning + non_fast_forward, EMPTY bypass list) rejects it with `GH013`. Confirmed RED on
+      # + code_scanning + non_fast_forward; only the repository-administrator role can bypass)
+      # rejects the non-administrator GITHUB_TOKEN with `GH013`. Confirmed RED on
       # Benchmarks runs #27827073571 and #27826231986 (both push:main):
       #     1 file changed, 2 insertions(+), 2 deletions(-)
       #     ! [rejected]        HEAD -> main (fetch first)
-      #     error: failed to push some refs to 'https://github.com/jeswr/sparq.git'
+      #     error: failed to push some refs to 'https://github.com/sparq-org/sparq.git'
       # Under `set -euo pipefail` that turned the whole Benchmarks job RED on every improving push, AND
       # the floor never landed (the ratchet is silently a no-op on this path). Two changes below:
       #   (1) FETCH-REBASE: before the push, fetch the latest origin/main and rebase the floor-only commit
@@ -444,7 +445,7 @@ jobs:
           push_rc=$?
           set -e
           if [ "$push_rc" -ne 0 ]; then
-            echo "::warning title=perf-floor push declined::Could not push the tightened perf floor to protected main (git push exit ${push_rc}; likely a non_fast_forward race or the GH013 ruleset rejection — direct pushes to main are blocked, empty bypass list). Best-effort no-op: the perf measurement + hard gate ran and the floor WAS computed, but the bench/perf-baseline.json update was NOT landed. Resolve by adding the github-actions bot to the main ruleset bypass list (owner-only; sq-llxc/sq-roe3 needs:user) or folding the baseline update into the periodic .beads / data-sync PR (sq-2xdg). The floor only tightens via a human/orchestrator commit in the meantime."
+            echo "::warning title=perf-floor push declined::Could not push the tightened perf floor to protected main (git push exit ${push_rc}; likely a non_fast_forward race or the GH013 ruleset rejection — the bypass list contains only the repository-administrator role, not the github-actions bot). Best-effort no-op: the perf measurement + hard gate ran and the floor WAS computed, but the bench/perf-baseline.json update was NOT landed. Resolve by adding the github-actions bot to the main ruleset bypass list (owner-only; sq-llxc/sq-roe3 needs:user) or folding the baseline update into the periodic .beads / data-sync PR (sq-2xdg). The floor only tightens via a human/orchestrator commit in the meantime."
             exit 0
           fi
           echo "committed + pushed tightened perf floor to main."
@@ -514,6 +515,28 @@ jobs:
       # "Soft-zone triage" step below merges into the rolling deduped `bench-flake` issue
       # (tagged "floor-exempt hard-band"): the durable trail that survives the rebase. The file
       # is written on pass AND fail; triage runs `if: always()` and tolerates its absence.
+      #
+      # CONFIRM BEFORE FAILING ([OPUS-5] sq-jxeqz) — `--remeasure-cmd`. A timing row may only red
+      # main if its breach REPRODUCES in an independent re-measurement. MEASURED motivation:
+      # harvesting this step's own output from 153 Benchmarks runs on main (the run logs are the
+      # only UNCENSORED record, since a failing run publishes nothing) gives 29 tripped runs — 19%
+      # — carrying 60 fatal rows over 19 metrics, every one bracketed by GREEN runs on the same
+      # metric with no revert in between, and co-moving within a run across metrics that share a
+      # workload. That is a runner slow WINDOW, and it has no exemption here: the uniform-shift
+      # carve-out needs >= 50% of the suite to move together and a slow window was observed moving
+      # 1-8 of 438. Widening a band was measured and REJECTED (it needs 10-12 sigma to relieve a
+      # majority, which stops catching a real 2x regression on 6-7% of gated metrics);
+      # confirmation costs NO sensitivity instead, because a real regression is a property of the
+      # built artifact and re-measures at the same ratio.
+      #
+      # The command re-runs the SAME full suite as the "Run benchmarks" step — deliberately the
+      # identical invocation, so the confirmation measures what the gate measures — but writes to
+      # a DIFFERENT path: bench-results.json is the artifact the Store step publishes and must
+      # never be overwritten by a confirmation run (the trend must keep recording what was
+      # actually measured, not a re-measured best). It is ONLY executed on a run that is already
+      # about to FAIL on non-deterministic rows, so the steady-state cost is zero; a deterministic
+      # byte-count breach is never re-measured and still fails on the first read. Mirrors the
+      # perf-gate `--remeasure-cmd` wiring above (sq-dzfu).
       - name: Hard zone — median-of-history regression gate (main pushes only)
         if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
         run: |
@@ -523,7 +546,10 @@ jobs:
             --results bench-results.json \
             --prev-data prev-data.js \
             --suite 'sparq engine' \
-            --report-out bench-hardzone-report.json
+            --report-out bench-hardzone-report.json \
+            --remeasure-cmd 'bash scripts/ci-bench.sh 200000 bench-results-remeasure.json' \
+            --remeasure-out bench-results-remeasure.json \
+            --remeasure-k 1
       # [OPUS-4.8] sq-owci — clean the working tree before github-action-benchmark switches branches.
       # ROOT CAUSE: the "Run benchmarks" step (scripts/ci-bench.sh) does `cd bench/zk && cargo bench`
       # and `cd bench/zk-trace && cargo bench` (two STANDALONE cargo projects, run WITHOUT --locked),

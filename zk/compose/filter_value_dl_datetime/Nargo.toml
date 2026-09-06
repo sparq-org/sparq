@@ -1,0 +1,7 @@
+[package]
+name = "filter_value_dl_datetime"
+type = "bin"
+authors = ["sparq"]
+
+[dependencies]
+sparq_zk_compose_core = { path = "../compose_core" }

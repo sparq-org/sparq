@@ -813,9 +813,9 @@ dependencies = [
 
 [[package]]
 name = "chacha20"
-version = "0.10.0"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -1929,9 +1929,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.15"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -3468,6 +3468,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "p384"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4010,7 +4022,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2e8e8bcc7961af1fdac401278c6a831614941f6164ee3bf4ce61b7edb162207"
 dependencies = [
- "chacha20 0.10.0",
+ "chacha20 0.10.2",
  "getrandom 0.4.2",
  "rand_core 0.10.1",
 ]
@@ -4378,15 +4390,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -4884,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "oxrdf 0.3.3",
@@ -4895,7 +4898,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-algos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -4905,7 +4908,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-arrow"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -4921,18 +4924,21 @@ dependencies = [
 
 [[package]]
 name = "sparq-bench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "oxigraph",
+ "oxrdf 0.3.3",
  "serde_json",
+ "sparq-canon",
  "sparq-core",
+ "sparq-difftest",
  "sparq-engine",
 ]
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "digest 0.10.7",
  "oxrdf 0.2.4",
@@ -4949,7 +4955,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bzip2",
  "flate2",
@@ -4964,6 +4970,7 @@ dependencies = [
  "sparq-engine",
  "sparq-hdt",
  "sparq-reason",
+ "sparq-reason-el",
  "sparq-server",
  "sparq-terse",
  "zstd",
@@ -4971,7 +4978,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxjsonld",
  "oxrdf 0.3.3",
@@ -4997,11 +5004,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-conformance-floors"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hashbrown 0.17.1",
  "libc",
@@ -5019,7 +5026,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-crdt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5030,16 +5037,19 @@ dependencies = [
 
 [[package]]
 name = "sparq-difftest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bigdecimal",
  "num-bigint 0.5.1",
+ "oxrdf 0.2.4",
+ "rdf-canon",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
 name = "sparq-e2ee-ng"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -5055,7 +5065,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "md-5 0.11.0",
  "oxiri",
@@ -5080,7 +5090,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5091,7 +5101,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5105,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedclient"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5123,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "foldhash 0.2.0",
@@ -5134,7 +5144,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-fedplan-mpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sparq-fedplan",
  "sparq-mpc",
@@ -5142,7 +5152,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-forms"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5156,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-geo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crs-definitions",
  "geo",
@@ -5179,7 +5189,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-gpu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "pollster",
@@ -5189,7 +5199,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bzip2",
  "crc",
@@ -5206,7 +5216,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-http3"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "bytes",
@@ -5225,7 +5235,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-introspect"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5240,21 +5250,21 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxiri",
 ]
 
 [[package]]
 name = "sparq-jsonld-registry"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sparq-jsonld",
 ]
 
 [[package]]
 name = "sparq-kb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5305,7 +5315,6 @@ dependencies = [
  "redis",
  "reqwest",
  "rustls",
- "rustls-pemfile",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5315,6 +5324,9 @@ dependencies = [
  "sparq-engine",
  "sparq-http3",
  "sparq-policy",
+ "sparq-solid",
+ "sparq-trust",
+ "sparq-zk",
  "subtle",
  "thiserror 2.0.18",
  "tokio",
@@ -5327,8 +5339,9 @@ dependencies = [
 
 [[package]]
 name = "sparq-lws-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "async-trait",
  "axum",
  "console_error_panic_hook",
  "futures-executor",
@@ -5345,12 +5358,13 @@ dependencies = [
 
 [[package]]
 name = "sparq-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
  "serde",
  "serde_json",
+ "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-forms",
@@ -5363,7 +5377,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-metamorph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "serde",
@@ -5376,7 +5390,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-mpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.4.2",
  "oxrdf 0.3.3",
@@ -5389,7 +5403,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-nlq"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5405,7 +5419,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-parse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "proptest",
@@ -5415,17 +5429,18 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-conformance-floors",
  "sparq-core",
  "sparq-engine",
+ "sparq-secprop-vocab",
 ]
 
 [[package]]
 name = "sparq-prov"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5438,7 +5453,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5455,7 +5470,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "quick-xml 0.41.0",
@@ -5470,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-diff"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sparq-core",
  "sparq-reason",
@@ -5478,7 +5493,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-dl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "oxrdf 0.3.3",
@@ -5491,7 +5506,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-el"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "rustc-hash 2.1.3",
@@ -5501,7 +5516,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-ql"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5514,7 +5529,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5527,7 +5542,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5542,7 +5557,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-rsp-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5554,8 +5569,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-secprop-vocab"
+version = "0.1.1"
+dependencies = [
+ "oxrdf 0.3.3",
+ "oxttl 0.2.3",
+]
+
+[[package]]
 name = "sparq-serve"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "oxrdf 0.3.3",
@@ -5567,7 +5590,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "axum",
@@ -5576,6 +5599,7 @@ dependencies = [
  "futures-util",
  "h3",
  "h3-quinn",
+ "http-body",
  "hyper",
  "hyper-util",
  "mimalloc",
@@ -5585,7 +5609,6 @@ dependencies = [
  "quinn",
  "reqwest",
  "rustls",
- "rustls-pemfile",
  "serde_json",
  "sparesults",
  "spargebra",
@@ -5613,7 +5636,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5629,7 +5652,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5641,7 +5664,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-shaclc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -5651,7 +5674,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-sim"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5662,7 +5685,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf 0.3.3",
@@ -5675,13 +5698,14 @@ dependencies = [
  "sparq-policy",
  "sparq-reason",
  "sparq-trust",
+ "sparq-vc",
  "sparq-zk",
  "wasm-bindgen-test",
 ]
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "hashbrown 0.17.1",
@@ -5694,7 +5718,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-terse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5706,7 +5730,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "proptest",
@@ -5723,7 +5747,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-text-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "sparq-core",
@@ -5735,22 +5759,26 @@ dependencies = [
 
 [[package]]
 name = "sparq-trust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
+ "getrandom 0.4.2",
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
  "serde_json",
+ "spargebra",
  "sparq-canon",
  "sparq-core",
+ "sparq-engine",
  "sparq-reason",
+ "sparq-secprop-vocab",
  "sparq-shacl",
  "sparq-zk",
 ]
 
 [[package]]
 name = "sparq-vc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bs58",
  "ed25519-dalek",
@@ -5767,7 +5795,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-vectors"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.3.4",
  "instant-distance",
@@ -5789,7 +5817,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-wac-oracle"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sparq-core",
  "sparq-policy",
@@ -5798,11 +5826,12 @@ dependencies = [
 
 [[package]]
 name = "sparq-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "js-sys",
+ "oxjsonld",
  "oxrdf 0.3.3",
  "serde_json",
  "sparq-canon",
@@ -5817,15 +5846,27 @@ dependencies = [
 
 [[package]]
 name = "sparq-wrapper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oxrdf 0.3.3",
  "sparq-core",
 ]
 
 [[package]]
+name = "sparq-wrapper-gen"
+version = "0.1.1"
+
+[[package]]
+name = "sparq-wrapper-integration"
+version = "0.1.1"
+
+[[package]]
+name = "sparq-wrapper-shacl"
+version = "0.1.1"
+
+[[package]]
 name = "sparq-zk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -5834,23 +5875,28 @@ dependencies = [
  "ark-serialize",
  "ark-std",
  "blake3",
+ "bs58",
  "ed25519-dalek",
  "getrandom 0.4.2",
+ "oxjsonld",
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
  "p256",
+ "p384",
+ "serde_json",
  "sha2 0.10.9",
  "spargebra",
  "sparq-canon",
  "sparq-core",
  "sparq-engine",
+ "sparq-secprop-vocab",
  "subtle",
  "zeroize",
 ]
 
 [[package]]
 name = "sparq-zk-compose"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "oxrdf 0.3.3",

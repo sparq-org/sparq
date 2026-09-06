@@ -41,6 +41,16 @@ members = [
     # dispatch) is the same follow-up as the integer member (design bead 6 / sq-j506).
     "filter_value_dl_f64",
     "filter_value_dl_decimal",
+    # [OPUS-5] sq-wz99x: the DUAL-LEAF value-lane FILTER member for the
+    # xsd:dateTime / xsd:date datatype classes (research/zk-field-native-encoding.md
+    # S13.5) -- the circuit half of the S13 lane whose host encoder is sq-we9vs.
+    # Structurally the decimal member with a scaled-epoch value handle (signed
+    # milliseconds on the XSD timeOnTimeline, lane-fixed FS=3), reusing the
+    # UNCHANGED signed_scaled_verdict. ONE package serves BOTH lanes: xsd:date is
+    # separated purely by its PUBLIC datatype_const, so there is no second Noir fn
+    # and no second compiled member. Same OFF-by-default `dual-leaf` feature,
+    # INV-VL downgrade (#769 accepted, CR-G8 / sq-qhy4), NOT externally audited.
+    "filter_value_dl_datetime",
     "filter_f64",
     "filter_f64_d1",
     "filter_f64_d2",

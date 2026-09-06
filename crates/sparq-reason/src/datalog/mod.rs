@@ -13,7 +13,10 @@
 //! rederivation at stratum boundaries for `NOT`/`AGGREGATE` strata). [GPT-5.6]
 //! Phase 4 (sq-a7bmo) adds grouped `NOT`, projected `COUNT(DISTINCT ?v)`, the full
 //! numeric tower for `FILTER`, and conservative variable-predicate atoms. Surface
-//! wiring and an external-engine differential arm stay beaded from the design record.
+//! wiring stays beaded from the design record; the external-engine differential arm
+//! (sq-xzb9p) has SHIPPED as the test-only `souffle` module — Soufflé stratifies the
+//! translated program itself, so that arm also checks our stratification. See its
+//! module docs for the relational fragment it covers and why it stops there.
 //!
 //! # The dialect
 //!
@@ -93,6 +96,8 @@ mod incr;
 #[cfg(test)]
 mod oracle;
 mod parser;
+#[cfg(test)]
+mod souffle;
 mod stratify;
 
 pub use incr::MaterializedProgram;

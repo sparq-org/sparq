@@ -9,7 +9,8 @@ import type { ToolOverride } from "@/data/tools";
  * The Plan explorer ships working: EXPLAIN / EXPLAIN ANALYZE tree over the live in-tab
  * store (exact rows + q-error; wall times honestly unmeasured on wasm32), desktop-native
  * ANALYZE with real per-operator wall time, endpoint-mode explain against a running
- * sparq-server, and the this-workbench query monitor with endpoint Kill.
+ * sparq-server, the this-workbench query monitor, and an endpoint-mode all-clients
+ * monitor backed by sparq-server's opt-in `/queries` registry.
  */
 export const PLAN_TOOL_OVERRIDE: ToolOverride = {
   tier: "live",

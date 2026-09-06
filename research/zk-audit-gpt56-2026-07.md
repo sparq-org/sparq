@@ -57,7 +57,7 @@ per-claim status), `research/zk-dual-leaf-issuer-desync-review.md`, and `complia
 |---|---|---|---|---|---|
 | **H-1** | `zk/.../issuer.nr` `schnorr_verify` / `key_set_membership` + `sig.rs::public_key_from_hex` | **In-circuit issuer Schnorr verify has NO prime-order subgroup check on the free-witness issuer `pk`** — only `assert_on_curve` + reject-identity `(0,1)`. The host `public_key_from_hex` likewise rejects only the identity, not non-subgroup points. A small-order (torsion) issuer key such as `(0,-1)` (order 2) is on-curve, is not `(0,1)`, and passes both. | **HIGH** | If a torsion point is present in the relying party's trusted KeySet K, a prover forges a valid Schnorr proof under it with **no secret key** (pick `s`; set `R=sG` when the Poseidon challenge is even, else `R=sG+pk`; `e·pk` depends only on challenge parity for an order-2 key), then satisfies the hidden-issuer key-set Merkle membership. Gated by K-curation — but K-curation has no subgroup check either, so the guarantee "only a holder of a secret key for a key in K can attest" is broken in-circuit. | **NEW / CONFIRMED** |
 | **M-1** | `commit.rs`, `dual_leaf.rs`, `filter_value.nr` | **`DualLeafV1.is_production_selectable() == true` while `removes_inv_vl() == true`** — the dual-leaf value lane does not bind the compared value to `parse(committed lexical)`; a malicious *trusted* issuer can commit lexical `"5"` yet a value handle `18` and pass a `>= 18` FILTER. | **MEDIUM** | Bounded to a **malicious trusted issuer** (an untrusted party cannot exploit it; `StringCanonicalV1` — the only end-to-end method — is not affected, and the `dual-leaf` cargo feature is OFF by default; the leaf encoding `sq-j506` is not implemented end-to-end). | **CONFIRMED — already tracked (CR-G8 / sq-j506)** |
-| **L-1** | `verifier.rs::bind_query_correctness` (~3869) | **FILTER gating uses `find_map` to pick only the FIRST slot** a filtered variable occupies within a scan. A single scan whose bound pattern answers two query patterns that place the filtered variable at different slots (e.g. scan `(?,P,?)` answering both `(?s P ?v)` and `(?v P ?s)`) has only one of those slots gated. | **LOW** | Requires an unusual query/scan shape; the disclosed-row model makes reachability uncertain. Flagged for the human auditor to confirm/refute; not demonstrated as an end-to-end forge here. | **PLAUSIBLE — auditor-verify** |
+| **L-1** | `verifier.rs::bind_query_correctness` (~3869) | **FILTER gating uses `find_map` to pick only the FIRST slot** a filtered variable occupies within a scan. A single scan whose bound pattern answers two query patterns that place the filtered variable at different slots (e.g. scan `(?,P,?)` answering both `(?s P ?v)` and `(?v P ?s)`) has only one of those slots gated. | **LOW** | **CONFIRMED reachable at the structural gate** (sq-q9r5e, below): a fully-attested, revocation-fresh manifest with an HONEST filter proof over the first slot and the second slot entirely ungated returned `Ok`. Still not shown to yield a *useful* forged answer — the second slot is a subject/predicate position, so the ungated `?v` binding is an IRI a numeric FILTER could not legitimately satisfy anyway. | **CONFIRMED + FIXED (sq-q9r5e)** |
 | **L-2** | `verifier.rs` holder-PoP path | **Declared `zk:cryptosuite` IRI is validated as an allowlist but the resolved `SignatureScheme` is discarded** — verification always calls the fixed Schnorr `sig_verify` regardless of the declared suite. | **LOW** | Benign today (exactly one signature scheme is implemented, and it *is* Schnorr), but it is not fail-closed against a future second scheme / downgrade. Overlaps the documented CR-G9 (method×circuit×signature matrix) obligation. | **CONFIRMED (defense-in-depth) — overlaps CR-G9** |
 
 ### H-1 detail (the one NEW soundness gap)
@@ -144,7 +144,8 @@ and dismissed** — recorded here for the human auditor's efficiency (do not re-
 - **M-1 (dual-leaf INV-VL removal) is real and already tracked (CR-G8 / sq-j506);** the auditor should
   decide whether `DualLeafV1` should be `is_production_selectable() == false` until sq-j506 lands and
   is audited.
-- **L-1/L-2** are low-severity items for the human auditor to confirm.
+- **L-1/L-2** are low-severity items for the human auditor to confirm. **L-1 has since been
+  confirmed reachable and fixed** (`sq-q9r5e`, see §4); L-2 remains open under CR-G9.
 
 **Release #1084 ZK gate — recommendation.** With **no critical** and the single **high** gap H-1
 scoped to the (feature/opt-in) hidden-issuer path plus a fixable host parse, the maintainer *may*, at
@@ -165,6 +166,124 @@ until a human accredited cryptographer signs off; that engagement is still recom
   attestation → reject) and fix the false-assurance comment at `issuer.nr:158-161`.
 - **L-1 → new P2 `sq-q9r5e`** (analysis/hardening): confirm or refute the `bind_query_correctness` single-slot
   gating gap; if reachable, gate **every** slot a filtered variable occupies within a scan.
+  **RESOLVED — CONFIRMED reachable, then fixed.** The empirical witness
+  (`crates/sparq-zk-compose/tests/e2e.rs::filter_reject_ungated_second_slot_within_scan`)
+  builds the audit's own shape — query `{ ?s <age> ?v . ?v <age> ?o } FILTER(?v >= 18)`, whose two
+  patterns share the constant layout `(?, <age>, ?)` so ONE scan sub-proof answers both, placing `?v`
+  at slot 2 (pattern 0) and slot 0 (pattern 1). With the scan issuer-attested, the revocation fresh,
+  and an *honest* `25 >= 18` `filter_int` proof wired to slot 2 only, the pre-fix
+  `prefilter_manifest_structure` returned **`Ok`** — slot 0 was never gated. Note the reachability is
+  at the *structural gate*, not a demonstrated useful forge: the un-gated position is a subject slot,
+  so the ungated `?v` binding is an IRI, which a numeric FILTER could not honestly satisfy in any
+  case. The fix replaces the `find_map` with the full `BTreeSet` of slots `?v` occupies across every
+  pattern that scan answers and requires a true-verdict edge per `(row, slot)` — matching the
+  all-matching-scans discipline `bind_attributions` already uses. It is deliberately FAIL-CLOSED on
+  the pattern→scan ambiguity: where two patterns share a constant layout the verifier cannot tell
+  which one a scan was meant to answer, so it now demands the FILTER be discharged at every slot that
+  scan could be read at, and REJECTS a manifest that cannot. Manifests over queries whose patterns
+  have distinct constant layouts (the ordinary case, incl. every other test in the suite) are
+  unaffected.
+
+  **Structural follow-up — the over-demand STANDS; the explicit pattern→scan mapping does NOT
+  relax it.** The fail-closed direction above is an over-demand. Take `{ ?x <age> ?v . ?x <age> ?c
+  FILTER(?v >= 18) }` — two same-layout patterns joined on `?x`, with the FILTER on `?v`, which
+  occurs only in pattern 0. An honest prover answering pattern 0 from `{alice age 25}` and pattern 1
+  from `{alice age 5}` presents a joined solution (`?x = alice`, `?v = 25`, `?c = 5`) satisfying the
+  FILTER — yet membership also matches the second scan to pattern 0 and demands a true-verdict
+  `?v >= 18` proof over its `5`, which no honest prover can supply, so the manifest is rejected.
+  (Note the *pre*-fix code could not serve that shape either — `find_map` gated the FIRST-matching
+  pattern's slot on EVERY matching scan.)
+
+  The obvious fix — let the prover DECLARE which scan answers which pattern and demand only the
+  declared scan's slots — was attempted and **rejected as unsound** in review. Ordinary SPARQL
+  evaluates each BGP pattern over EVERY compatible committed row, and the query text contains no
+  source partition authorising the prover to redefine membership. A prover free to exclude a
+  constant-compatible scan from a pattern can therefore drop that scan's rows out of the pattern's
+  FILTER and attribution obligations by fiat while still disclosing them; well-formedness rules on
+  the declaration (no empty entry, no dangling scan, no pair contradicting the bb-bound constants)
+  establish only that the declaration is a TOTAL map of scans to labels, never that an excluded scan
+  cannot contribute to the claimed result. Shifting the correct reading onto the consumer does not
+  prove the query result, so the flat verifier keeps FULL constant-membership obligations.
+
+  What DID land is the schema slot plus a fail-closed well-formedness gate, deliberately carrying no
+  verification weight. `ProofManifest::pattern_scans` records, per query BGP pattern (query order,
+  exactly like `attributions`), the `sub_proofs` indices of the scans the prover says answer it, and
+  `verifier::check_pattern_scans` rejects a declaration that is mis-sized
+  (`PatternScanArityMismatch`), leaves a pattern unanswered (`PatternScanUnbound`), names a sub-proof
+  that is out of range / not a scan / whose bb-bound `pattern_is_const`/`pattern_const_enc`
+  contradict the pattern's constants (`PatternScanMismatch`, audit #10), or leaves a scan DANGLING
+  (`PatternScanUndeclared`). Those are ADDITIONAL rejections: `bind_query_correctness` (FILTER
+  slots), `bind_attributions` (audit #8), `global_attributions` (the Q6 cross-graph namespace) and
+  `bind_joins` all resolve pattern→scan by `scan_matches_pattern` membership and never read the
+  field, so a manifest carrying a declaration is never accepted where the same manifest without one
+  is rejected — it can only fail additionally. An EMPTY `pattern_scans` means "not declared" and skips the checks; obligations are identical
+  either way.
+
+  **What narrowing would need before it can be revisited:** a claimed result row bound to the
+  selected scan rows, with all shared-variable joins enforced, so "this scan does not contribute to
+  the answer" is a VERIFIED property and not a prover assertion. The flat `ProofManifest` carries no
+  claimed result row, so it cannot express that witness today. Witnesses:
+  `crates/sparq-zk-compose/tests/e2e.rs::pattern_scans_*` — the same-layout manifest stays REJECTED
+  under every declaration a prover could write (including the intended one-scan-per-pattern
+  assignment and its cross), the cross-slot shape stays rejected when the declaration is engineered
+  to hide each scan's opposite failing slot, the L-1 single-scan witness stays rejected, and each of
+  the four well-formedness rejections is pinned. Both non-narrowing witnesses were mutation-checked:
+  making `bind_query_correctness` read `pattern_scans` turns them red. NOT externally audited
+  (sq-qhy4).
+
+  **Sibling finding raised while fixing L-1 — WITHIN-pattern repeated variable (#5240).
+  CONFIRMED reachable, then fixed.** L-1 is about one variable at two slots across two PATTERNS.
+  The question it raised is the degenerate case: one variable at two slots of ONE pattern,
+  `{ ?v <p> ?v }`. SPARQL matches a BGP pattern under a single substitution, so such a pattern
+  constrains the two disclosed columns to be EQUAL — and nothing enforced that.
+  `scan_matches_pattern` compares only per-slot const-ness and the constant encodings (both slots
+  are variables, so any `(?, <p>, ?)` scan matches); the scan circuit binds only the CONSTANT slots
+  to `pattern_const_enc`, so the in-circuit statement is silent; and every shared-variable gate
+  works CROSS-pattern and is structurally blind to the repeat —
+  `sparq_zk::verify::cross_graph_join_obligations` (the disclosed path, via `recheck`) iterates
+  pattern PAIRS `i < j` over per-pattern variable SETS, where a repeated variable collapses to one
+  element and `i == j` is never considered, and `bind_joins` (the hidden path) likewise requires the
+  shared variable to sit in two DISTINCT patterns (`pj != pi`). That combination — the cross-pattern
+  and cross-scan analogues both covered, the within-pattern one not — is what made it look like a
+  gap rather than a deliberate omission.
+
+  Confirmed by the same method as L-1. A fully-attested, revocation-fresh manifest whose single scan
+  discloses the row `(alice, knows, bob)` was presented under `SELECT ?v WHERE { ?v <knows> ?v }`;
+  `prefilter_manifest_structure` returned **`Ok([])`**, so a relying party would read a solution
+  binding `?v` to two DIFFERENT terms at once — a disclosed row that does not satisfy the pattern it
+  is disclosed under. Unlike L-1 this needs no numeric-type coincidence to be a useful wrong answer:
+  both slots hold ordinary IRIs, so the accepted row is a plain false "these are the same entity"
+  claim (self-loop / same-as / reflexive-relation queries are exactly where `{ ?v <p> ?v }` is
+  written).
+
+  The fix is `verifier::bind_repeated_pattern_slots`, run as stage 2b′ of
+  `prefilter_manifest_structure_impl` immediately after `bind_query_correctness` (placed after so the
+  existing gates' already-pinned error precedence is unchanged). For each query BGP pattern it groups
+  the pattern's variable slots by NAME, and for each variable at more than one slot demands, for
+  EVERY active disclosed row of EVERY scan that matches the pattern by constants, that those slots
+  carry equal values — compared on canonical big-endian field bytes (`field_hex_eq`), so hex
+  spelling/padding differences do not spuriously diverge and a malformed row hex fails CLOSED.
+  Rejection is `CheckError::RepeatedSlotMismatch { pattern, proof, row, variable, slots }`. It
+  inherits the sq-q9r5e discipline in both directions: per-ROW (the disclosed result IS the scans'
+  rows, so one bad row makes the pattern unproven for the disclosed set) and over EVERY
+  constant-MATCHING scan rather than the prover's `pattern_scans` declaration — so a query mixing a
+  repeated-variable pattern with a distinct-variable pattern at the same constant layout
+  (`{ ?v <p> ?v . ?a <p> ?b }`) is over-demanded and REJECTED fail-closed, the same trade L-1 made.
+  Queries whose patterns carry no repeated variable (the ordinary case, incl. every other test in the
+  suite) are unaffected.
+
+  The `extended-fragment` regime did NOT have this gap and needs no new gate: `bind_fragment_scans`
+  binds each variable slot of the selected row either to the disclosed solution (projected vars, via
+  `mu`) or to a per-branch existential-coherence map, both keyed by variable NAME across slots, so a
+  repeated variable's two slots are compared there by construction.
+
+  Witnesses (`crates/sparq-zk-compose/tests/e2e.rs`):
+  `repeated_pattern_var_rejects_a_row_whose_slots_disagree` (the forge — RED before the gate, with
+  the pre-fix `Ok([])` recorded above), `repeated_pattern_var_accepts_a_genuine_self_loop_row`
+  (positive control: `(alice, knows, alice)` still verifies) and
+  `distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate` (scope control). Mutation-checked
+  BOTH ways: making the equality vacuous reds the forge, and inverting it reds the positive control.
+  Research-grade, NOT externally audited (sq-qhy4).
 - **M-1 / L-2** are already covered by **CR-G8 / sq-j506** and **CR-G9** respectively — no new bead
   (the auditor should weigh gating `DualLeafV1` out of production until sq-j506 is audited).
 

@@ -20,6 +20,9 @@
 #   * results are ALSO cat'd to the console log by the instance script, so
 #     `aws ec2 get-console-output` recovers the envelopes even with no SSH pull
 #     (parsed by scripts/bench/extract-console-envelopes.sh).
+#   * [OPUS-5] sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
+#     uploads every envelope + gather-meta.json to a run-scoped S3 prefix — the channel
+#     that survives an AMI whose serial console returns nothing usable. Opt-in.
 #
 # SENTINEL PROTOCOL: /root/GATHER_DONE = validated canonical success (every cut has
 # a valid-JSON envelope for BOTH engines AND gather-meta.json re-parsed with
@@ -35,6 +38,7 @@
 #
 # Usage:  AWS_PROFILE=pss scripts/bench/canonical-beir-bench.sh [<branch>]
 #   env: REGION ITYPE BEIR_CUTS BEIR_K WATCHDOG_S EBS_GB RESULTS_LOCAL
+#        BENCH_IAM_PROFILE BENCH_RESULTS_S3 (opt-in durable S3 egress, sq-ffaa9)
 # Results (bench/competitor-results envelopes + gather-meta.json) are SSH-pulled
 # incrementally into RESULTS_LOCAL (default
 # ~/sparq-bench-results/canonical-<UTC-date>-beir/); a maintainer transcribes
@@ -68,12 +72,20 @@ command -v aws >/dev/null || die "aws CLI not found"
 command -v python3 >/dev/null || die "python3 not found (verifies the recovered gather-meta.json)"
 mkdir -p "$RESULTS_LOCAL"
 
+# [OPUS-5] sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
+# Inert unless BOTH are exported; half-configured fails fast here rather than after a
+# multi-hour gather. See scripts/bench/bootstrap-bench-iam.sh (one-time maintainer setup).
+. "$HERE/bench-result-egress.sh"
+bench_egress_preflight || die "S3 result egress is misconfigured (see the message above)"
+
 WORK="$(mktemp -d)"
 KEYFILE="$WORK/key"
 KEY_NAME="sparq-bench-canonical-beir-$$-${RANDOM}"
 INSTANCE_ID=""; SG_ID=""
 ssh-keygen -t ed25519 -N '' -f "$KEYFILE" -q
 SSHO="-i $KEYFILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
+# Run-scoped S3 prefix (empty when egress is off). KEY_NAME is already unique per run.
+EGRESS_URI="$(bench_egress_run_uri "$KEY_NAME")" || die "could not derive the S3 run prefix"
 
 cleanup() {
   set +e
@@ -141,6 +153,7 @@ echo "[user-data] checked out \$(git rev-parse --short HEAD)" | tee /dev/console
 # NOTE: this is an UNQUOTED heredoc, so keep comments free of backticks and dollar signs
 # or the launcher shell expands them into the rendered user-data.
 setsid nohup env HOME=/root USER=root LOGNAME=root \
+  BENCH_RESULTS_S3_URI="$EGRESS_URI" BENCH_EGRESS_REGION="$REGION" \
   BEIR_CUTS="$BEIR_CUTS" BEIR_K=$BEIR_K \
   bash scripts/bench/canonical-beir-gather-instance.sh >/var/log/gather.log 2>&1 < /dev/null &
 echo "[user-data] gather backgrounded (pid \$!); cloud-final returning" | tee /dev/console
@@ -153,10 +166,14 @@ UD_RAW=$(wc -c < "$WORK/userdata.sh")
 log "user-data raw=${UD_RAW}B (limit 16384B)"
 [ "$UD_RAW" -le 16384 ] || die "user-data ${UD_RAW}B exceeds 16384B — trim it"
 LAUNCH_ERR="$WORK/launch.err"
+# shellcheck disable=SC2046  # intentional word-split: bench_egress_launch_args emits either
+# nothing (egress off — the launch command is then byte-identical to before) or the two
+# words `--iam-instance-profile Name=<profile>`.
 INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" --image-id "$AMI" --instance-type "$ITYPE" \
   --instance-initiated-shutdown-behavior terminate \
   --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
   --subnet-id "$SUBNET" --associate-public-ip-address \
+  $(bench_egress_launch_args) \
   --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":${EBS_GB},\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
   --tag-specifications "$TAGSPEC" \
   --user-data "file://$WORK/userdata.sh" \
@@ -206,6 +223,12 @@ while :; do
   fi
   [ "$STATE" = "terminated" ] && { log "instance terminated before sentinel — results may be partial"; break; }
 done
+
+# [OPUS-5] sq-ffaa9 — durable channel first when configured: the box uploaded each
+# envelope (and gather-meta.json, the canonical-success artifact this launcher checks
+# below) as it was produced, so a run survives both a dead SSH path AND an AMI whose
+# serial console returns nothing usable. No-op when egress is off.
+bench_egress_pull "$EGRESS_URI" "$RESULTS_LOCAL/competitor-results"
 
 # Recover the envelopes from the serial console (authoritative when SSH failed): each
 # envelope was cat'd between ===ENVELOPE-BEGIN <name>=== / ===ENVELOPE-END=== markers

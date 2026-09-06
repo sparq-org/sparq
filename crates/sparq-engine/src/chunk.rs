@@ -38,8 +38,10 @@
 //!
 //! A [`DataChunk`] is a column-major *transpose* of a slice of rows: column `c`,
 //! position `r` holds the id that the row representation stores at `row[r][c]`. The
-//! round-trip [`DataChunk::from_rows`] → [`DataChunk::to_rows`] is the identity (see
-//! the tests), and `select_numeric` selects exactly the rows a row-at-a-time numeric
+//! round-trip [`DataChunk::from_rows`] → [`DataChunk::to_rows`] preserves the ids and their
+//! row/column order (see the tests — it is `==` the input only for `Vec<Id>` rows, since
+//! `from_rows` accepts any `AsRef<[Id]>` row while `to_rows` materialises `Vec<Vec<Id>>`),
+//! and `select_numeric` selects exactly the rows a row-at-a-time numeric
 //! filter over the same column would keep. This is what lets the vector path be wired
 //! into the evaluator later (roadmap T1.3 morsel-driven pipelining) without changing
 //! query results.
@@ -150,8 +152,12 @@ impl DataChunk {
     }
 
     /// Materialises the chunk back into row-major tuples. The inverse of
-    /// [`Self::from_rows`]: `to_rows()` of `from_rows(rows, w)` equals `rows` for any
-    /// well-formed `rows`.
+    /// [`Self::from_rows`] up to the row representation: `to_rows()` of `from_rows(rows, w)`
+    /// yields the same ids, in the same row and column order, for any well-formed `rows`.
+    /// Since `from_rows` is generic over `AsRef<[Id]>` while this always materialises
+    /// `Vec<Vec<Id>>`, the round-trip is `== rows` only when the input rows are themselves
+    /// `Vec<Id>`; for another row type (e.g. the engine's `SmallVec<[Id; 4]>`) it is content
+    /// and order equality, not `==`.
     #[must_use]
     pub fn to_rows(&self) -> Vec<Vec<Id>> {
         (0..self.len)
@@ -193,9 +199,10 @@ impl DataChunk {
     /// re-gathers `numeric_value(id)` per element — a random-access value-cache lookup plus a
     /// branch, the *same* access pattern the row path pays and **not** auto-vectorisable.
     /// Decoding **once** into a contiguous `f64` column lets every subsequent compare / reduce
-    /// run as one branchless loop over `f64` that the compiler auto-vectorises (NEON/AVX on
-    /// native, `+simd128` on wasm). It therefore pays only when the decoded column is *reused*
-    /// by ≥1 downstream kernel, or when the column is inline-int (below).
+    /// run over contiguous memory with no per-element cache access, so the compare itself is
+    /// auto-vectorisable (NEON/AVX on native, `+simd128` on wasm). It therefore pays only when
+    /// the decoded column is *reused* by ≥1 downstream kernel, or when the column is inline-int
+    /// (below).
     ///
     /// The **NaN sentinel** is chosen so the decoded column drops straight into the numeric
     /// kernels with no separate validity bitmap: `VecCmp::test` already rejects `NaN` under
@@ -253,8 +260,9 @@ impl DataChunk {
     /// Given a contiguous value column `decoded` (as produced by
     /// [`Self::decode_numeric_column`]), returns the ascending [`SelVec`] of positions whose
     /// value passes `cmp`. Unlike [`Self::select_numeric`], this does **no** per-element cache
-    /// gather — it is one branchless straight-line loop over contiguous `f64`, so the compiler
-    /// is free to auto-vectorise it (NEON/AVX on native, `+simd128` on wasm). It is the
+    /// gather — it is one contiguous-memory, auto-vectorisable compare over `f64` (NEON/AVX on
+    /// native, `+simd128` on wasm). The compare itself is what vectorises; appending a passing
+    /// position stays data-dependent, so the loop is *not* branchless. It is the
     /// "select over the decoded column" step: decode **once**, then compare (and, later, reuse
     /// the same decoded column for a reducer aggregate) without re-touching the value cache.
     ///

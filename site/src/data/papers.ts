@@ -54,19 +54,28 @@ export const FAMILY_LABEL: Record<PaperFamily, string> = {
 
 export const PAPERS: Paper[] = [
   {
+    // [OPUS-5] sq-gum8.3 REVISION 2 (adversarial PC panel — novelty / rigor / reproducibility
+    // / clarity): "pre-registered" corrected to "specified" (no registry deposit exists — the
+    // same correction odrl-policy-bridge took under PR #1330); the answer-safety scope
+    // re-pointed at the path that actually carries it (the SPARQL `vec:` path is ANSWER-EXACT,
+    // so pre≡post is unconditional there — the prior "approximate path preconditioned,
+    // broad-mask" hedge described a path the SPARQL surface never reaches, and the stated
+    // precondition was necessary-but-not-sufficient anyway); the 0.90 filtered recall floor
+    // re-attributed to the approximate traversal it actually measures; the
+    // sideways-information-passing lineage cited rather than implicitly claimed as novel.
     slug: "filtered-ann",
     source: "filtered-ann.typ",
     title:
       "Filter-as-Query: Filtered Approximate Nearest-Neighbour Search over SPARQL, where the Filter is an Exact BGP over the Engine's Own Dictionary Ids",
     blurb:
-      "An RDF-native filtered-ANN integration: the filter on a vector-neighbour variable is the join-connected sub-BGP of the query itself, evaluated exactly by the engine and materialised as an id-mask over the shared dictionary-id space (no metadata mirroring, no boundary id translation), with the pre≡post answer contract enforced as machine-checked invariants — exact path by construction, approximate path preconditioned and verified on broad-mask fixtures. Related work covers the 2023–26 filtered-ANN wave incl. the engine-integrated systems (VBASE/NaviX) it is closest to; the performance evaluation is pre-registered (baselines, workloads, falsification criteria) pending the canonical runner.",
+      "An RDF-native filtered-ANN integration: the filter on a vector-neighbour variable is the join-connected sub-BGP of the query itself, evaluated exactly by the engine and materialised as an id-mask over the shared dictionary-id space (no metadata mirroring, no boundary id translation). The pre≡post answer contract is enforced as machine-checked invariants and holds unconditionally on the path the SPARQL surface reaches, which is answer-exact — both physical strategies rank the complete admitted pool. The crate's approximate filtered traversal is a separate path the paper claims nothing for. Positioning is explicit that the constraint pushdown is a static instantiation of sideways-information-passing (magic sets, semi-joins, RDF-3X SIP) rather than a new strategy; related work covers the 2023–26 filtered-ANN wave incl. the engine-integrated systems (VBASE/NaviX) it is closest to. The performance evaluation is specified (baselines, workloads, falsification criteria) but unexecuted, pending the canonical runner.",
     authors: "Jesse Wright · the sparq project",
     venue:
-      "EDBT short / demo or ESWC in-use/resources — results-free systems description; research-track submission deferred until the pre-registered evaluation is executed",
+      "EDBT short / demo or ESWC in-use/resources — results-free systems description; research-track submission deferred until the specified evaluation is executed",
     status: "draft",
     family: "A",
     evidence:
-      "Deterministic only: recall floors (0.95 unfiltered, 0.90 filtered — sanity checks, labelled as such) + asserted pre-filter ≡ post-filter equivalence (single / transitive / cyclic; exact path unconditional, approximate path broad-mask) + the cost-model crossover constant. No latency/throughput claim; the performance evaluation is pre-registered but unexecuted (blocked on the canonical runner).",
+      "Deterministic only: recall floors (0.95 unfiltered, 0.90 approximate-filtered — sanity checks on a traversal the SPARQL surface does not reach, labelled as such) + asserted pre-filter ≡ post-filter equivalence (single / transitive / cyclic), unconditional because the SPARQL-level filtered path is answer-exact, + the cost-model crossover constant. A canonical invariant record that went false now aborts the paper build rather than rendering blank. No latency/throughput claim; the performance evaluation is specified (not pre-registered — no registry deposit exists) and unexecuted, blocked on the canonical runner.",
   },
   {
     slug: "solid-acl-conformance",

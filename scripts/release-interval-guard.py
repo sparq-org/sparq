@@ -12,10 +12,30 @@ That exclusion stops the Release PR being merged automatically. This guard sits 
 release path ITSELF, so even a mistaken merge — by a human, by a future automation, by a
 path nobody enumerated — cannot cut a release more often than ``MIN_RELEASE_INTERVAL``.
 
-It runs in ``.github/workflows/release-plz.yml``'s ``release-plz-release`` job, BEFORE the
-``release-plz release`` step that creates the ``v<version>`` tag and (once
-``release-plz.toml`` sets ``publish = true``) runs ``cargo publish``. Exiting non-zero
-stops the job before either happens.
+It runs at BOTH points where a release can begin:
+
+* ``.github/workflows/release-plz.yml``'s ``release-plz-release`` job, BEFORE the
+  ``release-plz release`` step that creates the ``v<version>`` tag and (once
+  ``release-plz.toml`` sets ``publish = true``) runs ``cargo publish``;
+* ``.github/workflows/release.yml``'s ``setup`` job (``--released-tag v<version>``, see
+  below), which is the entry point every other job in that workflow depends on — so a
+  refusal there stops the archives, the SBOM/VEX, the GitHub Release and the ghcr image.
+
+Exiting non-zero stops the job before any of that happens.
+
+THE TAG-PUSH PATH (``--released-tag``, issue #2552)
+===================================================
+``release-plz.yml`` only covers releases that go through the Release PR. The runbook's
+canonical instruction is *"nothing publishes until you push a ``v*`` tag"* — and a
+hand-pushed tag fires ``release.yml`` directly, which used to be entirely uncadenced. That
+is the hole ``--released-tag`` closes.
+
+It cannot be closed by running the guard unchanged there: on a tag push ``v<workspace
+version>`` IS in the tag list, so check 3 below ("already tagged, nothing to do") would
+short-circuit to ALLOW and the guard would be vacuous. ``--released-tag v<version>`` says
+*"a release for exactly this tag is being cut right now"*: the named tag is EXCLUDED from
+the last-release sources, and the already-tagged short-circuit does not apply. The cadence
+question then reads correctly — how long since the release BEFORE this one.
 
 **A crates.io version can never be unpublished.** Every ambiguity below therefore refuses.
 
@@ -27,14 +47,18 @@ THE THREE CHECKS
    silently breaking the locked single-version model the group exists to preserve — and
    are published anyway. A mismatch is exactly the "I do not know what would be published"
    condition, so it REFUSES.
-2. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
+2. **Registry dependency closure.** Every path dependency shipped by a publishable crate
+   must itself be publishable and must carry a registry version requirement. Cargo cannot
+   publish a package that points only at a private workspace member.
+3. **Cadence.** ``now - last_release >= MIN_RELEASE_INTERVAL``, where ``last_release`` is
    the MAXIMUM of two authoritative sources — the newest ``v*`` git tag's creation date
    and the newest crates.io publication timestamp across the publishable crates. Taking
    the max means neither source can be used to argue for a shorter wait.
-3. **Would a release even happen?** If ``v<workspace version>`` is already tagged,
+4. **Would a release even happen?** If ``v<workspace version>`` is already tagged,
    ``release-plz release`` is a no-op, so the cadence check is not applicable and the
    guard passes quietly. Without this the guard would red every ordinary push to main
-   inside the interval window.
+   inside the interval window. This check is SKIPPED under ``--released-tag`` (there, the
+   tag existing is the release happening, not evidence that it already happened).
 
 FAIL-CLOSED, EXHAUSTIVELY
 =========================
@@ -46,8 +70,12 @@ Every one of these REFUSES (exit 1) rather than publishing:
 * crates.io cannot be reached, returns a non-200/non-404 status, or returns a body that
   does not parse (a 404 IS definitive: that crate has never been published);
 * a tag or publish timestamp cannot be parsed;
+* ``--released-tag`` is given a value that is not a ``vX.Y.Z`` release tag (the guard
+  cannot tell which tag to exclude, so it would silently measure the interval against the
+  release it is being asked to permit);
 * the last release timestamp is in the FUTURE (clock skew / a bad tag date);
 * the workspace manifest cannot be read, or the publishable-crate set cannot be derived;
+* a publishable crate has an unpublished or unversioned workspace dependency;
 * a publishable crate is missing from the version_group.
 
 An unknown NEVER means "go ahead". There is deliberately **no override flag** — a
@@ -75,6 +103,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -91,8 +120,8 @@ except ModuleNotFoundError:  # pragma: no cover - the runner ships 3.11+
 # THE ONE KNOB. 24 hours.
 #
 # WHY 24h, and not less:
-#   * One sparq release publishes EVERY crate in the version_group (17 today) as a new
-#     crates.io version, in lockstep. Two releases in a day is 34 irreversible versions.
+#   * One sparq release publishes EVERY crate in the version_group (37 today) as a new
+#     crates.io version, in lockstep. Two releases in a day is 74 irreversible versions.
 #   * sparq lands on the order of 80 commits a day. Cadence tracks Release-PR MERGES, not
 #     commits — but nothing except this guard bounds how often that PR can be merged, and
 #     the whole point of #1135 is that the maintainer does not want the registry spammed.
@@ -114,6 +143,12 @@ CRATES_IO_USER_AGENT = (
     "sparq-release-interval-guard (https://github.com/sparq-org/sparq; issue #1135)"
 )
 CRATES_IO_TIMEOUT = 20
+# [GPT-5.6] Thirty-seven registry reads make a one-off CDN/TLS reset likely enough to
+# wedge a release. Retry only transient transport/status failures; remain fail-closed.
+CRATES_IO_RETRY_DELAYS = (0.5, 1.5)
+CRATES_IO_RETRYABLE_ERROR_RE = re.compile(
+    r"^(?:request failed:|HTTP (?:408|425|429|5\d\d)$)"
+)
 
 VERSION_TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+(?:[-+].*)?)$")
 
@@ -195,7 +230,10 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
         )
     workspace_version = ((workspace.get("package") or {}) or {}).get("version")
 
-    raw: dict[str, tuple[str, Path, dict]] = {}
+    # [GPT-5.6] Keep every member until dependency closure is validated. The old code
+    # discarded `publish = false` members before walking dependencies, which made a
+    # public -> private path edge invisible even though `cargo publish` cannot resolve it.
+    all_members: dict[str, tuple[str, Path, dict, bool]] = {}
     for member in members:
         member_dir = repo_root / str(member)
         manifest = _load_toml(member_dir / "Cargo.toml")
@@ -208,8 +246,7 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
         publish = package.get("publish")
         # cargo: `publish = false` or `publish = []` means never publish. Anything else
         # (absent, true, a registry list) means cargo WOULD publish it.
-        if publish is False or publish == []:
-            continue
+        is_publishable = publish is not False and publish != []
         version = package.get("version")
         if isinstance(version, dict):  # version.workspace = true
             if not version.get("workspace"):
@@ -220,7 +257,15 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                 f"{name}: no resolvable version (member nor [workspace.package]) — "
                 "refusing to publish a crate whose version is unknown"
             )
-        raw[name] = (version, member_dir, manifest)
+        if name in all_members:
+            raise GuardRefusal(f"duplicate workspace package name {name!r}")
+        all_members[name] = (version, member_dir, manifest, is_publishable)
+
+    raw = {
+        name: (version, member_dir, manifest)
+        for name, (version, member_dir, manifest, is_publishable) in all_members.items()
+        if is_publishable
+    }
 
     if not raw:
         raise GuardRefusal(
@@ -236,8 +281,24 @@ def publishable_crates(repo_root: Path) -> list[Crate]:
                 real = dep_name
                 if isinstance(spec, dict) and isinstance(spec.get("package"), str):
                     real = spec["package"]
-                if real in raw and real != name:
-                    deps.add(real)
+                if not isinstance(spec, dict) or "path" not in spec:
+                    continue
+                if real not in all_members or real == name:
+                    continue
+                if not all_members[real][3]:
+                    raise GuardRefusal(
+                        f"{name}: publishable crate depends on unpublished workspace "
+                        f"crate {real!r}; publish the dependency or remove the registry "
+                        "package from the release set"
+                    )
+                requirement = spec.get("version")
+                if not isinstance(requirement, str) or not requirement.strip():
+                    raise GuardRefusal(
+                        f"{name}: workspace dependency {real!r} has a path but no "
+                        "registry version requirement; add `version = \"<workspace "
+                        "version>\"` before publishing"
+                    )
+                deps.add(real)
         crates.append(
             Crate(name=name, version=version, path=member_dir, deps=frozenset(deps))
         )
@@ -410,18 +471,27 @@ def _http_get_json(url: str) -> tuple[dict | None, str | None]:
 
 
 def crates_io_last_publish(
-    names: list[str], fetch=_http_get_json
+    names: list[str], fetch=_http_get_json, retry_sleep=time.sleep
 ) -> dt.datetime | None:
     """The newest crates.io publication timestamp across `names`, or None if NONE of them
-    has ever been published. REFUSES on any indeterminate response."""
+    has ever been published. Transient lookup failures receive two bounded retries; the
+    final failure (and every non-transient error) REFUSES."""
     newest: dt.datetime | None = None
     for name in sorted(names):
-        payload, error = fetch(CRATES_IO_API.format(name=name))
-        if error is not None:
-            raise GuardRefusal(
-                f"crates.io lookup for {name!r} was indeterminate ({error}) — the last "
-                "publication time cannot be established, refusing to publish"
-            )
+        attempts = 0
+        while True:
+            attempts += 1
+            payload, error = fetch(CRATES_IO_API.format(name=name))
+            if error is None:
+                break
+            retryable = CRATES_IO_RETRYABLE_ERROR_RE.match(error) is not None
+            if not retryable or attempts > len(CRATES_IO_RETRY_DELAYS):
+                suffix = f" after {attempts} attempt(s)" if retryable else ""
+                raise GuardRefusal(
+                    f"crates.io lookup for {name!r} was indeterminate{suffix} ({error}) — "
+                    "the last publication time cannot be established, refusing to publish"
+                )
+            retry_sleep(CRATES_IO_RETRY_DELAYS[attempts - 1])
         if payload is None:
             continue  # definitive 404: never published
         versions = payload.get("versions")
@@ -453,14 +523,28 @@ def decide(
     tags: list[tuple[str, dt.datetime]],
     crates_io_at: dt.datetime | None,
     interval: dt.timedelta = MIN_RELEASE_INTERVAL,
+    released_tag: str | None = None,
 ) -> Verdict:
     """Pure cadence decision. Every caller-visible refusal path is exercised by the tests.
 
     Callers MUST have already resolved `tags` and `crates_io_at` through the fail-closed
     readers above — reaching here means both sources answered DEFINITIVELY.
+
+    `released_tag` is the tag-push path (issue #2552): the named tag is the release being
+    cut RIGHT NOW, so it is excluded from the last-release sources and the already-tagged
+    short-circuit below does not apply. Without both of those, the guard on that path
+    would measure the interval against the very release it is deciding, and always allow.
     """
-    tagged = {name for name, _ in tags}
-    if f"v{workspace_version}" in tagged:
+    if released_tag is not None:
+        if not VERSION_TAG_RE.match(released_tag):
+            raise GuardRefusal(
+                f"--released-tag {released_tag!r} is not a `vX.Y.Z` release tag, so the "
+                "tag being cut cannot be excluded from the last-release sources — the "
+                "cadence would be measured against this very release and always pass. "
+                "Refusing to publish."
+            )
+        tags = [(name, when) for name, when in tags if name != released_tag]
+    elif f"v{workspace_version}" in {name for name, _ in tags}:
         return Verdict(
             True,
             f"v{workspace_version} is already tagged — `release-plz release` is a no-op "
@@ -553,6 +637,7 @@ def run(
     dry_run: bool,
     now: dt.datetime | None = None,
     interval: dt.timedelta = MIN_RELEASE_INTERVAL,
+    released_tag: str | None = None,
     git_runner=_run_git,
     fetch=_http_get_json,
     log=print,
@@ -560,6 +645,11 @@ def run(
     now = now or dt.datetime.now(dt.timezone.utc)
     mode = "DRY-RUN (reporting only, nothing is mutated)" if dry_run else "ENFORCE"
     log(f"[{PROGRAM}] mode: {mode}")
+    if released_tag is not None:
+        log(
+            f"[{PROGRAM}] tag-push path: {released_tag} is the release being cut now — "
+            "excluded from the last-release sources (issue #2552)"
+        )
     try:
         crates = publishable_crates(repo_root)
         ordered = publish_order(crates)
@@ -614,11 +704,15 @@ def run(
         tags = git_release_tags(repo_root, run_git=git_runner)
         # Short-circuit the no-op push BEFORE hitting crates.io: `release-plz release`
         # does nothing when the current version is already tagged, and on this repo that
-        # is every ordinary push to main. Skipping the ~26 registry requests there keeps
+        # is every ordinary push to main. Skipping the ~37 registry requests there keeps
         # the guard cheap; the decision is identical (decide() returns the same verdict,
         # which the self-test pins).
+        # On the tag-push path that short-circuit does not apply (the tag exists BECAUSE
+        # the release is happening), so crates.io is always consulted there.
         crates_io_at: dt.datetime | None = None
-        if not any(name == f"v{workspace_version}" for name, _ in tags):
+        if released_tag is not None or not any(
+            name == f"v{workspace_version}" for name, _ in tags
+        ):
             crates_io_at = crates_io_last_publish([c.name for c in crates], fetch=fetch)
         verdict = decide(
             now=now,
@@ -626,6 +720,7 @@ def run(
             tags=tags,
             crates_io_at=crates_io_at,
             interval=interval,
+            released_tag=released_tag,
         )
     except GuardRefusal as refusal:
         log(f"::error title={PROGRAM} REFUSED to publish::{refusal}")
@@ -729,6 +824,71 @@ def self_test() -> int:
         already.allowed and "already tagged" in already.reason,
     )
 
+    # ---- the tag-push path (issue #2552). The SAME inputs that read as a harmless no-op
+    # above must read as a cadence VIOLATION once the tag is the release being cut, or the
+    # guard is vacuous on release.yml. These two cases are the discriminating pair.
+    check(
+        "the tag being cut does NOT excuse itself (v0.1.0 pushed 1h after v0.0.9)",
+        not decide(
+            now=now,
+            workspace_version="0.1.0",
+            tags=[
+                ("v0.1.0", now),
+                ("v0.0.9", now - dt.timedelta(hours=1)),
+            ],
+            crates_io_at=None,
+            released_tag="v0.1.0",
+        ).allowed,
+    )
+    check(
+        "the tag being cut is EXCLUDED from the sources (v0.1.0 pushed 25h after v0.0.9)",
+        decide(
+            now=now,
+            workspace_version="0.1.0",
+            tags=[
+                ("v0.1.0", now),
+                ("v0.0.9", now - dt.timedelta(hours=25)),
+            ],
+            crates_io_at=None,
+            released_tag="v0.1.0",
+        ).allowed,
+    )
+    check(
+        "the FIRST tag push (nothing else tagged, never published) is ALLOWED",
+        decide(
+            now=now,
+            workspace_version="0.1.0",
+            tags=[("v0.1.0", now)],
+            crates_io_at=None,
+            released_tag="v0.1.0",
+        ).allowed,
+    )
+    check(
+        "crates.io still bounds the tag-push path (tag list empty, published 2h ago)",
+        not decide(
+            now=now,
+            workspace_version="0.1.0",
+            tags=[("v0.1.0", now)],
+            crates_io_at=now - dt.timedelta(hours=2),
+            released_tag="v0.1.0",
+        ).allowed,
+    )
+    try:
+        decide(
+            now=now,
+            workspace_version="0.1.0",
+            tags=[],
+            crates_io_at=None,
+            released_tag="not-a-tag",
+        )
+    except GuardRefusal as error:
+        check(
+            "a non-release --released-tag REFUSES (it cannot be excluded)",
+            "not a `vX.Y.Z` release tag" in str(error),
+        )
+    else:
+        check("a non-release --released-tag REFUSES", False)
+
     # ---- fail-closed readers.
     def shallow_git(_root, args):
         if args[:2] == ["rev-parse", "--is-shallow-repository"]:
@@ -778,7 +938,11 @@ def self_test() -> int:
 
     # ---- crates.io reader.
     try:
-        crates_io_last_publish(["sparq-core"], fetch=lambda _u: (None, "HTTP 503"))
+        crates_io_last_publish(
+            ["sparq-core"],
+            fetch=lambda _u: (None, "HTTP 503"),
+            retry_sleep=lambda _seconds: None,
+        )
     except GuardRefusal as error:
         check("an UNREACHABLE crates.io REFUSES", "indeterminate" in str(error))
     else:
@@ -898,11 +1062,24 @@ def main(argv: list[str] | None = None) -> int:
         default=".",
         help="workspace root containing Cargo.toml + release-plz.toml (default: .)",
     )
+    parser.add_argument(
+        "--released-tag",
+        default=None,
+        metavar="vX.Y.Z",
+        help="the tag-push path (issue #2552): the `v*` tag whose release is being cut "
+        "RIGHT NOW. It is excluded from the last-release sources and suppresses the "
+        "already-tagged no-op short-circuit, so the interval is measured against the "
+        "PREVIOUS release. Refuses if the value is not a release tag.",
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
         return self_test()
-    return run(Path(args.repo_root).resolve(), dry_run=bool(args.dry_run))
+    return run(
+        Path(args.repo_root).resolve(),
+        dry_run=bool(args.dry_run),
+        released_tag=args.released_tag,
+    )
 
 
 if __name__ == "__main__":

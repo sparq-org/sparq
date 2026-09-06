@@ -23,24 +23,58 @@
 //! `rr:predicateObjectMap`, `rr:predicateMap`/`rr:predicate`, `rr:objectMap`/`rr:object`,
 //! `rr:template` (IRI-safe percent-encoding of substituted values in IRI maps),
 //! `rr:column`, `rr:constant`, `rr:termType` (IRI/Literal/BlankNode), `rr:datatype`,
-//! `rr:language`. Everything else in the `rr:` namespace — notably `rr:sqlQuery`,
-//! `rr:parentTriplesMap`/`rr:joinCondition`, `rr:graphMap`/`rr:graph`,
-//! `rr:inverseExpression` — is a LOUD error (fail-closed), never a silent skip. An empty CSV
-//! cell is NULL per R2RML: the term map generates no term and the triple (or the whole row,
-//! for a subject map) is skipped. Column-valued literals stay plain strings (CSV's natural
-//! datatype) unless the mapping says `rr:datatype`/`rr:language` — datatype inference is a
-//! direct-mapping convenience only, never applied to R2RML output.
+//! `rr:language`, plus — [OPUS-5] (sq-u1z86) — **cross-CSV joins**
+//! (`rr:parentTriplesMap` + `rr:joinCondition`/`rr:child`/`rr:parent`) and **named-graph
+//! output** (`rr:graphMap`/`rr:graph`). Everything else in the `rr:` namespace — notably
+//! `rr:sqlQuery`, `rr:sqlVersion`, `rr:inverseExpression` — is a LOUD error (fail-closed),
+//! never a silent skip. An empty CSV cell is NULL per R2RML: the term map generates no term
+//! and the triple (or the whole row, for a subject map) is skipped. Column-valued literals
+//! stay plain strings (CSV's natural datatype) unless the mapping says
+//! `rr:datatype`/`rr:language` — datatype inference is a direct-mapping convenience only,
+//! never applied to R2RML output.
 //!
-//! SQL-connection R2RML and a GUI import wizard are explicitly OUT of scope (follow-ons live
-//! in the bead tree under epic sq-lsp7k).
+//! **Joins** (`rr:parentTriplesMap`): a referencing object map is executed as a KEYED HASH
+//! JOIN, not a nested scan — the parent CSV is pre-scanned ONCE into a
+//! `join-key tuple → parent subjects` index, then the child table streams past it as usual.
+//! Honest cost: the index is the one part of the pipeline that is NOT constant-memory (it
+//! holds one key tuple + subject IRI per parent row); the child side still streams. SQL join
+//! semantics on NULL: an empty join cell on either side matches nothing. At least one
+//! `rr:joinCondition` is REQUIRED — the join-condition-free (cross-join) form is a loud
+//! error rather than a guess.
+//!
+//! **Named graphs** (`rr:graphMap`/`rr:graph`): a graph map on the subject map scopes that
+//! triples map's class + predicate-object triples; a graph map on a predicate-object map
+//! scopes just its own; the two sets UNION, and an empty set (or the `rr:defaultGraph`
+//! constant) means the default graph. The moment a mapping uses ANY graph map the emitter
+//! switches from N-Triples to **N-Quads** and the load path becomes a DATASET load
+//! (`Graph::load_dataset`, which preserves named graphs so `GRAPH ?g { … }` works). Honest
+//! cost: that dataset load is whole-document, so the quad path buffers the generated
+//! N-Quads in memory — `--out` still streams. A mapping with NO graph map keeps the
+//! unchanged streaming N-Triples fast path (`load_reader_parallel`).
+//!
+//! **Row provenance** (`--row-provenance`, both modes): every generated subject also gets
+//! `prov:wasDerivedFrom <base><table>/row/{_row}>` — the SAME row IRI the direct mapping's
+//! default subject template produces, so a custom-template or R2RML subject stays linked to
+//! the exact source row. Emitted into the row's graph(s), so it follows `rr:graphMap`.
+//!
+//! SQL-connection R2RML (virtualization — a deliberate non-goal; sparq's counter-story is
+//! materializing import) and a GUI import wizard are explicitly OUT of scope (follow-ons
+//! live in the bead tree under epic sq-lsp7k / sq-ixc3).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::time::Instant;
 
 const RR: &str = "http://www.w3.org/ns/r2rml#";
-const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+/// `rdf:type`, pre-serialised as an N-Triples predicate — the class statement is emitted per
+/// ROW, so its fixed terms are built once here, never per row.
+const RDF_TYPE_NT: &str = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+/// The R2RML constant naming the default graph — a MEMBER of the graph set like any other
+/// (next to a second graph map it adds the default graph, it does not cancel it).
+const RR_DEFAULT_GRAPH: &str = "http://www.w3.org/ns/r2rml#defaultGraph";
+/// Row-provenance predicate (`--row-provenance`) — W3C PROV-O, no invented vocabulary.
+const PROV_WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFrom";
 
 // ---------------------------------------------------------------------------------------------
 // Streaming RFC-4180 CSV reader
@@ -451,23 +485,60 @@ struct TermSpec {
     kind: TermKind,
 }
 
+/// [OPUS-5] (sq-u1z86) A referencing object map (`rr:parentTriplesMap` + `rr:joinCondition`)
+/// compiled to a KEYED HASH JOIN: the parent table was pre-scanned once into
+/// `join-key tuple → the parent subjects that key generates`, so the child table can stream.
+#[derive(Clone, Debug)]
+struct RefJoin {
+    /// Child-row column indices of the join conditions, in `rr:child`/`rr:parent` order.
+    child: Vec<usize>,
+    /// Shared so cloning a [`CompiledMap`] never re-scans or re-allocates the index.
+    index: std::sync::Arc<HashMap<Vec<String>, Vec<GenTerm>>>,
+}
+
+/// An object of a predicate-object map: an ordinary term map, or a join into a parent table.
+#[derive(Clone, Debug)]
+enum ObjectSpec {
+    Term(TermSpec),
+    Ref(RefJoin),
+}
+
 /// One `rr:predicateObjectMap`: every predicate × every object (the R2RML cartesian rule).
 #[derive(Clone, Debug)]
 struct CompiledPom {
     predicates: Vec<TermSpec>,
-    objects: Vec<TermSpec>,
+    objects: Vec<ObjectSpec>,
+    /// `rr:graphMap`/`rr:graph` on THIS map — the union with the subject map's (R2RML §12.2).
+    graphs: Vec<TermSpec>,
 }
 
 /// A fully header-resolved mapping for ONE logical table (one CSV file).
 #[derive(Clone, Debug)]
 struct CompiledMap {
     subject: TermSpec,
+    /// The `rr:class` IRIs, pre-serialised as N-Triples object terms (`<iri>`).
     classes: Vec<String>,
     poms: Vec<CompiledPom>,
+    /// `rr:graphMap`/`rr:graph` on the SUBJECT map: scopes the class + provenance triples and
+    /// unions into every predicate-object map's graphs.
+    graphs: Vec<TermSpec>,
+    /// `--row-provenance`: the row-IRI prefix (`<base><table>/row/`), completed with the
+    /// 1-based data-row number.
+    provenance: Option<String>,
     /// Resolve relative generated IRIs against this (simple prefix concatenation).
     base: Option<String>,
     /// Expected record width (= header width); a ragged row is a loud error.
     width: usize,
+}
+
+impl CompiledMap {
+    /// Does this map use ANY graph map? Drives N-Triples vs N-Quads emission: a graph-map-free
+    /// mapping keeps the unchanged streaming N-Triples path. Deliberately CONSERVATIVE — a
+    /// mapping whose graph maps all resolve to `rr:defaultGraph` still takes the quad path,
+    /// because that is only knowable per row, and mis-taking the triple path would lose data.
+    fn uses_graphs(&self) -> bool {
+        !self.graphs.is_empty() || self.poms.iter().any(|p| !p.graphs.is_empty())
+    }
 }
 
 /// Resolve a column reference against the header: a `"quoted"` (delimited) name matches
@@ -602,7 +673,89 @@ fn gen_term(
     }))
 }
 
-/// Emit the N-Triples lines one CSV row generates under a compiled map.
+/// What one scope's graph maps generated for one row.
+struct GraphSet {
+    /// The generated graph labels, N-Quads-serialised and duplicate-free; the EMPTY string is
+    /// the default graph (an `rr:defaultGraph` constant).
+    labels: Vec<String>,
+    /// A declared graph map generated NULL on this row (and so contributed no label). This
+    /// distinguishes "no graph maps declared" — the default graph — from "declared, but every
+    /// one was NULL", which must NOT silently fall back to the default graph.
+    null_seen: bool,
+}
+
+/// The graph terms a set of graph maps generates for one row. A NULL graph map contributes
+/// NOTHING to the set rather than erasing it: R2RML §12.2 scopes a statement by the UNION of
+/// its subject map's and its predicate-object map's graph sets, so a NULL must not wipe out a
+/// graph a sibling map — or the other side of that union — generated.
+fn gen_graphs(
+    specs: &[TermSpec],
+    row: &[String],
+    row_num: u64,
+    base: Option<&str>,
+) -> Result<GraphSet, String> {
+    let mut labels: Vec<String> = Vec::with_capacity(specs.len());
+    let mut null_seen = false;
+    for spec in specs {
+        let Some(t) = gen_term(spec, row, row_num, base)? else {
+            null_seen = true;
+            continue;
+        };
+        let label = match t {
+            GenTerm::Iri(i) if i == RR_DEFAULT_GRAPH => String::new(),
+            GenTerm::Iri(i) => format!("<{i}>"),
+            other => {
+                return Err(format!("graph map generated a non-IRI term {other:?} on row {row_num}"))
+            }
+        };
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    Ok(GraphSet { labels, null_seen })
+}
+
+/// The union of a subject map's graphs and a predicate-object map's graphs (R2RML §12.2),
+/// duplicate-free and order-preserving. Both empty → an empty set → the default graph.
+fn union_graphs(subject: &[String], pom: &[String]) -> Vec<String> {
+    if pom.is_empty() {
+        return subject.to_vec();
+    }
+    let mut out: Vec<String> = Vec::with_capacity(subject.len() + pom.len());
+    for g in subject.iter().chain(pom) {
+        if !out.contains(g) {
+            out.push(g.clone());
+        }
+    }
+    out
+}
+
+/// Write one statement once per graph in `graphs` — an EMPTY slice (or an empty label) is the
+/// default graph, which serialises as a plain N-Triples line.
+fn push_stmt(out: &mut String, s: &str, p: &str, o: &str, graphs: &[String]) {
+    let mut one = |g: &str| {
+        out.push_str(s);
+        out.push(' ');
+        out.push_str(p);
+        out.push(' ');
+        out.push_str(o);
+        if !g.is_empty() {
+            out.push(' ');
+            out.push_str(g);
+        }
+        out.push_str(" .\n");
+    };
+    if graphs.is_empty() {
+        one("");
+    } else {
+        for g in graphs {
+            one(g);
+        }
+    }
+}
+
+/// Emit the N-Triples (or, with graph maps, N-Quads) lines one CSV row generates under a
+/// compiled map.
 fn emit_row(map: &CompiledMap, row: &[String], row_num: u64, out: &mut String) -> Result<(), String> {
     if row.len() != map.width {
         return Err(format!(
@@ -611,25 +764,43 @@ fn emit_row(map: &CompiledMap, row: &[String], row_num: u64, out: &mut String) -
             map.width
         ));
     }
-    let Some(subj) = gen_term(&map.subject, row, row_num, map.base.as_deref())? else {
+    let base = map.base.as_deref();
+    let Some(subj) = gen_term(&map.subject, row, row_num, base)? else {
         return Ok(()); // NULL subject: the whole row generates nothing.
     };
     if matches!(subj, GenTerm::Lit { .. }) {
         return Err(format!("subject map generated a literal on row {row_num}"));
     }
     let s_nt = nt_term(&subj);
-    for cls in &map.classes {
-        out.push_str(&s_nt);
-        out.push_str(" <");
-        out.push_str(RDF_TYPE);
-        out.push_str("> <");
-        out.push_str(cls);
-        out.push_str("> .\n");
+    let s_graphs = gen_graphs(&map.graphs, row, row_num, base)?;
+    // Class and provenance triples are scoped by the subject map's graph set alone. An empty
+    // set means the default graph — UNLESS graph maps were declared and every one generated
+    // NULL, in which case the statement is unscoped and dropped (the same fail-quiet-per-NULL
+    // rule R2RML gives a NULL object, never a silent default-graph fallback that would put data
+    // somewhere the mapping did not ask for).
+    if !(s_graphs.labels.is_empty() && s_graphs.null_seen) {
+        for cls in &map.classes {
+            push_stmt(out, &s_nt, RDF_TYPE_NT, cls, &s_graphs.labels);
+        }
+        if let Some(prefix) = &map.provenance {
+            push_stmt(
+                out,
+                &s_nt,
+                &format!("<{PROV_WAS_DERIVED_FROM}>"),
+                &format!("<{prefix}{row_num}>"),
+                &s_graphs.labels,
+            );
+        }
     }
     for pom in &map.poms {
+        let p_graphs = gen_graphs(&pom.graphs, row, row_num, base)?;
+        let graphs = union_graphs(&s_graphs.labels, &p_graphs.labels);
+        if graphs.is_empty() && (s_graphs.null_seen || p_graphs.null_seen) {
+            continue; // every declared graph map was NULL: this map's statements are unscoped.
+        }
         let mut preds: Vec<String> = Vec::with_capacity(pom.predicates.len());
         for p in &pom.predicates {
-            match gen_term(p, row, row_num, map.base.as_deref())? {
+            match gen_term(p, row, row_num, base)? {
                 None => {}
                 Some(GenTerm::Iri(i)) => preds.push(format!("<{i}>")),
                 Some(other) => {
@@ -641,17 +812,36 @@ fn emit_row(map: &CompiledMap, row: &[String], row_num: u64, out: &mut String) -
             continue;
         }
         for o in &pom.objects {
-            let Some(obj) = gen_term(o, row, row_num, map.base.as_deref())? else {
-                continue; // NULL object: skip this triple only.
-            };
-            let o_nt = nt_term(&obj);
-            for p_nt in &preds {
-                out.push_str(&s_nt);
-                out.push(' ');
-                out.push_str(p_nt);
-                out.push(' ');
-                out.push_str(&o_nt);
-                out.push_str(" .\n");
+            match o {
+                ObjectSpec::Term(spec) => {
+                    let Some(obj) = gen_term(spec, row, row_num, base)? else {
+                        continue; // NULL object: skip this triple only.
+                    };
+                    let o_nt = nt_term(&obj);
+                    for p_nt in &preds {
+                        push_stmt(out, &s_nt, p_nt, &o_nt, &graphs);
+                    }
+                }
+                ObjectSpec::Ref(join) => {
+                    // SQL join semantics: a NULL (empty) child key cell matches no parent row.
+                    let mut key: Vec<String> = Vec::with_capacity(join.child.len());
+                    for &i in &join.child {
+                        if row[i].is_empty() {
+                            break;
+                        }
+                        key.push(row[i].clone());
+                    }
+                    if key.len() != join.child.len() {
+                        continue;
+                    }
+                    let Some(parents) = join.index.get(&key) else { continue };
+                    for parent in parents {
+                        let o_nt = nt_term(parent);
+                        for p_nt in &preds {
+                            push_stmt(out, &s_nt, p_nt, &o_nt, &graphs);
+                        }
+                    }
+                }
             }
         }
     }
@@ -662,15 +852,19 @@ fn emit_row(map: &CompiledMap, row: &[String], row_num: u64, out: &mut String) -
 // Streaming: CSV rows → N-Triples chunks → `Read`
 // ---------------------------------------------------------------------------------------------
 
-/// Iterator adapter: each CSV data row becomes one N-Triples chunk (possibly empty).
-struct MappedRows<R: Read> {
-    rows: CsvRows<R>,
+/// A stream of already-parsed CSV records — the one row-source type the compiler and the
+/// emitter share, so a table can be pre-scanned (join index) and streamed (emission) alike.
+type RowIter = Box<dyn Iterator<Item = Result<Vec<String>, String>> + Send>;
+
+/// Iterator adapter: each CSV data row becomes one N-Triples/N-Quads chunk (possibly empty).
+struct MappedRows {
+    rows: RowIter,
     map: CompiledMap,
     row_num: u64,
     failed: bool,
 }
 
-impl<R: Read> Iterator for MappedRows<R> {
+impl Iterator for MappedRows {
     type Item = Result<String, String>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed {
@@ -745,6 +939,8 @@ struct DirectOpts {
     /// `None` = default class `<base><table>`; `Some(None)` = `--class none`; `Some(Some(iri))`.
     class: Option<Option<String>>,
     infer: bool,
+    /// `--row-provenance`: also emit `prov:wasDerivedFrom <base><table>/row/{_row}>`.
+    provenance: bool,
 }
 
 /// Compile the direct mapping of one CSV header.
@@ -764,6 +960,7 @@ fn compile_direct(header: &[String], table: &str, opts: &DirectOpts) -> Result<C
     for c in &classes {
         check_iri(c)?;
     }
+    let classes: Vec<String> = classes.iter().map(|c| format!("<{c}>")).collect();
     let poms = header
         .iter()
         .enumerate()
@@ -772,14 +969,32 @@ fn compile_direct(header: &[String], table: &str, opts: &DirectOpts) -> Result<C
             check_iri(&pred)?;
             Ok(CompiledPom {
                 predicates: vec![TermSpec { value: ValueSpec::Constant(GenTerm::Iri(pred)), kind: TermKind::Iri }],
-                objects: vec![TermSpec {
+                objects: vec![ObjectSpec::Term(TermSpec {
                     value: ValueSpec::Column(i),
                     kind: if opts.infer { TermKind::LitInfer } else { TermKind::LitPlain },
-                }],
+                })],
+                graphs: Vec::new(),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(CompiledMap { subject, classes, poms, base: Some(opts.base.clone()), width: header.len() })
+    let provenance = opts.provenance.then(|| row_iri_prefix(&opts.base, table)).transpose()?;
+    Ok(CompiledMap {
+        subject,
+        classes,
+        poms,
+        graphs: Vec::new(),
+        provenance,
+        base: Some(opts.base.clone()),
+        width: header.len(),
+    })
+}
+
+/// The `--row-provenance` row-IRI prefix for one table: `<base><table>/row/`, validated once
+/// at compile time (against row 1) so a bad `--base` fails before any row is emitted.
+fn row_iri_prefix(base: &str, table: &str) -> Result<String, String> {
+    let prefix = format!("{base}{}/row/", iri_safe(table));
+    check_iri(&format!("{prefix}1"))?;
+    Ok(prefix)
 }
 
 /// Header sanity: no empty and no duplicate column names (both would map ambiguously).
@@ -808,9 +1023,8 @@ struct RrGraph {
 }
 
 /// The `rr:` local names this subset implements. Any OTHER `rr:` predicate in the mapping is
-/// a loud error (fail-closed): `rr:sqlQuery`, `rr:parentTriplesMap`, `rr:joinCondition`,
-/// `rr:graphMap`, `rr:graph`, `rr:inverseExpression`, `rr:sqlVersion`, … are all rejected,
-/// never silently skipped.
+/// a loud error (fail-closed): `rr:sqlQuery`, `rr:sqlVersion`, `rr:inverseExpression`, … are
+/// all rejected, never silently skipped.
 const RR_SUPPORTED: &[&str] = &[
     "logicalTable",
     "tableName",
@@ -828,6 +1042,13 @@ const RR_SUPPORTED: &[&str] = &[
     "object",
     "datatype",
     "language",
+    // [OPUS-5] (sq-u1z86) cross-CSV joins + named-graph output.
+    "parentTriplesMap",
+    "joinCondition",
+    "child",
+    "parent",
+    "graphMap",
+    "graph",
 ];
 
 impl RrGraph {
@@ -893,7 +1114,7 @@ fn parse_r2rml(mapping_ttl: &str) -> Result<R2rmlMapping, String> {
             if !RR_SUPPORTED.contains(&local) {
                 return Err(format!(
                     "unsupported R2RML construct rr:{local} — this materializing subset covers CSV logical tables only \
-                     (no rr:sqlQuery / rr:parentTriplesMap / rr:joinCondition / rr:graphMap / rr:inverseExpression)"
+                     (no rr:sqlQuery / rr:sqlVersion / rr:inverseExpression: SQL-connection R2RML is out of scope)"
                 ));
             }
         }
@@ -917,8 +1138,8 @@ fn parse_r2rml(mapping_ttl: &str) -> Result<R2rmlMapping, String> {
     Ok(R2rmlMapping { rr, tms })
 }
 
-/// Build the [`TermSpec`] of one term-map node. `pos`: 0 = subject, 1 = predicate, 2 = object
-/// (drives the R2RML default term type + which properties are legal).
+/// Build the [`TermSpec`] of one term-map node. `pos`: 0 = subject, 1 = predicate, 2 = object,
+/// 3 = graph (drives the R2RML default term type + which properties are legal).
 fn term_spec(
     rr: &RrGraph,
     node: &str,
@@ -958,8 +1179,12 @@ fn term_spec(
     let kind = match term_type.as_str() {
         "IRI" => TermKind::Iri,
         "BlankNode" => {
-            if pos == 1 {
-                return Err(format!("predicate map {node} cannot be a blank node"));
+            if pos == 1 || pos == 3 {
+                // R2RML: predicate maps and graph maps must generate IRIs.
+                return Err(format!(
+                    "{} map {node} cannot be a blank node",
+                    if pos == 1 { "predicate" } else { "graph" }
+                ));
             }
             TermKind::Blank
         }
@@ -1011,36 +1236,74 @@ fn constant_term(t: &oxrdf::Term, pos: u8) -> Result<GenTerm, String> {
     }
 }
 
-/// Compile one triples map against its CSV header.
-fn compile_tm(
+/// The subject side of a triples map — `rr:subjectMap` node or the `rr:subject` constant
+/// shortcut (exactly one) — plus its `rr:class`es and its `rr:graphMap`/`rr:graph` set.
+/// Shared by [`compile_tm`] and the join pre-scan, which needs the PARENT's subject map.
+fn subject_of(
     m: &R2rmlMapping,
     tm_key: &str,
     header: &[String],
-    base: Option<&str>,
-) -> Result<CompiledMap, String> {
-    check_header(header)?;
+) -> Result<(TermSpec, Vec<String>, Vec<TermSpec>), String> {
     let rr = &m.rr;
-    // Subject: rr:subjectMap node or the rr:subject constant shortcut — exactly one.
     let sm = rr.prop1(tm_key, "subjectMap")?;
     let s_const = rr.prop1(tm_key, "subject")?;
-    let (subject, classes): (TermSpec, Vec<String>) = match (sm, s_const) {
+    match (sm, s_const) {
         (Some(sm), None) => {
             let sm_key = term_key(sm);
             let spec = term_spec(rr, &sm_key, 0, header)?;
             let mut classes = Vec::new();
             for c in rr.props(&sm_key, "class") {
-                classes.push(iri_value(c, "rr:class")?);
+                classes.push(format!("<{}>", iri_value(c, "rr:class")?));
             }
             classes.sort();
-            (spec, classes)
+            Ok((spec, classes, graph_specs(rr, &sm_key, header)?))
         }
-        (None, Some(c)) => (
+        (None, Some(c)) => Ok((
             TermSpec { value: ValueSpec::Constant(constant_term(c, 0)?), kind: TermKind::Iri },
             Vec::new(),
-        ),
-        (None, None) => return Err(format!("triples map {tm_key} has no rr:subjectMap / rr:subject")),
-        (Some(_), Some(_)) => return Err(format!("triples map {tm_key} has both rr:subjectMap and rr:subject")),
-    };
+            Vec::new(),
+        )),
+        (None, None) => Err(format!("triples map {tm_key} has no rr:subjectMap / rr:subject")),
+        (Some(_), Some(_)) => Err(format!("triples map {tm_key} has both rr:subjectMap and rr:subject")),
+    }
+}
+
+/// The `rr:graph` constants + `rr:graphMap` term maps attached to one subject / predicate-object
+/// map node. [OPUS-5] (sq-u1z86)
+fn graph_specs(rr: &RrGraph, node: &str, header: &[String]) -> Result<Vec<TermSpec>, String> {
+    let mut out: Vec<TermSpec> = Vec::new();
+    for g in rr.props(node, "graph") {
+        out.push(TermSpec { value: ValueSpec::Constant(constant_term(g, 3)?), kind: TermKind::Iri });
+    }
+    let mut keys: Vec<String> = rr.props(node, "graphMap").map(term_key).collect();
+    keys.sort(); // deterministic emission order
+    for key in keys {
+        let spec = term_spec(rr, &key, 3, header)?;
+        if spec.kind != TermKind::Iri {
+            return Err(format!("graph map {key} must generate an IRI"));
+        }
+        out.push(spec);
+    }
+    Ok(out)
+}
+
+/// Opens a CSV logical table by name, returning its header + a fresh row stream. Threading it
+/// through the compiler is what lets a referencing object map pre-scan its PARENT table.
+type TableOpener<'a> = &'a mut dyn FnMut(&str) -> Result<(Vec<String>, RowIter), String>;
+
+/// Compile one triples map against its CSV header. `provenance` is the `--row-provenance`
+/// row-IRI prefix for THIS table (`None` = off); `open` resolves parent tables for joins.
+fn compile_tm(
+    m: &R2rmlMapping,
+    tm_key: &str,
+    header: &[String],
+    base: Option<&str>,
+    provenance: Option<&str>,
+    open: TableOpener,
+) -> Result<CompiledMap, String> {
+    check_header(header)?;
+    let rr = &m.rr;
+    let (subject, classes, graphs) = subject_of(m, tm_key, header)?;
     let mut poms: Vec<CompiledPom> = Vec::new();
     let mut pom_keys: Vec<String> = rr.props(tm_key, "predicateObjectMap").map(term_key).collect();
     pom_keys.sort(); // deterministic emission order
@@ -1052,30 +1315,122 @@ fn compile_tm(
         for pm in rr.props(&pom_key, "predicateMap") {
             predicates.push(term_spec(rr, &term_key(pm), 1, header)?);
         }
-        let mut objects: Vec<TermSpec> = Vec::new();
+        let mut objects: Vec<ObjectSpec> = Vec::new();
         for o in rr.props(&pom_key, "object") {
             let c = constant_term(o, 2)?;
             let kind = match &c {
                 GenTerm::Iri(_) => TermKind::Iri,
                 _ => TermKind::LitPlain, // kind is unused for constants; value wins
             };
-            objects.push(TermSpec { value: ValueSpec::Constant(c), kind });
+            objects.push(ObjectSpec::Term(TermSpec { value: ValueSpec::Constant(c), kind }));
         }
-        for om in rr.props(&pom_key, "objectMap") {
-            objects.push(term_spec(rr, &term_key(om), 2, header)?);
+        let mut om_keys: Vec<String> = rr.props(&pom_key, "objectMap").map(term_key).collect();
+        om_keys.sort(); // deterministic emission order
+        for om_key in om_keys {
+            // A REFERENCING object map (rr:parentTriplesMap) joins into another table; every
+            // other object map is an ordinary term map over this row.
+            objects.push(match rr.prop1(&om_key, "parentTriplesMap")?.cloned() {
+                Some(parent) => ObjectSpec::Ref(compile_ref(m, &om_key, &parent, header, base, open)?),
+                None => ObjectSpec::Term(term_spec(rr, &om_key, 2, header)?),
+            });
         }
         if predicates.is_empty() || objects.is_empty() {
             return Err(format!("predicate-object map {pom_key} needs at least one predicate and one object"));
         }
-        poms.push(CompiledPom { predicates, objects });
+        poms.push(CompiledPom { predicates, objects, graphs: graph_specs(rr, &pom_key, header)? });
     }
     Ok(CompiledMap {
         subject,
         classes,
         poms,
+        graphs,
+        provenance: provenance.map(str::to_owned),
         base: base.map(str::to_owned),
         width: header.len(),
     })
+}
+
+/// [OPUS-5] (sq-u1z86) Compile a referencing object map into a [`RefJoin`]: resolve the
+/// `rr:joinCondition`s, then PRE-SCAN the parent CSV once into the `key tuple → parent
+/// subjects` hash index the child rows probe as they stream.
+fn compile_ref(
+    m: &R2rmlMapping,
+    om_key: &str,
+    parent: &oxrdf::Term,
+    child_header: &[String],
+    base: Option<&str>,
+    open: TableOpener,
+) -> Result<RefJoin, String> {
+    let rr = &m.rr;
+    for p in ["template", "column", "constant", "datatype", "language", "termType"] {
+        if rr.prop1(om_key, p)?.is_some() {
+            return Err(format!("referencing object map {om_key} must not also have rr:{p}"));
+        }
+    }
+    let parent_key = term_key(parent);
+    let parent_table = m
+        .tms
+        .iter()
+        .find(|(k, _)| k == &parent_key)
+        .map(|(_, t)| t.clone())
+        .ok_or_else(|| format!("rr:parentTriplesMap {parent_key} is not a triples map with an rr:logicalTable"))?;
+    let mut jc_keys: Vec<String> = rr.props(om_key, "joinCondition").map(term_key).collect();
+    jc_keys.sort(); // key-tuple order must be stable across child and parent
+    if jc_keys.is_empty() {
+        return Err(format!(
+            "referencing object map {om_key} has no rr:joinCondition — this materializing subset needs an \
+             explicit rr:child/rr:parent join (R2RML's condition-free form is a SQL cross join, out of scope)"
+        ));
+    }
+    let mut child: Vec<usize> = Vec::with_capacity(jc_keys.len());
+    let mut parent_cols: Vec<String> = Vec::with_capacity(jc_keys.len());
+    for jc in &jc_keys {
+        let c = rr.prop1(jc, "child")?.ok_or_else(|| format!("join condition {jc} has no rr:child"))?;
+        let p = rr.prop1(jc, "parent")?.ok_or_else(|| format!("join condition {jc} has no rr:parent"))?;
+        child.push(resolve_col(&lit_value(c, "rr:child")?, child_header)?);
+        parent_cols.push(lit_value(p, "rr:parent")?);
+    }
+    let (parent_header, rows) = open(&parent_table)
+        .map_err(|e| format!("parent logical table {parent_table:?} of {om_key}: {e}"))?;
+    check_header(&parent_header)?;
+    let (subject, _, _) = subject_of(m, &parent_key, &parent_header)?;
+    let parent_idx: Vec<usize> =
+        parent_cols.iter().map(|c| resolve_col(c, &parent_header)).collect::<Result<_, String>>()?;
+    let mut index: HashMap<Vec<String>, Vec<GenTerm>> = HashMap::new();
+    let mut row_num: u64 = 0;
+    for row in rows {
+        let row = row.map_err(|e| format!("parent table {parent_table:?}: {e}"))?;
+        row_num += 1;
+        if row.len() != parent_header.len() {
+            return Err(format!(
+                "ragged CSV row {row_num} in parent table {parent_table:?}: {} field(s), header has {}",
+                row.len(),
+                parent_header.len()
+            ));
+        }
+        // SQL join semantics: a NULL (empty) key cell joins to nothing, so it never enters
+        // the index — and neither does a row whose subject map is itself NULL.
+        let mut key: Vec<String> = Vec::with_capacity(parent_idx.len());
+        for &i in &parent_idx {
+            if row[i].is_empty() {
+                break;
+            }
+            key.push(row[i].clone());
+        }
+        if key.len() != parent_idx.len() {
+            continue;
+        }
+        let Some(s) = gen_term(&subject, &row, row_num, base)? else { continue };
+        if matches!(s, GenTerm::Lit { .. }) {
+            return Err(format!("parent subject map generated a literal on row {row_num} of {parent_table:?}"));
+        }
+        let bucket = index.entry(key).or_default();
+        // The same key can repeat; the RDF output is a SET, so identical subjects collapse.
+        if !bucket.contains(&s) {
+            bucket.push(s);
+        }
+    }
+    Ok(RefJoin { child, index: std::sync::Arc::new(index) })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1113,9 +1468,13 @@ fn usage() -> ! {
          \n  R2RML:\
          \n    --mapping <r2rml.ttl>  execute the mapping (CSV logical tables bound by\
          \n                        rr:tableName = file stem, or explicit <name>=<csv>)\
+         \n                        joins (rr:parentTriplesMap + rr:joinCondition) and named\
+         \n                        graphs (rr:graphMap/rr:graph -> N-Quads) are supported\
          \n  common:\
+         \n    --row-provenance    also emit <subject> prov:wasDerivedFrom\
+         \n                        <base><table>/row/{{_row}}\
          \n    --sep <char|tab>    field separator (default ',')\
-         \n    --out <file.nt[.gz|.zst]>  stream N-Triples out instead of loading\
+         \n    --out <file.nt|.nq[.gz|.zst]>  stream the triples/quads out instead of loading\
          \n    --query <sparql> [--format <table|tsv|csv|xml|json|ntriples>] [--count]\
          \n                        run one query over the loaded graph"
     );
@@ -1130,6 +1489,7 @@ struct Flags {
     class: Option<String>,
     sep: u8,
     infer: bool,
+    row_provenance: bool,
     out: Option<String>,
     query: Option<String>,
 }
@@ -1143,6 +1503,7 @@ fn parse_flags(args: &[String]) -> Flags {
         class: None,
         sep: b',',
         infer: true,
+        row_provenance: false,
         out: None,
         query: None,
     };
@@ -1185,6 +1546,12 @@ fn parse_flags(args: &[String]) -> Flags {
             }
             "--no-infer" => {
                 f.infer = false;
+                i += 1;
+            }
+            // [OPUS-5] (sq-u1z86) Mode-agnostic: row provenance applies to direct mapping
+            // AND R2RML, so it is deliberately absent from the direct-mapping-only check.
+            "--row-provenance" => {
+                f.row_provenance = true;
                 i += 1;
             }
             "--out" => {
@@ -1240,13 +1607,36 @@ fn open_csv(path: &str, sep: u8) -> Result<(Vec<String>, FileRows), String> {
 
 type ChunkIter = Box<dyn Iterator<Item = Result<String, String>> + Send>;
 
-/// Assemble the per-file chunk iterators for the whole invocation.
-fn build_sources(f: &Flags) -> Result<Vec<ChunkIter>, String> {
+/// Which CSV a logical table name binds to: exact file-stem (or `<name>=<path>`) match first,
+/// then a unique case-insensitive one; ambiguity and misses are loud.
+fn bind_table(bound: &[(String, String)], table: &str) -> Result<usize, String> {
+    let exact: Vec<usize> = (0..bound.len()).filter(|&i| bound[i].0 == table).collect();
+    match exact.len() {
+        1 => return Ok(exact[0]),
+        0 => {}
+        _ => return Err(format!("logical table {table:?} matches multiple CSV files")),
+    }
+    let ci: Vec<usize> = (0..bound.len()).filter(|&i| bound[i].0.eq_ignore_ascii_case(table)).collect();
+    match ci.len() {
+        1 => Ok(ci[0]),
+        0 => Err(format!(
+            "no CSV bound for logical table {table:?} (files: {:?}; bind explicitly with {table}=<path>)",
+            bound.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()
+        )),
+        _ => Err(format!("logical table {table:?} matches multiple CSV files case-insensitively")),
+    }
+}
+
+/// Assemble the per-file chunk iterators for the whole invocation, plus whether any compiled
+/// map emits into a NAMED graph (`true` → the output is N-Quads and the load is a dataset load).
+fn build_sources(f: &Flags) -> Result<(Vec<ChunkIter>, bool), String> {
+    let base = f.base.clone().unwrap_or_else(|| "http://example.com/".to_owned());
     let mut srcs: Vec<ChunkIter> = Vec::new();
+    let mut quads = false;
     match &f.mapping {
         None => {
             let opts = DirectOpts {
-                base: f.base.clone().unwrap_or_else(|| "http://example.com/".to_owned()),
+                base: base.clone(),
                 template: f.template.clone(),
                 class: match f.class.as_deref() {
                     None => None,
@@ -1254,12 +1644,13 @@ fn build_sources(f: &Flags) -> Result<Vec<ChunkIter>, String> {
                     Some(iri) => Some(Some(iri.to_owned())),
                 },
                 infer: f.infer,
+                provenance: f.row_provenance,
             };
             for (name, path) in &f.files {
                 let table = name.clone().unwrap_or_else(|| table_stem(path));
                 let (header, rows) = open_csv(path, f.sep)?;
                 let map = compile_direct(&header, &table, &opts).map_err(|e| format!("{path}: {e}"))?;
-                srcs.push(Box::new(MappedRows { rows, map, row_num: 0, failed: false }));
+                srcs.push(Box::new(MappedRows { rows: Box::new(rows), map, row_num: 0, failed: false }));
             }
         }
         Some(mapping_path) => {
@@ -1275,31 +1666,26 @@ fn build_sources(f: &Flags) -> Result<Vec<ChunkIter>, String> {
                 .map(|(name, path)| (name.clone().unwrap_or_else(|| table_stem(path)), path.clone()))
                 .collect();
             let mut used = vec![false; bound.len()];
-            for (tm_key, table) in &m.tms {
-                let exact: Vec<usize> = (0..bound.len()).filter(|&i| &bound[i].0 == table).collect();
-                let idx = match exact.len() {
-                    1 => exact[0],
-                    0 => {
-                        let ci: Vec<usize> =
-                            (0..bound.len()).filter(|&i| bound[i].0.eq_ignore_ascii_case(table)).collect();
-                        match ci.len() {
-                            1 => ci[0],
-                            0 => {
-                                return Err(format!(
-                                    "no CSV bound for logical table {table:?} (files: {:?}; bind explicitly with {table}=<path>)",
-                                    bound.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()
-                                ))
-                            }
-                            _ => return Err(format!("logical table {table:?} matches multiple CSV files case-insensitively")),
-                        }
-                    }
-                    _ => return Err(format!("logical table {table:?} matches multiple CSV files")),
+            {
+                // The opener the compiler also uses to PRE-SCAN a join's parent table — which
+                // is why a parent-only CSV counts as "used" and never warns.
+                let sep = f.sep;
+                let mut open = |table: &str| -> Result<(Vec<String>, RowIter), String> {
+                    let idx = bind_table(&bound, table)?;
+                    used[idx] = true;
+                    let (header, rows) = open_csv(&bound[idx].1, sep)?;
+                    Ok((header, Box::new(rows) as RowIter))
                 };
-                used[idx] = true;
-                let path = &bound[idx].1;
-                let (header, rows) = open_csv(path, f.sep)?;
-                let map = compile_tm(&m, tm_key, &header, f.base.as_deref()).map_err(|e| format!("{path}: {e}"))?;
-                srcs.push(Box::new(MappedRows { rows, map, row_num: 0, failed: false }));
+                for (tm_key, table) in &m.tms {
+                    let path = bound[bind_table(&bound, table)?].1.clone();
+                    let (header, rows) = open(table)?;
+                    let provenance =
+                        f.row_provenance.then(|| row_iri_prefix(&base, table)).transpose()?;
+                    let map = compile_tm(&m, tm_key, &header, f.base.as_deref(), provenance.as_deref(), &mut open)
+                        .map_err(|e| format!("{path} (table {table:?}): {e}"))?;
+                    quads |= map.uses_graphs();
+                    srcs.push(Box::new(MappedRows { rows, map, row_num: 0, failed: false }));
+                }
             }
             for (i, (table, path)) in bound.iter().enumerate() {
                 if !used[i] {
@@ -1308,7 +1694,7 @@ fn build_sources(f: &Flags) -> Result<Vec<ChunkIter>, String> {
             }
         }
     }
-    Ok(srcs)
+    Ok((srcs, quads))
 }
 
 /// Sink for `--out`: plain, `.gz`, or `.zst` N-Triples — finished EXPLICITLY so a failed
@@ -1349,34 +1735,45 @@ impl OutSink {
 /// `sparq-cli tabular …` — see [`usage`] and the module docs for the exact contract.
 pub(crate) fn cmd_tabular(args: &[String]) {
     let flags = parse_flags(args);
-    let srcs = build_sources(&flags).unwrap_or_else(|e| die(e));
+    let (srcs, quads) = build_sources(&flags).unwrap_or_else(|e| die(e));
     let mut reader = NtReader::new(srcs);
+    // A mapping with graph maps emits N-Quads; anything else keeps the N-Triples fast path.
+    let kind = if quads { "quads" } else { "triples" };
     let t = Instant::now();
 
     if let Some(out_path) = &flags.out {
         // Stream N-Triples straight out — no graph build, constant memory.
         let mut sink = OutSink::create(out_path).unwrap_or_else(|e| die(format!("creating {out_path}: {e}")));
         let mut buf = vec![0u8; 64 * 1024];
-        let mut triples: u64 = 0;
+        let mut stmts: u64 = 0;
         loop {
             let n = reader.read(&mut buf).unwrap_or_else(|e| die(e));
             if n == 0 {
                 break;
             }
-            triples += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+            stmts += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
             sink.writer().write_all(&buf[..n]).unwrap_or_else(|e| die(format!("writing {out_path}: {e}")));
         }
         sink.finish().unwrap_or_else(|e| die(format!("finishing {out_path}: {e}")));
-        eprintln!("wrote {triples} triples to {out_path} in {:.3}s", t.elapsed().as_secs_f64());
+        eprintln!("wrote {stmts} {kind} to {out_path} in {:.3}s", t.elapsed().as_secs_f64());
         return;
     }
 
-    let g = sparq_core::Graph::load_reader_parallel(reader, "ntriples").unwrap_or_else(|e| die(e));
+    let g = if quads {
+        // Named graphs must survive into the store, and the dataset loader is
+        // whole-document — so THIS is the one non-streaming path (documented on the module).
+        let mut nq = String::new();
+        reader.read_to_string(&mut nq).unwrap_or_else(|e| die(e));
+        sparq_core::Graph::load_dataset(&nq, "nquads")
+    } else {
+        sparq_core::Graph::load_reader_parallel(reader, "ntriples")
+    }
+    .unwrap_or_else(|e| die(e));
     let secs = t.elapsed().as_secs_f64();
+    let n = g.len() + g.named.iter().map(|(_, ng)| ng.len()).sum::<usize>();
     eprintln!(
-        "loaded {} triples in {secs:.3}s ({:.2} M/s) from tabular import",
-        g.len(),
-        g.len() as f64 / secs / 1e6
+        "loaded {n} {kind} in {secs:.3}s ({:.2} M/s) from tabular import",
+        n as f64 / secs / 1e6
     );
     if let Some(q) = &flags.query {
         let count_only = args.iter().any(|a| a == "--count");
@@ -1498,7 +1895,7 @@ mod tests {
         let mut all = CsvRows::new(Cursor::new(csv.as_bytes().to_vec()), b',');
         let header = all.next().unwrap().unwrap();
         let map = compile_direct(&header, table, opts).unwrap();
-        let mr = MappedRows { rows: all, map, row_num: 0, failed: false };
+        let mr = MappedRows { rows: Box::new(all), map, row_num: 0, failed: false };
         let mut lines: Vec<String> = Vec::new();
         for chunk in mr {
             lines.extend(chunk.unwrap().lines().map(str::to_owned));
@@ -1508,7 +1905,13 @@ mod tests {
     }
 
     fn dopts() -> DirectOpts {
-        DirectOpts { base: "http://example.com/".into(), template: None, class: None, infer: true }
+        DirectOpts {
+            base: "http://example.com/".into(),
+            template: None,
+            class: None,
+            infer: true,
+            provenance: false,
+        }
     }
 
     #[test]
@@ -1531,6 +1934,7 @@ mod tests {
             template: Some("http://example.com/emp/{ID}".into()),
             class: Some(None),
             infer: false,
+            provenance: false,
         };
         let lines = direct_nt("ID,name,age\n7,ann,\n", &opts, "emp");
         assert_eq!(
@@ -1550,6 +1954,7 @@ mod tests {
             template: Some("http://example.com/x/{full name}".into()),
             class: Some(None),
             infer: true,
+            provenance: false,
         };
         let lines = direct_nt("full name\nJane Doe\n", &opts, "my table");
         assert_eq!(
@@ -1569,7 +1974,7 @@ mod tests {
         let mut all = CsvRows::new(Cursor::new(b"a,b\n1\n".to_vec()), b',');
         let header = all.next().unwrap().unwrap();
         let map = compile_direct(&header, "t", &dopts()).unwrap();
-        let err = MappedRows { rows: all, map, row_num: 0, failed: false }
+        let err = MappedRows { rows: Box::new(all), map, row_num: 0, failed: false }
             .collect::<Result<Vec<_>, _>>()
             .unwrap_err();
         assert!(err.contains("ragged"), "{err}");
@@ -1598,19 +2003,36 @@ mod tests {
 
     // ---- R2RML -------------------------------------------------------------------------
 
-    /// Run an R2RML mapping over in-memory CSV tables; sorted unique N-Triples lines out.
+    /// Run an R2RML mapping over in-memory CSV tables; sorted unique N-Triples/N-Quads out.
     fn r2rml_nt(mapping: &str, tables: &[(&str, &str)]) -> Result<Vec<String>, String> {
+        r2rml_nt_prov(mapping, tables, false)
+    }
+
+    /// [`r2rml_nt`] with the `--row-provenance` prefix wired in (`http://example.com/<table>/row/`).
+    fn r2rml_nt_prov(
+        mapping: &str,
+        tables: &[(&str, &str)],
+        provenance: bool,
+    ) -> Result<Vec<String>, String> {
         let m = parse_r2rml(mapping)?;
-        let mut lines: Vec<String> = Vec::new();
-        for (tm_key, table) in &m.tms {
-            let (_, csv) = tables
+        let owned: Vec<(String, String)> =
+            tables.iter().map(|(n, c)| ((*n).to_owned(), (*c).to_owned())).collect();
+        let mut open = |table: &str| -> Result<(Vec<String>, RowIter), String> {
+            let (_, csv) = owned
                 .iter()
                 .find(|(n, _)| n == table)
                 .ok_or_else(|| format!("test: no CSV for table {table}"))?;
-            let mut all = CsvRows::new(Cursor::new(csv.as_bytes().to_vec()), b',');
-            let header = all.next().ok_or("empty csv")??;
-            let map = compile_tm(&m, tm_key, &header, None)?;
-            for chunk in (MappedRows { rows: all, map, row_num: 0, failed: false }) {
+            let mut rows = CsvRows::new(Cursor::new(csv.as_bytes().to_vec()), b',');
+            let header = rows.next().ok_or("empty csv")??;
+            Ok((header, Box::new(rows) as RowIter))
+        };
+        let mut lines: Vec<String> = Vec::new();
+        for (tm_key, table) in &m.tms {
+            let (header, rows) = open(table)?;
+            let prov =
+                provenance.then(|| row_iri_prefix("http://example.com/", table)).transpose()?;
+            let map = compile_tm(&m, tm_key, &header, None, prov.as_deref(), &mut open)?;
+            for chunk in (MappedRows { rows, map, row_num: 0, failed: false }) {
                 lines.extend(chunk?.lines().map(str::to_owned));
             }
         }
@@ -1697,17 +2119,19 @@ mod tests {
         assert!(got.is_empty());
     }
 
+    /// SQL-connection R2RML stays a NON-GOAL: every construct that only makes sense against a
+    /// live SQL connection is still a loud, fail-closed error — never a silent skip.
     #[test]
     fn r2rml_unsupported_constructs_fail_closed() {
         for (frag, needle) in [
             ("ex:TM rr:logicalTable [ rr:sqlQuery \"SELECT 1\" ] .", "rr:sqlQuery"),
             (
-                "ex:TM rr:logicalTable [ rr:tableName \"t\" ] ; rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:parentTriplesMap ex:Other ] ] .",
-                "rr:parentTriplesMap",
+                "ex:TM rr:logicalTable [ rr:tableName \"t\" ; rr:sqlVersion ex:SQL2008 ] .",
+                "rr:sqlVersion",
             ),
             (
-                "ex:TM rr:logicalTable [ rr:tableName \"t\" ] ; rr:subjectMap [ rr:template \"http://e/{{x}}\" ; rr:graphMap [ rr:constant ex:g ] ] .",
-                "rr:graphMap",
+                "ex:TM rr:logicalTable [ rr:tableName \"t\" ] ; rr:subjectMap [ rr:template \"http://e/{{x}}\" ; rr:inverseExpression \"{x} = 1\" ] .",
+                "rr:inverseExpression",
             ),
         ] {
             let err = r2rml_nt(&format!("{PREAMBLE}{frag}\n"), &[("t", "x\n1\n")]).unwrap_err();
@@ -1765,6 +2189,323 @@ mod tests {
         }
     }
 
+    // ---- R2RML joins (sq-u1z86) --------------------------------------------------------
+
+    const SPORT_CSV: &str = "ID,Name\n110,Tennis\n111,Football\n";
+    /// Row 10 joins, row 11's key matches no parent, row 12's key is NULL.
+    const STUDENT_CSV: &str = "ID,Name,Sport\n10,Venus,110\n11,Fred,999\n12,Ann,\n";
+
+    fn join_mapping(condition: &str) -> String {
+        format!(
+            "{PREAMBLE}\
+             ex:Sport rr:logicalTable [ rr:tableName \"sport\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/sport/{{ID}}\" ] .\n\
+             ex:Student rr:logicalTable [ rr:tableName \"student\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/student/{{ID}}\" ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:plays ;\n\
+                 rr:objectMap [ rr:parentTriplesMap ex:Sport ; {condition} ] ] .\n"
+        )
+    }
+
+    /// The headline join: the child's `Sport` column keys into the parent's `ID`, and the
+    /// generated object is the PARENT's subject IRI — with SQL NULL/no-match semantics.
+    #[test]
+    fn r2rml_join_parent_triples_map() {
+        let got = r2rml_nt(
+            &join_mapping("rr:joinCondition [ rr:child \"Sport\" ; rr:parent \"ID\" ]"),
+            &[("sport", SPORT_CSV), ("student", STUDENT_CSV)],
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                // ONLY student 10 joins: 11's key (999) matches nothing, 12's key is NULL.
+                "<http://example.com/student/10> <http://example.com/plays> <http://example.com/sport/110> .",
+            ]
+        );
+    }
+
+    /// A two-condition join is a TUPLE join (both columns must match), and a parent row whose
+    /// key cell is NULL never enters the index.
+    #[test]
+    fn r2rml_join_multi_condition_and_null_parent_key() {
+        let mapping = join_mapping(
+            "rr:joinCondition [ rr:child \"a\" ; rr:parent \"x\" ] ; rr:joinCondition [ rr:child \"b\" ; rr:parent \"y\" ]",
+        )
+        .replace("{ID}\" ] .\nex:Student", "{x}-{y}\" ] .\nex:Student")
+        .replace("student/{ID}", "student/{id}");
+        let got = r2rml_nt(
+            &mapping,
+            &[
+                // (1,2) is joinable; (1,) has a NULL second key so it is never indexed.
+                ("sport", "x,y\n1,2\n1,\n"),
+                // s1 matches (1,2); s2's (1,9) matches nothing; s3 flips the tuple order.
+                ("student", "id,a,b\ns1,1,2\ns2,1,9\ns3,2,1\n"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            vec!["<http://example.com/student/s1> <http://example.com/plays> <http://example.com/sport/1-2> ."]
+        );
+    }
+
+    /// Join shapes that cannot be executed honestly are loud, never silently empty.
+    #[test]
+    fn r2rml_join_shape_errors() {
+        // no join condition -> the SQL cross-join form, deliberately out of scope
+        let err = r2rml_nt(&join_mapping(""), &[("sport", SPORT_CSV), ("student", STUDENT_CSV)])
+            .unwrap_err();
+        assert!(err.contains("rr:joinCondition"), "{err}");
+        // a referencing object map may not also be a term map
+        let err = r2rml_nt(
+            &join_mapping("rr:column \"Sport\" ; rr:joinCondition [ rr:child \"Sport\" ; rr:parent \"ID\" ]"),
+            &[("sport", SPORT_CSV), ("student", STUDENT_CSV)],
+        )
+        .unwrap_err();
+        assert!(err.contains("must not also have rr:column"), "{err}");
+        // rr:parent naming a column the parent header does not have
+        let err = r2rml_nt(
+            &join_mapping("rr:joinCondition [ rr:child \"Sport\" ; rr:parent \"nope\" ]"),
+            &[("sport", SPORT_CSV), ("student", STUDENT_CSV)],
+        )
+        .unwrap_err();
+        assert!(err.contains("\"nope\" not found"), "{err}");
+        // rr:parentTriplesMap pointing at something that is not a triples map
+        let err = r2rml_nt(
+            &join_mapping("rr:joinCondition [ rr:child \"Sport\" ; rr:parent \"ID\" ]")
+                .replace("rr:parentTriplesMap ex:Sport", "rr:parentTriplesMap ex:Nothing"),
+            &[("sport", SPORT_CSV), ("student", STUDENT_CSV)],
+        )
+        .unwrap_err();
+        assert!(err.contains("is not a triples map"), "{err}");
+    }
+
+    // ---- R2RML named graphs (sq-u1z86) -------------------------------------------------
+
+    /// Compile (without emitting) every triples map — for asserting the N-Triples/N-Quads switch.
+    fn r2rml_maps(mapping: &str, tables: &[(&str, &str)]) -> Result<Vec<CompiledMap>, String> {
+        let m = parse_r2rml(mapping)?;
+        let owned: Vec<(String, String)> =
+            tables.iter().map(|(n, c)| ((*n).to_owned(), (*c).to_owned())).collect();
+        let mut open = |table: &str| -> Result<(Vec<String>, RowIter), String> {
+            let (_, csv) = owned.iter().find(|(n, _)| n == table).ok_or("test: no CSV")?;
+            let mut rows = CsvRows::new(Cursor::new(csv.as_bytes().to_vec()), b',');
+            let header = rows.next().ok_or("empty csv")??;
+            Ok((header, Box::new(rows) as RowIter))
+        };
+        let mut out = Vec::new();
+        for (tm_key, table) in &m.tms {
+            let (header, _) = open(table)?;
+            out.push(compile_tm(&m, tm_key, &header, None, None, &mut open)?);
+        }
+        Ok(out)
+    }
+
+    /// Subject-map graphs scope the class triples AND union into every predicate-object map's;
+    /// a per-row `rr:graphMap` template gives one named graph per row.
+    #[test]
+    fn r2rml_graph_maps_emit_quads() {
+        let mapping = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:class ex:C ; rr:graph ex:g1 ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:q ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+        );
+        let tables = [("t", "id,v,cat\n1,x,red\n")];
+        assert!(r2rml_maps(&mapping, &tables).unwrap()[0].uses_graphs());
+        assert_eq!(
+            r2rml_nt(&mapping, &tables).unwrap(),
+            vec![
+                // ex:p lands in BOTH the subject graph and the per-row graph (the union)…
+                "<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g/red> .",
+                "<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g1> .",
+                // …ex:q and the class triple only in the subject-map graph.
+                "<http://example.com/r/1> <http://example.com/q> \"x\" <http://example.com/g1> .",
+                "<http://example.com/r/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/C> <http://example.com/g1> .",
+            ]
+        );
+    }
+
+    /// `rr:defaultGraph` names the default graph (a plain triple), and it takes part in the
+    /// union like any other graph — so a per-row graph map next to it emits BOTH.
+    #[test]
+    fn r2rml_default_graph_constant_joins_the_union() {
+        let mapping = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:graph rr:defaultGraph ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:q ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+        );
+        // Row 1 has a graph; row 2's `cat` is NULL, so the predicate-object map generates no
+        // graph — but the subject map's default graph survives the union, so both statements
+        // still land there.
+        let got = r2rml_nt(&mapping, &[("t", "id,v,cat\n1,x,red\n2,y,\n")]).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                "<http://example.com/r/1> <http://example.com/p> \"x\" .",
+                "<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g/red> .",
+                "<http://example.com/r/1> <http://example.com/q> \"x\" .",
+                "<http://example.com/r/2> <http://example.com/p> \"y\" .",
+                "<http://example.com/r/2> <http://example.com/q> \"y\" .",
+            ]
+        );
+    }
+
+    /// A NULL graph map contributes NOTHING to the union — it never erases a graph generated
+    /// by a sibling graph map or by the other side of the subject/predicate-object union.
+    #[test]
+    fn r2rml_null_graph_map_does_not_erase_the_union() {
+        // (a) NULL predicate-object graph map alongside a valid NAMED subject graph.
+        let subject_named = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:class ex:C ; rr:graph ex:g1 ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] .\n"
+        );
+        assert_eq!(
+            r2rml_nt(&subject_named, &[("t", "id,v,cat\n1,x,\n")]).unwrap(),
+            vec![
+                "<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g1> .",
+                "<http://example.com/r/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/C> <http://example.com/g1> .",
+            ]
+        );
+        // (b) NULL subject graph map alongside a valid predicate-object graph: the class triple
+        // is scoped by the subject set alone, so it drops, but the ex:p statement keeps ex:g2.
+        let pom_named = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:class ex:C ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ; rr:graph ex:g2 ] .\n"
+        );
+        assert_eq!(
+            r2rml_nt(&pom_named, &[("t", "id,v,cat\n1,x,\n")]).unwrap(),
+            vec!["<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g2> ."]
+        );
+        // (c) TWO subject graph maps, only one NULL: the survivor still scopes everything.
+        let two_maps = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:graph ex:g1 ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+        );
+        assert_eq!(
+            r2rml_nt(&two_maps, &[("t", "id,v,cat\n1,x,\n")]).unwrap(),
+            vec!["<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g1> ."]
+        );
+    }
+
+    /// When EVERY declared graph map generates NULL the statement is unscoped and dropped — a
+    /// declared-but-NULL graph set is not the same thing as no graph maps at all, so there is
+    /// no silent fallback into the default graph.
+    #[test]
+    fn r2rml_all_null_graph_maps_drop_the_statement() {
+        let mapping = format!(
+            "{PREAMBLE}\
+             ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+               rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:class ex:C ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/g/{{cat}}\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ] ;\n\
+               rr:predicateObjectMap [ rr:predicate ex:q ; rr:objectMap [ rr:column \"v\" ] ;\n\
+                 rr:graphMap [ rr:template \"http://example.com/h/{{cat}}\" ] ] .\n"
+        );
+        // Row 1 keeps everything; row 2's NULL `cat` empties BOTH scopes, so it emits nothing.
+        assert_eq!(
+            r2rml_nt(&mapping, &[("t", "id,v,cat\n1,x,red\n2,y,\n")]).unwrap(),
+            vec![
+                "<http://example.com/r/1> <http://example.com/p> \"x\" <http://example.com/g/red> .",
+                "<http://example.com/r/1> <http://example.com/q> \"x\" <http://example.com/g/red> .",
+                "<http://example.com/r/1> <http://example.com/q> \"x\" <http://example.com/h/red> .",
+                "<http://example.com/r/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/C> <http://example.com/g/red> .",
+            ]
+        );
+    }
+
+    /// A graph-map-free mapping keeps the N-Triples fast path (no quad column at all).
+    #[test]
+    fn r2rml_without_graph_maps_stays_ntriples() {
+        let mapping = format!(
+            "{PREAMBLE}ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+             rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ] ;\n\
+             rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+        );
+        let tables = [("t", "id,v\n1,x\n")];
+        assert!(!r2rml_maps(&mapping, &tables).unwrap()[0].uses_graphs());
+        assert_eq!(
+            r2rml_nt(&mapping, &tables).unwrap(),
+            vec!["<http://example.com/r/1> <http://example.com/p> \"x\" ."]
+        );
+    }
+
+    /// Graph maps must generate IRIs — a literal or blank-node graph is a loud error.
+    #[test]
+    fn r2rml_graph_map_must_be_an_iri() {
+        for (frag, needle) in [
+            ("rr:graphMap [ rr:column \"v\" ; rr:termType rr:BlankNode ]", "cannot be a blank node"),
+            ("rr:graph \"g\"", "only valid in object position"),
+        ] {
+            let err = r2rml_nt(
+                &format!(
+                    "{PREAMBLE}ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+                     rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; {frag} ] ;\n\
+                     rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+                ),
+                &[("t", "id,v\n1,x\n")],
+            )
+            .unwrap_err();
+            assert!(err.contains(needle), "{err}");
+        }
+    }
+
+    // ---- row provenance (sq-u1z86) -----------------------------------------------------
+
+    /// `--row-provenance` links a custom-template subject back to the exact source row.
+    #[test]
+    fn row_provenance_direct_mapping() {
+        let opts = DirectOpts {
+            base: "http://example.com/".into(),
+            template: Some("http://example.com/emp/{ID}".into()),
+            class: Some(None),
+            infer: true,
+            provenance: true,
+        };
+        assert_eq!(
+            direct_nt("ID\n7\n", &opts, "people"),
+            vec![
+                "<http://example.com/emp/7> <http://example.com/people#ID> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+                "<http://example.com/emp/7> <http://www.w3.org/ns/prov#wasDerivedFrom> <http://example.com/people/row/1> .",
+            ]
+        );
+    }
+
+    /// The same option works under R2RML, and follows the row into its NAMED graph.
+    #[test]
+    fn row_provenance_r2rml_follows_the_graph_map() {
+        let mapping = format!(
+            "{PREAMBLE}ex:TM rr:logicalTable [ rr:tableName \"t\" ] ;\n\
+             rr:subjectMap [ rr:template \"http://example.com/r/{{id}}\" ; rr:graph ex:g ] ;\n\
+             rr:predicateObjectMap [ rr:predicate ex:p ; rr:objectMap [ rr:column \"v\" ] ] .\n"
+        );
+        let got = r2rml_nt_prov(&mapping, &[("t", "id,v\na,x\nb,y\n")], true).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                "<http://example.com/r/a> <http://example.com/p> \"x\" <http://example.com/g> .",
+                "<http://example.com/r/a> <http://www.w3.org/ns/prov#wasDerivedFrom> <http://example.com/t/row/1> <http://example.com/g> .",
+                "<http://example.com/r/b> <http://example.com/p> \"y\" <http://example.com/g> .",
+                "<http://example.com/r/b> <http://www.w3.org/ns/prov#wasDerivedFrom> <http://example.com/t/row/2> <http://example.com/g> .",
+            ]
+        );
+    }
+
     // ---- plumbing ----------------------------------------------------------------------
 
     #[test]
@@ -1794,7 +2535,7 @@ mod tests {
         let mut all = CsvRows::new(Cursor::new(csv.as_bytes().to_vec()), b',');
         let header = all.next().unwrap().unwrap();
         let map = compile_direct(&header, "people", &dopts()).unwrap();
-        let src: ChunkIter = Box::new(MappedRows { rows: all, map, row_num: 0, failed: false });
+        let src: ChunkIter = Box::new(MappedRows { rows: Box::new(all), map, row_num: 0, failed: false });
         let g = sparq_core::Graph::load_reader_parallel(NtReader::new(vec![src]), "ntriples").unwrap();
         assert_eq!(g.len(), 6); // 2 rows × (2 columns + rdf:type)
         let r = sparq_engine::query(

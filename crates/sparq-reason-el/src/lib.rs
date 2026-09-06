@@ -133,8 +133,10 @@ pub struct Report {
     /// and therefore excludes `owl:Thing`.
     pub thing_unsatisfiable: bool,
     /// [OPUS-4.8] sq-pbz04.2.5 (`abox`): ABox assertions the realiser DEFERRED as counted skips
-    /// — a `DataPropertyAssertion` (literal object; the `cdomain` point-range rescue is a
-    /// sequenced follow-up) or a `ClassAssertion` whose class expression is outside the EL
+    /// — a `DataPropertyAssertion` whose literal has no minted point range (EVERY literal object
+    /// without `cdomain`; [SONNET-4.6] sq-vkq9u rescues the exact-numeric ones as `{a} ⊑ ∃q.{v}`
+    /// when `abox` and `cdomain` are composed, leaving the string / lang-tagged / float-tier /
+    /// ill-formed cases deferred) or a `ClassAssertion` whose class expression is outside the EL
     /// fragment. Set only by [`realize`] / [`realize_graph`]; the TBox `Classifier::classify` /
     /// `classify_graph` leave it `0`. A non-zero count is the honest "n instance facts not
     /// internalized" signal (fail-closed — never a guessed typing).
@@ -244,7 +246,11 @@ impl ClassHierarchy {
 /// use sparq_core::Graph;
 /// use sparq_reason_el::Classifier;
 ///
-/// // A ⊑ ∃r.B, B ⊑ C, ∃r.C ⊑ D  ⊨  A ⊑ D  (the CR4 subsumption OWL 2 RL cannot derive).
+/// // A ⊑ ∃r.B, B ⊑ C, ∃r.C ⊑ D  ⊨  A ⊑ D  (CR4 — reasoning through an ∃r successor).
+/// // [OPUS-5] sq-2ch27: the "…which OWL 2 RL cannot derive" gloss this line used to carry was
+/// // measured WRONG for THIS shape — sparq's RL implements `scm-svf1`, and both restriction
+/// // nodes appear syntactically, so RL closes it too. The RL gap that does hold is pinned in
+/// // `crates/sparq-cli/tests/el_cli.rs::el_derives_what_rl_cannot` (TBox conjunction).
 /// let ttl = r#"
 ///   @prefix : <http://ex/> .
 ///   @prefix owl: <http://www.w3.org/2002/07/owl#> .

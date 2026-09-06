@@ -42,6 +42,10 @@ appear in this record.
 
 ## 2. Measured scoreboard (runner output, 2026-07-17, pins above)
 
+**Superseded by §2a (2026-07-27, bead sq-gzsky) for the `expand` and `compact`
+rows** — kept here as the before-picture the negative-lane rise is measured
+against.
+
 | operation | pass | fail | skip | total | rate (strict, skips count against) | rate over RUN tests |
 |---|---|---|---|---|---|---|
 | expand  | 276 | 0 | 109 | 385 | 71.6% | 276/276 = 100% |
@@ -56,6 +60,51 @@ There are **0 outright fails** at the pin: every sub-100% strict rate is a
 `#t0038`, a JSON-LD-**1.0**-only positive the compact lane RAN rather than
 skipped; bead sq-uzdw7 resolved it as an honest 1.0 skip — see the compact
 skip-bucket below and `floors::compact`.)
+
+## 2a. Re-measured after the negative lanes land (bead sq-gzsky, 2026-07-27)
+
+Lever **sq-oy1f.31** in §6 — "the whole remaining expand gap" — is spent. The
+`expand` and `compact` lanes now RUN every `NegativeEvaluationTest` in BOTH the
+ratchet lane (`crates/sparq-conformance/tests/jsonld_suite/`) and this runner:
+a negative passes iff the algorithm raises **exactly** the manifest's
+`expectErrorCode`; a *wrong* code is a FAIL, never a pass. Same pins, same
+document oracle, same command:
+
+| operation | pass | fail | skip | total | rate (strict) | Δ vs §2 |
+|---|---|---|---|---|---|---|
+| expand  | 381 | 4 | 0  | 385 | 98.9% | +105 pass, 109 → 0 skip |
+| compact | 243 | 2 | 1  | 246 | 98.7% | +15 pass, 18 → 1 skip |
+| flatten | 53  | 0 | 5  | 58  | 91.3% | unchanged |
+| frame   | 92  | 0 | 0  | 92  | 100.0% | unchanged (at the suite ceiling) |
+| fromRdf | 52  | 0 | 1  | 53  | 98.1% | unchanged |
+
+Wiring the negatives alone measured expand 371/14/0 and compact 242/3/1; seven
+spec-faithful `sparq-jsonld` fixes closed 10 more of the revealed divergences
+(`@included` arrayification, `@type`+`@direction`, datatype-IRI validation,
+blank-node datatypes, the term round-trip against a keyword, `@container`
+arrays in 1.0 mode, relative `@vocab` in 1.0 mode — itemised in
+`floors::expand`). Floors raised **expand 276 → 381**, **compact 228 → 243**;
+`frame` stays at 92 because 92/92 IS the pinned suite's ceiling.
+
+**The 6 remaining fails are recorded as FAILS, not absorbed into a skip
+bucket**, so they stay in the runner's complete failure listing:
+
+- `expand #ter02`/`#ter03` (`recursive context inclusion`),
+  `expand #ter24`/`#ter32` + `compact #te001` (`list of lists` /
+  `compaction to list of lists`) — five cases expecting JSON-LD **1.0** error
+  codes the 1.1 REC REMOVED from the `JsonLdErrorCode` registry (1.1 replaces
+  the first with `context overflow` on a processor-defined limit and ALLOWS a
+  list of lists outright). `sparq_jsonld::JsonLdErrorCode` is a deliberately
+  CLOSED mirror of the 1.1 registry and cannot name them.
+- `compact #te002` (`IRI confused with prefix`) — a REAL 1.1 gap: IRI
+  Compaction step 8 must abort when the scheme of an authority-less IRI matches
+  a `@prefix`-flagged term. `context::inverse::compact_iri` is infallible
+  (`-> String`), so raising it needs a fallible signature threaded through the
+  compaction walk; scoped as follow-up rather than folded into this rise.
+
+This trades the §2 "0 outright fails" property for 120 fewer unverified skips
+and a gated error-code registry — the honest direction, but the property is
+genuinely gone and is not claimed below.
 The document-level oracle is the pinned sq-kk1mq comparator (key order
 insignificant; array order significant only inside `@list`; exact integral /
 f64-fallback numerics) — the same oracle the `sparq-conformance` ratchet lane
@@ -93,20 +142,23 @@ Peer numbers are the official JSON-LD 1.1 EARL report subjects quoted in
 report denominators are SMALLER — a real suite-version mismatch, so rates are
 loosely comparable only).
 
+Rates below are the §2a re-measurement (sq-gzsky) for `expand`/`compact`.
+
 | operation | sparq (strict) | best published peers | verdict |
 |---|---|---|---|
-| expand  | 71.6% | jsonld-cpp / JSON-LD.ex 100.0, Titanium 98.1, jsonld.js 97.3 | **BEHIND** (driver: deferred negative lane, sq-oy1f.31) |
-| compact | 92.6% | JSON-LD.ex 99.6, Titanium 98.0, jsonld.js 97.5 | **BEHIND**, narrowed from .22's stale 75.6 (floor has risen 186→228); residual = 17 negatives + the `#t0038` 1.0-only skip |
+| expand  | 98.9% | jsonld-cpp / JSON-LD.ex 100.0, Titanium 98.1, jsonld.js 97.3 | **AT PARITY** with the mid-field at sparq's pin (denominators differ — loosely comparable); .22's 71.7 and §2's 71.6 both pre-date the negative lane. Residual = 4 retired-1.0-code fails |
+| compact | 98.7% | JSON-LD.ex 99.6, Titanium 98.0, jsonld.js 97.5 | **AT PARITY**, from .22's stale 75.6 via 186→228→243; residual = 1 retired-1.0-code fail, the `IRI confused with prefix` gap, and the `#t0038` 1.0-only skip |
 | flatten | 91.3% | listed peers 100.0 | **BEHIND** (small; 5 skips) |
 | frame   | 100.0% | jsonld.js 97.8, Titanium 96.7 | **AHEAD at sparq's pin** (.22's 66.3 is stale — floor rose 61→92; denominator 92 vs report 91, loosely comparable) |
 | fromRdf | 98.1% | Titanium / Sophia 98.1 (of 52) | **PARITY** (.22 cited the then-floor 51; current measured 52/53) |
 | toRdf (native) | not implemented | jsonld-cpp 99.8, JSON-LD.ex 99.6 | **BEHIND** natively; engine-path toRdf is a separate 413/467 = 88.4% ratchet (§4) |
 
-The epic-level verdict stays **BEHIND** — honestly driven by (a) the deferred
-negative-test lanes (expand/compact/flatten) and (b) native toRdf not existing
-yet — but the .22 snapshot materially understated the current estate on
-compact and frame. (The former driver (c), compact `#t0038`, is resolved: an
-honest 1.0 skip per sq-uzdw7, still counted against the strict rate.)
+The epic-level verdict stays **BEHIND**, now on a single driver: **native toRdf
+does not exist yet** (bead sq-oy1f.30 — see §4). Driver (a), the deferred
+negative-test lanes, is spent for `expand` and `compact` (sq-gzsky, §2a); only
+`flatten`'s 1 negative remains in that bucket. (Driver (c), compact `#t0038`,
+was resolved earlier as an honest 1.0 skip per sq-uzdw7, still counted against
+the strict rate.)
 
 ## 4. toRdf honesty note
 
@@ -135,7 +187,9 @@ sq-hmd7l.15/.43) or the cross-engine table script (sq-hmd7l.22).
 
 - **sq-oy1f.31** — negative-test lanes (error-code completeness) for
   expand/compact/flatten: worth up to +109 / +17 / +1 strict-rate points and
-  is the whole remaining expand gap.
+  is the whole remaining expand gap. **SPENT for expand + compact**
+  (bead sq-gzsky, 2026-07-27 — §2a: +105 / +15 realised, floors 276 → 381 and
+  228 → 243). `flatten`'s single negative is the only part still open.
 - **sq-oy1f.30** — native toRdf (Deserialization to RDF); once landed, the
   runner grows a real toRdf row.
 - **sq-uzdw7** — RESOLVED (2026-07-17): compact `#t0038` ("Index map
@@ -147,5 +201,13 @@ sq-hmd7l.15/.43) or the cross-engine table script (sq-hmd7l.22).
   future 1.0-only positive is silently absorbed). "Fixing" it was rejected as
   unreachable: its 1.0-era prefixing expectation contradicts `#tp001` (a
   1.1-suite test run in 1.0 processing mode), so a REC-conformant processor
-  cannot pass both. Floors unchanged (compact stays 228; fail 1→0,
-  skip 17→18).
+  cannot pass both. Floors unchanged at the time (compact stayed 228; fail 1→0,
+  skip 17→18); the `#t0038` skip itself is unchanged by sq-gzsky.
+- **`IRI confused with prefix` in IRI Compaction** — the one non-retired-code
+  fail left (compact `#te002`, §2a). Needs `context::inverse::compact_iri` to
+  become fallible so step 8 can abort. NEW, opened by sq-gzsky.
+- **The 5 retired-1.0-error-code cases** (expand `#ter02`/`#ter03`/`#ter24`/
+  `#ter32`, compact `#te001`, §2a) — a maintainer decision, not an
+  implementation task: modelling them means adding JSON-LD **1.0** codes to
+  `JsonLdErrorCode`, whose closed-enum rationale is that it mirrors the **1.1**
+  registry exactly. NEW, opened by sq-gzsky.

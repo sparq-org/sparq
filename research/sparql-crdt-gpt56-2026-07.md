@@ -8,6 +8,19 @@ opt-in implementation `sq-tag1q.7`. It extends those beads and the E2EE survey i
 [`e2ee-queryable-options.md`](./e2ee-queryable-options.md); it does not replace the
 proposal draft or duplicate E2EE envelope/key design.
 
+> **Reconciled 2026-07-26 (sq-1vbdy).** This is the **single** RDF CRDT of the sparq
+> estate: the E2EE Profile BR
+> ([`e2ee-queryable-nextgraph-variant-2026-07.md`](./e2ee-queryable-nextgraph-variant-2026-07.md)
+> + its v0 binding
+> [`e2ee-nextgraph-variant-gpt56-2026-07.md`](./e2ee-nextgraph-variant-gpt56-2026-07.md))
+> carries **these** deltas and defines no CRDT of its own — see the binding contract (one
+> replication domain per branch, one shared membership epoch, opaque-payload encoding
+> boundary) in
+> [`e2ee-program-reconciliation-2026-07.md`](./e2ee-program-reconciliation-2026-07.md).
+> Where this record and the frozen proposal `site/specs/sparql-crdt.typ` (sq-tag1q.4)
+> differ, **the proposal wins**: notably its `CRDT-SCOPE` puts `COPY`/`MOVE`/`ADD` outside
+> the profile, superseding those three rows of §5.2.
+>
 > **Honesty boundary.** The algorithms below are *designed* to make replicas that have
 > accepted the same valid deltas expose the same RDF dataset. The algebra is based on
 > established dotted observed-remove and delta-state CRDT constructions, but this exact

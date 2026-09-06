@@ -95,16 +95,37 @@ jobs:
 
       # wasm-pack BEFORE `npm ci`: the package's `prepare` lifecycle (sq-bkag git-pin
       # build) runs on `npm ci` and needs wasm-pack on PATH to compile the wasm engine.
+      #
+      # [OPUS-5] sq-khm3f: DOWNLOAD the prebuilt release binary — do NOT `cargo install
+      # wasm-pack --locked`. That compiled wasm-pack (and its whole chrono/wasm-bindgen
+      # source tree) from crates.io on EVERY run of this GATING lane, so any transient
+      # crates.io/CDN blip red-gated an unrelated PR: PR #1131 died on `download of
+      # wa/sm/wasm-bindgen failed / curl failed: [16] Error in the HTTP2 framing layer`,
+      # cleared by a plain re-run. Fetching one static musl tarball instead collapses
+      # that network surface from wasm-pack's whole dependency graph to a single file,
+      # and jetli/wasm-pack-action fetches it with @actions/tool-cache, which retries a
+      # failed download — so the one remaining request is itself flake-tolerant. It
+      # installs to ~/.cargo/bin (already on PATH; disjoint from the registry/git paths
+      # the rust-cache step above owns, so the two do not interact). Same action, same
+      # SHA pin, same shape as the `wasm` job in ci.yml already uses for wasm-pack.
+      #
+      # The version is pinned EXACTLY (repo tool-pin doctrine, cf. sq-tool-pin): 0.15.0
+      # is wasm-pack's current release, i.e. what `cargo install wasm-pack` resolved to
+      # here, so this is version-neutral today. `version: latest` would re-add an
+      # unauthenticated api.github.com release lookup — a second rate-limit-flake
+      # source, which is the thing being removed. Bump deliberately, not implicitly.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
       # [OPUS-4.8] sq-fvz8: install the FULL workspace from the repo ROOT, not just the
       # `js/` member. The cross-language Solid differential oracle (test/solid-differential
       # .test.mjs, PR #922) imports n3 / @solid/acl-check / @solidlab/policy-engine / rdflib,
       # which are declared as ROOT devDependencies (deliberately NOT in js/package.json — the
-      # js-sbom lane derives the published @jeswr/sparq SBOM from js/package.json's deps, so
+      # js-sbom lane derives the published @sparq-org/sparq SBOM from js/package.json's deps, so
       # putting test-only deps there would pollute the runtime SBOM, sq-f04e/#887). A member-
-      # scoped `npm ci` (working-directory: js) installs ONLY @jeswr/sparq's own closure and
+      # scoped `npm ci` (working-directory: js) installs ONLY @sparq-org/sparq's own closure and
       # NOT the root workspace devDeps, so those imports were ERR_MODULE_NOT_FOUND -> red `js`
       # gate. A root install hoists them into the workspace node_modules where the test (and
       # the `js`-member build) both resolve them. js/package.json is untouched, so the
@@ -123,7 +144,7 @@ jobs:
       # (packages/rdfjs-conformance, a candidate rdfjs/ contribution). Typecheck it and run its
       # OWN parity suites — they drive the harness against N3.js + @rdfjs/dataset to prove it is
       # implementation-agnostic. The `js` test step above already runs the harness against
-      # @jeswr/sparq (js/test/rdfjs-conformance.test.mjs). Run from the repo root so the
+      # @sparq-org/sparq (js/test/rdfjs-conformance.test.mjs). Run from the repo root so the
       # workspace-linked harness + its devDeps resolve.
       - name: RDF/JS conformance harness (typecheck + N3 parity)
         working-directory: packages/rdfjs-conformance
@@ -142,7 +163,7 @@ jobs:
           npm test
           npm run check:package
 
-      # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @jeswr/solid-server package — a local-dev
+      # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp): the @sparq-org/solid-server package — a local-dev
       # Solid/LDP pod backed by the sparq-lws wasm handler. Build the wasm bundle
       # (crates/sparq-lws-wasm, matched by the `crates/sparq-*-wasm/**` paths filter above) with
       # the same wasm-pack installed earlier in this job, then run the package's node:test suite
@@ -159,9 +180,13 @@ jobs:
           npm run check:package
 
       # Publish guardrail + git-pin verification (sq-bkag): `prepare` wired, the
-      # `files` allowlist intact, and the packed tarball actually ships dist/ + wasm/.
+      # `files` allowlist intact, and the packed tarball actually ships dist/ + wasm/
+      # + the `--target nodejs` CommonJS engine in wasm-node/ ([OPUS-5] sq-2hk).
       - name: Package guardrail check
         run: npm run check:package
 
+      # Both targets are built from the same crate + feature set (the glue differs,
+      # so the two byte counts are close but not identical) — printing both makes a
+      # feature-set drift between them visible in the log.
       - name: Report wasm size
-        run: ls -l wasm/sparq_wasm_bg.wasm
+        run: ls -l wasm/sparq_wasm_bg.wasm wasm-node/sparq_wasm_bg.wasm

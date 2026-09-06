@@ -9,7 +9,7 @@ This is the **worker-tier core** (≤32 KiB) loaded by codex. For the full refer
 sparq is a from-scratch **RDF triplestore and SPARQL 1.1 engine in Rust** — dictionary-encoded, six sorted permutation indexes, parallel + streaming execution, RDFS/OWL-RL/N3 inference, an out-of-core (mmap) mode with a compressed on-disk format, a WebAssembly build, and a W3C-conformant HTTP server. The engine is published across several surfaces:
 
 - **Rust crates** (crates.io): `sparq-core`, `sparq-engine` (core), `sparq-cli`, `sparq-server`, plus opt-in capability crates. `sparq-reason-el` is a **separate** opt-in crate — an OWL 2 EL consequence-based classifier — see [`skills/inference/SKILL.md`](skills/inference/SKILL.md).
-- **npm**: `@jeswr/sparq` — RDF/JS-typed API over the wasm build.
+- **npm**: `@sparq-org/sparq` — RDF/JS-typed API over the wasm build.
 - **PyPI**: `sparq-rdf` (import name `sparq`) — pyo3/maturin bindings.
 
 Status: experimental research engine; the API is unstable.
@@ -23,9 +23,11 @@ Usage instructions for each public surface are packaged as Agent Skills under [`
 ## Working on this repo (contributor agents)
 
 - Build: `cargo build --workspace`. Test: `cargo test --workspace`.
-- Lint is enforcing (CI gates on it): `cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings` and `cargo fmt --check` must pass. Run clippy over the **full workspace**, not a single crate.
+- Lint is enforcing (CI gates on it): `cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings` must pass. Run clippy over the **full workspace**, not a single crate.
+- `cargo fmt --all --check` is **informational, not a gate** — the deferred one-time workspace reformat means it fails on files your change did not touch. Format only what you touched; never run `cargo fmt --all`. (The formatter version itself is pinned by `rust-toolchain.toml`.)
 - The core crates (`sparq-core`, `sparq-engine`) must stay dependency-free of the opt-in capability crates, and the wasm build must not regress — both are enforced in CI.
 - **New capabilities are opt-in by default** (a dedicated crate and/or a cargo feature that is OFF by default), so `sparq-core`/`sparq-engine` stay lean and the lean wasm bundle never grows.
+- **Frontend optional-code policy (sq-mrrn4):** the same lean-by-default rule for the site/GUI. Any net-new frontend feature that is uncertain-value or rarely used and grows the bundle MUST load through a literal ESM dynamic `import()` taken on the user action that invokes it — `next/dynamic`/`React.lazy` for components, invocation-path `import()` for libraries and codecs (e.g. a compressed-codec decoder fetched only on the first upload of that file type). A feature flag or conditional render does **not** keep a static import out of the initial bundle. Classify every new frontend dependency in the PR as core/shared or optional, and register material optional chunks in `site/scripts/check-bundle.mjs`. Decision rule, exceptions, and the audit procedure: [AGENTS.md](AGENTS.md) and `.claude/skills/frontend-design/SKILL.md`.
 - Conformance: the W3C SPARQL, inference, W3C SHACL, OGC GeoSPARQL and Solid WAC + ACP suites must stay green and are each **ratcheted** (the committed floor only goes up).
 - **Merge discipline:** the gate for landing any change is *full-workspace clippy + `cargo test` + the conformance/perf ratchets*, all green.
 
@@ -36,7 +38,7 @@ Usage instructions for each public surface are packaged as Agent Skills under [`
 - a `pub` item in a crate's public surface (a published crate's exported types, traits, functions, or their signatures);
 - a CLI flag, subcommand, or its behavior in `sparq-cli`;
 - an HTTP route, query/body parameter, or response shape in `sparq-server`;
-- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@jeswr/sparq`).
+- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@sparq-org/sparq`).
 
 Then edit the corresponding `skills/<surface>/SKILL.md` so its instructions and examples still compile and run against the new surface. Do not split this across a follow-up PR — a skill that documents a removed flag or a changed signature is worse than no skill. If the change spans surfaces, update every affected `SKILL.md`.
 

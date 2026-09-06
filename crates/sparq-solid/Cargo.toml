@@ -23,14 +23,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
-sparq-reason = { path = "../sparq-reason", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
+# [SONNET-4.6] sq-zgbso.4 (epic sq-zgbso, issue #1582): the materializer evaluates the
+# WAC/ACP rules on the id-level COMPILED evaluator (`sparq_reason::n3::compiled`), so the
+# `compiled-rules` slice is REQUIRED, not optional — the rule text is lowered to the IR
+# once per process and the facts enter as `[Id; 3]` straight from the source `Graph`, with
+# no per-call N3 text round trip. It pulls only the `sparq-substrate` rows+join slices
+# (an in-tree path dep, no new external crate); `sparq-core`/`sparq-engine` are untouched.
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", default-features = false, features = [
+    "compiled-rules",
+] }
 # [OPUS-4.8] sq-h3uk: the ODRL→AUTH_GRAPH bridge. OPTIONAL + behind the `odrl-bridge`
 # feature (OFF by default), so the default sparq-solid build carries zero ODRL code,
 # deps, or runtime cost — sparq-policy is NOT forced onto the default build. Research
 # track (the single-node bridge of epic sq-3183), NOT a production cutover.
-sparq-policy = { path = "../sparq-policy", version = "0.1.0", default-features = false, optional = true }
+sparq-policy = { path = "../sparq-policy", version = "0.1.1", default-features = false, optional = true }
 # [OPUS-4.8] sq-pfae PoC (issue #940): the trust-graph admission gate. OPTIONAL +
 # behind the `trust-graph` feature (OFF by default), so the default sparq-solid build
 # carries ZERO trust-graph code, deps, or runtime cost — it behaves EXACTLY as WAC/ACP
@@ -38,7 +46,16 @@ sparq-policy = { path = "../sparq-policy", version = "0.1.0", default-features =
 # publish=false; the ZK estate it composes with is externally unaudited, sq-qhy4), NOT
 # a production cutover. Path-only (no crates.io version): the `trust-graph` feature is a
 # research-only feature and is not part of sparq-solid's published feature set.
-sparq-trust = { path = "../sparq-trust", optional = true }
+sparq-trust = { path = "../sparq-trust", version = "0.1.1", optional = true }
+# [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc` —
+# W3C Data Integrity (`eddsa-rdfc-2022`) verification of a presented credential. OPTIONAL +
+# behind the `acp-vc` feature (OFF by default), so the default sparq-solid build carries ZERO
+# credential-verification code or crypto deps. The `acp:vc` MATCHER SEMANTICS (fail-closed
+# unless a verified holding is supplied) are unconditional and need no dependency — this dep
+# only provides the verification that populates the trusted channel. Path-only (no crates.io
+# version): `sparq-vc` is `publish = false`, so like `trust-graph` this is a research-only
+# feature and is not part of sparq-solid's published feature set.
+sparq-vc = { path = "../sparq-vc", version = "0.1.1", optional = true }
 oxrdf.workspace = true
 spargebra.workspace = true
 rustc-hash.workspace = true
@@ -111,6 +128,30 @@ pattern-scope = []
 # escape hatch does NOT widen the readable set, it only reinstates the (more permissive-looking
 # but equi-authorized) bare-pattern-scans-the-union convenience.
 legacy-union-default-graph = []
+
+# [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc`.
+#
+# READ THIS BEFORE ASSUMING THE FEATURE GATES THE SEMANTICS — it does not. `acp:vc` matcher
+# evaluation is UNCONDITIONAL: an `acp:vc` matcher is satisfied only by an agent the caller
+# has asserted (through the always-available `VerifiedCredentials` trusted channel) holds a
+# verified credential for, and with no assertion it FAILS CLOSED. That correction ships in
+# the default build because the previous behaviour was an over-grant — `acp:vc` was an
+# unrecognized attribute, so a credential-gated matcher looked agent-unconstrained and
+# granted auth:Public, i.e. everyone including anonymous.
+#
+# What this OPT-IN feature adds is only the machinery that POPULATES the channel:
+# `VcRequirement` + `VerifiedCredentials::admit_data_integrity`, which verify a presented
+# credential's W3C Data Integrity proof (`eddsa-rdfc-2022` = Ed25519 over RDFC-1.0) via
+# `sparq-vc`, check the signer is an accepted issuer, and check the credential type and
+# exact-match claims. OFF by default, so the default build carries no crypto dependency.
+#
+# HONEST SCOPE: trust-the-issuer only — authenticity, integrity, non-repudiation. It reveals
+# the whole credential to the verifier and makes NO privacy, unlinkability, zero-knowledge or
+# selective-disclosure claim. The zero-knowledge backend (prove an attribute without
+# revealing the credential) is NOT wired here: it needs the ZK estate, whose external
+# accredited-cryptographer audit is still PENDING (sq-qhy4). Revocation and credential expiry
+# are not checked either — a holding lasts until the caller re-materializes.
+acp-vc = ["dep:sparq-vc"]
 
 # [OPUS-4.8] sq-gq28y (issue #1546): the vendored solid-sparql-query query-semantics
 # conformance suite runner (tests/conformance_solid_sparql_query.rs) parses the pinned

@@ -37,8 +37,10 @@ on:
     inputs:
       tag:
         description: >-
-          Release tag the built assets attach to (e.g. v0.1.0-dev). A developer/test dispatch
-          SHOULD use a -dev / pre-release suffix so it is never mistaken for a canonical release.
+          Release tag the built assets attach to (e.g. v0.1.0-dev). MUST be a vX.Y.Z release tag —
+          the publish-cadence guard (#2552) refuses anything else, because it cannot tell which tag
+          to exclude from the interval sources. A developer/test dispatch SHOULD use a -dev /
+          pre-release suffix so it is never mistaken for a canonical release.
           This is the single source of asset naming + the GitHub Release tag on the dispatch path.
         required: true
         type: string
@@ -72,6 +74,55 @@ jobs:
       - name: Resolve version
         id: v
         run: echo "version=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      # [OPUS-5] issue #2552 — THE CADENCE GUARD ON THE TAG-PUSH PATH. LOAD-BEARING.
+      #
+      # Maintainer, verbatim: "We need to make sure that we do not create many many
+      # releases so please put a policy in place to ensure we do not do more than 1
+      # release a day." The policy is ONE constant — `MIN_RELEASE_INTERVAL` (24h) in
+      # scripts/release-interval-guard.py — enforced at BOTH points a release can start:
+      #   * release-plz.yml's `release-plz-release` job (the Release-PR path), and
+      #   * HERE, the `v*` tag push, which is the runbook's canonical instruction
+      #     ("nothing publishes until you push a `v*` tag") and was previously UNCADENCED:
+      #     a hand-pushed tag fires this workflow directly, never touching release-plz.
+      #
+      # WHY IN `setup` AND NOT ITS OWN JOB: every other job here depends on `setup`
+      # (directly, or through it), so a refusal stops the archives, the SBOM/VEX, the
+      # GitHub Release and the ghcr image. A separate `needs:` job would instead SKIP its
+      # dependents on the dispatch path, which silently produces a release with no assets.
+      #
+      # WHY `--released-tag`: on a tag push, `v<workspace version>` is already in the tag
+      # list, so the guard's "already tagged => `release-plz release` is a no-op" branch
+      # would short-circuit to ALLOW and this step would be VACUOUS. `--released-tag`
+      # excludes the tag being cut and suppresses that branch, so the interval is measured
+      # against the PREVIOUS release. The `fetch-depth: 0` checkout below is a
+      # PRECONDITION — on a shallow checkout the tag list is not authoritative and the
+      # guard refuses rather than guessing.
+      #
+      # WHY UNCONDITIONAL — including `workflow_dispatch`. A dispatch build looks like a
+      # developer/test path (pre-release, `dev-`-prefixed image tags), but the Release it
+      # creates fires `release: published`, and publish.yml's `npm` job runs on ANY
+      # `release` event. So a dispatch reaches a registry too: exempting it would leave the
+      # loophole this guard exists to close. The escape hatch the guard's no-override
+      # design reserves is a maintainer publishing BY HAND, outside CI — not dispatching a
+      # workflow that publishes for them. Consequence, by design: `inputs.tag` must be a
+      # `vX.Y.Z` release tag (a `-dev` suffix is fine); anything else refuses, because the
+      # guard cannot tell which tag to exclude from the cadence sources.
+      #
+      # DO NOT add an `if:`, do not add `continue-on-error`, do not swap `--enforce` for
+      # `--dry-run`, and do not append `|| true`.
+      # scripts/tests/test_release_publish_guard.py parses THIS FILE structurally and
+      # fails on each of those mutations.
+      - name: Checkout (full history — the `v*` tag list must be authoritative)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish-cadence guard (fail-closed minimum release interval, #2552)
+        env:
+          # Via env, never string-interpolated into the shell: a tag name is attacker-
+          # controlled text and `run:` interpolation would splice it into the command.
+          RELEASED_TAG: ${{ steps.v.outputs.version }}
+        run: python3 scripts/release-interval-guard.py --enforce --repo-root . --released-tag "${RELEASED_TAG}"
 
   # ---- 1. build + package per hardware tier ----
   # [OPUS-4.8] sq-v286.2: invoke the shared reusable matrix in `archive` mode. The 10-tier
@@ -93,6 +144,59 @@ jobs:
     with:
       mode: archive
       version: ${{ needs.setup.outputs.version }}
+
+  # ---- 1a. ISOLATED trusted-builder SLSA provenance over the release archives ----
+  # [OPUS-5] sq-toze.25 (GX-11 / SL-B3-b) — the SLSA **Build L3** lane for the release archives.
+  #
+  # THE GAP THIS CLOSES. `package` (above) already emits provenance with
+  # `actions/attest-build-provenance`, but that step runs in the SAME job as
+  # `cargo auditable build`: the OIDC token and the signing step share an execution context with
+  # user-controlled build steps, so a compromised build step could in principle taint the inputs
+  # the attestation describes. That ceiling is SLSA Build **L2**, and it is what
+  # compliance/slsa/controls.md SL-B3-b records as the L3 blocker.
+  #
+  # THE BOUNDARY. `slsa-framework/slsa-github-generator`'s generic generator is a trusted
+  # reusable workflow: it runs in its OWN job, mints its OWN OIDC token, and the only thing it
+  # accepts from us is `base64-subjects` — a list of digests. No step of ours executes inside it,
+  # and nothing inside it can be reached from `package`. So the provenance is generated by a
+  # control plane the build steps cannot influence, which is the L3 property.
+  #
+  # WHAT THIS DOES *NOT* CLAIM. The subjects are the digests the build matrix reported. A build
+  # step that produced a malicious archive still gets provenance over THAT archive — L3 makes the
+  # provenance non-falsifiable, it does not make the build trustworthy. And the scope of THIS job
+  # is the ARCHIVES ONLY — [OPUS-5] #4570 added the sibling `provenance-artifacts` job for the GUI
+  # bundles / SBOM/VEX / conformance report and `dist.yml#provenance` for the tiered binaries, but
+  # the ghcr image still attests in-band (L2). GX-11 therefore NARROWS; it does not close.
+  #
+  # WHY A TAG REF, NOT A SHA — the ONE documented exception to this repo's SHA-pin convention.
+  # The generator derives the trusted-builder identity that ends up in the provenance (and that
+  # `slsa-verifier` checks a consumer policy against) from its own `@ref`. Referenced by commit
+  # SHA it cannot resolve a builder identity a verifier will accept, so the tag IS the trust
+  # anchor here — pinning to a SHA would break the very property the job exists to provide.
+  # Bump this tag deliberately (it is a trust decision, not a Dependabot bump).
+  #
+  # STATUS — DOCUMENTED-UNTESTED. release.yml is tag/dispatch-triggered, so this job does not run
+  # on a PR. Its shape is pinned structurally by scripts/tests/test_release_slsa_l3_provenance.py;
+  # its RUNTIME behaviour is first exercised on the next `v*` tag. Until a tag proves it green,
+  # treat the L3 claim as WIRED, not VERIFIED (compliance/slsa/controls.md says exactly this).
+  provenance:
+    needs: [setup, package]
+    permissions:
+      actions: read # read the workflow definition the provenance records as the entry point
+      id-token: write # mint the generator's OWN signing identity (never shared with `package`)
+      contents: read # `upload-assets: false` below — the `release` job attaches the file, not this
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      # The ONLY input crossing the isolation boundary: digests, computed by `package`, of the
+      # bytes it uploaded. Deliberately threaded — this job must never recompute them from
+      # artifacts, which would drag the build's outputs back inside the trusted builder.
+      base64-subjects: ${{ needs.package.outputs.hashes }}
+      # `upload-assets: false`: the generator's own uploader attaches to `github.ref`'s release,
+      # which on a workflow_dispatch is a BRANCH (the same trap sq-gl3cf fixed everywhere else),
+      # and the `release` job below is the single place this pipeline creates the Release. We
+      # download the provenance artifact there instead, so it lands in SHA256SUMS for free.
+      upload-assets: false
+      provenance-name: sparq-cli-${{ needs.setup.outputs.version }}.intoto.jsonl
 
   # ---- 1b. per-release CycloneDX SBOM + VEX ----
   # [OPUS-4.8] sq-toze.3 (GX-2): emit a CycloneDX SBOM for each released binary plus a VEX
@@ -122,7 +226,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-cyclonedx
       # [OPUS-4.8] sq-toze.27 (GS-3): Node for the JS/npm SBOM of the published WASM client.
@@ -137,7 +241,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.version }}
         run: scripts/gen-sbom-vex.sh
       # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: per-release CycloneDX SBOMs for
-      # `@jeswr/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
+      # `@sparq-org/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
       # Runtime + full build trees land in sbom/, so the attestation glob below covers all four.
       # [OPUS-4.8] sq-gl3cf: gen-js-sbom.sh ALSO reads GITHUB_REF_NAME for the version-stamped
       # filenames, so it needs the same VERSION thread for the dispatch path to name JS SBOMs right.
@@ -151,6 +255,34 @@ jobs:
           subject-path: |
             sbom/*.sbom.cdx.json
             sbom/*.vex.cdx.json
+      # [OPUS-5] #4570 (GX-11 residual): publish the SBOM/VEX digests as data for the ISOLATED
+      # trusted builder (`provenance-artifacts` below). The in-band attestation above stays — it
+      # is what `gh attestation verify` reads — but it shares this job's execution context with
+      # the generator scripts, which is the L2 ceiling. Digests are taken over the SAME set the
+      # `sbom-vex` artifact uploads (`sbom/*.json`), so every byte that reaches the Release is a
+      # subject. `cd sbom` so each subject name is the RELEASED asset name, not a path.
+      # ubuntu-only job, so GNU `sha256sum` is always present (unlike the matrix lanes).
+      - name: Record SBOM/VEX digests (subjects for the isolated provenance builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sbom
+          shopt -s nullglob
+          files=( *.json )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "ERROR: SBOM/VEX generation produced no artifact to attest" >&2
+            exit 1
+          fi
+          sha256sum -- "${files[@]}" > subject-hashes-sbom.txt
+          cat subject-hashes-sbom.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # `subject-hashes-*` is the collector's download pattern and is deliberately DISJOINT
+          # from both `pkg-*` (published release assets) and `archive-hashes-*` (the archives'
+          # own subjects) — the two provenance bundles must not silently attest each other's set.
+          name: subject-hashes-sbom
+          path: sbom/subject-hashes-sbom.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-vex
@@ -209,6 +341,27 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: conformance/served-conformance-*.json
+      # [OPUS-5] #4570 (GX-11 residual): same digest hand-off as the SBOM lane — the conformance
+      # report is a consumer-facing assurance artifact, so provenance a compromised build step
+      # could restate is exactly the wrong property for it.
+      - name: Record conformance-report digests (subjects for the isolated provenance builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd conformance
+          shopt -s nullglob
+          reports=( served-conformance-*.json )
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "ERROR: the conformance run produced no report to attest" >&2
+            exit 1
+          fi
+          sha256sum -- "${reports[@]}" > subject-hashes-conformance.txt
+          cat subject-hashes-conformance.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: subject-hashes-conformance
+          path: conformance/subject-hashes-conformance.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: served-conformance
@@ -354,7 +507,7 @@ jobs:
       # resolves `next`/`cross-env` from root .bin. This is EXACTLY the install the proven-green
       # gui.yml `gui-app` ("Install workspace dependencies") + `tauri-e2e` jobs use.
       # (`npm install`, not `npm ci`, matches gui.yml — tolerant of a not-yet-regenerated lock.)
-      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @jeswr/sparq workspace
+      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @sparq-org/sparq workspace
       # member's `prepare` hook (js/guardrails/prepare-build.mjs) calling `execFileSync('npm',…)`
       # WITHOUT `shell:true`, so `npm.cmd` did not resolve on Windows (`spawnSync npm ENOENT`),
       # whose crash then triggered npm's rollback `EPERM rmdir node_modules/next` cleanup warnings.
@@ -557,11 +710,149 @@ jobs:
         with:
           subject-path: gui-bundles/*
 
+      # [OPUS-5] #4570 (GX-11 residual): this row's bundle digests, published as data for the
+      # ISOLATED trusted builder (`provenance-artifacts` below). Two things this step must get
+      # right, both of which fail only at release time:
+      #   * WRITE OUTSIDE gui-bundles/ — that directory is uploaded WHOLESALE as `pkg-gui-*`,
+      #     which the `release` job downloads with `pattern: pkg-*` straight into the published
+      #     assets. A digest list written next to the installers would ship as a release asset.
+      #   * PORTABLE DIGEST — this matrix has macOS rows, which have BSD `shasum` and no GNU
+      #     `sha256sum`; a bare `sha256sum` would red exactly the rows marked `soft`, so it would
+      #     not even fail loudly — it would silently drop those bundles from the subjects set.
+      - name: Record GUI bundle digests (subjects for the isolated provenance builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gui-subjects
+          OUT="../gui-subjects/subject-hashes-gui-${{ matrix.label }}.txt"
+          cd gui-bundles
+          shopt -s nullglob
+          bundles=( * )
+          if [ "${#bundles[@]}" -eq 0 ]; then
+            echo "ERROR: no staged GUI bundle to attest for ${{ matrix.label }}" >&2
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -- "${bundles[@]}" > "$OUT"
+          else
+            shasum -a 256 -- "${bundles[@]}" > "$OUT"
+          fi
+          cat "$OUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: subject-hashes-gui-${{ matrix.label }}
+          path: gui-subjects/subject-hashes-gui-${{ matrix.label }}.txt
+          if-no-files-found: error
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pkg-gui-${{ matrix.label }}
           path: gui-bundles/*
           if-no-files-found: error
+
+  # ---- 1e. collect the NON-ARCHIVE release-artifact digests into ONE `base64-subjects` blob ----
+  # [OPUS-5] #4570 (GX-11 residual). sq-toze.25 routed only the release ARCHIVES through the
+  # isolated trusted builder; the GUI bundles, the SBOM/VEX and the served-surface conformance
+  # report were left on in-band `actions/attest-build-provenance`, which signs inside the same job
+  # that produced the bytes — the L2 ceiling. This job is the digest hand-off that lets them cross
+  # the same boundary the archives already cross.
+  #
+  # WHY A SEPARATE COLLECTOR AND NOT ONE MERGED WITH `package`'s: keeping the archive lane's
+  # subjects disjoint means the slow GUI matrix (60-min timeout, `soft` rows that may fail) can
+  # never delay or fail-close the archives' provenance. Two bundles, two failure domains.
+  #
+  # It BUILDS nothing and holds NO signing identity (`contents: read`, no `id-token`) — it
+  # downloads text, validates its shape, base64-encodes it. Signing happens one job further out.
+  artifact-subjects:
+    name: collect artifact digests
+    needs: [sbom, served-conformance, gui-bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      hashes: ${{ steps.combine.outputs.hashes }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # `subject-hashes-*` only: `archive-hashes-*` belongs to the archives' own bundle and
+          # `pkg-*` are the published assets themselves.
+          pattern: subject-hashes-*
+          path: subject-hashes
+          merge-multiple: true
+      # FAIL-CLOSED, and specifically about COVERAGE, not just about well-formedness. A subjects
+      # blob that silently lost a lane would still produce a valid signature over a smaller set,
+      # and the release notes would go on claiming the lane is covered — the vacuous-artifact
+      # class the compliance register exists to prevent. So each lane is required by name.
+      # The `soft` macOS/Windows GUI rows may legitimately be absent (they are allowed to fail),
+      # but the Linux rows are BLOCKING, so at least one GUI list must always be present.
+      - name: Combine + base64-encode the subjects
+        id: combine
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd subject-hashes
+          shopt -s nullglob
+          for required in subject-hashes-sbom.txt subject-hashes-conformance.txt; do
+            if [ ! -s "$required" ]; then
+              echo "ERROR: '$required' missing or empty — a release artifact lane produced no subjects" >&2
+              exit 1
+            fi
+          done
+          gui=( subject-hashes-gui-*.txt )
+          if [ "${#gui[@]}" -eq 0 ]; then
+            echo "ERROR: no subject-hashes-gui-* list — every GUI bundle row failed to publish digests" >&2
+            exit 1
+          fi
+          cat -- subject-hashes-sbom.txt subject-hashes-conformance.txt "${gui[@]}" > all.sha256
+          while read -r digest name; do
+            if ! printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || [ -z "$name" ]; then
+              echo "ERROR: malformed sha256sum record: '$digest  $name'" >&2
+              exit 1
+            fi
+          done < all.sha256
+          echo "subjects for the isolated provenance builder:"
+          cat all.sha256
+          echo "hashes=$(base64 -w0 all.sha256)" >> "$GITHUB_OUTPUT"
+
+  # ---- 1f. ISOLATED trusted-builder SLSA provenance over the non-archive release artifacts ----
+  # [OPUS-5] #4570 (GX-11 residual / SL-B3-b). Structurally identical to `provenance` above — a
+  # BARE `uses:` of the trusted reusable builder, its own OIDC identity, no step of ours inside,
+  # and exactly one input across the boundary (`base64-subjects`, threaded from the collector).
+  # See `provenance`'s header for the full rationale, including WHY A TAG REF, NOT A SHA (the
+  # builder identity `slsa-verifier` matches against is derived from the `@ref`) and WHAT THIS
+  # DOES NOT CLAIM (unforgeable provenance about the bytes the build reported — not a hardened
+  # build; the GENERIC generator attests, it does not build).
+  #
+  # A SECOND invocation rather than more subjects on the first: distinct `provenance-name`s keep
+  # the two bundles' artifact names disjoint, and a consumer verifying an archive should not have
+  # to reason about a bundle that also covers a .deb.
+  #
+  # THE ONE THING TO WATCH ON THE FIRST TAG: this is the first time the generator is invoked
+  # TWICE in one workflow run. The two jobs are only safe to coexist because the generator names
+  # its uploaded artifact from `provenance-name`, and the two names differ — the `release` job
+  # never hard-codes either, it reads each job's own `provenance-download-name` output. If a
+  # future generator version ever used a FIXED artifact name instead, the second upload would
+  # collide and this job would red (fail-closed, which is the right direction) — that is the
+  # residual to check on the first `v*` tag, not something verifiable from a PR.
+  #
+  # STILL NOT COVERED after this: the ghcr.io container image, which needs the generator's
+  # separate `generator_container_slsa3.yml` (image-digest, not file-digest, subjects) — its own
+  # migration. GX-11 narrows again; it does not close.
+  #
+  # STATUS — DOCUMENTED-UNTESTED, exactly as the archives lane: release.yml never runs on a PR,
+  # so this first executes on the next `v*` tag. Shape pinned by
+  # scripts/tests/test_release_slsa_l3_provenance.py.
+  provenance-artifacts:
+    needs: [setup, artifact-subjects]
+    permissions:
+      actions: read # read the workflow definition the provenance records as the entry point
+      id-token: write # mint the generator's OWN signing identity (never shared with a build job)
+      contents: read # not the uploader; the `release` job attaches the bundle
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.artifact-subjects.outputs.hashes }}
+      upload-assets: false
+      provenance-name: sparq-artifacts-${{ needs.setup.outputs.version }}.intoto.jsonl
 
   # ---- 2. checksums + GitHub Release ----
   release:
@@ -569,7 +860,13 @@ jobs:
     # [OPUS-4.8] sq-gl3cf: `setup` added so the Release attaches to the resolved tag (tag_name
     # below) on BOTH triggers — on dispatch, action-gh-release's default tag_name is `github.ref`,
     # which is the BRANCH, so we must override it explicitly.
-    needs: [setup, package, sbom, gui-bundle, served-conformance]
+    # [OPUS-5] sq-toze.25: `provenance` is a HARD dependency, not an optional extra. If the
+    # isolated trusted builder fails, no Release is cut — a release that shipped without the
+    # L3 provenance while the docs claim L3 is precisely the silent overclaim the compliance
+    # register exists to prevent.
+    # [OPUS-5] #4570: `provenance-artifacts` is a hard dependency on exactly the same grounds —
+    # it covers the GUI bundles, SBOM/VEX and conformance report.
+    needs: [setup, package, provenance, provenance-artifacts, sbom, gui-bundle, served-conformance]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release + upload assets — the only write this pipeline needs
@@ -594,6 +891,23 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: served-conformance
+          path: assets
+      # [OPUS-5] sq-toze.25 (GX-11): pull in the in-toto bundle the ISOLATED trusted builder
+      # signed (release.yml#provenance) so it is covered by SHA256SUMS and attached to the
+      # Release. Consumers verify it with `slsa-verifier verify-artifact <archive>
+      # --provenance-path <this file> --source-uri github.com/<owner>/<repo>`. The artifact name
+      # comes from the generator's own output — hard-coding it would silently 404 the day the
+      # generator changes its naming, and this download is fail-closed by default.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.provenance.outputs.provenance-download-name }}
+          path: assets
+      # [OPUS-5] #4570 (GX-11 residual): the SECOND isolated-builder bundle — the one covering the
+      # GUI bundles, SBOM/VEX and served-surface conformance report. Same fail-closed download by
+      # the generator's own output name, so it lands in SHA256SUMS and on the Release too.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}
           path: assets
       # [FABLE-5] sq-vw3ax.11.3: stage version-STABLE alias assets. The /download page's direct
       # buttons target `releases/latest/download/<alias>` (static hrefs, no API dependency), but
@@ -675,8 +989,42 @@ jobs:
 
             **Desktop GUI bundles (UNSIGNED).** This release also includes cross-platform [sparq GUI](https://github.com/${{ github.repository }}/tree/${{ needs.setup.outputs.version }}/gui) desktop installers (`sparq-gui_${{ needs.setup.outputs.version }}_*`): macOS `.dmg`, Windows `.msi` + NSIS `.exe`, and Linux `.deb` + `.AppImage`. **These bundles are NOT code-signed or notarized.** On macOS, Gatekeeper will quarantine them; on Windows, SmartScreen will warn — see [/download](https://github.com/${{ github.repository }}/tree/${{ needs.setup.outputs.version }}/gui) for the install bypass instructions (Gatekeeper/SmartScreen). OS-level code-signing (Apple Developer ID notarization + Windows Authenticode) requires maintainer-held credentials and is tracked separately — until then, treat the GUI bundles as developer/test installs. The SLSA attestation below proves *who built* each bundle (build provenance); it is not a substitute for OS code-signing. (No `win-arm64` GUI installer yet — the Tauri bundler cannot cross-bundle it from the x64 Windows runner; no mobile app bundles yet.)
 
-            **Supply chain:** each release carries a CycloneDX SBOM per binary (`*-${{ needs.setup.outputs.version }}.sbom.cdx.json`, including the GUI shell `sparq-gui-${{ needs.setup.outputs.version }}.sbom.cdx.json`), runtime + full-build CycloneDX SBOMs for the published npm/WASM client (`sparq-js-*`) and shared browser client (`sparq-js-client-*`), and a VEX (`sparq-${{ needs.setup.outputs.version }}.vex.cdx.json`) stating the exploitability of every advisory the dependency policy ignores. All artifacts (archives, GUI bundles, SBOMs, VEX) are SLSA build-provenance attested — verify with `gh attestation verify <file> --repo ${{ github.repository }}`.
+            **Experimental — read before you rely on this.** sparq is a pre-1.0 research engine and the API is unstable. The zero-knowledge (`sparq-zk`) and multi-party-computation (`sparq-mpc`) surfaces are **research scaffolds shipped for experimentation only**: no external accredited cryptographer has reviewed them, the MPC protocols are honest-majority semi-honest only, and this release makes **no** soundness, security or privacy claim for either. Do not present their output as a production-grade guarantee. See [SECURITY.md](https://github.com/${{ github.repository }}/blob/${{ needs.setup.outputs.version }}/SECURITY.md) for the full scope and caveats. <!-- privacy-claims-allow: NEGATIVE caveat — states the ABSENCE of any soundness/privacy claim and that external audit is pending; issue #2552 -->
+
+            **Supply chain:** each release carries a CycloneDX SBOM per binary (`*-${{ needs.setup.outputs.version }}.sbom.cdx.json`, including the GUI shell `sparq-gui-${{ needs.setup.outputs.version }}.sbom.cdx.json`), runtime + full-build CycloneDX SBOMs for the published npm/WASM client (`sparq-js-*`) and shared browser client (`sparq-js-client-*`), and a VEX (`sparq-${{ needs.setup.outputs.version }}.vex.cdx.json`) stating the exploitability of every advisory the dependency policy ignores. All artifacts (archives, GUI bundles, SBOMs, VEX) are SLSA build-provenance attested — verify with `gh attestation verify <file> --repo ${{ github.repository }}`. That in-band attestation is **SLSA Build L2**.
+
+            **The archives, GUI bundles, SBOMs/VEX and conformance report additionally** carry provenance generated by the isolated `slsa-github-generator` trusted builder, in a job no build step of ours can reach, split across two in-toto bundles: `sparq-cli-${{ needs.setup.outputs.version }}.intoto.jsonl` covers the CLI/server archives, and `sparq-artifacts-${{ needs.setup.outputs.version }}.intoto.jsonl` covers the GUI bundles, the SBOMs/VEX and the conformance report. Verify: `slsa-verifier verify-artifact <file> --provenance-path <the matching bundle> --source-uri github.com/${{ github.repository }}` (matching is by digest, so the version-stable alias copies — `sparq-cli-x64-linux.tar.gz` and friends — verify against the same bundle as the versioned originals they were copied from). **Read that precisely:** it means the *provenance* is unforgeable by the build (SLSA's L3 SL-B3-b property), not that the artifacts were built inside a trusted builder — the `cargo`/`tauri`/SBOM steps still run in this repo's own jobs, and the generator attests the digests those jobs reported. So this is **not** a blanket "sparq is SLSA Build L3" claim. **Not covered by either bundle:** `SHA256SUMS` and the two `.intoto.jsonl` bundles themselves (trivially), and the ghcr.io container image — which is not a Release asset and so gets its own lane, below.
+
+            **Container image.** `ghcr.io/${{ github.repository_owner }}/sparq-server` carries provenance from the isolated `slsa-github-generator` **container** builder (`release.yml#provenance-container`), attached to the image in the registry rather than shipped as a Release asset — an image is not a file, so it takes an image digest, not the file-digest bundles above. Verify: `slsa-verifier verify-image ghcr.io/${{ github.repository_owner }}/sparq-server@<digest> --source-uri github.com/${{ github.repository }}` (`ghcr.io` requires `GH_TOKEN` to be exported). The buildkit in-band attestation (`provenance: mode=max` + `sbom: true`, read by `cosign verify-attestation`) is unchanged and still present — the image carries both. **One honest difference from the file lanes:** those are fail-closed (`release` `needs:` its provenance jobs, so an unprovenanced archive is never published), whereas an image must be pushed before it has a digest to attest — so publication precedes attestation here, and a failure of that lane reds the run over an image already in the registry. See `compliance/slsa/controls.md` for the audited per-artifact levels.
           fail_on_unmatched_files: true
+
+  # ---- 2b. post-publication provenance verification (the SL-B3-b evidence step) ----
+  # [OPUS-5] issue #4571 / PR #4644 review: this MUST be driven from HERE, not from
+  # release-verify.yml's `release: published` trigger. GitHub does not start a workflow run from
+  # an event generated by the workflow's own GITHUB_TOKEN, and the `release` job above creates the
+  # Release with exactly that token (action-gh-release defaults `token: ${{ github.token }}`), so
+  # that trigger never fires on the normal `v*` path — it only covers a Release published
+  # out-of-band by a human/PAT. Calling the SAME reusable workflow from a job that `needs: release`
+  # is what actually makes a release produce the machine-checked verdict `compliance/slsa/`
+  # `controls.md` SL-B3-b cites. Same definition either way: one workflow, two entry points.
+  #
+  # It runs AFTER the Release exists, deliberately: two of the three checks (bundles attached to
+  # the Release, bundles listed in SHA256SUMS) are only observable then, so this cannot gate
+  # publication — `release`'s `needs: [provenance, provenance-artifacts]` is what stops a Release
+  # being cut when a trusted builder fails. A red run here means a PUBLISHED release does not carry
+  # the provenance the compliance estate claims for it: a supply-chain incident, fix forward.
+  # Do NOT add `continue-on-error` and do NOT add an `if:` — a swallowed failure would manufacture
+  # the very evidence this job exists to produce. `test_verify_release_provenance.sh` pins it.
+  verify-provenance:
+    name: verify published provenance
+    needs: [setup, release]
+    permissions:
+      contents: read # `gh release download` — the only API the called workflow touches
+    uses: ./.github/workflows/release-verify.yml
+    with:
+      # The tag the rest of the pipeline named assets with (NOT github.ref_name, which is the
+      # branch on a workflow_dispatch) — the same value the `release` job attached them to.
+      tag: ${{ needs.setup.outputs.version }}
 
   # ---- 3. server container -> ghcr.io ----
   # Pushes ghcr.io/<owner>/sparq-server using the workflow's own GITHUB_TOKEN — ghcr needs no
@@ -725,6 +1073,13 @@ jobs:
       # code-scanning dashboard (Security tab) so a vuln in the published artifact
       # is visible there, not just in the run log.
       security-events: write
+    # [OPUS-5] #4635 (GX-11 residual): the two values — and the ONLY two — that cross into the
+    # isolated container generator (`provenance-container` below). `digest` is the OCI index
+    # digest buildx REPORTED for the push, never a tag: a tag is mutable, so provenance keyed on
+    # one would describe "whatever :latest happens to be", which is not provenance about anything.
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # [GPT-5.6] sq-fvzi6: register the arm64 binfmt emulator before Buildx so the final
@@ -735,7 +1090,7 @@ jobs:
           platforms: arm64
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Log in to ghcr.io
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -810,11 +1165,26 @@ jobs:
           trivyignores: .trivyignore
       - name: Upload Trivy SARIF to code-scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy-release-image
+      # [OPUS-5] #4635: the image NAME the container generator attests, computed here rather than
+      # inlined into the `provenance-container` call for two reasons. (1) The generator's `image`
+      # input must carry NO tag and NO digest — it is the repository name alone — so it cannot
+      # reuse `steps.meta.outputs.tags`. (2) ghcr rejects an uppercase path component, and
+      # `github.repository_owner` preserves the account's case; `docker/metadata-action` lowercases
+      # `images:` for us, but nothing lowercases a raw expression, so an owner like `JesWr` would
+      # push fine and then attest against a name that does not resolve. Lowercase it explicitly.
+      - name: Resolve the image name (no tag, no digest) for the isolated provenance builder
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sparq-server" >> "$GITHUB_OUTPUT"
       - name: Build and push
+        id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -830,3 +1200,65 @@ jobs:
           # attached to the image in ghcr.io (verifiable via cosign / gh).
           provenance: mode=max
           sbom: true
+
+  # ---- 3a. ISOLATED trusted-builder SLSA provenance over the pushed container image ----
+  # [OPUS-5] #4635 (GX-11 residual / SL-B3-b) — the fourth and last isolated-provenance lane.
+  #
+  # WHY IT IS ITS OWN MIGRATION. The other three lanes (`release.yml#provenance`,
+  # `release.yml#provenance-artifacts`, `dist.yml#provenance`) all call the GENERIC generator,
+  # whose single boundary input is `base64-subjects` — a list of FILE digests. A registry image
+  # is not a file: its provenance has to be attached to the image in ghcr.io, keyed by the OCI
+  # index digest. That is a different reusable workflow (`generator_container_slsa3.yml`) with a
+  # different interface (`image` + `digest`, no `base64-subjects`, no `upload-assets`), so it
+  # could not reuse the digest-threading pattern #4570 established.
+  #
+  # THE BOUNDARY IS THE SAME PROPERTY. Still a bare `uses:` in its OWN job — no `steps:`/`run:`
+  # of ours can execute inside it — minting its OWN OIDC identity, and receiving exactly two
+  # values from `docker`: the image name and the digest buildx reported for the push. The
+  # signing therefore does not share an execution context with `cargo`/`docker build`, which is
+  # the SL-B3-b property.
+  #
+  # WHY A TAG REF, NOT A SHA: identical to the generic lanes — the builder identity baked into
+  # the provenance (the thing a consumer's `slsa-verifier` policy matches) derives from the
+  # `@ref`, so a SHA reference yields no identity a verifier will accept. All four lanes are held
+  # on ONE tag by scripts/tests/test_release_slsa_l3_provenance.py; the policy record is
+  # compliance/slsa/trusted-builder-pin-policy.md.
+  #
+  # THE IN-BAND ATTESTATION STAYS. `docker`'s buildkit `provenance: mode=max` is deliberately
+  # NOT removed by this migration: it is a different predicate, attached differently, and it is
+  # what `cosign verify-attestation` reads. The image therefore carries both — in-band buildkit
+  # provenance (L2, describes the build) and this isolated bundle (the SL-B3-b property).
+  #
+  # WHAT THIS LANE CANNOT DO — and the honest difference from the file lanes. The file lanes are
+  # FAIL-CLOSED: `release` `needs:` both provenance jobs, so an unprovenanced artifact is never
+  # published. An image cannot work that way — it must be PUSHED before it has a digest to
+  # attest, so the publication necessarily precedes the attestation. If this job reds, the run
+  # reds, but the image is already in ghcr.io and must be dealt with by fixing forward (re-run,
+  # or delete the pushed tags). Do not read this lane as the same guarantee as the archives'.
+  #
+  # `packages: write` is REQUIRED here and is not privilege creep: unlike the generic lanes
+  # (`upload-assets: false`, where the `release` job is the uploader) the container generator IS
+  # the uploader — it `cosign attach`es the attestation to the image in the registry. It still
+  # holds no `contents: write`.
+  #
+  # STATUS — DOCUMENTED-UNTESTED, exactly as the other three lanes: release.yml never runs on a
+  # PR, so this first executes on the next `v*` tag or dispatch. Shape pinned structurally by
+  # scripts/tests/test_release_slsa_l3_provenance.py; runtime behaviour is not evidence until a
+  # tag produces it. Verify a published image with (ghcr.io needs `GH_TOKEN` exported):
+  #   slsa-verifier verify-image ghcr.io/<owner>/sparq-server@<digest> \
+  #     --source-uri github.com/sparq-org/sparq
+  provenance-container:
+    needs: [docker]
+    permissions:
+      actions: read # read the workflow definition the provenance records as the entry point
+      id-token: write # mint the generator's OWN signing identity (never shared with `docker`)
+      packages: write # this generator IS the uploader — it attaches the attestation in ghcr.io
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
+    with:
+      # The image REPOSITORY name only — the generator rejects a tag or digest here.
+      image: ${{ needs.docker.outputs.image }}
+      # The index digest buildx reported for the push, threaded across the boundary. Never a tag.
+      digest: ${{ needs.docker.outputs.digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}

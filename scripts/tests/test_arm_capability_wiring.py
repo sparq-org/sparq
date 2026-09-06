@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import importlib.util
 import re
 import shutil
@@ -52,6 +53,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from types import ModuleType
+from typing import NamedTuple
 
 import yaml
 
@@ -404,7 +406,7 @@ class TestScriptContract(unittest.TestCase):
 class TestSelfTestsRunInCi(unittest.TestCase):
     """The self-tests are only worth writing if something runs them on every PR."""
 
-    def test_docs_quality_runs_both_self_tests_and_this_wiring_suite(self) -> None:
+    def test_docs_quality_runs_the_arm_policy_self_tests_and_this_wiring_suite(self) -> None:
         document = load(WORKFLOWS / "docs-quality.yml")
         gating = [
             run_of(step)
@@ -412,16 +414,34 @@ class TestSelfTestsRunInCi(unittest.TestCase):
             for step in (job.get("steps") or [])
             if "advisory" not in str(job.get("name", job_id)).lower()
         ]
-        blob = "\n".join(gating)
-        for needle in (
-            "scripts/rearm-sweeper.py --self-test",
-            "scripts/auto-arm.py --self-test",
-            "scripts/tests/test_arm_capability_wiring.py",
+        # [OPUS-5] #4795: match a whole stripped LINE, not a substring of the blob. A
+        # containment check passes against `… --self-test-DISABLED` / `… --self-test || true`
+        # — the exact suffix-mutation shape that survived a containment pin elsewhere in
+        # this repo — so the command must appear as its own complete command line.
+        commands = {
+            line.strip()
+            for block in gating
+            for line in block.splitlines()
+            if line.strip()
+        }
+        for command in (
+            # [OPUS-5] #4795: gh_retry.py was the ONLY one of the three arm-policy scripts
+            # whose PR-time self-test was unpinned. docs-quality.yml did run it, so the
+            # coverage looked complete — but deleting that single line would have gone
+            # unnoticed, leaving every change to the transient classifier (the thing that
+            # decides whether a platform blip reds main) validated by nothing until the
+            # next cron. Pinning the file whose guard you are relying on is the point.
+            "python3 scripts/gh_retry.py --self-test",
+            "python3 scripts/rearm-sweeper.py --self-test",
+            "python3 scripts/auto-arm.py --self-test",
+            "python3 scripts/tests/test_arm_capability_wiring.py",
         ):
             self.assertIn(
-                needle,
-                blob,
-                f"docs-quality.yml must run `{needle}` in a GATING job",
+                command,
+                commands,
+                f"docs-quality.yml must run `{command}` as a complete command line in a "
+                "GATING job (found gating commands: "
+                f"{sorted(c for c in commands if 'self-test' in c or 'test_arm' in c)})",
             )
 
 
@@ -598,7 +618,7 @@ class TestMissingReleaseGuardArmsNothing(unittest.TestCase):
     A missing `gh_retry.py` costs RETRIES and must never cost the arm (#3776). A missing
     `release_pr_guard.py` costs the ARM ITSELF and must: without it the sweep cannot prove
     any candidate is not the release-plz Release PR, and arming that PR cuts a `v*` tag
-    and — once `publish = true` — publishes 17 crates to crates.io, irreversibly. A missed
+    and — once `publish = true` — publishes 37 crates to crates.io, irreversibly. A missed
     sweep is covered by the next cron; an unpublishable version is covered by nothing.
 
     These are the tests that go red if someone 'fixes' the fail-closed stub into a
@@ -1013,6 +1033,437 @@ class TestEventModeIsPerPr(unittest.TestCase):
             "policy decision about what may block a merge",
         ):
             self.assertIn(needle, source, f"auto-arm.py must keep {needle!r}")
+
+
+
+# --------------------------------------------------------------------------------------
+# [OPUS-5] #4548 — THE STUCK-ARM PHASE, pinned at the YAML SEAM.
+#
+# Measured here repeatedly: every uncaught mutant in this repo's recent rounds lived in the
+# workflow, not the Python. A wiring assertion once stayed green because the step's COMMENT
+# named the file it searched for; a `paths:`-filtered workflow never ran the suite guarding
+# its own headline mutant. So the pins below assert against the PARSED document (yaml drops
+# comments structurally — proved by `test_the_harness_is_comment_blind`) and against the
+# SCRIPT's real argparse surface, so deleting either half reds.
+STUCK_PHASE_FLAG = "--phase stuck-arm"
+STUCK_CAP_FLAG = "--max-stuck-actions"
+
+
+class TestStuckArmWiring(unittest.TestCase):
+    """The stuck-arm sweep must be REACHED, BOUNDED, and PERMITTED — or it is decoration."""
+
+    def setUp(self) -> None:
+        self.document = load(REARM_YML)
+        self.steps = steps_of(self.document)
+
+    def _stuck_indexes(self) -> list[int]:
+        return [
+            index
+            for index, step in enumerate(self.steps)
+            if STUCK_PHASE_FLAG in " ".join(run_of(step).split())
+        ]
+
+    def test_the_harness_is_comment_blind(self) -> None:
+        """The tripwire for the measured false-green: a COMMENT must not satisfy a pin."""
+        commented = yaml.safe_load(
+            "jobs:\n  j:\n    steps:\n"
+            f"      # runs rearm-sweeper.py {STUCK_PHASE_FLAG} {STUCK_CAP_FLAG} 5\n"
+            "      - name: decoy\n        run: echo nothing-here\n"
+        )
+        blob = "\n".join(run_of(step) for step in steps_of(commented))
+        self.assertNotIn(STUCK_PHASE_FLAG, blob)
+        self.assertNotIn(STUCK_CAP_FLAG, blob)
+        # ...and the same token in a real `run:` IS seen, so the check is not vacuous.
+        live = yaml.safe_load(
+            "jobs:\n  j:\n    steps:\n"
+            f"      - name: real\n        run: python3 x.py {STUCK_PHASE_FLAG}\n"
+        )
+        self.assertIn(
+            STUCK_PHASE_FLAG, "\n".join(run_of(step) for step in steps_of(live))
+        )
+
+    def test_the_stuck_arm_phase_is_actually_invoked_exactly_once(self) -> None:
+        indexes = self._stuck_indexes()
+        self.assertEqual(
+            len(indexes),
+            1,
+            f"rearm-sweeper.yml must run `{STUCK_PHASE_FLAG}` exactly once; a phase that "
+            "is never invoked classifies nothing, and two invocations double-act",
+        )
+        self.assertIn(
+            "scripts/rearm-sweeper.py",
+            run_of(self.steps[indexes[0]]),
+            "the stuck-arm flag must be passed to rearm-sweeper.py itself",
+        )
+
+    def test_it_runs_after_the_rearm_step(self) -> None:
+        """Order is policy: a PR re-armed seconds ago must be inside the grace window."""
+        stuck = self._stuck_indexes()[0]
+        rearm = [
+            index
+            for index, step in enumerate(self.steps)
+            if "scripts/rearm-sweeper.py" in run_of(step)
+            and PROBE_FLAG not in run_of(step)
+            and "--self-test" not in run_of(step)
+            and STUCK_PHASE_FLAG not in " ".join(run_of(step).split())
+        ]
+        self.assertTrue(rearm, "the re-arm step must still exist")
+        self.assertGreater(
+            stuck, max(rearm), "the stuck-arm phase must run AFTER the re-arm phase"
+        )
+
+    def test_the_per_tick_bound_is_actually_passed(self) -> None:
+        """A congestion bound that is never supplied is not a bound.
+
+        This repo has a measured congestion-collapse mode, so the cap has to be on the
+        command line, not merely available as a default.
+        """
+        run = " ".join(run_of(self.steps[self._stuck_indexes()[0]]).split())
+        self.assertIn(STUCK_CAP_FLAG, run)
+        value = run.split(STUCK_CAP_FLAG, 1)[1].split()[0]
+        self.assertTrue(value.isdigit(), f"{STUCK_CAP_FLAG} needs a numeric cap, got {value!r}")
+        self.assertGreaterEqual(int(value), 1)
+        self.assertLessEqual(
+            int(value), 10, "a per-tick cap above 10 re-opens the congestion-collapse mode"
+        )
+
+    def test_the_live_step_is_not_stuck_in_dry_run(self) -> None:
+        """A sweep permanently in --dry-run reports beautifully and repairs nothing.
+
+        The flag exists so the census can be taken against the live repository before
+        remediation is switched on; leaving it in the scheduled step would recreate exactly
+        the invisible-no-exit state this phase was built to remove.
+        """
+        run = " ".join(run_of(self.steps[self._stuck_indexes()[0]]).split())
+        self.assertNotIn("--dry-run", run)
+
+    def test_it_uses_the_same_token_expression_as_the_probe(self) -> None:
+        stuck = self.steps[self._stuck_indexes()[0]]
+        probe = next(
+            step for step in self.steps if PROBE_FLAG in run_of(step)
+        )
+        self.assertEqual(
+            (stuck.get("env") or {}).get("GH_TOKEN"),
+            (probe.get("env") or {}).get("GH_TOKEN"),
+            "a stuck-arm phase on a different token than the probe attests capability it "
+            "does not have",
+        )
+
+    def test_the_scopes_its_mutations_need_are_granted(self) -> None:
+        """Classify-then-403 is the failure mode this pin exists for.
+
+        `checks: write` is the only scope that can re-request a cancelled run, and
+        labelling a pull request consumes the ISSUES scope.
+        """
+        permissions = self.document.get("permissions") or {}
+        for scope in ("contents", "pull-requests", "checks", "issues"):
+            self.assertEqual(
+                permissions.get(scope),
+                "write",
+                f"the stuck-arm phase cannot remediate without `{scope}: write`",
+            )
+
+
+# --------------------------------------------------------------------------------------
+# [OPUS-5] #4642 — THE YAML SEAM ITSELF, lifted from #4400's docs-quality guard (which was
+# hardened into this exact shape after an earlier round found `|| true` on either leg
+# surviving every other pin in its class).
+#
+# Everything above this line tests the Python, or tests that the YAML NAMES the Python.
+# Neither can see the seam that decides whether the Python RUNS AT ALL. RE-DERIVED here by
+# applying each shape to the real rearm-sweeper.yml and running the suite as it stood
+# before this class existed — all four survived GREEN:
+#   1. `continue-on-error: true` on the JOB
+#   2. `continue-on-error: true` on the STEP
+#   3. `if: false` on the step
+#   4. `|| true` appended to the run line
+# A fifth, `if: false` on the JOB, falls out of the same read and is pinned with them.
+#
+# The reason is structural, and it is this estate's most-repeated defect class: a step
+# cannot red its own neutering (`continue-on-error` discards the exit status that would
+# report it) and a job cannot red its own skipping (`ci_summary_gate._PASSING` is
+# `("success", "skipped", "neutral")`). Something OUTSIDE the run has to witness that it
+# ran — so these checks read the PARSED document and never any result of executing it.
+# This workflow is not itself a gate (schedule / workflow_dispatch only), which makes the
+# seam MORE dangerous, not less: a neutered cron produces no red anywhere, it just
+# silently stops sweeping.
+#
+# `seam_findings` is a pure function of the document precisely so that
+# `test_the_guard_reds_on_each_swallow_shape` can feed it a MUTATED copy of the real
+# workflow and require the corresponding finding. A seam guard nobody has watched go red
+# is the thing a seam guard exists to prevent.
+REARM_SCRIPT = "scripts/rearm-sweeper.py"
+
+# Every `if:` permitted on a step that runs the sweep, keyed by step name. FAIL-CLOSED in
+# both directions: a step that runs the sweep must appear here, and its `if:` must match
+# EXACTLY. So `if: false`, a plausible-looking `github.event_name` guard, and a brand-new
+# unreviewed step all red, rather than inheriting silence from a permissive predicate.
+SEAM_STEP_IFS: dict[str, str | None] = {
+    "Self-test policy": None,
+    "Probe arm capability (one loud error, never per-PR)": None,
+    "Re-arm dropped reviewed PRs": None,
+    # #4642: the ONE vetted condition. Neither clause can be false while the sweep is
+    # needed — see the rationale block at the step itself. `always()` is deliberately NOT
+    # what is written there: this step mutates the repository.
+    "Sweep armed-but-unmergeable PRs to a counted terminal state": (
+        "${{ !cancelled() && steps.probe.outcome == 'success' }}"
+    ),
+}
+
+# A line invoking the sweep must BE the whole command. `||`, `;`, `|` and `&` each decide
+# the exit status the runner sees, so none may follow it — the anchored bare-call shape
+# test_banned_terminology.py uses, and the one a substring match cannot enforce
+# (`… --self-test || true` still "contains" `… --self-test`).
+BARE_SWEEP_LINE = re.compile(r"^[ \t]*python3 +" + re.escape(REARM_SCRIPT) + r"[^|;&]*$")
+
+
+class Finding(NamedTuple):
+    kind: str
+    message: str
+
+
+def _invokes_sweep(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("python3") and REARM_SCRIPT in stripped
+
+
+def sweep_steps(document: dict) -> list[tuple[str, dict, dict]]:
+    """(job_id, job, step) for every step whose `run` invokes the sweep script."""
+    return [
+        (job_id, job, step)
+        for job_id, job in (document.get("jobs") or {}).items()
+        for step in (job.get("steps") or [])
+        if any(_invokes_sweep(line) for line in run_of(step).splitlines())
+    ]
+
+
+def seam_findings(document: dict) -> list[Finding]:
+    """Every way this document could run the sweep and not report its failure."""
+    hosts = sweep_steps(document)
+    if not hosts:
+        return [Finding("absent", f"no step runs {REARM_SCRIPT} at all")]
+    findings: list[Finding] = []
+    for job_id, job, step in hosts:
+        name = str(step.get("name") or "<unnamed>")
+        if job.get("continue-on-error") not in (None, False):
+            findings.append(Finding(
+                "job-continue-on-error",
+                f"job {job_id!r} hosting {name!r} is continue-on-error, so a failed sweep "
+                "reports the job green",
+            ))
+        if step.get("continue-on-error") not in (None, False):
+            findings.append(Finding(
+                "step-continue-on-error",
+                f"step {name!r} is continue-on-error, so it cannot red its own failure",
+            ))
+        if job.get("if") is not None:
+            findings.append(Finding(
+                "if",
+                f"job {job_id!r} hosting {name!r} carries `if: {job.get('if')!r}`; a job "
+                "cannot red its own skipping",
+            ))
+        if name not in SEAM_STEP_IFS:
+            findings.append(Finding(
+                "undeclared",
+                f"step {name!r} runs the sweep but is not declared in SEAM_STEP_IFS — "
+                "decide and record whether it may carry an `if:`",
+            ))
+        elif step.get("if") != SEAM_STEP_IFS[name]:
+            findings.append(Finding(
+                "if",
+                f"step {name!r} carries `if: {step.get('if')!r}`, not the vetted "
+                f"{SEAM_STEP_IFS[name]!r}; an `if:` is the cheapest way to make a sweep "
+                "vacuous, and a skipped step is not a failed one",
+            ))
+        run = run_of(step)
+        for line in run.splitlines():
+            if _invokes_sweep(line) and not BARE_SWEEP_LINE.match(line):
+                findings.append(Finding(
+                    "discard",
+                    f"step {name!r} does not invoke the sweep as a bare command, so its "
+                    f"exit code can be discarded by what follows: {line.strip()!r}",
+                ))
+        if "set +e" in run:
+            findings.append(Finding(
+                "discard", f"step {name!r} disables errexit with `set +e`"
+            ))
+    return findings
+
+
+class TestTheYamlSeamIsGating(unittest.TestCase):
+    """The wiring above is only worth anything if a failure of it can be seen."""
+
+    def setUp(self) -> None:
+        self.document = load(REARM_YML)
+
+    def _kinds(self, *kinds: str) -> list[str]:
+        return [f.message for f in seam_findings(self.document) if f.kind in kinds]
+
+    def test_the_sweep_is_reached_by_at_least_one_step(self) -> None:
+        self.assertTrue(sweep_steps(self.document), f"nothing runs {REARM_SCRIPT}")
+
+    def test_no_sweep_step_can_swallow_its_own_failure(self) -> None:
+        self.assertEqual(self._kinds("job-continue-on-error", "step-continue-on-error"), [])
+
+    def test_no_sweep_step_is_conditionally_skipped_by_an_unvetted_if(self) -> None:
+        self.assertEqual(self._kinds("if", "undeclared"), [])
+
+    def test_no_sweep_step_discards_its_exit_code(self) -> None:
+        self.assertEqual(self._kinds("discard"), [])
+
+    def test_every_declared_step_still_exists(self) -> None:
+        """A rename must not leave a dead allowance behind, silently vetting nothing."""
+        live = {str(step.get("name")) for _job_id, _job, step in sweep_steps(self.document)}
+        self.assertEqual(
+            sorted(set(SEAM_STEP_IFS) - live),
+            [],
+            "SEAM_STEP_IFS names steps that rearm-sweeper.yml no longer has",
+        )
+
+    def test_the_stuck_arm_terminal_is_not_skipped_when_its_predecessor_fails(self) -> None:
+        """#4642's measured gap: 5 of the 200 most recent runs failed, and both retained
+        failures were the step directly in FRONT of this one. With no `if:`, GitHub skips
+        a step whenever an earlier one failed — so the terminal was unavailable exactly on
+        the ticks that needed it. `!cancelled()` is what makes a failed predecessor still
+        run it; the probe clause is what keeps the "fail loud once" contract."""
+        _job_id, _job, step = sweep_steps(self.document)[-1]
+        condition = str(step.get("if") or "")
+        self.assertIn("!cancelled()", condition)
+        self.assertNotIn("success()", condition)
+        self.assertIn(
+            "steps.probe.outcome",
+            condition,
+            "the probe clause must read `outcome` (the pre-continue-on-error result), so "
+            "it cannot be laundered green by marking the probe continue-on-error",
+        )
+        probe = next(
+            step for _j, _job, step in sweep_steps(self.document)
+            if PROBE_FLAG in run_of(step)
+        )
+        self.assertEqual(
+            probe.get("id"), "probe", "the `if:` above references a step id that must exist"
+        )
+
+    def test_the_guard_reds_on_each_swallow_shape(self) -> None:
+        """THE VACUITY GUARD. Each mutation is applied to a deep copy of the REAL workflow
+        and must produce a finding of its OWN kind — not merely some finding, which would
+        pass even if one check were doing all the work."""
+        def stuck(document: dict) -> tuple[dict, dict]:
+            _job_id, job, step = sweep_steps(document)[-1]
+            return job, step
+
+        mutants: tuple[tuple[str, str, object], ...] = (
+            ("job-continue-on-error", "continue-on-error on the JOB",
+             lambda job, step: job.__setitem__("continue-on-error", True)),
+            ("step-continue-on-error", "continue-on-error on the STEP",
+             lambda job, step: step.__setitem__("continue-on-error", True)),
+            ("if", "`if: false` on the step",
+             lambda job, step: step.__setitem__("if", False)),
+            ("if", "a plausible-looking event guard on the step",
+             lambda job, step: step.__setitem__("if", "github.event_name == 'schedule'")),
+            ("if", "`if: false` on the job",
+             lambda job, step: job.__setitem__("if", False)),
+            ("discard", "`|| true` appended to the run line",
+             lambda job, step: step.__setitem__("run", run_of(step) + " || true")),
+            ("discard", "`set +e` before the invocation",
+             lambda job, step: step.__setitem__("run", "set +e\n" + run_of(step))),
+            ("undeclared", "an undeclared new step running the sweep",
+             lambda job, step: job["steps"].append(
+                 {"name": "sneak", "run": f"python3 {REARM_SCRIPT} --phase stuck-arm"})),
+        )
+        for kind, label, mutate in mutants:
+            with self.subTest(shape=label):
+                document = copy.deepcopy(self.document)
+                mutate(*stuck(document))
+                self.assertIn(
+                    kind,
+                    [f.kind for f in seam_findings(document)],
+                    f"{label} survives the seam guard",
+                )
+        # That the guard is not simply always-red is what the three tests above assert,
+        # against the unmutated document — so it is deliberately not repeated here.
+
+
+class TestStuckArmScriptContract(unittest.TestCase):
+    """Cross-file pin: the YAML above is only meaningful if the SCRIPT still honours it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.rearm = load_module(REARM_PY, "rearm_sweeper_stuck_under_test")
+
+    def test_the_script_accepts_the_flags_the_workflow_passes(self) -> None:
+        source = REARM_PY.read_text(encoding="utf-8")
+        for needle in ('"--phase"', '"stuck-arm"', '"--max-stuck-actions"'):
+            self.assertIn(needle, source, f"rearm-sweeper.py must define {needle}")
+        self.assertTrue(hasattr(self.rearm, "StuckArmSweeper"))
+        self.assertTrue(hasattr(self.rearm, "stuck_arm_exit"))
+
+    def test_the_stuck_self_test_is_reachable_from_dash_dash_self_test(self) -> None:
+        """THE VACUITY GUARD.
+
+        Everything else in this file assumes the stuck-arm suite runs. If `self_test()`
+        stops calling `stuck_self_test()`, that whole suite becomes dead code that still
+        reports PASS — the exact shape of a green-but-vacuous gate. Asserted on the AST so
+        a mention in a comment or a docstring cannot satisfy it.
+        """
+        tree = ast.parse(REARM_PY.read_text(encoding="utf-8"))
+        self_test = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "self_test"
+        )
+        called = {
+            node.func.id
+            for node in ast.walk(self_test)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        self.assertIn(
+            "stuck_self_test",
+            called,
+            "self_test() must CALL stuck_self_test(); otherwise the stuck-arm suite never "
+            "runs and every pin in this file is vacuous",
+        )
+
+    def test_the_two_gate_names_are_distinct_and_matched_exactly(self) -> None:
+        """registry #761 in miniature: `gate` is a strict prefix of `gate, draft-tier`."""
+        self.assertNotEqual(self.rearm.GATE_CHECK_NAME, self.rearm.DRAFT_GATE_CHECK_NAME)
+        self.assertTrue(
+            self.rearm.DRAFT_GATE_CHECK_NAME.startswith(self.rearm.GATE_CHECK_NAME)
+        )
+        pages = [
+            {
+                "total_count": 1,
+                "check_runs": [
+                    {
+                        "name": self.rearm.DRAFT_GATE_CHECK_NAME,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "started_at": "2026-07-27T00:00:00Z",
+                        "id": 1,
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            self.rearm.resolve_gate(pages, is_draft=False), self.rearm.GATE_MISSING
+        )
+        self.assertEqual(
+            self.rearm.resolve_gate(pages, is_draft=True), self.rearm.GATE_SUCCESS
+        )
+
+    def test_every_class_is_routed(self) -> None:
+        """The enum is closed in BOTH directions — no class without an action."""
+        actions = self.rearm.CLASS_ACTIONS
+        self.assertTrue(actions)
+        self.assertEqual(
+            set(actions.values()) - {
+                self.rearm.ACTION_NONE, self.rearm.ACTION_PARK,
+                self.rearm.ACTION_ROUTE_FIX, self.rearm.ACTION_REBASE,
+                self.rearm.ACTION_RETRIGGER,
+            },
+            set(),
+        )
+
 
 
 if __name__ == "__main__":

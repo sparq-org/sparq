@@ -413,6 +413,57 @@ fn blank_node_candidate_at_the_boundary_is_a_hard_query_error() {
     assert_eq!(iris(&r, 0), vec!["http://ex/top".to_string()], "{r:?}");
 }
 
+/// [SONNET-4.6] (sq-vv2l0) VG-DEG-3 of `site/specs/sparql-vector-genai.typ`: `k = 0` yields ZERO
+/// solutions and is NOT an error. `k` is typed as a non-negative integer (VG-TYP-2), so `0` parses
+/// and reaches the search; both answer-exact entry points truncate/return empty at `k = 0`. The
+/// spec's degenerate cases are only meaningful if the empty answer is a normal answer.
+#[test]
+fn k_zero_yields_zero_solutions_and_is_not_an_error() {
+    let (g, store) = fixture("k_zero");
+    for q in [
+        "PREFIX vec: <http://sparq.dev/vec#>
+         SELECT ?node WHERE { ?node vec:nearest ( \"1,0\" 0 ) }",
+        "PREFIX vec: <http://sparq.dev/vec#>
+         SELECT ?node WHERE { ?node vec:nearest ( <http://ex/a> 0 ) }",
+        "PREFIX vec: <http://sparq.dev/vec#>
+         SELECT ?node ?score WHERE { ( ?node ?score ) vec:search ( \"1,0\" 0 ) }",
+    ] {
+        let r = query_vec(&g, q, &store)
+            .unwrap_or_else(|e| panic!("k = 0 must not be a query error, got: {e}\nquery: {q}"));
+        assert!(r.is_empty(), "k = 0 must yield zero solutions: {r:?}");
+    }
+}
+
+/// [SONNET-4.6] (sq-vv2l0) VG-GRM-2/VG-ERR-2: a non-variable SCORE position in `vec:search` is a
+/// hard query error, exactly as a non-variable neighbour position is — both subject elements go
+/// through the same bare-variable requirement. Pins the branch the spec previously left
+/// unconfirmed: an author who writes a constant where the score binding belongs gets a loud
+/// failure, never an empty or partial result.
+#[test]
+fn non_variable_score_position_is_a_hard_query_error() {
+    let (g, store) = fixture("score_not_var");
+    for (label, q) in [
+        (
+            "literal score position",
+            "PREFIX vec: <http://sparq.dev/vec#>
+             SELECT ?node WHERE { ( ?node \"0.9\" ) vec:search ( \"1,0\" 2 ) }",
+        ),
+        (
+            "IRI score position",
+            "PREFIX vec: <http://sparq.dev/vec#>
+             SELECT ?node WHERE { ( ?node <http://ex/a> ) vec:search ( \"1,0\" 2 ) }",
+        ),
+    ] {
+        let err = query_vec(&g, q, &store)
+            .err()
+            .unwrap_or_else(|| panic!("a non-variable score position ({label}) must be an error"));
+        assert!(
+            err.contains("second vec:search subject element") && err.contains("must be a variable"),
+            "expected the score-position variable error ({label}), got: {err}"
+        );
+    }
+}
+
 /// [SONNET-4.6] (sq-tb9p0) VG-TIE-1 through the FILTERED `vec:` execution path — the branch the
 /// unfiltered tie test above cannot reach (a constrained neighbour variable returns through the
 /// cost-model'd filtered search, not `search_tied`). VG-FILT-2 makes this load-bearing: in

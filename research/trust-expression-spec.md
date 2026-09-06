@@ -3,7 +3,7 @@
 <!-- [OPUS-4.8] sq-5reoy (#1599): the `zk/xpath` tree was externalized to the `sparq-org/noir_XPath` (v0.2.0) face repo; its `KNOWN_FAILING` discipline (referenced below) now lives in that repo's CI. Any `zk/xpath/…` path below is a HISTORICAL in-tree reference. -->
 
 Status: **design-for-review decomposition record** (epic `sq-6syab`, issue
-[#1592](https://github.com/jeswr/sparq/issues/1592)). This record frames the
+[#1592](https://github.com/sparq-org/sparq/issues/1592)). This record frames the
 maintainer's trust-expression directive against the built estate, makes the
 architecture choices the child beads need, and cuts the program into disjoint
 fragments. Nothing here is shipped; the specification itself, the vocabulary
@@ -65,7 +65,7 @@ over these verified surfaces, not a re-derivation:
 | Estate surface | Verified state | Evidence |
 |---|---|---|
 | Per-(source, statement-type) trust vocabulary (`trust:`, ten-term core + `forPredicate` sugar) | **Merged** | `crates/sparq-trust/ontologies/trust/trust.ttl`, byte-pinned to `src/vocab.rs` (`desugar_for_predicate`, sync test) |
-| Security-properties ontology + assurance axis (`sec-prop:` vendored, `secx:` extension, `Claimed`/`ExternalSignOffPending`) | **Merged** | `crates/sparq-trust/ontologies/zkp-sparql/` (vendored, ISWC 2025 companion), `secprop-ext.ttl`, `src/secprop.rs`; design `research/security-properties-ontology-design.md` |
+| Security-properties ontology + assurance axis (`sec-prop:` vendored, `secx:` extension, `Claimed`/`ExternalSignOffPending`) | **Merged** | `crates/sparq-trust/ontologies/zkp-sparql/` (vendored, ISWC 2025 companion); `secprop-ext.ttl` + the IRI constants in `crates/sparq-secprop-vocab/` (#3705); design `research/security-properties-ontology-design.md` |
 | Regulatory-framework instances — **eIDAS 2.0, UK DVS/DIATF, NIST PQC — already exist as `sec-req:Requirement` individuals** | **Merged (vendored)** | `crates/sparq-trust/ontologies/zkp-sparql/vocab/sec-req.yaml.ld` |
 | ODRL-driven proof-method admissibility (N3 ruleset + `admissible()`, ODRL leftOperand profile) | **Merged** | `crates/sparq-trust/src/admissibility.rs`, epic `sq-0dksu` Phases 1–5 |
 | Positive status attestation, clear path: signed Bitstring status lists with freshness window + RDF justification triples | **Merged** | `crates/sparq-trust/src/status_list.rs` (`SignedStatusList`, `VerifyingLiveStatusCheck`, `justify_status_decision`) |
@@ -120,7 +120,7 @@ mechanics rather than a caricature.
 1. **Certification scope granularity differs by framework.** eIDAS gives
    schema-level scoping hooks (Attestation Rulebooks, the attribute
    catalogue); DIATF certifies a *service*, not an attribute list. So
-   `trustx:scope` must range from "everything this certified service issues"
+   `trustx:certificationScope` must range from "everything this certified service issues"
    (service-level, the DIATF reality) down to a specific attestation type or
    attribute-predicate set (the eIDAS Rulebook reality). A spec that hardwires
    attribute-level scope would misdescribe DIATF; one that omits scope cannot
@@ -171,7 +171,7 @@ binding reuses `sq-pfae.3`'s did:key/did:web work):
 
 ```turtle
 [] a trustx:TrustRequirements ;
-   trustx:question   <urn:q1> ;             # binds TR to Q
+   trustx:question   <urn:q1> ;             # names the question TR was authored for (opaque label — §7.7)
    trustx:trustsIssuer <did:web:x.example>, <did:web:y.example>, <did:web:z.example> ;
    trustx:requiresValidStatusAt "2026-07-05T00:00:00Z"^^xsd:dateTime .
 ```
@@ -219,14 +219,27 @@ constants like `trust.ttl`/`vocab.rs` and `secprop-ext.ttl`/`secprop.rs`):
   mechanics it lacks.
 - `trustx:Certification` — a time-windowed, authority-signed attestation
   that an issuer is certified under a framework: `trustx:certifies` (issuer),
-  `trustx:underFramework`, `trustx:scope`, `trustx:validFrom`/`validUntil`,
+  `trustx:underFramework`, `trustx:certificationScope`, `trustx:validFrom`/`validUntil`,
   plus the signature/attestation binding. A Trusted-List or DIATF-register
   entry *is* a `trustx:Certification` in this model.
-- `trustx:scope` — what the issuer is certified to issue. Ranges over (i)
+- `trustx:certificationScope` — what the issuer is certified to issue. Ranges over (i)
   `trustx:AnyServiceScope` (service-level — the honest DIATF granularity),
   (ii) an attestation type / Rulebook IRI, (iii) a predicate set or SHACL
   shape (reusing `trust:`'s existing `forPredicate` → `forShape` desugaring
-  pattern rather than inventing a second scoping idiom).
+  pattern rather than inventing a second scoping idiom). Named
+  `certificationScope`, **not** `scope`: `trustx:` is a prose-only sub-prefix
+  over `trust:`'s *own* base IRI, so a `trustx:scope` term would literally be
+  `trust:scope` (rule applicability, `rdfs:domain trust:TrustRule`) — one
+  property carrying two conflicting domains rather than two homonyms
+  (issue #3801). Every `trustx:` local name must stay disjoint from
+  `trust.ttl`'s for the shared-base choice to remain sound.
+- `trustx:validFrom` / `trustx:validUntil` carry the validity window of a
+  `trustx:Certification` **and** of a `trustx:StatusAttestation`, so their
+  `rdfs:domain` is the *union* of those two classes. A bare
+  `rdfs:domain trustx:Certification` would, under RDFS entailment, type every
+  status attestation as a certification and oblige it to satisfy the
+  certification's `certifies` / `underFramework` / `certificationScope`
+  structure (issue #3801).
 - "**Issuers only issued what they are certified to issue**" is then a
   *scope-conformance check*: every contributing attested statement's
   type/predicate falls under its issuer's `trustx:Certification.scope` valid
@@ -323,7 +336,7 @@ classes, all derived from §3's semantics, every negative case fail-closed:
 4. Untrusted issuer: signature valid, issuer not in `TR` → reject.
 5. Mode 2 pass: issuer certified under the framework, scope-conformant.
 6. Scope violation: certified issuer, contributing statement outside
-   `trustx:scope` → reject (the "only issued what certified to issue" case).
+   `trustx:certificationScope` → reject (the "only issued what certified to issue" case).
 7. Certification expired/revoked at *t* → reject (certifications are status-
    checked exactly like credentials — same positive-attestation machinery).
 8. Encoding: response provenance round-trips (a) ↔ (b) losslessly.
@@ -357,6 +370,16 @@ conformance-honesty discipline).
 6. No performance numbers appear in this record or the spec; the integration
    paper takes numbers only from the canonical evidence pipeline (work-box
    timings are non-canonical).
+7. **`trustx:question` is a label, not an enforced binding.** The clear path
+   checks that `TR` names exactly one question IRI but defines no canonical
+   resolution or digest scheme tying that IRI to a query string, so it never
+   verifies that `Q` *is* the named question — a `TR` authored for question A
+   paired with an unrelated supported query B parses and evaluates. The
+   question↔query association belongs to whoever authenticates the request
+   (e.g. a signature over `(Q, TR, nonce)` or a trusted question publication),
+   exactly like the `MethodPrecheck` policy resolution. An authoritative
+   in-band binding (a digest-IRI question scheme over a canonical query form)
+   is future work.
 
 ## 8. Decomposition — child beads of `sq-6syab`
 

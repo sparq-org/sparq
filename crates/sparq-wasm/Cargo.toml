@@ -34,7 +34,7 @@ js-sys = { version = "0.3", optional = true }
 sparq-shacl = { path = "../sparq-shacl", default-features = false, optional = true }
 
 # [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) to the
-# @jeswr/sparq RDF/JS `Dataset` (toCanonical / equals / contains), OPT-IN behind the
+# @sparq-org/sparq RDF/JS `Dataset` (toCanonical / equals / contains), OPT-IN behind the
 # `canon` feature (OFF by default). `default-features = false` drops `sparq-core`'s
 # `parallel` (rayon — no wasm threads); the RDFC-1.0 algorithm itself (`rdf-canon`) is
 # single-threaded. The DEFAULT bundle carries zero canonicalization code so the lean
@@ -57,7 +57,7 @@ serde_json = { version = "1", optional = true }
 # default). PROBE scope: proves wasm32 compat + gives the bundle-delta measurement a
 # reachable parse→evaluate→conflict path behind two EXPERIMENTAL free functions
 # (`policyEvaluate` / `policyConflicts`); the full JS API awaits a maintainer
-# public-contract decision, and the published `@jeswr/sparq` bundle (js `build:wasm`)
+# public-contract decision, and the published `@sparq-org/sparq` bundle (js `build:wasm`)
 # does NOT enable it — the lean default bundle links zero policy code and stays
 # byte-identical. `default-features = false` keeps the stateful `count-enforcement`
 # store (Mutex/lockfile usage counters — meaningless in a single-threaded browser tab
@@ -65,6 +65,17 @@ serde_json = { version = "1", optional = true }
 # sparq-core/sparq-engine (both already default-features = false here) + oxrdf, so no
 # new external dependency enters the wasm graph.
 sparq-policy = { path = "../sparq-policy", default-features = false, optional = true }
+
+# [SONNET-4.6] sq-yz27r (#3251): a DIRECT `oxjsonld` dependency, linked only behind the
+# opt-in `jsonld-contexts` feature. The `jsonld` feature forwards to sparq-core, whose
+# JSON-LD arm drives `oxjsonld` with NO LoadDocumentCallback; installing one needs the
+# parser builder itself (`SliceJsonLdParser::with_load_document_callback`), which
+# sparq-core does not re-export. `oxjsonld` is ALREADY in this crate's graph whenever
+# `jsonld` is on (sparq-core pulls the same workspace pin, so feature unification links
+# ONE copy) — this adds no crate to the bundle that `jsonld` did not already bring, only
+# a name to link against. Not in the wasm-deps-guard forbidden set. OPTIONAL, so the lean
+# default bundle links none of it.
+oxjsonld = { workspace = true, optional = true }
 
 # oxrdf pulls `rand`/getrandom (blank-node ids). On wasm there is no OS RNG, so
 # select getrandom's browser backend (crypto.getRandomValues). The matching
@@ -115,6 +126,15 @@ scs = ["shacl", "serialize-rdf", "sparq-shacl/scs"]
 # code and stays under the perf-gate floor. The site REPL build (js `build:wasm`) turns this
 # on so the upload/URL loader keeps the JSON-LD capability.
 jsonld = ["sparq-core/jsonld"]
+# [SONNET-4.6] sq-yz27r (#3251): expose `Store::loadJsonLdWithContexts(text, contexts)` —
+# JSON-LD ingest for a document that names its `@context` by URL (the shape every real
+# Verifiable Credential uses), resolved from a caller-supplied `[[url, documentText], …]`
+# map. Implies `jsonld` and links `oxjsonld` DIRECTLY, because installing a
+# `LoadDocumentCallback` needs the parser builder sparq-core does not re-export. The
+# binding performs NO network I/O: `oxjsonld`'s callback is synchronous and the browser's
+# `fetch` is not, so the host fetches and this parses (see src/jsonld_context.rs). OFF by
+# default so the lean `wasm_bundle_bytes` baseline is byte-identical.
+jsonld-contexts = ["jsonld", "dep:oxjsonld", "dep:js-sys"]
 # [OPUS-4.8] sq-0ptd (gh-54): OPT-IN `REGEX` / `REPLACE` in the browser. `sparq-engine`'s
 # `regex` feature is default-ON for native but this crate disables the engine's defaults
 # (to keep the regex automata out of the lean bundle — the `wasm_bundle_bytes` perf-gate
@@ -133,11 +153,11 @@ regex = ["sparq-engine/regex"]
 # adds no new external dependency, and stays OFF the lean default bundle.
 serialize-rdf = ["sparq-engine/serialize-rdf", "dep:js-sys"]
 # [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) as the
-# `canonicalizeNQuads(nquads)` free function the @jeswr/sparq RDF/JS `Dataset` uses for
+# `canonicalizeNQuads(nquads)` free function the @sparq-org/sparq RDF/JS `Dataset` uses for
 # blank-node-isomorphism-aware `toCanonical` / `equals` / `contains`. Pulls `sparq-canon`
 # (single-sourced RDFC-1.0 over `rdf-canon`) and the getrandom-0.2 browser-backend shim
 # its oxrdf-0.2 bridge needs on wasm. OFF by default so the lean bundle is byte-identical;
-# the published `@jeswr/sparq` bundle (js `build:wasm`) turns it on.
+# the published `@sparq-org/sparq` bundle (js `build:wasm`) turns it on.
 canon = ["dep:sparq-canon", "dep:getrandom02"]
 # [FABLE-5] sq-586sh: the ODRL usage-control wasm32 probe (see the sparq-policy
 # dependency note above). OFF by default; NOT enabled by the published bundle build.

@@ -62,11 +62,19 @@ test('the _plus_rules output modes fail loudly (deferred, not silently wrong)', 
     /not yet supported/);
 });
 
-test('a query using an unsupported builtin fails closed', async () => {
+test('a query premise EVALUATES a builtin (sq-xqchl.1) rather than failing closed', async () => {
   const q = `@prefix math: <http://www.w3.org/2000/10/swap/math#>.
 @prefix : <${S}>.
-{ ?x :age ?a. ?a math:greaterThan 18 } => { ?x a :Adult }.`;
-  await assert.rejects(() => n3reasoner(`@prefix : <${S}>. :a :age 21 .`, q), /N3 builtin/);
+{ ?x :age ?n. ?n math:greaterThan 18 } => { ?x a :Adult }.`;
+  const nt = await n3reasoner(`@prefix : <${S}>. :a :age 21 . :b :age 12 .`, q);
+  assert.match(nt, new RegExp(`<${S}a> <http://www\\.w3\\.org/1999/02/22-rdf-syntax-ns#type> <${S}Adult> \\.`));
+  // The builtin must FILTER: matching it as data would answer for :b as well.
+  assert.doesNotMatch(nt, new RegExp(`<${S}b>`));
+});
+
+test('a query document with no forward rule is an error, not an empty answer', async () => {
+  await assert.rejects(() => n3reasoner(`@prefix : <${S}>. :a :p :b .`, `@prefix : <${S}>. :a :p :b .`),
+    /forward rule/);
 });
 
 test('SWIPL/EYE-image-bound exports throw a clear migration error', () => {

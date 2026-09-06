@@ -258,6 +258,7 @@ fn holder_manifest(
         key_set: vec![public_key_to_hex(&issuer_sk.public_key())],
         commitment_attestations: attestations,
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],

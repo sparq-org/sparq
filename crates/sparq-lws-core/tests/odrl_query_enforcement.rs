@@ -105,8 +105,9 @@ fn mint_access_token_for(issuer_key: &KeyKit, cnf_jkt: &str, webid: &str) -> Str
 
 /// The harness: the FULL assembled router (auth → WAC → LDP) over the REAL in-process embedded
 /// engine + an in-memory blob store — the same stack `embedded_read_counters.rs` drives. A clone of
-/// the [`EmbeddedSparqClient`] (same shared `Arc<Mutex<Graph>>`) is kept OUTSIDE the router so a
-/// test can prove data EXISTS in the engine while every HTTP requester is denied.
+/// the [`EmbeddedSparqClient`] (same logical backend — the same graph-owning actor thread) is kept
+/// OUTSIDE the router so a test can prove data EXISTS in the engine while every HTTP requester is
+/// denied.
 struct Harness {
     app: axum::Router,
     issuer_key: KeyKit,

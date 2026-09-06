@@ -427,6 +427,52 @@ pub fn with_functions<T>(fns: &FunctionRegistry, f: impl FnOnce() -> T) -> T {
     f()
 }
 
+// ---- Local rows-returning SERVICE handlers (sq-lsp7k.2.2) --------------------
+//
+// The ROWS-returning twin of `FunctionRegistry` (which is scalar: terms in, ONE term
+// out). A registered IRI is intercepted at `SERVICE <iri> { … }` BEFORE the HTTP
+// transport, so a handled SERVICE performs no network I/O and the egress allowlist has
+// nothing to police; an unregistered IRI falls through to the unchanged `service` path
+// where the default-deny SSRF filter still applies in full. NON-DEFAULT
+// `service-local` feature: when off, none of this compiles, the executor's SERVICE
+// dispatch is byte-identical to before, and no new dependency enters the graph
+// (oxrdf + spargebra are already direct deps). [OPUS-5]
+#[cfg(feature = "service-local")]
+pub mod service_local;
+#[cfg(feature = "service-local")]
+pub use service_local::{
+    LocalServiceFn, LocalServicePattern, LocalServiceRegistry, LocalServiceRequest,
+    LocalServiceRows, LocalServiceSlot,
+};
+
+/// Runs `f` with `reg` installed as the active local SERVICE-handler registry: every
+/// `SERVICE <iri> { … }` whose IRI is registered is answered IN PROCESS by the handler
+/// instead of being forwarded over HTTP. See the [`service_local`] module docs for the
+/// egress/SSRF argument and the v1 scope-outs.
+///
+/// The registry is visible to every query the closure runs on this thread (installed
+/// thread-locally and propagated into the engine's rayon workers, so a `SERVICE` nested
+/// under a `FILTER EXISTS` still sees it) and uninstalled when the closure returns.
+/// Composes with [`with_functions`] / [`with_spatial_index`] in either nesting order.
+///
+/// Nests with ITSELF: an inner install SHADOWS the outer registry only for the inner
+/// closure, and the outer one is restored when that closure returns — including on
+/// unwind, so a panicking inner scope never leaves the outer scope's handlers
+/// unregistered.
+///
+/// ```ignore
+/// let mut reg = LocalServiceRegistry::new();
+/// reg.register("urn:sparq:local:evens", |_req| {
+///     Ok(LocalServiceRows::new(vec![Variable::new("n")?], rows))
+/// });
+/// with_local_services(&reg, || query(&graph, "SELECT * WHERE { SERVICE <urn:sparq:local:evens> { ?n } }"))
+/// ```
+#[cfg(feature = "service-local")]
+pub fn with_local_services<T>(reg: &LocalServiceRegistry, f: impl FnOnce() -> T) -> T {
+    let _guard = exec::local_services::install(reg);
+    f()
+}
+
 // ---- Custom aggregate registry + window functions (sq-5qz9) -----------------
 //
 // NON-DEFAULT `window-functions` feature. Two distinct, OPT-IN extension surfaces;
@@ -2551,6 +2597,71 @@ mod tests {
         let b = QueryBudget { max_rows: Some(3), ..QueryBudget::unlimited() };
         let e = query_json_chunks_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &b).unwrap_err();
         assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
+    }
+
+    /// [SONNET-4.6] (sq-yfcu2) The general (multi-pattern) SELECT-JSON path bounds the
+    /// SERIALIZE step by the budget, not just evaluation. The pre-serialize gate prices the
+    /// row/byte caps exactly (the rows are materialised, so the count is known), but
+    /// serialising a large materialised set is itself unbounded work — a deadline can fall
+    /// due *during* it, and before this the full body was serialised and returned as if it
+    /// were in time. The post-serialization gate now reports the trip instead.
+    ///
+    /// Pinned deterministically with the CANCEL limit rather than a wall clock: the sink
+    /// raises the flag when it receives the FIRST flush chunk, i.e. strictly after the
+    /// pre-serialize gate has passed and while the body is still being produced — exactly
+    /// the mid-serialize window a deadline falls into, and `budget::exhausted` treats the
+    /// two identically. Covers BOTH branches: a below-threshold result (the cooperative
+    /// serial loop) and a >`PAR_THRESHOLD` one (the rayon fan-out, where the whole set is
+    /// already serialised when the trip is seen, so only the post-serialization gate can
+    /// catch it).
+    #[test]
+    fn json_serialize_is_budget_bounded_mid_stream() {
+        use std::ops::ControlFlow;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        // A two-pattern (general-path) query over enough rows that the body exceeds the
+        // 64 KiB flush size several times over, so the sink is reached mid-serialize.
+        // `parallel` is default-on, so the 60k case takes the fan-out branch.
+        let q = "SELECT ?s ?o WHERE { ?s ?p ?o . ?s ?p2 ?o }";
+        for rows in [3_000u32, 60_000] {
+            let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+            for i in 0..rows {
+                ttl.push_str(&format!("ex:s{} ex:p \"value-{}-padding-padding-padding\" .\n", i, i));
+            }
+            let graph = Graph::load_str(&ttl, "turtle").unwrap();
+
+            // Reference: the untripped body, complete and unaffected by the new gate.
+            let full = query_json(&graph, q).unwrap();
+            assert_eq!(full.matches("\"s\":").count(), rows as usize, "unbudgeted body must be complete");
+
+            let flag = Arc::new(AtomicBool::new(false));
+            let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
+            let mut chunks = 0usize;
+            let err = query_json_stream_with_budget(&graph, q, &budget, |_c| {
+                chunks += 1;
+                flag.store(true, Ordering::Relaxed); // budget falls due mid-serialize
+                ControlFlow::Continue(())
+            })
+            .unwrap_err();
+            // The flag is raised ONLY by the sink, so reaching the error at all proves the
+            // trip happened after the pre-serialize gate. The serial branch stops within
+            // ~1024 further rows, so it legitimately emits just the one chunk.
+            assert!(chunks >= 1, "sink never reached at {} rows — trip is not mid-serialize", rows);
+            assert_eq!(err, "query budget exceeded (cancelled)", "at {} rows", rows);
+
+            // A budget that never trips still yields the complete body byte-for-byte —
+            // the gate costs nothing on the success path.
+            let ok = Arc::new(AtomicBool::new(false));
+            let budget = QueryBudget::cancelled_by(ok);
+            let mut streamed = String::new();
+            query_json_stream_with_budget(&graph, q, &budget, |c| {
+                streamed.push_str(&c);
+                ControlFlow::Continue(())
+            })
+            .unwrap();
+            assert_eq!(streamed, full, "untripped budgeted body must equal the unbudgeted one at {} rows", rows);
+        }
     }
 
     /// [OPUS-4.8] (sq-7d3dj.34.2) `query_json_stream_with_budget` hands each chunk to the

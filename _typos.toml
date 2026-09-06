@@ -32,6 +32,12 @@ extend-exclude = [
   # commit SHAs like "ba9c281") + skill front-matter — projected source data, not
   # hand-written prose, so it is excluded like other generated artifacts.
   "crates/sparq-kb/ingest/pkg-instances.ttl",
+  # [SONNET-4.6] sq-3x7dl.14.2: the GENERATED xpath differential oracle. Its corpus is
+  # deliberate non-prose — string FRAGMENTS ("hel", "llo", "ell", "zzz") and multibyte /
+  # ligature codepoints chosen to exercise UTF-8 edges — emitted by
+  # zk/xpath/differential/src/main.rs and marked DO NOT EDIT BY HAND. Excluded like the
+  # other generated artifacts above; the generator's own prose IS still scanned.
+  "zk/xpath/tests/differential_oracle",
 ]
 
 [default]
@@ -130,3 +136,4 @@ lov = "lov"              # lowercase var name in a SIMD code block
 LOD = "LOD"              # Linked Open Data
 WQS = "WQS"              # [OPUS-4.8] Wikidata Query Service — RDFox's own term, quoted in research/rdfox-claims-inventory.md (typos splits/flags WQS->WAS)
 Groth = "Groth"          # Groth16 zk-SNARK proving system
+intoto = "intoto"        # [OPUS-5] the in-toto attestation framework — `sparq-cli-<version>.intoto.jsonl` is the literal provenance filename the SLSA generic generator emits, quoted throughout compliance/slsa/ (typos flags the token as "into")

@@ -246,6 +246,23 @@ promoted to `Vec` to support multi-credential presentations, the single-check as
 credential's liveness would go unchecked. → **P3 bead sq-cuvmj** to (a) document the constraint on
 `bind_joins`, and (b) pre-register the per-commitment obligations any future `Vec` migration owes.
 
+> **DOCUMENTED (sq-cuvmj) `[OPUS-5]`.** Both deliverables landed; the limitation itself is
+> UNCHANGED (this is documentation + a tripwire, not a fix, and it lifts no soundness label).
+> (a) `bind_joins` carries a `# Cross-credential scope constraint` section stating that the gate
+> validates hidden joins across the graphs of ONE credential (or credentials sharing a status
+> slot), NOT arbitrary multi-credential joins, and that the blocking rejection happens upstream in
+> `resolve_status_ref`/`bind_issuer_attestations` — fail-closed, with attempt 5's no-false-accept
+> argument recorded inline. (b) `ProofManifest::revocation` carries the canonical pre-registration:
+> the scalar-by-design rationale plus the four per-commitment obligations a `Vec` migration owes
+> (`bind_issuer_attestations`/`resolve_status_ref`; `bind_revocation`; `bind_hidden_revocation` +
+> `bind_fully_hidden_revocation`; `scan_referenced_messages` + `verify_holder_attestation_signature`),
+> with `hidden_revocation`/`fully_hidden_revocation` cross-referencing it. The invariant is pinned by
+> `verifier::tests::two_credentials_with_distinct_status_refs_are_rejected` — two credentials on
+> distinct status slots, both attestations independently VALID, refused at the reference gate, with
+> a same-slot control proving the fixture is otherwise accepted. That test is deliberately a
+> TRIPWIRE: a `Vec` migration turns it red and must discharge the pre-registered obligations before
+> flipping its expectation.
+
 ## Overall composition verdict
 
 **NO EXPLOITABLE COMPOSITION BREAK FOUND.** Every attempted construction (field-reorder, attribution
@@ -264,9 +281,12 @@ Two composition weaknesses are documented, neither an exploitable break at prese
   sole live backstop). Fixed by Option (i): `global_attributions` keys the union on committed-graph
   identity, so cross-scan joins over distinct graphs now require the obligation (see the RESOLVED
   note under Finding A). Does not lift any not-production-sound label (sq-qhy4).
-- **Finding B (P3):** scalar `revocation`/`hidden_revocation` fail-closes multi-credential
-  presentations (restricting `bind_joins`) and is a latent soundness pitfall for any future
-  `Vec` migration.
+- **Finding B (P3) — DOCUMENTED (sq-cuvmj):** scalar `revocation`/`hidden_revocation` fail-closes
+  multi-credential presentations (restricting `bind_joins`) and is a latent soundness pitfall for
+  any future `Vec` migration. The limitation REMAINS; what landed is the `bind_joins` scope
+  constraint, the per-commitment `Vec`-migration obligations pre-registered on
+  `ProofManifest::revocation`, and a regression tripwire pinning the single-reference invariant
+  (see the DOCUMENTED note under Finding B).
 
 **This does not lift any not-production-sound label. sq-qhy4 (external accredited-cryptographer
 audit, P0) remains the gating soundness authority; this review is advisory input to it, not a

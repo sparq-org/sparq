@@ -5,9 +5,19 @@
 # Each emitted check-run name is `opt-in <name>` and is discovered by the
 # ci-summary gate aggregator, so names must remain unique and stable. [GPT-5.6]
 #
-# All five proposal implementations are default-OFF. Their code and integration
-# tests therefore need explicit feature legs instead of relying on the workspace's
-# default-feature lane. [GPT-5.6] sq-1rg2q
+# Implemented proposal features are default-OFF. Their code and integration tests
+# therefore need explicit feature legs instead of relying on the workspace's
+# default-feature lane. [SONNET-4.6] sq-1rg2q
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
+- name: "sparq-wrapper (proposed-async-store)"
+  crate: "sparq-wrapper"
+  features: "proposed-async-store"
+  test: true
+
 - name: "sparq-wrapper (proposed-cardinality)"
   crate: "sparq-wrapper"
   features: "proposed-cardinality"
@@ -42,4 +52,11 @@
 - name: "sparq-wrapper (proposed-graph-scope)"
   crate: "sparq-wrapper"
   features: "proposed-graph-scope"
+  test: true
+
+# [SONNET-4.6] sq-1rg2q.11: tests/json.rs is `#![cfg(feature = "proposed-json")]`,
+# so ci.yml's default-feature lane compiles it EMPTY. This leg is its only executor.
+- name: "sparq-wrapper (proposed-json)"
+  crate: "sparq-wrapper"
+  features: "proposed-json"
   test: true

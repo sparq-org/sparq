@@ -1,0 +1,90 @@
+# [SONNET-4.6] sq-xzb9p — the OPTIONAL external-engine differential lane for the
+# stratified-Datalog module (design record research/stratified-datalog-rules.md §6.4).
+#
+# WHAT: runs the `datalog::tests::souffle_*` fixtures with a real
+# [Soufflé](https://souffle-lang.github.io/) binary present, so the same programs are
+# evaluated by sparq-reason AND by the reference implementation of stratified Datalog
+# with negation, over the same seed-randomised graphs. `crates/sparq-reason/src/datalog/
+# souffle.rs` translates the program into Soufflé source WITHOUT consulting our own
+# `stratify()` — Soufflé stratifies it itself — so this lane can catch a stratification
+# bug the in-tree `oracle` differential structurally cannot, and it checks BOTH
+# directions (Soufflé must accept what we accept and refuse what we refuse).
+#
+# WHY A SEPARATE, OPTIONAL LANE: Soufflé is an external binary, deliberately NOT a cargo
+# dependency — the arm adds no crate to the graph and needs no `cargo-vet` audit (the
+# tooling decision the bead flagged; `crepe` would have been a new proc-macro dep and a
+# shared cargo-vet attestation, this is neither). The cost is that the binary is not on
+# an ordinary runner, so without this lane the fixtures would always skip.
+#
+# SKIP-PROOF: the run sets SPARQ_DATALOG_SOUFFLE_REQUIRED=1, which makes a missing or
+# unrunnable binary a PANIC rather than a skip. Without it a broken install would make
+# every fixture "pass" by not running — the failure mode this lane exists to prevent.
+#
+# TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
+# differential.yml and shacl-diff-fuzz.yml: this workflow never produces a check-run on
+# a PR head commit, so the `ci-summary / gate` aggregator never sees it and the per-PR
+# gate is unaffected. The per-PR arm for this module is the in-tree `oracle` differential
+# in the ordinary `cargo test --features datalog` run.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the
+# trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. Pins match
+# those already used by differential.yml / shacl-diff-fuzz.yml / ci.yml.
+name: datalog-souffle
+
+on:
+  workflow_dispatch:
+  # Heavy tier. 04:47 UTC — offset from ci.yml coverage (03:17), differential.yml
+  # (03:53) and fuzz.yml (04:23), per the existing nightly stagger convention.
+  schedule:
+    - cron: "47 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: datalog-souffle-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Pinned so a Soufflé release cannot silently change the reference semantics this
+  # lane compares against. Bump deliberately, as its own reviewed change.
+  SOUFFLE_VERSION: "2.5"
+
+jobs:
+  souffle-differential:
+    name: datalog differential vs Soufflé
+    # PINNED to 24.04 (not ubuntu-latest) because the .deb asset below is built per
+    # Ubuntu release — a runner-image bump would otherwise install a mismatched build.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Soufflé
+        run: |
+          set -euo pipefail
+          url="https://github.com/souffle-lang/souffle/releases/download/${SOUFFLE_VERSION}/x86_64-ubuntu-2404-souffle-${SOUFFLE_VERSION}-Linux.deb"
+          curl -fsSL -o /tmp/souffle.deb "$url"
+          # `update` first: the .deb pulls runtime deps (libffi/libsqlite3/ncurses/zlib)
+          # and a runner's package lists are not guaranteed fresh.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends /tmp/souffle.deb
+          souffle --version
+
+      # The repo pins the compiler via rust-toolchain.toml; this only reports what
+      # the pin resolved to (see that file — `rustup default` is a no-op here).
+      - name: Report toolchain
+        run: rustup show active-toolchain
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Datalog differential vs Soufflé
+        env:
+          # Absence of the binary is a FAILURE here, never a silent skip.
+          SPARQ_DATALOG_SOUFFLE_REQUIRED: "1"
+        run: |
+          cargo test -p sparq-reason --features datalog --lib \
+            datalog::tests::souffle -- --nocapture

@@ -253,6 +253,18 @@ pub(crate) fn process_inner(
             if is_null(v) {
                 result.vocabulary_mapping = None;
             } else if let Json::Str(s) = v {
+                // [OPUS-5] sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
+                // neither an IRI nor a blank node identifier, an invalid vocab mapping
+                // error". A RELATIVE reference (including the empty string) resolved
+                // against `@base` / the current `@vocab` is the JSON-LD 1.1 relaxation
+                // (W3C expand/0112, a 1.1 positive); in `json-ld-1.0` processing mode the
+                // 1.0 rule stands and the same shapes are an error (expand/0115 `""`,
+                // expand/0116 `"/relative"`).
+                if env.mode == ProcessingMode::JsonLd10
+                    && !(is_absolute_iri(s) || is_blank_node(s))
+                {
+                    return Err(JsonLdError::new(E::InvalidVocabMapping));
+                }
                 match result.expand_iri_readonly(s, true, true) {
                     Some(e) if e.is_empty() || is_absolute_iri(&e) || is_blank_node(&e) => {
                         result.vocabulary_mapping = Some(e);
@@ -491,15 +503,20 @@ pub(crate) fn create_term_definition(
             // in 1.1 to disallow inconsistent compact-IRI redefinitions.  In JSON-LD 1.0
             // mode the check is skipped (W3C expand/0026 maps rdf:type→@type and
             // expand/0071 remaps v:term→v:somethingElse — both VALID in 1.0).
-            // The check is also skipped when the IRI mapping is a keyword (e.g. `@type`):
-            // keywords are not IRIs, so the round-trip "expand term = IRI mapping" predicate
-            // cannot hold and the check would always fire spuriously.
+            // [OPUS-5] sq-gzsky — the check is NOT skipped when the IRI mapping is a
+            // keyword. That the round-trip predicate cannot hold for a keyword is exactly
+            // what §4.2.2 step 14.3.3 is FOR in 1.1: an IRI-shaped term may not be
+            // remapped onto a keyword. W3C expand/er43 (`rdf:type` → `@type`, 1.1) pins the
+            // error; its 1.0 twin expand/0026 is a POSITIVE and stays passing through the
+            // `ProcessingMode::JsonLd10` gate below, which is the 1.0/1.1 split the spec
+            // actually draws (the check is absent from the JSON-LD 1.0 algorithm — it was
+            // added in 1.1 to disallow inconsistent compact-IRI redefinitions; expand/0071
+            // remaps `v:term`→`v:somethingElse`, also VALID in 1.0).
             // [FABLE-5] (sq-oy1f.27) The round-trip check applies to a term containing
             // a colon "anywhere but as the first or last character" (§4.2.2 step
             // 14.3.3) — a term ENDING in a colon (the `"prefix:"` declaration form,
             // W3C compact/p003-p004) is a regular term, not a compact-IRI form.
             if env.mode != ProcessingMode::JsonLd10
-                && !is_keyword(&expanded)
                 && (term.find(':').is_some_and(|i| i > 0 && i < term.len() - 1)
                     || term.contains('/'))
             {
@@ -662,7 +679,7 @@ fn finish_definition(
     // @container.
     if let Some(c) = value.get("@container") {
         let members = normalize_container(c).ok_or_else(|| JsonLdError::new(E::InvalidContainerMapping))?;
-        if !valid_container(&members, env.mode) {
+        if !valid_container(&members, env.mode, matches!(c, Json::Str(_))) {
             return Err(JsonLdError::new(E::InvalidContainerMapping));
         }
         def.container = members;
@@ -820,13 +837,22 @@ fn normalize_container(c: &Json) -> Option<Vec<String>> {
 /// Validates an `@container` mapping against the allowed keyword combinations (§4.2.2
 /// container-mapping rules), honouring the JSON-LD 1.0 restriction to a single
 /// `@list`/`@set`/`@index`.
-fn valid_container(members: &[String], mode: ProcessingMode) -> bool {
+///
+/// `raw_is_string` reports whether the `@container` entry was written as a bare string
+/// rather than an array. [OPUS-5] sq-gzsky — §4.2.2 step 21.2 rejects a container value
+/// that "is @graph, @id, or @type, **or is otherwise not a string**" in `json-ld-1.0`
+/// processing mode, so `"@container": ["@set"]` is an `invalid container mapping` in 1.0
+/// even though the single member `@set` is itself 1.0-legal (W3C expand/es01,
+/// compact/ep12). Normalising to a member list alone loses that distinction.
+fn valid_container(members: &[String], mode: ProcessingMode, raw_is_string: bool) -> bool {
     let set: BTreeSet<&str> = members.iter().map(String::as_str).collect();
     if set.len() != members.len() {
         return false; // duplicates
     }
     if mode == ProcessingMode::JsonLd10 {
-        return members.len() == 1 && matches!(members[0].as_str(), "@list" | "@set" | "@index");
+        return raw_is_string
+            && members.len() == 1
+            && matches!(members[0].as_str(), "@list" | "@set" | "@index");
     }
     if members.len() == 1 {
         return matches!(

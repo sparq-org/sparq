@@ -1,0 +1,31 @@
+# Design §6 case 7 (a) — CERTIFICATION EXPIRED. Byte-for-byte case 5 apart from the
+# certification's `trustx:validUntil`, which closes before t. The CREDENTIAL is still
+# live (its own status attestation covers t), so the rejection is attributable to the
+# certification window alone.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:qtsp.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:cert:qtsp> a trustx:Certification ;
+    trustx:certifies      <did:web:qtsp.example> ;
+    trustx:underFramework trustx:eIDAS2 ;
+    trustx:certificationScope trustx:AnyServiceScope ;
+    trustx:validFrom      "2025-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil     "2026-06-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:coveredBy      <urn:status:cert> .
+
+<urn:status:cert> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}

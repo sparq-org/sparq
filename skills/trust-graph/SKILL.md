@@ -1,10 +1,10 @@
 ---
 name: trust-graph
-description: "Pod-side certification-edge trust-graph admission with the opt-in cert-graph (sparq-trust) + trust-graph (sparq-solid) cargo features, both default-OFF: anchor trust in a certifier (a framework operator / Trusted-List authority) via a Control-gated trust:TrustRule, then let the depth-bounded, attenuation-only, fail-closed closure (derive_effective_rules) turn that certifier's signed trustx:Certification edges into derived rules the UNCHANGED admission gate consumes — so a pod admits facts from issuers the certifier vouches for, never wider than the certifier's own authority. Use when access should follow certified-issuer attestations rather than a controller-enumerated agent list; covers the anchor-rule TTL shape, the certification-bundle shape, the six EdgeRejection fail-closed reject reasons, and the PodStore wiring. RESEARCH prototype — no privacy/unlinkability claim, ZK estate externally unaudited (sq-qhy4)."
+description: "Pod-side certification-edge trust-graph admission with the opt-in cert-graph (sparq-trust) + trust-graph (sparq-solid) cargo features, both default-OFF: anchor trust in a certifier (a framework operator / Trusted-List authority) via a Control-gated trust:TrustRule, then let the depth-bounded, attenuation-only, fail-closed closure (derive_effective_rules) turn that certifier's signed trustx:Certification edges into derived rules the UNCHANGED admission gate consumes — so a pod admits facts from issuers the certifier vouches for, never wider than the certifier's own authority. Use when access should follow certified-issuer attestations rather than a controller-enumerated agent list; covers the anchor-rule TTL shape, the certification-bundle shape, the six EdgeRejection fail-closed reject reasons, and the PodStore wiring. Also covers the default-OFF expression feature (sparq-trust): the verifier→holder trust-expression contract, clear path — parse the query+TR+nonce request, generate the §3.1 reference rewrite Q→Q', evaluate over the holder's attested named-graph dataset, and independently re-check the provenance-encoded response. RESEARCH prototype — no privacy/unlinkability claim, ZK estate externally unaudited (sq-qhy4)."
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq trust-graph — certification-edge admission (pod-side closure)
@@ -90,7 +90,13 @@ The HTTP surface (`sparq-server`) exposes the same closure behind its own opt-in
 `solid-authz-trust` feature: the request's JSON trust block may carry a
 `"certifications"` array (wire schema in `crates/sparq-server/src/solid_authz.rs`), and
 the handler runs `derive_effective_rules(..., depth_bound = 1)` ahead of admission,
-reporting `certGraphDerived` in the decision JSON.
+reporting `certGraphDerived` in the decision JSON. Both `CertScope` kinds are on the wire:
+`"scopeKind": "anyService"`, and `"scopeKind": "shape"` + `"scopeShapePredicateIri"` for a
+statement-type-scoped edge (`sq-sllu4`). A shape scope travels as a `trust:forPredicate`
+IRI, not an arbitrary shape closure, because the certifier's signature covers the scope
+triples — the server rebuilds ONE canonical desugaring (fixed blank-node labels, fixed
+triple order; see `cert_scope_predicate_shape`) so the certifier's own reconstruction hashes
+to the same signed preimage. Anything else fails the signature gate.
 
 ## The anchor rule — `trust:TrustRule` is the ceiling
 
@@ -124,7 +130,11 @@ Field-by-field, each is a **ceiling** the closure can only narrow, never widen:
 - `trust:scope` — the resource ceiling. A certification narrows WHO and WHAT-TYPE, never
   widens WHERE: the derived rule inherits the anchor's resource scope **unchanged**.
 - `trust:freshWithin` (`xsd:duration`) — the staleness ceiling: the derived rule's
-  freshness is `min(anchor.fresh_within, certification window remaining)`.
+  freshness is `min(anchor.fresh_within, certification window remaining)`. The lexical
+  value must be an **exact** day/time duration — `PnDTnHnMnS` (`P30D`, `PT12H`,
+  `P1DT2H3M4S`). The nominal `P1Y` / `P6M` designators have no exact seconds value
+  without an anchor instant, so they are **rejected fail-closed** (the whole policy is
+  refused) rather than approximated; write `P365D` if that is what you mean.
 
 The equivalent claim-level relational form (`trust:trustsSourceFor`) desugars to the same
 `Vec<TrustRule>` — see `skills/access-control/SKILL.md` for both authoring forms.
@@ -144,7 +154,7 @@ DIATF-register entry IS one such edge. The vocabulary (namespace `trustx:` — t
 <urn:example:cert-1> a trustx:Certification ;
   trustx:certifies      <https://issuer.example/dvs> ;      # the vouched-for issuer
   trustx:underFramework <https://gov.example/framework> ;   # the trustx:Framework
-  trustx:scope          trustx:AnyServiceScope ;            # or a SHACL shape / rulebook IRI
+  trustx:certificationScope trustx:AnyServiceScope ;        # or a SHACL shape / rulebook IRI
   trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
   trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime .
 ```
@@ -250,7 +260,7 @@ Behind the default-OFF **`framework-vocab`** feature. The `trustx:` namespace (s
   (framework-certified issuers), `trustx:requiresScopeConformance` (issuer certification
   scope check), `trustx:requiresValidStatusAt` (positive status window instant),
   `trustx:methodPolicy` (OPTIONAL ODRL reference).
-- **Certification and scope** (`trustx:Certification`, `trustx:scope`) — an issuer being
+- **Certification and scope** (`trustx:Certification`, `trustx:certificationScope`) — an issuer being
   *certified under* a framework (`trustx:underFramework`), for a *scope* ranging from
   service-level (`trustx:AnyServiceScope`, the honest DIATF granularity) down to a
   predicate set / SHACL shape (reusing `trust:forShape`). Validity window via
@@ -267,16 +277,96 @@ are **NON-STANDARD** (a WG would rehome them). **Anchored, not proven** — fram
 membership bottoms out in a trust anchor (the operator's signed Trusted List / register),
 not cryptography. See `crates/sparq-trust/README.md` for the full honesty frame.
 
-### Holder-side evaluation — PLANNED, not implemented (`sq-6syab.4`)
+### Holder-side evaluation — the `expression` feature (`sq-6syab.4`)
 
-The holder-side clear-path contract evaluation — trust-requirements parsing, a
-provenance-emitting query rewrite (Q→Q'), and response assembly — is **design work
-only** at this point. `research/trust-expression-spec.md` §3.1 / §4 specifies it, and
-`sq-6syab.4` tracks the future opt-in `expression` module and its acceptance tests.
-**No `expression` module, cargo feature, or tests exist in `sparq-trust` yet** —
-nothing below the vocabulary layer above is runnable, and no behavioral claim
-(fail-closed evaluation, verifier re-check over response provenance) applies until
-that module lands with real-path tests.
+The same `trustx:` vocabulary also drives the **verifier→holder trust-expression
+contract** (issue #1592, `research/trust-expression-spec.md` §3.1–3.5): a verifier sends a
+SPARQL query `Q`, a `trustx:TrustRequirements` graph `TR`, and a nonce; the holder answers
+`Q` **only from statements admissible under `TR`** and returns a provenance-encoded
+response the verifier can independently re-check. Opt-in module
+`sparq_trust::expression`, behind the default-OFF **`expression`** feature (enables
+`framework-vocab` + `status-list` + `did` + `secprop-admissibility` — the surfaces it
+reuses — and pulls `sparq-engine` + the vendored `spargebra` parser; the lean default
+build is byte-identical with it OFF):
+
+```toml
+sparq-trust = { path = "crates/sparq-trust", features = ["expression"] }
+```
+
+The public surface, in contract order — the challenge-nonce type first, then the five
+contract calls:
+
+0. **`ChallengeNonce::generate()` / `ChallengeNonce::from_wire(&str)`** — the nonce is a
+   type, not a `&str`, so the freshness obligation is visible at the construction site
+   (issue #4621). `generate()` is the **verifier-side** path: 32 bytes from the OS CSPRNG.
+   `from_wire()` adopts a value that legitimately came from outside (the echoed challenge,
+   a decoded response, a session nonce minted a layer above) and **promises nothing about
+   freshness** — a call site wrapping a literal with it is visibly opting out. Empty /
+   all-whitespace is refused (`ExpressionError::EmptyNonce`); there is deliberately no
+   length or entropy heuristic, which would reject `"n"` while accepting a 32-byte
+   constant. Hardening only: nothing here can *detect* a reused nonce, and the ZK/trust
+   estate remains externally unaudited (`sq-qhy4`).
+1. **`parse_request(query, tr_triples, &nonce)` → `ContractRequest`** — fail-closed on a
+   missing/duplicated requirements node, a missing `trustx:question` /
+   `trustx:requiresValidStatusAt`, a non-UTC `xsd:dateTime`, a malformed `did:` issuer,
+   or a `TR` naming **no trust mode** (neither `trustx:trustsIssuer` nor
+   `trustx:trustsFramework` — such a document admits nothing and is refused up front,
+   never evaluated vacuously). `trustx:question` is an **opaque label** at this layer:
+   it is parsed for presence and IRI-ness but never resolved or compared against the
+   query, so the question↔query association is a caller-owned trust boundary (request
+   authentication / trusted question resolution — see the module's honest-scope docs).
+2. **`rewrite_query(&request)`** — the §3.1 normative reference rewrite `Q → Q'`: each
+   of `Q`'s triple patterns is wrapped in a `GRAPH ?g { … }` over the holder's
+   attestation bundles and conjoined with issuer-membership (mode 1), positive
+   status-attestation validity at *t* (the existence of a covering window — never
+   evidence-of-absence), and certification-window + scope-conformance (mode 2) patterns;
+   the two modes compose by plain `UNION`.
+3. **`evaluate_contract(&request, &holder, precheck)` → `ContractOutcome`** — runs the
+   optional `trustx:methodPolicy` ODRL pre-check (the existing
+   `sparq_trust::admissibility::admissible` reduction), then `Q'` via `sparq-engine`
+   over the holder's attested dataset — one named graph per attestation bundle;
+   attribution (`prov:wasAttributedTo`), status attestations, and certifications in the
+   default graph (build it with `Graph::load_dataset` from TriG) — then assembles the
+   response.
+4. **`verify_response(&request, &response)`** — the INDEPENDENT verifier re-check:
+   re-derives `Q'` from the request alone and evaluates it over the response's
+   named-graph (TriG) form. A wrong nonce is refused outright; a stripped- or
+   tampered-provenance response simply yields no admissible derivation.
+5. **`mint_status_attestation(…)`** — the status-list bridge: only a verified
+   `status_list::LiveStatus::Live` check can mint the positive, time-windowed
+   `trustx:StatusAttestation` triples the rewrite consumes, so a revoked credential can
+   never acquire a covering window.
+
+The response carries both design-§4 encodings: the RDF 1.2 **reifier normative form**
+(`rdf:reifies` + a triple term, PROV-O qualification on the reifier) and the mechanically
+lossless **named-graph + PROV-O TriG mapping** — the latter is what `verify_response`
+re-checks, runnable on any SPARQL 1.1 engine today.
+
+**Limitations (v1 — each a fail-closed refusal, never a partial evaluation):** `Q` must
+be an ASK or SELECT (optionally DISTINCT) over ONE basic graph pattern — no property
+paths, FILTER, OPTIONAL, UNION, dataset clauses, blank-node patterns, or RDF 1.2
+triple-term patterns (the engine cannot *match* triple terms yet, design §7.5) — and no
+variables in the reserved `?__tx_*` namespace the rewrite mints.
+
+**Fail-closed trust boundaries (load-bearing):**
+
+- **No admissible derivation ⇒ no binding.** An untrusted issuer, a stale or missing
+  status window, a scope violation, an expired or status-uncovered certification — each
+  yields `false` / zero rows AND a response with zero bundles. Every check is the
+  monotone existence of a positive attestation (OWA); "reject" is never a derived denial.
+- **The clear path re-checks admissibility, not cryptography.** The verifier must trust
+  the underlying attestations' signatures and the completeness of what the holder
+  disclosed (design §7.3); framework trust is anchored, not proven (§7.2).
+- **The method-policy pre-check is IRI-bound but caller-resolved.** A `MethodPrecheck`
+  resolving a different policy IRI than `TR` names is refused
+  (`ExpressionError::MethodPolicyMismatch`), so the named policy can never be silently
+  substituted with a weaker one — but resolving that IRI into the policy's N3
+  constraints remains the caller's trust boundary; nothing authenticates the resolution
+  itself.
+- **No ZK / privacy / unlinkability claim.** This is the CLEAR path; the ZK realisation
+  is a separate bead (`sq-6syab.5`), the sparq ZK estate is internally re-audited with
+  external accredited-cryptographer sign-off PENDING (`sq-qhy4`), and `sparq-mpc` is
+  honest-majority semi-honest only.
 
 ## Cross-references
 

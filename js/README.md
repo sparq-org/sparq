@@ -1,4 +1,4 @@
-# @jeswr/sparq
+# @sparq-org/sparq
 
 
 [RDF/JS](https://rdf.js.org/)-style bindings for **sparq**, a Rust RDF
@@ -53,9 +53,39 @@ npm run build   # wasm-pack build ../crates/sparq-wasm (--features shacl) + tsc
 npm test        # node --test against the built dist/
 ```
 
+### Reproducing the `js` CI gate locally
+
+Install from the **repo root**, not from `js/` — this is the one step that differs
+from a normal single-package checkout, and skipping it is what makes the gate look
+irreproducible from a fresh worktree:
+
+```sh
+cd .. && npm ci   # repo-root npm workspaces install
+cd js && npm run build && npm test
+```
+
+`js/test/rdfjs-conformance.test.mjs` imports `@rdfjs-test/conformance` (the
+`packages/rdfjs-conformance` workspace member) and `js/test/solid-differential.test.mjs`
+imports `@solid/acl-check` / `@solidlab/policy-engine` / `rdflib` (resolved out of the
+repo-root install). Those are test-only and stay **out** of `js/package.json` on
+purpose, because the `js-sbom` lane derives the published `@sparq-org/sparq` SBOM from
+this manifest and test deps there would pollute the runtime component list. An
+`npm ci` run inside `js/` installs only this member's own closure, so those imports
+fail with `ERR_MODULE_NOT_FOUND`; a root install hoists them and links the workspace
+member. `.github/workflows/js.yml` installs from the root for exactly this reason.
+
+`npm test`'s `pretest` guardrail (`guardrails/check-test-deps.mjs`) checks this up
+front and names the missing packages, rather than letting the suite fail two thirds
+of the way through. To run one file without a root install, invoke the runner
+directly — that path skips `pretest`:
+
+```sh
+node --test test/store.test.mjs
+```
+
 ### Pinning a git build (before the npm release)
 
-Until `@jeswr/sparq` is published to npm under its settled name, depend on it by
+Until `@sparq-org/sparq` is published to npm under its settled name, depend on it by
 **pinning a git build**. The package's `prepare` script compiles the wasm engine
 + TypeScript on install, so a git pin yields a working binding (the registry
 tarball ships those prebuilt). Add to the consumer's `package.json`:
@@ -63,7 +93,7 @@ tarball ships those prebuilt). Add to the consumer's `package.json`:
 ```jsonc
 "dependencies": {
   // pin an immutable commit; `directory: "js"` is read from this package.json
-  "@jeswr/sparq": "github:jeswr/sparq#<commit-sha>"
+  "@sparq-org/sparq": "github:sparq-org/sparq#<commit-sha>"
 }
 ```
 
@@ -73,7 +103,7 @@ it `prepare` fails loudly with the install command rather than silently shipping
 an engine-less binding. After install, verify the engine actually landed:
 
 ```sh
-node -e "import('@jeswr/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
+node -e "import('@sparq-org/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
 ```
 
 Maintainers run the publish guardrail this repo gates on — `npm run
@@ -88,10 +118,41 @@ MiB, +~1.0 MiB / +85%, before gzip). If you do not need validation and bundle
 size matters, build the lean variant — `npm run build:wasm:lean` — which omits
 SHACL entirely (`SparqStore.validate` then throws a clear error if called).
 
+### CommonJS (`require`) consumers
+
+The main entry (`@sparq-org/sparq`) is ESM-only: it is built from the `--target web`
+wasm-pack output, whose glue is a real ESM module. From CommonJS, reach it with a
+dynamic import — supported in CJS since Node 12.17, and the way to get the full
+RDF/JS wrapper (`SparqStore`, `Dataset`, `DataFactory`, …):
+
+```js
+const { SparqStore } = await import('@sparq-org/sparq');   // inside an async function
+```
+
+`npm run build` **also** produces a `--target nodejs` build of the same engine,
+with the same feature set, into `wasm-node/`. That one is plain CommonJS and
+instantiates the module eagerly at `require()` time (it `readFileSync`s the
+`.wasm` next to the glue), so it is `require()`-able and needs **no `init()`**:
+
+```js
+const { Store } = require('@sparq-org/sparq/wasm-node');   // synchronous, no await
+
+const store = Store.load('<http://e/a> <http://e/b> <http://e/c> .', 'ntriples');
+console.log(store.size, store.ask('ASK { ?s ?p ?o }'));   // `size` is a getter
+store.free();
+```
+
+That subpath exposes the **raw generated `Store`** (the same surface documented
+under *Raw wasm `Store`* in `skills/javascript-wasm/SKILL.md`) — strings in,
+SPARQL-JSON strings out, explicit `.free()` — not the RDF/JS wrapper. Use it when
+you want a synchronous engine in a CommonJS file; use `await import(...)` when you
+want `SparqStore`/`Dataset`. The two builds are separate artifacts, so a package
+that only ever uses one still downloads both in the tarball.
+
 ## Usage
 
 ```js
-import { SparqStore, DataFactory as DF } from '@jeswr/sparq';
+import { SparqStore, DataFactory as DF } from '@sparq-org/sparq';
 
 const store = await SparqStore.fromString(`
   @prefix ex: <http://ex/> .
@@ -200,7 +261,7 @@ accept either another sparq `Dataset` **or any foreign RDF/JS dataset/store**
 the operand is our own:
 
 ```js
-import { Dataset } from '@jeswr/sparq';
+import { Dataset } from '@sparq-org/sparq';
 import { Store as N3Store } from 'n3';
 
 const a = await Dataset.fromString('<http://ex/a> <http://ex/p> <http://ex/b> .', 'ntriples');
@@ -237,7 +298,7 @@ engine streams in only when you first build a dataset:
 <script type="module">
   // From an ESM CDN (or a bundler import) — the ~MB wasm is lazily fetched by
   // the first `Dataset.fromString(...)`, not by the import below.
-  import { Dataset, DataFactory as DF } from "https://esm.sh/@jeswr/sparq";
+  import { Dataset, DataFactory as DF } from "https://esm.sh/@sparq-org/sparq";
 
   const ds = await Dataset.fromString(
     "<http://ex/a> <http://ex/name> \"Alice\" .",
@@ -269,7 +330,7 @@ it already holds the dictionary, so no request ever waits on one.
 `SparqDictionaryClient` wraps `fetch` with the whole negotiation:
 
 ```js
-import { SparqDictionaryClient } from '@jeswr/sparq';
+import { SparqDictionaryClient } from '@sparq-org/sparq';
 
 const client = new SparqDictionaryClient({
   // fzstd cannot decode dictionary frames — supply a dict-capable decoder

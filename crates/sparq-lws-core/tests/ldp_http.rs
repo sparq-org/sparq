@@ -704,10 +704,10 @@ async fn post_creates_a_child_with_slug() {
         .to_str()
         .unwrap()
         .to_string();
-    // V2 (decisions/0003): the `Location` is collision-INDEPENDENT — it CONTAINS the Slug (`note1`) as
-    // an opaque-suffixed prefix but is never the verbatim segment, so it leaks nothing about which
-    // child names already exist. (The CTH `post-uri-assignment-slug` row asserts `Location contains
-    // '<slug>'`, satisfied here.)
+    // V2 (`research/lws-design-records.md` §6): the `Location` is collision-INDEPENDENT — it
+    // CONTAINS the Slug (`note1`) as an opaque-suffixed prefix but is never the verbatim segment,
+    // so it leaks nothing about which child names already exist. (The CTH
+    // `post-uri-assignment-slug` row asserts `Location contains '<slug>'`, satisfied here.)
     assert!(
         location.starts_with("https://pod.example/alice/note1-"),
         "Location must contain the Slug as an opaque-suffixed prefix: {location}"
@@ -1441,8 +1441,9 @@ async fn container_get_renders_ldp_contains_listing() {
         )
         .await;
     assert_eq!(post.status(), StatusCode::CREATED);
-    // V2 (decisions/0003): the member's IRI is an opaque-suffixed `…/doc1-<opaque>` — capture the
-    // minted Location (and its path) instead of assuming the verbatim Slug.
+    // V2 (`research/lws-design-records.md` §6): the member's IRI is an opaque-suffixed
+    // `…/doc1-<opaque>` — capture the minted Location (and its path) instead of assuming the
+    // verbatim Slug.
     let member_iri = post
         .headers()
         .get(axum::http::header::LOCATION)
@@ -1612,7 +1613,8 @@ async fn container_etag_changes_when_membership_changes() {
         )
         .await;
     assert_eq!(post.status(), StatusCode::CREATED);
-    // V2 (decisions/0003): the member is at the opaque-suffixed minted Location — capture its path.
+    // V2 (`research/lws-design-records.md` §6): the member is at the opaque-suffixed minted
+    // Location — capture its path.
     let member_iri = post
         .headers()
         .get(axum::http::header::LOCATION)

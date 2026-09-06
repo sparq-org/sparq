@@ -23,6 +23,13 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("query") => cmd_query(&args),
         Some("reason") => cmd_reason(&args),
+        // [OPUS-5] (sq-2ch27, Phase E6) `classify` materializes the OWL 2 EL subsumption lattice
+        // (`sparq-reason-el`, `rbox` on / `cdomain` off — complete for the E1+E2 fragment, with
+        // concrete-domain axioms deferred into `skipped_axioms`) — the class hierarchy OWL 2 RL is
+        // sound but silently incomplete for. Gated behind the opt-in `el` feature: the default CLI
+        // build carries no EL code, so the subcommand is only present under `--features el`.
+        #[cfg(feature = "el")]
+        Some("classify") => cmd_classify(&args),
         Some("bench") => cmd_bench(&args),
         Some("memstat") => cmd_memstat(&args),
         Some("bench-mmap") => cmd_bench_mmap(&args),
@@ -896,13 +903,14 @@ fn load_reasoned(path: &str, format: &str, profile: sparq_reason::Profile) -> sp
     apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
 }
 
-/// Pull an optional `--reason <profile>` flag (rdfs | owl | n3) out of the argument list.
+/// Pull an optional `--reason <profile>` flag (`rdfs` | `owl` | `n3` | `el` |
+/// `datalog:<rules.dlog>`) out of the argument list.
 fn reason_flag(args: &[String]) -> Option<String> {
     let i = args.iter().position(|a| a == "--reason")?;
     Some(
         args.get(i + 1)
             .unwrap_or_else(|| {
-                eprintln!("--reason needs a profile (rdfs | owl | n3)");
+                eprintln!("--reason needs a profile (rdfs | owl | n3 | el | datalog:<rules.dlog>)");
                 std::process::exit(2);
             })
             .clone(),
@@ -910,16 +918,147 @@ fn reason_flag(args: &[String]) -> Option<String> {
 }
 
 /// Load a graph applying the named reasoning profile. `rdfs`/`owl` materialize over the
-/// parsed triples; `n3` parses the file as Notation3 (rules + facts) and forward-chains.
+/// parsed triples; `n3` parses the file as Notation3 (rules + facts) and forward-chains;
+/// `el` runs the OWL 2 EL classifier (opt-in `el` feature — see `load_el_classified`, a code
+/// span rather than an intra-doc link so this always-compiled comment stays clean in a build
+/// without the feature); `datalog:<rules.dlog>` runs a stratified-Datalog program over the
+/// parsed triples (opt-in `datalog` feature — see `load_datalog`, a code span for the same
+/// reason).
 fn load_with_reasoning(path: &str, format: &str, profile: &str) -> sparq_core::Graph {
     if profile.eq_ignore_ascii_case("n3") {
         return load_n3(path);
     }
+    // [SONNET-4.6] (sq-p4zci, design record research/stratified-datalog-rules.md §6 item 6)
+    // `datalog:<rules.dlog>` is the ONLY `--reason` value that carries an argument: a Datalog
+    // program is user-supplied rules, not a fixed profile, so the rules file is part of the
+    // flag. Intercepted before the RL/RDFS profile parse for the same reason as `el` — it is a
+    // different rule language in a different module, and there is no profile to fall back to.
+    if let Some(rules) = datalog_rules_arg(profile) {
+        #[cfg(feature = "datalog")]
+        return load_datalog(path, format, rules);
+        #[cfg(not(feature = "datalog"))]
+        {
+            eprintln!(
+                "cannot run the datalog rules in {}: reasoning profile 'datalog' needs the \
+                 opt-in `datalog` cargo feature (cargo run -p sparq-cli --features datalog -- …); \
+                 there is no fall-back profile — RDFS/OWL-RL are monotone and cannot express \
+                 negation as failure or aggregation",
+                rules
+            );
+            std::process::exit(2);
+        }
+    }
+    // [OPUS-5] (sq-2ch27) `el` is NOT a `sparq_reason::Profile` — EL classification is a
+    // different algorithm family in a different crate, so it is intercepted before the RL/RDFS
+    // profile parse. Without the opt-in feature this is a hard exit-2 error naming the feature:
+    // falling back to `owl` would silently hand back an INCOMPLETE class hierarchy.
+    if profile.eq_ignore_ascii_case("el") {
+        #[cfg(feature = "el")]
+        return load_el_classified(path, format);
+        #[cfg(not(feature = "el"))]
+        {
+            eprintln!(
+                "reasoning profile 'el' needs the opt-in `el` cargo feature \
+                 (cargo run -p sparq-cli --features el -- …); refusing to fall back to \
+                 'owl', which is sound but INCOMPLETE for class classification"
+            );
+            std::process::exit(2);
+        }
+    }
     let prof = sparq_reason::Profile::parse(profile).unwrap_or_else(|| {
-        eprintln!("unknown reasoning profile '{profile}' (known: rdfs | owl | n3)");
+        eprintln!(
+            "unknown reasoning profile '{profile}' (known: rdfs | owl | n3 | el | datalog:<rules.dlog>)"
+        );
         std::process::exit(2);
     });
     load_reasoned(path, format, prof)
+}
+
+/// [SONNET-4.6] (sq-p4zci) Recognise the `datalog:<rules.dlog>` reasoning profile and return the
+/// rules-file path. A bare `datalog` (no rules file) is a hard exit-2 error naming the syntax —
+/// there is no default program to guess, and falling through to the profile parser would report
+/// the far less useful "unknown reasoning profile".
+///
+/// Split on the FIRST `:` only, so a rules path may itself contain colons.
+fn datalog_rules_arg(profile: &str) -> Option<&str> {
+    if profile.eq_ignore_ascii_case("datalog") {
+        eprintln!("reasoning profile 'datalog' needs a rules file: --reason datalog:<rules.dlog>");
+        std::process::exit(2);
+    }
+    let (head, rules) = profile.split_once(':')?;
+    if !head.eq_ignore_ascii_case("datalog") {
+        return None;
+    }
+    if rules.is_empty() {
+        eprintln!("reasoning profile 'datalog' needs a rules file: --reason datalog:<rules.dlog>");
+        std::process::exit(2);
+    }
+    Some(rules)
+}
+
+/// [SONNET-4.6] (sq-p4zci, design record `research/stratified-datalog-rules.md` §6 item 6) The
+/// `--reason datalog:<rules.dlog>` load path: parse the data file, parse the rule document,
+/// check stratifiability, run the per-stratum fixpoint, and build the graph from the closure.
+///
+/// The closure is ordinary triples, so the subsequent query is plain BGP evaluation — the same
+/// shape as the RDFS/OWL-RL materialization path, except the rules come from the user.
+///
+/// Reasoning runs at the `parse_to_triples` → `from_parts` seam (exactly like `load_reasoned`),
+/// so the default no-`--reason` path is untouched. Both failure modes are LOUD (exit 1): a syntax
+/// error or a construct outside the documented fragment is a parse error naming the offending
+/// construct, and a program with a recursion cycle through `NOT`/`AGGREGATE` is rejected by the
+/// stratification checker naming a predicate on the cycle — never a silently mis-evaluated
+/// program. Both messages carry the RULES path, which the data-file path would not identify.
+#[cfg(feature = "datalog")]
+fn load_datalog(path: &str, format: &str, rules_path: &str) -> sparq_core::Graph {
+    use sparq_reason::datalog;
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error reading {}: {}", path, e);
+        std::process::exit(1);
+    });
+    let rules_src = std::fs::read_to_string(rules_path).unwrap_or_else(|e| {
+        eprintln!("error reading datalog rules {}: {}", rules_path, e);
+        std::process::exit(1);
+    });
+    let (mut dict, triples) = sparq_core::Graph::parse_to_triples(&text, format).unwrap_or_else(|e| {
+        eprintln!("parse error: {}", e);
+        std::process::exit(1);
+    });
+    let program = datalog::parse_program(&mut dict, &rules_src).unwrap_or_else(|e| {
+        eprintln!("datalog rule error in {}: {}", rules_path, e);
+        std::process::exit(1);
+    });
+    // Check stratifiability BEFORE evaluating so a non-stratifiable program is rejected by the
+    // checker rather than after the data has been walked; `n_strata` is also what we report.
+    // (`eval` re-checks — the duplicate is over the RULES, not the data, so it is negligible.)
+    let strat = datalog::stratify(&dict, &program).unwrap_or_else(|e| {
+        eprintln!("datalog stratification error in {}: {}", rules_path, e);
+        std::process::exit(1);
+    });
+    // `eval` seeds its fact store with every input fact and only ever inserts, so the closure is
+    // a de-duplicated SUPERSET of the parsed facts. The derived count is therefore exact against
+    // the DISTINCT input (and the subtraction below cannot underflow) — `triples` may carry
+    // duplicates the closure collapses, and subtracting the raw parsed length would under-report
+    // the derivations by that many.
+    let distinct_in: std::collections::HashSet<[sparq_core::dict::Id; 3]> = triples.iter().copied().collect();
+    let base = distinct_in.len();
+    let t = Instant::now();
+    let closure = datalog::eval(&mut dict, &triples, &program).unwrap_or_else(|e| {
+        eprintln!("datalog reasoning error: {}", e);
+        std::process::exit(1);
+    });
+    eprintln!(
+        "reasoned [datalog {}]: {} rule(s) in {} stratum/strata; {} -> {} distinct triples (+{} derived) in {:.3}s",
+        rules_path,
+        program.n_rules(),
+        strat.n_strata(),
+        base,
+        closure.len(),
+        closure.len() - base,
+        t.elapsed().as_secs_f64()
+    );
+    // Honour `SPARQ_STORE_PROFILE` on the datalog path too (see `load_reasoned`).
+    apply_store_profile(sparq_core::Graph::from_parts(dict, closure), store_profile_from_env())
 }
 
 /// Parse a Notation3 document (facts + `{…}=>{…}` rules), run the rule closure, build a graph.
@@ -939,13 +1078,132 @@ fn load_n3(path: &str) -> sparq_core::Graph {
     apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
 }
 
+/// [OPUS-5] (sq-2ch27, Phase E6) Parse `path` and materialize the OWL 2 EL subsumption lattice
+/// into the parsed triples via `sparq_reason_el::classify_graph`, returning the `(Dict, triples)`
+/// pair plus the classifier's [`sparq_reason_el::Report`]. Shared by the `--reason el` load path
+/// and the `classify` subcommand so the two cannot drift.
+///
+/// SCOPE: the CLI pulls `sparq-reason-el` with `rbox` but WITHOUT `cdomain`, so the lattice is
+/// complete for the E1+E2 fragment (CR1–CR6 class saturation + the CR10/CR11 role automaton),
+/// NOT for OWL 2 EL as a whole — concrete-domain axioms are deferred, not applied.
+///
+/// Everything the classifier could NOT reason over is reported on stderr rather than swallowed:
+/// EL is SOUND but complete only for the fragment it recognises, so a non-zero `skipped_axioms`
+/// (or a non-regular RBox) means the emitted lattice may be incomplete for those axioms.
+#[cfg(feature = "el")]
+fn el_classify_parts(
+    path: &str,
+    format: &str,
+) -> (sparq_core::dict::Dict, Vec<[sparq_core::dict::Id; 3]>, sparq_reason_el::Report) {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error reading {path}: {e}");
+        std::process::exit(1);
+    });
+    let (mut dict, mut triples) = sparq_core::Graph::parse_to_triples(&text, format).unwrap_or_else(|e| {
+        eprintln!("parse error: {e}");
+        std::process::exit(1);
+    });
+    let base = triples.len();
+    let t = Instant::now();
+    let report = sparq_reason_el::classify_graph(&mut dict, &mut triples);
+    eprintln!(
+        "classified [OWL 2 EL]: {base} -> {} triples (+{} rdfs:subClassOf, +{} rdfs:subPropertyOf) in {:.3}s",
+        triples.len(),
+        report.emitted_subsumptions,
+        report.emitted_role_subsumptions,
+        t.elapsed().as_secs_f64()
+    );
+    if report.skipped_axioms > 0 {
+        eprintln!(
+            "  NOTE: {} class axiom(s) used a construct this build does NOT reason over and were NOT applied\n\
+             \x20       — either outside EL entirely (union / complement / allValuesFrom / cardinality /\n\
+             \x20         multi-individual oneOf, which need a different calculus), or IN OWL 2 EL but\n\
+             \x20         deferred here: this CLI enables `rbox` and NOT `cdomain`, so every concrete-domain\n\
+             \x20         axiom (faceted owl:onDatatype/owl:withRestrictions, literal owl:hasValue/owl:oneOf)\n\
+             \x20         is skipped. The lattice may be INCOMPLETE for those axioms.",
+            report.skipped_axioms
+        );
+    }
+    if report.rbox_non_regular {
+        eprintln!(
+            "  NOTE: the told RBox is NOT regular (a property-chain cycle, which OWL 2's global\n\
+             \x20       restrictions forbid). Every derived subsumption is still sound, but the EL+\n\
+             \x20       completeness argument assumes regularity — this classification may be INCOMPLETE."
+        );
+    }
+    if report.unsatisfiable_classes > 0 {
+        eprintln!(
+            "  {} named class(es) are UNSATISFIABLE (⊑ owl:Nothing).",
+            report.unsatisfiable_classes
+        );
+    }
+    if report.thing_unsatisfiable {
+        eprintln!("  owl:Thing ⊑ owl:Nothing — the TBox forces EVERY class to be empty.");
+    }
+    (dict, triples, report)
+}
+
+/// [OPUS-5] (sq-2ch27, Phase E6) The `--reason el` load path: classify, then build the graph
+/// from the lattice-augmented triples. The derived `rdfs:subClassOf` / `rdfs:subPropertyOf`
+/// edges are ordinary triples, so the subsequent query is plain BGP evaluation — exactly like
+/// the RL `scm-*` output, just complete for the E1+E2 fragment (see `el_classify_parts` for the
+/// `cdomain` deferral that keeps this short of full OWL 2 EL).
+#[cfg(feature = "el")]
+fn load_el_classified(path: &str, format: &str) -> sparq_core::Graph {
+    let (dict, triples, _) = el_classify_parts(path, format);
+    // Honour `SPARQ_STORE_PROFILE` on the EL path too (see `load_reasoned`).
+    apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
+}
+
+/// [OPUS-5] (sq-2ch27, Phase E6) `classify <data-file> <format> [out.nt]` — run the OWL 2 EL
+/// classifier and print the classification REPORT as `name<TAB>value` lines on stdout (the
+/// `memstat` convention); with `out.nt`, also write the lattice-augmented graph as N-Triples.
+///
+/// This is the surface for the capability OWL 2 RL cannot reach. RL's completeness theorem is
+/// scoped to ASSERTIONAL conclusions, so `--reason owl` silently omits derivable class
+/// subsumptions — e.g. `B ⊑ D` from `B ⊑ C`, `B ⊑ E`, `C ⊓ E ⊑ D` (RL has no TBox
+/// conjunction-composition rule), pinned by `tests/el_cli.rs::el_derives_what_rl_cannot`.
+#[cfg(feature = "el")]
+fn cmd_classify(args: &[String]) {
+    let (path, format) = match (args.get(2), args.get(3)) {
+        (Some(p), Some(f)) => (p.as_str(), f.as_str()),
+        _ => {
+            eprintln!("usage: sparq-cli classify <data-file> <format> [out.nt]");
+            std::process::exit(2);
+        }
+    };
+    let (dict, triples, report) = el_classify_parts(path, format);
+    println!("triples\t{}", triples.len());
+    println!("named_classes\t{}", report.named_classes);
+    println!("emitted_subclassof\t{}", report.emitted_subsumptions);
+    println!("emitted_subpropertyof\t{}", report.emitted_role_subsumptions);
+    println!("skipped_axioms\t{}", report.skipped_axioms);
+    println!("unsatisfiable_classes\t{}", report.unsatisfiable_classes);
+    println!("thing_unsatisfiable\t{}", report.thing_unsatisfiable);
+    println!("rbox_non_regular\t{}", report.rbox_non_regular);
+    if let Some(out) = args.get(4) {
+        use std::io::Write;
+        let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
+            eprintln!("create {out}: {e}");
+            std::process::exit(1);
+        }));
+        for t in &triples {
+            writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])).unwrap();
+        }
+        w.flush().unwrap();
+        eprintln!("wrote classified graph to {out}");
+    }
+}
+
 /// `reason <data-file> <format> <profile> [out.nt]` — materialize the entailed closure and
 /// report the expansion; with `out.nt`, write the full closure as N-Triples.
 fn cmd_reason(args: &[String]) {
     let (path, format, profile) = match (args.get(2), args.get(3), args.get(4)) {
         (Some(p), Some(f), Some(pr)) => (p.as_str(), f.as_str(), pr.as_str()),
         _ => {
-            eprintln!("usage: sparq-cli reason <data-file> <format> <rdfs|owl|n3> [out.nt]");
+            eprintln!(
+                "usage: sparq-cli reason <data-file> <format> <rdfs|owl|n3|el|datalog:<rules.dlog>> [out.nt]"
+            );
             std::process::exit(2);
         }
     };

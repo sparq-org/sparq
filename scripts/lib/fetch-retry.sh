@@ -71,3 +71,60 @@ retry_git_clone_pinned() {
         git -C "$dest" checkout --detach "$pin"
     fi
 }
+
+# sha256_of PATH
+#   The file's sha256 hex digest. Portable across the GNU (`sha256sum`) and
+#   BSD/macOS (`shasum -a 256`) spellings.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+# fetch_pinned_file URL DEST SHA256 [DESCRIPTION]
+#   Content-addressed fetch of ONE pinned file.
+#
+#   The OFFLINE-ON-HIT property is the point (#4935): when DEST already holds the
+#   pinned payload — sha256 == SHA256 — this returns 0 having made NO network
+#   call at all. That is what lets a CI job restore DEST from an Actions cache and
+#   run the whole lane without reaching the origin host, so third-party downtime
+#   can no longer red a gating check. On a MISS it curls (retried) into DEST.tmp,
+#   verifies the digest, and installs DEST only then — a mismatched or truncated
+#   payload is never installed, so the pin can never silently drift.
+#
+#   Returns non-zero (never exits) on download failure or digest mismatch so the
+#   caller can add its own source-specific diagnostics. `--retry-all-errors`
+#   (curl >= 7.71) is required: plain `--retry` skips (56) Recv failure, the
+#   dominant mid-transfer failure from CI runner IP ranges. Retry counts honour
+#   FETCH_RETRY_MAX / FETCH_RETRY_DELAY, matching `retry` above.
+fetch_pinned_file() {
+    local url="$1" dest="$2" want="$3"
+    local desc="${4:-$(basename "$dest")}"
+    if [ -f "$dest" ] && [ "$(sha256_of "$dest")" = "$want" ]; then
+        echo "$desc already present (sha256 ok) — nothing to do."
+        return 0
+    fi
+    mkdir -p "$(dirname "$dest")"
+    echo "Downloading $desc…"
+    if ! curl -sSfL \
+            --retry "${FETCH_RETRY_MAX:-5}" --retry-delay "${FETCH_RETRY_DELAY:-5}" \
+            --retry-all-errors --retry-connrefused \
+            --connect-timeout 30 --max-time 300 \
+            -o "$dest.tmp" "$url"; then
+        rm -f "$dest.tmp"
+        echo "ERROR: could not download $desc after retries." >&2
+        echo "  URL: $url" >&2
+        return 1
+    fi
+    local have
+    have="$(sha256_of "$dest.tmp")"
+    if [ "$have" != "$want" ]; then
+        rm -f "$dest.tmp"
+        echo "ERROR: $desc checksum mismatch (got $have, want $want)." >&2
+        return 1
+    fi
+    mv "$dest.tmp" "$dest"
+    echo "$desc pinned (sha256 ok)."
+}

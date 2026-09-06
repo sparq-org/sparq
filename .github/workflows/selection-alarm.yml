@@ -2,19 +2,42 @@
 # epic sq-fmx4u). [OPUS-4.8] Design: research/change-based-test-selection.md §6.1.
 #
 # WHAT: when the nightly FULL-matrix backstop (CI workflow, `schedule` =>
-# mode=full) FAILS, correlate each failed job's crate with the crates that
+# mode=full) has any GENUINELY-FAILED JOB — regardless of the run's aggregate
+# conclusion, which fail-fast cancellation makes lossy (#4965) — correlate each
+# failed job's crate with the crates that
 # change-based selection (scripts/ci_select.py) SKIPPED in the PRs landed since
-# the last green nightly. Any intersection is prima-facie a selection soundness
-# bug (design §2) — scripts/ci_selection_alarm.py files a self-identified SPARQ
-# agent GitHub issue naming the offending job(s) + the suspect PRs. The
+# the last VERIFIED nightly backstop. Any intersection is prima-facie a selection
+# soundness bug (design §2) — scripts/ci_selection_alarm.py files a self-identified
+# SPARQ agent GitHub issue naming the offending job(s) + the suspect PRs. The
 # orchestrator reconciles those issues into P1 beads (we never touch `bd`/`.beads`
 # in CI — same rule as flow-on.yml).
 #
+# [OPUS-5] #5025 — "VERIFIED", not "green". The window's lower bound used to be the
+# most recent run-level `success`, the last place the alarm trusted the aggregate
+# #4965 had already shown to be lossy, and it is why the first real firing carried
+# 644 suspects: the last `success` was 28 days behind HEAD. ci.yml already sets
+# `fail-fast: false` on every matrix, so no matrix setting can repair the aggregate —
+# a job CANCELLED at its timeout ceiling (the advisory cargo-mutants sweep runs at
+# 120/360min caps) drags the whole run to `cancelled` regardless. The bound is
+# therefore computed over each scheduled run's JOB list instead
+# (ci_selection_alarm.classify_run: no genuinely-failed job, and every full-matrix
+# test shard concluded `success`), and the run's own health — which runs were
+# examined, why each was rejected, which jobs are red in more than one of them — is
+# printed to the step summary whenever there is something to correlate, and on
+# demand via `python3 scripts/ci_selection_alarm.py --nightly-health`.
+#
 # NOT A GATE (design §6.1 "fail-open"): this runs AFTER the nightly completes via
-# `workflow_run`, files issues, and blocks NO merge. Its name carries no
-# `advisory`/`informational` token, but it is not on the ci-summary gate's poll
-# set (that polls check-runs on the PR/merge-group head commit; this runs on a
-# past main nightly commit via workflow_run) so it can never affect a merge.
+# `workflow_run`, files issues, and blocks NO merge. That holds because this job
+# is DECLARED in `.github/advisory-registry.json` — since #3773 the ONLY thing
+# that can make a check-run non-gating. [OPUS-5] sq-huwr8: this header used to
+# claim the lane "is not on the ci-summary gate's poll set (that polls check-runs
+# on the PR/merge-group head commit …)". The gate ALSO polls on `push:
+# branches: [main]` (ci-summary.yml, timeout-minutes: 80), and a workflow_run
+# fired by a CI-on-main completion lands its check-run on that main head SHA —
+# OBSERVED on cb0c6739c (2026-07-27), where `nightly selection-bug alarm` was
+# present in the gate's poll set (conclusion `skipped`). A `skipped` conclusion
+# is harmless, but this lane is FAIL-LOUD and REDs on detector breakage, and a
+# red would have gated. Pinned by scripts/tests/test_alarm_lanes_non_gating.py.
 #
 # FAIL-LOUD (design invariant, opposite of ci_select's fail-CLOSED): an
 # alarm-INFRASTRUCTURE error (cannot list the failed jobs / load cargo metadata /
@@ -29,8 +52,9 @@
 name: selection-alarm
 
 on:
-  # Fire after a CI run on MAIN completes; the job `if:` narrows to a FAILED
-  # nightly (schedule / manual dispatch). The `branches: [main]` filter keys on the
+  # Fire after a CI run on MAIN completes; the job `if:` narrows to a
+  # nightly (schedule / manual dispatch) and the SCRIPT decides, from the real job
+  # list, whether anything genuinely failed (#4965). The `branches: [main]` filter keys on the
   # TRIGGERING run's head branch, so a PR's CI completion (head branch = the PR
   # branch) never fires this workflow — that guarantees selection-alarm produces
   # NO check-run on any PR head commit and so can never interact with the
@@ -60,24 +84,49 @@ concurrency:
 jobs:
   alarm:
     name: nightly selection-bug alarm
-    # workflow_dispatch: always run (operator asked). workflow_run: only a FAILED
+    # workflow_dispatch: always run (operator asked). workflow_run: every
     # scheduled/dispatched nightly on main (a PR/push/merge_group run carries a diff
     # => selection may narrow legitimately; only the full-matrix backstop is the
     # oracle here).
+    #
+    # [OPUS-5] #4965 — THERE IS DELIBERATELY NO `conclusion` TEST HERE, and adding
+    # one back re-breaks the alarm. This `if:` used to read
+    # `github.event.workflow_run.conclusion == 'failure' && …`, and that single
+    # clause is where the alarm died: MEASURED over all 45 nightlies — 35
+    # `cancelled`, 7 `success`, 3 `failure`, the last `failure` on 2026-07-19, the
+    # exact day the alarm last acted. 266 of 267 alarm runs were job-SKIPPED, and a
+    # SKIPPED JOB IS NEVER RED, so nine days of silence looked exactly like a healthy
+    # no-op. Known positive: nightly run 30333511110 concluded `cancelled` while
+    # carrying FOUR genuinely `failure` jobs (sparq-mpc / sparq-fedplan /
+    # sparq-reason ×2) — because ONE dying leg fail-fast-CANCELS the other 30 and
+    # GitHub aggregates that to `cancelled`.
+    #
+    # The run-level conclusion cannot express "some job failed", and a job `if:`
+    # cannot see the job list at all, so no expression here can make this admission
+    # precise. It is made in scripts/ci_selection_alarm.py instead, over the real
+    # jobs API, by the SAME `FAILED_CONCLUSIONS` predicate the analysis already uses:
+    # zero genuinely-failed jobs => a quiet exit 0 (the common `cancelled` case, so
+    # the alarm cannot cry wolf and get muted); a `failure`/`timed_out`-concluded run
+    # with zero failed jobs => still RED, fail-loud (STRICT_EMPTY_CONCLUSIONS).
+    # Widening to every conclusion costs ~1 extra short run per night (the nightly is
+    # the only schedule/dispatch CI run on main) and leaves NO conclusion literal here
+    # that can silently drift away from the script. Pinned by
+    # scripts/tests/test_ci_selection_alarm.py::TestWorkflowAdmissionSeam.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'failure' &&
-       (github.event.workflow_run.event == 'schedule' ||
+      ((github.event.workflow_run.event == 'schedule' ||
         github.event.workflow_run.event == 'workflow_dispatch') &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # list the failed run's jobs + look up the last green nightly
+      actions: read # list the failed run's jobs + scan recent scheduled runs' jobs
+                    # for the window bound / health report (#5025)
       issues: write # file the alarm issue (idempotent, labelled)
     steps:
       # Full history so the per-commit selection replay (git diff <sha>^ <sha>) and
-      # the last-green-nightly window (git log base..HEAD) resolve.
+      # the window (git log <bound>..HEAD, or `--since` the oldest scheduled run
+      # examined when nothing verified the matrix) resolve.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
@@ -105,9 +154,15 @@ jobs:
           CARGO_NET_RETRY: "10"
           RUN_ID: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.inputs.head_sha }}
+          # NOT an admission filter (#4965) — the script uses it only to decide
+          # whether an EMPTY genuinely-failed-job set is anomalous (fail-loud) or the
+          # ordinary `cancelled`-with-nothing-really-broken case (quiet exit 0).
+          # Empty on the workflow_dispatch path; the script looks it up then.
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
           python3 scripts/ci_selection_alarm.py \
             --run-id "$RUN_ID" \
             --head-sha "$HEAD_SHA" \
+            --run-conclusion "$RUN_CONCLUSION" \
             --repo "$GITHUB_REPOSITORY"

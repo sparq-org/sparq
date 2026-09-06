@@ -45,6 +45,22 @@
 //     which the data satisfies. The same mechanism covers role-disjointness violations on
 //     TBox-generated edges (a generated edge belongs to every super-role of its generator).
 //
+// The argument is stated over ASSERTED negative inclusions, NOT over the RDF syntax that carried
+// them, so it is stable under a broadened capture: `TBox::neg_incl` is the set of asserted NIs,
+// however spelled. Re-checked for the subClassOf-complement capture (sq-fj8lj follow-up),
+// `B1 rdfs:subClassOf [ owl:complementOf B2 ]`: the axiom it denotes is `B1 ⊑ ¬B2` — EXACTLY the
+// DL-Lite_R negative inclusion, not an approximation of a stronger axiom (contrast the
+// NAMED-subject `A owl:complementOf B`, which asserts the biconditional `A ≡ ¬B`; its `¬B ⊑ A`
+// half has no NI form, so it stays uncaptured and keeps `Consistent` fail-closed). `B1 ⊑ ¬B2` is
+// interderivable with the disjointness `B1 ⊓ B2 ⊑ ⊥` that `owl:disjointWith` asserts, so the
+// captured value lands in the SAME `NegativeInclusion::Concept(Basic, Basic)` shape, composes the
+// SAME violation query `q() ← B1(x), B2(x)`, and enters cln(T) by the same rules — every step of
+// the closure simulation above applies verbatim, with no new rule and no new witness shape. What
+// changes is only WHICH KBs reach the gates: a graph whose sole negative axiom is a
+// subClassOf-complement now has `consistency_uncaptured == 0` and (the shape no longer being
+// counted `skipped`) can satisfy `fully_captured()`, so it can graduate a definitive verdict on
+// either side instead of an unavoidable `Unknown`.
+//
 // So if NO rewritten violation UCQ matches the data, no negative inclusion of cln(T) is violated
 // in db(A), and the canonical model of the positive inclusions is a model of the whole captured
 // KB — `Consistent`. That argument needs EVERY axiom captured: `fully_captured()` must hold
@@ -108,8 +124,8 @@ pub enum QlConsistencyGap {
         unrecognised_schema: usize,
     },
     /// Some consistency-relevant axiom was not structurally captured into `TBox::neg_incl`
-    /// (`owl:complementOf`, or a disjointness with a non-basic operand) — its violations are
-    /// not covered by the composed queries.
+    /// (a NAMED-subject `owl:complementOf`, or a disjointness / subClassOf-complement with a
+    /// non-basic operand) — its violations are not covered by the composed queries.
     UncapturedNegativeAxioms {
         /// `TBox::consistency_uncaptured`.
         uncaptured: usize,
@@ -435,7 +451,60 @@ mod tests {
         assert_eq!(check_consistency(&kb), QlConsistency::Consistent);
     }
 
-    // complementOf is NEVER structurally captured: no violation found → fail-closed Unknown.
+    // sq-fj8lj follow-up — the subClassOf-complement negative inclusion `A ⊑ ¬B` decides BOTH
+    // sides: violated → Inconsistent, satisfiable → definitive Consistent (the verdict this
+    // shape could not reach while it was counted `skipped` + `consistency_uncaptured`).
+    #[test]
+    fn subclass_complement_decides_both_verdicts() {
+        const COMPLEMENT: &str = "http://www.w3.org/2002/07/owl#complementOf";
+        let bnode = oxrdf::BlankNode::new("c0").unwrap();
+        // :A rdfs:subClassOf [ owl:complementOf :B ] — i.e. A ⊑ ¬B.
+        let tbox = vec![
+            Triple::new(iri("http://ex/A"), iri(SUBCLASS), bnode.clone()),
+            Triple::new(bnode, iri(COMPLEMENT), iri("http://ex/B")),
+        ];
+        // Violated: `i` is in both A and B.
+        let mut violating = tbox.clone();
+        violating.extend([
+            triple("http://ex/i", RDF_TYPE, "http://ex/A"),
+            triple("http://ex/i", RDF_TYPE, "http://ex/B"),
+        ]);
+        let QlConsistency::Inconsistent(v) = check_consistency(&violating) else {
+            panic!("expected Inconsistent, got {:?}", check_consistency(&violating));
+        };
+        assert_eq!(
+            v.axiom,
+            NegativeInclusion::Concept(
+                Basic::Class("http://ex/A".into()),
+                Basic::Class("http://ex/B".into())
+            )
+        );
+        // Satisfiable: distinct individuals — a DEFINITIVE Consistent, not Unknown.
+        let mut satisfiable = tbox.clone();
+        satisfiable.extend([
+            triple("http://ex/i", RDF_TYPE, "http://ex/A"),
+            triple("http://ex/j", RDF_TYPE, "http://ex/B"),
+        ]);
+        assert_eq!(check_consistency(&satisfiable), QlConsistency::Consistent);
+        // MUTATION WITNESS: drop the complement triple and the same data is merely a subClassOf
+        // of an opaque blank node — `skipped`, hence fail-closed Unknown. The Consistent above is
+        // carried by the capture, not by the fixture happening to be violation-free.
+        let no_complement: Vec<Triple> = violating
+            .iter()
+            .filter(|t| t.predicate.as_str() != COMPLEMENT)
+            .cloned()
+            .collect();
+        assert_eq!(
+            check_consistency(&no_complement),
+            QlConsistency::Unknown(QlConsistencyGap::NotFullyCaptured {
+                skipped: 1,
+                unrecognised_schema: 0
+            })
+        );
+    }
+
+    // A NAMED-subject complementOf is NEVER structurally captured: no violation found →
+    // fail-closed Unknown.
     #[test]
     fn complement_of_stays_unknown_fail_closed() {
         let kb = vec![

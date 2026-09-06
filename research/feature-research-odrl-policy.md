@@ -62,9 +62,19 @@ makes "an ODRL gate in front of a query" feasible rather than hand-wavy:
 - **W3C ODRL Formal Semantics (CG)** — defines evaluation as: inputs = `{Policy, State-of-the-World,
   Evaluation Request, open/closed behavior}`; output = a **Compliance/Evaluation Report** of per-rule
   activation states (Permission: active + permit/deny; Prohibition: activated/violated; Obligation:
-  fulfilled/violated/not-set; Constraint: satisfied/unsatisfied). Conflict default = **closed system**
-  (unlicensed → denied); prohibitions "carve out" sub-sets of broader permissions.
+  fulfilled/violated/not-set; Constraint: satisfied/unsatisfied). Its **open/closed behavior** input is
+  what makes an unlicensed request denied (**closed system**); prohibitions "carve out" sub-sets of
+  broader permissions.
   [ODRL Formal Semantics — w3.org](https://w3c.github.io/odrl/formal-semantics/).
+  **Correction ([OPUS-5] sq-ilk2q):** an earlier revision of this bullet called the closed-system
+  behavior a *"conflict default"*, and that phrasing propagated into the `usage-control-policy` skill.
+  It is wrong on both halves: open/closed behavior is not conflict resolution, and the CG report's
+  conflict-resolution machinery is explicitly marked **pending**, so **no conflict default can be
+  attributed to it at all**. The normative default for an unset `odrl:conflict` is `invalid`, and it
+  comes from [ODRL IM 2.2 §conflict](https://www.w3.org/TR/odrl-model/#conflict) — not from the CG
+  report. sparq's evaluator hard-wires the `prohibit` (deny-overrides) strategy instead; that
+  divergence is deliberate and disclosed (crate README's ODRL conformance note, issue
+  [#1375](https://github.com/sparq-org/sparq/issues/1375), odrl-policy-bridge paper Limitation #1).
 - **Evaluation and Comparison Semantics for ODRL** (arXiv 2025) — a clean **query-answering
   semantics**: the state of the world is a relation of *events*, an ODRL rule is a boolean query over
   it, policy comparison/refinement is **query containment**. Reference impl `ODRL2SHACL` (deployed in

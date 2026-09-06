@@ -26,8 +26,10 @@
 //! solution modifiers that do not change pattern input sets (DISTINCT /
 //! REDUCED / LIMIT-OFFSET / projection). Everything else — property paths,
 //! OPTIONAL, MINUS, UNION, `GRAPH` (contradictory with graph-set privacy,
-//! plan §2.4), VALUES, BIND, aggregates, SERVICE — is rejected as outside
-//! the verifiable fragment, failing closed.
+//! plan §2.4), `FROM` / `FROM NAMED` dataset clauses (which would re-define
+//! the dataset the fixed statement is about, so ignoring one mis-scopes the
+//! consumer's reading of the verdict — sq-p2hci), VALUES, BIND, aggregates,
+//! SERVICE — is rejected as outside the verifiable fragment, failing closed.
 //!
 //! **Wave-1 extended gate** (sq-3kd2g.3, epic sq-3kd2g / #1591): the separate
 //! [`fragment_query`] entry point additionally accepts the *monotone*
@@ -103,6 +105,32 @@ pub struct JoinEdge {
     pub patterns: (usize, usize),
 }
 
+/// Rejection reason for a `FROM` / `FROM NAMED` dataset clause. Shared by
+/// every query-text entry point so the two gates give one answer.
+const DATASET_CLAUSE_REASON: &str = "FROM / FROM NAMED (dataset clauses name graphs — contradictory with graph-set privacy; the committed union is the dataset)";
+
+/// Fails closed on a query carrying a `FROM` / `FROM NAMED` dataset clause
+/// (sq-p2hci).
+///
+/// A dataset clause RE-DEFINES the dataset the query is evaluated over, but
+/// the statement every zk entry point gates is fixed: *these solutions are in
+/// the answer over the **committed union***, with each pattern's witnesses
+/// drawn from the manifest's public attribution set. Ignoring the clause is
+/// therefore a CONSUMER-HONESTY defect, not merely an unsupported feature: a
+/// consumer reading `SELECT * FROM <g1> …` off the manifest reads the verdict
+/// as a claim scoped to `g1`, while the verified statement admits scans
+/// attributed to any committed graph — and, since the FROM-restricted answer
+/// is a *subset* of the union answer, a disclosed solution can be one the
+/// query as written does not produce. The clause also cannot be honoured
+/// here: the graph *set* is private by design (plan §2.4), so the verifier
+/// cannot check that the named graphs are the attributed ones. Fail closed.
+fn reject_dataset_clause(query: &Query) -> Result<(), VerifyError> {
+    if query.dataset().is_some() {
+        return Err(VerifyError::UnsupportedFragment(DATASET_CLAUSE_REASON.into()));
+    }
+    Ok(())
+}
+
 /// Re-derives the stage-1 fragment's BGP triple patterns from the query
 /// text, in query (text) order, as the same [`PatternKey`] shape the
 /// zk-trace records — so manifest pattern references can be cross-checked
@@ -120,6 +148,7 @@ pub fn fragment_patterns(sparql: &str) -> Result<Vec<PatternKey>, VerifyError> {
             return Err(VerifyError::UnsupportedFragment("DESCRIBE".into()))
         }
     };
+    reject_dataset_clause(&query)?;
     let mut out = Vec::new();
     collect_patterns(pattern, &mut out)?;
     Ok(out)
@@ -383,6 +412,7 @@ pub fn fragment_filters(sparql: &str) -> Result<Vec<QueryFilter>, VerifyError> {
         Query::Construct { .. } => return Err(VerifyError::UnsupportedFragment("CONSTRUCT".into())),
         Query::Describe { .. } => return Err(VerifyError::UnsupportedFragment("DESCRIBE".into())),
     };
+    reject_dataset_clause(&query)?;
     let mut out = Vec::new();
     collect_filters_gp(pattern, &mut out)?;
     Ok(out)
@@ -858,6 +888,7 @@ pub fn fragment_expr_trees(sparql: &str) -> Result<Vec<ExprObligation>, VerifyEr
         Query::Construct { .. } => return Err(VerifyError::UnsupportedFragment("CONSTRUCT".into())),
         Query::Describe { .. } => return Err(VerifyError::UnsupportedFragment("DESCRIBE".into())),
     };
+    reject_dataset_clause(&query)?;
     let mut out = Vec::new();
     collect_expr_obligations_gp(pattern, &mut out)?;
     Ok(out)
@@ -1236,9 +1267,9 @@ pub fn fragment_query(sparql: &str) -> Result<FragmentQuery, VerifyError> {
     let query = spargebra::SparqlParser::new()
         .parse_query(sparql)
         .map_err(|e| VerifyError::Parse(e.to_string()))?;
-    let (pattern, dataset, ask) = match &query {
-        Query::Select { pattern, dataset, .. } => (pattern, dataset, false),
-        Query::Ask { pattern, dataset, .. } => (pattern, dataset, true),
+    let (pattern, ask) = match &query {
+        Query::Select { pattern, .. } => (pattern, false),
+        Query::Ask { pattern, .. } => (pattern, true),
         Query::Construct { .. } => {
             return Err(VerifyError::UnsupportedFragment(
                 "CONSTRUCT (graph-template result form, outside the result-membership property — instantiate templates client-side from a proved mapping)".into(),
@@ -1250,11 +1281,7 @@ pub fn fragment_query(sparql: &str) -> Result<FragmentQuery, VerifyError> {
             ))
         }
     };
-    if dataset.is_some() {
-        return Err(VerifyError::UnsupportedFragment(
-            "FROM / FROM NAMED (dataset clauses name graphs — contradictory with graph-set privacy; the committed union is the dataset)".into(),
-        ));
-    }
+    reject_dataset_clause(&query)?;
 
     // Peel the OUTER solution-modifier stack (membership-indifferent:
     // LIMIT/OFFSET, DISTINCT/REDUCED) down to the query's own projection.
@@ -1747,6 +1774,47 @@ mod tests {
             fragment_patterns("SELECT WHERE"),
             Err(VerifyError::Parse(_))
         ));
+    }
+
+    /// sq-p2hci: a dataset clause RE-DEFINES the dataset the query is
+    /// evaluated over, but the stage-1 statement is fixed — "these solutions
+    /// are in the answer over the COMMITTED union". A consumer reading
+    /// `SELECT * FROM <g1> …` off the manifest would read the verdict as a
+    /// claim about `g1` alone, while the proof binds scans attributed to any
+    /// committed graph. The gate must fail closed on the clause instead of
+    /// silently ignoring it (the wave-1 gate already does).
+    #[test]
+    fn stage1_gate_rejects_dataset_clauses() {
+        for q in [
+            "SELECT * FROM <http://ex/g1> WHERE { ?s <http://ex/p> ?o }",
+            "SELECT * FROM NAMED <http://ex/g1> WHERE { ?s <http://ex/p> ?o }",
+            "SELECT * FROM <http://ex/g1> FROM NAMED <http://ex/g2> WHERE { ?s <http://ex/p> ?o }",
+            "ASK FROM <http://ex/g1> WHERE { ?s <http://ex/p> ?o }",
+        ] {
+            for (entry, got) in [
+                ("fragment_patterns", fragment_patterns(q).err()),
+                ("fragment_filters", fragment_filters(q).err()),
+                ("fragment_expr_trees", fragment_expr_trees(q).err()),
+                ("fragment_query", fragment_query(q).err()),
+                ("recheck", recheck(q, &attrs(&[&[0]]), &[]).err()),
+            ] {
+                match got {
+                    Some(VerifyError::UnsupportedFragment(msg)) => assert!(
+                        msg.contains("FROM / FROM NAMED"),
+                        "{entry}({q}): expected the dataset-clause reason, got `{msg}`"
+                    ),
+                    other => panic!("{entry}({q}): expected UnsupportedFragment, got {other:?}"),
+                }
+            }
+        }
+        // A dataset-free query of the same shape still passes every entry
+        // point — the rejection is the clause, not the shape.
+        let q = "SELECT * WHERE { ?s <http://ex/p> ?o }";
+        assert_eq!(fragment_patterns(q).unwrap().len(), 1);
+        assert!(fragment_filters(q).unwrap().is_empty());
+        assert!(fragment_expr_trees(q).unwrap().is_empty());
+        assert!(fragment_query(q).is_ok());
+        assert!(recheck(q, &attrs(&[&[0]]), &[]).unwrap().is_empty());
     }
 
     #[test]

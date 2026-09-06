@@ -29,6 +29,11 @@ publish = false
 zlib-ng = ["flate2/zlib-ng"]
 # [GPT-5.6] (sq-98w7z.2) Pure-Rust zlib-rs encoder backend, opt-in and OFF by
 # default so the existing miniz_oxide default and lean/wasm graphs are unchanged.
+# [OPUS-5] (sq-98w7z.2) MEASURED, not taken on faith: a large encoder win at
+# gzip -6 for a negligible ratio cost, but at -1 it trades ratio for speed — see
+# the "Gzip encoder backend" rustdoc section before enabling it. NOTE the flate2
+# precedence rule: `zlib-ng` (C) outranks `zlib-rs` outranks `miniz_oxide`, so
+# enabling both gives zlib-ng and `--all-features` does NOT exercise this one.
 zlib-rs = ["flate2/zlib-rs"]
 
 [dependencies]

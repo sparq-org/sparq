@@ -12,11 +12,20 @@
 # workflow closes the layer that actually binds.
 #
 # WHY NOT actions/labeler: it cannot express the three properties this needs — (a) the
-# label must ALREADY EXIST (labeler's add-label call silently CREATES an unknown label,
-# which is how a typo becomes permanent repo state), (b) a >max_areas fan-out must fall
-# BACK to `__global__` rather than acquiring many labels, and (c) the same code must drive
-# the one-pass backfill of the existing open PRs. The policy lives in reviewable TOML
-# (ci/area-labels.toml), not inline YAML.
+# label must ALREADY EXIST, or be EXPLICITLY created on a structural witness (labeler's
+# add-label call silently CREATES whatever name it is handed, which is how a typo becomes
+# permanent repo state), (b) a >max_areas fan-out must fall BACK to `__global__` rather
+# than acquiring many labels, and (c) the same code must drive the one-pass backfill of
+# the existing open PRs. The policy lives in reviewable TOML (ci/area-labels.toml), not
+# inline YAML.
+#
+# NEW-CRATE PRs (issue #4582). A PR that ADDS `crates/<name>/` was unattributable forever:
+# the checkout below is the DEFAULT BRANCH, where the crate does not exist, and no
+# `area:<name>` label was ever made — so the deriver reported `KEEP __global__
+# [unresolved]` (measured on #4578, `crates/sparq-wrapper-shacl`). Warn-and-fall-back is
+# the worst of both, so the deriver now CREATES that one label, on a witness it can check:
+# the PR's own added `crates/<name>/Cargo.toml` entry. Nothing weaker qualifies, and a
+# creation that fails REDS this run instead of falling back.
 #
 # TRUSTED-CODE POSTURE. The job holds `pull-requests: write`, so it must NOT execute code
 # from the pull request. `actions/checkout` is therefore pinned to the repository's
@@ -57,12 +66,22 @@ on:
   # deriver receives `--pr 0` and no-ops — see the Python no-pull-request-context path.
   merge_group:
 
-# Least privilege. `pull-requests: write` is the ONLY write scope, and it is the exact
-# scope the "add labels to a pull request" call needs. `contents: read` is required by
-# actions/checkout to read the deriver + ci/area-labels.toml; it grants no write.
-# NO `issues: write`, no `contents: write`, no secrets are referenced anywhere.
+# Least privilege, re-derived for #4582. `pull-requests: write` is the scope the "add
+# labels to a pull request" call needs. `issues: write` is the scope GitHub requires for
+# `POST /repos/{owner}/{repo}/labels` — the explicit label creation the new-crate case
+# needs; the repository label COLLECTION is issues-scoped, and no pull-request scope
+# reaches it. `contents: read` is required by actions/checkout to read the deriver +
+# ci/area-labels.toml; it grants no write. NO `contents: write`, and no secret other than
+# the scoped GITHUB_TOKEN is referenced anywhere.
+#
+# WHAT BOUNDS `issues: write` HERE: this job runs ONLY default-branch code (see
+# TRUSTED-CODE POSTURE) and the only issues-scoped call in scripts/pr-area-labels.py is
+# that one label creation, reachable only for a name the PR's own added
+# `crates/<name>/Cargo.toml` witnesses. Both halves are pinned by named tests in
+# scripts/tests/test_pr_area_labels.py.
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 concurrency:

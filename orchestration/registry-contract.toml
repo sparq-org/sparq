@@ -1,0 +1,141 @@
+# [OPUS-5] sparq#4819 — THE NAMES jeswr/agent-account-registry READS OFF `scripts/dispatch-plan.py`.
+#
+# WHY THIS FILE EXISTS. The registry's `dispatch.yml` (step `id: readiness`) does
+# `load_dispatch(<target>/scripts/dispatch-plan.py)` and then reads named attributes off THAT
+# module with `getattr(planner, "<name>", None)`. When an attribute it wants is absent the
+# registry does not fail — it DEGRADES, prints a reason, and plans this repository as if the
+# feature did not exist. That is the correct behaviour for a hostile-target planner, and it means
+# a missing export here is invisible from inside sparq: every sparq self-test can be green while
+# the orchestrator has silently stopped consuming the thing those tests prove.
+#
+# It has happened twice. `roleless_ready` went unreported for every tick until it was re-exported;
+# `INERT_FIELD`/`MACHINE_PARK_PR_LABEL` (sparq#4819) were defined only in `scripts/ready-issues.py`
+# and shipped as a MEASURED no-op — ready-issues.py's own suite was 9/9 green throughout, because
+# it pins the ENGINE and the registry reads the MODULE.
+#
+# HOW IT IS ENFORCED. `scripts/dispatch-plan.py --self-test` reads this file and asserts every
+# `required_attributes` name is present on the module as loaded EXACTLY the way `load_dispatch`
+# loads it, and that the pinned `values` still match. Adding a name here without exporting it is
+# red; renaming an export without changing this file is red. It is deliberately DATA and not a
+# Python constant so that a rename sweep over `scripts/` cannot carry the expectation along with
+# the thing it is supposed to be checking.
+#
+# THESE NAMES ARE NOT SPARQ'S TO RENAME. They are hard-coded string literals in the registry's
+# workflow. Changing one here without a matching registry PR does not break a test in CI — it
+# silently returns the pipeline to the degraded path.
+
+[planner_exports]
+# The two-repo interlock that releases a machine-parked (`review:parked`) PR's `area:` keys, but
+# ONLY against the registry's own per-row inertness proof (sparq#4819). The registry's
+# `inert_aware` probe refuses to stamp anything unless BOTH names resolve to strings AND
+# `compute_ready` demonstrably honours them in both directions.
+required_attributes = [
+    "compute_ready",
+    "roleless_ready",
+    "ready_candidates",
+    "INERT_FIELD",
+    "MACHINE_PARK_PR_LABEL",
+]
+
+[planner_exports.values]
+# WIRE VALUES, not just names. `INERT_FIELD` is the key the registry WRITES onto each occupancy
+# row (`row[field] = inert_map.get(pr_number, False)`), and `MACHINE_PARK_PR_LABEL` is a real
+# GitHub label on this repository — so both are observable outside sparq and neither is a free
+# local choice.
+INERT_FIELD = "inert"
+MACHINE_PARK_PR_LABEL = "review:parked"
+
+[partition_resolver]
+# [OPUS-5] sparq#4365 — the `area:` PARTITION ALGEBRA, offered to `busy_packages_of_pulls`.
+#
+# sparq#4360 made this repo's readiness engine containment-aware: two `area:` keys conflict iff one
+# workspace-derived partition path is a prefix of the other. Per sparq#4365 — a claim about the
+# PRIVATE registry, which nothing in this repository can verify — its `dispatch.yml` mirrors the
+# same key space and still compares by EXACT STRING, so the two legs disagree on every sub-crate
+# key: the double-dispatch class `scripts/dispatch-plan.py`'s #3691 fixtures exist for.
+#
+# #4365 proposed porting a six-line resolver into `dispatch.yml`. These names are the alternative:
+# `dispatch.yml` already clones this checkout and already `load_dispatch`es `dispatch-plan.py`, so
+# `planner.keys_conflict(a, b)` gets the rule AND the tree-derived root set from the same tree, and
+# there is exactly ONE implementation to keep honest. A port would be a second one — and #4360
+# found #4336's hand-written containment table stale before it was even written down.
+required_attributes = [
+    "partition_path",
+    "keys_conflict",
+    "workspace_roots",
+    "DegeneratePartitionRoots",
+]
+
+[partition_resolver.parity_fixture]
+# THE ASSERTION #4365 ASKS FOR, as data both repositories can read. Key -> the partition path it
+# reserves. `python3 scripts/ready-issues.py --dump-partitions KEY...` prints
+# `{"roots": [...], "resolved": {key: path}}` offline with no API calls, precisely so a registry
+# leg can diff against this table cheaply; `dispatch-plan.py --self-test` asserts the loaded module
+# reproduces it here.
+#
+# Every row is load-bearing and each covers a distinct resolution rule:
+"sparq-server-http" = ["sparq-server"]            # region -> its crate
+"sparq-core-store" = ["sparq-core"]               # region -> its crate...
+"sparq-core-nt-dict" = ["sparq-core"]             # ...and two regions of one crate collide
+"sparq-engine-exec" = ["sparq-engine"]            # region -> its crate
+"sparq-engine-serialize" = ["sparq-engine-serialize"]  # REAL sibling crate: stays independent
+"sparq-conformance-floors" = ["sparq-conformance-floors"]  # ditto — #4336's table said otherwise
+"deps" = ["deps"]                                 # single-segment: keeps its OWN partition
+"upstream-noir" = ["upstream"]                    # unknown parent: over-reserves to the head
+"" = []                                           # degenerate: falls CLOSED to the global root
+#
+# NOT `__global__`: an unrecognised single-segment key keeps its OWN partition, which is why `deps`
+# is pinned here as a row rather than left implicit. A registry leg that "falls closed" on those
+# instead would stall the fleet, not harden it — the measurement is recorded on
+# `scripts/ready-issues.py::partition_path` and in
+# `test_readiness_visibility.py::test_single_segment_unknown_key_keeps_its_own_partition`, and is
+# deliberately NOT restated here so there is one place to correct when it is re-measured.
+
+[non_reserving_partitions]
+# [OPUS-5] sparq#4929 — the CROSS-CUTTING EXEMPTION, offered to the registry's SECOND occupancy leg.
+#
+# sparq#4928 made `ci`/`docs` non-reserving for occupancy in `scripts/ready-issues.py` — the PLAN
+# leg. sparq#4929 reports that the registry's `dispatch-claim.py::busy_packages_of_pulls` (applied
+# at `filter_busy_area_items` on assemble, and again at `revalidate_items_against_live_pulls` at
+# CLAIM time) derives its own busy-area union from open worker PRs with NO exemption, so the rows
+# PLAN now offers are re-deferred one layer down. Two legs disagreeing about one partition is the
+# drift class sparq#4819 documents.
+#
+# So the declaration is pinned here as DATA and exported as a CALLABLE, exactly as #4365's
+# resolver is: `dispatch.yml` already `load_dispatch`es `scripts/dispatch-plan.py`, so
+# `planner.reserves_partition(key)` gets the rule, the measured basis and the fail-safe from one
+# implementation. A registry leg that instead re-types `{"ci", "docs"}` into its own source would
+# make the declaration a SECOND copy, free to drift from this one — and two legs disagreeing about
+# one partition is the defect sparq#4929 reports, not a fix for it.
+#
+# NOTHING HERE OBSERVES THE REGISTRY. These rows assert the sparq half; passing them does not mean
+# `busy_packages_of_pulls` has changed, and the before/after sparq#4929 asks for is measurable only
+# in the registry, where the `ledger` provenance half is readable.
+required_attributes = [
+    "non_reserving_partitions",
+    "reserves_partition",
+]
+
+[non_reserving_partitions.declared]
+# THE VALIDATED SET — `planner.non_reserving_partitions()`, not the raw `NON_RESERVING_PARTITIONS`
+# constant, which is deliberately NOT exported: reading the declaration directly skips the
+# validation that voids it on a single bad entry and keeps the global/degenerate root out of it.
+# `deps` is absent BY MEASUREMENT, not by omission — every live `deps` holder pair collides on
+# `Cargo.lock`, so it and the crate areas stay reserving on both legs (sparq#4929 asks for exactly
+# that). The measured basis lives once, on `scripts/ready-issues.py::NON_RESERVING_PARTITIONS`.
+partitions = ["ci", "docs"]
+
+[non_reserving_partitions.parity_fixture]
+# key -> does an OCCUPANT declaring it RESERVE its partition? (`planner.reserves_partition(key)`)
+#
+# Every row covers a distinct rule, and the two `*-fragments`/sub-crate rows are the ones an
+# exact-string mirror (`key in {"ci", "docs"}`) gets WRONG in opposite directions — which is why
+# the predicate, and not the set, is the thing to call.
+"ci" = false                      # declared exempt
+"docs" = false                    # declared exempt
+"ci-fragments" = false            # resolves INTO the `ci` partition -> exempt WITH it
+"deps" = true                     # single-segment, own partition, measured colliding -> reserves
+"sparq-core" = true               # crate area -> reserves
+"sparq-core-store" = true         # region of a reserving crate -> reserves
+"__global__" = true               # the containing root can NEVER be exempted...
+"" = true                         # ...nor can a degenerate key, which resolves to it

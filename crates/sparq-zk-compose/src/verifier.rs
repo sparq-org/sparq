@@ -113,7 +113,8 @@ use crate::manifest::{
     StatusListSnapshot,
 };
 // [OPUS-4.8] sq-314: derivation-step re-check for entailment-regime enforcement.
-use crate::derivation::regime_admits;
+// [OPUS-5] sq-rsd3v.7: the two UNBUILT completeness halves the refusal message names.
+use crate::derivation::{regime_admits, COMPLETENESS_UNDER_ENTAILMENT_UNBUILT};
 // [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation root derivation.
 use crate::revocation::merkle_root;
 use sparq_zk::encode::encode_term;
@@ -586,12 +587,18 @@ impl HolderBindingPolicy {
 /// in-circuit single-step relation exists (`compose_core::entail`, sq-g91d,
 /// research-grade / NOT-yet-sound sq-qhy4) but is not yet wired into this policy —
 /// see the `derivation` module docs. A relying party that requires
-/// cryptographic-strength inference keeps the `Simple`-only default.
+/// cryptographic-strength inference keeps the `Simple`-only default. Accepting a
+/// regime also says NOTHING about COMPLETENESS under that regime — the separate,
+/// UNBUILT obligation `sq-rsd3v.7`; a relying party that needs it says so with
+/// [`EntailmentPolicy::require_completeness_under_entailment`] and is REFUSED
+/// rather than handed a soundness-only accept.
 // [OPUS-4.8] sq-314: entailment-regime policy (external, fail-closed).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntailmentPolicy {
     accept_rdfs: bool,
     accept_owl: bool,
+    // [OPUS-5] sq-rsd3v.7: the relying party demands completeness-under-entailment.
+    require_completeness: bool,
 }
 
 impl Default for EntailmentPolicy {
@@ -603,7 +610,7 @@ impl Default for EntailmentPolicy {
 impl EntailmentPolicy {
     /// Accept ONLY `Simple` (no inference) — the fail-closed default.
     pub fn simple_only() -> Self {
-        EntailmentPolicy { accept_rdfs: false, accept_owl: false }
+        EntailmentPolicy { accept_rdfs: false, accept_owl: false, require_completeness: false }
     }
 
     /// Additionally accept `Rdfs` manifests (with grounded derivation steps).
@@ -618,6 +625,52 @@ impl EntailmentPolicy {
         self.accept_owl = true;
         self.accept_rdfs = true;
         self
+    }
+
+    /// Declare that this relying party requires **COMPLETENESS under entailment** —
+    /// "no entailed answer is MISSING from the disclosed result".
+    ///
+    /// That property is **UNBUILT in sparq and NOT claimed** (`sq-rsd3v.7`, design
+    /// `research/zk-inference-and-credentials.md` §3.7): it needs BOTH halves of
+    /// [`crate::derivation::COMPLETENESS_UNDER_ENTAILMENT_UNBUILT`], and the
+    /// fixpoint-saturation half exists nowhere in the estate. So setting this dial
+    /// does not enable a check — it makes the verifier REFUSE, fail-closed, every
+    /// non-`Simple` manifest with
+    /// [`CheckError::CompletenessUnderEntailmentUnavailable`]. The point is that a
+    /// relying party which needs completeness gets a MACHINE-CHECKABLE refusal
+    /// naming the gap, instead of an accept it could misread as completeness — the
+    /// soundness-of-derivation / completeness-under-entailment conflation this
+    /// crate must never allow.
+    ///
+    /// # Precisely what the refusal does and does NOT assert
+    /// It asserts only this: **no accepted proof under this policy rests on
+    /// entailment whose completeness sparq cannot check.** A `Simple` manifest is
+    /// NOT refused (there is no entailment closure for it to be complete over), but
+    /// passing one is *not* an assertion that its answer set is complete — that
+    /// rests on the `scan.nr` per-pattern sweep and the rest of the (not externally
+    /// audited, `sq-qhy4`) verifier, not on this dial. And this dial CANNOT detect
+    /// a closure materialised OFF-circuit and presented as `Simple` over the
+    /// materialised graph (design §3.6(a) trusted-materialiser mode): there the
+    /// regime field is honestly `Simple` and entailment is trusted to the
+    /// materialiser's signature, a DIFFERENT trust model the relying party must
+    /// evaluate itself.
+    ///
+    /// When the design's RE-ENTRY TRIGGER fires (a documented huge-closure case
+    /// plus a verifier demanding full completeness — §3.6(c),
+    /// `research/zkp-performance-landscape.md` §5 trigger 4), the unconditional
+    /// refusal is what gets replaced by a real check; until then it is the honest
+    /// answer.
+    // [OPUS-5] sq-rsd3v.7: enforced deferral — a demand for completeness REFUSES.
+    pub fn require_completeness_under_entailment(mut self) -> Self {
+        self.require_completeness = true;
+        self
+    }
+
+    /// Whether this relying party requires completeness under entailment
+    /// (`sq-rsd3v.7`) — always a REFUSAL for a non-`Simple` regime, since the
+    /// capability is unbuilt.
+    fn requires_completeness(&self) -> bool {
+        self.require_completeness
     }
 
     /// Whether this policy accepts `regime`.
@@ -1275,6 +1328,53 @@ pub enum CheckError {
     /// A query FILTER constrains a variable that does not bind to any scanned
     /// column of a BGP pattern (cannot be mapped to a `filter_int` operand).
     UnmappableFilterVar { variable: String },
+    /// `manifest.pattern_scans` is DECLARED (non-empty) but does not carry
+    /// exactly one entry per query BGP pattern (sq-q9r5e follow-up): the
+    /// pattern→scan mapping is indexed in query order like `attributions`, so a
+    /// mis-sized declaration cannot be interpreted and is rejected fail-closed.
+    /// (The FILTER/attribution obligations themselves are unaffected by a
+    /// declaration — see `check_pattern_scans`.)
+    // [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping.
+    PatternScanArityMismatch { patterns: usize, declared: usize },
+    /// A DECLARED `manifest.pattern_scans[pattern]` is EMPTY: the prover declared
+    /// the mapping but left this query BGP pattern with no answering scan. Every
+    /// pattern must be answered (the declared analogue of `UnboundPattern`).
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanUnbound { pattern: usize },
+    /// A DECLARED `manifest.pattern_scans[pattern]` names sub-proof `proof`,
+    /// which is out of range, is not a SCAN, or whose bb-bound
+    /// `pattern_is_const`/`pattern_const_enc` do NOT match the query pattern's
+    /// constant slots (audit #10). A declaration must not claim a scan answers a
+    /// pattern it provably does not.
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanMismatch { pattern: usize, proof: usize },
+    /// `manifest.pattern_scans` is DECLARED but scan sub-proof `proof` is named
+    /// by NO pattern: the manifest discloses that scan's rows while its own
+    /// declared reading gives them no pattern, which is incoherent, so it is
+    /// rejected fail-closed rather than recorded.
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanUndeclared { proof: usize },
+    /// A query BGP pattern uses the SAME variable at two slots (`{ ?v <p> ?v }`)
+    /// but a disclosed row of a scan that answers that pattern binds those two
+    /// slots to DIFFERENT terms — so the row does not satisfy the pattern it is
+    /// disclosed under, and a relying party would read `?v` as two terms at once.
+    /// `slots` is the `(first, offending)` slot pair within the pattern.
+    ///
+    /// The cross-pattern analogues of this obligation are the disclosed-path
+    /// `recheck` / `join_obligations` gate and the hidden-path `bind_joins` slot
+    /// binding; both iterate pattern PAIRS over per-pattern variable SETS, so the
+    /// WITHIN-pattern repetition is invisible to them. `scan_matches_pattern` only
+    /// compares per-slot const-ness/encodings and the scan circuit binds only the
+    /// CONSTANT slots to `pattern_const_enc`, so nothing else constrains it.
+    // [OPUS-5] #5240 (raised while fixing audit L-1 / sq-q9r5e). Research-grade,
+    // NOT externally audited (sq-qhy4).
+    RepeatedSlotMismatch {
+        pattern: usize,
+        proof: usize,
+        row: usize,
+        variable: String,
+        slots: (usize, usize),
+    },
     /// A scan sub-proof's commitment has no issuer attestation in the manifest
     /// (audit #3): `commitments[g]` is unsigned / prover-invented, so the
     /// "credential issued by X" claim has no cryptographic backing. Closes the
@@ -1754,6 +1854,17 @@ pub enum CheckError {
     /// `derivation` module; until then only the disclosed base grounds a step.)
     // [OPUS-4.8] sq-314.
     UngroundedDerivationAntecedent { step: usize, antecedent: usize },
+    /// The relying party requires COMPLETENESS under entailment
+    /// ([`EntailmentPolicy::require_completeness_under_entailment`]) but the
+    /// manifest declares a non-`Simple` regime, and that property is **UNBUILT in
+    /// sparq and NOT claimed** (`sq-rsd3v.7`): both halves of
+    /// [`crate::derivation::COMPLETENESS_UNDER_ENTAILMENT_UNBUILT`] would be needed
+    /// and the fixpoint-saturation half exists nowhere in the estate. Refused
+    /// fail-closed — a soundness-of-derivation accept must never be handed to a
+    /// relying party that asked for completeness (the conflation the design's §3.7
+    /// forbids). This is a CAPABILITY refusal, not a defect in the manifest.
+    // [OPUS-5] sq-rsd3v.7: enforced deferral of completeness-under-entailment.
+    CompletenessUnderEntailmentUnavailable { regime: &'static str },
     /// A derivation step introduces or consumes an `owl:sameAs` fact
     /// (sq-rsd3v.6): the `owl:sameAs` encoding stands in a predicate slot of an
     /// antecedent or of the derived triple. The fixed-shape RDFS / OWL-RL-minus-
@@ -1887,6 +1998,27 @@ impl std::fmt::Display for CheckError {
             CheckError::UnmappableFilterVar { variable } => write!(
                 f,
                 "query FILTER on ?{variable} does not bind to any scanned column"
+            ),
+            CheckError::PatternScanArityMismatch { patterns, declared } => write!(
+                f,
+                "manifest.pattern_scans declares {declared} entries for {patterns} query BGP patterns (the pattern→scan mapping is indexed per query pattern, like attributions)"
+            ),
+            CheckError::PatternScanUnbound { pattern } => write!(
+                f,
+                "manifest.pattern_scans[{pattern}] is empty: query BGP pattern {pattern} is declared to be answered by no scan sub-proof"
+            ),
+            CheckError::PatternScanMismatch { pattern, proof } => write!(
+                f,
+                "manifest.pattern_scans[{pattern}] names sub-proof {proof}, which is out of range, is not a scan, or whose bound pattern constants do not answer query BGP pattern {pattern} (audit #10: a declaration must not contradict the proof-bound constants)"
+            ),
+            CheckError::PatternScanUndeclared { proof } => write!(
+                f,
+                "scan sub-proof {proof} is named by no entry of the declared manifest.pattern_scans: the manifest discloses its rows but its own declared reading gives them no query BGP pattern (dangling scan)"
+            ),
+            CheckError::RepeatedSlotMismatch { pattern, proof, row, variable, slots } => write!(
+                f,
+                "query BGP pattern {pattern} binds ?{variable} at slots {} and {}, but disclosed row {row} of scan sub-proof {proof} (which answers that pattern) gives them different terms: the row does not satisfy the pattern it is disclosed under",
+                slots.0, slots.1
             ),
             CheckError::UnattestedCommitment { proof, commitment } => write!(
                 f,
@@ -2182,6 +2314,11 @@ impl std::fmt::Display for CheckError {
                 f,
                 "derivation step {step} antecedent {antecedent} is ungrounded (sq-314: it is neither an earlier step's derived triple nor a disclosed scan row — a derived triple cannot rest on an antecedent the proof does not establish)"
             ),
+            CheckError::CompletenessUnderEntailmentUnavailable { regime } => write!(
+                f,
+                "the relying party requires completeness under entailment but regime `{regime}` cannot supply it (sq-rsd3v.7: UNBUILT and NOT claimed — it needs both an {} and a {}, and the saturation half exists nowhere in sparq; soundness of derivation is NOT completeness under entailment)",
+                COMPLETENESS_UNDER_ENTAILMENT_UNBUILT[0], COMPLETENESS_UNDER_ENTAILMENT_UNBUILT[1]
+            ),
             CheckError::EqualityReasoningUnsupported { step } => write!(
                 f,
                 "derivation step {step} introduces or consumes an owl:sameAs fact (sq-rsd3v.6: encoding-equality re-checks are the wrong proxy under equality reasoning — owl:sameAs needs the separate in-circuit canonicalisation member, so it is refused fail-closed here)"
@@ -2339,6 +2476,20 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
         #[cfg(feature = "dual-leaf")]
         ProofInputs::FilterValueDlDecimal { .. } => match inputs.circuit_id() {
             CircuitId::FilterValueDlDecimal => Some(CircuitId::FilterValueDlDecimal),
+            _ => None,
+        },
+        // [OPUS-5] sq-wz99x: the DUAL-LEAF dateTime/date value-lane FILTER. Also
+        // DIGIT-COUNT-FREE, and additionally LANE-FREE: ONE member serves BOTH the
+        // `xsd:dateTime` and `xsd:date` classes, because the lane (and the
+        // sub-second scale `FS`) lives in the PUBLIC `datatype_const`, not the
+        // member id. So the derive only confirms the declared id is that single
+        // member; WHICH lane a proof is for is pinned by the public-input
+        // reconstruction below — `datatype_const` is a public input, so a lane swap
+        // changes the reconstructed vector and cannot byte-match the proof. The
+        // fail-closed `(method × circuit)` legality is `crate::dispatch` (sq-cfmv).
+        #[cfg(feature = "dual-leaf")]
+        ProofInputs::FilterValueDlDateTime { .. } => match inputs.circuit_id() {
+            CircuitId::FilterValueDlDateTime => Some(CircuitId::FilterValueDlDateTime),
             _ => None,
         },
         // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN. The
@@ -2603,8 +2754,24 @@ fn prefilter_manifest_structure_impl(
     // so it is skipped here (documented unbound-terms limitation — the sub-proofs
     // still verify cryptographically, they are just not yet tied to the disclosed
     // solution terms).
+    //
+    // [OPUS-5] sq-q9r5e follow-up: stage 2a′ first — when the prover DECLARED a
+    // `manifest.pattern_scans` mapping, re-check it here. It is an ADDITIONAL
+    // fail-closed constraint only: the FILTER and attribution obligations below
+    // still run over the full constant-MEMBERSHIP relation, so a declaration can
+    // never shrink what the verifier demands (see `check_pattern_scans`).
+    //
+    // [OPUS-5] #5240: stage 2b′ last — a variable repeated WITHIN one BGP pattern
+    // (`{ ?v <p> ?v }`) constrains the two disclosed columns to be EQUAL, which no
+    // other gate enforced: `scan_matches_pattern` compares only const-ness and the
+    // constant encodings, and every shared-variable gate (`recheck` /
+    // `join_obligations` on the disclosed path, `bind_joins` on the hidden path)
+    // works across pattern PAIRS and so cannot see a within-pattern repeat. Placed
+    // AFTER the gates above so their (already-pinned) error precedence is unchanged.
     if !skip_query_binding {
+        check_pattern_scans(manifest)?;
         bind_query_correctness(manifest)?;
+        bind_repeated_pattern_slots(manifest)?;
     }
 
     // --- Stage 2e: cross-graph attribution binding (audit #8). ---
@@ -4351,7 +4518,19 @@ fn bind_holder_set(
 /// preferred when present (the additive mode); the hidden entry's salt is the
 /// fallback so a commitment with no clear attestation can still have its `m`
 /// recomputed. `None` if neither source supplies a parseable salt.
+///
+/// # Disclosure posture (sq-93h, assessed)
+/// Every salt this can return belongs to a commitment the presentation ALREADY
+/// discloses in the clear (a scan's `commitments[g]`, byte-bound into the bb public
+/// inputs by [`reconstruct_public_inputs`]), so the salt is a DOMINATED correlator and
+/// withholding it behind an in-circuit salt-commitment would buy no unlinkability. That
+/// conclusion is conditional on TWO things: `C(G)` staying public — pinned on the real
+/// paths by `tests::hidden_only_salt_disclosure_is_dominated_by_the_clear_commitment` —
+/// and the audit-#9 ISSUANCE discipline that no salt is reused for two distinct graphs,
+/// of which only the within-manifest instance (`SaltReused`) is machine-checked. Argued
+/// in `research/zk-hidden-path-salt-disclosure.md`.
 // [OPUS-4.8] sq-xxg: salt source for hidden-only message reconstruction.
+// [OPUS-5] sq-93h: disclosure assessed NO-BUILD; the trip-wire guards the premise.
 fn resolve_commitment_salt(manifest: &ProofManifest, c_fr: &Fr) -> Option<Fr> {
     // Prefer the clear attestation's salt (the original sq-z9l additive path).
     if let Some(att) = manifest.commitment_attestations.iter().find(|a| {
@@ -4496,6 +4675,99 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
     true
 }
 
+/// Stage 2a′: re-check a DECLARED [`ProofManifest::pattern_scans`] pattern→scan
+/// mapping. A no-op when the field is empty (the ordinary case).
+///
+/// # This gate only ADDS obligations — it never narrows one
+/// The declaration is a prover-authored reading of which scan answers which query
+/// BGP pattern. It is NOT consulted by [`bind_query_correctness`] or
+/// [`bind_attributions`]: both still resolve pattern→scan by constant MEMBERSHIP
+/// (`scan_matches_pattern`), so the sq-q9r5e / audit-L-1 rule stands unweakened —
+/// the FILTER must be discharged at EVERY slot the filtered variable occupies
+/// across EVERY pattern a scan matches by constants, whatever the prover declares.
+/// Declaring a mapping can therefore only ever cause an ADDITIONAL rejection
+/// here; it can never buy an acceptance the membership regime would refuse.
+///
+/// # Why it does not narrow (the round-2 review finding — READ THIS BEFORE WIRING IT IN)
+/// The obvious use of the declaration is to demand only the DECLARED answering
+/// scan's slots, removing the membership over-demand on same-constant-layout
+/// queries (`{ ?x <age> ?v . ?x <age> ?c }` — both patterns `(?, <age>, ?)`; see
+/// `research/zk-audit-gpt56-2026-07.md` L-1). That is UNSOUND as the manifest
+/// stands. SPARQL evaluates each pattern over EVERY compatible committed row, and
+/// the query text authorises no prover-chosen partition of the committed data, so
+/// a prover free to exclude a constant-compatible scan from a pattern can drop
+/// that scan's rows out of the pattern's FILTER and attribution obligations while
+/// still disclosing them. The checks below (total assignment: no empty entry, no
+/// dangling scan, no declared pair that contradicts the bb-bound constants) pin
+/// only that the declaration is a TOTAL map of scans to labels — they establish
+/// nothing about whether an excluded scan contributes to the claimed result.
+///
+/// Narrowing needs the missing piece: a claimed result row bound to the selected
+/// scan rows, with all shared-variable joins enforced, so that "this scan does not
+/// contribute" is a VERIFIED property rather than a prover assertion the consumer
+/// is asked to take on faith. The flat `ProofManifest` carries no such claimed
+/// result row, so that witness is NOT built here and
+/// the flat verifier keeps full constant-membership obligations, including the
+/// over-demand, and the honest same-layout manifest stays REJECTED
+/// (`pattern_scans_do_not_narrow_the_filter_obligation`).
+///
+/// # What IS checked when a declaration is present
+/// Exactly one entry per query pattern ([`CheckError::PatternScanArityMismatch`]);
+/// no empty entry ([`CheckError::PatternScanUnbound`]); every named sub-proof in
+/// range, a scan, and with bb-bound `pattern_is_const`/`pattern_const_enc` that
+/// MATCH the pattern's constants ([`CheckError::PatternScanMismatch`], audit #10);
+/// and no scan sub-proof left undeclared
+/// ([`CheckError::PatternScanUndeclared`]). A declaration that survives all four
+/// is recorded metadata, nothing more.
+// [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping, validated but
+// deliberately NOT load-bearing. Research-grade, NOT externally audited (sq-qhy4).
+fn check_pattern_scans(manifest: &ProofManifest) -> Result<(), CheckError> {
+    if manifest.pattern_scans.is_empty() {
+        return Ok(());
+    }
+
+    let patterns = fragment_patterns(&manifest.query)?;
+    let consts = fragment_pattern_consts(&patterns);
+
+    if manifest.pattern_scans.len() != consts.len() {
+        return Err(CheckError::PatternScanArityMismatch {
+            patterns: consts.len(),
+            declared: manifest.pattern_scans.len(),
+        });
+    }
+
+    let mut declared_scans: BTreeSet<usize> = BTreeSet::new();
+    for (pi, decl) in manifest.pattern_scans.iter().enumerate() {
+        if decl.is_empty() {
+            return Err(CheckError::PatternScanUnbound { pattern: pi });
+        }
+        for &spi in decl {
+            // Out of range / not a scan / constants disagree all collapse to the
+            // same rejection: the declaration must not contradict the bb-bound
+            // pattern constants (audit #10).
+            let answers = manifest
+                .sub_proofs
+                .get(spi)
+                .is_some_and(|sp| scan_matches_pattern(&sp.inputs, &consts[pi]));
+            if !answers {
+                return Err(CheckError::PatternScanMismatch { pattern: pi, proof: spi });
+            }
+            declared_scans.insert(spi);
+        }
+    }
+
+    // No DANGLING scan: a declaration that discloses a scan's rows while naming it
+    // for no pattern is an incoherent reading, so it is rejected rather than
+    // recorded.
+    for (spi, sp) in manifest.sub_proofs.iter().enumerate() {
+        if matches!(sp.inputs, ProofInputs::Scan { .. }) && !declared_scans.contains(&spi) {
+            return Err(CheckError::PatternScanUndeclared { proof: spi });
+        }
+    }
+
+    Ok(())
+}
+
 /// Stage 2b/2c: bind every query BGP pattern's constants to a scan sub-proof
 /// (audit #10) and every query FILTER to a slot-bound, true-verdict
 /// `filter_int` sub-proof reached via a binding edge (audit #5/#6/#7).
@@ -4510,6 +4782,24 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
 /// comparison-substitution); and (4) the filter's `expected == true` (audit
 /// #5/#6 — the verdict gates row inclusion; an `expected==false` row may not be
 /// presented as passing).
+///
+/// # EVERY slot, not the first (sq-q9r5e / audit L-1)
+/// A scan is matched to a query pattern by constant MEMBERSHIP, so ONE scan can
+/// answer SEVERAL patterns — and those patterns may place the filtered variable
+/// at DIFFERENT slots. The obligation is therefore per `(scan, row, slot)` over
+/// the FULL set of slots `?v` occupies across the patterns that scan answers,
+/// not the first such slot. Gating only the first accepted a manifest whose
+/// other disclosed ?v column was never proven against the FILTER (confirmed
+/// reachable; witness `filter_reject_ungated_second_slot_within_scan`).
+///
+/// This is deliberately FAIL-CLOSED on the pattern→scan ambiguity: where two
+/// patterns share a constant layout the verifier cannot tell which one a given
+/// scan was meant to answer, so it demands the FILTER be discharged for every
+/// slot that scan could be read at. A manifest that cannot supply those proofs
+/// is REJECTED rather than accepted on the strength of one of them. A prover's
+/// `manifest.pattern_scans` declaration does NOT relax this — see
+/// [`check_pattern_scans`] for why narrowing needs a verified result witness the
+/// flat manifest cannot yet express.
 ///
 /// A FILTER with no such edge ⇒ REJECT (audit #10 FILTER-add / a `filter_int`
 /// over the wrong operand). Stage 2 already enforced the edge's scanned-slot
@@ -4560,27 +4850,58 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
                 ProofInputs::Scan { rows, row_count, .. } => (rows, *row_count as usize),
                 _ => continue,
             };
-            // Is this scan the one that answers a pattern ?v binds in, and at
-            // which slot does ?v sit there?
-            let slot = positions.iter().find_map(|(pi, si)| {
-                consts
-                    .get(*pi)
-                    .filter(|c| scan_matches_pattern(&sp.inputs, c))
-                    .map(|_| *si)
-            });
-            let Some(slot) = slot else { continue };
+            // EVERY slot ?v sits at across EVERY query pattern this scan
+            // answers — not just the first.
+            //
+            // [OPUS-5] sq-q9r5e (audit L-1, `research/zk-audit-gpt56-2026-07.md`):
+            // this was a `find_map`, which took only the FIRST matching
+            // (pattern, slot) pair. Pattern→scan is resolved by constant
+            // MEMBERSHIP (`scan_matches_pattern`), not an explicit mapping, so
+            // ONE scan can answer SEVERAL query patterns — and when those
+            // patterns place the filtered variable at DIFFERENT slots (e.g. a
+            // `(?, P, ?)` scan answering both `(?s P ?v)` and `(?v P ?o)`),
+            // every one of those slots is a column the relying party reads ?v
+            // off. Gating only the first left the others ungated, so a row whose
+            // second-slot binding of ?v was never proven against the FILTER was
+            // presented as satisfying it (CONFIRMED reachable: the structural
+            // gate accepted such a manifest — witness
+            // `filter_reject_ungated_second_slot_within_scan` in `tests/e2e.rs`).
+            //
+            // Collecting ALL matching slots is the FAIL-CLOSED direction and
+            // matches the discipline `bind_attributions` already applies (it
+            // checks EVERY scan matching a pattern, never a first match). A
+            // BTreeSet dedups the case where two patterns place ?v at the same
+            // slot, and gives a deterministic order for the error path.
+            //
+            // [OPUS-5] sq-q9r5e follow-up: a `manifest.pattern_scans` declaration
+            // is deliberately NOT read here. Narrowing this set to the declared
+            // answering scan would let the prover drop a constant-compatible
+            // scan's rows out of the FILTER obligation on its own say-so; see
+            // `check_pattern_scans`.
+            let slots: BTreeSet<usize> = positions
+                .iter()
+                .filter(|(pi, _)| {
+                    consts.get(*pi).is_some_and(|c| scan_matches_pattern(&sp.inputs, c))
+                })
+                .map(|(_, si)| *si)
+                .collect();
+            if slots.is_empty() {
+                continue;
+            }
             any_scan_answered = true;
             // Every ACTIVE disclosed row must have a true-verdict filter_int
-            // edge at this slot with matching (op, bound).
+            // edge at EACH such slot with matching (op, bound).
             for row in 0..row_count.min(rows.len()) {
-                let gated = manifest.binding_edges.iter().any(|edge| {
-                    edge.from_proof == spi
-                        && edge.from_row == row
-                        && edge.from_slot == slot
-                        && filter_edge_true(manifest, edge.to_proof, *op, *bound)
-                });
-                if !gated {
-                    return Err(CheckError::UnboundFilter { variable: variable.clone() });
+                for &slot in &slots {
+                    let gated = manifest.binding_edges.iter().any(|edge| {
+                        edge.from_proof == spi
+                            && edge.from_row == row
+                            && edge.from_slot == slot
+                            && filter_edge_true(manifest, edge.to_proof, *op, *bound)
+                    });
+                    if !gated {
+                        return Err(CheckError::UnboundFilter { variable: variable.clone() });
+                    }
                 }
             }
         }
@@ -4589,6 +4910,112 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
             // that pattern: the FILTER cannot be discharged (FILTER-add on a
             // manifest missing the filtered pattern's scan).
             return Err(CheckError::UnboundFilter { variable: variable.clone() });
+        }
+    }
+    Ok(())
+}
+
+/// Stage 2b′: a variable repeated WITHIN a single query BGP pattern
+/// (`{ ?v <p> ?v }`) must bind ONE term, so every disclosed row of every scan that
+/// answers that pattern must carry EQUAL values at the repeated slots.
+///
+/// # Why this is not already covered (#5240)
+/// SPARQL evaluates a BGP by matching each pattern against the data with a single
+/// substitution, so a variable at two slots of one pattern constrains those two
+/// columns to be equal. Nothing in the flat manifest regime enforced that:
+///
+/// - [`scan_matches_pattern`] compares only per-slot CONST-NESS and the constant
+///   ENCODINGS. Both slots of `{ ?v <p> ?v }` are variables, so it accepts any
+///   `(?, <p>, ?)` scan regardless of what the rows hold.
+/// - The scan circuit binds each disclosed row's CONSTANT slots to
+///   `pattern_const_enc`; a variable slot is unconstrained by construction (that
+///   is what makes it a variable), so the in-circuit statement says nothing here.
+/// - The shared-variable gates all work CROSS-pattern and are therefore blind to
+///   it: `sparq_zk::verify::cross_graph_join_obligations` (the disclosed path,
+///   via [`recheck`]) iterates pattern PAIRS `i < j` over per-pattern variable
+///   SETS — a repeated variable collapses in the set and `i == j` is never
+///   considered — and [`bind_joins`] (the hidden path) likewise requires the
+///   shared variable to sit in two DISTINCT patterns (`pj != pi`).
+///
+/// Confirmed empirically reachable against [`prefilter_manifest_structure`]
+/// (the method used for audit L-1): a manifest disclosing `(alice, knows, bob)`
+/// under `SELECT ?v WHERE { ?v <knows> ?v }` was ACCEPTED, so a relying party
+/// read a solution binding `?v` to two different terms at once. Witness:
+/// `repeated_pattern_var_rejects_a_row_whose_slots_disagree` in `tests/e2e.rs`.
+///
+/// # Per-row, over every constant-matching scan (the sq-q9r5e regime)
+/// This mirrors the FILTER gate exactly. The disclosed result IS the scans' rows,
+/// so EVERY active disclosed row of a matching scan is presented as answering the
+/// pattern and must satisfy it — one bad row makes the pattern unproven for the
+/// disclosed set. And pattern→scan is resolved by constant MEMBERSHIP, not by the
+/// prover's [`ProofManifest::pattern_scans`] declaration, so the obligation runs
+/// over EVERY scan whose bound constants match. Where a query places a
+/// repeated-variable pattern and a distinct-variable pattern at the SAME constant
+/// layout (`{ ?v <p> ?v . ?a <p> ?b }`) that is an OVER-demand — the verifier
+/// cannot tell which pattern a given scan answers, so it demands the equality for
+/// both readings and REJECTS rather than accept on the prover's say-so. That is
+/// the same deliberate fail-closed trade sq-q9r5e made for FILTERs; see
+/// [`check_pattern_scans`] for why narrowing it needs a verified result witness
+/// the flat manifest cannot yet express.
+///
+/// Comparison is on canonical big-endian field bytes ([`field_hex_eq`]), so hex
+/// spelling/padding differences do not spuriously diverge and a malformed row hex
+/// fails CLOSED (the reconstruction stage also rejects it as `MalformedField`).
+///
+/// The `extended-fragment` regime does not need this gate: `bind_fragment_scans`
+/// already binds each variable slot of a selected row to the disclosed solution
+/// (projected vars) or to a per-branch coherence map (existentials), both keyed by
+/// variable NAME across slots, so a repeated variable's two slots are compared
+/// there by construction.
+// [OPUS-5] #5240: within-pattern slot equality. Research-grade, NOT externally
+// audited (sq-qhy4).
+fn bind_repeated_pattern_slots(manifest: &ProofManifest) -> Result<(), CheckError> {
+    let patterns = fragment_patterns(&manifest.query)?;
+    let consts = fragment_pattern_consts(&patterns);
+    let var_slots = variable_slots(&patterns);
+
+    for (pi, c) in consts.iter().enumerate() {
+        // The repeated-slot obligations of THIS pattern: for a variable occupying
+        // slots [s0, s1, ..], every later slot must equal the first (which chains
+        // into full pairwise equality). A pattern with no repeat contributes none.
+        let mut by_var: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (v, p, s) in &var_slots {
+            if *p == pi {
+                by_var.entry(v.as_str()).or_default().push(*s);
+            }
+        }
+        let obligations: Vec<(&str, usize, usize)> = by_var
+            .iter()
+            .filter(|(_, slots)| slots.len() > 1)
+            .flat_map(|(v, slots)| slots[1..].iter().map(move |s| (*v, slots[0], *s)))
+            .collect();
+        if obligations.is_empty() {
+            continue;
+        }
+
+        for (spi, sp) in manifest.sub_proofs.iter().enumerate() {
+            let (rows, row_count) = match &sp.inputs {
+                ProofInputs::Scan { rows, row_count, .. } => (rows, *row_count as usize),
+                _ => continue,
+            };
+            if !scan_matches_pattern(&sp.inputs, c) {
+                continue;
+            }
+            let active = row_count.min(rows.len());
+            for (row, values) in rows.iter().take(active).enumerate() {
+                for &(variable, first, other) in &obligations {
+                    if !field_hex_eq(&values[first], &values[other]) {
+                        return Err(CheckError::RepeatedSlotMismatch {
+                            pattern: pi,
+                            proof: spi,
+                            row,
+                            variable: variable.to_string(),
+                            slots: (first, other),
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -4671,7 +5098,34 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
 /// path + a FULL-bb accept test (sq-r2s8) and the forge-and-verify regression suite
 /// (sq-hlul) are the follow-ups. What IS enforced is the security-critical
 /// direction: a forged / cross-scan / wrong-slot / spurious hidden join is rejected.
+///
+/// # Cross-credential scope constraint (sq-cuvmj) — READ BEFORE CLAIMING THE USE CASE
+/// The headline use case for a hidden `JoinEdge` is joining two genuinely DIFFERENT
+/// credentials. In the current manifest schema that case only reaches this gate when
+/// both credentials carry the SAME issuer-signed status reference, because
+/// [`ProofManifest::revocation`] is SCALAR: [`resolve_status_ref`] (run earlier, in
+/// [`bind_issuer_attestations`]) requires EVERY scan-covering commitment's attested
+/// status to resolve to that ONE reference, so two credentials with distinct
+/// `(list, index, version)` slots cannot both be attested and the manifest is
+/// rejected upstream ([`CheckError::RevocationReferenceMismatch`]) before any join
+/// is inspected.
+///
+/// This is FAIL-CLOSED — it is an over-restriction, not a hole. The construction it
+/// blocks (present a live credential A alongside a REVOKED credential B, joined,
+/// hoping B's liveness goes unchecked because there is only one `revocation` field)
+/// has no false-accept: pointing `revocation` at A's slot makes B's attestation
+/// mismatch, and pointing it at B's slot makes [`bind_revocation`] read B's SET
+/// status bit and reject [`CheckError::CredentialRevoked`]
+/// (`research/zk-bind-composition-review.md` §Finding B, attempt 5).
+///
+/// The practical consequence for this gate: what it validates today is hidden joins
+/// ACROSS GRAPHS OF ONE CREDENTIAL (or across credentials sharing a status slot),
+/// NOT arbitrary multi-credential joins. Do not describe `bind_joins` as enabling
+/// arbitrary cross-credential joins until the manifest carries per-credential
+/// revocation references; the obligations such a migration owes are pre-registered
+/// on [`ProofManifest::revocation`].
 // [OPUS-4.8] sq-sfsi: bind_joins gate (commitment-matching + query slot binding).
+// [OPUS-5] sq-cuvmj: + the scalar-revocation cross-credential scope constraint.
 fn bind_joins(manifest: &ProofManifest) -> Result<(), CheckError> {
     if manifest.join_edges.is_empty() {
         // No hidden joins declared: nothing for this gate to validate. A query
@@ -4972,9 +5426,10 @@ fn global_attributions(manifest: &ProofManifest) -> Vec<BTreeSet<usize>> {
 /// per-graph attribution each scan sub-proof carries (audit #8).
 ///
 /// For each query BGP pattern `pi`, find the scan sub-proof that answers it
-/// (constants match, `scan_matches_pattern`) and require
-/// `manifest.attributions[pi]` to be a SUPERSET of that scan's proof-bound
-/// matched-graph set (`attribution[g] == true`). Soundness:
+/// (constants match, `scan_matches_pattern` — a prover's `manifest.pattern_scans`
+/// declaration deliberately does NOT narrow this, see [`check_pattern_scans`])
+/// and require `manifest.attributions[pi]` to be a SUPERSET of that scan's
+/// proof-bound matched-graph set (`attribution[g] == true`). Soundness:
 /// - **Under-declaring** (the `[[0],[0]]` forge): a graph the scan proved a
 ///   contribution from but `manifest.attributions[pi]` omits is rejected. This
 ///   is the load-bearing #8 fix — the prover can no longer shrink the
@@ -5417,6 +5872,10 @@ fn encode_iri_hex(iri: &str) -> Option<FieldHex> {
 /// `entailment_regime` a CHECKED claim rather than free metadata.
 ///
 /// Fail-closed contract:
+/// 0. if the relying party requires COMPLETENESS under entailment
+///    ([`EntailmentPolicy::require_completeness_under_entailment`]), every
+///    non-`Simple` manifest is REFUSED first — the capability is unbuilt
+///    (`sq-rsd3v.7`) — else `CompletenessUnderEntailmentUnavailable`;
 /// 1. the regime MUST be accepted by the relying party's [`EntailmentPolicy`]
 ///    (`Simple` always; `Rdfs`/`Owl` only on explicit opt-in) — else
 ///    `EntailmentRegimeNotAccepted`;
@@ -5448,6 +5907,13 @@ fn encode_iri_hex(iri: &str) -> Option<FieldHex> {
 /// yet wired into this verifier (no compiled member / manifest variant / dispatch
 /// arm), so until that follow-up lands this path stays disclosed-base only. See
 /// the `crate::derivation` module docs.
+///
+/// Everything above is SOUNDNESS of derivation ("every derived triple IS
+/// entailed"). It is NOT completeness under entailment ("no entailed answer is
+/// MISSING") — the distinct, UNBUILT obligation `sq-rsd3v.7`. Gate (0) below is
+/// the enforced deferral: a relying party that demands completeness is REFUSED
+/// before any other check, so the two obligations can never be conflated by
+/// reading an accept.
 // [OPUS-4.8] sq-314: entailment regime + derivation steps, end-to-end.
 fn bind_entailment(
     manifest: &ProofManifest,
@@ -5459,6 +5925,18 @@ fn bind_entailment(
         EntailmentRegime::Rdfs => "rdfs",
         EntailmentRegime::Owl => "owl",
     };
+    // (0) sq-rsd3v.7: the relying party demands COMPLETENESS under entailment. The
+    // capability is UNBUILT (no in-circuit closure-sweep, no fixpoint-saturation
+    // proof), so any manifest that RESTS on entailment is refused here rather than
+    // accepted on soundness-of-derivation grounds the relying party could misread
+    // as completeness. Checked FIRST so the diagnostic names the real gap (the
+    // unbuilt obligation) rather than the incidental one (regime not accepted).
+    // `Simple` is not refused: it carries no entailment for completeness to range
+    // over — see `require_completeness_under_entailment` for what that does and
+    // does NOT assert.
+    if policy.requires_completeness() && regime != EntailmentRegime::Simple {
+        return Err(CheckError::CompletenessUnderEntailmentUnavailable { regime: regime_name });
+    }
     // (1) The regime must be accepted by the relying party.
     if !policy.accepts(regime) {
         return Err(CheckError::EntailmentRegimeNotAccepted { regime: regime_name });
@@ -7561,6 +8039,33 @@ fn reconstruct_public_inputs(
             push_field(&mut out, datatype_const, proof, "datatype_const")?;
             push_uint(&mut out, u64::from(*expected));
         }
+        // [OPUS-5] sq-wz99x: filter_value_dl_datetime (DUAL-LEAF dateTime/date
+        // value lane) public inputs, in `main` declaration order: challenge (pushed
+        // above), operand_enc, op, bound_neg (bool -> {0,1}), bound_scaled_epoch
+        // (the FILTER constant instant as |T| in milliseconds on the XSD
+        // timeOnTimeline), datatype_const (SELECTS the dateTime or date lane AND
+        // folds the scale FS), expected. Cross-reference
+        // `zk/compose/filter_value_dl_datetime/src/main.nr`. The layout is the
+        // decimal member's with `bound_scaled` renamed — ONE member, and here ONE
+        // reconstruction, serves both lanes, because the lane is carried by the
+        // `datatype_const` public input (so a lane swap changes THIS vector).
+        #[cfg(feature = "dual-leaf")]
+        ProofInputs::FilterValueDlDateTime {
+            operand_enc,
+            op,
+            bound_neg,
+            bound_scaled_epoch,
+            datatype_const,
+            expected,
+            ..
+        } => {
+            push_field(&mut out, operand_enc, proof, "operand_enc")?;
+            push_uint(&mut out, u64::from(op.code()));
+            push_uint(&mut out, u64::from(*bound_neg));
+            push_uint(&mut out, *bound_scaled_epoch);
+            push_field(&mut out, datatype_const, proof, "datatype_const")?;
+            push_uint(&mut out, u64::from(*expected));
+        }
         // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN
         // public inputs, in the `join_eq` member's `main` declaration order:
         // challenge (pushed above), commit_a, commit_b, join_commitment, slot_a,
@@ -7727,9 +8232,22 @@ fn test_attestation(
     salt: Fr,
     sk: &sparq_zk::sig::SecretKey,
 ) -> crate::manifest::CommitmentAttestation {
+    test_attestation_at_index(commitment, salt, sk, TEST_STATUS_INDEX)
+}
+
+/// As [`test_attestation`], but over a CHOSEN status-list `index` — the signature is
+/// formed over that index's `status_ref_digest`, so the attestation is internally
+/// valid and the manifest reaches the reference-resolution step. Lets a test build a
+/// presentation whose two credentials occupy DISTINCT status slots (sq-cuvmj).
+#[cfg(test)]
+fn test_attestation_at_index(
+    commitment: Fr,
+    salt: Fr,
+    sk: &sparq_zk::sig::SecretKey,
+    index: u64,
+) -> crate::manifest::CommitmentAttestation {
     let list_id = sparq_zk::sig::status_list_id_to_field(TEST_STATUS_LIST);
-    let status_ref =
-        sparq_zk::sig::status_ref_digest(&list_id, TEST_STATUS_INDEX, TEST_STATUS_VERSION);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, index, TEST_STATUS_VERSION);
     crate::manifest::CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: sparq_zk::sig::public_key_to_hex(&sk.public_key()),
@@ -7739,7 +8257,7 @@ fn test_attestation(
             .to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(crate::manifest::AttestedStatusRef {
-            index: Some(TEST_STATUS_INDEX),
+            index: Some(index),
             version: Some(TEST_STATUS_VERSION),
             index_commitment: None,
             ref_commitment: None,
@@ -8424,6 +8942,7 @@ mod tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -8504,6 +9023,224 @@ mod tests {
                 Err(CheckError::UnattestedCommitment { proof: 0, .. })
             ),
             "an unattested flat scan must be refused identically in both feature states"
+        );
+    }
+
+    /// A single-graph BGP `Scan` over a CHOSEN committed graph (the issuer gate
+    /// verifies the signature over the given commitment value; it never recomputes
+    /// it from triples, so a test may pick the commitment freely).
+    fn flat_scan_with_commit(commit: Fr) -> ProofInputs {
+        ProofInputs::Scan {
+            id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+            commitments: vec![FieldHex::from_field(&commit)],
+            pattern_is_const: [true, true, false],
+            pattern_const_enc: [fh("0x1"), fh("0x2"), fh("0x0")],
+            rows: vec![],
+            row_count: 0,
+            attribution: vec![false],
+        }
+    }
+
+    /// [OPUS-5] sq-cuvmj: THE SCALAR-`revocation` TRIPWIRE.
+    ///
+    /// Pins the single-reference invariant `ProofManifest::revocation` documents: a
+    /// presentation carrying TWO credentials whose issuer-signed status references
+    /// occupy DISTINCT slots is structurally REJECTED, because every scan-covering
+    /// commitment must resolve to the ONE disclosed reference. Both attestations
+    /// here are internally VALID (key in K, signature verifies over each one's own
+    /// `status_ref_digest`, distinct salts), so the manifest reaches
+    /// `resolve_status_ref` and the rejection is the reference comparison itself —
+    /// not an incidental signature or salt failure.
+    ///
+    /// This is FAIL-CLOSED, not a false-accept (§Finding B of
+    /// `research/zk-bind-composition-review.md`): the second credential's liveness is
+    /// never skipped, it simply cannot be presented. The cost is that hidden
+    /// cross-credential joins ([`bind_joins`]) are restricted to credentials sharing
+    /// a status slot.
+    ///
+    /// TRIPWIRE: a future `Vec` migration of `revocation`/`hidden_revocation` WILL
+    /// turn this test red — that is the point. Before changing it, discharge the
+    /// per-commitment obligations pre-registered on `ProofManifest::revocation`;
+    /// flipping the expectation to "accepted" without them is exactly the
+    /// unchecked-second-credential regression this pins.
+    #[test]
+    fn two_credentials_with_distinct_status_refs_are_rejected() {
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let k = KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())]);
+        let c_a = Fr::from(100u64); // credential A, status index TEST_STATUS_INDEX
+        let c_b = Fr::from(200u64); // credential B, a DIFFERENT slot on the same list
+        let other_index = TEST_STATUS_INDEX + 6;
+
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![
+            crate::manifest::SubProof {
+                inputs: flat_scan_with_commit(c_a),
+                proof_hex: String::new(),
+            },
+            crate::manifest::SubProof {
+                inputs: flat_scan_with_commit(c_b),
+                proof_hex: String::new(),
+            },
+        ];
+        m.commitment_attestations = vec![
+            test_attestation(c_a, Fr::from(7u64), &sk),
+            test_attestation_at_index(c_b, Fr::from(9u64), &sk, other_index),
+        ];
+        // The ONE disclosed reference — A's slot. B's issuer-signed reference cannot
+        // also match it.
+        m.revocation = Some(test_revocation());
+
+        let err = bind_issuer_attestations(&m, &k, &std::collections::BTreeSet::new())
+            .unwrap_err();
+        assert!(
+            matches!(err, CheckError::RevocationReferenceMismatch { .. }),
+            "two credentials on distinct status slots must be refused at the reference gate (sq-cuvmj fail-closed), got {err:?}"
+        );
+
+        // CONTROL: the SAME manifest with both credentials on the SAME slot is
+        // accepted — so the rejection above is the distinct-reference constraint,
+        // not a vacuous failure of the two-scan fixture itself.
+        let mut same_slot = m.clone();
+        same_slot.commitment_attestations = vec![
+            test_attestation(c_a, Fr::from(7u64), &sk),
+            test_attestation(c_b, Fr::from(9u64), &sk),
+        ];
+        assert!(
+            bind_issuer_attestations(&same_slot, &k, &std::collections::BTreeSet::new()).is_ok(),
+            "two credentials sharing one status slot must pass — the fixture is otherwise valid"
+        );
+    }
+
+    /// [OPUS-5] sq-93h: THE SALT-DISCLOSURE DOMINATION TRIP-WIRE.
+    ///
+    /// sq-93h asked whether the per-graph salt that `HiddenIssuerAttestation` carries
+    /// on the sq-xxg HIDDEN-ONLY path is a residual cross-presentation linkability
+    /// channel. Assessment (`research/zk-hidden-path-salt-disclosure.md`): NO — it is
+    /// DOMINATED, because the same graph's `C(G)` is disclosed in the clear on the very
+    /// same entry (and byte-bound into the scan sub-proof's bb public inputs). Any two
+    /// presentations linkable by salt are already linkable by `C(G)`, so hiding the salt
+    /// behind an in-circuit salt-commitment would buy zero unlinkability.
+    ///
+    /// That verdict rests on ONE premise — `C(G)` stays public. This test pins it on the
+    /// REAL paths, never on a test-local notion of "disclosed":
+    /// - the hidden-only salt fallback actually resolves (red if `resolve_commitment_salt`
+    ///   loses its hidden-entry arm);
+    /// - `reconstruct_public_inputs` — the function whose output the verifier
+    ///   BYTE-COMPARES against each proof's `public_inputs` — emits `C(G)` as scan
+    ///   public-input word 1, salt or no salt; and
+    /// - on the WIRE (serde round-trip of the salt-withheld manifest) `C(G)` survives
+    ///   while the salt is gone, and the round-tripped manifest still reconstructs the
+    ///   same `C(G)`-bearing public inputs.
+    ///
+    /// TRIP-WIRE: a future hidden / re-randomised-commitment tier stops emitting the
+    /// cleartext `C(G)` word and turns this red. That is the intended signal — at that
+    /// point the salt becomes the finest remaining correlator and sq-93h must be
+    /// RE-OPENED, not the assertion relaxed.
+    ///
+    /// SCOPE (do not over-read): this pins premise (D1) — `C(G)` disclosure — only.
+    /// Domination additionally assumes the ISSUANCE discipline that a salt is never
+    /// reused for two distinct graphs; the verifier machine-checks only the
+    /// within-manifest instance of that (`SaltReused`), so no test here can establish
+    /// it across presentations. See §3 of the research record.
+    #[test]
+    fn hidden_only_salt_disclosure_is_dominated_by_the_clear_commitment() {
+        let c = Fr::from(4242u64);
+        let salt = Fr::from(1357u64);
+
+        // A HIDDEN-ONLY presentation: one scan over `c`, one hidden-issuer entry over
+        // `c` carrying the salt, and NO clear attestation to read the salt from.
+        let mut with_salt = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        with_salt.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: flat_scan_with_commit(c),
+            proof_hex: String::new(),
+        }];
+        with_salt.hidden_issuer_attestations = vec![crate::manifest::HiddenIssuerAttestation {
+            commitment: FieldHex::from_field(&c),
+            depth: 4,
+            key_set_root: fh("0x8"),
+            message: fh("0x9"),
+            salt: Some(FieldHex::from_field(&salt)),
+            proof_hex: String::new(),
+        }];
+        assert!(
+            with_salt.commitment_attestations.is_empty(),
+            "the fixture must be HIDDEN-ONLY — a clear attestation would supply the salt \
+             by the preferred path and the hidden fallback would go untested"
+        );
+
+        // (a) The hidden-only fallback resolves the salt (the sq-xxg behaviour).
+        assert_eq!(
+            resolve_commitment_salt(&with_salt, &c),
+            Some(salt),
+            "a hidden-only commitment must resolve its salt from the hidden entry"
+        );
+
+        // The counterfactual: the SAME presentation with the salt WITHHELD, i.e. what an
+        // in-circuit salt-commitment would achieve on the disclosure surface.
+        let mut without_salt = with_salt.clone();
+        without_salt.hidden_issuer_attestations[0].salt = None;
+        assert_eq!(
+            resolve_commitment_salt(&without_salt, &c),
+            None,
+            "withholding the salt must actually remove it from the disclosure surface — \
+             otherwise the comparison below is vacuous"
+        );
+
+        // (b) Premise (D1) on the REAL verification path: `C(G)` is not merely a JSON
+        // field, it is BYTE-BOUND into the scan sub-proof's bb public inputs — the blob
+        // stage 3a byte-compares against the prover's proof. Reconstruct it exactly as
+        // the verifier does (challenge = word 0, `commitments[k]` next).
+        let challenge = match &without_salt.binding {
+            BindingMode::Challenge { challenge } => challenge.clone(),
+            other => panic!("fixture must use the challenge binding, got {:?}", other),
+        };
+        let c_word = field_to_be_bytes_32(&c);
+        let pi = reconstruct_public_inputs(&without_salt.sub_proofs[0].inputs, &challenge, 0)
+            .expect("the scan sub-proof's public inputs must reconstruct");
+        assert_eq!(
+            pi.get(32..64),
+            Some(&c_word[..]),
+            "premise (D1): the committed graph's C(G) is emitted in the CLEAR as scan \
+             public-input word 1 even on the hidden-only path, so it cannot be withheld \
+             without redesigning the scan member — if this fails, sq-93h must be RE-OPENED"
+        );
+        assert_eq!(
+            pi,
+            reconstruct_public_inputs(&with_salt.sub_proofs[0].inputs, &challenge, 0)
+                .expect("the scan sub-proof's public inputs must reconstruct"),
+            "withholding the salt changes NOT ONE BYTE of the scan's public inputs — the \
+             salt is not among them, C(G) is"
+        );
+
+        // (c) DOMINATION on the wire: serialize the salt-withheld presentation (what an
+        // in-circuit salt-commitment would achieve on the disclosure surface) and confirm
+        // the salt is really gone while `C(G)` — the correlator a colluding verifier pair
+        // would use — survives, and still reconstructs the same public inputs.
+        let salt_hex = field_to_hex(&salt);
+        let with_json = serde_json::to_string(&with_salt).expect("manifest serializes");
+        let without_json = serde_json::to_string(&without_salt).expect("manifest serializes");
+        assert!(
+            with_json.contains(&salt_hex),
+            "the fixture must actually disclose the salt on the wire, else the \
+             counterfactual below is vacuous"
+        );
+        assert!(
+            !without_json.contains(&salt_hex),
+            "withholding must actually remove the salt from the wire form"
+        );
+        assert!(
+            without_json.contains(&field_to_hex(&c)),
+            "premise (D1) on the wire: C(G) survives the salt being withheld — hiding the \
+             salt buys no cross-presentation unlinkability (sq-93h NO-BUILD)"
+        );
+        let round: ProofManifest =
+            serde_json::from_str(&without_json).expect("salt-withheld manifest round-trips");
+        assert_eq!(
+            reconstruct_public_inputs(&round.sub_proofs[0].inputs, &challenge, 0)
+                .expect("the round-tripped scan's public inputs must reconstruct"),
+            pi,
+            "a verifier that only ever sees the salt-withheld wire form still reconstructs \
+             the SAME C(G)-bearing public inputs"
         );
     }
 
@@ -8702,6 +9439,7 @@ mod fragment_dispatch_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],

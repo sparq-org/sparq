@@ -209,6 +209,11 @@ impl TrainConfig {
 /// The trained model: dense parameter matrices plus the id→row maps that translate a graph
 /// dictionary id into a parameter row. Scoring ([`TrainedModel::score`]) and the eval harness read
 /// only this struct, so a model is self-contained once trained.
+///
+/// [OPUS-5] `Clone` so an eval harness can derive a *post-processed* model — e.g. the
+/// confidence-weighted structural-sketch augmentation `eval::run_pooling_ablation` measures —
+/// without retraining, keeping the two ablation arms on genuinely identical parameters.
+#[derive(Clone)]
 pub struct TrainedModel {
     /// The scoring model — [`ModelKind::DistMult`] (symmetric) or [`ModelKind::ComplEx`]
     /// (asymmetric). [`TrainedModel::score`] dispatches on it.

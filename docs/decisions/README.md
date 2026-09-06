@@ -21,6 +21,14 @@ the `research/zk-*-audit.md` records and are unchanged by this ledger.
 Columns: `Issue` = the steering issue that captured it · `Evidence` = the merged PR (and,
 where relevant, the design record) · GitHub auto-links `#NNNN`.
 
+**Separate estate — the imported LWS server.** `crates/sparq-lws-core` was imported from
+another repository and brought its own, independently-numbered `decisions/` tree with it.
+Those are **not** proceed-and-document calls made here, so they are not rows in this table;
+their durable in-repo home is
+[`research/lws-design-records.md`](../../research/lws-design-records.md). Read that record
+before interpreting any bare `decisions/NNNN` citation inside `crates/sparq-lws-core/**` —
+its §2 documents a genuine number collision between two upstream ADR trees.
+
 ## Reasoner (OWL RL / EL / QL / DL, RIF, N3)
 
 | Issue | Date | Decision | Rationale | Evidence | Status |
@@ -37,7 +45,8 @@ where relevant, the design record) · GitHub auto-links `#NNNN`.
 | Issue | Date | Decision | Rationale | Evidence | Status |
 |---|---|---|---|---|---|
 | #1203 | 2026-06-22 | `sparq-vc` hand-rolls `eddsa-rdfc-2022` + `did:key`/`did:web` over `ed25519-dalek`; verifies over the RDF-dataset form (not raw JSON-LD); its standard-Ed25519 DID resolver coexists with the ZK Baby-JubJub one | lean-core on one vetted primitive; RDFC-1.0 canonical form is what the proof binds; the two resolvers serve interop vs custom-ZK | #1202 | adopted |
-| #1195 | 2026-06-22 | the `secx:` IRI constants the sparq-zk annotation graph needs are declared locally and drift-pinned to `secprop-ext.ttl` via `include_str!` | `sparq-trust` already depends on `sparq-zk`, so the reverse edge would be a cycle; a compile-time file read is not a crate edge | #1194 | adopted |
+| #1195 | 2026-06-22 | the `secx:` IRI constants the sparq-zk annotation graph needs are declared locally and drift-pinned to `secprop-ext.ttl` via `include_str!` | `sparq-trust` already depends on `sparq-zk`, so the reverse edge would be a cycle; a compile-time file read is not a crate edge | #1194 | **superseded by #3705** |
+| #3705 | 2026-08-01 | the `secx:`/`sec-prop:` IRI constants, the canonical `secprop-ext.ttl` and the single TTL drift test move to `sparq-secprop-vocab`, a dependency-free LEAF crate that `sparq-trust`, `sparq-policy` and `sparq-zk` each depend on behind their existing default-OFF secprop features | supersedes #1195: a leaf BELOW all three removes the cycle that forced the local copies, so there is one copy of every IRI instead of three; the cross-package `include_str!` it replaces also broke `cargo package` file inclusion for `sparq-zk`, and its `ci/path-ownership.toml` `readers` patches are retired because the ordinary reverse-dependency closure now attributes the vocabulary | #3705 | adopted |
 | #1190 | 2026-06-22 | PROV-O delegation-audit plus human/AI-principal classification emitted directly via oxrdf behind default-OFF `delegation-prov`; the audit is a record, never an authority source | no `sparq-prov` dep (lean-core); the audit is produced only after a successful invoke | #1192 | adopted |
 | #1165 | 2026-06-22 | DID resolution uses a sparq-private multicodec for Baby-JubJub (loudly non-interop), a pluggable `DidDocumentFetcher` trait (no shipped HTTP client), and first-verification-method doc parse | the key is non-Ed25519; lean-core plus offline-testable; PoC scope, narrows but does not anchor forgery | #1164 | adopted |
 | #1209 | 2026-06-23 | the ODRL 2.2 security-property profile and its leftOperand surface ship in `sparq-policy` (default-OFF `secprop-leftoperands`), not `sparq-trust` | Phase 4 is verbatim "registration in sparq-policy"; avoids a policy to trust crate edge; `secx:` IRIs bound as fixed w3id strings | #1207 | adopted |
@@ -85,12 +94,13 @@ where relevant, the design record) · GitHub auto-links `#NNNN`.
 | #1168 | 2026-06-22 | disk-guard's completed-worktree reclaim is opt-in in the library script but ON-by-default in the per-tick `disk-guard.sh` delegation | the per-tick sweep must reclaim or disk starves; an in-use probe plus the harness LOCK keep it off live agents | #1167 | adopted |
 | #1104 | 2026-06-21 | `proceed-and-document` lives in the internal `.claude/skills/` tree (not the public `skills/`); AGENTS.md reconciled to current truth (scheduler landed), not the bead's stale framing | it is an agent-process skill, not a usage surface; fix stale claims to the verified reality | #1103 | adopted |
 | #1199 | 2026-06-22 | the docs guide single-sources its capability list by `{{#include}}`-ing the README plus a build-time link-rewriting mdBook preprocessor (option a) | keeps the single source in README with lychee-friendly relative links; avoids weakening the internal-links gate or adding a manifest | #1196 | adopted |
+| #2759 | 2026-07-29 | merge-queue throughput (sq-6vshe.16): `max_entries_to_build` 3→5 approved in principle but NOT requested; `min_entries_to_merge_wait_minutes: 5` audit closes **inert** (no edit); CodeQL stays eligible for the queue-blocking path | the 3→5 precondition (`sq-6vshe.14` push-skip) has not landed, and raising parallelism first worsens the measured 43–225 s per-job queue delays; the wait field is a ceiling while `min_entries_to_merge` is unmet, not a floor, so it never binds at 1; CodeQL measured 3.8 m median on `merge_group` — a non-pole, so latency never justified demoting a security gate | `docs/branch-protection.md` §Merge-queue throughput settings · `research/ci-mergequeue-speedup-2026-07.md` §3.3 | adopted |
 
 ## E2E gating governance
 
 | Issue | Date | Decision | Rationale | Evidence | Status |
 |---|---|---|---|---|---|
-| #1656 | 2026-07-06 | RATIFY the early promotion of the `gui-mock-ipc` Playwright lane — keep it gating `ci-summary`, backfill its probation-ledger row as ratified | it is a fully deterministic headless-Chromium lane (`retries: 0`, mocked IPC); demoting a green gate on an active surface reduces real enforcement. Rollback = the §4 reverse flip (append the `advisory` marker to the job name + set `continue-on-error: true` on the run step) | `.github/E2E-GATING-POLICY.md` §6 · §8 | adopted |
+| #1656 | 2026-07-06 | RATIFY the early promotion of the `gui-mock-ipc` Playwright lane — keep it gating `ci-summary`, backfill its probation-ledger row as ratified | it is a fully deterministic headless-Chromium lane (`retries: 0`, mocked IPC); demoting a green gate on an active surface reduces real enforcement. Rollback = the §6 demotion runbook: add a `.github/advisory-registry.json` entry for `gui.yml` · `gui-mock-ipc` (`owner_bead` + `promotion_criteria` + `job_id`) **and** `continue-on-error: true` on the run step. Since #3773 the registry declaration — not the job name — decides gating, so a name edit alone demotes nothing (and `scripts/check-advisory-registry.py` C2 would RED on an advisory-named job with no entry) | `.github/E2E-GATING-POLICY.md` §6 · §8 | adopted |
 
 ## Still-open steering items (NOT consolidated)
 

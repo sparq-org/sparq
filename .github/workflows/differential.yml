@@ -5,7 +5,7 @@
 # nightly lane, sharded PER CATEGORY. Running only the 'all' category hides
 # category-dense bugs — the sq-lr2ii sargable-decimal bug reproduces at seeds
 # 4695+ in 'equality'/'filter' but is invisible in 'all' 0..20000 (density) — so
-# each of the generator's 16 query categories gets its own shard, plus three shards
+# each of the generator's 21 query categories gets its own shard, plus three shards
 # that re-run a prefix of the same day window through the STORE-MODE read paths
 # (mmap / block-compressed / dict-spill rebuilds), which otherwise get zero
 # standing correctness differential.
@@ -94,7 +94,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The 16 generator categories (crates/sparq-bench/src/fuzz.rs `CATEGORIES`).
+          # The 21 generator categories (crates/sparq-bench/src/fuzz.rs `CATEGORIES`).
           # ONE SHARD PER CATEGORY is an invariant the fuzz.rs unit test
           # `every_category_has_a_nightly_shard` pins against this file, and an
           # unknown category name here exits non-zero rather than quietly fuzzing the
@@ -118,6 +118,24 @@ jobs:
           - { name: values, category: values, count: 120000, mode: "" }
           - { name: bind, category: bind, count: 120000, mode: "" }
           - { name: graph, category: graph, count: 120000, mode: "" }
+          # sq-avd75: the `OPTIONAL … FILTER(!bound(?v))` negation idiom — the
+          # trigger shape of rewrite (b) of the `algebra-rewrite` pass (#1735),
+          # which sparq-bench builds ON. Before this shard the pass's anti-join
+          # half was pinned only by fixed fixtures (sparq-engine's
+          # tests/rewrite_pass.rs, on the feature-matrix leg) and never by the
+          # random-data oracle.
+          - { name: antijoin, category: antijoin, count: 120000, mode: "" }
+          # sq-qcnn.6: the generator's typed-literal columns (dateTime/date with and
+          # without a timezone, the three duration datatypes incl. the incomparable
+          # yearMonth/dayTime pair, booleans in both lexical forms, integers beyond
+          # i128, doubles incl. INF/-INF/NaN), the SPARQL 1.1 string functions, and
+          # the two non-SELECT RESULT FORMS — `compare_ask` compares the boolean and
+          # `compare_graph` the canonical triple set, neither of which any shard
+          # reached while the generator emitted only SELECT.
+          - { name: typed, category: typed, count: 120000, mode: "" }
+          - { name: strfn, category: strfn, count: 120000, mode: "" }
+          - { name: ask, category: ask, count: 120000, mode: "" }
+          - { name: construct, category: construct, count: 120000, mode: "" }
           # Store-mode differentials: re-run a PREFIX of the same day window with
           # the store rebuilt through each out-of-core/compressed read path (env-
           # selected in fuzz.rs). Much slower per seed (mmap save/reopen; dict-spill
@@ -141,8 +159,10 @@ jobs:
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # All 12 shards build the identical sparq-bench release-fast binary — share
-          # ONE cache key across the matrix instead of 12 near-duplicate caches.
+          # EVERY shard builds the identical sparq-bench release-fast binary — share
+          # ONE cache key across the matrix instead of a near-duplicate cache per shard.
+          # (Stated without a count: the matrix grows whenever the generator gains a
+          # category, and the previous "All 12" had already gone stale.)
           shared-key: differential-nightly
       # Build once, distinctly, so a compile error is reported separately from a
       # differential mismatch.

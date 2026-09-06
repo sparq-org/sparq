@@ -105,13 +105,24 @@ mod scs;
 mod forms;
 
 // [OPUS-4.8] sq-1dd5t (#1047): the opt-in RDFC-1.0 `canonicalizeNQuads(nquads)` free
-// function (the @jeswr/sparq RDF/JS `Dataset` consumes it for isomorphism-aware
+// function (the @sparq-org/sparq RDF/JS `Dataset` consumes it for isomorphism-aware
 // toCanonical / equals / contains). Behind the non-default `canon` feature so the lean
 // bundle carries zero canonicalization code; the module exports a `#[wasm_bindgen]` free
 // function (not a `Store` method — canonicalization is over an arbitrary quad set, which
 // may be a foreign RDF/JS dataset, not necessarily this store's contents).
 #[cfg(feature = "canon")]
 mod canon;
+
+// [SONNET-4.6] sq-yz27r (#3251): the opt-in `Store.loadJsonLdWithContexts(text, contexts)`
+// binding — JSON-LD ingest for a document whose `@context` is given by URL (a Verifiable
+// Credential's `"@context": "https://www.w3.org/2018/credentials/v1"`), which the
+// no-callback `load(_, "jsonld")` path rejects. Behind the non-default `jsonld-contexts`
+// feature so the lean bundle is unchanged; the module adds a `#[wasm_bindgen] impl Store`
+// method that installs an `oxjsonld` LoadDocumentCallback over a caller-supplied context
+// map. Fail-closed, and it opens no socket — see the module docs for why the fetch has to
+// stay on the JS side.
+#[cfg(feature = "jsonld-contexts")]
+mod jsonld_context;
 
 // Re-export the free function at the crate root so it is reachable as
 // `sparq_wasm::canonicalizeNQuads` from the headless wasm test (tests/web.rs) and any

@@ -53,4 +53,28 @@
 ///   value`, but error-code completeness across context processing, expansion,
 ///   and compaction is unverified; the negative ratchet lanes are bead
 ///   sq-oy1f.31. SKIP (honest), never a counted pass.
-pub const FLOOR: usize = 228;
+///
+/// ## [OPUS-5] sq-gzsky — the NEGATIVE lane lands; 228 → 243 (skips 18 → 1)
+///
+/// The 17-case negative skip bucket above is closed (lever sq-oy1f.31 in
+/// `research/gap-jsonld-conformance-2026-07.md` §6). The runner RUNS every
+/// `NegativeEvaluationTest`: a case passes iff `compact()` — expansion + context
+/// processing + compaction — raises EXACTLY the manifest's `expectErrorCode`, with a WRONG
+/// code a FAIL rather than a pass. Measured **243 pass / 2 fail / 1 skip** of 246. Wiring
+/// alone measured 242/3/1; `#tep12` came from the `@container`-array-in-1.0 fix landed for
+/// the expand lane (§4.2.2 step 21.2 — see the expand floor doc for the full fix list).
+/// The one remaining SKIP is `#t0038`, unchanged and still narrowly pinned.
+///
+/// ### The 2 remaining FAILS — honest, itemised, NOT skipped
+///
+/// * `#te001` — expects `compaction to list of lists`, a JSON-LD **1.0** error code the 1.1
+///   REC REMOVED from the `JsonLdErrorCode` registry (1.1 allows a list of lists), so the
+///   closed `sparq_jsonld::JsonLdErrorCode` mirror cannot name it. Same class as expand
+///   `#ter24`/`#ter32`.
+/// * `#te002` — expects `IRI confused with prefix`. This one is a REAL 1.1 gap, not a
+///   retired code: IRI Compaction step 8 aborts when the scheme of an IRI with no `//`
+///   authority matches a `@prefix`-flagged term (`tag:champin.net,2019:prop` against a
+///   `tag` prefix term). `context::inverse::compact_iri` is infallible (`-> String`), so
+///   raising it needs a fallible signature threaded through the compaction walk — a
+///   scoped follow-up, deliberately not folded into this floor rise.
+pub const FLOOR: usize = 243;

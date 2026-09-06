@@ -20,19 +20,44 @@
 % set-identical to sparq's OWL-RL closure (0 diff both directions, 150589) — the
 % reconciliation is cross-checked in scripts/bench/materialize-same-box.sh.
 %
-% NEMO PERFORMANCE NOTE (load-bearing): the restriction-schema atoms of cls-svf1 and
-% scm-svf2 are FIRST folded into a small `svfR(R,onProp,filler)` relation, and the
-% intersectionOf conjuncts into small `int1def`/`int2def` relations, BEFORE the join
-% against the (large) type index. Written the naive way — the restriction/intersection
-% atoms inlined into the recursive `closed` rule — Nemo's semi-naive evaluation does
-% not converge in a reasonable time on LUBM(1) (a wide self-join over the growing type
-% relation re-fires each round). The pre-folded form converges in ~2.5s on the work box
-% and is logically identical. VLog (bench/reason-encodings/vlog/owl-rl.dlog) evaluates
-% the inlined form directly; the two engines agree with sparq set-for-set.
+% NEMO CONVERGENCE NOTE (load-bearing — sq-hmd7l.31; mechanism written up in sq-3xsx0):
+% the restriction-schema atoms of cls-svf1/scm-svf2 are FIRST folded into a small
+% `svfR(R,onProp,filler)` relation, and the intersectionOf list into `intTail`/`intAll`,
+% BEFORE the join against the (large) type index. Written the naive way — those schema
+% atoms inlined into the recursive `closed` rule — Nemo's semi-naive evaluation does not
+% converge in a reasonable time on LUBM(1). The STRUCTURAL difference, which is what this
+% file can state: every rule here derives into the ONE predicate `closed`, so semi-naive
+% must instantiate each round's delta at EVERY body position of every rule. Inlined,
+% cls-svf1 is a 4-atom rule over `closed` alone — four delta-rules per round, each a
+% 4-way join over a relation that is still growing, and nothing in the program marks the
+% two restriction atoms as schema rather than data, so whether a given round is planned
+% schema-first is left to the engine. Pre-folded, those atoms live in `svfR`, which
+% SATURATES early (on this corpus no rule derives a new owl:onProperty / owl:someValuesFrom
+% triple after the opening rounds), so its delta goes empty and the delta-rules on those
+% positions stop producing; what is re-done each round is a join of a small, stable
+% relation against the type index. The pre-fold does NOT put the schema in a separate
+% recursive component — svfR/intAll are themselves derived from `closed` — it makes the
+% "schema first, data after" order a property of the PROGRAM instead of a hope about the
+% planner, which is the only form of the hint a `.rls` file can carry. The pre-folded form
+% converged in ~2.5s on the work box (non-canonical, directional only) and is logically
+% identical. VLog (bench/reason-encodings/vlog/owl-rl.dlog) evaluates the inlined cls-svf1
+% form directly; both engines agree with sparq set-for-set.
 %
-% cls-int1 is written as an explicit list-arity decode for lengths 1 and 2 — the
-% arities the LUBM intersectionOf lists actually use. scm-int (C subClassOf each
-% conjunct) uses a recursive list walk so it generalises to any list length.
+% UNMEASURED (sq-3xsx0): whether some rule ordering or engine-side hint makes the INLINED
+% form converge under Nemo after all was NOT re-tested — Nemo is a gather-only dep and no
+% binary was available for that change. The paragraph above is about THIS program's join
+% structure, which is inspectable here; the engine-behaviour half needs a Nemo build
+% before it can be stated as measured.
+%
+% cls-int1 and scm-int BOTH use a recursive list walk, so both generalise to any
+% intersectionOf list length (sq-3xsx0 — cls-int1 was previously an explicit decode for
+% lengths 1 and 2, the only arities the LUBM TBox uses, and silently derived nothing for
+% a 3+-conjunct intersection). The LUBM closure is unchanged by that generalisation: on
+% lists of length 1 and 2 the walk derives exactly the facts the explicit decode did
+% (pinned by crates/sparq-reason/tests/datalog_intersection_arity.rs, which runs both
+% rule shapes through a semi-naive Datalog fixpoint). NOT re-measured against a live
+% Nemo in that change — Nemo is a gather-only dep; the harness re-asserts the pinned
+% closure count before recording any timing, so a divergence fails loudly, never silently.
 
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -68,13 +93,20 @@ intTail(?c, ?l) :- closed(?c, owl:intersectionOf, ?l) .
 intTail(?c, ?r) :- intTail(?c, ?l), closed(?l, rdf:rest, ?r) .
 closed(?c, rdfs:subClassOf, ?d) :- intTail(?c, ?l), closed(?l, rdf:first, ?d) .
 
-% cls-int1 — intersection membership; conjunct classes are bound from small int{1,2}def
-% relations (list arities 1 and 2, the arities present in the LUBM TBox) BEFORE the
-% type join, so no type-index self-join over the growing closure.
-int1def(?c, ?a) :- closed(?c, owl:intersectionOf, ?l1), closed(?l1, rdf:first, ?a), closed(?l1, rdf:rest, <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>) .
-int2def(?c, ?a, ?b) :- closed(?c, owl:intersectionOf, ?l1), closed(?l1, rdf:first, ?a), closed(?l1, rdf:rest, ?l2), closed(?l2, rdf:first, ?b), closed(?l2, rdf:rest, <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>) .
-closed(?x, rdf:type, ?c) :- int1def(?c, ?a), closed(?x, rdf:type, ?a) .
-closed(?x, rdf:type, ?c) :- int2def(?c, ?a, ?b), closed(?x, rdf:type, ?a), closed(?x, rdf:type, ?b) .
+% cls-int1 — intersection membership, GENERIC in list arity (sq-3xsx0). `intAll(?l, ?x)`
+% reads "?x is typed with EVERY conjunct from list cell ?l onward"; the base case is the
+% last cell (rdf:rest = rdf:nil) and the step case peels one conjunct off the front. This
+% matches sparq, which decodes the whole list and requires membership in every conjunct
+% (crates/sparq-reason/src/owl.rs `cls-int1/int2`, `members.iter().all(…)`); an EMPTY
+% intersection list derives nothing on both sides. It supersedes the previous explicit
+% arity-1/arity-2 decode, which silently derived NOTHING for a 3+-conjunct intersection.
+% The PRE-FOLD discipline is preserved: the walk is guarded by intTail, so only cells
+% reachable from an owl:intersectionOf are visited (unrelated RDF lists in the data are
+% never joined against the type index), and the cell ?l — hence the conjunct ?a it holds —
+% is bound from that small, early-saturating relation before the type atom is probed.
+intAll(?l, ?x) :- intTail(?c, ?l), closed(?l, rdf:first, ?a), closed(?l, rdf:rest, <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>), closed(?x, rdf:type, ?a) .
+intAll(?l, ?x) :- intTail(?c, ?l), closed(?l, rdf:first, ?a), closed(?l, rdf:rest, ?r), intAll(?r, ?x), closed(?x, rdf:type, ?a) .
+closed(?x, rdf:type, ?c) :- closed(?c, owl:intersectionOf, ?l), intAll(?l, ?x) .
 
 % ===== OWL schema-propagation rules ==========================================
 % scm-dom1/scm-rng1 — domain/range climb the subClassOf hierarchy

@@ -135,11 +135,38 @@ fn oracle_satisfiable_kb_is_definitively_consistent() {
     assert_eq!(check_consistency(&kb), QlConsistency::Consistent);
 }
 
+/// Oracle 6b — hand-derivation, sq-fj8lj follow-up: the SUBCLASS-COMPLEMENT spelling of a
+/// negative inclusion, `:Bird rdfs:subClassOf [ owl:complementOf :Fish ]` (QL's
+/// `superClassExpression ::= ObjectComplementOf(subClassExpression)`), is the axiom
+/// `:Bird ⊑ ¬:Fish` — the same DL-Lite_R NI `owl:disjointWith` spells, so cln(T) derives
+/// `:Penguin ⊑ ¬:Fish` exactly as in oracle 2. Expected: INCONSISTENT on the violating ABox,
+/// definitive CONSISTENT on the satisfiable one (before the capture broadened, the anonymous
+/// `¬:Fish` superclass counted as `skipped`, so BOTH sides could only be Unknown).
+#[test]
+fn oracle_subclass_complement_negative_inclusion() {
+    let tbox = ":Penguin rdfs:subClassOf :Bird . \
+                :Bird rdfs:subClassOf [ owl:complementOf :Fish ] . ";
+    let kb = ttl(&format!("{tbox} :pingu a :Penguin , :Fish ."));
+    let QlConsistency::Inconsistent(v) = check_consistency(&kb) else {
+        panic!("expected Inconsistent, got {:?}", check_consistency(&kb));
+    };
+    assert_eq!(
+        v.axiom,
+        NegativeInclusion::Concept(
+            Basic::Class("http://ex/Bird".into()),
+            Basic::Class("http://ex/Fish".into())
+        ),
+        "the witness is the ASSERTED axiom, not the cln(T)-derived one"
+    );
+    let kb = ttl(&format!("{tbox} :pingu a :Penguin . :dory a :Fish ."));
+    assert_eq!(check_consistency(&kb), QlConsistency::Consistent);
+}
+
 /// Oracle 7 — fail-closed: an UNCAPTURED axiom keeps the verdict Unknown. (a) a non-QL
-/// construct (`owl:FunctionalProperty`) blocks `fully_captured()`; (b) `owl:complementOf` is
-/// consistency-relevant but never structurally captured (`A ≡ ¬B` is stronger than `A ⊑ ¬B` —
-/// e.g. `¬B ⊑ A` can make a KB inconsistent with no captured violation query to see it).
-/// Expected: Unknown in both — NEVER silently Consistent.
+/// construct (`owl:FunctionalProperty`) blocks `fully_captured()`; (b) a NAMED-subject
+/// `owl:complementOf` is consistency-relevant but never structurally captured (`A ≡ ¬B` is
+/// stronger than `A ⊑ ¬B` — e.g. `¬B ⊑ A` can make a KB inconsistent with no captured violation
+/// query to see it). Expected: Unknown in both — NEVER silently Consistent.
 #[test]
 fn oracle_uncaptured_axioms_stay_unknown() {
     let kb = ttl(":p a owl:FunctionalProperty . :x :p :y . :x :p :z .");

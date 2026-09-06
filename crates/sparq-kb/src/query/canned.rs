@@ -71,6 +71,47 @@ GROUP BY ?p ORDER BY DESC(?uses)"#,
     param: None,
 };
 
+/// INTROSPECT — the **read-path facade** card: for each `pkg:` term, the fluent
+/// `schema.org` term it bridges onto via the asserted `pkg.ttl` bridge axioms
+/// (`rdfs:subClassOf` / `rdfs:subPropertyOf` / `skos:closeMatch`).
+///
+/// [`SCHEMA_CLASSES`] deliberately filters to the `pkg:` namespace, so on its own the
+/// schema card shows the agent *none* of the facade vocabulary — even though
+/// schema.org-as-top is the PKG's ratified read-path facade (bead `sq-mztg8.5`; the
+/// facade-selection verdict is `sq-mztg8.4`, `research/fo-llm-bridge.md` §6 Phase 5).
+/// That matters because the FO-KM Metric-1 measurement (`bench/fo-km/RESULTS.md`) found
+/// the agent grounds *fluent* `schema:` terms markedly more reliably than rare academic
+/// FO terms — so the facade is exactly the vocabulary worth surfacing at introspect time.
+/// This query closes that gap without touching [`SCHEMA_CLASSES`], whose `pkg:`-only
+/// filter is load-bearing (the FO-KM design record §7 notes the class card gets *noisier*
+/// under closure, a small regression for agent grounding).
+///
+/// It reads the **asserted** bridge axioms, so it answers on the plain
+/// [`load_pkg`](super::load_pkg) path with no `--close` step required; under OWL-RL
+/// closure the bridged `schema:` types are additionally entailed on the instances
+/// themselves and can be queried directly.
+///
+/// **Facade identity is a decision, not a constant.** The `schema:` namespace filter
+/// below encodes the ratified schema.org-as-top choice; re-ratifying a different facade
+/// (e.g. gist) would change this FILTER and the `pkg.ttl` bridge axioms together. As of
+/// `sq-mztg8.4` no gist arm has been measured, so schema.org-as-top stands. [OPUS-5]
+pub const FACADE_TERMS: CannedQuery = CannedQuery {
+    name: "facade-terms",
+    about: "INTROSPECT: the schema.org facade term each pkg: term bridges onto (the ratified read-path facade)",
+    sparql: r#"
+PREFIX pkg:    <https://sparq.dev/ns/pkg#>
+PREFIX rdfs:   <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos:   <http://www.w3.org/2004/02/skos/core#>
+PREFIX schema: <http://schema.org/>
+SELECT ?pkgTerm ?bridge ?facadeTerm WHERE {
+  ?pkgTerm ?bridge ?facadeTerm .
+  FILTER(?bridge IN (rdfs:subClassOf, rdfs:subPropertyOf, skos:closeMatch))
+  FILTER(STRSTARTS(STR(?pkgTerm), STR(pkg:)))
+  FILTER(STRSTARTS(STR(?facadeTerm), STR(schema:)))
+} ORDER BY ?pkgTerm ?facadeTerm"#,
+    param: None,
+};
+
 // ---------------------------------------------------------------------------
 // (b) GROUND — NL question → SPARQL over the introspected terms (worked templates)
 // ---------------------------------------------------------------------------
@@ -264,6 +305,7 @@ SELECT (COUNT(DISTINCT ?t) AS ?ready) WHERE {
 pub const ALL: &[&CannedQuery] = &[
     &SCHEMA_CLASSES,
     &SCHEMA_PROPERTIES,
+    &FACADE_TERMS,
     &FINDINGS_ABOUT,
     &FINDING_PROVENANCE,
     &FINDING_QUALITY_DQV,

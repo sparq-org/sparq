@@ -85,6 +85,34 @@ class TestFeatureMatrixAssemble(unittest.TestCase):
             "did NOT intend to change the gating set, this is a real regression.",
         )
 
+    def test_golden_is_exact_names_output(self):
+        """The golden is REGENERATED, never hand-edited: it == `--names` stdout, byte-for-byte.
+
+        [SONNET-4.6] issue #2384. The sibling test above compares the SORTED SETS, so a
+        hand-written golden line still passes it while sitting in the wrong sort position
+        (or carrying a comment, or a stray blank line). This pins the documented
+        regeneration command instead — `python3 scripts/assemble-feature-matrix.py --names
+        > scripts/tests/feature-matrix-legnames.golden.txt` — so the only way to update the
+        golden is to run it. That matters because the decomposition rule says a leg-NAME-SET
+        change scopes BOTH the fragment and this golden, with the golden regenerated.
+        """
+        buf = io.StringIO()
+        argv = sys.argv
+        sys.argv = ["assemble-feature-matrix.py", "--names"]
+        try:
+            with redirect_stdout(buf):
+                self.mod.main()
+        finally:
+            sys.argv = argv
+        self.assertEqual(
+            buf.getvalue(),
+            GOLDEN.read_text(encoding="utf-8"),
+            "scripts/tests/feature-matrix-legnames.golden.txt is not the verbatim output "
+            "of `python3 scripts/assemble-feature-matrix.py --names`. Do not hand-edit it "
+            "— regenerate: python3 scripts/assemble-feature-matrix.py --names > "
+            "scripts/tests/feature-matrix-legnames.golden.txt",
+        )
+
     def test_no_duplicate_leg_names(self):
         names = [leg["name"] for leg in self.legs]
         dupes = sorted({n for n in names if names.count(n) > 1})
@@ -912,6 +940,204 @@ class TestGroupedWorkflowWiring(unittest.TestCase):
                 "the reporter (PR #3511 review findings 2 + 4)")
 
 
+class TestPreMergeC1Job(unittest.TestCase):
+    """[OPUS-5] sq-nd4yj: pins the PRE-MERGE C1 job in feature-matrix.yml.
+
+    C1 (scripts/check-feature-test-execution.py) is a WHOLE-TREE invariant — a
+    feature-gated test in one crate is covered by an executor declared elsewhere in the
+    tree — so a MERGE can break it while NEITHER SIDE breaks it alone. That is the sq-nd4yj
+    incident: 700ec341 (#2194's drain merge) dropped the `sparq-algos (topology)` leg that
+    #2193 had just landed, while the gated tests stayed, and C1 then RED-ded main and every
+    branch until f6a06580. The `setup` job's C1 cannot see that class: on `pull_request` it
+    grades `refs/pull/N/merge`, frozen at event time, and GitHub does not re-run the checks
+    when the base moves. The `premerge-c1` job re-merges the base tip AS OF ITS OWN RUN and
+    re-runs the SAME `--check`. (Scope, stated in the job's own header: it grades CLEAN
+    merges only — a conflicting PR has no merge ref for anyone to grade, and a
+    locally-resolved push to main runs no PR CI, which is how 700ec341 itself got in.) Each
+    assertion below is one of the properties that makes the job able to do that; delete the
+    job, or weaken any of them, and this test goes red.
+
+    LIFECYCLE (PR #5253 review round 1). `premerge-c1` narrows the stale-green window
+    without closing it: a push to the base branch re-triggers nothing for the open PRs
+    targeting it, so this job's completed green can outlive the base it graded. The job
+    therefore claims only "head ⊕ THIS named base SHA was clean", and the verdict that
+    cannot go stale is `setup`'s C1 on the `merge_group` ref — a SHA that contains the
+    latest base by construction. Two tests below pin exactly that division of labour: the
+    job must publish the base SHA it graded, and the merge_group path must stay wired.
+
+    TEXT-BASED (block slicing on the job's fixed indent) rather than yaml.safe_load, on
+    purpose: PyYAML is an install step in CI but is absent on a bare dev box, where the
+    yaml-based classes above cannot run at all. The rest of the file already reads
+    WORKFLOW as text for the same kind of contract (the static-`include:` check)."""
+
+    JOB_ID = "premerge-c1"
+    JOB_NAME = "pre-merge C1 (feature-gated test execution)"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = WORKFLOW.read_text(encoding="utf-8")
+        cls.block = cls._job_block(cls.text, cls.JOB_ID)
+
+    @staticmethod
+    def _job_block(text: str, job_id: str, why: str = "") -> str:
+        """The `jobs.<job_id>` mapping, verbatim: from its 2-space-indented key line to
+        (exclusive) the next line at that indent. Job-level keys sit at 4 spaces and
+        steps deeper, so the terminator is unambiguous."""
+        lines = text.splitlines()
+        try:
+            start = lines.index(f"  {job_id}:")
+        except ValueError:
+            raise AssertionError(
+                f"feature-matrix.yml declares no `{job_id}` job — "
+                + (why or
+                   "the pre-merge C1 guard (sq-nd4yj) is GONE, so a violation that only "
+                   "exists in the merged tree (gated test on one side, its matrix leg on "
+                   "the other) reaches main and reds C1 on every branch.")
+            ) from None
+        out = [lines[start]]
+        for line in lines[start + 1:]:
+            if re.match(r"^  \S", line):
+                break
+            out.append(line)
+        return "\n".join(out)
+
+    @staticmethod
+    def _top_level_block(text: str, key: str) -> str:
+        """The top-level `<key>:` mapping, verbatim: from its column-0 key line to
+        (exclusive) the next column-0 line. Same slicing contract as `_job_block`, one
+        indent level up — used for the `on:` trigger block."""
+        lines = text.splitlines()
+        try:
+            start = lines.index(f"{key}:")
+        except ValueError:
+            raise AssertionError(
+                f"feature-matrix.yml has no top-level `{key}:` block"
+            ) from None
+        out = [lines[start]]
+        for line in lines[start + 1:]:
+            if re.match(r"^\S", line):
+                break
+            out.append(line)
+        return "\n".join(out)
+
+    def test_runs_the_c1_guard_itself(self):
+        """The point of the job: the SAME check, not a re-implementation of it."""
+        self.assertIn(
+            "python3 scripts/check-feature-test-execution.py --check", self.block,
+            "the pre-merge job must run the real C1 guard on the merged tree")
+
+    def test_merges_the_current_base_tip(self):
+        """Without this the job grades the same stale tree `setup` already graded."""
+        self.assertIn('merge --no-commit --no-ff "origin/${BASE_REF}"', self.block,
+                      "the job must test-merge the CURRENT base tip into the PR head")
+        self.assertIn("BASE_REF: ${{ github.event.pull_request.base.ref }}", self.block,
+                      "BASE_REF must come from the PR's base branch")
+
+    def test_checkout_has_the_merge_base(self):
+        """A default pull_request checkout fetches only `refs/pull/N/merge` at depth 1 —
+        no `origin/<base_ref>` to merge and no shared ancestor — so the test merge, and
+        with it the guard, would never evaluate."""
+        self.assertIn("fetch-depth: 0", self.block)
+        self.assertIn("persist-credentials: false", self.block)
+
+    def test_test_merge_starts_at_the_pr_head(self):
+        """PR #5253 review round 2. On `pull_request`, actions/checkout WITHOUT an explicit
+        `ref` lands on `refs/pull/N/merge` — the synthetic merge GitHub froze at event time,
+        i.e. the head already merged with the THEN-current base. Merging the current base
+        tip into that grades ((stale base ⊕ head) ⊕ current base), not the "PR head ⊕
+        current base tip" this job's comments and summary claim; history shape feeds merge
+        base resolution and rename detection, so the two are not interchangeable. Pin both
+        halves of the fix — the checkout starts at the head SHA, and the merge step
+        re-verifies HEAD against it rather than trusting the checkout. Note this asserts
+        the merge's STARTING COMMIT, which `test_publishes_the_base_sha_it_graded` does not:
+        that one only proves HEAD_SHA reaches the summary, which was true while the bug
+        was live."""
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.block,
+                      "the checkout must pin `ref` to the PR head SHA — otherwise the "
+                      "test merge starts from the event-time refs/pull/N/merge commit")
+        self.assertIn('ACTUAL_HEAD="$(git rev-parse HEAD)"', self.block,
+                      "the merge step must resolve the commit it is about to merge from")
+        self.assertIn('if [ "${ACTUAL_HEAD}" != "${HEAD_SHA}" ]; then', self.block,
+                      "the merge step must FAIL CLOSED when HEAD is not the PR head — a "
+                      "merge from any other commit produces a tree the job misreports")
+
+    def test_guard_step_is_gated_on_a_clean_test_merge(self):
+        """A conflicted working tree is not the merge result; grading it would be a
+        verdict about a tree that will never exist."""
+        self.assertIn("if: steps.merge.outputs.merged == 'true'", self.block)
+        self.assertIn("git merge --abort", self.block)
+
+    def test_pull_request_only_and_path_filtered(self):
+        """merge_group/push already check out an actually-merged tree, so re-merging
+        there is meaningless; `rust_changed` keeps a non-Rust PR off this runner."""
+        self.assertIn("github.event_name == 'pull_request'", self.block)
+        self.assertIn("needs.changes.outputs.rust_changed == 'true'", self.block)
+        self.assertIn("needs: [changes]", self.block)
+
+    def test_publishes_the_base_sha_it_graded(self):
+        """PR #5253 review round 1. The job resolves the base tip WHILE RUNNING, and no PR
+        event re-runs it when the base later advances — so a completed green can be a
+        verdict about a base the PR would no longer merge with. The job must therefore
+        name the SHA it graded (step output + job summary); without that, an old green and
+        a current one are indistinguishable and "the CURRENT base tip" is unfalsifiable."""
+        self.assertIn('BASE_SHA="$(git rev-parse "origin/${BASE_REF}")"', self.block,
+                      "the job must resolve the base tip to a concrete SHA")
+        self.assertIn('echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"', self.block,
+                      "the graded base SHA must be a step output so later steps can cite it")
+        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', self.block,
+                      "the graded base SHA must reach the job summary a human reads")
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", self.block,
+                      "the summary must name the PR head it merged, not just the base")
+
+    def test_unstaleable_c1_verdict_stays_wired_on_merge_group(self):
+        """PR #5253 review round 1 — the LIFECYCLE half, not another substring of this job.
+
+        Because this job's verdict is scoped to one base SHA and GitHub re-runs nothing for
+        an open PR when the base advances, it CANNOT be the last word on the merge
+        candidate; the job header says so. That honesty only holds while the invariant is
+        ALSO enforced on a ref whose SHA contains the latest base by construction — the
+        merge queue's `merge_group` ref. Assert that path end to end: the workflow triggers
+        on merge_group, and the job that runs C1 (`setup`) is not restricted to
+        pull_request, so the merge_group run actually grades it. Drop either and the only
+        remaining C1 verdict is a staleable one."""
+        on_block = self._top_level_block(self.text, "on")
+        self.assertIn("  merge_group:", on_block,
+                      "feature-matrix.yml must still trigger on merge_group — that run is "
+                      "the C1 verdict on the tree that actually ships, and the pre-merge "
+                      "job explicitly defers to it")
+        setup = self._job_block(
+            self.text, "setup",
+            why="`setup` is where the whole-tree C1 guard runs on the merge_group ref; "
+                "without it the only C1 verdict left is the pre-merge job's, which is "
+                "scoped to a base SHA that can go stale (PR #5253 review round 1).")
+        self.assertIn("python3 scripts/check-feature-test-execution.py --check", setup,
+                      "`setup` must still run the real C1 guard")
+        self.assertNotIn("pull_request", setup.split("steps:")[0],
+                         "`setup`'s job-level condition must NOT restrict it to "
+                         "pull_request — the merge_group run is the C1 verdict that "
+                         "cannot go stale")
+
+    def test_job_is_unprivileged(self):
+        """It checks out the PR head and merges the base locally; it needs nothing but
+        the source."""
+        self.assertIn("permissions:\n      contents: read\n", self.block)
+        self.assertNotIn("checks: write", self.block)
+
+    def test_job_gates(self):
+        """Post-#3773 a check gates unless DECLARED advisory; assert both halves — the
+        name carries no advisory token, and nothing declares this check advisory."""
+        self.assertIn(f"name: {self.JOB_NAME}", self.block)
+        self.assertNotRegex(self.JOB_NAME, ADVISORY_RE)
+        registry = json.loads(
+            (REPO_ROOT / ".github" / "advisory-registry.json").read_text(encoding="utf-8")
+        )
+        declared = {k.lower() for k in registry if not k.startswith("_")}
+        self.assertNotIn(
+            self.JOB_NAME.lower(), declared,
+            "the pre-merge C1 check must not be declared advisory — a merge-only C1 "
+            "violation must BLOCK the merge, which is the whole point (sq-nd4yj)")
+
+
 class TestReportWorkflowTrustBoundary(unittest.TestCase):
     """Pins the DEFAULT-BRANCH-owned reporter workflow (PR #3511 review finding 1):
     feature-matrix-report.yml is triggered by workflow_run on feature-matrix, so
@@ -1443,6 +1669,60 @@ class TestGroupReporter(unittest.TestCase):
         self.assertEqual({c["name"] for c in leg_calls},
                          {f"opt-in {leg['name']}" for leg in legs})
         self.assertEqual(len(self._summary_calls(gh_calls)), 1)
+
+
+class TestTwoFileScopeRuleIsDocumented(unittest.TestCase):
+    """[SONNET-4.6] issue #2384 — the leg/golden pairing must be stated where it is read.
+
+    A task that adds/removes/RENAMES a leg but is decomposed with
+    `.github/feature-matrix.d/<crate>.yml` as its ONLY permitted file is
+    self-contradicting: the leg-name change it asks for also requires the golden update it
+    forbids, and a worker that obeys the scope has to decline. (That is exactly what
+    happened on sq-19f1i / sq-kf56o.) Edits that cannot move the name set stay single-file.
+    The contract therefore lives in the fragment directory itself, and these tests keep it
+    from being deleted or drifting.
+
+    Pure file reads — no PyYAML, no assembler import.
+    """
+
+    README = FRAGMENT_DIR / "README.md"
+    GOLDEN_REL = "scripts/tests/feature-matrix-legnames.golden.txt"
+    REGEN_CMD = "python3 scripts/assemble-feature-matrix.py --names"
+
+    def test_fragment_dir_readme_states_both_in_scope_paths(self):
+        self.assertTrue(self.README.is_file(), f"missing {self.README}")
+        text = self.README.read_text(encoding="utf-8")
+        for needle in (".github/feature-matrix.d/<crate>.yml", self.GOLDEN_REL):
+            self.assertIn(
+                needle, text,
+                f"{self.README} must name {needle} as an in-scope file for a "
+                "leg-name-set change",
+            )
+
+    def test_fragment_dir_readme_gives_the_regeneration_command(self):
+        text = self.README.read_text(encoding="utf-8")
+        self.assertIn(
+            f"{self.REGEN_CMD} > {self.GOLDEN_REL}", text,
+            "the README must give the exact regeneration command, since the golden is "
+            "regenerated and never hand-edited",
+        )
+
+    def test_every_fragment_points_at_the_golden(self):
+        """A fragment author/decomposer reading ONLY their crate's file still sees the rule
+        — including its name-set qualification, so a non-name edit is not over-scoped."""
+        frags = sorted(FRAGMENT_DIR.glob("*.yml"))
+        self.assertTrue(frags, "no fragment files found")
+        missing = [
+            f.name for f in frags
+            if "feature-matrix-legnames.golden.txt" not in f.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(
+            missing, [],
+            "these fragments never mention the gate-name golden, so a leg-name-set task "
+            "scoped from them alone would forbid the golden update it requires. Add the "
+            "SCOPE comment "
+            f"(see any sibling fragment or {self.README}): {missing}",
+        )
 
 
 if __name__ == "__main__":

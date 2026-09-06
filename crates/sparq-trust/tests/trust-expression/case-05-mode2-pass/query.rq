@@ -1,0 +1,2 @@
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+ASK { <urn:person:jesse> foaf:age ?age }

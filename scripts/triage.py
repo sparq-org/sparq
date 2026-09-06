@@ -32,7 +32,23 @@ SEC_KEYWORDS = ("zk", "mpc", "reasoner", "crypto", "auth", "e2ee")
 # role:site chain in orchestration/routing.toml leads with terra/codex). EXACT labels, not
 # substrings: a substring set would false-match (e.g. "gui" in "guide") and UI keywords must NOT
 # enter routing match_labels, which the arm-side security classifier unions into its keyword set.
-UI_SURFACE_LABELS = ("area:site", "area:gui", "surface:frontend", "dashboard")
+UI_SURFACE_LABELS = ("area:site", "surface:frontend", "dashboard")
+# [OPUS-5] `area:gui` gets its OWN role (maintainer directive 2026-07-26). The routing default
+# flipped to opus5-first over sol, "except for GUI work where sol should remain prioritised", and
+# the maintainer settled the boundary as "just go with area:gui work". area:gui used to sit in
+# UI_SURFACE_LABELS above and therefore derived role:site — which made the carve-out inexpressible,
+# because role:site also covers area:site / surface:frontend / dashboard, and those are NOT in the
+# carve-out. Splitting the label out is what lets orchestration/routing.toml give role:gui a
+# sol-first chain while role:site takes the opus5-first default like everything else.
+# EXACT label, never a substring: a substring test would match "guide"/"guidance".
+#
+# THIS IS NOT WHERE THE CARVE-OUT BINDS. This rule fires only for an issue with NO explicit role —
+# the explicit-role branch in _role() returns first — and 35 of 35 open area:gui issues already
+# carry one (33 role:impl, 1 role:perf, 1 role:research), so on its own it reached NONE of the live
+# backlog and GUI work silently took the opus5-first default. The binding rule is
+# scripts/route-resolve.py `gui_carve_out()`, which reads `area:gui` directly at plan time
+# regardless of role. Keep the two label sets in sync — `test_both_gui_selectors_agree`.
+GUI_SURFACE_LABELS = ("area:gui",)
 # [FABLE-5] STANDING RULE — frontier-tier CI/infrastructure authorship (maintainer decision
 # 2026-07-17, same pattern as the UI→codex rule above / PR #3416): infra-surface labels derive
 # role:ci so infra work (.github/workflows, gate aggregators, orchestration/ + dispatch scripts)
@@ -50,6 +66,35 @@ def _valid_priority(labels):
     return len(ps) == 1
 
 
+# [OPUS-5] `needs:area` is the ONE `needs:*` label this function owns: it is applied below when an
+# otherwise-complete issue has no crate, and cleared in the ready branch once one lands. Everything
+# else in the namespace is an external gate.
+SELF_CLEARING_GATE = "needs:area"
+
+
+def _blocking_gates(labels):
+    """The `needs:*` gates that must block `status:ready`, matching ready-issues.py `is_gated`.
+
+    [OPUS-5] This used to be the single literal `"needs:user" not in labels`, so triage attested
+    `status:ready` on `needs:ec2` / `needs:docker` / `needs:zk` / `needs:upstream` /
+    `needs:maintainer` issues. ready-issues.py treats EVERY `needs:*` as a hard dispatch gate, so
+    the two components disagreed about what "gated" means and the readiness engine was the only
+    thing keeping those issues off the frontier — a single-point defence for a class that is
+    gated for real external reasons (an EC2 spend authorisation, a missing upstream release).
+
+    Measured live on sparq-org/sparq 2026-07-26: 21 open issues carried BOTH `status:ready` and a
+    real `needs:*` gate (needs:ec2 12, needs:docker 4, needs:zk 3, needs:external-subject 2,
+    needs:upstream 1, needs:maintainer 1). It also bounded the retriage reach fix in this PR:
+    5 of the 79 newly-promotable issues carry `needs:ec2` and must NOT be attested ready.
+
+    Narrowing only — an issue that stops being `ready` here is fail-closed and cannot reach the
+    frontier, so this can never open a dispatch path. `SELF_CLEARING_GATE` is excluded because
+    treating it as blocking would deadlock it: `ready` would be False forever, and the `remove`
+    that lifts the park only runs in the ready branch.
+    """
+    return {lb for lb in labels if lb.startswith("needs:")} - {SELF_CLEARING_GATE}
+
+
 def _role(labels, issue_type):
     # a security-surface keyword forces the soundness lane regardless of kind/type/explicit role
     if any(k in lb for lb in labels for k in SEC_KEYWORDS):
@@ -62,8 +107,14 @@ def _role(labels, issue_type):
     for lb in labels:
         if lb.startswith("kind:") and lb[5:] in ROLE_BY_KIND:
             return ROLE_BY_KIND[lb[5:]]
-    # [FABLE-5] UI-surface labels derive role:site (codex-led chain) before the generic type map,
-    # after kind (so kind:docs about the site stays docs) and after an explicit role:* label.
+    # [OPUS-5] area:gui derives role:gui — the sol-first carve-out — and is tested BEFORE the
+    # generic UI rule below, which would otherwise swallow it into role:site again. Same
+    # precedence slot otherwise (after security, an explicit role:*, and kind).
+    if any(lb in GUI_SURFACE_LABELS for lb in labels):
+        return "gui"
+    # [FABLE-5] UI-surface labels derive role:site (now the opus5-first default chain) before the
+    # generic type map, after kind (so kind:docs about the site stays docs) and after an explicit
+    # role:* label. NOTE: area:gui is deliberately NOT here — see GUI_SURFACE_LABELS.
     if any(lb in UI_SURFACE_LABELS for lb in labels):
         return "site"
     # [FABLE-5] infra-surface labels derive role:ci (the frontier-only fable/terra chain) before
@@ -98,7 +149,7 @@ def triage(labels, issue_type="task", trusted=True):
     # [OPUS-4.8] an epic is a tracking umbrella, never dispatchable — it must not gain status:ready
     # (the readiness engine also excludes kind:epic as the hard dispatch gate; this keeps the tracker
     # honest so an epic never *shows* as ready).
-    ready = (bool(role) and _valid_priority(labels) and has_area and "needs:user" not in labels
+    ready = (bool(role) and _valid_priority(labels) and has_area and not _blocking_gates(labels)
              and "kind:epic" not in labels)
     if ready:
         add.add("status:ready")
@@ -110,7 +161,7 @@ def triage(labels, issue_type="task", trusted=True):
         # a triage-complete-but-no-area issue: mark WHY it is parked so it is maintainer-actionable
         # and stays out of the frontier (needs:* is a hard gate) instead of silently reserving global.
         if (bool(role) and _valid_priority(labels) and not has_area
-                and "kind:epic" not in labels and "needs:user" not in labels):
+                and "kind:epic" not in labels and not _blocking_gates(labels)):
             add.add("needs:area")
     return {"add": add - labels, "remove": remove & labels, "ready": ready, "role": role}
 
@@ -153,7 +204,21 @@ def _self_test():
     # [FABLE-5] UI-surface ownership: a UI-surface label derives role:site (the codex/GPT-5.6-led
     # chain) even when the issue type would derive impl; kind (docs) and security still win.
     chk("ui surface -> site", triage(["priority:P2", "area:site"], "feature")["role"], "site")
-    chk("gui surface -> site", triage(["priority:P2", "area:gui"], "task")["role"], "site")
+    # [OPUS-5] the area:gui carve-out (maintainer 2026-07-26): area:gui gets its OWN role so the
+    # routing table can keep it sol-first while everything else prefers opus5.
+    chk("gui surface -> gui (NOT site)", triage(["priority:P2", "area:gui"], "task")["role"], "gui")
+    # THE DISCRIMINATION THAT MATTERS: "GUI" informally reads as covering the site surfaces, so a
+    # future editor could easily widen the carve-out back over them. NO site* area may derive
+    # role:gui — that is the exact property, asserted independently of which non-gui role each
+    # one happens to take (area:site -> site; the narrower area:site-specs / area:site-papers are
+    # not exact UI_SURFACE_LABELS and fall through to the type map, which is fine: every one of
+    # those roles is on the opus5-first default).
+    for _area in ("area:site", "area:site-specs", "area:site-papers", "area:sitemap"):
+        chk(f"{_area} does NOT derive role:gui (not swept into the sol carve-out)",
+            triage(["priority:P2", _area], "task")["role"] == "gui", False)
+    chk("surface:frontend stays role:site", triage(["priority:P2", "surface:frontend"], "task")["role"], "site")
+    chk("a 'guide' label does NOT false-match the gui carve-out",
+        triage(["priority:P2", "area:guide"], "task")["role"], "impl")
     chk("explicit impl on ui surface stays impl",
         triage(["priority:P2", "role:impl", "area:site"], "feature")["role"], "impl")
     chk("site docs stay docs", triage(["priority:P3", "kind:docs", "area:site"], "task")["role"], "docs")
@@ -179,6 +244,31 @@ def _self_test():
     # once an area lands, retriage clears the needs:area gate and promotes
     r = triage(["priority:P1", "role:impl", "area:sparq-core", "needs:area", "status:untriaged"], "feature")
     chk("area landed -> ready + clears needs:area", (r["ready"], "needs:area" in r["remove"]), (True, True))
+    # [OPUS-5] EVERY needs:* gate blocks readiness, not just needs:user — ready-issues.py has
+    # always treated the whole namespace as a hard dispatch gate and this function did not, so an
+    # externally-gated issue was attested `status:ready` with the readiness engine as the only
+    # thing keeping it off the frontier. Deleting a gate from `_blocking_gates` reds these.
+    for gate in ("needs:ec2", "needs:docker", "needs:zk", "needs:upstream", "needs:maintainer",
+                 "needs:external-subject", "needs:user"):
+        r = triage(["priority:P1", "role:impl", "area:sparq-core", gate], "feature")
+        chk(f"{gate} blocks status:ready",
+            (r["ready"], "status:ready" in r["add"], "status:untriaged" in r["add"]),
+            (False, False, True))
+        # ...and an externally-gated issue is not ALSO double-parked with needs:area
+        chk(f"{gate} no-area is not double-parked",
+            "needs:area" in triage(["priority:P1", "role:impl", gate], "task")["add"], False)
+    # the self-clearing gate must NOT be treated as blocking, or it can never be lifted: `ready`
+    # would be False forever and the `remove` that clears it only runs in the ready branch.
+    chk("needs:area is self-clearing, not a permanent block",
+        _blocking_gates({"needs:area"}), set())
+    # an unknown future needs:* label is gated by DEFAULT (namespace rule, not an allow-list)
+    chk("an unknown needs:* gate blocks by default",
+        triage(["priority:P1", "role:impl", "area:sparq-core", "needs:whatever-lands-next"],
+               "feature")["ready"], False)
+    # the gate set agrees with the readiness engine's, which is the whole point of the change
+    chk("gate namespace matches ready-issues.py is_gated",
+        _blocking_gates({"needs:ec2", "needs:area", "role:impl", "area:x", "trust:untrusted"}),
+        {"needs:ec2"})
     print("triage self-test", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 

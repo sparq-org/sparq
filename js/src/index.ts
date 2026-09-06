@@ -14,7 +14,7 @@ export {
 export { Dataset, datasetFactory } from './dataset.js';
 // [OPUS-4.8] sq-iwhl8 (#1116) — the RDF/JS Stream-spec surface: a quad `Stream` + a
 // `Source`/`Sink`/`Store` adapter over a `SparqStore` (also reachable via `store.asSource()`).
-export { SparqSource, QuadStream } from './source.js';
+export { SparqSource, QuadStream, type SparqSourceOptions } from './source.js';
 export { Bindings } from './bindings.js';
 export type { SparqResultStream } from './result-stream.js';
 export { DataFactory, NamedNode, BlankNode, Literal, Variable, DefaultGraph, Quad } from './terms.js';

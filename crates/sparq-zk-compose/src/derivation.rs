@@ -42,20 +42,66 @@
 //! the verifier-side manifest/dispatch/public-input wiring that would let this
 //! host path CONSUME an in-circuit derivation are follow-up beads; until they
 //! land, this host re-check remains disclosed-base only.
+//!
+//! # The TWO obligations — never conflate them (`sq-rsd3v.7`)
+//! `research/zk-inference-and-credentials.md` §3.7 keeps two DISTINCT properties
+//! apart, and this module supplies exactly ONE of them:
+//!
+//! 1. **SOUNDNESS of derivation** — "every disclosed derived triple IS entailed".
+//!    That is what [`DerivationStep`] + `verifier::bind_entailment` re-check
+//!    host-side over the disclosed base, and what the in-circuit relation
+//!    (`zk/compose/compose_core/src/derivation.nr`, `sq-rsd3v.2`) states over
+//!    HIDDEN antecedents. Supplied, as scoped (and NOT externally audited —
+//!    `sq-qhy4`).
+//! 2. **COMPLETENESS under entailment** — "no entailed answer is MISSING": a
+//!    NEGATIVE over a fixpoint. **UNBUILT and NOT claimed.** It needs BOTH halves
+//!    listed in [`COMPLETENESS_UNDER_ENTAILMENT_UNBUILT`], and the saturation half
+//!    exists nowhere in sparq.
+//!
+//! A relying party that needs (2) must NOT read an accepted `Rdfs`/`Owl` manifest
+//! as supplying it. That conflation is MACHINE-CHECKED rather than left to prose:
+//! `EntailmentPolicy::require_completeness_under_entailment` makes the verifier
+//! REFUSE every non-`Simple` manifest fail-closed
+//! (`CheckError::CompletenessUnderEntailmentUnavailable`) instead of returning an
+//! accept the relying party could misread as completeness.
+//!
+//! Folding (Nova/HyperNova/Protostar) / zkVM re-execution is the only shape that
+//! natively gives (2), and it was measured OUT at credential scale (design §3.6(c);
+//! `research/zkp-performance-landscape.md` §5 trigger 4). The documented RE-ENTRY
+//! TRIGGER is a huge closure PLUS a verifier that demands full completeness. Until
+//! that fires, soundness-first (`sq-rsd3v.2`/`.3`) is the path and (2) stays an
+//! OPEN, honestly-deferred problem.
 
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{EntailmentRegime, FieldHex};
+
+/// The TWO obligations completeness-under-entailment requires (design §3.7),
+/// **NEITHER of which is built** in sparq. This is the single source of truth the
+/// verifier's refusal message and its regression test share, so the honest scope
+/// cannot decay into prose only one of them remembers.
+///
+/// Half (a) is the entailment analogue of `scan.nr`'s asserted-base sweep: the
+/// closure — not just the base — would have to be swept in-circuit so no matching
+/// entailed triple can be withheld. Half (b) is the part with no precedent
+/// anywhere in the estate: proving that the fixpoint was REACHED, i.e. that no
+/// rule fires producing a new triple.
+// [OPUS-5] sq-rsd3v.7: completeness-under-entailment is UNBUILT and NOT claimed.
+pub const COMPLETENESS_UNDER_ENTAILMENT_UNBUILT: [&str; 2] = [
+    "in-circuit closure-sweep over the flat full graph",
+    "fixpoint-saturation proof (no rule fires producing a new triple)",
+];
 
 /// The RDFS/OWL-RL rule a [`DerivationStep`] instantiates. v1 ships the RDFS
 /// rules whose antecedents are fixed-shape Datalog over term encodings (the
 /// subset expressible over disclosed/committed triple encodings — the phased
 /// RULE SCOPE of `research/zk-inference-and-credentials.md §3.5`); the enum is
 /// the extension point for the full rule set. `owl:sameAs` is gated SEPARATELY
-/// (`sq-rsd3v.6`, the [`crate::sameas`] canonicalisation path) — encoding-equality
-/// re-checks are UNSOUND under equality reasoning — and must never ride this
-/// fixed-shape path; [`DerivationStep::mentions_equality_predicate`] enforces
-/// that fail-closed.
+/// (`sq-rsd3v.6`, the [`crate::sameas`] canonicalisation path — NOT `.7`, which
+/// is the distinct completeness obligation above) — encoding-equality re-checks
+/// are UNSOUND under equality reasoning — and must never ride this fixed-shape
+/// path; [`DerivationStep::mentions_equality_predicate`] enforces that
+/// fail-closed.
 ///
 /// Each rule's antecedent/consequent SHAPE is fixed and re-checked by
 /// [`DerivationStep::is_well_formed`]; the rule is identified in the manifest by

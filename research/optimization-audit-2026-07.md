@@ -15,10 +15,17 @@ readability, or a deliberate design tradeoff, and avoid duplicating in-flight pr
   (`scripts/perf-gate.py` / `bench/perf-baseline.json`) or an EC2 benchmark run
   (sq-vw3ax.12). Work-box numbers quoted below are **non-canonical directional
   brackets** used only to size expectations, never claims.
-- Deterministic ratchets (`wasm_bundle_bytes`, `store_bytes_per_triple[_small]`,
-  `dict_bytes_per_term`; advisory `parse_ns_per_byte`) must hold or improve on every
-  item. No clippy/readability/soundness compromise; new risk-bearing paths ship
-  **opt-in** behind differential tests (the established yannakakis / semijoin-bitmap /
+- Deterministic ratchets must hold or improve on every item. `scripts/perf-gate.py`
+  classifies by `mode` in `bench/perf-baseline.json`: **every `mode: auto` metric
+  hard-fails** (exit 2), and only `mode: noise` timing metrics are advisory. The
+  `mode: auto` metrics relevant to the items below are `wasm_bundle_bytes`,
+  `store_bytes_per_triple[_small]` and `dict_bytes_per_term` (the baseline also gates
+  others, e.g. `comp_store_bytes_per_triple`, `fts_bytes_per_doc`,
+  `vectors_{diskann,pq}_recall_at10`, `geo_compliance_deficit`). `parse_ns_per_byte` is
+  the sole `mode: noise` metric — wall-clock-derived and therefore an **advisory timing
+  signal (tracked/warned, non-blocking)**: watched on every item, but it never blocks a
+  merge. No clippy/readability/soundness compromise; new risk-bearing
+  paths ship **opt-in** behind differential tests (the established yannakakis / semijoin-bitmap /
   cs-planner pattern).
 
 **Not re-proposed here (owned elsewhere):**
@@ -109,8 +116,9 @@ Estimate triple/term counts from chunk byte length (bytes / avg-line-length), ca
 avoid over-allocation on tiny chunks — the exact pattern the HDT decoder already uses.
 Directly attacks the ~4.9% `reserve_rehash` + Vec-regrow profile cost.
 
-**Measurement plan.** Canonical: `parse_ns_per_byte` (advisory perf-gate metric, pinned
-CI corpus) must hold or improve. Hard guards: byte-identical ingest differentials
+**Measurement plan.** Canonical: `parse_ns_per_byte` on the pinned CI corpus — an advisory
+timing signal (tracked/warned, non-blocking), watched for regression. Hard guards:
+byte-identical ingest differentials
 (`dict_consolidation_differential.rs`, `parallel_serial_load_differential.rs`) unchanged;
 `store_bytes_per_triple[_small]` + `dict_bytes_per_term` ratchets neutral (capacity
 hints do not change stored bytes).
@@ -199,8 +207,9 @@ dict id just to inspect its datatype. Rebuild the in-memory numeric/temporal cac
 borrowed `Stored` components using the `is_numeric_datatype_str` borrowed path already
 proven by the spill build — removing O(distinct-terms) allocations from `Graph::build`.
 
-**Measurement plan.** Canonical: `parse_ns_per_byte` hold-or-improve (cache build is
-inside the load path). Hard guard: the existing streamed==dense byte-identity assertion —
+**Measurement plan.** Canonical: `parse_ns_per_byte` watched for regression (advisory
+timing signal — tracked/warned, non-blocking; the cache build is inside the load path).
+Hard guard: the existing streamed==dense byte-identity assertion —
 the produced cache must be byte-identical to the current dense write. Ratchets neutral
 (numerics/temporals bytes are not in the gated metrics; footprint unchanged).
 
@@ -295,8 +304,9 @@ same job; IRIs cannot contain an unescaped `>`, so a close-delim memchr + `\\` s
 over the span is sound). Keep the scalar path if short terms show no win.
 
 **Measurement plan.** bench/parse A/B (MB/s, Mtriples/s at 1 + 8 threads) on EC2 with a
-real grouped dump AND a shuffled control; canonical `parse_ns_per_byte` must hold or
-improve on the pinned corpus. Hard guards: exact term<->id bijection + byte-identical
+real grouped dump AND a shuffled control; canonical `parse_ns_per_byte` on the pinned
+corpus — an advisory timing signal (tracked/warned, non-blocking) — watched for
+regression. Hard guards: exact term<->id bijection + byte-identical
 output through the full differential suite (interning order is determinism-audited) —
 the cache must not change interned ids.
 
@@ -385,9 +395,13 @@ deliberate tradeoffs. Standing do-not-touch list:
 1. **Canonical or it did not happen**: deterministic perf-gate metrics for anything
    byte-countable; EC2 benchmark runs (sq-vw3ax.12) for latency/throughput; work-box
    numbers locate hot spots only. This document's bracket figures are non-canonical.
-2. **Ratchets hold or improve** on every PR: `wasm_bundle_bytes`,
-   `store_bytes_per_triple[_small]`, `dict_bytes_per_term`; `parse_ns_per_byte`
-   advisory but watched. Item 1 is the only deliberate re-baseline, and it moves DOWN.
+2. **Ratchets hold or improve** on every PR: every `mode: auto` metric in
+   `bench/perf-baseline.json` hard-fails the gate on regression — the ones this document
+   touches are `wasm_bundle_bytes`, `store_bytes_per_triple[_small]` and
+   `dict_bytes_per_term`. `parse_ns_per_byte` is the sole `mode: noise` metric: its floor
+   still ratchets down on sustained improvement, but a regression is an advisory timing
+   warning (tracked/warned, non-blocking). Item 1 is the only deliberate re-baseline, and
+   it moves DOWN.
 3. **Differential-or-die** for anything near semantics: ingest byte-identity suites,
    W3C conformance, ON==OFF feature differentials, byte-identical HTTP bodies.
 4. **Measure-first beads (12, 13) may close as "measured, rejected"** — a recorded

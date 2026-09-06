@@ -27,6 +27,12 @@ pub mod mode;
 // module's own docs. Native-only: the wasm request core keeps the policy layer out.
 #[cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]
 pub mod odrl;
+// [OPUS-5] sq-hed3q: the opt-in trust-graph admission seam (`trust-graph`) — a PURE library
+// function, deliberately NOT wired into the LDP handler, so enabling the feature changes no
+// request's outcome. Native-only, mirroring the ODRL gate: the wasm request core keeps the
+// trust-graph estate out of its dependency graph.
+#[cfg(all(feature = "trust-graph", not(target_arch = "wasm32")))]
+pub mod trust_admit;
 pub mod wac;
 pub mod wac_allow;
 

@@ -1,0 +1,41 @@
+# [SONNET-4.6] XPath differential harness — PROOF M1 (sq-3x7dl.14.2).
+#
+# A STANDALONE cargo project (own `[workspace]`, same isolation pattern as
+# `bench/zk-compose/family_curve` and the retired `zk/ieee754/differential`) so the
+# nargo-only `zk/xpath` domain never enters the fast `cargo build --workspace` /
+# `clippy --workspace` gate. It path-depends on the in-repo engine because the ORACLE
+# for this harness IS sparq's own trusted Rust SPARQL/XSD scalar evaluator — unlike the
+# ieee754 harness, whose oracle (hardware f32/f64) was independent of the library.
+#
+# No `Cargo.lock` is committed and the driver script does NOT pass `--locked`: the path
+# deps reach into the root workspace, whose manifests bump on lanes that never run this
+# harness, so a committed lock drifts silently on main and `--locked` then fails an
+# innocent PR (the sq-q134e lesson from `bench/zk-compose/family_curve`).
+[package]
+name = "sparq-xpath-differential"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "XPath differential harness — PROOF M1: diff noir_XPath primitives against sparq's own trusted Rust SPARQL/XSD scalar evaluator."
+license = "MIT"
+
+# Stand-alone workspace declaration so `cargo build` here works without the root
+# workspace (which does not list this crate as a member).
+[workspace]
+
+# The root workspace patches spargebra with the vendored W3C-conformance fork; the
+# engine's parser depends on it, so this detached project applies the same patch.
+[patch.crates-io]
+spargebra = { path = "../../../vendor/spargebra" }
+
+[[bin]]
+name = "sparq-xpath-differential"
+path = "src/main.rs"
+
+[dependencies]
+# THE ORACLE: sparq's own SPARQL 1.1 evaluator (scalar XSD/XPath function semantics).
+sparq-core = { path = "../../../crates/sparq-core" }
+sparq-engine = { path = "../../../crates/sparq-engine" }
+
+[profile.release]
+opt-level = 3

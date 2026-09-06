@@ -54,6 +54,40 @@ consumed** from real sub-agent transcripts and adds a third, cheaper arm:
   pkg-query NL-tool). The decision metric is **model-price-weighted cost**, since
   arm C runs the verbose middle on a model ~15× cheaper per token.
 
+## The provenance-capability A/B (`sq-2489d.6` — GenAI-KB Phase 7)
+
+A **second, independent** experiment on the same substrate. The A/B/C run above asks
+*"is querying the PKG cheaper than reading the docs?"*; Phase 7 asks *"does making the
+PKG **provenance-driven** — citations, hedging, provenance-weighted retrieval — change
+agent OUTCOMES, and is it worth what it costs?"* Baseline arm **P0** is the same
+`pkg-query` with every capability off (the inert PKG, i.e. today's shipped behaviour);
+arms **P1/P2/P3** each switch on exactly one capability, so a capability that pays is
+never carried by one that does not.
+
+- **`PREREG-PROVENANCE.md`** — the frozen pre-registration. Read it first: it declares
+  the **direction swap** (these treatments *add* quality and *cost* tokens, so quality is
+  the superiority axis and cost is the non-inferiority axis, reusing the same frozen
+  constants rather than a second threshold family), the seeded stale-fact-trap
+  substrate, and the three blockers that keep the verdict from being final.
+- **`prov_ab.py`** — emits one §5.6 verdict object **per capability** plus an
+  adopt/drop/blocked roll-up. Tokens come from `tokens_real.py` (the `[ABM … arm=P0..P3]`
+  tags), prices and the gold-key grader from `analyze3.py`, and the bar + statistics are
+  **imported** from `stats.py`.
+- **`test_prov_ab.py`** — the analyzer's self-test over a synthetic in-process fixture
+  (no measurement, no real transcript). It pins that each honesty precondition refuses on
+  its own, that each kill criterion fires, and that `honest=true AND recommend_adopt=true`
+  is reachable — a gate that can never go green is not a gate.
+
+```bash
+python3 bench/pkg-dogfood/test_prov_ab.py   # self-test the Phase-7 analyzer
+```
+
+**Not yet runnable, by three declared blockers** (each enforced in code, so it cannot rot
+into a stale caveat): the canonical A/B host is `needs-maintainer-steer`; the Fable re-run
+(#1111) has not happened; and `pkg-query`'s `NlToolResult` envelope does not yet surface
+citations or qualification, so arms P1/P2 would be placebos today. Until those clear the
+analyzer reports `honest=false` and names which condition failed.
+
 ## Honesty (load-bearing)
 
 - **Fidelity caveat.** This measures the **read-payload** effective tokens via a

@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -70,6 +75,21 @@
 - name: "sparq-reason-el (abox — ABox realisation + whole-ontology consistency)"
   crate: "sparq-reason-el"
   features: "abox"
+  test: true
+
+# [SONNET-4.6] sq-vkq9u: the COMBINED abox+cdomain leg — the `DataPropertyAssertion` POINT-RANGE
+# RESCUE (`a q 5` ⇒ `{a} ⊑ ∃q.{5}`). Its OWN leg per rule (b) of feature-matrix.yml's guard: the
+# rescue exists ONLY in the CONJUNCTION of the two features, so neither leg above runs a line of
+# it — tests/abox_cdomain.rs is `#![cfg(all(feature = "abox", feature = "cdomain"))]` and the
+# `cfg(all(…))` arms in extract.rs (`abox_data_literals`, the `cd_abox_point` map, the `abox_point`
+# rescue branch) compile out on BOTH single-feature legs. It also pins the OTHER direction: the
+# `#[cfg(feature = "cdomain")]` half of `src/abox.rs`'s `data_property_assertion_is_a_counted_skip`
+# (the plain `abox` leg runs the `not(cdomain)` half). No new dep beyond `cdomain`'s existing
+# optional sparq-substrate. Verified locally: `cargo test -p sparq-reason-el --features abox,cdomain`
+# green, and green in each single-feature state.
+- name: "sparq-reason-el (abox+cdomain — DataPropertyAssertion point-range rescue)"
+  crate: "sparq-reason-el"
+  features: "abox,cdomain"
   test: true
 
 # [FABLE-5] sq-wy3i6 (Phase E4): sparq-reason-el's `par` feature — deterministic parallel

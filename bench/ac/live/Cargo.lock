@@ -10,6 +10,7 @@ dependencies = [
  "sparq-acbench",
  "sparq-core",
  "sparq-engine",
+ "sparq-policy",
  "sparq-solid",
 ]
 
@@ -425,6 +426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-policy"
+version = "0.1.0"
+dependencies = [
+ "oxrdf",
+ "sparq-core",
+ "sparq-engine",
+]
+
+[[package]]
 name = "sparq-reason"
 version = "0.1.0"
 dependencies = [
@@ -444,6 +454,7 @@ dependencies = [
  "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-policy",
  "sparq-reason",
 ]
 

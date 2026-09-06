@@ -1,10 +1,10 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@jeswr/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq native Solid/LWS server
@@ -12,7 +12,7 @@ metadata:
 Use `sparq-lws-core` as an experimental native Solid/LDP server. It is not a
 replacement for the supported TypeScript `prod-solid-server`, and its default
 storage is ephemeral. Use `skills/javascript-wasm/SKILL.md` instead for the
-separate `@jeswr/solid-server` loopback development host.
+separate `@sparq-org/solid-server` loopback development host.
 
 ## Start a local server
 
@@ -92,6 +92,29 @@ proof fails because its `jti` is replay-protected. A valid token proves identity
 but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode.
+
+## Serve provider WebIDs off the pod (optional)
+
+`SOLID_SERVER_IDENTITY_ENABLE=1` is **off by default**. When set, the server serves
+provider-issued WebID documents from a separate identity host — `id.<base authority>`
+unless `SOLID_SERVER_IDENTITY_HOST` overrides it — with WebIDs of the form
+`https://<identity-host>/<handle>#me`. Those documents answer `GET` and `HEAD` only, are
+publicly readable, and carry no `.acl` link.
+
+Enable this when you do not want the Solid-OIDC trust root inside the pod. A WebID
+document tells every resource server which issuers may mint tokens for that WebID, so an
+in-pod, owner-writable, WAC-governed WebID is one over-broad `acl:default` grant away from
+letting someone else's grant rewrite that trust root.
+
+Two consequences to design around:
+
+- The reserved `/.identity/**` path is refused with `404` on the LDP surface for every
+  method, **whether or not the flag is set**. You cannot create, read, or write an ACL for
+  anything under it. That is deliberate, not a gap.
+- With the flag on, the conformance seed mints identity-host WebIDs whose documents hold
+  the `solid:oidcIssuer` and `pim:storage` statements, and demotes the in-pod
+  `/{u}/profile/card` to a user-editable profile that carries neither. Read identity from
+  the WebID document, not from the in-pod card.
 
 ## Use the LDP surface
 
@@ -175,6 +198,44 @@ direction. Protocol `default-graph-uri` and `named-graph-uri` parameters may
 select from that authorized dataset; they cannot make an unreadable resource
 visible.
 
+## Follow the normative specs, not this server
+
+Several behaviours here implement an external specification, and **the spec is the
+contract** — where this server and the spec disagree, treat the spec as right and the
+server as the defect. Write integration code against the spec, and pin the same revision
+the server pins:
+
+- **Solid-OIDC access tokens and DPoP proofs**: baseline verification on the normal
+  cache-miss path is delegated to the pinned
+  [`solid-oidc-verifier`](https://github.com/jeswr/solid-oidc-verifier) git dependency
+  (see `crates/sparq-lws-core/Cargo.toml` for the exact revision), so what a token or
+  proof must look like is whatever that revision enforces. Delegated is not
+  pass-through, though, and integrators should know the two places this crate
+  participates. On a **verified-token-cache hit** the token signature and claims are not
+  re-verified (they were checked once on the miss, and the entry is keyed by the token
+  and expires at `min(token exp, a shorter validation-freshness TTL)`), while the fresh
+  DPoP proof is verified locally on every request — proof signature, `htm`/`htu`/`iat`,
+  `ath`, the `jti` replay mark against the same shared replay store, and the `cnf.jkt`
+  binding — orchestrated from the verifier's own public primitives
+  (`crates/sparq-lws-core/src/auth_cache.rs`). Separately, the
+  server layers **opt-in** proof-of-possession tiers on top of an already-verified token:
+  RFC 8705 mTLS cert-bound tokens, and DPoP-SK below. Both are off by default
+  (`crates/sparq-lws-core/src/auth.rs`).
+- **DPoP-SK**, the sender-key proof-of-possession tier, follows the
+  [DPoP-SK profile](https://jeswr.github.io/dpop-sk-spec/). The spec's Appendix-A worked
+  example is executed as a test vector in `crates/sparq-lws-core/src/pop/sk/derive.rs`, so
+  a drift between the spec's derivation and this implementation fails a test rather than
+  going unnoticed. Derive session keys per the spec, not by reading the Rust.
+- **WAC**, **LDP**, and the **Solid Protocol** govern the access-control and resource
+  surfaces above; the sections of this skill describe how this server exposes them, not
+  what they require.
+
+For the design decisions behind the identity host, the in-process engine backend, the
+public-read fast path, and the existence-non-disclosure guards, read
+[`research/lws-design-records.md`](../../research/lws-design-records.md). It is
+reconstructed from the code and cites it line by line; it also maps the source-repo
+`decisions/` and `docs/design/` paths that this crate's doc-comments still reference.
+
 ## Operational checks and boundaries
 
 - `GET /livez` and `GET /readyz` are unauthenticated probes.
@@ -189,3 +250,7 @@ visible.
   proof-of-possession environment variables.
 - Use `skills/usage-control-policy/SKILL.md` for the default-off
   `odrl-authz` read/query gate.
+- Use `skills/access-control/SKILL.md` § *LWS-server admission seam* for the
+  default-off `trust-graph` feature. It adds the library function
+  `authz::trust_admit::trust_admit_verdict`, which is deliberately not wired
+  into the request pipeline, so enabling it changes no request's outcome.

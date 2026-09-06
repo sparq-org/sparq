@@ -115,6 +115,35 @@ env:
   # (b) lld-18 is pre-installed on ubuntu-24.04 runners; (c) no per-job apt install step is
   # needed — tests that spawn cargo as a subprocess (e.g. crate-doc guard tests) inherit
   # this flag safely. Bench/release/dist profiles are NOT changed (bench.yml, build-matrix.yml).
+  #
+  # [SONNET-4.6] sq-6vshe.11 — THE THIRD LEG DOES NOT REACH EVERY JOB. Audit result of
+  # "does the sq-6vshe.1 trio reach the coverage lane?", measured, not assumed:
+  #   * CARGO_INCREMENTAL=0            — REACHES it (a plain cargo env var, no competition).
+  #   * CARGO_PROFILE_DEV_DEBUG        — REACHES it. Verified by running `cargo test --no-run
+  #     -v` with the var set: rustc is invoked with `-C debuginfo=line-tables-only`. Cargo's
+  #     `test` profile inherits `dev`, and a config/env profile key overrides the manifest,
+  #     so instrumented TEST binaries do get the thin-debuginfo build.
+  #   * CARGO_TARGET_<triple>_RUSTFLAGS — DOES **NOT** reach any job that also sets
+  #     `RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS`. Cargo's four rustflags sources are
+  #     FIRST-MATCH-WINS, never merged: `CARGO_ENCODED_RUSTFLAGS` > `RUSTFLAGS` >
+  #     `target.<triple>.rustflags` (which is what this var is) > `build.rustflags`.
+  #     Verified directly: with only the per-target var set, rustc gets its flags; with
+  #     `RUSTFLAGS` ALSO set, the per-target var is dropped entirely and only `RUSTFLAGS`
+  #     survives. cargo-llvm-cov sets exactly those variables to inject `-C
+  #     instrument-coverage` — this repo already depends on that: scripts/
+  #     coverage-engine-shard.sh `build-objects` runs `eval "$(cargo llvm-cov show-env
+  #     --export-prefix)"` precisely to import "RUSTC_WRAPPER + coverage RUSTFLAGS" into its
+  #     shell. So every coverage job was silently linking with the DEFAULT linker while
+  #     every sibling job used lld.
+  # Fix: the coverage jobs below set `RUSTFLAGS` themselves, which is the source
+  # cargo-llvm-cov reads and extends rather than one it shadows. NOT VERIFIED IN-SANDBOX:
+  # cargo-llvm-cov is not installed on the authoring box, so "it appends to an existing
+  # RUSTFLAGS instead of replacing it" is its documented behaviour, not something measured
+  # here — confirm on the first CI run by checking a coverage job's compile line. The
+  # failure mode is benign either way: if it replaced RUSTFLAGS, this change is a no-op
+  # (status quo, still no lld) rather than a regression. They must all use the IDENTICAL
+  # value (the engine split's cross-runner .profraw merge requires identical compile
+  # inputs); `scripts/check-coverage-rustflags.py` enforces presence AND sameness.
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
@@ -149,12 +178,26 @@ jobs:
   # `scripts/ci_select.py --classify-only` — the IDENTICAL `classify_change()` path the
   # `select` pre-job runs on this event, so the two layers cannot disagree on a resolved
   # diff (no duplicated path lists; ci_select.py stays the single source of truth).
-  # Class docs-only/orchestration-only => rust_changed=false + docker_changed=false
-  # (sound: every path in the dorny `rust`/`docker` filter sets classifies `engine`, so
-  # those classes PROVE both filters would be false — same trust model as the PR-level
-  # gate, a pure function of the authoritative diff). Any OTHER class, an unresolvable
-  # SHA pair, or ANY classifier error => true/true (fail-safe = full run, cost never
-  # soundness). Gate accounting: the skipped legs report `skipped` and the required
+  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false.
+  # SOUNDNESS: an inert class means every changed path is on an AUDITED inert surface —
+  # the orchestration/deploy allowlists (whose script/workflow entries the inertness tests
+  # in scripts/tests/test_ci_select.py pin by grepping the Rust-CI workflows) or an
+  # ownership-map `safe = true` verdict (re-verified every run by scripts/ci_audit_inputs.py,
+  # which FAILS the moment a crate reads a safe-listed path). THAT is the load-bearing
+  # proof, not the dorny `rust`/`docker` filters, which are a coarser extension-level
+  # proxy: an audited-inert tree may legitimately hold a `.rs`/`Cargo.toml` those filters
+  # would flag — research/hardware/wgpu-spike (no CI lane builds it) and
+  # site/test/fixtures/policy-evaluator (built only by site-e2e.yml, a workflow this
+  # gate does not touch) — while no lane gated here compiles either. Same trust model as
+  # the PR-level gate otherwise: a pure function of the authoritative diff. Any OTHER
+  # class, an unresolvable SHA pair, or ANY classifier error => true/true (fail-safe =
+  # full run, cost never soundness).
+  # [OPUS-5] sq-g25hr widened `_INERT_CLASSES` from {docs-only, orchestration-only} to
+  # also cover `deploy-only` (deploy/** + the deploy lint workflows) and `inert-mixed`
+  # (a diff confined to inert surfaces that SPANS more than one of them — previously
+  # collapsed into `mixed` and therefore paid the full suite). Nothing about the trust
+  # model changed: the class is still computed from the authoritative queued diff, so
+  # one crates/** path taints the batch back to `mixed` => the wildcard arm => full run. Gate accounting: the skipped legs report `skipped` and the required
   # ci-summary gate attributes them to the (green, same-diff) `select` pre-job —
   # attributed skips, never missing legs (scripts/ci_summary_gate.py, sq-fmx4u.3).
   # NOT gated by-class here: vectorized-feature-off.yml stays FULL on merge groups on
@@ -258,8 +301,15 @@ jobs:
             if [ "${ok}" = "true" ]; then
               cls="$(python3 scripts/ci_select.py --classify-only --event merge_group \
                        --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
+              # [OPUS-5] sq-g25hr: the arm lists ci_select.py `_INERT_CLASSES` verbatim
+              # (pinned by scripts/tests/test_ci_select_wiring.py so the two cannot drift).
+              # deploy-only = deploy/** + the deploy lint workflows; inert-mixed = a diff
+              # confined to inert surfaces that SPANS more than one of them (the observed
+              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml);
+              # [OPUS-5] #5249: map-safe = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
-                docs-only|orchestration-only) rust=false; docker=false ;;
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false; docker=false ;;
                 *) rust=true; docker=true ;;
               esac
             else
@@ -384,8 +434,59 @@ jobs:
           # `nextest.tar.zst` artifact and run it with `--archive-file`, so there is no
           # shared cache key with them (the earlier per-shard build that did share this
           # key is removed). A stable `shared-key` is still worth keeping so this job's
-          # dep cache survives across this branch's runs.
+          # dep cache is the one every branch's run restores.
           shared-key: "test-workspace"
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE. THIS IS THE CANONICAL NOTE; every other rust-cache step in this
+          # file carries the same `save-if` and points back here. All three beads reached
+          # the same posture from different ends (sq-h2gz6 and sq-aemq7 as follow-ups to
+          # sq-3sbrr / #1395, which did this for the feature-matrix legs; sq-6vshe.15 as
+          # lever 2 of the CI structural-speedup program) — this note is their union.
+          #
+          # RESTORE is unconditional — PR heads and `gh-readonly-queue/*` entries both
+          # branch off main and read main's entry, which is where the dep-cache hit
+          # comes from. SAVE happens on push-to-main ONLY, for two reasons:
+          #   1. A save from a merge-queue entry is DEAD ON ARRIVAL. Actions cache
+          #      scoping makes an entry written from `refs/heads/gh-readonly-queue/<base>/
+          #      pr-<N>-<sha>` visible to that ref alone, and GitHub deletes that ref the
+          #      moment the entry merges or is ejected — nothing can ever restore it. The
+          #      save is pure post-step wall-clock on the queue's critical path.
+          #   2. Branch-scoped saves churn the repo's shared 10 GB Actions-cache budget,
+          #      which GitHub LRU-evicts against, so those write-only copies push the
+          #      WARM main-scoped entries out and the heavy jobs (coverage, conformance,
+          #      mutants) restore COLD and pay the dependency-compile floor from scratch.
+          #      Caching was present but self-defeating: a branch-scoped entry is
+          #      unreadable from main and from every sibling PR anyway, so each PR run
+          #      was paying to make the next run colder. This is sq-3sbrr's doctrine,
+          #      already applied to feature-matrix.yml and the wasm lanes; this file's
+          #      cache steps (plus the one in vectorized-feature-off.yml) were the gap
+          #      left on the queue path.
+          #
+          # WHY main-only is safe rather than a permanent cold start, twice over:
+          #   - SEEDING: EVERY key here still has a seeder.
+          #     - the per-commit jobs are seeded by the post-merge push-to-main run — the
+          #       `changes` job forces rust_changed=true on any non-PR/non-merge_group
+          #       event (`ci_select.py` treats `push` as mode=full), so `push` runs the
+          #       full matrix;
+          #     - `coverage-nightly` / `mutants-nightly-advisory` never run on push (they
+          #       hang off `nightly-gate`, which is schedule/workflow_dispatch only), and
+          #       are seeded by the 03:17 UTC cron — a scheduled run's ref IS
+          #       refs/heads/main, so save-if holds there too.
+          #     No job is left permanently cold by this.
+          #   - CONTENT: rust-cache stores the DEPENDENCY build only (it cleans
+          #     workspace-crate artifacts out of `target/` before saving), and deps are
+          #     pinned by the committed Cargo.lock, so main's dep cache is the same
+          #     closure the PR would build for itself.
+          #
+          # COST: a PR that changes `Cargo.lock` re-resolves/rebuilds deps on each push
+          # instead of once (a PR that merely ADDS a dep just compiles that dep cold).
+          # Accepted — that PR class is rare, and it is exactly the class whose
+          # branch-scoped save was evicting main's entry for everyone else.
+          # COUPLING (read before landing sq-6vshe.14): main-scope freshness now depends
+          # ENTIRELY on push-to-main runs. .14 skips queue-validated push legs and must
+          # keep its promised cache-primer leg, or these caches go stale.
+          # The posture is pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # [OPUS-4.8] sq-x4jy: cargo-nextest is the test runner — each test in its OWN
       # process (a stray abort can't take the whole binary down), a never-executed
       # BINARY reported as a DETERMINISTIC failure, and retries = 2 (now set by
@@ -393,7 +494,7 @@ jobs:
       # item 2) lets a residual transient binary race self-heal. SHA-pinned install
       # action (a pin already vetted elsewhere in this workflow).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: nextest
       # [OPUS-4.8] Build + ARCHIVE the whole workspace test set once. `--all-targets`
@@ -427,6 +528,18 @@ jobs:
           path: nextest.tar.zst
           retention-days: 1
           if-no-files-found: error
+          # [SONNET-4.6] sq-6vshe.15 lever 1 — ARTIFACT DIET. upload-artifact wraps its
+          # payload in a zip at DEFLATE level 6 by default. `nextest.tar.zst` is ALREADY
+          # zstd-compressed, so that pass re-compresses incompressible bytes: it burns CPU
+          # on this job — which sits on the merge-queue critical path, with every test
+          # shard blocked on the artifact via `needs:` — for a size delta that on
+          # already-compressed input is ~0 (DEFLATE cannot find redundancy zstd removed).
+          # `0` = store, i.e. zip the file without re-compressing it. NOT a content change:
+          # the archive bytes the shards download are identical, only the zip container's
+          # compression method differs, so the nextest test set is unchanged by
+          # construction (and any drift would still fail LOUD — a shard's exact `-E` filter
+          # matching zero tests is nextest exit 4, not a silent pass).
+          compression-level: 0
       # [OPUS-4.8] Doctests run ONCE here (nextest neither executes nor archives them,
       # and --partition does not apply to them), off the warm archive build for ~12s at
       # ZERO extra build cost — the whole point of build-once (sq-vyxy). Tradeoff (raised
@@ -479,12 +592,23 @@ jobs:
     # than the prior 5×(131s build) and with the shards genuinely finishing together.
     #
     # GENERALISING (so a NEW heavy test cannot silently re-skew this): the known-heavy
-    # set is the single `HEAVY` filterset env below. When nextest's run output flags a
-    # NEW test SLOW (the `SLOW [> Ns]` markers), add `| test(=its_name)` to HEAVY and,
-    # if it is comparable to the existing heavies, give it its own matrix shard; the
+    # set is the single `HEAVY` filterset env below. To add one: `| test(=its_name)` in
+    # HEAVY and, if it is comparable to the existing heavies, its own matrix shard; the
     # bulk filter is the negation of HEAVY, so it stays correct automatically. This is
     # the pragmatic known-heavy-list + count-partition-the-rest design — deliberately
     # NOT a timing database (over-engineered for a 2-heavy tail).
+    #
+    # [OPUS-5] sq-6vshe.7 phase 4 (#5563) — WHO NOTICES. This upkeep used to depend on a
+    # human spotting a `SLOW [> Ns]` marker in a shard log, which is not a mechanism: a
+    # newly-slow test just rejoins a bulk shard and re-skews the split, and the only
+    # symptom is a slower merge queue that nobody attributes back to this env. That read
+    # is now MEASURED weekly by `.github/workflows/heavy-set-alarm.yml` +
+    # scripts/heavy_set_alarm.py, which times every test via nextest's libtest-json-plus
+    # stream and files an issue when HEAVY stops matching the measured heavy set — a test
+    # above the floor that HEAVY does not name, an atom left behind by a rename (whose
+    # shard then silently runs ZERO tests, since `test(=NAME)` is an exact match), or a
+    # declared heavy that got fast and is now wasting a shard. It is ADVISORY and reads
+    # this env; it never edits it, so the list below stays hand-owned.
     #
     # fail-fast: false so one shard's failure does not cancel the others (we want the
     # full failure picture across the suite, not just the first shard to break).
@@ -571,7 +695,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: nextest
       - name: Download nextest archive
@@ -889,6 +1013,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build sparq-wasm for the browser target
         run: cargo build -p sparq-wasm --target wasm32-unknown-unknown
       # [OPUS-4.8] sq-yqi1 (#162): also build WITH the opt-in `shacl` feature so the
@@ -916,6 +1046,17 @@ jobs:
         run: cargo build -p sparq-wasm --target wasm32-unknown-unknown --features shacl,jsonld
       - name: clippy (wasm32 target, jsonld feature, deny warnings)
         run: cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features jsonld -- -D warnings
+      # [SONNET-4.6] sq-yz27r (#3251): also build + clippy WITH the opt-in
+      # `jsonld-contexts` feature (the `Store::loadJsonLdWithContexts` binding, which
+      # installs an oxjsonld LoadDocumentCallback over a host-supplied context map so a
+      # VC naming its `@context` by URL parses in-tab). It links `oxjsonld` DIRECTLY
+      # rather than only through sparq-core, so the wasm32 build of that surface needs
+      # its own gate step. NOT in the published bundle (build:wasm) yet; the DEFAULT
+      # bundle stays byte-identical (module is fully cfg'd out).
+      - name: Build sparq-wasm for the browser target (jsonld-contexts feature)
+        run: cargo build -p sparq-wasm --target wasm32-unknown-unknown --features jsonld-contexts
+      - name: clippy (wasm32 target, jsonld-contexts feature, deny warnings)
+        run: cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features jsonld-contexts -- -D warnings
       # [FABLE-5] sq-586sh: also build + clippy WITH the opt-in `policy` feature (the
       # sparq-policy ODRL-evaluator wasm32 probe, #890 ask A) so the wasm32 compat this
       # probe established is gate-protected. NOT in the published bundle (build:wasm) —
@@ -934,6 +1075,45 @@ jobs:
         run: cargo build -p sparq-wasm --target wasm32-unknown-unknown --features explain-json
       - name: clippy (wasm32 target, explain-json feature, deny warnings)
         run: cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features explain-json -- -D warnings
+      # [SONNET-4.6] #3546: also build + clippy WITH the opt-in `native-ttl` feature (the
+      # sparq-core native byte-level Turtle parser sq-3ul2n.11/#2752 routes the wasm SERIAL
+      # Turtle load path through). IN the published bundle (js `build:wasm` enables it).
+      # This leg checks `native-ttl` STANDALONE, exactly like the per-feature legs above;
+      # the shipped COMBINATION is compiled by the published-bundle leg below. The DEFAULT
+      # bundle stays on oxttl (perf floor byte-identical).
+      - name: Build sparq-wasm for the browser target (native-ttl feature)
+        run: cargo build -p sparq-wasm --target wasm32-unknown-unknown --features native-ttl
+      - name: clippy (wasm32 target, native-ttl feature, deny warnings)
+        run: cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features native-ttl -- -D warnings
+      # [SONNET-4.6] #3546: the PUBLISHED bundle's feature COMBINATION. The legs above
+      # compile each opt-in feature standalone (plus the two-feature `shacl,jsonld` site
+      # bundle), so a feature INTERACTION across the wider shipped set is invisible to
+      # them. That set IS built elsewhere — `npm run build:wasm` in gui.yml and
+      # nightly-full-sweep.yml — but gui.yml is path-scoped to gui/**, packages/
+      # sparq-client/**, site/**, js/** and package-lock.json, so a RUST-only PR that
+      # breaks the combination goes green here and is caught post-merge by the nightly at
+      # best. This leg closes that PR-time hole. The list is READ from js/package.json's
+      # `build:wasm` script — the single source of truth for what is shipped — rather than
+      # duplicated here, so adding a feature to the published bundle can never silently
+      # escape this gate. The DEFAULT (lean) bundle is untouched: this is an additional
+      # feature state, not a change to the perf-gate baseline.
+      - name: Resolve the published wasm feature list (js/package.json build:wasm)
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          import re
+          import sys
+
+          script = json.load(open("js/package.json"))["scripts"]["build:wasm"]
+          match = re.search(r"--features\s+(\S+)", script)
+          if match is None:
+              sys.exit("js/package.json build:wasm carries no --features list")
+          print("PUBLISHED_WASM_FEATURES=" + match.group(1))
+          PY
+      - name: Build sparq-wasm for the browser target (published bundle features)
+        run: cargo build -p sparq-wasm --target wasm32-unknown-unknown --features "$PUBLISHED_WASM_FEATURES"
+      - name: clippy (wasm32 target, published bundle features, deny warnings)
+        run: cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features "$PUBLISHED_WASM_FEATURES" -- -D warnings
       # [OPUS-4.8] sq-6qw3 (W-reason): the tier-b forward-chaining inference bundle. Build +
       # clippy it on wasm32 in BOTH feature states (default + the opt-in `why()` proof-tree
       # `explain` feature) so the reason bundle is gate-protected exactly like sparq-wasm.
@@ -1010,10 +1190,18 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
+      # [OPUS-5] #5771: this pin must stay EQUAL to the one the `js` lane
+      # (.github/workflows/js.yml) builds + packs the @sparq-org/sparq wasm artifact with.
+      # It was v0.13.1 here while js.yml pinned v0.15.0, so any wasm-pack/wasm-bindgen
+      # behaviour change between those releases was exercised only in that BUILD lane
+      # and never here — in the lane that actually RUNS the headless suites. Unified on
+      # js.yml's v0.15.0. The equality (not the value) is enforced by
+      # scripts/tests/test_js_wasm_pack_install.py::WasmPackVersionUnified, so bump
+      # BOTH lanes together or that test reds.
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
         with:
-          version: v0.13.1
+          version: v0.15.0
       - name: Headless wasm tests (wasm-pack test --node)
         working-directory: crates/sparq-wasm
         run: wasm-pack test --node
@@ -1029,6 +1217,13 @@ jobs:
       - name: Headless wasm tests (wasm-pack test --node, jsonld feature)
         working-directory: crates/sparq-wasm
         run: wasm-pack test --node --features jsonld
+      # [SONNET-4.6] sq-yz27r (#3251): run them WITH `jsonld-contexts` so the real
+      # exported `Store::loadJsonLdWithContexts` is driven in a genuine wasm runtime —
+      # the `js_sys::Array` `[[url, documentText], …]` argument-reading path and the
+      # `JsError` fail-closed arm are wasm-bindgen imports the native tests cannot reach.
+      - name: Headless wasm tests (wasm-pack test --node, jsonld-contexts feature)
+        working-directory: crates/sparq-wasm
+        run: wasm-pack test --node --features jsonld-contexts
       # [OPUS-4.8] sq-6qw3 (W-reason): drive the REAL #[wasm_bindgen] Reasoner exports
       # (crates/sparq-reason-wasm/tests/web.rs) in a genuine wasm runtime, in BOTH feature
       # states — the default suite, then with the opt-in `explain` feature so the `why()`
@@ -1167,6 +1362,12 @@ jobs:
           rustup component add rustfmt clippy
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # GATES: the whole workspace (sparq-py included) is clippy-clean under -D warnings.
       # A new warning — from new code or a Rust-stable bump that adds a lint — fails CI.
       - name: clippy (deny warnings)
@@ -1229,8 +1430,15 @@ jobs:
           cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings
           cargo run --manifest-path bench/dict/Cargo.toml -- selftest
       # Informational until the deferred `cargo fmt --all` reformat lands (see rustfmt.toml).
+      # The formatter VERSION is pinned by rust-toolchain.toml (channel + the `rustfmt`
+      # component), so this check is reproducible in a local checkout even while it is
+      # non-blocking — issue #2360 reported the opposite, a workspace-wide failure on
+      # unchanged files under an ambient rustfmt. Echo the version so any future
+      # disagreement between this log and a contributor's box names its own cause.
       - name: rustfmt (informational)
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --version
+          cargo fmt --all --check
         continue-on-error: true
 
   msrv:
@@ -1306,6 +1514,12 @@ jobs:
           rustup default 1.88
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo check on the declared MSRV
         # [SONNET-4.6] Test targets must compile at the declared floor too; they can
         # otherwise hide newer temporary-lifetime-extension behavior from this gate.
@@ -1384,6 +1598,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch W3C test suites (pinned)
         run: ./scripts/fetch-conformance.sh
       - name: Run conformance suites
@@ -1514,6 +1734,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch W3C SHACL test suite (pinned)
         run: ./crates/sparq-shacl/fetch-shacl-tests.sh
       - name: Run SHACL core + SHACL-SPARQL suites
@@ -1647,6 +1873,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run OGC GeoSPARQL topology compliance ratchet
         # The runner asserts its own floor (OGC_RATCHET_FLOOR) + fail==0; capture the
         # scoreboard so the grep gate below re-checks the pass count.
@@ -1789,6 +2021,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run Solid WAC + ACP decision-parity suites
         # The runners assert their own pinned floors; capture the output so the grep
         # gate below re-checks the scenario counts.
@@ -1895,6 +2133,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch SolidLab ODRL Test Suite (pinned)
         run: bash scripts/fetch-odrl-suite.sh
       - name: Run SolidLab ODRL decision-parity suite
@@ -1997,6 +2241,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sparq-text BM25 differential oracle
         # The runner asserts its own floor (TEXT_ORACLE_FLOOR) + per-hit score
         # equality; capture the output so the grep gate below re-checks the count.
@@ -2102,6 +2352,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sparq-rsp RSP expressivity / SRBench correctness oracle
         # The runner asserts its own floor (RSP_EXPRESSIVITY_FLOOR) + every
         # per-window correctness equality; capture the output so the grep gate below
@@ -2212,6 +2468,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch W3C JSON-LD 1.1 API test suite (toRdf/fromRdf/compact, pinned)
         run: ./scripts/fetch-jsonld-tests.sh
       - name: Fetch W3C JSON-LD 1.1 Framing test suite (frame, pinned)
@@ -2350,6 +2612,12 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy the gated harness surface (service-loopback feature ON)
         # The REAL gate for the feature-gated code: -D warnings over all targets with the
         # feature ON (the default `cargo clippy` never compiles this module/test).
@@ -2507,8 +2775,54 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # [OPUS-5] #4935 — AVAILABILITY DECOUPLING for the only two corpora in this
+      # GATING lane that come from a non-GitHub third party: the OWL 2 test-case
+      # export (an Internet Archive snapshot, fetched over plain http://) and the
+      # W3C RIF WG Core_v1.22 archive. Both are FIXED, sha256-pinned exports, yet
+      # they were re-downloaded live on every run — so a bad few minutes at
+      # web.archive.org concluded this leg `failure` with nothing measured, which
+      # ci-summary correctly fail-fasts on, ejecting unrelated PRs from the merge
+      # queue (merge group e5c2e01c, 2026-07-28: six 30s connect timeouts, no
+      # assertion failed, PR #4925 ejected). Restoring them from the Actions cache
+      # makes the network a CACHE-MISS-ONLY path: fetch-inference-suites.sh
+      # short-circuits on the pinned digest (`fetch_pinned_file` / the RIF stamp),
+      # so a hit performs zero network I/O. The ratchet is untouched — a genuine
+      # regression still reds, because the corpus arriving from cache vs. network
+      # is invisible to the runner. Key hashes the fetch script, so ANY pin change
+      # busts it (over-busting on an unrelated comment edit only costs one cold
+      # fetch). Pinned by scripts/tests/test_inference_corpus_cache.py.
+      - name: Restore the pinned OWL 2 / RIF corpora
+        id: inference-corpus-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            tests/w3c/owl2
+            tests/w3c/rif-core
+          key: inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}
       - name: Fetch inference test suites (pinned)
+        # On a cache hit this fetches only the two github.com clones (rdf-tests,
+        # N3); the OWL/RIF steps report "already present (sha256 ok)".
         run: ./scripts/fetch-inference-suites.sh
+      # Save from main-scoped runs only — repo cache-save doctrine (sq-3sbrr /
+      # sq-6vshe.15): an entry written from a PR or `gh-readonly-queue/` ref is
+      # scoped to that ref, which is deleted on merge/ejection, so it is pure
+      # unreachable churn against the shared 10 GB budget. PRs and merge groups
+      # RESTORE main's entry — which is exactly where the hit that protects the
+      # queue comes from. Skipped on a hit: cache entries are immutable.
+      - name: Save the pinned OWL 2 / RIF corpora (main-scoped runs)
+        if: github.ref == 'refs/heads/main' && steps.inference-corpus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            tests/w3c/owl2
+            tests/w3c/rif-core
+          key: inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}
       - name: Run inference suites
         # [OPUS-4.8] sq-shacl-flake (generalized from #1236): STEP-LEVEL transient
         # self-heal. This `cargo run` WRITES inference-conformance-report.md as a side
@@ -2790,6 +3104,13 @@ jobs:
     # is coverage-nightly), skip a doc-only PR. push/merge_group force rust_changed=true.
     if: github.event_name != 'schedule' && needs.changes.outputs.rust_changed == 'true'
     runs-on: ubuntu-latest
+    # [SONNET-4.6] sq-6vshe.17: `issues: read` is what the ratchet-ADVANCE pause step needs
+    # to probe for an open post-merge coverage alarm. Least privilege — this job never
+    # writes anything (the alarm is FILED by `coverage-demoted-filer`, which owns the write
+    # scope), and the probe fails OPEN if the read is unavailable.
+    permissions:
+      contents: read
+      issues: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Test-presence gate (fast, no compile)
@@ -2809,6 +3130,25 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin main
           python3 scripts/coverage-gate.py --check-monotonic --base-ref origin/main
+      - name: Ratchet-ADVANCE pause while post-merge coverage is RED (sq-6vshe.17) [SONNET-4.6]
+        # [SONNET-4.6] sq-6vshe.17: the second half of the demotion protocol. Because the
+        # coverage MEASUREMENT is demoted off merge_group, `main` is an enforcement point;
+        # while its coverage is RED (an open `[demoted-lane] lane=coverage-ratchet-main`
+        # issue, filed by `coverage-demoted-filer`), RAISING a floor is unverifiable
+        # book-keeping — the measured numbers a raise cites are exactly the numbers in
+        # doubt. So a branch that RAISES a floor is blocked until that alarm closes.
+        #
+        # Deliberately narrow + non-blocking by default:
+        #   * only a RAISE of an existing floor blocks; a new crate row, an unchanged
+        #     floor, and the RECOVERY path (a governed lowering under --allow-lower) never
+        #     do — see coverage-gate.py floor_advances();
+        #   * the alarm probe FAILS OPEN (no gh / no token / API error => PASS), so an
+        #     unavailable GitHub API can never red this fast gating job;
+        #   * `issues: read` is the only permission it needs.
+        # Unit-tested (pure seam + injected probe): coverage-gate.py --self-test.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/coverage-gate.py --check-advance-allowed --base-ref origin/main
 
   coverage-measure:
     # [OPUS-4.8] PER-CRATE line-coverage RATCHET (sq-hbg7), now SHARDED for merge-queue
@@ -2851,10 +3191,14 @@ jobs:
     # gated identically by the merge job's `coverage-gate.py --check`.
     name: coverage ratchet (shard ${{ matrix.shard }}/3)
     # [OPUS-4.8] sq-fmx4u.6 (design §5.2, phase 2): coverage is a function of
-    # compiled code + tests, so it stays ALWAYS-RUN with ONE exception — skip only
-    # when the affected closure is PROVABLY EMPTY (every changed path SAFE-listed /
+    # compiled code + tests, so its SELECTION exception is a single narrow one — skip
+    # only when the affected closure is PROVABLY EMPTY (every changed path SAFE-listed /
     # non-crate, so mode=selected AND affected==[]). Any NON-empty closure keeps it
     # running, because a dependency change can shift executed lines in dependents.
+    # [SONNET-4.6] (This comment used to say "ALWAYS-RUN with ONE exception". Two
+    # EVENT-level demotions have since been layered on top of the selection rule —
+    # draft-tier CI and the sq-6vshe.17 merge_group demotion, both documented below —
+    # so the "always-run" framing is scoped to the SELECTION axis only.)
     # Same fail-closed guard shape build-archive uses: `mode != 'selected'` (full/
     # shadow/empty output) => RUN, and `affected != '[]'` => RUN; both false (the
     # SAFE-only case) => skip (the shard reports `skipped`, which the `coverage`
@@ -2863,17 +3207,57 @@ jobs:
     # nightly full coverage backstop is `coverage-nightly` (schedule), unaffected.
     # [FABLE-5] Draft-tier CI: coverage is SKIPPED on draft PR heads entirely (the
     # instrumented rebuild is one of the heaviest lanes; the ready_for_review
-    # full-tier run + the merge_group run both re-measure it before any merge, and
-    # a draft-tier gate can never admit a PR — docs/branch-protection.md
-    # §Draft-tier CI). The guard is fail-open off the PR path: any non-pull_request
-    # event (push/merge_group) satisfies the first disjunct => RUN.
+    # full-tier run re-measures it, and a draft-tier gate can never admit a PR —
+    # docs/branch-protection.md §Draft-tier CI). The guard is fail-open off the PR
+    # path: any non-pull_request event (push) satisfies the first disjunct => RUN.
+    #
+    # [SONNET-4.6] sq-6vshe.17 (research/ci-mergequeue-speedup-2026-07.md §3.4a):
+    # the coverage MEASUREMENT is DEMOTED off the merge_group blocking path. MEASURED
+    # MOTIVE: these instrumented shards (448-785 s each) are the merge-group entry
+    # POLE whenever change-based selection skips the test shards. WHY it is designable
+    # at all: coverage is a RATCHET, not a correctness test — a floor regression that
+    # slips through a queued BATCH is detectable and RECOVERABLE post-merge, unlike a
+    # functional bug. Enforcement topology after this change:
+    #   * pull_request  — UNCHANGED, and the PRIMARY gate (every PR still measures).
+    #   * merge_group   — the measure legs are skipped (this guard). `coverage-floors`
+    #                     (fast, no-compile: presence + monotonicity + shard-partition)
+    #                     STILL RUNS here, so a batch can never LOWER a committed floor.
+    #   * push-to-main  — UNCHANGED and now load-bearing: the post-merge measurement is
+    #                     the enforcement point for the batch-stacking case. It is
+    #                     EXEMPT from any future push-run skip (sq-6vshe.14) — pinned by
+    #                     scripts/tests/test_ci_select_wiring.py so the exemption cannot
+    #                     be silently dropped when that lever lands.
+    #   * a main red    — auto-files a P1 bead + deduped issue via the demotion protocol
+    #                     (`coverage-demoted-filer` below) AND pauses further ratchet
+    #                     ADVANCES until green (`coverage-floors`
+    #                     --check-advance-allowed).
+    # RESIDUAL RISK, stated honestly: two PRs each individually >= floor can merge to a
+    # combined tree < floor. Rare, caught ~15 min later on main, recoverable by
+    # revert/fix-forward — and no committed floor is ever silently lowered.
+    # The skipped legs report `skipped`, which the `coverage` aggregator counts as
+    # satisfied, so the ci-summary gate still sees ONE terminal coverage check on the
+    # merge_group ref — never an expected-but-missing one.
     needs: [changes, coverage-floors, select]
     if: >-
       github.event_name != 'schedule' &&
+      github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&
       needs.changes.outputs.rust_changed == 'true' &&
       (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')
     runs-on: ubuntu-latest
+    # [SONNET-4.6] sq-6vshe.11: RE-DELIVER the workflow-level lld link flag to this job.
+    # cargo-llvm-cov sets RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS to inject -C instrument-coverage,
+    # and cargo's rustflags sources are first-match-wins, so the workflow-level
+    # CARGO_TARGET_<triple>_RUSTFLAGS is DROPPED here (see the env: block at the top of this
+    # file for the measurement). Setting RUSTFLAGS at job level puts the flag on the source
+    # cargo-llvm-cov actually reads and extends, so the instrumented links — the heaviest in
+    # CI — should go through lld like every other native job (the append behaviour is
+    # documented, not measured here; see the env: block's note). Host-only job, so the
+    # per-target scoping the workflow-level var provided (wasm32 on wasm-ld) is not needed.
+    # VALUE MUST STAY IDENTICAL across all four cargo-llvm-cov jobs; enforced by
+    # scripts/check-coverage-rustflags.py.
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     strategy:
       fail-fast: false   # one failing shard must NOT cancel the others (want all verdicts)
       matrix:
@@ -2900,47 +3284,109 @@ jobs:
       # the ACTIVE (pinned) toolchain. Idempotent, and a no-op if it is already there.
       - name: Ensure llvm-tools-preview on the pinned toolchain
         run: rustup component add llvm-tools-preview
-      # Per-shard cache key: each shard builds a DIFFERENT crate subset (different
-      # instrumented objects), so keying the cache by shard keeps them from clobbering /
-      # thrashing one another's saved target dir.
+      # [OPUS-5] sq-h2gz6 / [SONNET-4.6] sq-aemq7 (both beads reached this independently;
+      # the shared key is named `coverage-measure` after the job): ONE shared dep cache
+      # for ALL shards (was `key: coverage-shard-${{ matrix.shard }}`, i.e. one cache per
+      # matrix leg — 4 of them before sq-piapk split the engine shard out, 3 now).
+      #
+      # The per-shard key's premise was "each shard builds a DIFFERENT crate subset
+      # (different instrumented objects), so keying by shard keeps them from clobbering
+      # one another". That premise is about sparq's OWN crates — and rust-cache never
+      # stores those: it deletes workspace-member artifacts from the target dir before
+      # saving, so what a shard actually persists is the EXTERNAL dependency closure,
+      # compiled from the same Cargo.lock with the same llvm-cov instrumentation flags
+      # in every shard. Near-identical caches, one budget slot each. `shared-key` is
+      # documented as replacing the automatic job-id-derived key, so the matrix legs land
+      # on one entry instead of one per leg.
+      #
+      # Collapsing them frees ~2 slots of the shared 10 GB Actions-cache budget (the
+      # sq-3sbrr / #1395 finding: budget pressure is what LRU-evicts the warm entries
+      # and makes the heavy jobs restore cold).
+      #
+      # HONEST RESIDUAL, since the shards are NOT identical builds: coverage.sh selects
+      # per-crate `--features` (sparq-core mmap,dict-spill,rdfxml; sparq-reason datalog; …),
+      # so each shard's dep closure is a different subset and per-shard feature
+      # unification can make one shard's dep set a superset of another's. rust-cache skips
+      # saving on an exact key hit, so one shard's closure wins the entry and the others
+      # get a PARTIAL restore and still compile their extra deps cold. That is a smaller
+      # compile win than three warm caches would give, traded deliberately for the
+      # cache-budget headroom these beads are about — and it is still strictly better than
+      # the cold rebuild an evicted key forces, with no stale-artifact risk (fingerprints
+      # + the key already embed Cargo.lock, the rustc version and the Cargo.toml hashes).
+      #
+      # NOT affected: the shard PARTITION is chosen by the COVERAGE_SHARD env var below,
+      # which coverage.sh maps to SHARD_GROUPS[n-1]. Nothing reads the cache key, so which
+      # crates each shard measures is unchanged by this.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: coverage-shard-${{ matrix.shard }}
+          # REPLACES the former per-shard `key: coverage-shard-<n>` for the reason
+          # spelled out in the note above this step — the two are mutually exclusive,
+          # since a per-shard `key:` would re-split the one entry back into three.
+          shared-key: coverage-measure
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Full rationale on the
+          # `build-archive` cache step above; pinned by
+          # scripts/tests/test_mergequeue_cache_posture.py. Saving on main only also
+          # removes the concurrent-save race the per-shard key was working around: on
+          # main the shards still run together, but a duplicate-key save is a benign
+          # no-op (the cache API rejects the second writer), not a clobber.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
         # [OPUS-4.8] sq-tool-pin: taiki-e/install-action picks the tool from its @<tool> ref;
         # SHA-pinning (our code-scanning=0 policy) drops that ref, so an explicit `with: tool:`
         # is MANDATORY — without it install-action installs NOTHING and `cargo llvm-cov` ENOENTs.
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
-      - name: Compute coverage cone (shadow mode, sq-6vshe.8) [SONNET-4.6]
-        # [SONNET-4.6] sq-6vshe.8: SHADOW-ONLY pre-step. Computes the reverse-dep
-        # closure of the PR diff (reusing ci_select.py's diff classifier and fail-safe
-        # rules via shared import — NOT a diverging copy). The cone.json records which
-        # crates WOULD be measured fresh vs which would inherit their main-run floor.
-        # SHADOW MODE (enforce=False): the full coverage.sh run below is UNCHANGED;
-        # this step only computes + logs the cone for monitoring. Enforce flip is the
-        # follow-up bead (gated by sq-6vshe.8).
+      - name: Compute coverage cone (ENFORCE mode, sq-3dr4t) [SONNET-4.6]
+        # [SONNET-4.6] sq-3dr4t (flips sq-6vshe.8's shadow mode): computes the reverse-dep
+        # closure of the PR diff (reusing ci_select.py's diff classifier and fail-safe rules
+        # via shared import — NOT a diverging copy) and now ENFORCES it: `cone-crates.txt`
+        # becomes COVERAGE_CONE for the measure step below, which intersects this shard's
+        # crate group with it. A crate outside the cone is NOT measured — neither it nor any
+        # of its transitive deps changed, so its per-crate floor verdict from main's last
+        # full run still holds (the SAME soundness argument ci_select.py already makes for
+        # skipping its tests). Its floor stays enforced on main by the nightly full run.
+        #
+        # THE CONE IS THE `select` JOB'S OUTPUT, NOT AN IN-JOB DIFF. This job checks out at
+        # the `actions/checkout` DEFAULT (shallow) depth and does NOT set `fetch-depth: 0`
+        # (ci-select.yml does, explicitly so its three-dot diff resolves), so
+        # `git diff base...head` cannot resolve the base here and would fail-safe to
+        # mode=full every time, making the flip a no-op. `select` already
+        # ran the SAME ci_select.select() on a full-history checkout, so its `affected`
+        # closure IS the cone; we consume it instead of recomputing it (also avoids a
+        # second full clone × 3 shards). This job already `needs: select`.
+        #
+        # FAIL-SAFE: an EMPTY cone-crates.txt means "no filter", i.e. measure the whole
+        # shard exactly as before the flip. Narrowing happens ONLY for an explicit
+        # mode=selected. Every §4.1 full-run trigger (Cargo.lock, root Cargo.toml,
+        # .github/, scripts/, an unowned path — which includes bench/coverage-floor.json,
+        # so a floor edit can never ride in unmeasured), the `ci-full` label, the
+        # CI_SELECT_MODE=shadow rollback, a non-PR event, and every internal error all
+        # resolve to mode=full ⇒ empty file. No failure mode can NARROW measurement.
         env:
+          SELECT_MODE: ${{ needs.select.outputs.mode }}
+          SELECT_AFFECTED: ${{ needs.select.outputs.affected }}
+          # Recorded in cone.json for provenance (which base the inherited verdicts came
+          # from); NOT used to compute the cone — see above.
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || 'HEAD' }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          # [SONNET-4.6] SHADOW-MODE: the `|| true` on BOTH branches keeps this pre-step
-          # strictly gate-neutral — a cone.json write error or a ci_select.py import error
-          # must NEVER fail the coverage shard (that would cascade to the gate). The full
-          # coverage.sh run below is the sole source of truth until the enforce flip.
-          if [ -n "${BASE:-}" ]; then
-            python3 scripts/cone_coverage.py \
-              --mode compute-cone \
-              --base "$BASE" --head "$HEAD" \
-              --output cone.json || true
-          else
-            # Non-PR event (push/schedule) → full run; emit a placeholder cone.json.
-            python3 scripts/cone_coverage.py \
-              --mode compute-cone \
-              --output cone.json || true
-          fi
+          # Pre-create the file EMPTY, and reset it to empty on any failure, so a partial
+          # write or an import error degrades to a full shard measurement rather than a
+          # silently narrowed one. The `||` also keeps this step gate-neutral.
+          : > cone-crates.txt
+          python3 scripts/cone_coverage.py \
+            --mode compute-cone --enforce \
+            --select-mode "${SELECT_MODE:-}" \
+            --select-affected "${SELECT_AFFECTED:-[]}" \
+            --base "${BASE:-}" --head "${HEAD:-}" \
+            --crates-output cone-crates.txt \
+            --output cone.json || : > cone-crates.txt
+          # Collapse to the single space-separated line coverage.sh reads. Empty (or
+          # whitespace-only) => coverage.sh applies no filter and measures the whole shard.
+          echo "COVERAGE_CONE=$(tr '\n' ' ' < cone-crates.txt)" >> "$GITHUB_ENV"
       - name: Measure + enforce per-crate coverage (shard ${{ matrix.shard }}, max-remeasure gate)
         # [OPUS-4.8] sq-x4jy: ROBUST per-crate MAX-REMEASURE gate. Measure this shard's crate
         # subset once (COVERAGE_SHARD selects SHARD_GROUPS[shard-1]), then --check-robust
@@ -2954,23 +3400,31 @@ jobs:
         # reproducible and fails ALL K measurements; a transient undercount recovers on a
         # re-measure. coverage.sh still serialises each binary's tests (--test-threads=1) to
         # minimise the profraw-merge race at the source; this gate is the principled backstop.
+        #
+        # [SONNET-4.6] sq-3dr4t: COVERAGE_CONE comes from the previous step via $GITHUB_ENV
+        # and INTERSECTS this shard's group — so the crates measured here are
+        # SHARD_GROUPS[shard-1] ∩ cone, and the rest inherit their main floor verdict. It is
+        # empty (⇒ no filter, whole shard measured) on every fail-safe path. The robust
+        # re-measure loop is unaffected: it passes COVERAGE_CRATES, which bypasses the filter.
         env:
           COVERAGE_SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
           ./scripts/coverage.sh
           python3 scripts/coverage-gate.py --check-robust target/coverage/coverage-summary.json
-      - name: Shadow cone-vs-full coverage report (sq-6vshe.8) [SONNET-4.6]
-        # [SONNET-4.6] sq-6vshe.8: SHADOW-ONLY post-step. Compares the cone (from
-        # the pre-step) against the full coverage-summary.json: crates IN the cone are
-        # labeled "cone-measured"; crates OUTSIDE are labeled "inherited (unchanged
-        # cone): PASS". Divergences (outside-cone crates below floor) are logged to
-        # coverage-cone-divergence.json and surfaced as warnings. Never fails the gate
-        # (shadow mode); only the enforce flip (follow-up bead) changes enforcement.
+      - name: Cone coverage report (sq-6vshe.8 / sq-3dr4t) [SONNET-4.6]
+        # [SONNET-4.6] Post-step. Renders the cone against what the shard actually measured:
+        # crates IN the cone are labeled "cone-measured" with their line%; crates the
+        # enforced filter SKIPPED (from the summary's `cone.inherited` block) are labeled
+        # "inherited (unchanged cone): PASS", so the skip is auditable rather than an
+        # unexplained gap. Reporting only — it never fails the shard (coverage-gate.py is
+        # the sole gate). NB under enforce the outside-cone crates are not measured, so
+        # divergence detection is structurally unavailable and the report says so instead
+        # of implying the empty divergence list proves the cone sound.
         if: always() && hashFiles('cone.json') != '' && hashFiles('target/coverage/coverage-summary.json') != ''
         run: |
           python3 scripts/cone_coverage.py \
-            --mode shadow-report \
+            --mode report \
             --cone cone.json \
             --coverage-summary target/coverage/coverage-summary.json \
             --divergence-log coverage-cone-divergence-shard-${{ matrix.shard }}.json \
@@ -3007,7 +3461,8 @@ jobs:
   # runner compiling its own objects is far simpler + more robust than the fragile
   # cargo-llvm-cov `--archive-file` transport (whose 0.8.7 object layout does NOT
   # match where `report` reads objects). Each run/merge job passes ONE pinned
-  # toolchain and NO per-runner RUSTFLAGS, keeping the binaries reproducible.
+  # toolchain and the SAME job-level RUSTFLAGS (sq-6vshe.11 — no per-runner
+  # variation), keeping the binaries reproducible.
   #
   # Two jobs (both driven by scripts/coverage-engine-shard.sh):
   #   coverage-engine-run   : matrix[part 1..N] — compile + run a nextest test-level
@@ -3031,13 +3486,25 @@ jobs:
     name: coverage engine run (partition ${{ matrix.part }}/3)
     # [FABLE-5] Draft-tier CI: skipped on draft PR heads, same rationale + guard
     # shape as coverage-measure above (fail-open off the PR path).
+    # [SONNET-4.6] sq-6vshe.17: DEMOTED off merge_group with the same guard + the same
+    # recoverable-ratchet argument as coverage-measure above (this partitioned engine
+    # measurement is the other half of the instrumented pole). `coverage-engine-merge`
+    # needs `coverage-engine-run.result == 'success'`, so it skips with these — and the
+    # `coverage` aggregator counts both `skipped` results as satisfied.
     needs: [changes, coverage-floors, select]
     if: >-
       github.event_name != 'schedule' &&
+      github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&
       needs.changes.outputs.rust_changed == 'true' &&
       (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')
     runs-on: ubuntu-latest
+    # [SONNET-4.6] sq-6vshe.11: re-deliver the lld link flag (see coverage-measure above and
+    # the env: block at the top of this file). EXTRA constraint here: the cross-runner
+    # .profraw merge requires the run partitions and coverage-engine-merge to compile with
+    # IDENTICAL inputs, so this value and coverage-engine-merge's MUST match exactly.
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     strategy:
       fail-fast: false   # one partition failing must not cancel the others (want all profraw)
       matrix:
@@ -3062,12 +3529,21 @@ jobs:
       # shared-key cache warms the deps; keying by part avoids save-race clobbering.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # [OPUS-5] sq-h2gz6 / [SONNET-4.6] sq-aemq7: the per-part key is LEFT ALONE
+          # here — it is outside both beads' named scope (coverage-shard-N), which
+          # collapsed only the coverage-SHARD matrix onto one `shared-key`, and unlike
+          # those shards the merge job below deliberately points at part 1's key.
           key: coverage-engine-run-${{ matrix.part }}
       - name: Install cargo-llvm-cov + nextest
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action (the @<tool> ref is dropped by the pin). Both tools are needed:
         # llvm-cov for instrumentation, nextest for the partitioning.
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Fetch W3C fixtures (engine tests need them)
@@ -3102,6 +3578,11 @@ jobs:
     # and the aggregator counts `skipped` as satisfied.
     if: needs.coverage-engine-run.result == 'success'
     runs-on: ubuntu-latest
+    # [SONNET-4.6] sq-6vshe.11: MUST be byte-identical to coverage-engine-run's RUSTFLAGS —
+    # this job recompiles the instrumented objects the downloaded partition .profraw are
+    # merged against, and that merge is only valid when both compiles saw the same inputs.
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Free runner disk before instrumented build
@@ -3121,9 +3602,16 @@ jobs:
       # Reuse a run partition's dep cache to warm the merge job's object compile.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py. The pinned
+          # `key:` stays (see the note above this step) — both beads collapsed only the
+          # coverage-SHARD matrix onto one `shared-key`.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: coverage-engine-run-1
       - name: Install cargo-llvm-cov + nextest
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Build instrumented engine objects (for `report`, no test run)
@@ -3243,6 +3731,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate coverage floor + shard results
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
           floors='${{ needs.coverage-floors.result }}'
           measure='${{ needs.coverage-measure.result }}'
@@ -3259,8 +3749,128 @@ jobs:
           done
           if [ "$rc" -eq 0 ]; then
             echo "### coverage ratchet + test-presence gate: PASS" >> "$GITHUB_STEP_SUMMARY"
+            # [SONNET-4.6] sq-6vshe.17: say plainly WHAT passed on the merge_group ref, so a
+            # reviewer reading a green merge-queue coverage check never reads it as "the
+            # per-crate line-% was re-measured on the merged tree". It was not: only the
+            # fast no-compile floor gates ran here (presence + monotonicity + shard
+            # partition). The MEASUREMENT ran on the PR head and runs again on push-to-main.
+            if [ "$EVENT" = "merge_group" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "> NOTE (sq-6vshe.17): on the \`merge_group\` ref this verdict covers the" \
+                   "fast no-compile FLOOR gates only (test-presence, floor monotonicity," \
+                   "shard-partition). The instrumented per-crate line-% MEASUREMENT is" \
+                   "demoted off the queue's blocking path — it gated the PR head and" \
+                   "re-runs on push-to-main, where a red auto-files a P1 and pauses further" \
+                   "ratchet advances." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           exit "$rc"
+
+  # [SONNET-4.6] sq-6vshe.17 (research/ci-mergequeue-speedup-2026-07.md §3.4a) — the
+  # DEMOTED-LANE SAFETY NET for the coverage MEASUREMENT demoted off merge_group.
+  # The measure legs' FULL FORM runs at PR level AND on push-to-main. This tiny job is
+  # the "cannot silently rot" backstop the demotion protocol mandates (the same shape as
+  # `heavy-recall-demoted-filer` above): if a coverage MEASURE leg FAILS on the canonical
+  # push-to-main build — the batch-stacking regression a merge_group run no longer catches
+  # — it auto-files a P1 bead + a deduped GitHub issue naming the lane + run, via
+  # scripts/ci-file-demoted-lane-failure.py. That issue is ALSO what the `coverage-floors`
+  # ratchet-ADVANCE pause reads, so a red main both tracks the finding to closure and stops
+  # the ratchet from advancing on numbers that are in doubt.
+  # It files ONLY when a DEMOTED leg failed: a `coverage-floors` red on main is a normal
+  # red main build (those gates never left the queue), not a demoted-lane finding.
+  # SEPARATE job so the write scope stays off the coverage matrix — least privilege,
+  # matching the heavy-recall / fuzz / differential filer precedent.
+  coverage-demoted-filer:
+    name: coverage demoted-lane safety-net (push-to-main)
+    # Only the aggregate verdict is needed — it already folds in every measure leg, and an
+    # unused `needs` edge would just add a false dependency.
+    needs: [coverage]
+    # push-to-main only, and only when the coverage aggregate did not succeed. `always()`
+    # so this runs despite the failed `needs`; the body then confirms a DEMOTED leg was the
+    # culprit.
+    if: >-
+      always() && github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.coverage.result != 'success' && needs.coverage.result != 'skipped'
+    runs-on: ubuntu-latest
+    # Scoped write: append the bead + best-effort push (contents), file/comment the issue
+    # (issues), read this run's job list to detect which leg failed (actions).
+    permissions:
+      contents: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Detect a failed DEMOTED coverage measure leg in this run
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # List THIS workflow-run's jobs and find a FAILED leg whose measurement is the
+          # part demoted off merge_group. The regex matches EXACTLY the three demoted job
+          # names — "coverage ratchet (shard N/3)", "coverage engine run (partition N/3)",
+          # "coverage engine merge + ratchet (per-crate)" — and NOT the still-queued
+          # "coverage floors (…)", the "coverage ratchet + test-presence gate (per-crate)"
+          # aggregate, or the nightly "coverage (nightly, …)" tier. Pinned by
+          # scripts/tests/test_ci_select_wiring.py against the live job names.
+          failed="$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure") | select(.name | test("^coverage (ratchet \\(shard |engine )")) | .name' \
+            | head -n1 || true)"
+          if [ -z "$failed" ]; then
+            echo "No DEMOTED coverage measure leg failed in this run (a coverage-floors red is a normal red main build) — nothing to file."
+            echo "file=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Failed demoted coverage leg detected: $failed"
+            echo "file=true" >> "$GITHUB_OUTPUT"
+            echo "leg_name=$failed" >> "$GITHUB_OUTPUT"
+          fi
+      - name: File the demoted-lane P1 bead + issue
+        if: steps.detect.outputs.file == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LEG_NAME: ${{ steps.detect.outputs.leg_name }}
+        run: |
+          set -euo pipefail
+          # Self-test the filer first (hermetic; no gh, no writes) so a script regression
+          # is caught here, not silently.
+          python3 scripts/ci-file-demoted-lane-failure.py --self-test
+          # --lane MUST stay coverage-ratchet-main: coverage-gate.py COVERAGE_ALARM_LANE
+          # reads back the SAME token to decide whether to pause ratchet advances. The
+          # wiring test pins the two together.
+          python3 scripts/ci-file-demoted-lane-failure.py \
+            --lane "coverage-ratchet-main" \
+            --bead-prefix "cv" \
+            --full-form "instrumented per-crate coverage measurement on push-to-main ($LEG_NAME)" \
+            --per-pr-form "runs at PR level; demoted off merge_group (sq-6vshe.17) — the merge queue keeps the fast no-compile floor gates only" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Commit + push the auto-filed bead (best-effort)
+        if: steps.detect.outputs.file == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          if git diff --quiet -- .beads/issues.jsonl; then
+            echo "no bead appended (dedupe hit) — nothing to push."
+            exit 0
+          fi
+          git config user.name "sparq-ci[bot]"
+          git config user.email "sparq-ci@users.noreply.github.com"
+          git add .beads/issues.jsonl
+          git commit -m "chore(ci): auto-file demoted coverage-measure lane failure (sq-6vshe.17). [SONNET-4.6]"
+          push_rc=0
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main || push_rc=$?
+          if [ "$push_rc" -ne 0 ]; then
+            echo "::warning title=demoted-lane bead push declined::Could not push the auto-filed bead to protected main (git push exit ${push_rc}; likely GH013 ruleset rejection). The GitHub issue filed in the previous step is the durable record; the orchestrator beads it on the next issue sweep."
+          else
+            echo "pushed the demoted-lane bead to main."
+          fi
 
   nightly-gate:
     # [OPUS-4.8] Freshness gate for ALL nightly (schedule-triggered) jobs: run them
@@ -3313,6 +3923,10 @@ jobs:
     needs: nightly-gate
     if: needs.nightly-gate.outputs.fresh == 'true'
     runs-on: ubuntu-latest
+    # [SONNET-4.6] sq-6vshe.11: re-deliver the lld link flag past cargo-llvm-cov's
+    # RUSTFLAGS (see coverage-measure above and the env: block at the top of this file).
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -3338,11 +3952,17 @@ jobs:
       - name: Ensure llvm-tools-preview on the pinned toolchain
         run: rustup component add llvm-tools-preview
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action — the @<tool> ref is dropped by the SHA pin, so without this the
         # tool is silently NOT installed and `cargo llvm-cov` ENOENTs (see per-commit job).
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # cargo-llvm-cov
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Test-presence gate
@@ -3557,7 +4177,43 @@ jobs:
             timeout_minutes: 360
           - crate: sparq-vectors
             timeout_minutes: 360
+          # [SONNET-4.6] sq-qcnn.41: sparq-server QUIRK — measure it FEATURE-ON, so the ceiling
+          # it is about to be seeded with is honest. cargo-mutants generates mutants from the
+          # SOURCE (it walks `mod` items regardless of the `#[cfg]` on them), but a
+          # default-feature build never COMPILES the gated modules, so every mutant inside one
+          # is trivially "missed" — non-compiled code, NOT a test gap. Same class as the
+          # sparq-canon / sparq-prov quirks above, and the same artifact that forced this
+          # baseline to re-measure sparq-fedplan (committed 0-caught/534-survived) and
+          # sparq-fedclient (0/553). It matters MORE here than for either of those: ceilings
+          # only ever FALL (`--seed` will not raise one without `--allow-higher` + review), so
+          # an inflated FIRST seed is sticky — hence this lands BEFORE the crate is baselined.
+          # SCALE (structural counts from the tree, reproduce with grep + wc): the
+          # `#[cfg(feature = …)] mod` items the DEFAULT build leaves out are solid_authz 2647,
+          # tpf 1333, descriptors 1145, access_audit 614, streams 592, n3_patch 497,
+          # templates 373, audit 294 = 7495 of 25702 src lines (~29%), and src/http.rs carries
+          # a further 301 `cfg(feature = …)` sites naming a default-OFF feature.
+          # THE SET = the LEG-PROVEN subset: every feature named below already has a
+          # `test: true` leg in .github/feature-matrix.d/sparq-server.yml, so its suite is
+          # known-green on this runner image. That matters because cargo-mutants runs an
+          # UNMUTATED baseline first and aborts the whole sweep if it fails — a feature set
+          # nobody has ever executed could cost the crate its run.
+          # DELIBERATELY OUT, each with a reason. The ceiling therefore still carries
+          # trivially-surviving mutants from these, and must be re-tightened as they gain legs:
+          #   • shacl / backup / n3-patch — NO CI executor runs their suites (shacl + backup
+          #     are explicit entries in scripts/check-feature-test-execution.allowlist.json).
+          #     They COMPILE (the gating workspace `--all-features` clippy proves that much),
+          #     but "compiles" is not "passes", and this lane cannot risk the baseline run.
+          #   • http2 / http3 — transport plumbing (TLS / a second UDP listener) with few
+          #     mutable lines, whose socket + TLS test cost every mutant would then pay.
+          #   • zlib-ng — a flate2 backend swap; no leg, and no sparq-server code of its own.
+          #   • test-seams — a TEST seam, not product surface.
+          # COST, stated plainly: a feature-ON sweep compiles and runs strictly more per mutant
+          # than today's feature-OFF one, and this crate has no seedable run on record (the last
+          # one noted above was killed by runner shutdown). No timing is guessed here — RE-TUNE
+          # this entry from the first run that completes (raise timeout_minutes, or move it to the
+          # SUB-SHARDS idiom below), using that run's own timings as the evidence of record.
           - crate: sparq-server
+            features: audit-log,access-audit,change-stream,federation-descriptors,solid-authz,odrl-authz,solid-authz-trust,templates,tpf,brtpf,query-registry,facets,complete,service,time-travel,geo,terse,response-compression
             timeout_minutes: 360
           - crate: sparq-mpc
             timeout_minutes: 360
@@ -3718,17 +4374,25 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-mutants
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # cargo-mutants
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-mutants
         with:
           tool: cargo-mutants@25.3.1
       - name: Run cargo-mutants for this crate + ratchet against the baseline
         # [OPUS-4.8] sq-qcnn.11: measure exactly THIS shard's crate (--package). The static
         # exclusions (presence-gated / non-host crates) live in .cargo/mutants.toml.
-        # matrix.features carries the whole-surface features for the two DEFAULT-OFF crates
-        # (sparq-core mmap,dict-spill / sparq-substrate numeric,join,compare,rows) — passed via
-        # env (not inline ${{ }}) to keep it out of the shell-injection surface. A per-crate
-        # failure is tolerated (continue-on-error) while seeding — the gate verdict is --check.
+        # matrix.features carries the per-crate whole-surface feature set for every crate whose
+        # measured surface is DEFAULT-OFF (sparq-core, sparq-substrate, sparq-sim, sparq-canon,
+        # sparq-prov, sparq-fedplan, sparq-fedclient, sparq-server — see the QUIRK comments on
+        # each include entry) — passed via env (not inline ${{ }}) to keep it out of the
+        # shell-injection surface. A per-crate failure is tolerated (continue-on-error) while
+        # seeding — the gate verdict is --check.
         # [SONNET-4.6] sq-qcnn.28: continue-on-error:true at STEP level (in addition to job
         # level) so that a runner shutdown mid-cargo-mutants does not mark the job as failure:
         # the artifact upload (if: always()) still runs, and the job exits success even when the
@@ -3863,8 +4527,14 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # [OPUS-5] sq-h2gz6 + [SONNET-4.6] sq-6vshe.15 lever 2 / sq-aemq7 — CACHE-SAVE
+          # DISCIPLINE: restore always, save on push-to-main only. Rationale + the
+          # seeder argument are on the `build-archive` cache step above (the canonical
+          # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-geiger
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-geiger
         continue-on-error: true

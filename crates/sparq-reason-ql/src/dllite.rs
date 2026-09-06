@@ -143,13 +143,15 @@ pub struct ConceptInclusion {
 /// sq-p6yb7.
 ///
 /// - `Concept(B1, B2)` is `B1 ⊑ ¬B2` — from `owl:disjointWith` where BOTH operands resolve to
-///   QL basic concepts (a named class, or an unqualified `∃R` restriction node).
+///   QL basic concepts (a named class, or an unqualified `∃R` restriction node), or from the
+///   subClassOf-complement shape `B1 rdfs:subClassOf [ owl:complementOf B2 ]` (sq-fj8lj follow-up;
+///   see [`TBox::extract`]).
 /// - `Role(R1, R2)` is `R1 ⊑ ¬R2` — from `owl:propertyDisjointWith` between named properties.
 ///
 /// A negative axiom whose operands do NOT resolve (a complex class expression, a poisoned /
-/// qualified restriction, or any `owl:complementOf` triple — `A owl:complementOf B` asserts the
-/// EQUIVALENCE `A ≡ ¬B`, strictly stronger than the negative inclusion `A ⊑ ¬B`, and its
-/// `¬B ⊑ A` half is not a DL-Lite_R negative inclusion) is counted in
+/// qualified restriction, or a NAMED-subject `owl:complementOf` triple — `A owl:complementOf B`
+/// asserts the EQUIVALENCE `A ≡ ¬B`, strictly stronger than the negative inclusion `A ⊑ ¬B`, and
+/// its `¬B ⊑ A` half is not a DL-Lite_R negative inclusion) is counted in
 /// `TBox::consistency_uncaptured` instead, which keeps every consistency verdict fail-closed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NegativeInclusion {
@@ -209,9 +211,14 @@ pub struct TBox {
     /// restriction sub-predicate triples (those are silently ignored as expected). See also
     /// `consistency_relevant` and `unrecognised_schema`.
     pub skipped: usize,
-    /// Count of triples whose predicate is `owl:disjointWith`, `owl:propertyDisjointWith`, or
-    /// `owl:complementOf` — QL-legal negative axioms that do NOT contribute to the
-    /// certain-answer rewriting but ARE consistency-relevant. The REWRITER never applies them;
+    /// Count of QL-legal NEGATIVE axioms: one per `owl:disjointWith` /
+    /// `owl:propertyDisjointWith` triple, one per subClassOf-complement axiom
+    /// (`A rdfs:subClassOf [ owl:complementOf B ]` — counted at the `rdfs:subClassOf` triple, so
+    /// a complement blank node shared by two subClassOf triples counts TWICE and its defining
+    /// `owl:complementOf` triple counts zero), and one per `owl:complementOf` triple that does
+    /// NOT define a consumed complement node (a named-subject `A owl:complementOf B`, an orphan,
+    /// or a malformed complement blank node). These do NOT contribute to the certain-answer
+    /// rewriting but ARE consistency-relevant. The REWRITER never applies them;
     /// a non-zero count signals that the UCQ answers may under-approximate the certain answers
     /// when the KB is inconsistent (an inconsistent KB certain-answers everything) — unless the
     /// opt-in `ql-consistency` check (`check_consistency`, sq-p6yb7) proves the KB consistent.
@@ -222,17 +229,19 @@ pub struct TBox {
     /// — every tallied negative axiom is either structurally captured or counted uncaptured.
     pub consistency_relevant: usize,
     /// The negative inclusions STRUCTURALLY captured from `owl:disjointWith` (both operands
-    /// resolved to basic concepts) and `owl:propertyDisjointWith` (both operands named
-    /// properties). Input to the opt-in `ql-consistency` violation-query composition; never
-    /// applied by the rewriter. [FABLE-5] sq-p6yb7
+    /// resolved to basic concepts), `owl:propertyDisjointWith` (both operands named
+    /// properties), and the subClassOf-complement shape `B1 rdfs:subClassOf [ owl:complementOf
+    /// B2 ]` (both operands resolved to basic concepts). Input to the opt-in `ql-consistency`
+    /// violation-query composition; never applied by the rewriter. [FABLE-5] sq-p6yb7
     pub neg_incl: Vec<NegativeInclusion>,
     /// Count of consistency-relevant axioms that could NOT be structurally captured into
-    /// `neg_incl`: every `owl:complementOf` triple (an equivalence-with-complement, strictly
-    /// stronger than a negative inclusion — see [`NegativeInclusion`]), and any
-    /// `owl:disjointWith` / `owl:propertyDisjointWith` whose operand is not a resolvable basic
-    /// concept / named property. Non-zero means a consistency check can still soundly report
-    /// INCONSISTENT (logic is monotonic) but must never report CONSISTENT (fail-closed).
-    /// [FABLE-5] sq-p6yb7
+    /// `neg_incl`: every NAMED-subject `owl:complementOf` triple (an
+    /// equivalence-with-complement, strictly stronger than a negative inclusion — see
+    /// [`NegativeInclusion`]), every orphan/malformed complement blank node, and any
+    /// `owl:disjointWith` / `owl:propertyDisjointWith` / subClassOf-complement whose operand is
+    /// not a resolvable basic concept / named property. Non-zero means a consistency check can
+    /// still soundly report INCONSISTENT (logic is monotonic) but must never report CONSISTENT
+    /// (fail-closed). [FABLE-5] sq-p6yb7
     pub consistency_uncaptured: usize,
     /// Count of OWL/RDFS constructs this extractor does not recognise, tallied through two
     /// distinct paths: (1) triples whose *predicate* is in the `rdfs:`/`owl:` namespace and is
@@ -262,6 +271,17 @@ impl TBox {
     /// `owl:disjointWith`, `owl:propertyDisjointWith`, and `owl:complementOf` are counted in
     /// `consistency_relevant` (QL-legal but not used for rewriting — see `TBox::consistency_relevant`).
     ///
+    /// The **subClassOf-complement** shape `B1 rdfs:subClassOf [ owl:complementOf B2 ]` is the
+    /// OWL 2 QL `superClassExpression ::= ObjectComplementOf(subClassExpression)` production —
+    /// exactly the DL-Lite_R negative inclusion `B1 ⊑ ¬B2`. Both operands resolve through the
+    /// same basic-concept resolution as `owl:disjointWith` (a named class, or an UNqualified
+    /// `∃R` restriction node), so `A ⊑ ¬B`, `∃R ⊑ ¬B`, and `A ⊑ ¬∃R` are all captured into
+    /// `neg_incl`; an unresolvable operand goes to `consistency_uncaptured`. The complement
+    /// blank node's own `owl:complementOf` triple is then NOT tallied separately (its axiom
+    /// content is accounted at each `rdfs:subClassOf` triple that consumes it) — see
+    /// `TBox::consistency_relevant`. A NAMED-subject `A owl:complementOf B` still asserts the
+    /// biconditional `A ≡ ¬B` and stays `consistency_uncaptured`, unchanged.
+    ///
     /// `rdf:type` triples whose OBJECT is one of the 7 OWL characteristic property classes
     /// (`owl:FunctionalProperty`, `owl:InverseFunctionalProperty`, `owl:TransitiveProperty`,
     /// `owl:SymmetricProperty`, `owl:AsymmetricProperty`, `owl:ReflexiveProperty`,
@@ -281,12 +301,16 @@ impl TBox {
         let mut tbox = TBox::default();
         // Index restriction blank-nodes: subject -> (onProperty, someValuesFrom-filler).
         let restrictions = index_restrictions(triples);
+        // Index complement blank-nodes: subject -> complemented node. Only nodes CONSUMED by an
+        // `rdfs:subClassOf` RHS are here (see `index_complements`), which is exactly the set whose
+        // tally moves from the `owl:complementOf` triple to the consuming subClassOf axiom.
+        let complements = index_complements(triples);
 
         for t in triples {
             let p = t.predicate.as_str();
             match p {
                 _ if p == sub_class_of() => {
-                    tbox.add_subclass(&t.subject, &t.object, &restrictions);
+                    tbox.add_subclass(&t.subject, &t.object, &restrictions, &complements);
                 }
                 _ if p == sub_property_of() => {
                     if let (Some(r), Some(s)) =
@@ -395,13 +419,28 @@ impl TBox {
                         _ => tbox.consistency_uncaptured += 1,
                     }
                 }
-                // `A owl:complementOf B` asserts A ≡ ¬B — STRICTLY stronger than the negative
-                // inclusion A ⊑ ¬B (its ¬B ⊑ A half is not a DL-Lite_R negative inclusion, and
-                // treating only the negative half as captured would make a CONSISTENT verdict
-                // incomplete). Always uncaptured for consistency purposes. [FABLE-5] sq-p6yb7
+                // A NAMED-subject `A owl:complementOf B` asserts A ≡ ¬B — STRICTLY stronger than
+                // the negative inclusion A ⊑ ¬B (its ¬B ⊑ A half is not a DL-Lite_R negative
+                // inclusion, and treating only the negative half as captured would make a
+                // CONSISTENT verdict incomplete). Still uncaptured. [FABLE-5] sq-p6yb7
+                //
+                // A BLANK-subject complement node that some `rdfs:subClassOf` RHS consumes is an
+                // ANONYMOUS class expression, not a named class with an asserted biconditional:
+                // it carries no axiom of its own, so it is tallied at each consuming subClassOf
+                // axiom instead (`add_subclass`) and contributes nothing here — otherwise one
+                // `owl:complementOf` triple would be double-counted, or (shared by two subClassOf
+                // triples) under-counted, breaking the `consistency_relevant == neg_incl.len() +
+                // consistency_uncaptured` invariant. An orphan or malformed complement blank node
+                // is not in `complements` and stays uncaptured here.
                 _ if p == complement_of() => {
-                    tbox.consistency_relevant += 1;
-                    tbox.consistency_uncaptured += 1;
+                    let consumed = matches!(
+                        NodeKind::from_subject(&t.subject),
+                        NodeKind::Blank(bn) if complements.contains_key(&bn)
+                    );
+                    if !consumed {
+                        tbox.consistency_relevant += 1;
+                        tbox.consistency_uncaptured += 1;
+                    }
                 }
                 // [SONNET-4.6] sq-pbz04.3.3 — `rdf:type` triples encode OWL characteristic-
                 // property axioms via the OBJECT position (e.g. `:p rdf:type
@@ -466,16 +505,20 @@ impl TBox {
     }
 
     /// Add an `A ⊑ B`-derived inclusion, resolving restriction blank-nodes on either side into
-    /// the QL basic-concept forms. Non-QL shapes are skipped + counted.
+    /// the QL basic-concept forms. Non-QL shapes are skipped + counted. A complement blank node
+    /// on the RHS is the QL NEGATIVE inclusion `B1 ⊑ ¬B2` — captured into `neg_incl`, never a
+    /// positive inclusion, and tallied in `consistency_relevant` (never in `skipped`: the shape
+    /// is QL-legal).
     fn add_subclass(
         &mut self,
         sub: &NamedOrBlankNode,
         sup: &Term,
         restrictions: &FxHashMap<String, Restriction>,
+        complements: &FxHashMap<String, NodeKind>,
     ) {
         let sub_b = basic_of(&NodeKind::from_subject(sub), restrictions);
-        // Right side: a named class A (the PerfectRef class-atom rewrite target), or an
-        // unqualified ∃R (range generator → exists_super).
+        // Right side: a named class A (the PerfectRef class-atom rewrite target), an
+        // unqualified ∃R (range generator → exists_super), or ¬B (negative inclusion).
         match NodeKind::from_object(sup) {
             Some(NodeKind::Iri(a)) => {
                 if let Some(b) = sub_b {
@@ -484,22 +527,37 @@ impl TBox {
                     self.skipped += 1;
                 }
             }
-            Some(NodeKind::Blank(bn)) => match restrictions.get(&bn) {
-                Some(Restriction {
-                    on_property,
-                    some_values_thing: true,
-                }) => {
-                    // B ⊑ ∃R (unqualified existential on the RHS).
-                    if let Some(b) = sub_b {
-                        self.exists_super
-                            .push((b, Role::named(on_property.clone())));
-                    } else {
-                        self.skipped += 1;
+            Some(NodeKind::Blank(bn)) => {
+                // `B1 ⊑ ¬B2` — QL-legal negative inclusion, so it is consistency-relevant, never
+                // `skipped`. `index_complements` guarantees a complement node is not also a
+                // restriction node, so this arm and the restriction arm below are disjoint.
+                if let Some(complemented) = complements.get(&bn) {
+                    self.consistency_relevant += 1;
+                    match (sub_b, basic_of(complemented, restrictions)) {
+                        (Some(b1), Some(b2)) => {
+                            self.neg_incl.push(NegativeInclusion::Concept(b1, b2));
+                        }
+                        _ => self.consistency_uncaptured += 1,
                     }
+                    return;
                 }
-                // Qualified RHS existential or a non-someValues restriction: outside QL rewriting.
-                _ => self.skipped += 1,
-            },
+                match restrictions.get(&bn) {
+                    Some(Restriction {
+                        on_property,
+                        some_values_thing: true,
+                    }) => {
+                        // B ⊑ ∃R (unqualified existential on the RHS).
+                        if let Some(b) = sub_b {
+                            self.exists_super
+                                .push((b, Role::named(on_property.clone())));
+                        } else {
+                            self.skipped += 1;
+                        }
+                    }
+                    // Qualified RHS existential or non-someValues restriction: outside QL rewriting.
+                    _ => self.skipped += 1,
+                }
+            }
             None => self.skipped += 1,
         }
     }
@@ -587,6 +645,69 @@ fn index_restrictions(triples: &[Triple]) -> FxHashMap<String, Restriction> {
         );
     }
     out
+}
+
+/// Index the complement blank-nodes that an `rdfs:subClassOf` RHS CONSUMES: `bn -> B` for
+/// `_:bn owl:complementOf B`, i.e. the anonymous class expression `¬B`, keyed by blank-node id.
+///
+/// Only nodes that (a) are the object of some `rdfs:subClassOf` triple, (b) carry EXACTLY ONE
+/// `owl:complementOf` triple with a non-literal object, and (c) carry NO restriction predicate
+/// are indexed. Everything else — a NAMED-subject `owl:complementOf` (the biconditional
+/// `A ≡ ¬B`), an orphan complement node asserting no axiom, an ambiguous multi-complement node,
+/// and a malformed complement-and-restriction node — is deliberately left OUT, so its
+/// `owl:complementOf` triple keeps its conservative `consistency_relevant` +
+/// `consistency_uncaptured` tally in `TBox::extract` (fail-closed for `Consistent`).
+///
+/// The target `B` is returned UNRESOLVED (a `NodeKind`) because resolving it to a `Basic` needs
+/// the restriction index — `add_subclass` does that, and counts an unresolvable target as
+/// `consistency_uncaptured`.
+fn index_complements(triples: &[Triple]) -> FxHashMap<String, NodeKind> {
+    let mut candidate: FxHashMap<String, NodeKind> = FxHashMap::default();
+    let mut poisoned: FxHashSet<String> = FxHashSet::default();
+    let mut consumed: FxHashSet<String> = FxHashSet::default();
+
+    for t in triples {
+        // Consumption is a property of the subClassOf RHS, not of the blank node's own triples.
+        if t.predicate.as_str() == sub_class_of() {
+            if let Term::BlankNode(b) = &t.object {
+                consumed.insert(b.as_str().to_string());
+            }
+        }
+        let NamedOrBlankNode::BlankNode(s) = &t.subject else {
+            continue;
+        };
+        let p = t.predicate.as_str();
+        if p == complement_of() {
+            let s = s.as_str().to_string();
+            match NodeKind::from_object(&t.object) {
+                Some(n) => {
+                    if candidate.insert(s.clone(), n).is_some() {
+                        // A second owl:complementOf on the same node: ambiguous, not OWL 2 DL.
+                        poisoned.insert(s);
+                    }
+                }
+                // A literal complement filler is not a class expression.
+                None => {
+                    poisoned.insert(s);
+                }
+            }
+        } else if is_restriction_predicate(p) {
+            // Both a restriction and a complement: not a well-formed OWL 2 class expression.
+            // Poisoned HERE only — `index_restrictions` is left alone, so such a node keeps its
+            // existing (sound) `∃R` reading and its complementOf triple stays uncaptured.
+            poisoned.insert(s.as_str().to_string());
+        }
+    }
+
+    candidate.retain(|bn, _| consumed.contains(bn) && !poisoned.contains(bn));
+    candidate
+}
+
+/// `true` if `p` is one of the `owl:` restriction sub-predicates — the predicates whose presence
+/// makes a blank node a RESTRICTION node rather than a complement node.
+fn is_restriction_predicate(p: &str) -> bool {
+    p.strip_prefix(OWL)
+        .is_some_and(|local| RESTRICTION_SUB_PREDICATES.contains(&local))
 }
 
 /// Restriction predicates that, if present on a node, make it non-QL (so the node is poisoned).
@@ -835,6 +956,152 @@ mod tests {
         );
         // Negative axioms are QL-legal: they never block fully_captured (unchanged semantics).
         assert!(tbox.fully_captured());
+    }
+
+    // sq-fj8lj follow-up — the subClassOf-complement shape `A ⊑ ¬B` is a DL-Lite_R negative
+    // inclusion (QL's `superClassExpression ::= ObjectComplementOf(subClassExpression)`), so it
+    // is captured structurally instead of landing in `skipped` + `consistency_uncaptured`.
+    #[test]
+    fn subclass_complement_captured_as_negative_inclusion() {
+        use oxrdf::{BlankNode, NamedNode};
+        let iri = |s: &str| NamedNode::new(s).unwrap();
+        let c = BlankNode::new("c0").unwrap();
+        let triples = vec![
+            Triple::new(iri("http://ex/A"), iri(&format!("{RDFS}subClassOf")), c.clone()),
+            Triple::new(c, iri(&format!("{OWL}complementOf")), iri("http://ex/B")),
+        ];
+        let tbox = TBox::extract(&triples);
+        assert_eq!(
+            tbox.neg_incl,
+            vec![NegativeInclusion::Concept(
+                Basic::Class("http://ex/A".into()),
+                Basic::Class("http://ex/B".into())
+            )]
+        );
+        // The shape is QL-legal, so it is consistency-relevant — never `skipped` — and the
+        // complement node's own owl:complementOf triple is NOT tallied a second time.
+        assert_eq!(tbox.consistency_relevant, 1);
+        assert_eq!(tbox.consistency_uncaptured, 0);
+        assert_eq!(tbox.skipped, 0);
+        assert!(tbox.concept_incl.is_empty(), "¬B is not a positive superclass");
+        assert!(tbox.fully_captured());
+    }
+
+    // Both operands may be UNQUALIFIED existentials: `∃R ⊑ ¬B` and `A ⊑ ¬∃R` are both QL.
+    #[test]
+    fn subclass_complement_resolves_existential_operands() {
+        use oxrdf::{BlankNode, NamedNode};
+        let iri = |s: &str| NamedNode::new(s).unwrap();
+        let restriction = |bn: &BlankNode, r: &str| {
+            vec![
+                Triple::new(bn.clone(), iri(&format!("{OWL}onProperty")), iri(r)),
+                Triple::new(
+                    bn.clone(),
+                    iri(&format!("{OWL}someValuesFrom")),
+                    iri(&format!("{OWL}Thing")),
+                ),
+            ]
+        };
+        let (lhs, rhs, c0, c1) = (
+            BlankNode::new("lhs").unwrap(),
+            BlankNode::new("rhs").unwrap(),
+            BlankNode::new("c0").unwrap(),
+            BlankNode::new("c1").unwrap(),
+        );
+        let mut triples = restriction(&lhs, "http://ex/r");
+        triples.extend(restriction(&rhs, "http://ex/s"));
+        triples.extend([
+            // ∃r ⊑ ¬B
+            Triple::new(lhs, iri(&format!("{RDFS}subClassOf")), c0.clone()),
+            Triple::new(c0, iri(&format!("{OWL}complementOf")), iri("http://ex/B")),
+            // A ⊑ ¬∃s
+            Triple::new(iri("http://ex/A"), iri(&format!("{RDFS}subClassOf")), c1.clone()),
+            Triple::new(c1, iri(&format!("{OWL}complementOf")), rhs),
+        ]);
+        let tbox = TBox::extract(&triples);
+        assert_eq!(
+            tbox.neg_incl,
+            vec![
+                NegativeInclusion::Concept(
+                    Basic::Exists(Role::named("http://ex/r")),
+                    Basic::Class("http://ex/B".into())
+                ),
+                NegativeInclusion::Concept(
+                    Basic::Class("http://ex/A".into()),
+                    Basic::Exists(Role::named("http://ex/s"))
+                ),
+            ]
+        );
+        assert_eq!(tbox.consistency_relevant, 2);
+        assert_eq!(tbox.consistency_uncaptured, 0);
+        assert!(tbox.fully_captured());
+    }
+
+    // The tally is per AXIOM, not per owl:complementOf triple: a complement node SHARED by two
+    // subClassOf triples is two negative inclusions, and the invariant
+    // `consistency_relevant == neg_incl.len() + consistency_uncaptured` must still hold.
+    // An unresolvable subject on a third one is the uncaptured half of the same invariant.
+    #[test]
+    fn shared_and_unresolvable_subclass_complements_keep_the_tally_invariant() {
+        use oxrdf::{BlankNode, NamedNode};
+        let iri = |s: &str| NamedNode::new(s).unwrap();
+        let sub_class_of = iri(&format!("{RDFS}subClassOf"));
+        let c = BlankNode::new("c0").unwrap();
+        let triples = vec![
+            Triple::new(iri("http://ex/A"), sub_class_of.clone(), c.clone()),
+            Triple::new(iri("http://ex/A2"), sub_class_of.clone(), c.clone()),
+            // Unresolvable LHS: a blank node that is not a QL basic concept.
+            Triple::new(BlankNode::new("opaque").unwrap(), sub_class_of, c.clone()),
+            Triple::new(c, iri(&format!("{OWL}complementOf")), iri("http://ex/B")),
+        ];
+        let tbox = TBox::extract(&triples);
+        assert_eq!(tbox.neg_incl.len(), 2);
+        assert_eq!(tbox.consistency_relevant, 3);
+        assert_eq!(tbox.consistency_uncaptured, 1);
+        assert_eq!(
+            tbox.consistency_relevant,
+            tbox.neg_incl.len() + tbox.consistency_uncaptured,
+            "tally invariant (sq-p6yb7)"
+        );
+        assert_eq!(tbox.skipped, 0, "a QL-legal negative axiom is never `skipped`");
+    }
+
+    // An ORPHAN complement node (defined but never used as a subClassOf RHS) asserts no axiom
+    // this extractor models, so it keeps the conservative uncaptured tally — fail-closed.
+    // Likewise an AMBIGUOUS node carrying two owl:complementOf triples.
+    #[test]
+    fn orphan_and_ambiguous_complement_nodes_stay_uncaptured() {
+        use oxrdf::{BlankNode, NamedNode};
+        let iri = |s: &str| NamedNode::new(s).unwrap();
+        let orphan = vec![Triple::new(
+            BlankNode::new("c0").unwrap(),
+            iri(&format!("{OWL}complementOf")),
+            iri("http://ex/B"),
+        )];
+        let tbox = TBox::extract(&orphan);
+        assert!(tbox.neg_incl.is_empty());
+        assert_eq!(tbox.consistency_relevant, 1);
+        assert_eq!(tbox.consistency_uncaptured, 1);
+
+        let c = BlankNode::new("c0").unwrap();
+        let ambiguous = vec![
+            Triple::new(
+                iri("http://ex/A"),
+                iri(&format!("{RDFS}subClassOf")),
+                c.clone(),
+            ),
+            Triple::new(
+                c.clone(),
+                iri(&format!("{OWL}complementOf")),
+                iri("http://ex/B"),
+            ),
+            Triple::new(c, iri(&format!("{OWL}complementOf")), iri("http://ex/C")),
+        ];
+        let tbox = TBox::extract(&ambiguous);
+        assert!(tbox.neg_incl.is_empty(), "ambiguous complement node: capture nothing");
+        assert_eq!(tbox.consistency_uncaptured, 2, "one per owl:complementOf triple");
+        assert_eq!(tbox.skipped, 1, "the subClassOf RHS resolves to neither shape");
+        assert!(!tbox.fully_captured(), "fail-closed on a malformed complement node");
     }
 
     // [FABLE-5] sq-p6yb7 — a disjointness against an UNQUALIFIED ∃R restriction node resolves

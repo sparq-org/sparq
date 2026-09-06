@@ -110,7 +110,9 @@ mod gated {
 
         let tordf = to_rdf::run_tordf(&root);
         let fromrdf = from_rdf::run_fromrdf(&root);
-        let compact = compact::run_compact(&root);
+        let compact_scores = compact::run_compact(&root);
+        let compact = compact_scores.semantic;
+        let compact_strict = compact_scores.strict;
         // [SONNET-4.6] sq-kk1mq — expand now uses the NATIVE DOCUMENT-LEVEL oracle
         // (sparq_jsonld::expand() + json_ld_equal comparator) instead of the old
         // RDF-equivalence oracle.  See expand::run_expand_native() and the expand
@@ -149,6 +151,13 @@ mod gated {
         println!(
             "TOTAL compact {} {} {} (floor {})",
             compact.pass, compact.fail, compact.skip, COMPACT_FLOOR
+        );
+        // [GPT-5] sq-ruktv — advisory only. Unlike `TOTAL compact`, CI does not
+        // ratchet or assert this order-sensitive diagnostic. It makes an
+        // unmarked compacted-list order regression visible in job output.
+        println!(
+            "TOTAL compact-strict {} {} {} (advisory)",
+            compact_strict.pass, compact_strict.fail, compact_strict.skip
         );
         // [OPUS-4.8] sq-oy1f — the expand + flatten ratchets. The CI grep depends on
         // these exact `^TOTAL expand `/`^TOTAL flatten ` prefixes with the pass count
@@ -195,6 +204,12 @@ mod gated {
         if !compact.failures.is_empty() {
             println!("\ncompact failures (first 40):");
             for (id, why) in compact.failures.iter().take(40) {
+                println!("  {}: {}", id, why);
+            }
+        }
+        if !compact_strict.failures.is_empty() {
+            println!("\ncompact strict-order diagnostics (first 40; advisory):");
+            for (id, why) in compact_strict.failures.iter().take(40) {
                 println!("  {}: {}", id, why);
             }
         }

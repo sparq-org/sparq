@@ -193,6 +193,50 @@ fn complement_of_increments_consistency_relevant() {
 }
 
 // ---------------------------------------------------------------------------
+// A3b — subClassOf-complement `A ⊑ ¬B` is a QL-legal NEGATIVE inclusion: it is
+// consistency-relevant, NOT `skipped`, and does not block fully_captured() (sq-fj8lj follow-up)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn subclass_complement_is_consistency_relevant_not_skipped() {
+    // :A rdfs:subClassOf [ owl:complementOf :B ]
+    let ts = triples(&[
+        &format!("<{EX}A> <{RDFS}subClassOf> _:c ."),
+        &format!("_:c <{OWL}complementOf> <{EX}B> ."),
+    ]);
+    let tbox = TBox::extract(&ts);
+
+    assert_eq!(
+        tbox.consistency_relevant, 1,
+        "the subClassOf-complement axiom counts ONCE — the complement node's own \
+         owl:complementOf triple is accounted at the consuming subClassOf"
+    );
+    assert_eq!(
+        tbox.consistency_uncaptured, 0,
+        "A ⊑ ¬B is a DL-Lite_R negative inclusion — structurally captured"
+    );
+    assert_eq!(
+        tbox.consistency_relevant,
+        tbox.neg_incl.len() + tbox.consistency_uncaptured,
+        "tally invariant: relevant == captured + uncaptured"
+    );
+    assert_eq!(
+        tbox.skipped, 0,
+        "the shape is QL-legal (superClassExpression ::= ObjectComplementOf(...)), not \
+         'outside QL'"
+    );
+    assert_eq!(
+        tbox.concept_incl.len(),
+        0,
+        "¬B must NOT be read as a positive superclass (unsound)"
+    );
+    assert!(
+        tbox.fully_captured(),
+        "a TBox whose only axiom is a captured negative inclusion is fully captured"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // A4 — allValuesFrom still counted as skipped (existing behaviour preserved)
 // ---------------------------------------------------------------------------
 

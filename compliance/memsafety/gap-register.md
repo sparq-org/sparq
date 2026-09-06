@@ -19,7 +19,7 @@ now CLOSED** by `.github/workflows/asan.yml` (sq-hybl).
 
 | ID | What | Evidence it is closed |
 |---|---|---|
-| GX-5a | No per-site unsafe justification register | `compliance/memsafety/unsafe-register.md` — 91 rows, 100% of first-party sites. |
+| GX-5a | No per-site unsafe justification register | `compliance/memsafety/unsafe-register.md` — 92 rows, 100% of first-party sites. |
 | GX-5b | cargo-geiger informational only (no gating ratchet) | `scripts/unsafe-gate.py` + `bench/unsafe-snapshot.json` + the **gating** `unsafe-register (count ratchet)` CI lane in `ci.yml`. cargo-geiger stays as a separate visibility lane. |
 | GX-5c | B5 mmap sites "not attested in one place" | The coverage matrix in `controls.md` + the oracle (`mmap_corruption_oracle.rs`) + fuzz (`graph_open.rs`) citations attest each B5 site. |
 | **MS-G2** | First-party `clippy::undocumented_unsafe_blocks` lint missing (the `// SAFETY:` token was enforced by review + register, not mechanically) | **CLOSED (sq-8wbn, [OPUS-4.8]).** `#![warn(clippy::undocumented_unsafe_blocks)]` is a crate-root attribute on unsafe-bearing libraries, including `sparq-engine`; unsafe-bearing test/example crates set it locally. The 6 sites the lint originally flagged were normalised to a literal `// SAFETY:` comment immediately preceding each `unsafe` block/impl (the two `SlotPtr` `Send`/`Sync` pairs in `dict.rs`/`dictspill.rs`, plus `lib.rs` `from_raw_parts_mut` over `MmapMut` and the test `remove_var`). The existing `clippy --all-targets -D warnings` gate mechanically rejects any new undocumented `unsafe`. |

@@ -148,9 +148,9 @@ export const TOOLS: ToolDef[] = [
   {
     id: "inference",
     label: "Inference",
-    // [OPUS-4.8] sq-tp1m (#757) — a real, working tool: a per-workspace RDFS / OWL 2 RL
-    // entailment regime applied to queries by the engine's forward-chaining reasoner.
-    blurb: "Per-workspace RDFS / OWL 2 RL entailment — forward-chain the closure so queries match entailed triples.",
+    // [SONNET-4.6] sq-bfimm — N3 joins the existing per-workspace RDFS / OWL 2 RL
+    // entailment selector with persisted rule documents and ground-triple closure.
+    blurb: "Per-workspace RDFS / OWL 2 RL / N3 entailment — forward-chain the closure so queries match entailed triples.",
     tier: "live-new-wasm",
     icon: Brain,
     built: true,

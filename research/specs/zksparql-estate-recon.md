@@ -60,7 +60,7 @@ guarantee under an adversarial prover.
 
 - **Security-properties vocabulary**: VENDORED `sec-prop` 8 properties
   (`crates/sparq-trust/ontologies/zkp-sparql/vocab/sec-prop.yaml.ld`) EXTENDED by
-  `secprop-ext.ttl` (`crates/sparq-trust/ontologies/zkp-sparql/secprop-ext.ttl`):
+  `secprop-ext.ttl` (`crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl`):
   `ZeroKnowledgeType`, `Soundness`, `Completeness`, `Hiding`, `Binding`, `Anonymity`, `Setup`,
   `Interactivity`, `SelectiveDisclosure`, `SingleUse` plus `AssuranceLevel`, `AuditStatus`,
   `Assumption`, `PropertyScope` axes; Rust constants `crates/sparq-trust/src/secprop.rs`.
@@ -93,8 +93,13 @@ guarantee under an adversarial prover.
 - **bbs-2023 / ecdsa-sd-2023 selective-disclosure VC ingest** — explicitly DEFERRED seam in
   `vc_bridge.rs` (no in-repo BBS verifier); design `zk-configurable-commitment-design.md §5.3`.
 
-- **P-384 ECDSA** (`ecdsa-rdfc-2019` SHA-384 profile) — not implemented, fails closed as
-  `VcBridgeError::UnsupportedKeyCurve` (only P-256/SHA-256 built).
+- ~~**P-384 ECDSA** (`ecdsa-rdfc-2019` SHA-384 profile) — not implemented, fails closed as
+  `VcBridgeError::UnsupportedKeyCurve` (only P-256/SHA-256 built).~~ **BUILT** (sq-txg1y,
+  issue #3234): both published curve profiles verify off-circuit, the profile resolved from the
+  issuer key by `EcdsaProfile::from_sec1_key` before the DI hash is taken, pinned against the
+  vc-di-ecdsa § A.3 published vector. `UnsupportedKeyCurve` now denotes P-521 only. The same
+  bead added the additive `vc_bridge_json` JSON-LD envelope entry point (`oxjsonld` expansion
+  against a caller-supplied `@context` allowlist; no network, no `did:` resolution).
 
 - **In-circuit VC-proof verification** — deliberately OUT OF SCOPE; the query proof does NOT
   re-verify the source VC Ed25519/ECDSA proof in-circuit; `zk:sourceCryptosuite` is

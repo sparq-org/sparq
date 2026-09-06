@@ -39,3 +39,41 @@ jobs:
     uses: ./.github/workflows/build-matrix.yml
     with:
       mode: binary
+
+  # ---- ISOLATED trusted-builder SLSA provenance over the tiered binaries ----
+  # [OPUS-5] #4570 (GX-11 residual / SL-B3-b). sq-toze.25 routed only the release ARCHIVES
+  # through the isolated trusted builder; the dist binaries the launcher's fat package selects
+  # from were left on in-band `actions/attest-build-provenance`, which runs in the SAME job as
+  # `cargo auditable build` — the L2 ceiling. This is the same boundary, same shape:
+  # `slsa-framework/slsa-github-generator`'s generic generator called as a BARE `uses:`, in its
+  # own job, minting its own OIDC identity, receiving exactly one thing from us —
+  # `base64-subjects`, the per-tier binary digests threaded from `build-matrix.yml`'s
+  # `binary-hashes` output. No step of ours executes inside it.
+  #
+  # WHAT THIS DOES *NOT* CLAIM — identical caveat to release.yml#provenance: the subjects are the
+  # digests the build matrix reported, so a compromised build step still yields TRUTHFUL
+  # provenance about a compromised binary. L3's SL-B3-b property is "provenance the build cannot
+  # forge", not "the build is trustworthy", and the GENERIC generator attests rather than builds.
+  #
+  # WHY A TAG REF, NOT A SHA — the one documented exception to this repo's SHA-pin convention:
+  # the builder identity baked into the provenance (what `slsa-verifier` matches a consumer
+  # policy against) derives from the `@ref`, so a SHA reference yields no verifiable identity.
+  #
+  # `upload-assets: false`: dist.yml creates no GitHub Release (it uploads workflow artifacts),
+  # so there is nothing to attach to and the job needs no `contents: write`. The signed
+  # `sparq-dist.intoto.jsonl` is left as a run artifact alongside the per-tier binaries.
+  #
+  # STATUS — DOCUMENTED-UNTESTED. dist.yml is `workflow_dispatch`-only, so this job first runs on
+  # the next manual dispatch. Its shape is pinned on every PR by
+  # scripts/tests/test_release_slsa_l3_provenance.py; wiring is not evidence.
+  provenance:
+    needs: build
+    permissions:
+      actions: read # read the workflow definition the provenance records as the entry point
+      id-token: write # mint the generator's OWN signing identity (never shared with `build`)
+      contents: read # not the uploader — dist.yml publishes no Release (`upload-assets: false`)
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.binary-hashes }}
+      upload-assets: false
+      provenance-name: sparq-dist.intoto.jsonl

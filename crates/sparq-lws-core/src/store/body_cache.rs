@@ -1,10 +1,11 @@
 // AUTHORED-BY Claude Fable 5
 //! The **blob-body LRU cache** — read-4 of the read-path perf plan
-//! (`docs/design/backend-read-path.md` §3.4; `docs/design/throughput-hard-cases.md` §5
-//! `read-4-bodycache`): a byte-budgeted LRU of resource BODIES keyed by **`(blob_key, etag)`**, sat
-//! in front of [`BlobStore::get`](super::blob::BlobStore::get) inside
-//! [`CompositeStore`](super::CompositeStore) — so a hot, unchanged resource's repeat GET pays **zero**
-//! blob-store round-trips (blob-gets/op 1 → 0 on a hit).
+//! (`research/lws-design-records.md` §7; RSS `docs/design/backend-read-path.md` §3.4 +
+//! `docs/design/throughput-hard-cases.md` §5 `read-4-bodycache`): a byte-budgeted LRU of resource
+//! BODIES keyed by **`(blob_key, etag)`**, sat in front of
+//! [`BlobStore::get`](super::blob::BlobStore::get) inside [`CompositeStore`](super::CompositeStore)
+//! — so a hot, unchanged resource's repeat GET pays **zero** blob-store round-trips (blob-gets/op 1
+//! → 0 on a hit).
 //!
 //! ## Why a hit can NEVER be stale (immutable by construction)
 //! [`CompositeStore::mint_blob_key`](super::CompositeStore) mints a fresh 128-bit-random key on

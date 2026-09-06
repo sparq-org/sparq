@@ -9,6 +9,11 @@
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
 # `name` free of the whole words "advisory"/"informational" or the leg stops gating.
 # Fields: name (required), crate (required), features (non-empty), test (boolean).
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 
 # [GPT-5.6] sq-lsp7k.29: numeric range and histogram facets are default-OFF, and
 # tests/numeric_facets.rs is feature-gated. This leg compiles, lints, and runs that

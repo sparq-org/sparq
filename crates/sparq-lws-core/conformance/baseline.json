@@ -1,0 +1,16 @@
+{
+  "_doc": "[SONNET-4.6] sq-gg0qq.7 — the PINNED Solid-CTH floor for sparq-lws-core, enforced by conformance/run.sh after every run. Scores are GENERATED (EARL report -> reports/report.ttl), never committed as prose; this file holds only the ratchet bounds so a regression fails loudly instead of being re-narrated in markdown. Raise `min_passed` when a run beats it; NEVER lower it to go green. `expected_total` is the suite SIZE the TestSubject claims after its skip tags — a change there means the manifests or the skips moved and needs re-triage, not a floor edit.",
+  "expected_total": 41,
+  "min_passed": 41,
+  "max_failed": 0,
+  "suites": {
+    "protocol": 25,
+    "wac": 16
+  },
+  "skip_tags": ["acp", "wac-agent-group", "http-redirect"],
+  "source": {
+    "_doc": "Where the floor came from. The upstream repo this crate was imported from (sq-gg0qq.2) recorded this suite as fully passing at the import commit; this port carries the same bound forward and run.sh re-derives the actual score from the EARL report on every run.",
+    "repo": "https://github.com/jeswr/solid-server-rs",
+    "rev": "1e555b10382922191769fe88337cc0442f11b79e"
+  }
+}

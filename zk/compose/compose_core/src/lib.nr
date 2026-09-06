@@ -51,5 +51,14 @@ pub mod derivation;
 // OWL-RL-minus-sameAs path. Research-grade, NOT externally audited (sq-qhy4);
 // no cost claim (`bb gates` not run) and no compiled bin package yet.
 pub mod sameas;
+// [OPUS-5] sq-rsd3v.3 (#2946): witnessed-rule-shape N3 derivation -- `derivation`
+// generalised from a FIXED public rule table to a DATASET-SUPPLIED rule graph
+// committed into `rules_root` (the rule author as issuer), plus the whitelisted
+// `math:` builtin gadgets. Enforces the declared PROVABLE SUBSET in-circuit --
+// notably SAFETY (every conclusion variable bound in the premise), without which
+// the private substitution would let a prover derive anything. Research-grade,
+// NOT externally audited (sq-qhy4); the relation only -- no compiled bin package,
+// no `bb gates` measurement, no `verify_manifest` dispatch.
+pub mod n3;
 
 mod tests;

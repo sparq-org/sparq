@@ -15,7 +15,7 @@ store, or run the HTTP server:
 ## Use it as a library
 
 The snippet below is **not hand-written prose** — it is the `quickstart` region of
-[`crates/sparq-engine/examples/quickstart.rs`](https://github.com/jeswr/sparq/blob/main/crates/sparq-engine/examples/quickstart.rs),
+[`crates/sparq-engine/examples/quickstart.rs`](https://github.com/sparq-org/sparq/blob/main/crates/sparq-engine/examples/quickstart.rs),
 embedded verbatim via mdBook's `{{#rustdoc_include}}`. That file is compiled and run by
 `cargo test -p sparq-engine --examples`, so this example cannot silently drift from the
 public API:
@@ -39,9 +39,12 @@ build, test, lint, and the conformance / performance ratchets:
 cargo build --workspace
 cargo test  --workspace
 cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings
-cargo fmt --check
 ```
 
-See [`CONTRIBUTING.md`](https://github.com/jeswr/sparq/blob/main/CONTRIBUTING.md) for the full
+`cargo fmt --all --check` runs in CI too, but it is **informational, not part of the gate**:
+the one-time workspace reformat is still pending, so the check reports pre-existing diffs in
+files you did not touch. Format what you touched and leave the rest.
+
+See [`CONTRIBUTING.md`](https://github.com/sparq-org/sparq/blob/main/CONTRIBUTING.md) for the full
 contributor workflow and the conformance ratchet details — that file is the canonical source for
 the gate.

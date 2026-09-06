@@ -1,8 +1,9 @@
 // AUTHORED-BY Claude Fable 5
-//! write-1 (`docs/design/backend-read-path.md` §7 discipline, applied to the WRITE verbs): PINNED
-//! deterministic backend round-trip counts per WRITE operation, measured end-to-end through the
-//! assembled router (auth → WAC → LDP → store) with the counting decorators at the
-//! `SparqClient`/`BlobStore` seams — the write-path sibling of `read_path_counters.rs`.
+//! write-1 (`research/lws-design-records.md` §7; the RSS `docs/design/backend-read-path.md` §7
+//! discipline, applied to the WRITE verbs): PINNED deterministic backend round-trip counts per
+//! WRITE operation, measured end-to-end through the assembled router (auth → WAC → LDP → store)
+//! with the counting decorators at the `SparqClient`/`BlobStore` seams — the write-path sibling of
+//! `read_path_counters.rs`.
 //!
 //! These pins are the MEASURE-FIRST baseline for the write-path walk-collapse round: the read path
 //! (read-2) already folds its O(depth) ACL walk into ONE combined `Store::read_plan` query, but the
@@ -202,15 +203,15 @@ async fn put_overwrite_k3_counts() {
 }
 
 /// **PUT create (k = 3 from the parent, warm).** The existence-non-disclosure V1 closure
-/// (decisions/0003) makes a PUT-create authorize the TARGET's own effective ACL (`acl:Write`,
-/// inherited via `acl:default`) — a PLANNED walk (plan + re-confirm = 2) — BEFORE probing existence,
-/// so create and overwrite are indistinguishable to an under-authorized requester. It THEN also
-/// authorizes container-modification `acl:Append` on the nearest EXISTING ancestor container
-/// (`/alice/c/`), a SECOND planned walk (found by upward existence probes) — two DISTINCT ACL
-/// resolutions (the target's inherited grant vs the container's own `acl:accessTo`), the same
-/// two-walk shape DELETE has always had. MEASURED before → after the planned-walk optimization was
-/// 12 → 11 for main's create (which authorized ONLY the parent); the integrated V1 path adds the
-/// target-`acl:Write` planned walk (+2), for 13 total.
+/// (`research/lws-design-records.md` §6) makes a PUT-create authorize the TARGET's own effective
+/// ACL (`acl:Write`, inherited via `acl:default`) — a PLANNED walk (plan + re-confirm = 2) — BEFORE
+/// probing existence, so create and overwrite are indistinguishable to an under-authorized
+/// requester. It THEN also authorizes container-modification `acl:Append` on the nearest EXISTING
+/// ancestor container (`/alice/c/`), a SECOND planned walk (found by upward existence probes) — two
+/// DISTINCT ACL resolutions (the target's inherited grant vs the container's own `acl:accessTo`),
+/// the same two-walk shape DELETE has always had. MEASURED before → after the planned-walk
+/// optimization was 12 → 11 for main's create (which authorized ONLY the parent); the integrated V1
+/// path adds the target-`acl:Write` planned walk (+2), for 13 total.
 #[tokio::test]
 async fn put_create_k3_counts() {
     let h = Harness::new().await;

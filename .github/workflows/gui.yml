@@ -53,7 +53,7 @@ on:
     # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
     types: [opened, synchronize, reopened, ready_for_review]
     # [OPUS-4.8] The `site build + typecheck` job here consumes `site/` (its static export +
-    # the bundle-wasm-esm script) and `js/` (the @jeswr/sparq source it bundles), and resolves
+    # the bundle-wasm-esm script) and `js/` (the @sparq-org/sparq source it bundles), and resolves
     # workspace deps from the root lockfile — so changes to ANY of those can break it. They were
     # previously omitted, so a `site/`+lockfile regression (an unresolved `fzstd` in the ESM
     # bundle) slipped onto `main` undetected and only surfaced on a PR whose `gate` re-scans the

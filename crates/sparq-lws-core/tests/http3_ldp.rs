@@ -20,7 +20,8 @@ use bytes::Buf as _;
 use common::{BASE_URL, KeyKit, jwks_provider};
 use h3::quic::OpenStreams;
 use quinn::crypto::rustls::QuicClientConfig;
-use rustls_pemfile::certs;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
 use solid_oidc_verifier::config::VerifierConfig;
 use solid_oidc_verifier::replay::InMemoryReplayStore;
 use solid_oidc_verifier::verifier::Verifier;
@@ -112,7 +113,7 @@ async fn production_router(rate: f64, burst: f64) -> (axum::Router, Notification
 fn fixture_roots() -> TestResult<rustls::RootCertStore> {
     let pem = std::fs::read(CA_PATH)?;
     let mut roots = rustls::RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         roots.add(cert?)?;
     }
     Ok(roots)

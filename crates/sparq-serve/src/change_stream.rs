@@ -803,7 +803,7 @@ impl ChangeStreamControl {
 /// Reads all records with `seq >= from_seq` from the segments in `dir`, in order. Shared by
 /// [`ChangeLog::poll`] and the recovery path's cross-check. Fail-closed on mid-stream
 /// corruption; tolerates a torn tail (stops).
-fn read_from(dir: &Path, from_seq: u64) -> Result<Vec<ChangeRecord>, BackupError> {
+pub(crate) fn read_from(dir: &Path, from_seq: u64) -> Result<Vec<ChangeRecord>, BackupError> {
     let mut segments = segment_files(dir)?;
     segments.sort_by_key(|(seq, _)| *seq);
 
@@ -1155,6 +1155,18 @@ fn segment_files(dir: &Path) -> Result<Vec<(u64, PathBuf)>, BackupError> {
         out.push((seq, path));
     }
     Ok(out)
+}
+
+/// [OPUS-5] (sq-l6zks) The earliest seq still RETAINED on disk — the first segment's key
+/// (`0` for a never-trimmed or empty log). This is where a consumer with NO prior position
+/// starts (the [`change_sink`](crate::change_sink) relay's fresh-consumer case); a consumer
+/// that DOES have a prior position must not use it — [`read_from`] fails that case closed
+/// rather than silently skipping trimmed records.
+#[cfg(feature = "change-sink")]
+pub(crate) fn earliest_retained_seq(dir: &Path) -> Result<u64, BackupError> {
+    let mut segments = segment_files(dir)?;
+    segments.sort_by_key(|(seq, _)| *seq);
+    Ok(segments.first().map(|(seq, _)| *seq).unwrap_or(0))
 }
 
 /// Reads one line (without the trailing `\n`/`\r`) or `None` at EOF.

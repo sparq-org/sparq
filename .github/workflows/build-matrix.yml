@@ -49,6 +49,30 @@ on:
         required: false
         type: string
         default: ""
+    # [OPUS-5] sq-toze.25 (GX-11): the `archive`-mode subjects blob for the ISOLATED
+    # trusted-builder provenance job in release.yml. The build matrix NEVER signs this — it only
+    # publishes the digests of the bytes it uploaded; the signing happens in a separate,
+    # user-unreachable job (see release.yml#provenance). Empty on `binary` mode (the `hashes`
+    # job below is skipped), which is what dist.yml expects — it consumes no outputs.
+    #
+    # [OPUS-5] #4570 (GX-11 residual): `binary` mode now has the SAME hand-off, so dist.yml can
+    # run its own isolated trusted builder over the tiered binaries. Deliberately a SECOND,
+    # mode-disjoint output + collector rather than one shared collector: the archive lane's shape
+    # is the L3 contract `scripts/tests/test_release_slsa_l3_provenance.py` pins mutation-by-
+    # mutation, and generalising it would have loosened `if: inputs.mode == 'archive'` — i.e.
+    # weakened the assertion that keeps the archive lane honest — to save ~30 lines of YAML.
+    outputs:
+      hashes:
+        description: >-
+          base64(sha256sum lines) over every archive this run uploaded, in the format
+          `slsa-framework/slsa-github-generator`'s generic generator takes as `base64-subjects`.
+          Empty unless `mode: archive`.
+        value: ${{ jobs.hashes.outputs.hashes }}
+      binary-hashes:
+        description: >-
+          base64(sha256sum lines) over every bare per-tier binary this run uploaded, in the same
+          `base64-subjects` format. Empty unless `mode: binary`.
+        value: ${{ jobs.binary-hashes.outputs.hashes }}
 
 # Default read-only; the matrix job opts into the OIDC + attestation writes it needs (below).
 # A reusable workflow's effective permissions are the INTERSECTION of this declaration and the
@@ -103,7 +127,7 @@ jobs:
       # INTO the released binary, so the shipped artifact is self-describing for post-build audit
       # (`cargo audit bin <file>` / `auditable info <file>`). Negligible size cost; no runtime overhead.
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-auditable
       - name: Build sparq-cli + sparq-server (${{ matrix.cpu || 'default-cpu' }})
@@ -152,6 +176,10 @@ jobs:
             win-*) 7z a "$PKG.zip" "$PKG" ;;
             *)     tar czf "$PKG.tar.gz" "$PKG" ;;
           esac
+      # IN-BAND provenance (SLSA Build L2). Retained deliberately: it is what
+      # `gh attestation verify <archive> --repo sparq-org/sparq` reads, and the release notes point
+      # consumers at that command. It is NOT the basis of the L3 claim — see the digest step
+      # below + release.yml#provenance (sq-toze.25 / GX-11).
       - name: Attest build provenance (archives)
         if: inputs.mode == 'archive'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -159,6 +187,45 @@ jobs:
           subject-path: |
             pkg/*.tar.gz
             pkg/*.zip
+      # [OPUS-5] sq-toze.25 (GX-11): publish THIS tier's archive digest(s) as data — nothing
+      # more. The isolated trusted builder (release.yml#provenance) turns these subjects into
+      # signed provenance in a job that runs no user build step and holds the signing identity
+      # this job never sees. Emitting a digest is not signing it: a compromised build step here
+      # can only ever describe the bytes it actually produced, which is precisely the L3
+      # property `actions/attest-build-provenance` cannot give while it shares this job.
+      # Digest of the basenames (cd pkg) so each subject name is the RELEASED asset name.
+      # PORTABILITY: the two Darwin rows are the reason this is not a bare `sha256sum` call —
+      # macOS ships BSD `shasum` and no GNU coreutils, so `sha256sum` is simply absent there.
+      # A missing digest step does not fail loudly in isolation: those tiers upload no
+      # `archive-hashes-*` artifact, the `hashes` job that `needs: build` never runs, and the
+      # whole L3 lane fails closed at release time — on a lane no PR exercises. Both tools
+      # print the identical `<64-hex>  <name>` record the collector below validates.
+      - name: Record archive digests (subjects for the isolated provenance builder)
+        if: inputs.mode == 'archive'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pkg
+          shopt -s nullglob
+          archives=( *.tar.gz *.zip )
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "ERROR: packaging produced no archive to attest for tier ${{ matrix.tier }}" >&2
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"
+          else
+            shasum -a 256 -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"
+          fi
+          cat "archive-hashes-${{ matrix.tier }}.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: inputs.mode == 'archive'
+        with:
+          # NOT `pkg-*`: release.yml downloads `pattern: pkg-*` wholesale into the release
+          # assets, and the digest list is an internal hand-off, not a published asset.
+          name: archive-hashes-${{ matrix.tier }}
+          path: pkg/archive-hashes-${{ matrix.tier }}.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: inputs.mode == 'archive'
         with:
@@ -179,6 +246,9 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/sparq-cli${{ matrix.ext }}" "dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}"
           cp "target/${{ matrix.target }}/release/sparq-server${{ matrix.ext }}" "dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}"
+      # IN-BAND provenance (SLSA Build L2), retained for the same reason the archive lane keeps
+      # its own: it is what `gh attestation verify <binary> --repo sparq-org/sparq` reads. It is NOT
+      # the basis of the L3 claim — see the digest step below + dist.yml#provenance (#4570).
       - name: Attest build provenance (dist binaries)
         if: inputs.mode == 'binary'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -186,6 +256,40 @@ jobs:
           subject-path: |
             dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}
             dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}
+      # [OPUS-5] #4570 (GX-11 residual): the `binary`-mode twin of the archive digest step above.
+      # Publishes THIS tier's binary digests as data; dist.yml#provenance turns them into signed
+      # provenance in a job that runs no step of ours and holds a signing identity this job never
+      # sees. Same PORTABILITY caveat as the archive step — the two Darwin rows ship BSD `shasum`
+      # and no GNU `sha256sum` — and the same fail-closed-late risk: a broken digest step here
+      # only reds when someone dispatches dist.yml, on a lane no PR exercises. Hence the
+      # structural pin in scripts/tests/test_release_slsa_l3_provenance.py.
+      - name: Record dist binary digests (subjects for the isolated provenance builder)
+        if: inputs.mode == 'binary'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          binaries=( "sparq-cli-${{ matrix.tier }}${{ matrix.ext }}" "sparq-server-${{ matrix.tier }}${{ matrix.ext }}" )
+          for b in "${binaries[@]}"; do
+            if [ ! -f "$b" ]; then
+              echo "ERROR: staging produced no '$b' to attest for tier ${{ matrix.tier }}" >&2
+              exit 1
+            fi
+          done
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"
+          else
+            shasum -a 256 -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"
+          fi
+          cat "binary-hashes-${{ matrix.tier }}.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: inputs.mode == 'binary'
+        with:
+          # NOT `sparq-cli-*`: that is the launcher's per-tier binary payload artifact, and this
+          # digest list is an internal hand-off, not a shipped binary.
+          name: binary-hashes-${{ matrix.tier }}
+          path: dist/binary-hashes-${{ matrix.tier }}.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: inputs.mode == 'binary'
         with:
@@ -193,3 +297,104 @@ jobs:
           path: |
             dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}
             dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}
+
+  # ---- collect the per-tier archive digests into ONE `base64-subjects` blob ----
+  # [OPUS-5] sq-toze.25 (GX-11). WHY A SEPARATE JOB: a matrix job cannot carry a per-row job
+  # output (every row writes the same `outputs.*` key and the last writer wins), so the ten
+  # tiers hand their digests over as `archive-hashes-<tier>` artifacts and this job concatenates
+  # them. It runs NO build step — it downloads text, validates its shape, and base64-encodes it.
+  # It is deliberately NOT the signer either: it holds no OIDC token and declares
+  # `contents: read` only. The signing happens one job further out, in the trusted builder
+  # (release.yml#provenance), which is the whole point of the L3 boundary.
+  hashes:
+    name: collect archive digests
+    if: inputs.mode == 'archive'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      hashes: ${{ steps.combine.outputs.hashes }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-hashes-*
+          path: archive-hashes
+          merge-multiple: true
+      # FAIL-CLOSED. An empty or malformed subjects blob would make the generator produce
+      # provenance over nothing (or fail opaquely), and "provenance exists" would then be a
+      # vacuous claim — exactly the failure mode the compliance register warns about. So every
+      # line must be a real `<64-hex>  <name>` sha256sum record, and there must be at least one.
+      - name: Combine + base64-encode the subjects
+        id: combine
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=( archive-hashes/*.txt )
+          if [ "${#parts[@]}" -eq 0 ]; then
+            echo "ERROR: no archive-hashes-* artifact was produced by the build matrix" >&2
+            exit 1
+          fi
+          cat -- "${parts[@]}" > all.sha256
+          if ! [ -s all.sha256 ]; then
+            echo "ERROR: the combined subjects list is empty" >&2
+            exit 1
+          fi
+          while read -r digest name; do
+            if ! printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || [ -z "$name" ]; then
+              echo "ERROR: malformed sha256sum record: '$digest  $name'" >&2
+              exit 1
+            fi
+          done < all.sha256
+          echo "subjects for the isolated provenance builder:"
+          cat all.sha256
+          echo "hashes=$(base64 -w0 all.sha256)" >> "$GITHUB_OUTPUT"
+
+  # ---- collect the per-tier dist-binary digests into ONE `base64-subjects` blob ----
+  # [OPUS-5] #4570 (GX-11 residual): the `binary`-mode twin of `hashes` above, feeding
+  # dist.yml#provenance. Same three properties that make the archive lane an L3 hand-off and not
+  # theatre: it BUILDS nothing, it holds NO signing identity (`contents: read` only, no
+  # `id-token`), and it validates the blob FAIL-CLOSED — an empty or malformed subjects list
+  # would make the generator sign provenance over nothing, and "provenance exists" would then be
+  # a vacuous claim. Signing happens one job further out, inside the trusted builder.
+  binary-hashes:
+    name: collect dist binary digests
+    if: inputs.mode == 'binary'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      hashes: ${{ steps.combine.outputs.hashes }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: binary-hashes-*
+          path: binary-hashes
+          merge-multiple: true
+      - name: Combine + base64-encode the subjects
+        id: combine
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=( binary-hashes/*.txt )
+          if [ "${#parts[@]}" -eq 0 ]; then
+            echo "ERROR: no binary-hashes-* artifact was produced by the build matrix" >&2
+            exit 1
+          fi
+          cat -- "${parts[@]}" > all.sha256
+          if ! [ -s all.sha256 ]; then
+            echo "ERROR: the combined subjects list is empty" >&2
+            exit 1
+          fi
+          while read -r digest name; do
+            if ! printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || [ -z "$name" ]; then
+              echo "ERROR: malformed sha256sum record: '$digest  $name'" >&2
+              exit 1
+            fi
+          done < all.sha256
+          echo "subjects for the isolated provenance builder:"
+          cat all.sha256
+          echo "hashes=$(base64 -w0 all.sha256)" >> "$GITHUB_OUTPUT"

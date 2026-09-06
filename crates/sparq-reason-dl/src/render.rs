@@ -15,13 +15,19 @@
 // (b) **Human-readable diagnostics**: `render_to_turtle` converts the triple output back to
 //     a minimal Turtle string so a developer can inspect a structural model without a
 //     separate serialiser.
+// (c) **The L4 refutation budget fallback** ([OPUS-5] sq-pbz04.4.10): the tableau reasons over
+//     the structural model directly, but the RL/EL profile branches consume TRIPLES, so when a
+//     refutation exhausts the tableau budget `check::refutation_profile_fallback` renders the
+//     augmented model here to re-ask those branches. That path does NOT trust this module: it
+//     re-extracts the rendering and compares axiom multisets per call, so a rendering gap costs
+//     a fallback rather than feeding a reasoner the wrong graph. (Use (a)'s invariant as the
+//     contract; this is the same invariant, checked at runtime.)
 //
 // OUT-OF-SCOPE
 // ------------
-// The downstream consistency/satisfiability checker (L3/L4) operates on the structural model
-// directly and never needs RDF rendering — this module is a diagnostic/test aid, not a
-// production serialiser. No performance guarantees or stability commitments beyond the
-// round-trip invariant.
+// Not a production RDF serialiser: no performance guarantees and no stability commitments
+// beyond the round-trip invariant, and nothing downstream may assume a particular blank-node
+// labelling or triple order.
 
 use crate::model::{Axiom, ClassExpression, ObjectPropertyExpression, Ontology};
 use rustc_hash::FxHashSet;

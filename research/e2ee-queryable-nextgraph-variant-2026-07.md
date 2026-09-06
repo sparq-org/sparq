@@ -21,6 +21,18 @@ model buys sharing, multi-writer collaboration, and server-side availability at 
 of **more metadata leakage** (a DAG/sync-topology signal, overlay/topic membership as
 seen by a serving broker) than the pure client-only model.
 
+> **Reconciled 2026-07-26 (sq-1vbdy).** This record is the **privacy authority** of the
+> canonical Profile-BR set: its §5 threat model, §6 leakage table, and §8 BR-1…BR-9 clauses
+> stand. Its *mechanism* choices in §4.1–§4.2 (convergent object keys + dedup,
+> content-addressed block IDs, Merkle child keys, block-scoped read-caps, two-level
+> capabilities) and its "OR-Set of **triples**" are **superseded** by the v0 binding —
+> see the contradiction ledger in
+> [`e2ee-program-reconciliation-2026-07.md`](./e2ee-program-reconciliation-2026-07.md),
+> which also closes open questions §7 Q3(mechanism)/Q4/Q5/Q6. Companion records:
+> [`e2ee-nextgraph-variant-gpt56-2026-07.md`](./e2ee-nextgraph-variant-gpt56-2026-07.md)
+> (v0 wire binding) and [`sparql-crdt-gpt56-2026-07.md`](./sparql-crdt-gpt56-2026-07.md)
+> (the one shared CRDT).
+>
 > **Honesty banner.** Nothing here is a cryptographic-soundness claim. Every privacy
 > property is stated as **designed / intended**, never *proven* — the ZK/crypto
 > production gate **sq-qhy4** (P0, open) is live and no external accredited-cryptographer

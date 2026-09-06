@@ -763,6 +763,52 @@ mod shacl {
         let bad = store.validate("@prefix ex: <http://ex/> . ex:a ex:p", SHAPES, "turtle");
         assert!(bad.is_err(), "a truncated data graph must return Err");
     }
+
+    /// [SONNET-4.6] gh-2520: `validateStore(shapes, format)` validates the store's
+    /// OWN triples across the wasm/JS boundary — the stateful counterpart. (Report
+    /// equivalence with the stateless one-shot, which holds only modulo the
+    /// blank-node labels each shapes parse mints afresh, is asserted in the native
+    /// `src/shacl.rs` tests; here we pin that the export reads the stored triples.)
+    #[wasm_bindgen_test]
+    fn validate_store_reads_stored_triples() {
+        let store = Store::load(
+            r#"
+            @prefix ex: <http://example.org/> .
+            ex:bob a ex:Person ; ex:age -1 .
+        "#,
+            "turtle",
+        )
+        .unwrap();
+        let json = store
+            .validate_store(SHAPES, "turtle")
+            .expect("validateStore must return a report");
+        assert!(json.contains(r#""conforms":false"#), "{json}");
+        assert!(
+            json.contains(r#""focusNode":"<http://example.org/bob>""#),
+            "the store's own focus node: {json}"
+        );
+        assert!(
+            json.contains(r#""message":"age must be a non-negative integer""#),
+            "declared message: {json}"
+        );
+
+        // An empty store conforms vacuously — the receiver, not an argument, is
+        // what changed between the two calls.
+        let empty = Store::load("", "turtle").unwrap();
+        assert_eq!(
+            empty.validate_store(SHAPES, "turtle").unwrap(),
+            r#"{"conforms":true,"results":[]}"#
+        );
+    }
+
+    /// A malformed shapes document surfaces as the JsError Err arm (the arm that
+    /// cannot run natively), not a trap.
+    #[wasm_bindgen_test]
+    fn validate_store_shapes_parse_error_is_err() {
+        let store = Store::load("", "turtle").unwrap();
+        let bad = store.validate_store("@prefix sh: <http://ex/> . sh:a sh:p", "turtle");
+        assert!(bad.is_err(), "a truncated shapes graph must return Err");
+    }
 }
 
 // ---- [OPUS-4.8] sq-quly (#796): the opt-in SCS parse binding, in real wasm ----
@@ -849,7 +895,7 @@ shapeClass ex:Person {
 // `sparq_canon` fn the export delegates to — `JsError::new` panics off-wasm), so they
 // never touch the actual `#[wasm_bindgen]` free function. These drive the genuine wasm32
 // export through the JS boundary: the `String -> String` marshalling and the `Err`
-// (JsError) path the @jeswr/sparq RDF/JS `Dataset` relies on for toCanonical/equals/contains.
+// (JsError) path the @sparq-org/sparq RDF/JS `Dataset` relies on for toCanonical/equals/contains.
 #[cfg(feature = "canon")]
 mod canon {
     use super::*;
@@ -1002,5 +1048,283 @@ mod bytes_ingest {
             Store::load_bytes_with_base(&[0xC0], "turtle", "http://ex/").is_err(),
             "0xC0 (invalid UTF-8 lead) -> Err via loadBytesWithBase"
         );
+    }
+}
+
+// ---- [SONNET-4.6] sq-q4apb (#2644): the opt-in hosted-web forms bridge, in real wasm ----
+//
+// Drives the REAL exported `Store::deriveForm(data, shapes, focus, format, optionsJson)`
+// in a genuine wasm32 runtime — the surface `gui/app`'s `forms-bridge.ts` feature-detects
+// on the hosted `/app` bundle. The load-bearing assertion is the SAME one the native
+// `src/forms.rs` tests make, but through the wasm binding: the returned string must be
+// byte-identical to serialising `sparq_forms::derive_form`'s `FormDescription` directly,
+// so the bridge is provably a pass-through and never a reconstruction. Also covers the
+// `JsError` Err arm, which the native tests cannot reach (`JsError::new` panics off-wasm).
+#[cfg(feature = "forms")]
+mod forms {
+    use super::*;
+
+    // The same fixtures the native src/forms.rs tests and the desktop Tauri bridge use,
+    // so all three hosts stay pinned to one contract.
+    const FORM_DATA: &str = r#"
+        @prefix ex: <http://example.org/> .
+        ex:alice a ex:Person ; ex:name "Alice" ; ex:audit "reviewed" .
+    "#;
+
+    const FORM_SHAPES: &str = r#"
+        @prefix ex: <http://example.org/> .
+        @prefix sh: <http://www.w3.org/ns/shacl#> .
+
+        ex:PersonShape a sh:NodeShape ;
+            sh:targetClass ex:Person ;
+            sh:name "Person" ;
+            sh:property [ sh:path ex:name ; sh:name "Name" ; sh:minCount 1 ] .
+
+        ex:AuditShape a sh:NodeShape ;
+            sh:name "Audit" ;
+            sh:property [ sh:path ex:audit ; sh:name "Audit status" ] .
+    "#;
+
+    /// The FormDescription JSON serialised straight from the `sparq-forms` API — the
+    /// document the wasm binding must return verbatim.
+    fn direct_description(mode: sparq_forms::Mode, shape: Option<&str>) -> String {
+        let data = sparq_core::Graph::load_dataset(FORM_DATA, "turtle").expect("data fixture");
+        let shapes = sparq_core::Graph::load_dataset(FORM_SHAPES, "turtle").expect("shapes fixture");
+        let focus = oxrdf::Term::from(oxrdf::NamedNode::new_unchecked("http://example.org/alice"));
+        let options = sparq_forms::FormOptions {
+            mode,
+            shape: shape.map(|iri| oxrdf::Term::from(oxrdf::NamedNode::new_unchecked(iri))),
+            ..sparq_forms::FormOptions::default()
+        };
+        serde_json::to_string(&sparq_forms::derive_form(&data, &shapes, &focus, &options))
+            .expect("direct FormDescription serializes")
+    }
+
+    /// Applicable-shape derivation in BOTH modes crosses the wasm boundary byte-identical
+    /// to the direct `sparq_forms` serialization, with the mode-dependent editability
+    /// carried through.
+    #[wasm_bindgen_test]
+    fn derive_form_edit_and_view_match_direct_serialization() {
+        let store = Store::load("", "turtle").unwrap();
+        for (mode_text, mode) in [
+            ("edit", sparq_forms::Mode::Edit),
+            ("view", sparq_forms::Mode::View),
+        ] {
+            let json = store
+                .derive_form(
+                    FORM_DATA,
+                    FORM_SHAPES,
+                    "http://example.org/alice",
+                    "turtle",
+                    &format!("{{\"mode\":\"{}\"}}", mode_text),
+                )
+                .expect("applicable shape derives across the boundary");
+            assert_eq!(json, direct_description(mode, None), "{}", mode_text);
+
+            let parsed: serde_json::Value = serde_json::from_str(&json).expect("bridge JSON");
+            assert_eq!(parsed["mode"], mode_text);
+            assert_eq!(parsed["shape"]["value"], "http://example.org/PersonShape");
+            assert_eq!(parsed["groups"][0]["fields"][0]["label"], "Name");
+            assert_eq!(
+                parsed["groups"][0]["fields"][0]["editable"],
+                mode_text == "edit"
+            );
+        }
+    }
+
+    /// An explicit `shape` option pins the derivation to that node shape (which need not
+    /// target the focus node) — again byte-identical to the direct API call.
+    #[wasm_bindgen_test]
+    fn derive_form_explicit_shape_matches_direct_serialization() {
+        const AUDIT_SHAPE: &str = "http://example.org/AuditShape";
+        let store = Store::load("", "turtle").unwrap();
+        let json = store
+            .derive_form(
+                FORM_DATA,
+                FORM_SHAPES,
+                "http://example.org/alice",
+                "turtle",
+                &format!("{{\"mode\":\"edit\",\"shape\":\"{}\"}}", AUDIT_SHAPE),
+            )
+            .expect("explicit shape derives across the boundary");
+        assert_eq!(
+            json,
+            direct_description(sparq_forms::Mode::Edit, Some(AUDIT_SHAPE))
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("bridge JSON");
+        assert_eq!(parsed["shape"]["value"], AUDIT_SHAPE);
+        assert_eq!(parsed["shapes"][0]["via"], "explicit");
+        assert_eq!(parsed["groups"][0]["fields"][0]["label"], "Audit status");
+    }
+
+    /// The workbench actually sends N-Quads snapshots, so the same graphs in that syntax
+    /// must derive the same description (both snapshots share one `format`; the parse is
+    /// dataset-style, so named graphs survive).
+    #[wasm_bindgen_test]
+    fn derive_form_accepts_the_nquads_snapshots_the_workbench_sends() {
+        let store = Store::load("", "turtle").unwrap();
+        let data_nq = "<http://example.org/alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Person> .\n\
+                       <http://example.org/alice> <http://example.org/name> \"Alice\" .\n";
+        let shapes_nq = "<http://example.org/PersonShape> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/shacl#NodeShape> .\n\
+                         <http://example.org/PersonShape> <http://www.w3.org/ns/shacl#targetClass> <http://example.org/Person> .\n\
+                         <http://example.org/PersonShape> <http://www.w3.org/ns/shacl#property> _:p1 .\n\
+                         _:p1 <http://www.w3.org/ns/shacl#path> <http://example.org/name> .\n\
+                         _:p1 <http://www.w3.org/ns/shacl#name> \"Name\" .\n";
+        let json = store
+            .derive_form(
+                data_nq,
+                shapes_nq,
+                "http://example.org/alice",
+                "nquads",
+                "{\"mode\":\"edit\"}",
+            )
+            .expect("nquads snapshots derive");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("bridge JSON");
+        assert_eq!(parsed["shape"]["value"], "http://example.org/PersonShape");
+        assert_eq!(parsed["groups"][0]["fields"][0]["label"], "Name");
+    }
+
+    /// Malformed inputs surface as the `JsError` Err arm across the boundary — the
+    /// `try { … } catch` surface `forms-bridge.ts` relies on — never a trap, and never a
+    /// silently-defaulted derivation. (This arm constructs `JsError`, so only wasm can
+    /// exercise it.)
+    #[wasm_bindgen_test]
+    fn derive_form_malformed_inputs_are_err_not_trap() {
+        let store = Store::load("", "turtle").unwrap();
+        let derive = |data: &str, shapes: &str, focus: &str, options: &str| {
+            store.derive_form(data, shapes, focus, "turtle", options)
+        };
+        let alice = "http://example.org/alice";
+        assert!(
+            derive(FORM_DATA, FORM_SHAPES, alice, "not json").is_err(),
+            "unparseable options document"
+        );
+        assert!(
+            derive(FORM_DATA, FORM_SHAPES, alice, "[]").is_err(),
+            "options must be a JSON object"
+        );
+        assert!(
+            derive(FORM_DATA, FORM_SHAPES, alice, "{\"mode\":\"delete\"}").is_err(),
+            "unsupported mode"
+        );
+        assert!(
+            derive(FORM_DATA, FORM_SHAPES, alice, "{\"shape\":3}").is_err(),
+            "non-string shape option"
+        );
+        assert!(
+            derive(FORM_DATA, FORM_SHAPES, "not an iri", "{}").is_err(),
+            "unparseable focus node"
+        );
+        assert!(
+            derive("@prefix broken", FORM_SHAPES, alice, "{}").is_err(),
+            "unparseable data graph"
+        );
+        assert!(
+            derive(FORM_DATA, "@prefix broken", alice, "{}").is_err(),
+            "unparseable shapes graph"
+        );
+    }
+}
+
+// ---- [SONNET-4.6] sq-yz27r (#3251): remote-`@context` JSON-LD ingest, in real wasm ----
+//
+// These drive the REAL exported `Store::loadJsonLdWithContexts(text, contexts)` across the
+// JS boundary — specifically the two halves the native `src/jsonld_context.rs` tests cannot
+// reach, because both are wasm-bindgen imports that panic off-wasm: reading the JS
+// `[[url, documentText], …]` `js_sys::Array` argument, and the `JsError` Err arm. The
+// context-resolution semantics themselves are pinned natively; this proves the binding
+// actually exports to, and runs in, wasm. Compiled only under `jsonld-contexts`, as the
+// binding is.
+#[cfg(feature = "jsonld-contexts")]
+mod jsonld_contexts {
+    use super::*;
+    use wasm_bindgen::JsValue;
+
+    const VC_CONTEXT_URL: &str = "https://www.w3.org/2018/credentials/v1";
+    const VC_CONTEXT: &str = r#"{"@context":{
+        "id": "@id",
+        "type": "@type",
+        "VerifiableCredential": "https://www.w3.org/2018/credentials#VerifiableCredential",
+        "credentialSubject": {
+            "@id": "https://www.w3.org/2018/credentials#credentialSubject",
+            "@type": "@id"
+        }
+    }}"#;
+    const VC: &str = r#"{
+        "@context": "https://www.w3.org/2018/credentials/v1",
+        "id": "http://example.org/creds/1",
+        "type": "VerifiableCredential",
+        "credentialSubject": {"id": "http://example.org/subject/alice"}
+    }"#;
+
+    /// Builds the `[[url, documentText], …]` JS array the binding takes.
+    fn pairs(entries: &[(&str, &str)]) -> js_sys::Array {
+        let out = js_sys::Array::new();
+        for (url, document) in entries {
+            let pair = js_sys::Array::new();
+            pair.push(&JsValue::from_str(url));
+            pair.push(&JsValue::from_str(document));
+            out.push(&pair);
+        }
+        out
+    }
+
+    /// The bead's motivating case, end to end in wasm: a credential naming its `@context`
+    /// only by URL loads once the host hands the fetched context across the boundary, and
+    /// the terms it defines are queryable.
+    #[wasm_bindgen_test]
+    fn vc_with_url_context_loads_and_queries() {
+        let store =
+            Store::load_jsonld_with_contexts(VC, pairs(&[(VC_CONTEXT_URL, VC_CONTEXT)])).unwrap();
+        assert_eq!(store.size(), 2, "rdf:type + credentialSubject");
+        assert!(
+            store
+                .ask("ASK { <http://example.org/creds/1> a <https://www.w3.org/2018/credentials#VerifiableCredential> }")
+                .unwrap(),
+            "the `type` term resolved through the host-supplied remote context",
+        );
+    }
+
+    /// Fail-closed across the boundary: an unsupplied `@context` URL surfaces as the
+    /// `JsError` Err arm (a catchable JS throw), not a wasm trap and not a silent
+    /// partial parse.
+    #[wasm_bindgen_test]
+    fn unsupplied_context_is_the_err_arm_not_a_trap() {
+        assert!(
+            Store::load_jsonld_with_contexts(VC, js_sys::Array::new()).is_err(),
+            "an unsupplied remote @context must fail closed",
+        );
+    }
+
+    /// A malformed `contexts` element (not a 2-string array) is rejected rather than
+    /// skipped — the `js_sys` argument-reading path, unreachable from the native tests.
+    #[wasm_bindgen_test]
+    fn malformed_contexts_argument_is_rejected() {
+        let bad = js_sys::Array::new();
+        bad.push(&JsValue::from_str("not a pair"));
+        assert!(
+            Store::load_jsonld_with_contexts(VC, bad).is_err(),
+            "a non-array contexts element must throw",
+        );
+
+        let short = js_sys::Array::new();
+        let pair = js_sys::Array::new();
+        pair.push(&JsValue::from_str(VC_CONTEXT_URL));
+        short.push(&pair);
+        assert!(
+            Store::load_jsonld_with_contexts(VC, short).is_err(),
+            "a pair missing its document text must throw",
+        );
+    }
+
+    /// An inline `@context` still loads with an EMPTY contexts array, so the binding is a
+    /// superset of `load(_, "jsonld")` rather than a separate, stricter path.
+    #[wasm_bindgen_test]
+    fn inline_context_loads_with_no_supplied_documents() {
+        let doc = r#"{"@context":{"name":"http://schema.org/name"},
+                      "@id":"http://example.org/alice","name":"Alice"}"#;
+        let store = Store::load_jsonld_with_contexts(doc, js_sys::Array::new()).unwrap();
+        assert_eq!(store.size(), 1);
     }
 }

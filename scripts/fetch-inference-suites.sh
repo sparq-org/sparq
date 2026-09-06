@@ -52,50 +52,19 @@ OWL_URL="http://web.archive.org/web/${OWL_SNAPSHOT}if_/http://owl.semanticweb.or
 OWL_SHA256="446e9eae0488e7eb58a8bd7db92b5fb358316c63e3cad1749103cd912664bee4"
 OWL_DEST="$ROOT/tests/w3c/owl2/all.rdf"
 
-sha256_of() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
-    else
-        shasum -a 256 "$1" | awk '{print $1}'
-    fi
-}
-
-if [ -f "$OWL_DEST" ] && [ "$(sha256_of "$OWL_DEST")" = "$OWL_SHA256" ]; then
-    echo "OWL 2 test cases already present (sha256 ok) — nothing to do."
-else
-    mkdir -p "$(dirname "$OWL_DEST")"
-    echo "Downloading the OWL 2 test-case export (archived snapshot $OWL_SNAPSHOT)…"
-    # [OPUS-4.8] The Internet Archive (web.archive.org) regularly RESETS large
-    # transfers from CI runner IP ranges mid-stream: the symptom is
-    #   curl: (56) Recv failure: Connection reset by peer
-    # which exits 56. Plain `--retry` does NOT cover (56) — it only retries
-    # transient HTTP statuses (408/429/5xx) and connection-establishment
-    # failures, so the previous `--retry 3` never actually re-tried this
-    # reset and red-gated every engine PR (sq-y5dz). `--retry-all-errors`
-    # (curl ≥7.71, runner has 8.x) makes curl retry on ANY error incl. (56);
-    # `--retry-connrefused` covers a refused connect; the connect/max-time
-    # bounds keep a genuinely-dead source from hanging the lane. The sha256
-    # gate below still makes any payload drift loud, so retrying is safe.
-    if ! curl -sSfL \
-            --retry 5 --retry-delay 5 --retry-all-errors --retry-connrefused \
-            --connect-timeout 30 --max-time 300 \
-            -o "$OWL_DEST.tmp" "$OWL_URL"; then
-        rm -f "$OWL_DEST.tmp"
-        echo "ERROR: could not download the OWL 2 test-case export after retries." >&2
-        echo "  URL: $OWL_URL" >&2
-        echo "  This is the Internet Archive snapshot of the (offline) OWL WG wiki" >&2
-        echo "  export; transient connection resets are common. Re-run the job, or" >&2
-        echo "  if the archive is persistently unreachable, see scripts/fetch-inference-suites.sh." >&2
-        exit 1
-    fi
-    HAVE_SHA="$(sha256_of "$OWL_DEST.tmp")"
-    if [ "$HAVE_SHA" != "$OWL_SHA256" ]; then
-        rm -f "$OWL_DEST.tmp"
-        echo "ERROR: OWL 2 export checksum mismatch (got $HAVE_SHA, want $OWL_SHA256)." >&2
-        exit 1
-    fi
-    mv "$OWL_DEST.tmp" "$OWL_DEST"
-    echo "OWL 2 test cases pinned (snapshot $OWL_SNAPSHOT, sha256 ok)."
+# [OPUS-5] #4935 — the sha256-gated fetch now lives in the shared lib as
+# `fetch_pinned_file` (with the `--retry-all-errors` rationale sq-y5dz added
+# here). Extracting it made the OFFLINE-ON-HIT property — a payload already at
+# the pinned digest costs ZERO network calls — directly testable, which is what
+# scripts/tests/test_inference_corpus_cache.py asserts and what makes the CI
+# Actions-cache restore of tests/w3c/owl2 genuinely decouple this GATING lane
+# from web.archive.org's availability.
+if ! fetch_pinned_file "$OWL_URL" "$OWL_DEST" "$OWL_SHA256" \
+        "OWL 2 test cases (archived snapshot $OWL_SNAPSHOT)"; then
+    echo "  This is the Internet Archive snapshot of the (offline) OWL WG wiki" >&2
+    echo "  export; transient connection resets are common. Re-run the job, or" >&2
+    echo "  if the archive is persistently unreachable, see scripts/fetch-inference-suites.sh." >&2
+    exit 1
 fi
 
 # --- 4. W3C RIF Working Group test cases (Core subset) ------------------------

@@ -13,12 +13,10 @@
 //   * ENDPOINT — a remote sparq-server (`Accept: application/x-sparq-explain+json`), degrading
 //     HONESTLY to the text plan on a lean/older server (rendered as text, never a faked tree).
 //
-// The MONITOR is honest about its scope (queries issued from THIS workbench) and about what
-// Kill can do per target: an endpoint Kill aborts the HTTP request (the server bounds its own
-// side with the cooperative budget/timeout); an in-tab/native explain is a single engine call
-// with no cancellation point mid-flight, so its Kill is shown disabled with the reason.
-// A server-side ALL-clients monitor/kill needs net-new sparq-server machinery (tracked as
-// follow-up work) — this panel never pretends to be one.
+// The MONITOR separates this workbench's local request registry from sparq-server's opt-in
+// all-clients `/queries` registry. Local endpoint Kill aborts this tab's fetch; global Kill
+// calls the server's cooperative cancellation route. In-tab/native explain remains disabled
+// because it has no genuine mid-flight cancellation point.
 
 import * as React from "react";
 import { Activity, Network, OctagonX, Telescope } from "lucide-react";
@@ -36,10 +34,14 @@ import { cn } from "@/lib/utils";
 import { useEngine } from "@/lib/engine-context";
 import { isTauriRuntime } from "@/lib/tauri-ipc";
 import {
+  fetchEndpointRunningQueries,
   getRunning,
+  killEndpointRunningQuery,
   killQuery,
+  QueryRegistryHttpError,
   subscribeRunning,
   trackQuery,
+  type EndpointRunningQuery,
   type RunningQuery,
 } from "@/lib/query-monitor";
 import { PlanTree } from "@/components/workbench/plan-tree";
@@ -224,7 +226,14 @@ export function PlanExplorer() {
           onExplain={() => void runEndpoint("plan")}
           onAnalyze={() => void runEndpoint("analyze")}
         />
-        <QueryMonitor />
+        <QueryMonitor
+          endpointUrl={endpointBlocked ? "" : endpointUrl.trim()}
+          endpointToken={endpointToken}
+          tokenTransitRisk={endpointWarnings.some(
+            (warning) =>
+              warning.code === "token-over-plaintext" && warning.level === "warning",
+          )}
+        />
       </div>
     </div>
   );
@@ -370,7 +379,15 @@ function EndpointStrip({
 // The live query monitor.
 // ---------------------------------------------------------------------------
 
-function QueryMonitor() {
+function QueryMonitor({
+  endpointUrl,
+  endpointToken,
+  tokenTransitRisk,
+}: {
+  endpointUrl: string;
+  endpointToken: string;
+  tokenTransitRisk: boolean;
+}) {
   const running = React.useSyncExternalStore(subscribeRunning, getRunning, getRunning);
   // Re-render each second while anything is in flight, so the elapsed readout is live.
   const [, forceTick] = React.useReducer((n: number) => n + 1, 0);
@@ -380,6 +397,18 @@ function QueryMonitor() {
     return () => clearInterval(t);
   }, [running.length]);
 
+  const [monitoredEndpoint, setMonitoredEndpoint] = React.useState<{
+    url: string;
+    token: string;
+  } | null>(null);
+  const canMonitor = endpointUrl !== "" && !tokenTransitRisk;
+
+  React.useEffect(() => {
+    setMonitoredEndpoint((current) =>
+      current && (current.url !== endpointUrl || current.token !== endpointToken) ? null : current,
+    );
+  }, [endpointUrl, endpointToken]);
+
   return (
     <div className="px-3 py-2" data-plan-monitor>
       <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -387,8 +416,7 @@ function QueryMonitor() {
       </h3>
       {running.length === 0 ? (
         <p className="py-1 text-xs text-muted-foreground" data-plan-monitor-empty>
-          No queries in flight. (Server-side monitoring of OTHER clients needs a sparq-server
-          running-queries surface — tracked as follow-up work.)
+          No queries from this workbench in flight.
         </p>
       ) : (
         <ul className="divide-y divide-border">
@@ -397,7 +425,250 @@ function QueryMonitor() {
           ))}
         </ul>
       )}
+      <div className="mt-2 border-t border-border pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Running queries — endpoint (all clients)
+          </h3>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!monitoredEndpoint && !canMonitor}
+            onClick={() =>
+              setMonitoredEndpoint(
+                monitoredEndpoint ? null : { url: endpointUrl, token: endpointToken },
+              )
+            }
+            data-plan-endpoint-monitor-toggle
+          >
+            {monitoredEndpoint ? "Stop monitoring" : "Monitor endpoint"}
+          </Button>
+        </div>
+        {tokenTransitRisk && (
+          <p className="py-1 text-xs text-muted-foreground">
+            Endpoint monitoring is unavailable while a bearer token would be sent over plaintext.
+          </p>
+        )}
+        {monitoredEndpoint ? (
+          <EndpointQueryMonitor
+            endpointUrl={monitoredEndpoint.url}
+            endpointToken={monitoredEndpoint.token}
+          />
+        ) : (
+          <p className="py-1 text-xs text-muted-foreground">
+            Server-side monitoring is opt-in and starts only when requested.
+          </p>
+        )}
+      </div>
     </div>
+  );
+}
+
+type EndpointMonitorState =
+  | { kind: "loading" }
+  | { kind: "loaded"; queries: EndpointRunningQuery[] }
+  | { kind: "error"; message: string; destructive: boolean };
+
+function endpointRegistryMessage(error: unknown): {
+  message: string;
+  retry: boolean;
+  destructive: boolean;
+} {
+  if (error instanceof QueryRegistryHttpError) {
+    if (error.status === 404 || error.status === 405) {
+      return {
+        message:
+          "Server-side registry not enabled (start sparq-server with --features query-registry).",
+        retry: false,
+        destructive: false,
+      };
+    }
+    if (error.status === 401 || error.status === 403) {
+      return {
+        message: "Token not accepted for the registry read gate.",
+        retry: false,
+        destructive: false,
+      };
+    }
+  }
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    retry: true,
+    destructive: true,
+  };
+}
+
+function EndpointQueryMonitor({
+  endpointUrl,
+  endpointToken,
+}: {
+  endpointUrl: string;
+  endpointToken: string;
+}) {
+  const [state, setState] = React.useState<EndpointMonitorState>({ kind: "loading" });
+  const [killing, setKilling] = React.useState<string | null>(null);
+  const [killError, setKillError] = React.useState<string | null>(null);
+  const controllerRef = React.useRef<AbortController | null>(null);
+  const requestSequence = React.useRef(0);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    setState({ kind: "loading" });
+    const poll = async () => {
+      const sequence = ++requestSequence.current;
+      try {
+        const queries = await fetchEndpointRunningQueries(
+          endpointUrl,
+          endpointToken.trim() || undefined,
+          fetch,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        if (sequence === requestSequence.current) {
+          setState({ kind: "loaded", queries });
+          setKillError(null);
+        }
+        timeout = setTimeout(() => void poll(), 2000);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (sequence !== requestSequence.current) {
+          timeout = setTimeout(() => void poll(), 2000);
+          return;
+        }
+        const result = endpointRegistryMessage(error);
+        setState({ kind: "error", message: result.message, destructive: result.destructive });
+        if (result.retry) timeout = setTimeout(() => void poll(), 2000);
+      }
+    };
+    void poll();
+    return () => {
+      controller.abort();
+      controllerRef.current = null;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [endpointUrl, endpointToken]);
+
+  const kill = React.useCallback(
+    async (id: string) => {
+      setKilling(id);
+      setKillError(null);
+      const signal = controllerRef.current?.signal;
+      const sequence = ++requestSequence.current;
+      try {
+        await killEndpointRunningQuery(
+          endpointUrl,
+          id,
+          endpointToken.trim() || undefined,
+          fetch,
+          signal,
+        );
+        if (signal?.aborted) return;
+        const queries = await fetchEndpointRunningQueries(
+          endpointUrl,
+          endpointToken.trim() || undefined,
+          fetch,
+          signal,
+        );
+        if (!signal?.aborted && sequence === requestSequence.current) {
+          setState({ kind: "loaded", queries });
+        }
+      } catch (error) {
+        if (signal?.aborted) return;
+        if (error instanceof QueryRegistryHttpError && error.status === 404) {
+          setState((current) =>
+            current.kind === "loaded"
+              ? { kind: "loaded", queries: current.queries.filter((query) => query.id !== id) }
+              : current,
+          );
+        } else {
+          setKillError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setKilling((current) => (current === id ? null : current));
+        }
+      }
+    },
+    [endpointUrl, endpointToken],
+  );
+
+  return (
+    <div data-plan-endpoint-monitor>
+      {killError && (
+        <p className="py-1 text-xs text-destructive" role="status" data-plan-endpoint-kill-error>
+          {killError}
+        </p>
+      )}
+      {state.kind === "loading" ? (
+        <p className="py-1 text-xs text-muted-foreground">Loading server registry…</p>
+      ) : state.kind === "error" ? (
+        <p
+          className={cn(
+            "py-1 text-xs",
+            state.destructive ? "text-destructive" : "text-muted-foreground",
+          )}
+          role="status"
+          data-plan-endpoint-monitor-error
+        >
+          {state.message}
+        </p>
+      ) : state.queries.length === 0 ? (
+        <p className="py-1 text-xs text-muted-foreground" data-plan-endpoint-monitor-empty>
+          No server-side queries in flight.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {state.queries.map((query) => (
+            <EndpointMonitorRow
+              key={query.id}
+              query={query}
+              killing={killing === query.id}
+              onKill={() => void kill(query.id)}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function EndpointMonitorRow({
+  query,
+  killing,
+  onKill,
+}: {
+  query: EndpointRunningQuery;
+  killing: boolean;
+  onKill: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-2 py-1 text-xs" data-plan-endpoint-monitor-row>
+      <span className="shrink-0 rounded border border-border px-1 text-[10px] uppercase text-muted-foreground">
+        {query.kind}
+      </span>
+      <span
+        className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
+        title={query.fingerprint}
+      >
+        {query.fingerprint}
+      </span>
+      <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+        {(query.elapsed_ms / 1000).toFixed(1)}s
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={killing}
+        onClick={onKill}
+        title={`Cooperatively cancel server-side ${query.kind} ${query.id}`}
+        data-plan-endpoint-kill
+      >
+        <OctagonX className="size-3.5" aria-hidden />
+        {killing ? "Killing…" : "Kill"}
+      </Button>
+    </li>
   );
 }
 

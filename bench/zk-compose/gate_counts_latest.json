@@ -17,6 +17,7 @@
     "filter_signed_int_d2": { "circuit_size": 17416 },
     "filter_signed_int_d4": { "circuit_size": 17416 },
     "filter_value_dl_decimal": { "circuit_size": 3070 },
+    "filter_value_dl_datetime": { "circuit_size": 3070 },
     "filter_value_dl_f64": { "circuit_size": 4502 },
     "filter_value_dl_int": { "circuit_size": 3033 },
     "hidden_issuer_d4": { "circuit_size": 24452 },

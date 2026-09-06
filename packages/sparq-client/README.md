@@ -175,6 +175,24 @@ npm run sync:wasm-types               # copies the fresh js/wasm d.ts into src/g
 This eliminates the last hand-copy: the export **is** the generated type, and a hand mirror
 cannot silently reappear because the byte-identity check ties the tracked surface to the engine.
 
+## Running the tests — and which lane gates them
+
+```bash
+npm install    # from here or from the repo root; this is a workspace member
+npm test       # node --test over test/*.test.mjs, through the ts-loader
+```
+
+The gating lane for this package is the **`gui.yml` `shared TS client typecheck` job**
+(`npm install` → `npm run typecheck` → `npm test`), which carries no
+`.github/advisory-registry.json` declaration and therefore gates. **`js.yml` never runs this
+suite** — it covers `js/`, `packages/rdfjs-conformance`, `packages/eyereasoner-compat` and
+`packages/solid-server` only — so a green `js` check is not evidence about anything here.
+
+`npm test` runs a `pretest` preflight (`scripts/check-test-deps.mjs`) that resolves the lazy
+codec dependencies first. `src/decompress.ts` loads `fzstd` / `seek-bzip` through `import()`
+inside the invocation path, so without that preflight an install which skipped this member
+surfaces as failing bzip2 decode tests rather than as the missing dependency it is (#3006).
+
 ## Honesty
 
 No performance number is asserted anywhere in this package (this repo's work box is

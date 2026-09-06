@@ -3,7 +3,12 @@
 #
 # One self-contained leg mapping per opt-in feature. Assembled into the feature-matrix
 # `opt-in-features` strategy by scripts/assemble-feature-matrix.py; adding a leg for
-# THIS crate edits only THIS file (bead sq-ibrze).
+# THIS crate edits no OTHER crate's fragment (bead sq-ibrze).
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -61,4 +66,40 @@
 - name: "sparq-lws-core (wasm)"
   crate: "sparq-lws-core"
   features: "wasm"
+  test: true
+
+# [OPUS-5] sq-hed3q: the opt-in trust-graph admission seam (src/authz/trust_admit.rs) — the
+# library adapter from the sparq-trust admission gate onto this crate's AccessMode/Decision
+# vocabulary. tests/lws_trust_admit.rs is entirely `#![cfg(feature = "trust-graph")]`, so without
+# this leg the seam's signed-credential positive path, its fail-closed cases, and its adversarial
+# never-flips-a-WAC-denial invariants never compile or run in CI.
+- name: "sparq-lws-core (trust-graph)"
+  crate: "sparq-lws-core"
+  features: "trust-graph"
+  test: true
+
+# [OPUS-5] sq-gg0qq.11: the opt-in ODRL policy gate on the LDP read / SPARQL query path
+# (`src/authz/odrl.rs`, sq-elg47). THIS LEG WAS MISSING: `tests/odrl_gate.rs` is entirely
+# `#![cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]`, and `odrl-authz` is
+# default-OFF, so ci.yml's `cargo nextest archive --workspace --all-targets` (whose only
+# `--features` are the three sparq-vectors ones) compiled the file EMPTY and no leg here
+# enabled it — the suite's four
+# invariants (deny-overrides on a WAC-public target, permit-extends on a WAC-private target,
+# graph granularity, and unattached-gate ⇒ behaviour-identical) ran NOWHERE. That is the
+# sq-vya1 silent gap this lane exists to close.
+#
+# The gap survived `feature-matrix-tiers.py --enforce` because invariant (2) only classifies
+# (crate, feature) pairs that ALREADY APPEAR IN A LEG: a declared cargo feature with ZERO legs
+# is never handed to the detector, so it is invisible to the guard rather than sensitive-and-
+# uncovered. Closing that hole repo-wide is a separate change: 23 OTHER crates still declare at
+# least one feature with no leg. Not all of those are gaps — ci.yml's
+# `cargo clippy --workspace --all-targets --all-features` keeps every feature COMPILING; what a
+# missing leg costs is test EXECUTION, which is only lost when a suite is cfg-gated on it.
+#
+# The seam composes at the decision layer, not the store backend, so the leg needs no
+# `embedded-sparq` addition — the suite runs on the in-memory store doubles with the crate's
+# default features on.
+- name: "sparq-lws-core (odrl-authz)"
+  crate: "sparq-lws-core"
+  features: "odrl-authz"
   test: true

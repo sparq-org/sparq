@@ -17,8 +17,10 @@ use serde_json::{json, Value};
 
 use crate::jsonrpc::{
     Request, Response, RpcError, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST,
-    METHOD_NOT_FOUND,
+    METHOD_NOT_FOUND, RESOURCE_NOT_FOUND,
 };
+use crate::prompts;
+use crate::resources::{self, ReadError};
 use crate::tools;
 
 /// The newest MCP protocol revision this server implements — the version offered in
@@ -34,12 +36,13 @@ pub const PROTOCOL_VERSION: &str = "2025-11-25";
 /// not declare, and the plain `type`/`properties`/`required` tool input schemas are
 /// valid under the JSON Schema 2020-12 dialect that 2025-11-25 makes the default.
 ///
-/// The 2025-03-26 revision is deliberately ABSENT: it is the one revision that
-/// REQUIRES receiving JSON-RPC batches (added there, removed again in 2025-06-18),
-/// which this one-object-per-message dispatch core does not implement — so claiming
-/// it would overstate conformance. A 2025-03-26 client is offered
-/// [`PROTOCOL_VERSION`] instead and decides whether to proceed. [SONNET-4.6] sq-bvnqm
-pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2024-11-05"];
+/// 2025-03-26 is the one revision that REQUIRES receiving JSON-RPC batches (added
+/// there, removed again in 2025-06-18). [OPUS-5] (gh #2497) [`McpServer::handle_message`]
+/// now accepts a top-level batch array in both dispatch cores, so the revision is claimed here
+/// rather than declined; before that it was deliberately absent because claiming it
+/// would have overstated conformance. [SONNET-4.6] sq-bvnqm
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+    &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// MCP version negotiation over the client's `initialize` params: accept the
 /// client's proposed `protocolVersion` when it is one we support, otherwise respond
@@ -168,36 +171,21 @@ impl McpServer {
         &self.config
     }
 
-    /// Handle one raw JSON-RPC message. Returns `Ok(Some(response_json))` for a
-    /// request, `Ok(None)` for a notification (no response is emitted), and a
-    /// serialized error response for a malformed / failed request.
+    /// Handle one raw JSON-RPC message. Returns `Some(response_json)` for a request,
+    /// `None` for a notification (no response is emitted), and a serialized error
+    /// response for a malformed / failed request.
     ///
-    /// The string is one complete JSON object; the transport is responsible for
-    /// delimiting (the stdio transport uses one object per line).
+    /// The string is one complete JSON value; the transport is responsible for
+    /// delimiting (the stdio transport uses one value per line). That value may be a
+    /// single request object or a top-level **batch array**, in which case the reply is
+    /// an array of the non-notification responses: every element is dispatched in order,
+    /// notification entries are omitted, an all-notification batch gets no response at
+    /// all, an empty array is answered with a single (non-array) `INVALID_REQUEST` error,
+    /// and a malformed element gets its own null-id error without voiding the rest of the
+    /// batch — the JSON-RPC 2.0 §6 contract the MCP 2025-03-26 revision requires.
+    /// [OPUS-5] gh #2497
     pub fn handle_message(&mut self, raw: &str) -> Option<String> {
-        let req: Request = match serde_json::from_str(raw) {
-            Ok(r) => r,
-            Err(e) => {
-                // A parse error cannot be correlated to an id ⇒ id is JSON null.
-                let resp = Response::err(
-                    Value::Null,
-                    RpcError::new(INVALID_REQUEST, format!("invalid JSON-RPC request: {}", e)),
-                );
-                return Some(serialize(&resp));
-            }
-        };
-        let is_notification = req.is_notification();
-        let id = req.id.clone().unwrap_or(Value::Null);
-        let outcome = self.dispatch(&req);
-        if is_notification {
-            // Notifications never get a response, even on error.
-            return None;
-        }
-        let resp = match outcome {
-            Ok(result) => Response::ok(id, result),
-            Err(e) => Response::err(id, e),
-        };
-        Some(serialize(&resp))
+        handle_raw(raw, |req| self.dispatch(req))
     }
 
     /// Route a request to its method handler. Returns the JSON `result` or a JSON-RPC
@@ -210,6 +198,11 @@ impl McpServer {
             "ping" => Ok(json!({})),
             "tools/list" => Ok(self.tools_list_result()),
             "tools/call" => self.tools_call(&req.params),
+            // [SONNET-4.6] sq-sjey1: the read-only resources + prompts surfaces.
+            "resources/list" => Ok(self.resources_list()),
+            "resources/read" => self.resources_read(&req.params),
+            "prompts/list" => Ok(self.prompts_list()),
+            "prompts/get" => self.prompts_get(&req.params),
             other => Err(RpcError::new(
                 METHOD_NOT_FOUND,
                 format!("method not found: {}", other),
@@ -218,11 +211,21 @@ impl McpServer {
     }
 
     /// The `initialize` handshake result: the negotiated protocol version, server
-    /// info, and the declared capabilities (just `tools`).
+    /// info, and the declared capabilities.
+    ///
+    /// [SONNET-4.6] sq-sjey1: `resources` and `prompts` join `tools`. Both sub-capability
+    /// flags are declared FALSE and mean it: this server never pushes an unsolicited
+    /// `listChanged` notification, and it implements no `resources/subscribe` (the pod
+    /// server — feature `solid` — is the one that does, and declares `subscribe: true`
+    /// itself). Declaring a flag whose machinery does not exist would be an overclaim.
     fn initialize_result(&self, params: &Value) -> Value {
         json!({
             "protocolVersion": negotiate_protocol_version(params),
-            "capabilities": { "tools": {} },
+            "capabilities": {
+                "tools": {},
+                "resources": { "subscribe": false, "listChanged": false },
+                "prompts": { "listChanged": false },
+            },
             "serverInfo": {
                 "name": self.config.server_name,
                 "version": env!("CARGO_PKG_VERSION"),
@@ -235,6 +238,65 @@ impl McpServer {
     fn tools_list_result(&self) -> Value {
         let tools: Vec<Value> = tools::advertised(self).iter().map(|t| t.to_json()).collect();
         json!({ "tools": tools })
+    }
+
+    /// `resources/list`: the dataset descriptor, the default graph, and one entry per
+    /// named graph. See [`crate::resources`]. [SONNET-4.6] sq-sjey1
+    fn resources_list(&self) -> Value {
+        json!({ "resources": resources::descriptors(&self.graph) })
+    }
+
+    /// `resources/read`: materialise one resource in the MCP `contents` shape, under the
+    /// server's [`QueryBudget`].
+    ///
+    /// A URI this server does not serve is MCP's `RESOURCE_NOT_FOUND`; a served resource
+    /// that could not be materialised (a tripped budget) is an INTERNAL error, because
+    /// reporting it as "not found" would assert something false about the dataset.
+    /// [SONNET-4.6] sq-sjey1
+    fn resources_read(&self, params: &Value) -> Result<Value, RpcError> {
+        let uri = params.get("uri").and_then(Value::as_str).ok_or_else(|| {
+            RpcError::new(INVALID_PARAMS, "resources/read requires a string `uri`")
+        })?;
+        let text = resources::read(&self.graph, uri, &self.budget()).map_err(|e| match e {
+            ReadError::NotFound(m) => RpcError::new(RESOURCE_NOT_FOUND, m),
+            ReadError::Failed(m) => RpcError::new(INTERNAL_ERROR, m),
+        })?;
+        Ok(json!({
+            "contents": [ {
+                "uri": uri,
+                "mimeType": resources::NTRIPLES_MIME,
+                "text": text,
+            } ]
+        }))
+    }
+
+    /// `prompts/list`: the static canned-query prompt catalog. See [`crate::prompts`].
+    /// [SONNET-4.6] sq-sjey1
+    fn prompts_list(&self) -> Value {
+        let prompts: Vec<Value> = prompts::PROMPTS.iter().map(|p| p.to_json()).collect();
+        json!({ "prompts": prompts })
+    }
+
+    /// `prompts/get`: render one prompt into the MCP `messages` shape. An unknown prompt
+    /// name and an unusable argument are both `INVALID_PARAMS`, as the MCP prompts spec
+    /// prescribes — a prompt is never rendered around an argument that failed validation.
+    /// [SONNET-4.6] sq-sjey1
+    fn prompts_get(&self, params: &Value) -> Result<Value, RpcError> {
+        let name = params
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "prompts/get requires a string `name`"))?;
+        let spec = prompts::find(name)
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, format!("unknown prompt: {}", name)))?;
+        let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        let text = (spec.render)(&args).map_err(|m| RpcError::new(INVALID_PARAMS, m))?;
+        Ok(json!({
+            "description": spec.description,
+            "messages": [ {
+                "role": "user",
+                "content": { "type": "text", "text": text },
+            } ]
+        }))
     }
 
     /// Handle a `tools/call`: validate the requested tool name + arguments, run it,
@@ -268,6 +330,8 @@ impl McpServer {
             "void" => self.tool_void(&args),
             #[cfg(feature = "nlq")]
             "ask" => self.tool_ask(&args),
+            #[cfg(feature = "nlq")]
+            "nl_query" => self.tool_nl_query(&args),
             #[cfg(feature = "templates")]
             "template_list" => self.tool_template_list(),
             #[cfg(feature = "templates")]
@@ -344,6 +408,15 @@ impl McpServer {
     fn tool_ask(&self, args: &Value) -> Result<String, String> {
         let question = arg_str(args, "question")?;
         crate::nlq::ask(&self.graph, question, &self.budget())
+    }
+
+    /// `nl_query` (feature `nlq`): server-side NL→SPARQL **translation** via sparq-nlq —
+    /// the query is validated but never executed, so it takes no [`QueryBudget`]. Degrades
+    /// cleanly on the same "not configured" path as `ask`. [SONNET-4.6] sq-sj1f9
+    #[cfg(feature = "nlq")]
+    fn tool_nl_query(&self, args: &Value) -> Result<String, String> {
+        let question = arg_str(args, "question")?;
+        crate::nlq::nl_query(&self.graph, question)
     }
 
     /// `stats`: dataset totals as a small JSON object.
@@ -666,4 +739,114 @@ pub(crate) fn serialize(resp: &Response) -> String {
             INTERNAL_ERROR
         )
     })
+}
+
+/// Serialize a batch of responses as a JSON array, with the same never-panics
+/// fallback as [`serialize`].
+fn serialize_batch(responses: &[Response]) -> String {
+    serde_json::to_string(responses).unwrap_or_else(|_| {
+        format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":{},\"message\":\"response serialization failed\"}}}}",
+            INTERNAL_ERROR
+        )
+    })
+}
+
+/// The response to an uncorrelatable parse failure: JSON-RPC gives us no id to echo
+/// back, so the id is JSON null.
+fn parse_error(e: serde_json::Error) -> Response {
+    Response::err(
+        Value::Null,
+        RpcError::new(INVALID_REQUEST, format!("invalid JSON-RPC request: {}", e)),
+    )
+}
+
+/// Dispatch one already-parsed request, returning its response — or `None` when it is
+/// a notification, which never gets a response, even on error.
+fn dispatch_request<F>(req: &Request, dispatch: &mut F) -> Option<Response>
+where
+    F: FnMut(&Request) -> Result<Value, RpcError>,
+{
+    let is_notification = req.is_notification();
+    let id = req.id.clone().unwrap_or(Value::Null);
+    let outcome = dispatch(req);
+    if is_notification {
+        return None;
+    }
+    Some(match outcome {
+        Ok(result) => Response::ok(id, result),
+        Err(e) => Response::err(id, e),
+    })
+}
+
+/// Dispatch one *batch element*. An element that is not a well-formed request object
+/// gets its own `INVALID_REQUEST` error rather than voiding the whole batch, which is
+/// what JSON-RPC 2.0 §6 requires.
+fn dispatch_element<F>(elem: Value, dispatch: &mut F) -> Option<Response>
+where
+    F: FnMut(&Request) -> Result<Value, RpcError>,
+{
+    match serde_json::from_value::<Request>(elem) {
+        Ok(req) => dispatch_request(&req, dispatch),
+        Err(e) => Some(parse_error(e)),
+    }
+}
+
+/// The shared framing core behind [`McpServer::handle_message`] and its pod twin
+/// `SolidMcpServer::handle_message`: take one raw JSON-RPC message — a single request
+/// object **or a top-level batch array** — and route each request through `dispatch`.
+///
+/// [OPUS-5] (gh #2497) Batch *receipt* is the one thing the MCP **2025-03-26** revision
+/// requires that the other revisions do not (batching was added there and removed again
+/// in 2025-06-18), so it is what lets `2025-03-26` sit in
+/// [`SUPPORTED_PROTOCOL_VERSIONS`]. Per JSON-RPC 2.0 §6:
+///
+/// - every element is dispatched in order and the responses come back as a JSON array;
+/// - notification entries are omitted from that array;
+/// - a batch of nothing but notifications gets no response at all (`None`), exactly
+///   like a single notification;
+/// - an EMPTY array is itself an invalid request, answered with a single *non-array*
+///   error object;
+/// - a malformed element is answered with its own null-id error and does not void the
+///   rest of the batch.
+///
+/// A batch is accepted whatever revision was negotiated: receiving one is a strict
+/// superset of the revisions that dropped batching, the framing is unambiguous, and
+/// these servers keep no negotiated-version state to reject it against. Note the
+/// direction — an array is only ever emitted in reply to an array, never unsolicited,
+/// so a client speaking a batch-free revision is never handed one it did not ask for.
+pub(crate) fn handle_raw<F>(raw: &str, mut dispatch: F) -> Option<String>
+where
+    F: FnMut(&Request) -> Result<Value, RpcError>,
+{
+    // A top-level JSON array can only begin with `[` once insignificant leading
+    // whitespace is skipped, so this one-byte probe keeps the single-object path (the
+    // overwhelmingly common one) on exactly the parse it always had: straight to
+    // `Request`, with no intermediate `Value`.
+    if raw.trim_start().starts_with('[') {
+        let elements: Vec<Value> = match serde_json::from_str(raw) {
+            Ok(elements) => elements,
+            Err(e) => return Some(serialize(&parse_error(e))),
+        };
+        if elements.is_empty() {
+            return Some(serialize(&Response::err(
+                Value::Null,
+                RpcError::new(INVALID_REQUEST, "invalid JSON-RPC request: empty batch"),
+            )));
+        }
+        let responses: Vec<Response> = elements
+            .into_iter()
+            .filter_map(|elem| dispatch_element(elem, &mut dispatch))
+            .collect();
+        if responses.is_empty() {
+            return None;
+        }
+        return Some(serialize_batch(&responses));
+    }
+
+    let req: Request = match serde_json::from_str(raw) {
+        Ok(r) => r,
+        Err(e) => return Some(serialize(&parse_error(e))),
+    };
+    dispatch_request(&req, &mut dispatch).map(|resp| serialize(&resp))
 }

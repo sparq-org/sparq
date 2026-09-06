@@ -201,21 +201,41 @@ mod tests {
     }
 
     #[test]
-    fn nnf_complement_is_nnf_of_negation() {
-        // nnf_complement(C) must equal nnf(¬C) for every constructor.
+    fn nnf_complement_rewrites_every_constructor() {
+        // [SONNET-4.6] issue #2503: the EXPECTED complement is written out per constructor.
+        // Comparing against `nnf(&not(c))` instead would be VACUOUS — `nnf` dispatches
+        // `ObjectComplementOf(inner)` straight to `nnf_complement(inner)`, so that assertion
+        // is literally `x == x` and survives, for instance, mis-rewriting the ∀ dual as
+        // `¬∀R.C ⇝ ∀R.¬C`. Each pair below is one line of the module-doc rewrite table.
         let cases = vec![
-            a(),
-            CE::Thing,
-            CE::Nothing,
-            not(a()),
-            CE::ObjectIntersectionOf(vec![a(), b()]),
-            CE::ObjectUnionOf(vec![a(), not(b())]),
-            CE::some(10, CE::ObjectUnionOf(vec![a(), b()])),
-            CE::only(10, not(a())),
+            // ¬A stays as the NNF literal; ¬¬A collapses.
+            (a(), not(a())),
+            (not(a()), a()),
+            // ¬⊤ ⇝ ⊥ and ¬⊥ ⇝ ⊤.
+            (CE::Thing, CE::Nothing),
+            (CE::Nothing, CE::Thing),
+            // De Morgan, both directions.
+            (
+                CE::ObjectIntersectionOf(vec![a(), b()]),
+                CE::ObjectUnionOf(vec![not(a()), not(b())]),
+            ),
+            (
+                CE::ObjectUnionOf(vec![a(), not(b())]),
+                CE::ObjectIntersectionOf(vec![not(a()), b()]),
+            ),
+            // Quantifier duality: ¬∃R.C ⇝ ∀R.¬C and ¬∀R.C ⇝ ∃R.¬C. Getting the OUTER
+            // quantifier wrong here is exactly what the vacuous form could not see.
+            (
+                CE::some(10, CE::ObjectUnionOf(vec![a(), b()])),
+                CE::only(10, CE::ObjectIntersectionOf(vec![not(a()), not(b())])),
+            ),
+            (CE::only(10, not(a())), CE::some(10, a())),
         ];
-        for c in cases {
-            assert_eq!(nnf_complement(&c), nnf(&not(c.clone())), "case {:?}", c);
-            assert!(is_nnf(&nnf_complement(&c)), "case {:?}", c);
+        for (input, expected) in cases {
+            assert_eq!(nnf_complement(&input), expected, "case {:?}", input);
+            assert!(is_nnf(&nnf_complement(&input)), "case {:?}", input);
+            // Double complement returns to the NNF of the input (an involution on NNF).
+            assert_eq!(nnf_complement(&expected), nnf(&input), "case {:?}", input);
         }
     }
 

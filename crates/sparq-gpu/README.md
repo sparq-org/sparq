@@ -19,6 +19,7 @@ the full measured tables, the verdict, and the re-open conditions live in
 
 How-to: [`skills/gpu-kernels/SKILL.md`](../../skills/gpu-kernels/SKILL.md).
 Verdict: [`research/gpu-verdict.md`](../../research/gpu-verdict.md).
+Threat model: **deferred** because nothing depends on this crate — [`research/gpu-threat-model-deferral.md`](../../research/gpu-threat-model-deferral.md) (sq-vrye) holds the exit trigger; `tests/deferral_premise.rs` fails when that premise breaks.
 Contributing: [`AGENTS.md`](../../AGENTS.md).
 
 ## License

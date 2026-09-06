@@ -8,7 +8,7 @@
 //! significant only inside `@list`**; every other array (property values, `@type`, `@graph`,
 //! `@set`) is compared order-insensitively via the [`canon`] canonicaliser.
 
-use sparq_jsonld::{expand, Json, JsonLdErrorCode, JsonLdOptions, NoopLoader};
+use sparq_jsonld::{expand, Json, JsonLdErrorCode, JsonLdOptions, NoopLoader, ProcessingMode};
 
 /// Parses a JSON fixture.
 fn json(s: &str) -> Json {
@@ -711,5 +711,265 @@ fn free_floating_value_objects_under_graph_are_dropped() {
             {"@value": "typed", "@type": "http://example.com/type"}
         ]}"#,
         r#"[]"#,
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// [OPUS-5] sq-gzsky — the W3C `expand` NegativeEvaluationTest lane is now RUN rather than
+// skipped, which required these seven spec obligations to be enforced. Each test names the
+// suite case it pins; they live here (not only in the conformance lane) because the W3C
+// suite is fetched, gitignored, and absent from a fresh checkout — these run everywhere.
+// ---------------------------------------------------------------------------------------
+
+/// Expands `input` in JSON-LD 1.0 processing mode, expecting a specific error code.
+#[track_caller]
+fn assert_error_1_0(input: &str, code: JsonLdErrorCode) {
+    let mut opts = JsonLdOptions::default();
+    opts.processing_mode = ProcessingMode::JsonLd10;
+    let err = expand(&json(input), &opts, &NoopLoader).expect_err("expansion should fail");
+    assert_eq!(err.code(), code, "input: {}", input);
+}
+
+#[test]
+fn included_value_must_be_a_node_object() {
+    // §5.1.2 step 13.4.13: the expansion of `@included` is arrayified and EVERY element
+    // must be a node object. A string, a value object, and a list object each expand to a
+    // DROPPED (null) result under the null active property — arrayifying that yields one
+    // non-node element, so all three raise (W3C expand/in07, in08, in09). Collapsing the
+    // drop to an empty array instead would vacuously accept them.
+    for included in [r#""string""#, r#"{"@value": "value"}"#, r#"{"@list": ["value"]}"#] {
+        assert_error(
+            &format!(
+                r#"{{"@context": {{"@version": 1.1, "@vocab": "http://example.org/"}},
+                     "@included": {included}}}"#
+            ),
+            JsonLdErrorCode::InvalidIncludedValue,
+        );
+    }
+}
+
+#[test]
+fn included_node_object_still_expands() {
+    // The complement of the above: a real node object under `@included` is NOT an error.
+    assert_expands(
+        r#"{"@context": {"@version": 1.1, "@vocab": "http://example.org/"},
+            "@id": "http://example.org/s",
+            "@included": {"@id": "http://example.org/o", "p": "v"}}"#,
+        r#"[{"@id": "http://example.org/s",
+             "@included": [{"@id": "http://example.org/o",
+                            "http://example.org/p": [{"@value": "v"}]}]}]"#,
+    );
+}
+
+#[test]
+fn value_object_type_and_direction_are_exclusive() {
+    // §5.1.2 step 15.1: a value object "must not contain an `@type` entry if it contains
+    // either `@language` or `@direction`". The `@language` half was already enforced; this
+    // pins the `@direction` half (W3C expand/di09).
+    assert_error(
+        r#"{"ex:p": {"@value": "v", "@type": "ex:t", "@direction": "rtl"}}"#,
+        JsonLdErrorCode::InvalidValueObject,
+    );
+}
+
+#[test]
+fn datatype_iri_with_a_space_is_rejected() {
+    // §5.1.2 step 15.4: "Processors MUST validate datatype IRIs". A scheme-valid string
+    // carrying a SPACE is not an IRI (W3C expand/0123). Scheme validity alone accepted it.
+    assert_error(
+        r#"{"@id": "http://example.com/foo",
+            "http://example.com/bar": {"@value": "bar", "@type": "http://example.com/baz z"}}"#,
+        JsonLdErrorCode::InvalidTypedValue,
+    );
+}
+
+#[test]
+fn datatype_iri_with_a_malformed_percent_escape_is_rejected() {
+    // [SONNET-4.6] (PR #4610 review) §5.1.2 step 15.4 validates the datatype as an IRI, and
+    // `pct-encoded = "%" HEXDIG HEXDIG` — a non-hex or truncated escape is not one. The
+    // first cut of the check was a character denylist, which accepted all of these.
+    for datatype in [
+        "http://example.com/%ZZ",
+        "http://example.com/%",
+        "http://example.com/%A",
+    ] {
+        assert_error(
+            &format!(
+                r#"{{"http://example.com/bar": {{"@value": "bar", "@type": "{datatype}"}}}}"#
+            ),
+            JsonLdErrorCode::InvalidTypedValue,
+        );
+    }
+}
+
+#[test]
+fn datatype_iri_with_a_structurally_invalid_authority_is_rejected() {
+    // [SONNET-4.6] (PR #4610 review round 2) §5.1.2 step 15.4 validates the datatype as an
+    // IRI, which is the RFC 3987 `IRI` production — not merely a scheme plus admitted
+    // characters. Every string below is built ENTIRELY from characters an IRI may carry, so
+    // the round-one code-point check accepted all of them; each is structurally malformed in
+    // the authority (`ihost` / `port`).
+    for datatype in [
+        "http://[",                       // unterminated IP-literal
+        "http://[::1",                    // ...likewise
+        "http://a[b]c/",                  // brackets outside an IP-literal
+        "http://example.com:bad-port",    // port = *DIGIT
+        "http://example.com:80a/",        // ...likewise
+        "http://[gggg::1]/",              // non-HEXDIG in an IPv6 group
+        "http://[1:2:3:4:5:6:7]/",        // seven groups, no `::` elision
+        "http://[::ffff:999.1.1.1]/",     // dec-octet out of range
+    ] {
+        assert_error(
+            &format!(
+                r#"{{"http://example.com/bar": {{"@value": "bar", "@type": "{datatype}"}}}}"#
+            ),
+            JsonLdErrorCode::InvalidTypedValue,
+        );
+    }
+}
+
+#[test]
+fn structurally_valid_authorities_and_authority_less_schemes_are_accepted_datatypes() {
+    // [SONNET-4.6] (PR #4610 review round 2) The complement of the negatives above: adding
+    // the structural grammar must not over-reject. Covers each `ihost` alternative
+    // (IP-literal, IPv4address, ireg-name), userinfo/port, and the authority-less schemes
+    // (`ipath-rootless`) that carry no `//` at all.
+    for datatype in [
+        "http://[::1]/dt",
+        "http://[2001:db8::1]:8080/dt",
+        "http://[::ffff:192.168.0.1]/dt",
+        "http://192.168.0.1:80/dt",
+        "http://user:pass@example.com:8080/dt",
+        "urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66",
+        "did:example:123#key-1",
+        "tag:example.com,2026:dt",
+    ] {
+        let doc = format!(
+            r#"{{"http://example.com/bar": {{"@value": "bar", "@type": "{datatype}"}}}}"#
+        );
+        let expected = format!(
+            r#"[{{"http://example.com/bar": [{{"@value": "bar", "@type": "{datatype}"}}]}}]"#
+        );
+        assert_expands(&doc, &expected);
+    }
+}
+
+#[test]
+fn well_formed_percent_encoded_and_unicode_datatype_iris_are_accepted() {
+    // The complement of the two negatives above: datatype validation must not over-reject a
+    // well-formed escape or a native RFC 3987 `ucschar` IRI — every `is_absolute_iri` call
+    // site in context processing shares this predicate.
+    assert_expands(
+        r#"{"http://example.com/bar": {"@value": "bar", "@type": "http://example.com/a%20b"}}"#,
+        r#"[{"http://example.com/bar":
+              [{"@value": "bar", "@type": "http://example.com/a%20b"}]}]"#,
+    );
+    assert_expands(
+        "{\"http://example.com/bar\": {\"@value\": \"bar\",
+            \"@type\": \"http://\u{4f8b}\u{3048}.jp/na\u{ef}ve\"}}",
+        "[{\"http://example.com/bar\":
+             [{\"@value\": \"bar\", \"@type\": \"http://\u{4f8b}\u{3048}.jp/na\u{ef}ve\"}]}]",
+    );
+}
+
+#[test]
+fn blank_node_datatype_is_rejected() {
+    // §5.1.2 step 15.4: the value of `@type` must be an IRI, and a blank node identifier
+    // is not one (W3C expand/er40). Blank-node datatypes are only meaningful under the
+    // `GeneralizedRdf` optional feature, which sparq does not opt into.
+    assert_error(
+        r#"{"http://example/foo": {"@value": "bar", "@type": "_:dt"}}"#,
+        JsonLdErrorCode::InvalidTypedValue,
+    );
+}
+
+#[test]
+fn iri_shaped_term_may_not_be_remapped_onto_a_keyword_in_1_1() {
+    // §4.2.2 step 14.3.3: a term containing a colon must IRI-expand back to its own IRI
+    // mapping. Mapping `rdf:type` onto the keyword `@type` breaks that round trip, so 1.1
+    // rejects it (W3C expand/er43). The check was previously skipped whenever the mapping
+    // was a keyword — exactly the case the step exists to catch.
+    assert_error(
+        r#"{"@context": {"http://www.w3.org/1999/02/22-rdf-syntax-ns#type":
+                          {"@id": "@type", "@type": "@id"}},
+            "@id": "http://example.com/a",
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": "http://example.com/b"}"#,
+        JsonLdErrorCode::InvalidIriMapping,
+    );
+}
+
+#[test]
+fn iri_shaped_term_remapped_onto_a_keyword_is_legal_in_1_0() {
+    // The 1.0 twin of the case above is a POSITIVE (W3C expand/0026): the round-trip check
+    // is absent from the JSON-LD 1.0 algorithm, so the ONLY gate is the processing mode.
+    let mut opts = JsonLdOptions::default();
+    opts.processing_mode = ProcessingMode::JsonLd10;
+    let input = json(
+        r#"{"@context": {"http://www.w3.org/1999/02/22-rdf-syntax-ns#type":
+                          {"@id": "@type", "@type": "@id"}},
+            "@id": "http://example.com/a",
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": "http://example.com/b"}"#,
+    );
+    let got = expand(&input, &opts, &NoopLoader).expect("1.0 mode accepts the remapping");
+    assert_eq!(
+        canon(&got),
+        canon(&json(
+            r#"[{"@id": "http://example.com/a", "@type": ["http://example.com/b"]}]"#
+        ))
+    );
+}
+
+#[test]
+fn container_array_is_invalid_in_1_0_mode() {
+    // §4.2.2 step 21.2: a container value that "is otherwise not a string" is an
+    // `invalid container mapping` under `processingMode: json-ld-1.0` — so `["@set"]` is
+    // rejected even though the single member `@set` is itself 1.0-legal (W3C expand/es01,
+    // compact/ep12). Normalising to a member list alone loses that distinction.
+    assert_error_1_0(
+        r#"{"@context": {"term": {"@id": "http://example/term", "@container": ["@set"]}},
+            "@id": "http://example/test#example", "term": "foo"}"#,
+        JsonLdErrorCode::InvalidContainerMapping,
+    );
+}
+
+#[test]
+fn container_string_is_still_valid_in_1_0_mode() {
+    // The complement: the bare-string spelling of the same container is 1.0-legal.
+    let mut opts = JsonLdOptions::default();
+    opts.processing_mode = ProcessingMode::JsonLd10;
+    let input = json(
+        r#"{"@context": {"term": {"@id": "http://example/term", "@container": "@set"}},
+            "@id": "http://example/test#example", "term": "foo"}"#,
+    );
+    expand(&input, &opts, &NoopLoader).expect("a string @container is legal in 1.0");
+}
+
+#[test]
+fn relative_vocab_is_invalid_in_1_0_mode() {
+    // §4.1.2 step 5.8 tests the RAW value: "if value is neither an IRI nor a blank node
+    // identifier, an invalid vocab mapping error". Resolving a relative reference (the
+    // empty string included) against `@base` is the JSON-LD 1.1 relaxation; in 1.0 both
+    // spellings are an error (W3C expand/0115 `""`, expand/0116 `"/relative"`).
+    for vocab in [r#""""#, r#""/relative""#] {
+        assert_error_1_0(
+            &format!(
+                r#"{{"@context": {{"@base": "http://example.com/some/deep/directory/and/file/",
+                                   "@vocab": {vocab}}},
+                     "@id": "relativePropertyIris", "link": "link"}}"#
+            ),
+            JsonLdErrorCode::InvalidVocabMapping,
+        );
+    }
+}
+
+#[test]
+fn relative_vocab_is_accepted_in_1_1_mode() {
+    // The 1.1 twin (W3C expand/0112 lineage): the same relative `@vocab` resolves against
+    // `@base` instead of erroring, so the 1.0 rejection above must NOT leak into 1.1.
+    assert_expands(
+        r#"{"@context": {"@base": "http://example.com/deep/", "@vocab": ""},
+            "@id": "relativeIri", "link": "value"}"#,
+        r#"[{"@id": "http://example.com/deep/relativeIri",
+             "http://example.com/deep/link": [{"@value": "value"}]}]"#,
     );
 }

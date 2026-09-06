@@ -533,6 +533,196 @@ pub fn build_filter_value_dl_boolean(
     })
 }
 
+/// The SIGN-AWARE scaled comparison verdict for `value <op> bound` over two
+/// `(neg, magnitude)` operands on ONE scaled timeline (sq-wz99x) — the host
+/// mirror of the Noir member's UNCHANGED `signed_scaled_verdict`
+/// (`zk/compose/compose_core/src/filter_value.nr`). `(true, 0)` must be
+/// normalised to `(false, 0)` by the caller (there is no `-0`).
+///
+/// On the `Z`-only hookable domain this IS the XSD `timeOnTimeline` order, so
+/// all six operators are meaningful for `xsd:dateTime` / `xsd:date`.
+// [OPUS-5] sq-wz99x: dateTime/date value-lane verdict oracle. Opt-in (`dual-leaf`).
+#[cfg(feature = "dual-leaf")]
+pub fn signed_epoch_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op: FilterOp) -> bool {
+    let eq = v_neg == b_neg && v_mag == b_mag;
+    let lt = match (v_neg, b_neg) {
+        (true, false) => true,
+        (false, true) => false,
+        // Both pre-epoch: the LARGER magnitude is the EARLIER instant.
+        (true, true) => v_mag > b_mag,
+        (false, false) => v_mag < b_mag,
+    };
+    match op {
+        FilterOp::Lt => lt,
+        FilterOp::Le => lt || eq,
+        FilterOp::Gt => !lt && !eq,
+        FilterOp::Ge => !lt,
+        FilterOp::Eq => eq,
+        FilterOp::Ne => !eq,
+    }
+}
+
+/// Split an encoder-produced signed `VALUE_HOOK` field back into the
+/// `(neg, magnitude)` pair the Noir member takes as `(value_neg,
+/// value_hook_scaled)` (sq-wz99x).
+///
+/// The host encoder folds the sign by FIELD NEGATION (`if neg { -mag } else
+/// { mag }`), which is exactly what the member recomputes, so this inverts that:
+/// a hook that is already a `u64` is non-negative; otherwise its field negation
+/// must be. `None` if NEITHER fits `u64` — impossible for encoder output (the
+/// §13.4 predicate rejects a magnitude overflowing `u64`), so callers surface it
+/// fail-closed rather than assuming.
+#[cfg(feature = "dual-leaf")]
+fn split_signed_hook(hook: &Fr) -> Option<(bool, u64)> {
+    fn as_u64(f: &Fr) -> Option<u64> {
+        let b = field_to_be_bytes_32(f);
+        // A u64 occupies the low 8 big-endian bytes; anything above means the
+        // field element is not a small non-negative integer.
+        if b[..24].iter().any(|x| *x != 0) {
+            return None;
+        }
+        Some(u64::from_be_bytes(b[24..32].try_into().expect("8 bytes")))
+    }
+    // Zero matches the first branch, so `-0` is never produced here.
+    as_u64(hook)
+        .map(|m| (false, m))
+        .or_else(|| as_u64(&(Fr::from(0u64) - hook)).map(|m| (true, m)))
+}
+
+/// A built DUAL-LEAF `xsd:dateTime` / `xsd:date` value-lane FILTER (sq-wz99x):
+/// the public [`ProofInputs`] plus the member's three PRIVATE witnesses.
+///
+/// The witnesses are the dual-leaf components
+/// `sparq_zk::dual_leaf_datetime::{encode_datetime, encode_date}` produced for the
+/// committed literal, with the signed `VALUE_HOOK` split back into the member's
+/// `(value_neg, value_hook_scaled)` shape — so `inputs.operand_enc` is by
+/// construction the leaf those witnesses rebind to in-circuit.
+// [OPUS-5] sq-wz99x: dateTime/date value-lane host wiring. Opt-in, NOT-yet-sound.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltFilterValueDlDateTime {
+    /// Public inputs for the [`CircuitId::FilterValueDlDateTime`] member, carrying
+    /// the LANE constant that selects `xsd:dateTime` or `xsd:date`.
+    pub inputs: ProofInputs,
+    /// PRIVATE: sign of the operand's epoch (`true` = pre-1970).
+    pub value_neg: bool,
+    /// PRIVATE: `|T|` in milliseconds — the value handle's MAGNITUDE, as a field.
+    pub value_hook_scaled: FieldHex,
+    /// PRIVATE: the OFF-circuit blake3 lexical hash, carried as a free witness.
+    pub lexical_component: FieldHex,
+}
+
+/// Build a DUAL-LEAF `xsd:dateTime` value-lane FILTER over the committed literal
+/// `literal` under operator `op` against the constant instant `bound` (sq-wz99x —
+/// the circuit half of the §13 lane whose host encoder is sq-we9vs).
+///
+/// BOTH operands go through `sparq_zk::dual_leaf_datetime::encode_datetime`, so
+/// the disclosed `bound_scaled_epoch` is derived from the SAME §13.4 fail-closed
+/// canonical predicate and the SAME scaled-epoch mapping as the hidden value —
+/// the host cross-vector that makes the comparison meaningful. A `bound` outside
+/// the hookable domain (bare / non-`Z` offset / `24:00:00` / leap second /
+/// non-canonical year / over-`FS` fraction / `u64`-overflowing) returns the
+/// encoder's `Err` unchanged, so a desynced or indeterminate comparison is never
+/// built here.
+///
+/// Requiring both operands on the SAME lane is what makes a cross-lane
+/// (`xsd:date` vs `xsd:dateTime`) comparison structurally inexpressible through
+/// this API — matching the in-circuit lane separation, which is the public
+/// `datatype_const` and only that (see
+/// [`crate::manifest::date_datatype_const`]).
+///
+/// The disclosed verdict is COMPUTED here ([`signed_epoch_verdict`]) rather than
+/// taken from the caller, so an honest host cannot accidentally disclose a verdict
+/// the member will refuse to prove.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted),
+/// and the §13 rule set is itself an OPEN external-audit obligation (CR-G8 /
+/// sq-qhy4). NOT externally audited; no soundness / privacy claim.
+// [OPUS-5] sq-wz99x: dateTime lane host wiring. Opt-in, NOT-yet-sound.
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_datetime(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    let value = sparq_zk::dual_leaf_datetime::encode_datetime(literal)?;
+    let bound_components = sparq_zk::dual_leaf_datetime::encode_datetime(bound)?;
+    build_dl_datetime_common(
+        literal,
+        bound,
+        op,
+        value,
+        bound_components,
+        crate::manifest::datetime_datatype_const(),
+    )
+}
+
+/// Build a DUAL-LEAF `xsd:date` value-lane FILTER — the same member, the same
+/// scaled-epoch timeline, the DATE lane constant (sq-wz99x, §13.3).
+///
+/// A date's value handle is the scaled epoch of its STARTING instant (midnight
+/// UTC), so it is numerically equal to the dateTime hook of that same instant;
+/// [`crate::manifest::date_datatype_const`] is what keeps the two lanes apart. As
+/// with [`build_filter_value_dl_datetime`], both operands go through
+/// `sparq_zk::dual_leaf_datetime::encode_date`, so a bare date bound (order-
+/// INDETERMINATE per §13.2) is rejected fail-closed rather than compared.
+///
+/// DOCUMENTED RISK: as [`build_filter_value_dl_datetime`] (CR-G8 / sq-qhy4).
+// [OPUS-5] sq-wz99x: date lane host wiring. Opt-in, NOT-yet-sound.
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_date(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    let value = sparq_zk::dual_leaf_datetime::encode_date(literal)?;
+    let bound_components = sparq_zk::dual_leaf_datetime::encode_date(bound)?;
+    build_dl_datetime_common(
+        literal,
+        bound,
+        op,
+        value,
+        bound_components,
+        crate::manifest::date_datatype_const(),
+    )
+}
+
+/// The lane-agnostic remainder shared by the dateTime and date builders — ONE
+/// member, ONE assembly; only the `datatype_const` differs (sq-wz99x, §13.5).
+#[cfg(feature = "dual-leaf")]
+fn build_dl_datetime_common(
+    literal: &oxrdf::Literal,
+    bound: &oxrdf::Literal,
+    op: FilterOp,
+    value: sparq_zk::dual_leaf::DualLeafComponents,
+    bound_components: sparq_zk::dual_leaf::DualLeafComponents,
+    datatype_const: FieldHex,
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    // The encoder's §13.4 predicate already rejects a magnitude overflowing u64,
+    // so this split cannot fail on encoder output — surface it fail-closed anyway
+    // rather than unwrapping an invariant the type system does not carry.
+    let (value_neg, value_mag) = split_signed_hook(&value.value_hook).ok_or_else(|| {
+        sparq_zk::dual_leaf::DualLeafError::NonCanonicalValue(literal.to_string())
+    })?;
+    let (bound_neg, bound_mag) = split_signed_hook(&bound_components.value_hook)
+        .ok_or_else(|| sparq_zk::dual_leaf::DualLeafError::NonCanonicalValue(bound.to_string()))?;
+    Ok(BuiltFilterValueDlDateTime {
+        inputs: ProofInputs::FilterValueDlDateTime {
+            id: CircuitId::FilterValueDlDateTime,
+            operand_enc: hexf(&value.leaf()),
+            op,
+            bound_neg,
+            bound_scaled_epoch: bound_mag,
+            datatype_const,
+            expected: signed_epoch_verdict(value_neg, value_mag, bound_neg, bound_mag, op),
+        },
+        value_neg,
+        // The member takes the MAGNITUDE privately and re-folds the sign itself.
+        value_hook_scaled: hexf(&Fr::from(value_mag)),
+        lexical_component: hexf(&value.lexical_component),
+    })
+}
+
 /// Encode an xsd:integer literal `value` to its term encoding under `salt`
 /// (salt-independent for literals; convenience for callers wiring a filter to
 /// a known constant).

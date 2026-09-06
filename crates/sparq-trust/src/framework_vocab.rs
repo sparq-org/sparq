@@ -20,7 +20,7 @@
 //! - **The two trust modes** — enumerated parties (`TRUSTX_TRUSTS_ISSUER`) and
 //!   framework-certified issuers (`TRUSTX_TRUSTS_FRAMEWORK`), composing by plain OR
 //!   (design §3.2 / D2).
-//! - **The certification-scope terms** (`TRUSTX_CERTIFICATION`, `TRUSTX_SCOPE`, …)
+//! - **The certification-scope terms** (`TRUSTX_CERTIFICATION`, `TRUSTX_CERTIFICATION_SCOPE`, …)
 //!   — an issuer being *certified under* a framework, over a *scope* that ranges from
 //!   service-level (`TRUSTX_ANY_SERVICE_SCOPE`, the honest DIATF granularity) down to
 //!   a predicate set / SHACL shape reusing the existing `trust:forShape` idiom
@@ -72,7 +72,11 @@ pub const SEC_REQ_NS: &str = "https://w3id.org/zkp-sparql/sec-req#";
 /// binding a query to its trust conditions. The trust conditions live HERE, never in
 /// the query (no new query syntax — design §3.1 / D1).
 pub const TRUSTX_TRUST_REQUIREMENTS: &str = "https://sparq.dev/ns/trust#TrustRequirements";
-/// `trustx:question` — binds the trust requirements to the SPARQL query they scope.
+/// `trustx:question` — an opaque IRI naming the question a trust-requirements
+/// document was authored for. A correlation label ONLY: no layer of this crate
+/// resolves or verifies it against the query string, so the question↔query
+/// association belongs to whoever authenticates the request (see the
+/// `expression` module's honest-scope docs).
 pub const TRUSTX_QUESTION: &str = "https://sparq.dev/ns/trust#question";
 /// `trustx:trustsIssuer` — **MODE 1** (enumerated parties): admit contributing
 /// statements issued by this enumerated issuer identity (a DID/key binding; the
@@ -108,18 +112,26 @@ pub const TRUSTX_CERTIFICATION: &str = "https://sparq.dev/ns/trust#Certification
 pub const TRUSTX_CERTIFIES: &str = "https://sparq.dev/ns/trust#certifies";
 /// `trustx:underFramework` — the [`TRUSTX_FRAMEWORK`] a certification is issued under.
 pub const TRUSTX_UNDER_FRAMEWORK: &str = "https://sparq.dev/ns/trust#underFramework";
-/// `trustx:scope` — what the issuer is certified to issue: service-level
+/// `trustx:certificationScope` — what the issuer is certified to issue: service-level
 /// ([`TRUSTX_ANY_SERVICE_SCOPE`], the honest DIATF granularity), an attestation-type /
-/// Rulebook IRI, or a predicate set / SHACL shape (reusing `trust:forShape`). Distinct
-/// from `trust:scope` (rule applicability) — the certification-scope reading.
-pub const TRUSTX_SCOPE: &str = "https://sparq.dev/ns/trust#scope";
+/// Rulebook IRI, or a predicate set / SHACL shape (reusing `trust:forShape`).
+///
+/// NAMED `certificationScope`, **not** `scope`: the `trustx:` prefix shares the `trust:`
+/// base IRI, so a `trustx:scope` term would be *the same IRI* as
+/// [`crate::vocab::SCOPE`] (rule applicability, `rdfs:domain trust:TrustRule`) rather
+/// than a distinct homonym — one property carrying two conflicting domains (issue
+/// #3801). The certification-scope reading gets its own local name.
+pub const TRUSTX_CERTIFICATION_SCOPE: &str = "https://sparq.dev/ns/trust#certificationScope";
 /// `trustx:validFrom` — start of a certification's / status attestation's validity
-/// window (inclusive).
+/// window (inclusive). Its `rdfs:domain` is the UNION
+/// [`TRUSTX_CERTIFICATION`] ⊔ [`TRUSTX_STATUS_ATTESTATION`], since both classes carry
+/// the window; a bare `Certification` domain would entail that every status attestation
+/// is a certification (issue #3801).
 pub const TRUSTX_VALID_FROM: &str = "https://sparq.dev/ns/trust#validFrom";
 /// `trustx:validUntil` — end of a certification's / status attestation's validity
-/// window (inclusive).
+/// window (inclusive). Same union domain as [`TRUSTX_VALID_FROM`].
 pub const TRUSTX_VALID_UNTIL: &str = "https://sparq.dev/ns/trust#validUntil";
-/// `trustx:AnyServiceScope` — the coarsest, service-level [`TRUSTX_SCOPE`] value
+/// `trustx:AnyServiceScope` — the coarsest, service-level [`TRUSTX_CERTIFICATION_SCOPE`] value
 /// ("everything this certified service issues"), the honest DIATF granularity.
 pub const TRUSTX_ANY_SERVICE_SCOPE: &str = "https://sparq.dev/ns/trust#AnyServiceScope";
 
@@ -170,7 +182,7 @@ pub const ALL_TRUSTX_IRIS: &[&str] = &[
     TRUSTX_CERTIFICATION,
     TRUSTX_CERTIFIES,
     TRUSTX_UNDER_FRAMEWORK,
-    TRUSTX_SCOPE,
+    TRUSTX_CERTIFICATION_SCOPE,
     TRUSTX_VALID_FROM,
     TRUSTX_VALID_UNTIL,
     TRUSTX_ANY_SERVICE_SCOPE,
@@ -304,9 +316,10 @@ mod tests {
 
     /// D5 no-duplication: this extension REDECLARES no `trust:` core term. Every
     /// `trustx:LocalName` declared here must be a NEW local name — never one already
-    /// declared in `trust.ttl` — with the sole, deliberate exception of `scope`, which
-    /// `trust:` uses for rule-applicability and `trustx:` reuses (under the shared base)
-    /// for the distinct certification-scope reading (documented on the constant).
+    /// declared in `trust.ttl`. There is NO exception: because `trustx:` and `trust:`
+    /// share one base IRI, a repeated local name is the SAME property with two
+    /// `rdfs:domain` axioms, not a homonym (issue #3801) — which is why the
+    /// certification-scope reading is `certificationScope`, not `scope`.
     #[test]
     fn extends_trust_without_redeclaring_its_terms() {
         // The `trust:` core local names (from trust.ttl `trust:Foo a …` declarations).
@@ -330,16 +343,12 @@ mod tests {
             "sanity: trust.ttl should declare trust:forShape",
         );
 
-        // `scope` is the ONE deliberately-shared local name (distinct reading; see the
-        // TRUSTX_SCOPE doc-comment). Everything else the framework layer mints must be a
-        // NEW local name not already a trust: core term.
+        // Every local name the framework layer mints must be NEW — not already a trust:
+        // core term. `scope` in particular: `trust:scope` owns that IRI (issue #3801).
         for &iri in ALL_TRUSTX_IRIS {
             let Some(local) = iri.strip_prefix(TRUSTX_NS) else {
                 continue; // sec-req: reference, not a trust: base term
             };
-            if local == "scope" {
-                continue;
-            }
             assert!(
                 !trust_locals.contains(local),
                 "trustx:{} would REDECLARE a trust: core term — the D5 no-duplication \
@@ -443,12 +452,30 @@ mod tests {
             TRUSTX_UNDER_FRAMEWORK,
             "https://sparq.dev/ns/trust#underFramework"
         );
-        assert_eq!(TRUSTX_SCOPE, "https://sparq.dev/ns/trust#scope");
+        assert_eq!(
+            TRUSTX_CERTIFICATION_SCOPE,
+            "https://sparq.dev/ns/trust#certificationScope"
+        );
         assert_eq!(TRUSTX_VALID_FROM, "https://sparq.dev/ns/trust#validFrom");
         assert_eq!(TRUSTX_VALID_UNTIL, "https://sparq.dev/ns/trust#validUntil");
         assert_eq!(
             TRUSTX_ANY_SERVICE_SCOPE,
             "https://sparq.dev/ns/trust#AnyServiceScope"
+        );
+    }
+
+    /// The certification-scope property is a DIFFERENT IRI from the `trust:` core
+    /// rule-applicability `scope`. Both prefixes resolve to the same base, so this is the
+    /// only thing keeping them apart — and if they were equal, one property would carry
+    /// `rdfs:domain trust:TrustRule` AND `rdfs:domain trustx:Certification`, typing every
+    /// subject of it as both under RDFS entailment (issue #3801).
+    #[test]
+    fn certification_scope_does_not_collide_with_trust_scope() {
+        assert_ne!(
+            TRUSTX_CERTIFICATION_SCOPE,
+            crate::vocab::SCOPE,
+            "trustx: shares trust:'s base IRI — the certification-scope property MUST NOT \
+             reuse the `scope` local name (issue #3801)",
         );
     }
 

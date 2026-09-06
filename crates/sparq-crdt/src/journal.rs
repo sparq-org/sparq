@@ -18,10 +18,13 @@
 //! are the exact canonical envelope bytes; append is acknowledged only after
 //! the record is written and fdatasync'd (`CRDT-UPD-1` step 5 durability).
 //!
-//! **Crash recovery**: on open, records are scanned in order; a *torn tail* —
-//! a *structurally* incomplete final frame, whose frame header is partial or
-//! whose declared payload runs past end-of-file — is truncated away, because a
-//! crash mid-append leaves exactly that and the record was never acknowledged.
+//! **Crash recovery**: on open, records are *streamed* in order — one frame at
+//! a time into a single reused payload buffer, so peak recovery memory is
+//! bounded by the largest single record rather than by the log size. A *torn
+//! tail* — a *structurally* incomplete final frame, whose frame header is
+//! partial or whose declared payload runs past end-of-file — is truncated
+//! away, because a crash mid-append leaves exactly that and the record was
+//! never acknowledged.
 //! A checksum failure on any structurally-complete frame, **including the final
 //! one**, is treated as real corruption and fails closed with
 //! [`CrdtError::CorruptJournal`]: a full-length record whose checksum does not
@@ -48,7 +51,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// The version-1 journal header format tag.
@@ -69,6 +72,11 @@ const REC_SNAPSHOT: u8 = 3;
 /// type + len + sha256.
 const FRAME_OVERHEAD: u64 = 1 + 4 + 32;
 
+/// Read-ahead window used while streaming recovery. Recovery walks the log
+/// strictly sequentially, so a modest buffer amortises the syscalls without
+/// reintroducing a whole-log allocation.
+const RECOVERY_READ_BUF: usize = 64 * 1024;
+
 fn frame(record_type: u8, payload: &[u8]) -> Vec<u8> {
     let len = u32::try_from(payload.len()).expect("record payloads are bounded far below 4 GiB");
     let mut hasher = Sha256::new();
@@ -84,11 +92,55 @@ fn frame(record_type: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// One scanned record: `(type, payload offset, payload)`.
+/// One scanned record: `(type, payload)`. Record *offsets* are only needed
+/// when building a servable index, which is the streaming [`RecordReader`]'s
+/// job; the in-memory scan below backs [`Snapshot::decode`], which reads a
+/// single already-resident frame.
 struct ScannedRecord<'b> {
     record_type: u8,
-    payload_offset: u64,
     payload: &'b [u8],
+}
+
+/// The fixed-size head of a record frame: type, declared payload length, and
+/// the expected SHA-256 of `type || len-BE || payload`. Shared by the
+/// in-memory [`scan_records`] and the streaming [`RecordReader`] so both read
+/// the framing exactly the same way.
+struct FrameHead {
+    record_type: u8,
+    payload_len: u64,
+    digest: [u8; 32],
+}
+
+impl FrameHead {
+    /// Parses the first `FRAME_OVERHEAD` bytes of `bytes`, which the caller
+    /// must have established are present.
+    fn parse(bytes: &[u8]) -> Self {
+        FrameHead {
+            record_type: bytes[0],
+            payload_len: u32::from_be_bytes(bytes[1..5].try_into().expect("4 bytes")) as u64,
+            digest: bytes[5..37].try_into().expect("32 bytes"),
+        }
+    }
+
+    /// True iff `payload` hashes to the checksum this head declares.
+    fn checksum_matches(&self, payload: &[u8]) -> bool {
+        let mut hasher = Sha256::new();
+        hasher.update([self.record_type]);
+        hasher.update((self.payload_len as u32).to_be_bytes());
+        hasher.update(payload);
+        let digest: [u8; 32] = hasher.finalize().into();
+        digest == self.digest
+    }
+
+    /// The end offset of the record whose head starts at `frame_offset`.
+    fn record_end(&self, frame_offset: u64) -> Result<u64, CrdtError> {
+        (frame_offset + FRAME_OVERHEAD)
+            .checked_add(self.payload_len)
+            .ok_or(CrdtError::CorruptJournal {
+                offset: frame_offset,
+                reason: "record length overflows".into(),
+            })
+    }
 }
 
 /// Scans `buf` into records. Returns the records, the offset after the last
@@ -104,27 +156,14 @@ fn scan_records(buf: &[u8]) -> Result<(Vec<ScannedRecord<'_>>, u64, bool), CrdtE
         if len - off < FRAME_OVERHEAD {
             return Ok((records, off, true)); // torn tail: partial frame header
         }
-        let head = off as usize;
-        let record_type = buf[head];
-        let payload_len =
-            u32::from_be_bytes(buf[head + 1..head + 5].try_into().expect("4 bytes")) as u64;
+        let head = FrameHead::parse(&buf[off as usize..]);
         let payload_start = off + FRAME_OVERHEAD;
-        let record_end = payload_start.checked_add(payload_len).ok_or(
-            CrdtError::CorruptJournal {
-                offset: off,
-                reason: "record length overflows".into(),
-            },
-        )?;
+        let record_end = head.record_end(off)?;
         if record_end > len {
             return Ok((records, off, true)); // torn tail: payload ran past EOF
         }
         let payload = &buf[payload_start as usize..record_end as usize];
-        let mut hasher = Sha256::new();
-        hasher.update([record_type]);
-        hasher.update((payload_len as u32).to_be_bytes());
-        hasher.update(payload);
-        let digest: [u8; 32] = hasher.finalize().into();
-        if digest[..] != buf[head + 5..head + 37] {
+        if !head.checksum_matches(payload) {
             // A structurally-complete frame with a bad checksum is corruption,
             // even at EOF: a full-length final record is indistinguishable from
             // an acknowledged, fdatasync'd append whose bytes were later
@@ -137,13 +176,87 @@ fn scan_records(buf: &[u8]) -> Result<(Vec<ScannedRecord<'_>>, u64, bool), CrdtE
             });
         }
         records.push(ScannedRecord {
-            record_type,
-            payload_offset: payload_start,
+            record_type: head.record_type,
             payload,
         });
         off = record_end;
     }
     Ok((records, off, false))
+}
+
+/// Streams the records of a log, one frame at a time, into a single reused
+/// payload buffer.
+///
+/// Same framing, torn-tail rule, and fail-closed checksum discipline as the
+/// in-memory [`scan_records`], but peak memory is bounded by the largest
+/// single record instead of by the whole log, which is what makes recovery of
+/// a multi-GiB journal viable. A declared payload length is only ever
+/// allocated after it has been shown to fit inside the log (otherwise the
+/// frame is a torn tail), so a garbled length cannot provoke an allocation
+/// larger than the file itself.
+struct RecordReader<R> {
+    reader: R,
+    /// Byte length of the log being scanned.
+    len: u64,
+    /// Offset of the next unread frame; once the scan ends this is the offset
+    /// just past the last structurally complete record.
+    offset: u64,
+    /// The current record's payload; reused across records.
+    payload: Vec<u8>,
+    /// Set when a structurally incomplete final frame was seen.
+    torn: bool,
+}
+
+impl<R: Read> RecordReader<R> {
+    fn new(reader: R, len: u64) -> Self {
+        RecordReader {
+            reader,
+            len,
+            offset: 0,
+            payload: Vec::new(),
+            torn: false,
+        }
+    }
+
+    /// Reads the next record into [`Self::payload`], returning its type and
+    /// payload offset. `None` ends the scan — either a clean end of log or a
+    /// torn tail, distinguished by [`Self::torn`].
+    fn next_record(&mut self) -> Result<Option<(u8, u64)>, CrdtError> {
+        if self.torn || self.offset >= self.len {
+            return Ok(None);
+        }
+        if self.len - self.offset < FRAME_OVERHEAD {
+            self.torn = true; // torn tail: partial frame header
+            return Ok(None);
+        }
+        let mut frame_head = [0u8; FRAME_OVERHEAD as usize];
+        self.reader.read_exact(&mut frame_head)?;
+        let head = FrameHead::parse(&frame_head);
+        let payload_start = self.offset + FRAME_OVERHEAD;
+        let record_end = head.record_end(self.offset)?;
+        if record_end > self.len {
+            self.torn = true; // torn tail: payload runs past EOF
+            return Ok(None);
+        }
+        // `record_end <= len` bounds this by the largest record in the log,
+        // and the buffer's capacity is carried over to the next record.
+        // `reserve_exact` keeps that carried capacity at the largest record
+        // seen rather than letting amortised growth overshoot it.
+        self.payload.clear();
+        self.payload.reserve_exact(head.payload_len as usize);
+        self.payload.resize(head.payload_len as usize, 0);
+        self.reader.read_exact(&mut self.payload)?;
+        if !head.checksum_matches(&self.payload) {
+            // Structurally complete but mis-checksummed: real corruption, and
+            // fatal wherever it appears — see `scan_records`.
+            return Err(CrdtError::CorruptJournal {
+                offset: self.offset,
+                reason: "record checksum mismatch".into(),
+            });
+        }
+        self.offset = record_end;
+        Ok(Some((head.record_type, payload_start)))
+    }
 }
 
 fn encode_journal_header(admission: &Admission, pruned: &CausalSummary) -> Vec<u8> {
@@ -248,6 +361,10 @@ impl Journal {
     /// by truncating the unacknowledged final record. Every retained envelope
     /// record is fully re-validated against `admission` and `limits`; a
     /// journal for a different dataset or epoch is rejected.
+    ///
+    /// The log is streamed one record at a time, so peak recovery memory is
+    /// bounded by the largest single record and the resident index, not by
+    /// the size of the log.
     pub fn open(path: &Path, admission: Admission, limits: Limits) -> Result<Self, CrdtError> {
         if !path.exists() {
             let mut file = OpenOptions::new()
@@ -270,44 +387,46 @@ impl Journal {
                 end: header.len() as u64,
             });
         }
-        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-        let (records, valid_end, torn) = scan_records(&buf)?;
-        let mut records = records.into_iter();
-        let header = records.next().ok_or(CrdtError::CorruptJournal {
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        let log_len = file.metadata()?.len();
+        // Streamed, not slurped: one bounded record buffer walks the log, so a
+        // multi-GiB journal recovers without a proportional memory spike.
+        let mut scan =
+            RecordReader::new(BufReader::with_capacity(RECOVERY_READ_BUF, &file), log_len);
+        let (header_type, _) = scan.next_record()?.ok_or(CrdtError::CorruptJournal {
             offset: 0,
             reason: "journal has no header record".into(),
         })?;
-        if header.record_type != REC_HEADER {
+        if header_type != REC_HEADER {
             return Err(CrdtError::CorruptJournal {
                 offset: 0,
-                reason: format!("first record has type {}, expected header", header.record_type),
+                reason: format!("first record has type {}, expected header", header_type),
             });
         }
-        let pruned = decode_journal_header(header.payload, &admission, &limits)?;
+        let pruned = decode_journal_header(&scan.payload, &admission, &limits)?;
         let mut index = BTreeMap::new();
         let mut frontier = pruned.clone();
-        for record in records {
-            if record.record_type != REC_ENVELOPE {
+        while let Some((record_type, payload_offset)) = scan.next_record()? {
+            if record_type != REC_ENVELOPE {
                 return Err(CrdtError::CorruptJournal {
-                    offset: record.payload_offset - FRAME_OVERHEAD,
-                    reason: format!("unexpected record type {}", record.record_type),
+                    offset: payload_offset - FRAME_OVERHEAD,
+                    reason: format!("unexpected record type {}", record_type),
                 });
             }
-            let envelope = DeltaEnvelope::decode(record.payload, &admission, &limits)?;
+            let envelope = DeltaEnvelope::decode(&scan.payload, &admission, &limits)?;
             let id = envelope.id();
             if index
-                .insert(id.clone(), (record.payload_offset, record.payload.len() as u32))
+                .insert(id.clone(), (payload_offset, scan.payload.len() as u32))
                 .is_some()
             {
                 return Err(CrdtError::CorruptJournal {
-                    offset: record.payload_offset - FRAME_OVERHEAD,
+                    offset: payload_offset - FRAME_OVERHEAD,
                     reason: "duplicate envelope identity in the log".into(),
                 });
             }
             frontier.insert(id);
         }
+        let (valid_end, torn) = (scan.offset, scan.torn);
         if torn {
             file.set_len(valid_end)?;
             file.sync_data()?;
@@ -1012,6 +1131,112 @@ mod tests {
             Journal::open(&path, admission(), Limits::default()),
             Err(CrdtError::CorruptJournal { .. })
         ));
+    }
+
+    /// Builds a log of `count` envelope records and returns its bytes.
+    fn log_bytes(dir: &Path, count: u64) -> Vec<u8> {
+        let path = dir.join("crdt.log");
+        {
+            let mut journal = Journal::open(&path, admission(), Limits::default()).unwrap();
+            for sequence in 1..=count {
+                journal.append(&envelope(sequence)).unwrap();
+            }
+        }
+        std::fs::read(&path).unwrap()
+    }
+
+    #[test]
+    fn streaming_scan_agrees_with_the_whole_buffer_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let intact = log_bytes(dir.path(), 5);
+        // The intact log, plus a torn tail at every structural cut of a
+        // further record (partial head, exact head, partial payload).
+        let record = frame(REC_ENVELOPE, &envelope(6));
+        let mut cases = vec![intact.clone()];
+        for cut in [1usize, 5, 36, 37, record.len() - 1] {
+            let mut torn = intact.clone();
+            torn.extend_from_slice(&record[..cut]);
+            cases.push(torn);
+        }
+        for bytes in cases {
+            let (records, valid_end, torn) = scan_records(&bytes).unwrap();
+            let mut stream = RecordReader::new(bytes.as_slice(), bytes.len() as u64);
+            let mut streamed = Vec::new();
+            while let Some((record_type, payload_offset)) = stream.next_record().unwrap() {
+                streamed.push((record_type, payload_offset, stream.payload.clone()));
+            }
+            assert_eq!(streamed.len(), records.len());
+            let mut expected_offset = 0u64;
+            for (got, want) in streamed.iter().zip(&records) {
+                assert_eq!(got.0, want.record_type);
+                assert_eq!(got.1, expected_offset + FRAME_OVERHEAD);
+                assert_eq!(got.2.as_slice(), want.payload);
+                expected_offset += FRAME_OVERHEAD + want.payload.len() as u64;
+            }
+            assert_eq!(stream.offset, valid_end);
+            assert_eq!(stream.torn, torn);
+        }
+    }
+
+    #[test]
+    fn streaming_scan_fails_closed_on_corruption_at_the_same_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let intact = log_bytes(dir.path(), 3);
+        let header_len = frame(
+            REC_HEADER,
+            &encode_journal_header(&admission(), &CausalSummary::new()),
+        )
+        .len();
+        // A flipped byte in the first envelope record, and in the final one:
+        // both are structurally complete frames, so both are real corruption.
+        for flip in [header_len + FRAME_OVERHEAD as usize, intact.len() - 1] {
+            let mut garbled = intact.clone();
+            garbled[flip] ^= 0x01;
+            let buffered = match scan_records(&garbled) {
+                Err(error) => error,
+                Ok(_) => panic!("buffered scan missed corruption at {}", flip),
+            };
+            let mut stream = RecordReader::new(garbled.as_slice(), garbled.len() as u64);
+            let streamed = loop {
+                match stream.next_record() {
+                    Ok(Some(_)) => continue,
+                    Ok(None) => panic!("streaming scan missed corruption at {}", flip),
+                    Err(error) => break error,
+                }
+            };
+            match (buffered, streamed) {
+                (
+                    CrdtError::CorruptJournal { offset: buffered, .. },
+                    CrdtError::CorruptJournal { offset: streamed, .. },
+                ) => assert_eq!(buffered, streamed),
+                other => panic!("expected two corrupt-journal errors, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn streaming_scan_buffer_stays_bounded_by_the_largest_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = log_bytes(dir.path(), 64);
+        let (records, _, _) = scan_records(&bytes).unwrap();
+        let largest = records.iter().map(|r| r.payload.len()).max().unwrap();
+        let mut stream = RecordReader::new(bytes.as_slice(), bytes.len() as u64);
+        let mut scanned = 0usize;
+        let mut peak = 0usize;
+        while stream.next_record().unwrap().is_some() {
+            scanned += 1;
+            peak = peak.max(stream.payload.capacity());
+        }
+        assert_eq!(scanned, records.len());
+        // The reused buffer tracks the largest single record, not the log —
+        // this is the property that removes the whole-log memory spike.
+        assert!(peak <= 2 * largest, "peak {} exceeded 2x largest record {}", peak, largest);
+        assert!(
+            peak * 4 < bytes.len(),
+            "peak {} is not far below the {}-byte log; the case is too small to be meaningful",
+            peak,
+            bytes.len()
+        );
     }
 
     #[test]

@@ -13,9 +13,9 @@ compression overlaps serialization instead of following it.
 Hard constraint: this crate must **not** enter `sparq-wasm`'s dependency graph
 (flate2 / zstd / rayon stay out of the browser bundle).
 
-<!-- [GPT-5.6] sq-98w7z.2: document the opt-in backend selection. -->
-Gzip defaults to pure-Rust `miniz_oxide`; opt-in `zlib-rs` selects flate2's
-pure-Rust zlib-rs backend, while `zlib-ng` remains available for native builds.
+<!-- [GPT-5.6] sq-98w7z.2; [OPUS-5] measured verdict + precedence live in rustdoc. -->
+Gzip encoder backend is a build-time choice: `miniz_oxide` by default, opt-in
+`zlib-rs` (measured: much faster at `-6`, trades ratio at `-1`) or `zlib-ng`.
 
 > **Internal crate — not on crates.io** (`publish = false`). The design is gated
 > on a measured baseline; it is consumed inside the workspace, not as a

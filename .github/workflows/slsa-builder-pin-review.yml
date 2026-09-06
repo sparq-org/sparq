@@ -1,0 +1,181 @@
+# Quarterly deliberate-review tick for the ONE tag-pinned action reference in this repo:
+# `slsa-framework/slsa-github-generator`, called by the four isolated provenance lanes — its
+# GENERIC generator by `release.yml#provenance`, `release.yml#provenance-artifacts` and
+# `dist.yml#provenance`, and its CONTAINER generator by `release.yml#provenance-container`
+# ([OPUS-5] #4635). Two reusable workflows, one trust anchor: the step below matches on the repo
+# path, so both flavours are swept and a lane on a second tag fails the job closed. See
+# compliance/slsa/trusted-builder-pin-policy.md for the decision this workflow mechanises.
+# [OPUS-5] #4572
+#
+# WHY THIS EXISTS. Every other third-party action in the repo is SHA-pinned and swept weekly by
+# Dependabot. This one deliberately is not — the builder identity baked into the provenance
+# derives from the `@ref`, so a SHA reference yields no identity a `slsa-verifier` consumer
+# policy can match — and for the same reason `.github/dependabot.yml` ignores its version-updates.
+# That combination is correct, but it removes the only force that would otherwise notice the pin
+# ageing. Without a replacement the tag drifts silently: no PR, no alert, no owner. This is the
+# replacement.
+#
+# WHAT IT DOES. Derives the pinned tag from the workflows themselves (never a second copy that
+# could disagree with the lanes), asks upstream what the current release is, and opens ONE
+# idempotent tracking issue when — and only when — there is an actual trust decision to take:
+# upstream has published a newer release, or the pinned tag has stopped resolving upstream (a
+# retag or a deleted release is itself a trust event). If the pin is current it closes any
+# previously-opened issue, so a stale reminder cannot linger after the review has happened.
+#
+# NOT A GATE. Schedule + dispatch only, so it never produces a check-run on a PR and is invisible
+# to the `ci-summary / gate` aggregator (hence no `.github/advisory-registry.json` entry). The
+# structural half of this policy — all four lanes on one tag, the Dependabot ignore intact, this
+# workflow still scheduled — IS enforced on every PR by
+# scripts/tests/test_release_slsa_l3_provenance.py.
+#
+# Third-party actions pinned by full commit SHA.
+name: slsa-builder-pin-review
+
+on:
+  # Quarterly, off-peak: 06:37 UTC on the 1st of Jan / Apr / Jul / Oct. Odd minute to stay off
+  # the top-of-hour stampede, quarterly because a builder-identity change is a trust review, not
+  # a dependency sweep — weekly noise on a pin nobody should be bumping casually trains people
+  # to ignore it.
+  schedule:
+    - cron: "37 6 1 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slsa-builder-pin-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: trusted-builder tag pin -> quarterly review issue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # open/update/close the single trusted-builder-pin review issue
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The workflows ARE the source of truth for the pin. Reading it back out of them (rather
+      # than restating it here) means this job cannot drift away from the lanes it reviews, and
+      # it fails closed if the lanes ever disagree with each other — two lanes on different tags
+      # would mean one release carrying provenance from two different builder identities.
+      - name: Derive the pinned builder tag from the provenance lanes
+        id: pin
+        run: |
+          set -euo pipefail
+          refs="$(
+            { grep -hoE '^[[:space:]]*uses:[[:space:]]*slsa-framework/slsa-github-generator/[^[:space:]]+' \
+                .github/workflows/release.yml .github/workflows/dist.yml || true; } \
+              | sed -E 's/.*@//' | sort -u
+          )"
+          count="$(printf '%s' "$refs" | grep -c . || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly ONE distinct pinned ref across the trusted-builder lanes, found ${count}" >&2
+            printf '%s\n' "$refs" >&2
+            exit 1
+          fi
+          echo "tag=${refs}" >> "$GITHUB_OUTPUT"
+          echo "pinned trusted-builder tag: ${refs}"
+
+      - name: Compare against upstream, open/update/close the review issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PINNED: ${{ steps.pin.outputs.tag }}
+        with:
+          script: |
+            const upstream = { owner: 'slsa-framework', repo: 'slsa-github-generator' };
+            const pinned = process.env.PINNED;
+            const label = 'supply-chain:trusted-builder-pin';
+            const title = 'Review the slsa-github-generator trusted-builder tag pin';
+            const policy = 'compliance/slsa/trusted-builder-pin-policy.md';
+
+            const latest = (await github.rest.repos.getLatestRelease(upstream)).data;
+
+            // A pinned tag that no longer resolves upstream is a trust event in its own right
+            // (retagged, or the release was withdrawn) — surface it even if it still "matches".
+            let pinnedResolves = true;
+            try {
+              await github.rest.repos.getReleaseByTag({ ...upstream, tag: pinned });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              pinnedResolves = false;
+            }
+
+            // Find the single open tracking issue, if any.
+            const open = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'open', labels: label, per_page: 100,
+            });
+            const hit = open.data.find(i => i.title === title);
+
+            if (latest.tag_name === pinned && pinnedResolves) {
+              core.info(`pinned ${pinned} is the current upstream release — no trust decision due.`);
+              if (hit) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: hit.number,
+                  body: `Pin is back in sync: \`${pinned}\` is the current upstream release. Closing.`,
+                });
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: hit.number, state: 'closed',
+                });
+              }
+              return;
+            }
+
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The SLSA trusted-builder pin is due a deliberate review (\`${policy}\`).`,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| pinned in the provenance lanes | \`${pinned}\` |`,
+              `| upstream latest release | \`${latest.tag_name}\` (${latest.html_url}) |`,
+              `| pinned tag still resolves upstream | ${pinnedResolves ? 'yes' : '**NO — retagged or withdrawn**'} |`,
+              '',
+              'This is a **trust decision, not a dependency bump**: the tag is what the generator',
+              'derives the builder identity in the provenance from, so moving it changes the identity',
+              'downstream `slsa-verifier` consumer policies match against. Dependabot is deliberately',
+              'ignored for this reference, which is why this issue exists.',
+              '',
+              `Review checklist (the full version, with rationale, is in \`${policy}\`):`,
+              '',
+              '- [ ] Read the upstream release notes and the diff between the two tags, focusing on the',
+              '      signing path and any change to the builder identity string.',
+              '- [ ] Confirm the new tag is a stable release (not a pre-release/RC) and is the version',
+              '      upstream currently recommends for BOTH `generator_generic_slsa3.yml` and',
+              '      `generator_container_slsa3.yml`.',
+              '- [ ] Confirm any published consumer verification guidance still matches (the',
+              '      `slsa-verifier` invocation in `scripts/verify-release-provenance.sh` and the',
+              '      release-notes verify command in `release.yml`).',
+              '- [ ] Update **all four** lanes together — `release.yml#provenance`,',
+              '      `release.yml#provenance-artifacts`, `dist.yml#provenance` and',
+              '      `release.yml#provenance-container`. A partial bump is rejected on every PR by',
+              '      `scripts/tests/test_release_slsa_l3_provenance.py`.',
+              '- [ ] Keep it a TAG. SHA-pinning it erases the verifiable builder identity — that is the',
+              '      whole reason for the exception.',
+              '- [ ] Record the decision (and the date) in the review log in the policy record.',
+              '',
+              `Run: ${run}`,
+              '',
+              '_Maintained idempotently by `.github/workflows/slsa-builder-pin-review.yml`._',
+            ].join('\n');
+
+            try {
+              await github.rest.issues.createLabel({
+                ...context.repo, name: label, color: '5319e7',
+                description: 'The tag-pinned SLSA trusted builder needs a deliberate review',
+              });
+            } catch (e) {
+              if (e.status !== 422) throw e; // 422 == already exists
+            }
+
+            if (hit) {
+              await github.rest.issues.update({ ...context.repo, issue_number: hit.number, body });
+              core.info(`refreshed the existing review issue #${hit.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                ...context.repo, title, body, labels: [label],
+              });
+              core.info(`opened review issue #${created.data.number}`);
+            }

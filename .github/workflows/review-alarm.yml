@@ -1,0 +1,122 @@
+# review-alarm — the review-lane BLIND-SPOT alarm ([OPUS-5]). 🤖 SPARQ agent.
+#
+# WHAT: sparq has no in-repo verdict PRODUCER. Every review a sparq PR receives is produced
+# out of repo by the registry's review-fix.yml, scheduled by the registry's dispatch.yml,
+# whose `enumerate_review_items` admits a PR only if its head ref matches
+# `^sparq-agent/issue-([1-9][0-9]*)-`, its head repo is the target repo, its author is the
+# worker App bot, AND a registry-written provenance record exists. A PR opened by anything
+# else — every PR an interactive agent session pushes — fails all of those by construction
+# and no review is ever dispatched for it. MEASURED 2026-07-26 over all 118 open PRs
+# (paginated, total_count cross-checked): 89 bot-authored PRs, 100% carrying a review:*
+# loop label; 29 jeswr-authored PRs, ZERO carrying review:pass / review:changes /
+# review:needs. Absence of a review produces no artifact, so nothing noticed for weeks.
+# scripts/review_lane_alarm.py enumerates that blind spot and REDs this run (plus files ONE
+# deduped issue) when a PR has sat in it past the threshold.
+#
+# NOT A GATE (same posture as selection-alarm.yml / formal-alarm.yml): scheduled on main,
+# files issues, blocks NO merge. Redding this run blocks nothing — it exists to be SEEN.
+#
+# That is true because this job is DECLARED in `.github/advisory-registry.json`, which
+# #3773 made the ONLY thing that can make a check-run non-gating. It is NOT true because
+# of where the check-run lands. [OPUS-5] sq-huwr8 corrects the argument this header used
+# to make, which reasoned from "this workflow creates no check-run on a PR head or
+# merge-group ref" to the conclusion that the gate could therefore never see it. The
+# premise holds; the conclusion does not follow. ci-summary.yml also runs on
+# `push: branches: [main]` with `timeout-minutes: 80`, and a SCHEDULED run on main puts
+# its check-run on exactly the head SHA that push-triggered gate polls — and the gate
+# deliberately waits for the check-run name set to STABILISE, so a sibling appearing
+# mid-poll is picked up, not missed. MEASURED 2026-07-27: over the real 477-check-run set
+# for main head cb0c6739c, ci_summary_gate.py render_verdict() listed
+# `review-lane blind-spot alarm: failure` as a GATING failure. The registry entry, not
+# the trigger type, is what makes this lane safe to RED.
+#
+# Pinned by scripts/tests/test_alarm_lanes_non_gating.py, which drives the gate's own
+# is_advisory() + render_verdict() so that deleting the declaration REDs a named test
+# rather than silently re-arming this detector as a merge blocker.
+#
+# WHO APPLIED THE HOLD (sparq#4911). The alarm exempts a PR carrying `needs:user` /
+# `review:needs-user` — but it now resolves that hold's OWNER from the `labeled` timeline
+# event rather than from the label's name, because 41/41 of the live "human-owned" holds
+# on open sparq PRs were applied by `sparq-orchestrator[bot]`, and a further population of
+# machine PARKS was written under the maintainer's own alias — so neither the label nor the
+# actor identity alone is a trustworthy answer to "did a human decide this?". The
+# live step therefore also reads `repos/{repo}/issues/{n}/events` for held blind-spot
+# candidates. That is a READ, already covered by the scopes below; no new permission is
+# requested and the alarm still cannot write a label on any PR.
+#
+# NO ARMING AUTHORITY, STRUCTURALLY. This workflow holds `issues: write` and NOTHING else:
+# no `pull-requests: write` (it cannot label, promote, or un-draft a PR) and no
+# `contents: write` (it cannot push). It is a detector. It is deliberately disjoint from
+# verdict-bridge.yml, which owns the comment -> label TRANSPORT hop; this workflow owns
+# noticing that no verdict was ever PRODUCED to transport.
+#
+# FAIL-LOUD: an alarm-infrastructure error (gh api failure, unparseable response) exits
+# non-zero so THIS run goes red and a human notices the detector itself is broken — masking
+# an unreviewed backlog is the one thing the alarm must never do.
+#
+# All actions are SHA-pinned (code-scanning / Scorecard posture). The script self-tests
+# hermetically as the FIRST step of every run (a detector is never trusted to watch
+# anything before it has proved itself on this tick's code), and its suite also gates on
+# every PR via scripts/tests/test_review_lane_alarm.py in docs-quality.yml.
+name: review-alarm
+
+on:
+  # Every six hours, offset off the top of the hour so it never contends with auto-arm
+  # (4,14,24,…) or verdict-bridge (1,11,21,…). Explicit values (no */N) keep it auditable.
+  schedule:
+    - cron: "37 1,7,13,19 * * *"
+  # Manual run for validation / triage.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report the blind spot without filing or updating an issue"
+        type: boolean
+        default: false
+      max_age_hours:
+        description: "Hours a PR may sit with no countable verdict before it alarms"
+        type: string
+        default: "24"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-alarm
+  cancel-in-progress: false
+
+jobs:
+  alarm:
+    name: review-lane blind-spot alarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write # file/update the ONE deduped alarm issue — the only write it has
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/review_lane_alarm.py
+          sparse-checkout-cone-mode: false
+
+      # FIRST, unconditionally: a detector that cannot prove itself never gets to run.
+      - name: Self-test the alarm (hermetic fixtures)
+        run: python3 scripts/review_lane_alarm.py --self-test
+
+      - name: Enumerate PRs no review producer can reach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          MAX_AGE_HOURS: ${{ inputs.max_age_hours || '24' }}
+        # An args array, not an unquoted `$DRY_RUN` splat: word-splitting an env var into
+        # a flag is exactly the shellcheck SC2086 shape actionlint rejects, and here it
+        # would also let a crafted dispatch input inject an extra flag.
+        run: |
+          set -euo pipefail
+          args=(--max-age-hours "$MAX_AGE_HOURS")
+          if [ -n "$DRY_RUN" ]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/review_lane_alarm.py "${args[@]}"

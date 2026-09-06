@@ -6,7 +6,7 @@
 #       vX.Y.Z, which fires the EXISTING release.yml unchanged").
 #
 # WHAT THIS DOES — the two-step release-plz flow, anchored on release-plz.toml
-# (#789 / sq-v286.3: the version_group over the 17 publishable crates that keeps the
+# (#789 / sq-v286.3: the version_group over the 37 publishable crates that keeps the
 # locked single-version model):
 #
 #   1. release-pr  — on every push to main, release-plz reads the conventional-commit
@@ -24,6 +24,9 @@
 # THE HANDOFF — tag → reuse existing release.yml (the whole point; do NOT duplicate the
 # build matrix here). The EXISTING release.yml triggers on `push: tags: ["v*"]`, so the
 # tag this job creates fires release.yml unchanged → its proven build-matrix.yml archive
+# — PROVIDED the tag is pushed with a privileged token: GitHub suppresses workflow triggers
+# for events created with the workflow's own GITHUB_TOKEN, so this handoff needs the App
+# token / RELEASE_PLZ_TOKEN wired below (sq-iwnnf / #3273; docs/release.md §8e) —
 # matrix + CycloneDX SBOM/VEX + SLSA provenance + SHA256SUMS + GitHub Release + ghcr
 # container path all run exactly as today. This workflow adds NO build/package steps.
 #
@@ -70,23 +73,43 @@ jobs:
   # failed with `ERROR Failed to open PR ... HTTP status client error (403 Forbidden) for url
   # (https://api.github.com/repos/sparq-org/sparq/pulls)` (live: run 29988505600), and the old
   # job name carried no "advisory" token, so the failure GATED the ci-summary `gate` red on main.
-  # The in-repo App-token pattern (ORCHESTRATOR_APP_ID / create-github-app-token, batch-merge.yml)
-  # would bypass that setting, but the App secrets are NOT configured (live: batch-merge run
-  # 29990467905 — ORCHESTRATOR_APP_ID empty, HAVE_APP_TOKEN=false, hygiene-only mode), so there is
-  # no working token to switch to. Instead: (1) the job name now contains the whole word
-  # "advisory" AND it is DECLARED in .github/advisory-registry.json, which is what excludes it
-  # (since #3773 the name token alone does nothing) from the
-  # gating set (registered in .github/advisory-registry.json; owner bead sq-lonae); (2) the KNOWN
-  # 403 (PR-creation setting disabled) is tolerated loudly — a `::warning` naming the needed
-  # setting, exit 0 — but ONLY when BOTH the CAPTURED release-plz output matches the exact
-  # blocked-PR-creation signature (Failed to open PR + 403 on the /pulls URL) AND a
-  # side-effect-free live probe of the same call returns 403 ([FABLE-5] round-1 review:
-  # signature + probe together, so a coincidental 403 — e.g. a secondary-rate-limit response to
-  # the probe — can never launder an unrelated failure, and a non-403 real error with a flaky
-  # probe can never be swallowed). ANY OTHER failure still fails the (now advisory) job, never
-  # silently swallowed. DURABLE FIX (maintainer): enable
-  # Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"
-  # (or configure the ORCHESTRATOR_APP secrets and switch this job's token to a minted App token).
+  # Containment: (1) the job name contains the whole word "advisory" AND it is DECLARED in
+  # .github/advisory-registry.json, which is what excludes it (since #3773 the name token alone
+  # does nothing) from the gating set (owner bead sq-lonae); (2) the KNOWN 403 (PR-creation
+  # setting disabled) is tolerated loudly — a `::warning` naming the needed setting, exit 0 —
+  # but ONLY when BOTH the CAPTURED release-plz output matches the exact blocked-PR-creation
+  # signature (Failed to open PR + 403 on the /pulls URL) AND a side-effect-free live probe of
+  # the same call returns 403 ([FABLE-5] round-1 review: signature + probe together, so a
+  # coincidental 403 — e.g. a secondary-rate-limit response to the probe — can never launder an
+  # unrelated failure, and a non-403 real error with a flaky probe can never be swallowed).
+  #
+  # [OPUS-5] sq-iwnnf / #3273 — THE DURABLE FIX, CI half. Containment stops the red; it does not
+  # get a Release-PR opened, so the release automation the GUI download (sq-gl3cf) and the
+  # multi-platform builds (sq-v286) depend on stays dead. Both fixes the bead offers are
+  # needs:user (flip the repo setting, or provision a token). This job now takes the SECOND arm
+  # and PRE-WIRES it, so provisioning is the ONLY remaining step — no follow-up CI edit:
+  #
+  #   forge token = App token (ORCHESTRATOR_APP_ID/_PRIVATE_KEY, minted per batch-merge.yml)
+  #              || RELEASE_PLZ_TOKEN                        (a maintainer-provisioned PAT)
+  #              || GITHUB_TOKEN                             (today's fallback; cannot open PRs)
+  #
+  # Neither privileged token is subject to the Actions PR-creation setting, so the moment EITHER
+  # secret exists the Release-PR opens and this job goes green with no workflow change. Until
+  # then the chain resolves to GITHUB_TOKEN and behaviour is exactly as before.
+  #
+  # The containment is NARROWED to match: it tolerates the 403 only when the UNPRIVILEGED
+  # fallback was in use. A configured App/PAT token that still 403s means the token itself is
+  # wrong (missing repo scope / App not installed / expired) — a real, actionable failure that
+  # must stay loud rather than be laundered by a setting-disabled explanation that no longer
+  # applies. See the `PRIVILEGED_TOKEN` branch in the containment step.
+  #
+  # STILL needs:user — neither privileged secret was configured as of the last observation
+  # (batch-merge run 29990467905: ORCHESTRATOR_APP_ID empty, HAVE_APP_TOKEN=false), so today the
+  # chain still lands on GITHUB_TOKEN and the Release-PR is still not opened. ANY ONE of three
+  # unblocks it: provision ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY
+  # (repo secrets; App needs `contents: write` + `pull_requests: write`), OR add a RELEASE_PLZ_TOKEN
+  # secret (fine-grained PAT, same two permissions), OR enable Settings → Actions → General →
+  # "Allow GitHub Actions to create and approve pull requests". Any one of the three fixes this.
   release-plz-pr:
     name: release-plz / Release-PR (advisory)
     # Guard against forks: release-plz needs repo write + would open PRs on a fork clone.
@@ -96,7 +119,21 @@ jobs:
     permissions:
       contents: write       # commit the version bump + changelog onto the Release-PR branch
       pull-requests: write  # open / update the Release-PR
+    env:
+      # Secrets are not readable from a step `if:` expression — mirror the App id into env so
+      # the mint step can be skipped fail-soft when the App is not configured (batch-merge.yml).
+      ORCHESTRATOR_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
     steps:
+      # [OPUS-5] sq-iwnnf — first arm of the token chain. Skipped (not failed) when the App
+      # secrets are absent; `steps.app-token.outputs.token` is then empty and the `||` chain
+      # below falls through to RELEASE_PLZ_TOKEN, then to GITHUB_TOKEN.
+      - name: Mint the sparq-orchestrator App token (bypasses the PR-creation setting)
+        id: app-token
+        if: env.ORCHESTRATOR_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ORCHESTRATOR_APP_ID }}
+          private-key: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
       - name: Checkout (full history for changelog generation)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -124,7 +161,7 @@ jobs:
       # behavior is unchanged; only the invocation is now wrapped and captured. The unchanged
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)
@@ -134,10 +171,15 @@ jobs:
         # ::warning; anything else re-fails the job. See the job-level comment.
         continue-on-error: true
         env:
-          # GITHUB_TOKEN is what release-plz uses to open/update the Release-PR.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # [OPUS-5] sq-iwnnf — the token release-plz uses to open/update the Release-PR:
+          # App token || RELEASE_PLZ_TOKEN || GITHUB_TOKEN (see the job-level comment). An
+          # unset secret evaluates to the empty string, so `||` selects the first configured one.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          # Which arm won — logged (never the token itself) so a run says why it can/cannot open a PR.
+          TOKEN_SOURCE: ${{ steps.app-token.outputs.token != '' && 'sparq-orchestrator App token' || (secrets.RELEASE_PLZ_TOKEN != '' && 'RELEASE_PLZ_TOKEN (PAT)' || 'GITHUB_TOKEN (cannot open PRs while the Actions PR-creation setting is disabled)') }}
         run: |
           set -uo pipefail
+          echo "release-plz forge token: ${TOKEN_SOURCE}"
           # The commit ident the release-plz/action's git-config sub-action would set for
           # GITHUB_TOKEN (release-plz commits the version bump onto the Release-PR branch).
           git config user.name 'github-actions[bot]'
@@ -166,10 +208,20 @@ jobs:
       - name: Contain the known 403 (Actions PR-creation setting disabled)
         if: steps.releasepr.outcome == 'failure'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Probe with the SAME token release-plz used, or the probe proves nothing about it.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          # [OPUS-5] sq-iwnnf — 'true' iff a privileged (setting-exempt) token was configured.
+          # The whole tolerated-403 story is "GITHUB_TOKEN is blocked by a repo setting"; with an
+          # App/PAT token that story is false by construction, so the failure must stay loud.
+          PRIVILEGED_TOKEN: ${{ (steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN) != '' }}
         run: |
           set -euo pipefail
           log=/tmp/release-plz-pr.log
+          if [ "${PRIVILEGED_TOKEN}" = "true" ]; then
+            echo "::error::release-plz release-pr failed while using a PROVISIONED App/PAT token. That token is not subject to 'Allow GitHub Actions to create and approve pull requests', so the known blocked-setting condition cannot explain this — it is a real failure (check the App is installed on this repo with contents:write + pull_requests:write, or that RELEASE_PLZ_TOKEN is unexpired and carries those permissions). Captured output follows."
+            sed 's/^/  | /' "$log" 2>/dev/null || echo "  | (no captured output at $log)"
+            exit 1
+          fi
           if [ ! -s "$log" ]; then
             echo "::error::release-plz release-pr failed but left no captured output at $log — cannot classify the failure; treating as a real failure."
             exit 1
@@ -190,12 +242,55 @@ jobs:
             -d '{"title":"release-plz 403 probe (never created: head==base is invalid)","head":"main","base":"main"}')
           echo "PR-creation probe HTTP status: ${code}"
           if [ "${code}" = "403" ]; then
-            echo "::warning title=release-plz Release-PR blocked by repo setting::GITHUB_TOKEN cannot create pull requests: the repo/org setting 'Settings → Actions → General → Allow GitHub Actions to create and approve pull requests' is disabled, so the Release-PR was NOT opened (known condition, established by captured-output signature + live probe; tolerated as advisory). Durable fix: a maintainer enables that setting, or configures the ORCHESTRATOR_APP_ID/_PRIVATE_KEY App secrets and switches this job's token to a minted App token (batch-merge.yml pattern), which bypasses the setting."
+            echo "::warning title=release-plz Release-PR blocked by repo setting::GITHUB_TOKEN cannot create pull requests: the repo/org setting 'Settings → Actions → General → Allow GitHub Actions to create and approve pull requests' is disabled, so the Release-PR was NOT opened (known condition, established by captured-output signature + live probe; tolerated as advisory). Durable fix (needs:user, ANY ONE of the three — the CI side is already wired, no workflow edit needed): enable that repo setting; OR add the ORCHESTRATOR_APP_ID/_PRIVATE_KEY App secrets; OR add a RELEASE_PLZ_TOKEN secret (fine-grained PAT with contents:write + pull_requests:write). This job already prefers a minted App token, then RELEASE_PLZ_TOKEN, over GITHUB_TOKEN, and neither privileged token is subject to that setting."
             exit 0
           fi
           echo "::error::release-plz release-pr failed with the blocked-PR-creation signature in its output, but the live PR-creation probe returned HTTP ${code} (not 403) — the blocked-setting condition is not reproducible right now, so this is treated as a real failure. Probe response body follows."
           cat /tmp/rp-probe.json || true
           exit 1
+      # [OPUS-5] sq-lonae — PROMOTION SIGNAL. The promotion of this job back to gating is
+      # needs:user (provision ORCHESTRATOR_APP_ID/_PRIVATE_KEY or RELEASE_PLZ_TOKEN, or enable
+      # the Actions PR-creation setting — see the job comment and docs/release.md §8e), and
+      # until this step nothing in the repo OBSERVED the moment that prerequisite landed: the
+      # forge-token chain resolves silently, so a newly-provisioned token just makes this job go
+      # quietly green and the `(advisory)` declaration in .github/advisory-registry.json rots.
+      #
+      # The registered promotion criterion is "PR-creation works with this job's forge token",
+      # which is exactly what the containment step's side-effect-free probe answers — so re-use
+      # it on the SUCCESS path (the failure path already probed, and already reported). head==base
+      # is invalid, so a token PERMITTED to create PRs gets 422 Validation Failed and no PR is
+      # ever created, while a token blocked by the Actions setting gets 403. The probe is needed
+      # even on success because `release-plz release-pr` also exits 0 when there is simply
+      # nothing to release, which says nothing about whether PR-creation is allowed.
+      #
+      # FAIL-SOFT BY CONSTRUCTION — this step must never fail the release path (no `set -e`, the
+      # curl cannot propagate). Only the DEFINITIVE 422 (authorization passed, body rejected)
+      # claims readiness; 403 means still blocked; anything else — including a probe that never
+      # completed — is reported as inconclusive rather than misread as an unblock.
+      - name: Promotion signal — has PR-creation unblocked? (sq-lonae)
+        if: steps.releasepr.outcome == 'success'
+        env:
+          # Probe with the SAME token release-plz used, or the probe proves nothing about it.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls" \
+            -d '{"title":"release-plz PR-creation probe (never created: head==base is invalid)","head":"main","base":"main"}') || true
+          echo "PR-creation probe HTTP status: ${code:-<probe did not complete>}"
+          case "${code}" in
+            422)
+              echo "::warning title=release-plz Release-PR promotion unblocked (sq-lonae)::This job's forge token CAN now create pull requests — the side-effect-free probe returned 422 (authorization passed, only the head==base body was rejected), so the known blocked-PR-creation condition no longer holds. The advisory declaration is now STALE. Promote: drop the ' (advisory)' token from this job's name, delete the 'Contain the known 403' step and this step, and delete the 'release-plz / Release-PR (advisory)' entry from .github/advisory-registry.json (docs/release.md §8e)."
+              ;;
+            403)
+              echo "PR-creation is still blocked for this forge token — the job stays advisory (sq-lonae)."
+              ;;
+            *)
+              echo "PR-creation probe inconclusive (HTTP '${code}') — not claiming promotion readiness."
+              ;;
+          esac
 
   # ---- 2. release: when the Release-PR's version commit is on main, create the v<version>
   #         git tag. That tag fires the EXISTING release.yml (push: tags: ["v*"]) which does
@@ -210,7 +305,23 @@ jobs:
       # `publish` note). UNCOMMENT the next line together with the auth-action step + the
       # CARGO_REGISTRY_TOKEN env below, and set `publish = true` in release-plz.toml:
       # id-token: write  # OIDC token crates-io-auth-action exchanges for a short-lived crates.io token
+    env:
+      # See the release-plz-pr job: secrets are not readable from a step `if:`.
+      ORCHESTRATOR_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
     steps:
+      # [OPUS-5] sq-iwnnf / #3273 — the SAME token chain as the Release-PR job, and it matters
+      # here for a second, independent reason: GitHub suppresses workflow triggers for events
+      # created with the workflow's own GITHUB_TOKEN, so a `v<version>` tag pushed with
+      # GITHUB_TOKEN does NOT fire release.yml (`push: tags: ["v*"]`) — the tag→release.yml
+      # handoff this file is built around. A minted App token / PAT is a normal actor and does
+      # fire it. Skipped fail-soft when unconfigured; the chain then falls back as before.
+      - name: Mint the sparq-orchestrator App token (tag push must fire release.yml)
+        id: app-token
+        if: env.ORCHESTRATOR_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ORCHESTRATOR_APP_ID }}
+          private-key: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
       - name: Checkout (full history for tag detection)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -268,8 +379,10 @@ jobs:
         with:
           command: release
         env:
-          # Tagging is a forge operation done with GITHUB_TOKEN.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tagging is a forge operation. [OPUS-5] sq-iwnnf: same App-token || RELEASE_PLZ_TOKEN
+          # || GITHUB_TOKEN chain as the Release-PR job — a privileged token also makes the
+          # pushed tag actually trigger release.yml (see the mint step above).
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
           # [OPUS-4.8] sq-v286.11 — crates.io TRUSTED-PUBLISHING FLIP (step b, continued). With
           # `publish = false`, no crates.io credential is passed (publish is skipped, only the
           # tag is cut). To flip, UNCOMMENT the auth-action step above + this line:

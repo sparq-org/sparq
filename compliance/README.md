@@ -36,10 +36,10 @@ external cryptographer / organisational act. **They must never be presented as s
 | **ISMS / Statement-of-Applicability** org act (scope, risk treatment, SoA, management review) | iso27001 | deploying org | GAP-ISO-1 (P1) |
 | **External penetration test** + accredited ASVS L2 assessor of a deployed server | asvs (cis) | accredited assessor | AUDIT-READY |
 | **CE marking / EU Declaration of Conformity / Article-14 reporting** | cra | commercialising party | CRA-CA.2/CA.3 |
-| **SLSA Build L3** (isolated trusted builder) — **L2 is the honest ceiling today** | slsa | trusted-builder migration | GX-11 / `sq-toze.25` (P3) |
+| **SLSA Build L3** (isolated trusted builder) — **L2 is the honest ceiling today**; the isolated-builder lanes now cover every `release.yml`/`dist.yml` artifact except the ghcr container image (archives — sq-toze.25; GUI bundles, SBOM/VEX, conformance report, dist binaries — #4570), but every lane is unexercised and the container is still in-band | slsa | finish the trusted-builder migration (container) + one `v*` tag as evidence | GX-11 / `sq-toze.25` + #4570 (P3) |
 | Accredited-body **certificates** (ISO 27001, SLSA-L3, SOC2/27701) | iso27001, slsa, privacy | accredited body | external by definition |
 
-**Security fix shipped this phase — [PR #241](https://github.com/jeswr/sparq/pull/241) (MERGED):**
+**Security fix shipped this phase — [PR #241](https://github.com/sparq-org/sparq/pull/241) (MERGED):**
 the unauthenticated **error-body information leak** (echoing caller input / **loaded RDF data** /
 filesystem paths on the B3 no-auth path) is now sanitized at the HTTP boundary, with 5 regression
 no-echo tests. Refs `sq-cz89` / `sq-j9zs` / `sq-zg0u` — it closed the most material open engine gap

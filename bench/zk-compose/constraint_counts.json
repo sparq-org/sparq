@@ -35,7 +35,7 @@
         "filter_f64_raw",
         "filter_value_dl"
       ],
-      "members": 31
+      "members": 32
     },
     "credential": {
       "families": [
@@ -896,6 +896,13 @@
       ],
       "members": [
         {
+          "member": "filter_value_dl_datetime",
+          "params": {
+            "datatype": "datetime"
+          },
+          "circuit_size": 3070
+        },
+        {
           "member": "filter_value_dl_decimal",
           "params": {
             "datatype": "decimal"
@@ -1094,8 +1101,8 @@
   },
   "summary": {
     "families": 14,
-    "members": 36,
-    "snapshot_members": 36,
+    "members": 37,
+    "snapshot_members": 37,
     "scaling_pairs": 33,
     "invariance_facts": 3
   }

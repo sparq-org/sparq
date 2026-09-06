@@ -451,6 +451,121 @@ pub fn filter_value_dl_decimal(
     assert_eq(result, expected, "filter verdict mismatch");
 }
 
+// =====================================================================
+// xsd:dateTime / xsd:date value-lane member (sq-wz99x) -- the scaled-epoch bind.
+// =====================================================================
+
+/// Dual-leaf value-FILTER over a committed `xsd:dateTime` OR `xsd:date`
+/// (sq-wz99x; `research/zk-field-native-encoding.md` S13.5).
+///
+/// Structurally the [`filter_value_dl_decimal`] member with a different value
+/// handle: the `VALUE_HOOK` is the SIGNED SCALED EPOCH
+/// `sign(T) * |T|`, `T` = milliseconds from `1970-01-01T00:00:00Z` on the XSD
+/// proleptic-Gregorian `timeOnTimeline` (NO leap seconds), at the lane-fixed
+/// sub-second scale `FS = 3` -- carried sign-split as
+/// `(value_neg, value_hook_scaled)` exactly like the decimal member's scaled
+/// magnitude. Binds the operand with TWO Poseidon2 permutations, carries
+/// `lexical_component` as a FREE witness, and takes the verdict from the
+/// UNCHANGED [`signed_scaled_verdict`] -- NO in-circuit blake3, no new
+/// comparison machinery.
+///
+/// ## ONE relation serves BOTH lanes (the `datatype_const` is PUBLIC)
+/// `xsd:date` is its OWN lane, but only by its lane CONSTANT: the host picks
+/// `blake3("<xsd:dateTime IRI>@epochscale=3")` or
+/// `blake3("<xsd:date IRI>@epochscale=3")`
+/// (`sparq_zk::dual_leaf_datetime::{datetime_datatype_const,
+/// date_datatype_const}`) and folds it into `value_component`. Since that
+/// constant is a PUBLIC input, a date leaf's honest witness rebinds to a
+/// DIFFERENT leaf under the dateTime constant and fails the
+/// `assert_eq(leaf, operand_enc)` -- so the two lanes cannot cross even though a
+/// date's hook is the scaled epoch of its STARTING instant (midnight UTC) and
+/// therefore numerically equal to the dateTime hook of that same instant. No
+/// second Noir function is needed (S13.5); this is a BINDING argument resting on
+/// Poseidon2 preimage resistance, NOT an audited soundness claim.
+///
+/// ## B4 -- the scale + timezone bind lives OUTSIDE the circuit
+/// `FS` is folded into `datatype_const` exactly like the decimal `@scale=` bind,
+/// so a hook at one scale can never collide a hook at another. The hookable
+/// DOMAIN (strict XSD-canonical `Z`-timezoned lexicals only; bare / non-`Z` /
+/// `24:00:00` / leap-second / non-canonical-year / over-`FS`-fraction /
+/// `u64`-overflowing forms are REJECTED fail-closed) is the host's S13.4
+/// predicate, not an in-circuit check -- the same division of labour the decimal
+/// member uses for its canonical fraction width. Within that domain the hook is
+/// injective on the value within the datatype, so the comparison below is the
+/// XSD `timeOnTimeline` order.
+///
+/// ## B1 -- range-decompose the scaled epoch
+/// `value_hook_scaled` arrives as a `Field`; `assert_max_bit_size::<64>()` pins
+/// it to `u64` (no modular wrap -- reject-list (i)). The SAME range-decomposed
+/// value feeds the binding AND the comparison.
+///
+/// - `operand_enc`          : PUBLIC. The scan-anchored dual-leaf dateTime/date encoding.
+/// - `op`                   : PUBLIC. The FILTER operator.
+/// - `bound_neg`,`bound_scaled_epoch`: PUBLIC. The FILTER's constant instant, host-
+///   converted to the SAME signed scaled epoch (`bound_scaled_epoch = |T_bound|` in
+///   milliseconds, sign in `bound_neg`).
+/// - `expected`             : PUBLIC. The disclosed verdict.
+/// - `value_neg`            : PRIVATE. Sign of the operand's epoch.
+/// - `value_hook_scaled`    : PRIVATE. `|T|` in milliseconds as a `Field` -- the
+///   value handle at the lane-fixed scale `FS`.
+/// - `lexical_component`    : PRIVATE. The OFF-circuit blake3 lexical hash (free
+///   witness; the leaf binding pins it). Independence from the value handle is the
+///   removed INV-VL (module doc).
+/// - `datatype_const`       : PUBLIC. `blake3(<datatype IRI> || "@epochscale=FS")` --
+///   selects the dateTime lane or the date lane, and folds the scale (B4).
+pub fn filter_value_dl_datetime(
+    operand_enc: Field,
+    op: u32,
+    bound_neg: bool,
+    bound_scaled_epoch: u64,
+    expected: bool,
+    value_neg: bool,
+    value_hook_scaled: Field,
+    lexical_component: Field,
+    datatype_const: Field,
+) {
+    assert(op <= OP_NE, "unknown comparison operator");
+    // B1: range-decompose the scaled epoch to u64, no modular wrap.
+    value_hook_scaled.assert_max_bit_size::<64>();
+    let value_scaled: u64 = value_hook_scaled as u64;
+
+    // No "-0": a negative sign on a zero scaled epoch is not a canonical value
+    // handle (it would be a second encoding of the epoch instant itself). The
+    // host encoder reports a zero magnitude as non-negative, so an honest witness
+    // never trips this.
+    if value_neg {
+        assert(value_scaled != 0, "negative zero is not canonical");
+    }
+
+    // value_component = h3(VALUE_HOOK, DATATYPE_CONST, LANG_NONE), where VALUE_HOOK
+    // is the SIGNED scaled epoch: `value_scaled` for a non-negative instant,
+    // `-value_scaled` (field negation) for a pre-epoch one -- a single field per
+    // signed instant at this scale, matching the host's `if neg { -mag } else { mag }`.
+    let signed_value: Field = if value_neg {
+        0 - (value_scaled as Field)
+    } else {
+        value_scaled as Field
+    };
+    let value_component = h3(signed_value, datatype_const, LANG_NONE);
+
+    // leaf = h3(value_component, lexical_component, TYPE_CODE_LITERAL).
+    let leaf = h3(value_component, lexical_component, TYPE_CODE_LITERAL);
+
+    // A1: bind to the scan-anchored committed leaf. No in-circuit blake3.
+    assert_eq(leaf, operand_enc, "dual-leaf operand encoding mismatch");
+
+    // B2/B3: the UNCHANGED sign-aware fixed-point verdict, here over the scaled
+    // epoch -- the XSD timeOnTimeline order on the Z-only hookable domain.
+    let result = signed_scaled_verdict(
+        value_neg & (value_scaled != 0),
+        value_scaled,
+        bound_neg & (bound_scaled_epoch != 0),
+        bound_scaled_epoch,
+        op,
+    );
+    assert_eq(result, expected, "filter verdict mismatch");
+}
+
 #[test]
 fn accepts_true_ge_18() {
     // age = 18, FILTER age >= 18 -> true. Build the dual-leaf operand_enc the
@@ -712,4 +827,145 @@ fn decimal_rejects_unknown_op() {
     let lexical: Field = 0xdef;
     let operand_enc = decimal_operand_enc(false, 100, dt, lexical);
     filter_value_dl_decimal(operand_enc, 6, false, 100, true, false, 100, lexical, dt);
+}
+
+// ---- xsd:dateTime / xsd:date value-lane member (sq-wz99x) ----
+
+// Build the dual-leaf operand_enc for an instant at the lane scale FS, with the
+// SIGNED scaled-epoch value handle (mirrors the member's bind, and the host
+// `sparq_zk::dual_leaf_datetime::encode_datetime`/`encode_date` construction).
+// `dt` stands for blake3("<datatype IRI>@epochscale=FS") -- the LANE constant.
+fn datetime_operand_enc(neg: bool, scaled_epoch: u64, dt: Field, lexical: Field) -> Field {
+    let signed: Field = if neg { 0 - (scaled_epoch as Field) } else { scaled_epoch as Field };
+    let vc = h3(signed, dt, LANG_NONE);
+    h3(vc, lexical, TYPE_CODE_LITERAL)
+}
+
+#[test]
+fn datetime_accepts_true_ge() {
+    // value = 2001-09-09T01:46:40Z (1_000_000_000_000 ms), FILTER value >=
+    // 1970-01-02T00:00:00Z (86_400_000 ms) -> true.
+    let dt: Field = 0xabc; // stands for blake3(dateTime IRI || @epochscale=3)
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 1_000_000_000_000, dt, lexical);
+    filter_value_dl_datetime(
+        operand_enc,
+        OP_GE,
+        false,
+        86_400_000,
+        true,
+        false,
+        1_000_000_000_000,
+        lexical,
+        dt,
+    );
+}
+
+#[test]
+fn datetime_accepts_pre_epoch_lt_epoch() {
+    // value = 1969-12-31T23:59:59.5Z -> (neg, 500 ms) < the epoch (0) -> true.
+    // The sign is folded into the value handle by field negation, exactly as the
+    // host encoder does (`if neg { -mag } else { mag }`).
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(true, 500, dt, lexical);
+    filter_value_dl_datetime(operand_enc, OP_LT, false, 0, true, true, 500, lexical, dt);
+}
+
+#[test]
+fn datetime_cross_precision_operands_share_one_ordered_domain() {
+    // The lane-fixed FS point: a whole-second lexical and a sub-second one land
+    // in ONE scaled domain, so the single signed comparison orders them --
+    // T12:00:00Z < T12:00:00.5Z by 500 ms. (2020-06-01T12:00:00Z = 1_590_998_400
+    // s = 1_590_998_400_000 ms.)
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 1_590_998_400_000, dt, lexical);
+    filter_value_dl_datetime(
+        operand_enc,
+        OP_LT,
+        false,
+        1_590_998_400_500,
+        true,
+        false,
+        1_590_998_400_000,
+        lexical,
+        dt,
+    );
+}
+
+#[test(should_fail_with = "dual-leaf operand encoding mismatch")]
+fn date_lane_constant_separates_the_two_lanes() {
+    // THE ONE-RELATION-TWO-LANES INVARIANT (S13.3/S13.5): a date's hook is the
+    // scaled epoch of its STARTING instant, so 1970-01-02Z and
+    // 1970-01-02T00:00:00Z carry the NUMERICALLY IDENTICAL hook (86_400_000).
+    // They are still distinct terms, and the ONLY thing keeping them apart is the
+    // PUBLIC lane constant folded into value_component: a leaf committed under the
+    // DATE constant does not rebind under the DATETIME constant, so the honest
+    // witness for the date operand is unprovable against the dateTime lane.
+    let date_dt: Field = 0xda7e; // blake3(xsd:date IRI || @epochscale=3)
+    let datetime_dt: Field = 0xabc; // blake3(xsd:dateTime IRI || @epochscale=3)
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 86_400_000, date_dt, lexical);
+    // Same hook, same lexical witness -- only the public lane constant differs.
+    filter_value_dl_datetime(
+        operand_enc,
+        OP_EQ,
+        false,
+        86_400_000,
+        true,
+        false,
+        86_400_000,
+        lexical,
+        datetime_dt,
+    );
+}
+
+#[test(should_fail_with = "negative zero is not canonical")]
+fn datetime_rejects_negative_zero() {
+    // A negative sign on a zero scaled epoch is a second encoding of the epoch
+    // instant -- fail closed (the host encoder never emits it).
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 0, dt, lexical);
+    filter_value_dl_datetime(operand_enc, OP_EQ, false, 0, true, true, 0, lexical, dt);
+}
+
+#[test(should_fail_with = "filter verdict mismatch")]
+fn datetime_rejects_lying_verdict() {
+    // value = the epoch + 1000 ms, but the prover claims value >= 86_400_000 ms.
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 1_000, dt, lexical);
+    filter_value_dl_datetime(operand_enc, OP_GE, false, 86_400_000, true, false, 1_000, lexical, dt);
+}
+
+#[test(should_fail_with = "dual-leaf operand encoding mismatch")]
+fn datetime_rejects_sign_flip_unbinds_the_leaf() {
+    // THE SIGN BIND: the operand_enc was committed for a POST-epoch instant; a
+    // prover witnessing the same magnitude PRE-epoch does not reproduce the leaf.
+    // An untrusted prover cannot move a committed instant across the epoch.
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 500, dt, lexical);
+    filter_value_dl_datetime(operand_enc, OP_LT, false, 0, true, true, 500, lexical, dt);
+}
+
+#[test(should_fail_with = "call to assert_max_bit_size")]
+fn datetime_rejects_modular_wrap_scaled_epoch() {
+    // B1: a scaled epoch past u64 (2^64) must be rejected, not reduced mod p --
+    // the circuit-side mirror of the host's far-proleptic overflow rejection.
+    let value: Field = 0x10000000000000000; // 2^64
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 0, dt, lexical);
+    filter_value_dl_datetime(operand_enc, OP_EQ, false, 0, true, false, value, lexical, dt);
+}
+
+#[test(should_fail_with = "unknown comparison operator")]
+fn datetime_rejects_unknown_op() {
+    let dt: Field = 0xabc;
+    let lexical: Field = 0xdef;
+    let operand_enc = datetime_operand_enc(false, 1_000, dt, lexical);
+    filter_value_dl_datetime(operand_enc, 6, false, 1_000, true, false, 1_000, lexical, dt);
 }

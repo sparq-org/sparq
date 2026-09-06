@@ -620,8 +620,10 @@ mod gated {
     /// * `ValidationFailed(DistinctGroundEqual | Nonmonotonic)` — these are NOT
     ///   violation-detections but UNSUPPORTED-CAPABILITY fail-closes: `DistinctGroundEqual`
     ///   rejects a *VALID* RIF-Core document (a ground body `Equal` like
-    ///   `"1"^^integer = "1.0"^^decimal` is legal Core) pending the value-space comparator
-    ///   (sq-v5evr/#1646); `Nonmonotonic` is a defensive internal-invariant guard. Neither
+    ///   `"true"^^boolean = "1"^^boolean` is legal Core) pending a NON-numeric value-space
+    ///   comparator — the numeric half now resolves via `Num::cmp_relational`
+    ///   (sq-v5evr/#1646, adopted in sq-anyad), so only non-numeric literal equality still
+    ///   reaches this fail-close; `Nonmonotonic` is a defensive internal-invariant guard. Neither
     ///   demonstrates detecting the targeted violation — treating them as a pass would
     ///   launder an unsupported-capability rejection, exactly the vacuity this guard
     ///   forbids (sq-pbz04.5.5 review Finding 2). → the named condition-shape skip.

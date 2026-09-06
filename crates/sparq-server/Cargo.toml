@@ -47,7 +47,12 @@ required-features = ["server"]
 # (#1735 — result-equivalent, zero new deps; see the feature's own comment below). Like
 # `jsonld` it is a BINARY-crate default only — sparq-engine's LIBRARY default stays OFF, and
 # `--no-default-features --features server,jsonld` drops it for an explicit rewrite-dark build.
-default = ["server", "jsonld", "algebra-rewrite", "explain-json"]
+# [OPUS-5] (sq-7d3dj.30.15) `dp-planner` joins it, for the same reason and by the same
+# mechanism: sq-7d3dj.30.5 lit the DPccp join-order planner in sparq-cli ONLY, so the HTTP
+# binary planned joins with greedy GOO while every CLI-measured build planned them with the
+# cost-optimal DP — the two shipped surfaces disagreed on join order. See the feature's own
+# comment below.
+default = ["server", "jsonld", "algebra-rewrite", "explain-json", "dp-planner"]
 # [FABLE-5] (sq-ixc3.19) `explain-json` (default ON): the STRUCTURED explain response —
 # `Accept: application/x-sparq-explain+json` on `/sparql` answers with sparq-engine's typed
 # plan tree (`explain_json::PlanNode`, sq-u4lgr/#902) as camelCase JSON
@@ -71,6 +76,29 @@ explain-json = ["sparq-engine/explain-json"]
 # The pure serialiser library build (`--no-default-features`) is unaffected either way — this
 # only changes which sparq-engine the QUERY path compiles against.
 algebra-rewrite = ["sparq-engine/algebra-rewrite"]
+# [OPUS-5] (sq-7d3dj.30.15) `dp-planner` (default ON, see above): forwards sparq-engine's
+# opt-in DPccp join-order planner (sq-7d3dj.30.5 / #1732). Once compiled it is DEFAULT-ON in
+# the engine (the `Install::Default` state), so every BGP a request evaluates that is connected,
+# has 3..=63 patterns and fits the `DEFAULT_MAX_SUBGRAPHS` budget is planned by the cost-optimal
+# bushy DP instead of greedy GOO — no `with_dp_planner` call is needed on the request path, and
+# a caller can still opt out per-scope with `sparq_engine::without_dp_planner`.
+#
+# WHY default-on here: sq-7d3dj.30.5 enabled it in sparq-cli only, so the canonical CLI-measured
+# benchmarks and the shipped HTTP binary planned joins DIFFERENTLY — an HTTP-measured number was
+# not comparable to a CLI-measured one, and the server ran the greedy plan the DP's cost model is
+# there to improve on for the shapes it accepts. (The n < 3 case is NOT one of them: greedy GOO is
+# already Cout-optimal there, which is why sq-7d3dj.30.5 raised the threshold.) Same BINARY-crate
+# default rationale as `jsonld` / `algebra-rewrite` / `explain-json` above: sparq-engine's LIBRARY
+# default stays OFF, and `--no-default-features --features server,jsonld` still builds an
+# explicitly greedy-GOO server.
+#
+# Result-EQUIVALENT: the planner only reorders joins, never changes the answer — the invariant is
+# asserted by sparq-engine's `tests/query_features/dp_planner_differential.rs` in the
+# `sparq-engine (dp-planner)` feature-matrix leg. Pulls ZERO new dependencies (`dp-planner = []`
+# in sparq-engine) and no `unsafe`; `tests/dp_planner_default.rs` is this crate's tripwire that
+# the default set keeps it lit. The pure serialiser library build (`--no-default-features`) is
+# unaffected either way — this only changes which sparq-engine the QUERY path compiles against.
+dp-planner = ["sparq-engine/dp-planner"]
 # [OPUS-4.8] (sq-vpx4) Compiles internal TEST SEAMS — currently the durable-write
 # failure-injection hook on the `--persist` seal path, exposed via
 # `AppState::with_config_inject_durable_failure` for the graceful-degradation
@@ -79,12 +107,19 @@ algebra-rewrite = ["sparq-engine/algebra-rewrite"]
 test-seams = []
 # [SONNET-4.6] (sq-qsm5z) `query-registry` (default OFF): opt-in in-memory running-query
 # registry: each executing SELECT/ASK/CONSTRUCT/DESCRIBE registers on start and deregisters on
-# completion or error (RAII). `GET /queries` lists active queries (id, start timestamp, a
-# NON-REVERSIBLE fingerprint — never raw text per the #241 / sq-m9prn redaction posture,
+# completion or error (RAII). [SONNET-4.6] (sq-m9prn) A SPARQL UPDATE registers the same way,
+# from the sequenced writer thread as it starts applying, and is listed as `kind: "update"` —
+# the row whose cancellation also releases the writer for every write queued behind it. A
+# cancelled UPDATE is rejected WHOLE (the writer forks per batch and seals only on success),
+# never partially applied. `GET /queries` lists active queries (id, kind, start timestamp, an
+# FNV-1a fingerprint — never raw text per the #241 / sq-m9prn redaction posture; it is an
+# UNKEYED checksum, so it is a stable correlation tag and NOT a confidentiality boundary — a
+# reader can confirm a guessed query/update body offline, see `registry_fingerprint`,
 # elapsed ms) behind the READ auth gate (fail-closed). `DELETE /queries/{id}` cooperatively
 # cancels one query by flipping the `sq-kq9ia` cross-thread `Arc<AtomicBool>` cancel flag
 # already wired into the engine's `QueryBudget`, behind the WRITE auth gate (fail-closed).
-# Zero cost when compiled out: no fields in `AppState`, no routes, byte-identical to before.
+# Zero cost when compiled out: no fields in `AppState` or the writer's applier, no routes,
+# byte-identical to before.
 # Pulls no new dependencies beyond those already present via `server`.
 query-registry = ["server"]
 # [OPUS-4.8] (sq-0bxp) `audit-log` (default OFF): compiles the OPT-IN per-query access
@@ -120,7 +155,7 @@ access-audit = ["server"]
 # equivalent. Feature unification means the `sparq-core` `sparq-engine` resolves also gains `mmap`,
 # so the WAL-durable `apply_delta` path is live on the shared graph. Without `--persist` the server
 # is in-memory exactly as before (the flag, not the feature, selects durability).
-server = ["dep:sparq-serve", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio", "dep:tower", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "dep:futures-util", "dep:serde_json", "dep:flate2", "sparq-core/mmap"]
+server = ["dep:sparq-serve", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:http-body", "dep:tokio", "dep:tower", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "dep:futures-util", "dep:serde_json", "dep:flate2", "sparq-core/mmap"]
 # [GPT-5.6] (sq-abhuq) Opt-in outbound gzip/zstd negotiation for HTTP result bodies.
 # The default build remains byte-identical: without this feature the response middleware is
 # cfg-stripped and tower-http's compression codecs are not compiled. The middleware preserves
@@ -130,11 +165,11 @@ response-compression = ["server", "tower-http/compression-gzip", "tower-http/com
 # connection builder from hyper's HTTP/1-only builder to hyper-util's h1+h2 auto builder and
 # enables optional rustls termination with ALPN when --tls-cert/--tls-key are supplied. Without
 # this feature the original HTTP/1-only accept loop and dependency graph are unchanged.
-http2 = ["server", "axum/http2", "hyper/http2", "hyper-util/http2", "dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
+http2 = ["server", "axum/http2", "hyper/http2", "hyper-util/http2", "dep:rustls", "dep:tokio-rustls"]
 # [GPT-5.6] sq-oprna.3: HTTP/3 is a second, encrypted UDP listener dispatching into the
 # same Router as the unchanged plain-HTTP TCP listener. Every QUIC/TLS dependency remains
 # absent from the normal dependency graph unless this default-off feature is selected.
-http3 = ["server", "dep:quinn", "dep:rustls", "dep:rustls-pemfile", "dep:sparq-http3"]
+http3 = ["server", "dep:quinn", "dep:rustls", "dep:sparq-http3"]
 # [OPUS-4.8] (sq-i3xc, lever H5) `zlib-ng`: opt-in, OFF by default, NATIVE-ONLY faster
 # gzip backend (zlib-ng C library) for the server's `Content-Encoding: gzip` request
 # inflate (MultiGzDecoder) — a measured 1.5–3× at ~zero code change. The weak
@@ -337,7 +372,16 @@ change-stream = ["server", "sparq-serve/change-stream"]
 # `sparq-solid` is a LIBRARY-level authoriser with NO HTTP surface — this feature is exactly that
 # missing HTTP shell: authentication (Solid-OIDC/DPoP -> a `(WebID, client)` session) stays the
 # caller's job; the endpoints take an already-resolved session + the pod dataset per request and
-# map the library verdict onto HTTP. FAIL-CLOSED is the soundness invariant — every error path
+# map the library verdict onto HTTP.
+# [SONNET-4.6] (sq-snopa.8) The feature ALSO carries the STATEFUL lane: a request may set
+# `"source":"server"` to authorise over the server's OWN loaded store instead of a body dataset.
+# The materialised `PodStore` is a pure function of one published ring generation, so it is
+# cached BESIDE the ring in `AppState` keyed by the generation number rather than threaded
+# through the writer — which makes "re-materialise on ACL change" automatic (every commit
+# publishes a new generation, staleing the cache) and keeps the writer ignorant of the auth
+# view. The lane REFUSES (never silently un-enforces) an ODRL-carrying server store or a
+# `trust` block, both of which it cannot evaluate faithfully.
+# FAIL-CLOSED is the soundness invariant — every error path
 # (unparseable dataset, materialize failure, unknown mode/view) DENIES (`allow:false`), never
 # opens. STILL OFF AT RUNTIME by default even when compiled in — the operator must additionally
 # set `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` (`ServerConfig::solid_authz`), mirroring `tpf` /
@@ -396,8 +440,10 @@ solid-authz-trust = ["solid-authz", "dep:sparq-trust", "dep:sparq-zk"]
 # target (pattern targets are sq-lrtc3.3), a non-read mode, or an anonymous session is a
 # 4xx refusal — NEVER a silent allow; a constraint the stateless lane cannot evidence
 # (purpose / count / an undischarged duty) simply never grants. STATELESS-lane scope only
-# (the dataset arrives in the request body; the stateful loaded-store variant is sq-snopa.8),
-# which is exactly why the ONE-SHOT bridge entry point is used: the per-request store dies
+# (the dataset arrives in the request body). [SONNET-4.6] sq-snopa.8 landed the stateful
+# loaded-store lane (`"source":"server"`) but did NOT extend this lane to it: an ODRL-carrying
+# server store is REFUSED there (400) rather than un-enforced. Stateless scope is also
+# why the ONE-SHOT bridge entry point is used: the per-request store dies
 # with the response, so frozen-at-materialization semantics and per-session re-checked
 # conditions coincide. OFF by default — a build WITHOUT this feature carries ZERO ODRL code
 # (sparq-policy is never compiled) and `solid-authz` behaviour is byte-identical.
@@ -406,69 +452,69 @@ odrl-authz = ["solid-authz", "sparq-solid/odrl-bridge", "dep:sparq-policy"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 # [OPUS-4.8] (sq-o5bi, sq-0g6g) The swappable serving core (ring + writer) lives behind an
 # `ArcSwap` so an online restore can atomically install a rehydrated core while readers load
 # lock-free — the same arc-swap the ring uses internally. `backup`-feature ONLY: the default
 # serving path holds ring/writer directly (byte-identical to pre-#941), so without `backup` the
 # server never depends on arc-swap. The serialiser-only build and the wasm graph never see it.
 arc-swap = { version = "1", optional = true }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 # The concurrent-serving core (Wave A, research/concurrent-serving.md §6): the
 # lock-free generation ring pins read snapshots; the single sequenced writer
 # group-commits SPARQL Updates. Server-feature only — the serialiser-only build
 # and the wasm graph never see it (`cargo tree -p sparq-wasm -e normal | grep -c
 # serve` must stay 0).
-sparq-serve = { path = "../sparq-serve", version = "0.1.0", optional = true }
+sparq-serve = { path = "../sparq-serve", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-d3d8) Behind the opt-in `federation-descriptors` feature only: the VoID /
 # Service-Description generator (`Introspection::to_void`). Light — it depends only on
 # sparq-core + serde (no async, no heavy deps), and is already in the workspace tree
 # (sparq-engine / sparq-nlq use it). OFF by default, so it adds nothing to the standard build.
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0", optional = true }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1", optional = true }
 # [GPT-5.6] sq-lsp7k.9.3: pure prefix-completion index for the default-OFF `complete` HTTP
 # feature. Disable sparq-text's defaults so this edge does not pull its engine rewrite or rayon;
 # sparq-server already owns the queried Graph and needs only CompletionIndex.
-sparq-text = { path = "../sparq-text", version = "0.1.0", optional = true, default-features = false }
+sparq-text = { path = "../sparq-text", version = "0.1.1", optional = true, default-features = false }
 # Behind the opt-in `geo` feature only (geof_registry; its own default `engine`
 # feature is this same sparq-engine, so the graph gains just the georust stack).
-sparq-geo = { path = "../sparq-geo", version = "0.1.0", optional = true }
+sparq-geo = { path = "../sparq-geo", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-r868) Behind the opt-in `shacl` feature only: SHACL Core + SHACL-SPARQL
 # validation (`sparq_shacl::validate` → `ValidationReport`) for the `POST /shacl/validate`
 # endpoint. It transitively pulls sparq-engine (already a dependency here) for `sh:sparql`;
 # its OWN `oxrdf` is the same workspace 0.3 the server resolves, so terms flow through. OFF
 # by default — a build without the `shacl` feature carries zero SHACL code.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", optional = true }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-vczh2) Behind the opt-in `terse` feature only: the verifiable LLM-ergonomic
 # transpiler (`sparq_terse::terse_to_sparql` → `Expansion { canonical_sparql, keywords, ... }`)
 # for the `POST /terse/transpile` endpoint. Pulled WITHOUT its `vectors` feature, so this is the
 # LEAN build: it depends only on `spargebra` (already a server dependency) — no model, no
 # sparq-core/-engine/-nlq/-vectors. OFF by default — a build without the `terse` feature carries
 # zero terse code.
-sparq-terse = { path = "../sparq-terse", version = "0.1.0", optional = true }
+sparq-terse = { path = "../sparq-terse", version = "0.1.1", optional = true }
 # [FABLE-5] (sq-snopa.6, issue #992 FR-4) Behind the opt-in `solid-authz` feature only: the Solid
 # WAC/ACP library authoriser (`sparq_solid::PodStore::decide` / `wac_allow` / `query_json_as` ->
 # `WacDecision`) for the `POST /authz/*` endpoints. It transitively pulls sparq-engine (already a
 # dependency here) + sparq-reason; its OWN `oxrdf` is the same workspace 0.3 the server resolves,
 # so terms flow through. OFF by default — a build WITHOUT the `solid-authz` feature carries ZERO
 # Solid/access-control code (the standard server build never sees sparq-solid or sparq-reason).
-sparq-solid = { path = "../sparq-solid", version = "0.1.0", optional = true }
+sparq-solid = { path = "../sparq-solid", version = "0.1.1", optional = true }
 # [SONNET-4.6] (sq-pfae.17) Behind the opt-in `solid-authz-trust` feature only: the trust-graph
 # authorisation admission gate (`sparq_trust::derive_effective_rules` + `sparq_trust::admit`),
 # with the `cert-graph` feature for the certification-edge closure. OFF by default — a build
 # WITHOUT the `solid-authz-trust` feature carries ZERO trust-graph code.
-sparq-trust = { path = "../sparq-trust", version = "0.1.0", optional = true, features = ["cert-graph"] }
+sparq-trust = { path = "../sparq-trust", version = "0.1.1", optional = true, features = ["cert-graph"] }
 # [SONNET-4.6] (sq-pfae.17) Behind `solid-authz-trust` only: the ZK signature primitive used to
 # parse verifying keys from hex (`sparq_zk::sig::public_key_from_hex`). The `sparq-trust`
 # crate already pulls `sparq-zk` transitively, but `sparq-server` needs it directly so the
 # handler code can import `public_key_from_hex` without an extra re-export layer.
-sparq-zk = { path = "../sparq-zk", version = "0.1.0", optional = true }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1", optional = true }
 # [FABLE-5] (sq-lrtc3.1) Behind the opt-in `odrl-authz` feature only: the typed ODRL 2.2
 # model/parser/evaluator (`sparq_policy::parse_policy` / `Request` / `conflict_admissibility`)
 # the `/authz/query` ODRL lane feeds into the sparq-solid bridge. `sparq-solid/odrl-bridge`
 # already pulls it transitively, but the handler names `sparq_policy` types directly (the
 # bridge entry points take `&sparq_policy::Policy`), so the server needs the direct edge.
 # OFF by default — the standard build never compiles sparq-policy.
-sparq-policy = { path = "../sparq-policy", version = "0.1.0", optional = true }
+sparq-policy = { path = "../sparq-policy", version = "0.1.1", optional = true }
 oxrdf.workspace = true
 # [OPUS-4.8] sq-rt6v: prefix-compacting Turtle + RDF/XML graph serialisation, and RDF/XML
 # request-body parsing, for the GSP read/write + CONSTRUCT/DESCRIBE surface. Both crates are
@@ -498,6 +544,12 @@ axum = { version = "0.8", optional = true, default-features = false, features = 
 # only names them as direct deps so we can call `Builder`. http1-only (matches axum's config).
 hyper = { version = "1", optional = true, default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", optional = true, default-features = false, features = ["server", "tokio", "service"] }
+# [SONNET-4.6] (sq-7d3dj.26) `http_body::{Body, Frame}` — the streamed SELECT-JSON body is a
+# hand-written `Body` so it can emit an HTTP TRAILER (`X-Sparq-Complete` / `X-Sparq-Truncated`)
+# after its last data frame; `axum::body::Body::from_stream` cannot express a trailers frame.
+# Already in axum's and hyper's dependency graph (http-body 1.x), so this adds NO new transitive
+# code — it only names the direct edge so we can implement the trait.
+http-body = { version = "1", optional = true }
 # [GPT-5.6] sq-oprna.6: TLS wrapping for the opt-in HTTP/2 TCP listener. Crypto and PEM parsing
 # are shared with http3 when both features are selected; TLS 1.2 stays absent because the server
 # config intentionally admits TLS 1.3 only.
@@ -533,12 +585,13 @@ serde_json = { version = "1", optional = true }
 # transitive code. Server-feature only (the decode lives on the async HTTP body path).
 flate2 = { version = "1", optional = true }
 # [GPT-5.6] sq-oprna.3: owned by the default-off `http3` feature. Quinn and the shared
-# bridge use the same rustls 0.23 aws-lc-rs provider; rustls-pemfile reads the operator's
-# certificate chain and private key without introducing a TLS path on the TCP listener.
+# bridge use the same rustls 0.23 aws-lc-rs provider. [OPUS-5] sq-5ah3p: the operator's certificate
+# chain and private key are decoded through `rustls::pki_types::pem::PemObject` — rustls' own
+# re-export of `rustls-pki-types` — so no separate PEM crate is needed and the archived
+# `rustls-pemfile` (RUSTSEC-2025-0134) leaves the graph. Still no TLS path on the TCP listener.
 quinn = { version = "0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"], optional = true }
-rustls-pemfile = { version = "2", optional = true }
-sparq-http3 = { path = "../sparq-http3", optional = true, features = ["server"] }
+sparq-http3 = { path = "../sparq-http3", version = "0.1.1", optional = true, features = ["server"] }
 
 mimalloc = "0.1"
 
@@ -549,8 +602,8 @@ mimalloc = "0.1"
 # behind the `solid-authz-trust` feature, which already enables sparq-trust/sparq-zk as
 # optional deps; the dev-dep is unconditional so the test binary can import the helpers
 # regardless of which feature set the dev ran (tests are #[cfg(feature="solid-authz-trust")]).
-sparq-trust = { path = "../sparq-trust", version = "0.1.0", features = ["cert-graph"] }
-sparq-zk = { path = "../sparq-zk", version = "0.1.0" }
+sparq-trust = { path = "../sparq-trust", version = "0.1.1", features = ["cert-graph"] }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1" }
 oxrdf = { workspace = true }
 oxttl = { workspace = true }
 # [OPUS-4.8] Reference SPARQL-results parser (oxigraph's) for the serializer oracle

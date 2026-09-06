@@ -13,7 +13,10 @@
 use crate::derivation::{derivation_check, RULE_LEAF, RULE_RDFS9};
 use crate::filter_float::filter_f64_check;
 use crate::filter_int::{filter_int_check, OP_EQ, OP_GE, OP_GT, OP_LE, OP_LT, OP_NE};
-use crate::filter_signed::{filter_decimal_check, filter_signed_int_check};
+use crate::filter_signed::{filter_decimal_check, filter_signed_int_check, signed_int_encoding};
+use crate::n3::{
+    BUILTIN_GREATER_THAN, BUILTIN_NONE, n3_derivation_check, rule_leaf, SLOT_CONST, SLOT_VAR,
+};
 use crate::hashes::{commit_fold, h2, h3, TYPE_CODE_LITERAL};
 use crate::join::{JOIN_DOMAIN, join_eq_check, join_value_commitment};
 use crate::path::path_reach_check;
@@ -2543,5 +2546,668 @@ fn sameas_rejects_base_triple_in_padding() {
     let (mem, rep, parent, n) = sa_table();
     sameas_entails_row::<1, 8, 4>(
         commitments, SA_SAMEAS, [SA_C, SA_P, SA_O], counts, enc, n, mem, rep, parent, 0, 5,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// n3_derivation_check -- witnessed-rule-shape N3 derivation over a
+// DATASET-SUPPLIED rule graph, plus the math: builtin gadget whitelist
+// (sq-rsd3v.3, #2946). Tiny (K=1, N=4, R=2, P=2, C=1, M=4, V=3, MD=2)
+// monomorphisation. IRI encodings are arbitrary distinct nonzero constants (the
+// relation only cares about equality structure), exactly as the
+// derivation_check / sameas tests above; LITERAL operand encodings are DERIVED
+// through `signed_int_encoding` because the builtin gadgets bind them to their
+// canonical xsd:integer token.
+// ---------------------------------------------------------------------------
+
+global N3_WORKS_AT: Field = 71;
+global N3_LOCATED_IN: Field = 72;
+global N3_BASED_IN: Field = 73;
+global N3_SALARY: Field = 74;
+global N3_HIGH_EARNER: Field = 75;
+global N3_YES: Field = 76;
+global N3_X: Field = 111; // a well-paid person based in NL
+global N3_Y: Field = 112; // a low-paid person (the comparison's negative case)
+global N3_ACME: Field = 113;
+global N3_NL: Field = 114;
+global N3_GHOST: Field = 777; // fabricated: in neither the graph nor the rules
+
+// Canonical MD=2 padding digits for an operand slot the gadget does not read.
+// "10" rather than "00" because a multi-digit magnitude may not lead with '0'
+// (the canonicality asserts inside `signed_int_encoding` run unmasked).
+fn n3_pad() -> [u8; 2] {
+    [49, 48]
+}
+
+// The committed base graph:
+//   { (X worksAt ACME), (ACME locatedIn NL), (X salary "50"), (Y salary "10") }
+fn n3_graph(l50: Field, l10: Field) -> ([[[Field; 3]; 4]; 1], [u32; 1], [Field; 1]) {
+    let enc: [[[Field; 3]; 4]; 1] = [[
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_ACME, N3_LOCATED_IN, N3_NL],
+        [N3_X, N3_SALARY, l50],
+        [N3_Y, N3_SALARY, l10],
+    ]];
+    let counts: [u32; 1] = [4];
+    let mut leaves: [Field; 4] = [0; 4];
+    for i in 0..4 {
+        leaves[i] = h3(enc[0][i][0], enc[0][i][1], enc[0][i][2]);
+    }
+    let commitments: [Field; 1] = [commit_fold(leaves, 4)];
+    (enc, counts, commitments)
+}
+
+// The DATASET-SUPPLIED rule graph (the thing an N3 dataset ships and its author
+// signs), as witnessed shapes:
+//   rule 0: { ?x worksAt ?c . ?c locatedIn ?r }        => { ?x basedIn ?r }
+//   rule 1: { ?x salary ?s . ?s math:greaterThan 20 }  => { ?x highEarner yes }
+// Variable ids: ?x = 0, ?c/?s = 1, ?r = 2.
+//
+// Rule 1's comparison atom shows the slot-1 repurposing: a builtin's predicate
+// is carried by the TAG, so slot 1 holds no pattern (it is only an operand for
+// binary arithmetic). Slot 0 is `?s`, slot 2 the constant bound.
+fn n3_rules(
+    l20: Field,
+) -> ([u32; 2], [u32; 2], [[u32; 2]; 2], [[[u32; 3]; 2]; 2], [[[Field; 3]; 2]; 2], [[[u32; 3]; 2]; 2], [[[u32; 3]; 1]; 2], [[[Field; 3]; 1]; 2], [[[u32; 3]; 1]; 2]) {
+    let prem_len: [u32; 2] = [2, 2];
+    let concl_len: [u32; 2] = [1, 1];
+    let prem_builtin: [[u32; 2]; 2] =
+        [[BUILTIN_NONE, BUILTIN_NONE], [BUILTIN_NONE, BUILTIN_GREATER_THAN]];
+    let prem_kind: [[[u32; 3]; 2]; 2] = [
+        [[SLOT_VAR, SLOT_CONST, SLOT_VAR], [SLOT_VAR, SLOT_CONST, SLOT_VAR]],
+        [[SLOT_VAR, SLOT_CONST, SLOT_VAR], [SLOT_VAR, SLOT_CONST, SLOT_CONST]],
+    ];
+    let prem_konst: [[[Field; 3]; 2]; 2] = [
+        [[0, N3_WORKS_AT, 0], [0, N3_LOCATED_IN, 0]],
+        [[0, N3_SALARY, 0], [0, 0, l20]],
+    ];
+    let prem_var: [[[u32; 3]; 2]; 2] = [[[0, 0, 1], [1, 0, 2]], [[0, 0, 1], [1, 0, 0]]];
+    let concl_kind: [[[u32; 3]; 1]; 2] =
+        [[[SLOT_VAR, SLOT_CONST, SLOT_VAR]], [[SLOT_VAR, SLOT_CONST, SLOT_CONST]]];
+    let concl_konst: [[[Field; 3]; 1]; 2] =
+        [[[0, N3_BASED_IN, 0]], [[0, N3_HIGH_EARNER, N3_YES]]];
+    let concl_var: [[[u32; 3]; 1]; 2] = [[[0, 0, 2]], [[0, 0, 0]]];
+    (
+        prem_len, concl_len, prem_builtin, prem_kind, prem_konst, prem_var, concl_kind,
+        concl_konst, concl_var,
+    )
+}
+
+// The rule author as ISSUER: the root the rule graph is committed under. The
+// prover must reproduce every committed shape bit-for-bit to match it.
+fn n3_rules_root(
+    prem_len: [u32; 2],
+    concl_len: [u32; 2],
+    prem_builtin: [[u32; 2]; 2],
+    prem_kind: [[[u32; 3]; 2]; 2],
+    prem_konst: [[[Field; 3]; 2]; 2],
+    prem_var: [[[u32; 3]; 2]; 2],
+    concl_kind: [[[u32; 3]; 1]; 2],
+    concl_konst: [[[Field; 3]; 1]; 2],
+    concl_var: [[[u32; 3]; 1]; 2],
+) -> Field {
+    let mut leaves: [Field; 2] = [0; 2];
+    for r in 0..2 {
+        leaves[r] = rule_leaf(
+            prem_len[r],
+            concl_len[r],
+            prem_builtin[r],
+            prem_kind[r],
+            prem_konst[r],
+            prem_var[r],
+            concl_kind[r],
+            concl_konst[r],
+            concl_var[r],
+        );
+    }
+    commit_fold(leaves, 2)
+}
+
+// Operand witnesses for nodes whose premise atoms are all JOIN atoms: the
+// gadget is disabled, so only the (unmasked) canonicality checks run.
+fn n3_pad_ops() -> ([[[bool; 3]; 2]; 4], [[[[u8; 2]; 3]; 2]; 4]) {
+    ([[[false; 3]; 2]; 4], [[[n3_pad(); 3]; 2]; 4])
+}
+
+// ACCEPT: the honest DAG for the pure-join rule 0 -- two anchored leaves feeding
+// one firing whose conclusion is the disclosed derived row (X basedIn NL). The
+// base facts AND the rule text are HIDDEN (all private); only the commitments,
+// the rule-set root and `root` are public.
+#[test]
+fn n3_accepts_a_committed_join_rule() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]); // "50"
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]); // "10"
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]); // "20"
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, true, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [0, 0, 0], [N3_X, N3_ACME, N3_NL], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME], // leaf, anchored to the graph
+        [N3_ACME, N3_LOCATED_IN, N3_NL], // leaf, anchored to the graph
+        [N3_X, N3_BASED_IN, N3_NL], // rule 0 firing (the derived row)
+        [0, 0, 0], // inactive padding
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_NL],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        3,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// ACCEPT: the whitelisted `math:greaterThan` gadget. Rule 1 fires over the
+// hidden (X salary "50") with the committed bound "20"; the operand encodings
+// are bound to their canonical xsd:integer tokens and the verdict is
+// `signed_verdict` reused verbatim.
+#[test]
+fn n3_accepts_a_whitelisted_math_comparison() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits_pad) = n3_pad_ops();
+    let mut op_digits = op_digits_pad;
+    // Node 1, premise atom 1 (the comparison): operand slot 0 is ?s = "50",
+    // slot 2 the committed bound "20". Slot 1 is unread for a comparison.
+    op_digits[1][1][0] = [53, 48];
+    op_digits[1][1][2] = [50, 48];
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 1, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] = [[0, 0, 0], [N3_X, l50, 0], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_SALARY, l50], // leaf, anchored to the graph
+        [N3_X, N3_HIGH_EARNER, N3_YES], // rule 1 firing (the derived row)
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_HIGH_EARNER, N3_YES],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE-AND-VERIFY (the headline soundness regression for THIS bead): the
+// prover INVENTS a rule. Everything else is honest -- the graph is real, the
+// leaves are anchored, the firing is a perfectly well-formed instance of the
+// rule it cites, and the rule is even SAFE -- but the shape it cites is not the
+// shape the rule author committed, so only the rule-set root can catch it. This
+// is what "the proof says WHOSE rules" buys (design sec 4.1 move 1).
+#[test(should_fail_with = "rule-set commitment mismatch")]
+fn n3_rejects_an_uncommitted_rule_shape() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    // The root the rule AUTHOR published, over the honest shapes.
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    // The prover rewrites rule 0's conclusion to `{ ?x basedIn GHOST }` so a
+    // single honest firing "derives" a row about a place nobody asserted.
+    let mut ck2 = ck;
+    let mut cko2 = cko;
+    ck2[0][0] = [SLOT_VAR, SLOT_CONST, SLOT_CONST];
+    cko2[0][0] = [0, N3_BASED_IN, N3_GHOST];
+
+    let node_is_leaf: [bool; 4] = [true, true, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [0, 0, 0], [N3_X, N3_ACME, N3_NL], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_ACME, N3_LOCATED_IN, N3_NL],
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck2,
+        cko2,
+        cv,
+        3,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: an UNSAFE rule -- one whose conclusion carries a variable the premise
+// never binds -- must be REJECTED, not approximated (design sec 4.3). Note the
+// rule set here is COMMITTED honestly (the root is recomputed over the unsafe
+// shape), i.e. the dataset really does ship this rule; it is still refused,
+// because the substitution is a PRIVATE witness, so an unbound conclusion
+// variable lets the prover CHOOSE the derived row (here: GHOST). This is the
+// safety condition doing real soundness work, not style.
+#[test(should_fail_with = "rule is unsafe: a conclusion variable is not bound in the premise")]
+fn n3_rejects_unsafe_rule_with_unbound_conclusion_variable() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl_honest, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let mut pl = pl_honest;
+    // Rule 0 loses its second premise atom, so ?r (var 2) is no longer bound --
+    // but the conclusion `{ ?x basedIn ?r }` still mentions it.
+    pl[0] = 1;
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    // ?r is freely chosen as GHOST -- exactly the forgery safety forbids.
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [N3_X, N3_ACME, N3_GHOST], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: an UNGROUNDED antecedent. The rule is committed and honest and the
+// firing satisfies its shape, but the substitution names a company nobody
+// asserted, so neither premise is an earlier conclusion nor an anchored leaf.
+#[test(should_fail_with = "n3 premise not grounded")]
+fn n3_rejects_ungrounded_premise() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [N3_X, N3_GHOST, N3_NL], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME], // a genuine anchored leaf
+        [N3_X, N3_BASED_IN, N3_NL], // fired over (X worksAt GHOST),(GHOST locatedIn NL)
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_NL],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: a LEAF claiming a base fact that is not in the committed graph -- a
+// fabricated antecedent smuggled in as an "asserted" fact. This is the
+// hidden-antecedent soundness anchor: because leaves are PRIVATE, membership in
+// C(G) is the only thing standing behind them.
+#[test(should_fail_with = "n3 derivation leaf not present in committed graph")]
+fn n3_rejects_leaf_absent_from_graph() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, true, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [0, 0, 0], [N3_X, N3_ACME, N3_GHOST], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_ACME, N3_LOCATED_IN, N3_GHOST], // NOT a committed triple
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_GHOST],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        3,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: the whitelisted comparison gadget must actually HOLD. Y's committed
+// salary is "10", which is NOT greater than the rule's bound "20", so rule 1
+// cannot fire for Y even though every operand binding is honest.
+#[test(should_fail_with = "math: comparison builtin does not hold")]
+fn n3_rejects_a_false_math_comparison() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits_pad) = n3_pad_ops();
+    let mut op_digits = op_digits_pad;
+    op_digits[1][1][0] = [49, 48]; // "10" -- Y's real, committed salary
+    op_digits[1][1][2] = [50, 48]; // "20" -- the rule's committed bound
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 1, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] = [[0, 0, 0], [N3_Y, l10, 0], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_Y, N3_SALARY, l10],
+        [N3_Y, N3_HIGH_EARNER, N3_YES],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_Y, N3_HIGH_EARNER, N3_YES],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: lying about a builtin OPERAND's value. Y's salary really is "10", but
+// the prover witnesses the digits "50" to make the comparison come out true.
+// The operand's term ENCODING is what the graph committed, so the canonical
+// token rebuild catches the substitution.
+#[test(should_fail_with = "builtin operand encoding mismatch")]
+fn n3_rejects_a_relabelled_builtin_operand() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits_pad) = n3_pad_ops();
+    let mut op_digits = op_digits_pad;
+    op_digits[1][1][0] = [53, 48]; // claims "50" while ?s is bound to "10"
+    op_digits[1][1][2] = [50, 48];
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 1, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] = [[0, 0, 0], [N3_Y, l10, 0], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_Y, N3_SALARY, l10],
+        [N3_Y, N3_HIGH_EARNER, N3_YES],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_Y, N3_HIGH_EARNER, N3_YES],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// FORGE: citing a rule index outside the committed set (here `rule_count = 2`,
+// so index 5 names no rule at all). Fails closed rather than defaulting to some
+// rule.
+#[test(should_fail_with = "node cites a rule outside the committed rule set")]
+fn n3_rejects_a_rule_index_outside_the_committed_set() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, false, false, false];
+    let node_rule: [u32; 4] = [0, 5, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [N3_X, N3_ACME, N3_NL], [0, 0, 0], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_X, N3_BASED_IN, N3_NL],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_NL],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        2,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
+    );
+}
+
+// REJECT: the disclosed derived row must bind to the DAG's terminal conclusion.
+// A prover who proves a valid derivation of (X basedIn NL) cannot present it as
+// a proof of a DIFFERENT row.
+#[test(should_fail_with = "n3 derivation root not bound to the disclosed derived row")]
+fn n3_rejects_root_mismatch() {
+    let (l50, _, _) = signed_int_encoding(false, [53, 48]);
+    let (l10, _, _) = signed_int_encoding(false, [49, 48]);
+    let (l20, _, _) = signed_int_encoding(false, [50, 48]);
+    let (enc, counts, commitments) = n3_graph(l50, l10);
+    let (pl, cl, pb, pk, pko, pv, ck, cko, cv) = n3_rules(l20);
+    let rules_root = n3_rules_root(pl, cl, pb, pk, pko, pv, ck, cko, cv);
+    let (op_neg, op_digits) = n3_pad_ops();
+
+    let node_is_leaf: [bool; 4] = [true, true, false, false];
+    let node_rule: [u32; 4] = [0, 0, 0, 0];
+    let node_concl: [u32; 4] = [0, 0, 0, 0];
+    let node_subst: [[Field; 3]; 4] =
+        [[0, 0, 0], [0, 0, 0], [N3_X, N3_ACME, N3_NL], [0, 0, 0]];
+    let node_out: [[Field; 3]; 4] = [
+        [N3_X, N3_WORKS_AT, N3_ACME],
+        [N3_ACME, N3_LOCATED_IN, N3_NL],
+        [N3_X, N3_BASED_IN, N3_NL],
+        [0, 0, 0],
+    ];
+    // The proof derives (X basedIn NL) but claims (X basedIn ACME).
+    n3_derivation_check::<1, 4, 2, 2, 1, 4, 3, 2>(
+        commitments,
+        rules_root,
+        [N3_X, N3_BASED_IN, N3_ACME],
+        counts,
+        enc,
+        2,
+        pl,
+        cl,
+        pb,
+        pk,
+        pko,
+        pv,
+        ck,
+        cko,
+        cv,
+        3,
+        node_is_leaf,
+        node_rule,
+        node_concl,
+        node_subst,
+        node_out,
+        op_neg,
+        op_digits,
     );
 }

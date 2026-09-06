@@ -44,13 +44,13 @@ let g = Graph::from_parts(dict, triples);
   `rdf:langString`) with **correct typed value-space equality** (`"1"^^xsd:integer` =
   `"1.0"^^xsd:decimal`, never f64). Fail-closed: unmapped datatypes/facet-invalid literals
   rejected; `xsd:time`, durations, XML datatypes deferred.
-- **Notation3** — user-supplied `{ … } => { … }` rules with EYE-validated builtins. The
-  exact `math:` add/subtract/multiply/negate/abs core is the SHARED
-  `sparq-substrate::numeric` `Dec` tower (a base, non-optional `numeric`-slice dep), so the
-  N3 chainer and the SPARQL engine never diverge on exact-decimal arithmetic; the EYE-specific
-  edges (quotient scale/type rule, divisor-sign remainder, integer-quotient, exponentiation,
-  floor/ceiling rendering, `i128` integer tier) stay in a thin EYE-compat adapter — closures
-  byte-identical (`sq-pbz04.5.1`).
+- **Notation3** — user-supplied `{ … } => { … }` rules with EYE-validated builtins. The exact
+  `math:` add/subtract/multiply/negate/abs core is the SHARED `sparq-substrate::numeric` `Dec`
+  tower, so the N3 chainer and the SPARQL engine never diverge on exact-decimal arithmetic; the
+  EYE-specific edges (quotient scale/type rule, divisor-sign remainder, integer-quotient,
+  exponentiation, floor/ceiling rendering, `i128` tier) stay in a thin adapter — closures
+  byte-identical (`sq-pbz04.5.1`). `reason_n3_pass_all` = EYE `--pass-all`/`-ground` (closure **plus rules**, `sq-xqchl.2`);
+  `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too.
 - **RIF-Core** (opt-in `rif-core`) — W3C RIF **Core** dialect (monotone Horn subset of
   RIF-BLD/PRD) as `rif::Document` over the N3 chainer. Atoms: frame/membership/subclass
   plus numeric/string/list builtins. **Range-restriction safety enforced** (unsafe rules
@@ -60,12 +60,12 @@ let g = Graph::from_parts(dict, triples);
 - **Incremental maintenance** — `MaterializedGraph` keeps the closure current under
   inserts/deletes by exact derivation counting; cost scales with the change, not a re-run.
 - **Stratified Datalog** (opt-in `datalog`) — a small native rule dialect (RDFox-parity
-  track): single or grouped `NOT { atom, atom }` (negation as failure),
-  `AGGREGATE … BIND COUNT(DISTINCT ?v)/SUM/MIN/MAX/AVG(?v) AS ?c`, variable
-  predicates, and numeric `FILTER` over the shared exact/float/double tower. The
-  **stratification checker** rejects cycles through NOT/AGGREGATE and conservatively
-  couples variable predicates to every relation; the semi-naive evaluator and
-  incremental maintainer share that invariant. <!-- [GPT-5.6] sq-a7bmo -->
+  track): single or grouped `NOT { atom, atom }` (negation as failure), `AGGREGATE … BIND
+  COUNT(DISTINCT ?v)/SUM/MIN/MAX/AVG(?v) AS ?c`, variable predicates, and numeric `FILTER`
+  over the shared exact/float/double tower. The **stratification checker** rejects cycles
+  through NOT/AGGREGATE and conservatively couples variable predicates to every relation;
+  the semi-naive evaluator and incremental maintainer share that invariant. Surfaced by
+  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- [GPT-5.6] sq-a7bmo, [SONNET-4.6] sq-p4zci -->
 - **Quoted-triple inference** (opt-in `quoted-triples`) — RDF 1.2 reifier rules for the
   OWL-RL profile: **reif-dtr** destructures `R rdf:reifies <<( s p o )>>` into the classic
   `rdf:subject`/`rdf:predicate`/`rdf:object` view of `R` (so RL rules reason over reifier
@@ -100,10 +100,10 @@ let g = Graph::from_parts(dict, triples);
 - **Compiled rules** (opt-in `compiled-rules`) — `n3::compiled`: lower N3 rule text ONCE to
   an id-level IR (constants pre-interned into the caller's `Dict`) and run the semi-naive
   fixpoint DIRECTLY over `[Id; 3]` facts on the shared substrate join kernels — no per-call
-  graph→text→re-parse round-trip. Scoped to the access-control subset (`log:notIncludes`/
-  `log:uri`/`log:(not)equalTo`, `string:` concatenation/encodeForUri/scrape/notGreaterThan);
-  everything else is a loud compile error. Closure set-equality vs `reason_n3` is pinned by
-  `tests/compiled_equivalence.rs` over the sparq-solid WAC/ACP rule corpus. Off by default.
+  text round-trip. Scoped to the access-control subset (`log:notIncludes`/`log:uri`/`log:(not)equalTo`,
+  `string:` concat/encodeForUri/scrape/notGreaterThan, plus RDF 1.2 `<< s p o >>` triple terms
+  in premises, matched by component-indexed id unpacking); everything else is a loud compile error.
+  Closure set-equality vs `reason_n3` is pinned by `tests/compiled_equivalence.rs`. Off by default.
 
 ## 📚 Learn more
 

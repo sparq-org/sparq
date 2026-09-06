@@ -324,30 +324,47 @@ class AuditUnitTests(unittest.TestCase):
 class AdditionalReadersMapTests(unittest.TestCase):
     """[FABLE-5] sq-m4bxc: the shipped map's `readers` entries validate + resolve.
 
-    The two residual sibling-reads (sparq-zk -> secprop-ext, sparq-reason ->
-    sparq-solid/rules) are now closed by additional-readers entries; assert they
-    are present, valid, and MONOTONE (never a trigger-shadow, never an ownership
-    verdict)."""
+    The residual sibling-read (sparq-reason -> sparq-solid/rules) is closed by an
+    additional-readers entry; assert it is present, valid, and MONOTONE (never a
+    trigger-shadow, never an ownership verdict).
 
-    def test_shipped_map_has_the_two_readers_entries(self):
+    [OPUS-5] sq-3705: the secprop-vocabulary readers entries are GONE, and their
+    absence is asserted below. They patched a real residual — sparq-zk and
+    sparq-policy `include_str!`d sparq-trust's `secprop-ext.ttl` across package
+    boundaries because a sparq-zk -> sparq-trust edge would be a cycle — but the
+    reads themselves were removed: the vocabulary moved to the zero-dependency
+    `sparq-secprop-vocab` leaf all three now depend on, so the ORDINARY reverse
+    closure attributes it (see `test_secprop_vocab_change_selects_its_consumers`
+    in test_ci_select.py)."""
+
+    def test_shipped_map_has_the_solid_rules_readers_entry(self):
         readers_map = {
             e["pattern"]: e["readers"]
             for e in _real_map_entries() if "readers" in e
         }
         self.assertEqual(
-            readers_map.get("crates/sparq-trust/ontologies/zkp-sparql/**"),
-            # [FABLE-5] sq-mgxz8 (PR #3440): + sparq-policy, whose cross-crate
-            # dimension-IRI drift guards include_str! the shared secprop vocab.
-            ["sparq-zk", "sparq-trust", "sparq-policy"],
-        )
-        self.assertEqual(
             readers_map.get("crates/sparq-solid/rules/**"), ["sparq-reason"],
         )
-        # [FABLE-5] sq-mgxz8 (PR #3440): sparq-policy's drift guard also reads
-        # sparq-zk's per-method annotation graph (secprop-methods.ttl).
-        self.assertEqual(
-            readers_map.get("crates/sparq-zk/ontologies/**"), ["sparq-policy"],
-        )
+
+    def test_secprop_readers_entries_are_retired(self):
+        # [OPUS-5] sq-3705. A `readers` entry for either path would mean a
+        # cross-package `include_str!` of the secprop vocabulary / annotation
+        # graph came back — the thing #3705 deleted (it also broke `cargo package`
+        # file inclusion for sparq-zk). Real cargo edges attribute these now.
+        readers_map = {
+            e["pattern"]: e["readers"]
+            for e in _real_map_entries() if "readers" in e
+        }
+        for retired in (
+            "crates/sparq-trust/ontologies/zkp-sparql/**",
+            "crates/sparq-zk/ontologies/**",
+            "crates/sparq-secprop-vocab/**",
+        ):
+            self.assertIsNone(
+                readers_map.get(retired),
+                f"{retired} has a readers entry again — a cross-package "
+                "include_str! of the secprop vocabulary is back (sq-3705)",
+            )
 
     def test_every_readers_name_is_a_real_member(self):
         members = MapValidityTests()._members()
@@ -355,13 +372,8 @@ class AdditionalReadersMapTests(unittest.TestCase):
             for c in e.get("readers", []) or []:
                 self.assertIn(c, members, f"map references unknown reader crate {c!r}")
 
-    def test_additional_readers_resolves_the_residual_paths(self):
+    def test_additional_readers_resolves_the_residual_path(self):
         entries = _real_map_entries()
-        self.assertIn(
-            "sparq-zk",
-            cs.additional_readers(
-                "crates/sparq-trust/ontologies/zkp-sparql/secprop-ext.ttl", entries),
-        )
         self.assertIn(
             "sparq-reason",
             cs.additional_readers("crates/sparq-solid/rules", entries),

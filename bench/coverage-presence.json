@@ -76,8 +76,8 @@
     },
     "sparq-lws-core": {
       "had_integration_dir": true,
-      "min_tests": 880,
-      "note": "[FABLE-5] sq-gg0qq.2: crate imported whole from jeswr/solid-server-rs@1e555b10 with 893 #[test]s counted (inline unit + tests/ integration); floor 880 leaves a small margin. The %-coverage floor (bench/coverage-floor.json) is deferred to the sq-gg0qq epic's split beads — the crate is presence-gated meanwhile."
+      "min_tests": 1000,
+      "note": "[OPUS-5] sq-gg0qq.11: RATCHETED 880 -> 1000. The 880 floor was seeded at import (sq-gg0qq.2, 893 #[test]s from jeswr/solid-server-rs@1e555b10); the crate has since grown to 1014 counted #[test]/#[tokio::test]/#[rstest] attributes (inline unit + tests/ integration), so the old floor carried 134 tests of slack and would no longer catch a large test loss. Floor 1000 leaves a small margin; recount with scripts/coverage-presence.py --check. The line-% floor (bench/coverage-floor.json) is STILL absent for this crate: seeding one requires a real cargo-llvm-cov measurement (scripts/coverage-gate.py --seed), which sq-gg0qq.11 had no toolchain to perform, so the crate stays presence-gated only — open follow-up work, not closed here."
     },
     "sparq-mpc": {
       "had_integration_dir": false,

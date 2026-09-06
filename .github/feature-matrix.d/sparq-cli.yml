@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -63,4 +68,39 @@
 - name: "sparq-cli (diff)"
   crate: "sparq-cli"
   features: "diff"
+  test: true
+
+# [OPUS-5] sq-2ch27 (Phase E6): the OWL 2 EL classifier surface — `--reason el` on `query`,
+# `reason <f> <fmt> el`, and the `classify` subcommand (forwards `sparq-reason-el` WITH its
+# `rbox` feature, i.e. the E1+E2 capability this bead depends on). Same gap as the legs above:
+# the `classify` dispatch arm, `el_classify_parts` / `load_el_classified` / `cmd_classify`, and
+# the whole `tests/el_cli.rs` suite are `#[cfg(feature = "el")]`, so the default build (and
+# ci.yml's `--workspace --all-targets` archive, which passes NO `--features`) compiles them
+# EMPTY and runs ZERO of them — this leg is the ONLY thing that executes them. The
+# complementary feature-OFF assertions (a `--reason el` that refuses to fall back to `owl`; an
+# absent `classify` subcommand) are `#[cfg(not(feature = "el"))]` in tests/error_paths_cli.rs
+# and run in the DEFAULT lane, so both feature states are pinned. No new third-party dep —
+# sparq-reason-el rides sparq-core + oxrdf + rustc-hash, already in the CLI's tree.
+- name: "sparq-cli (el — OWL 2 EL classify / --reason el)"
+  crate: "sparq-cli"
+  features: "el"
+  test: true
+
+# [SONNET-4.6] sq-p4zci: the stratified-Datalog surface — `--reason datalog:<rules.dlog>` on
+# `query` and `reason <f> <fmt> datalog:<rules.dlog>` (forwards `sparq-reason/datalog`). Same
+# gap as the legs above: `load_datalog` and the whole `tests/datalog_cli.rs` suite are
+# `#[cfg(feature = "datalog")]`, so the default build (and ci.yml's `--workspace --all-targets`
+# archive, which passes NO `--features`) compiles them EMPTY and runs ZERO of them — this leg is
+# the ONLY thing that executes them. The complementary feature-OFF assertions (a
+# `--reason datalog:…` that refuses to fall back to a monotone profile, and the argument-less
+# `datalog` syntax error) are `#[cfg(not(feature = "datalog"))]` in tests/error_paths_cli.rs and
+# run in the DEFAULT lane, so both feature states are pinned. No new third-party dep —
+# sparq-reason is already a plain CLI dep and its `datalog` feature pulls only the
+# sparq-substrate rows+join slices.
+# The check-run name deliberately avoids `<`/`>` (the rules-file placeholder): the leg name is
+# echoed into shell steps and discovered as a REQUIRED check by name, and no existing leg name
+# carries shell metacharacters.
+- name: "sparq-cli (datalog — stratified Datalog reasoning profile)"
+  crate: "sparq-cli"
+  features: "datalog"
   test: true

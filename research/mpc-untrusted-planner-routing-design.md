@@ -1,14 +1,61 @@
 <!-- [OPUS-4.8] The untrusted-planner → MPC-routing seam: how sparq-fedplan source
 selection + a disclosed/hidden partition feed the sparq-mpc pipeline WITHOUT the
-cryptographic layer trusting the plan for soundness. Design-for-review (no code), Opus 4.8
-(Fable unavailable) — re-review when Fable returns. Date: 2026-06-19. Bead sq-pwr / sq-0jsc. -->
+cryptographic layer trusting the plan for soundness. Originally design-for-review (no code),
+Opus 4.8 (Fable unavailable) — re-review when Fable returns. Date: 2026-06-19. Bead sq-pwr /
+sq-0jsc. GREENLIT via issue #755; Phases 1-4 + 6, and the canonicalisation half of Phase 5
+(sq-1fo4, [OPUS-5]), have since landed in
+crates/sparq-fedplan-mpc/ — see the decision log under the Status line. -->
 
 # The untrusted-planner → MPC-routing seam (federated source selection + disclosed/hidden partition)
 
-**Status:** Deep-research design record (no implementation; doc-only — a PROPOSAL for the
-maintainer, not a fait accompli). Author: Opus 4.8 (Fable unavailable — flag for re-review).
+**Status:** Deep-research design record — **greenlit and PARTLY IMPLEMENTED** (see the
+decision log below). *Originally* filed as a doc-only proposal for the maintainer, not a
+fait accompli. Author: Opus 4.8 (Fable unavailable — flag for re-review).
 Date: 2026-06-19. Parent epics: **sq-pwr** (MPC over federated SPARQL with ZKP of correctness
 + attested-source derivation), **sq-0jsc** (MPC research track).
+
+> ## Decision log — [issue #755](https://github.com/sparq-org/sparq/issues/755)
+>
+> #755 held implementation pending a greenlight plus the two structural choices of §9.
+> Both are now **RESOLVED as recommended**, and the resolution is recorded here so this
+> record stops presenting as open a question the shipped code has already answered:
+>
+> 1. **§9 Q1 — crate vs feature → the STANDALONE CRATE (§7 Option (A)).** `sparq-fedplan-mpc`
+>    is a workspace member (`publish = false`), *additionally* behind its own `fedplan-mpc`
+>    cargo feature which is **OFF by default**; the default build compiles an empty crate and
+>    pulls in neither upstream, and neither `sparq-fedplan` nor `sparq-mpc` gains a dependency
+>    on the other. Evidence: `crates/sparq-fedplan-mpc/Cargo.toml`.
+> 2. **§9 Q2 — disclosure posture → DEFAULT-DENY**, in the two-layer shape the code actually
+>    took (the question was posed as a binary; the answer is not):
+>    * **Descriptor / predicate layer — default-deny, no exceptions.** A predicate is `Private`
+>      unless its source *explicitly* marks it `Public`; `SourcePrivacyDescriptor::deny_all`
+>      discloses nothing, and an operator is routed `Disclosed` only when **every** operand is
+>      disclosable and **every** contributing source opted it in (the most-private source wins).
+>      Evidence: `crates/sparq-fedplan-mpc/src/privacy.rs`, `…/src/routing.rs`.
+>    * **Global-IRI layer — the convention-#6 shortcut survives as the DEFAULT policy.**
+>      `RoutingPolicy::Default` discloses a global-IRI operand unconditionally (the cheap,
+>      demo-matching route); `RoutingPolicy::Strict` is the §5 "hide even a public term" knob,
+>      under which a global IRI is disclosed only when no contributing source marks its
+>      predicate private. Evidence: `routing::operand_disclosable`.
+>
+> **Landed since** (each its own bead, all opt-in, none in the default build): Phase 1
+> `sq-2q1x`, Phase 2 `sq-fix4`, Phase 3 `sq-i1wh2`, Phase 4 `sq-pwr.2`, Phase 6 `sq-pwr.3` +
+> `sq-xkrt`, and Phase 5 `sq-1fo4` — **its canonicalisation half ONLY** (a canonical plan
+> commitment + a fail-closed re-validation; the *soundness* half, the binding into a collaborative
+> proof, is deferred and makes no soundness claim).
+> See §8 for the per-phase status and `crates/sparq-fedplan-mpc/README.md` for the honest
+> boundary. **§9 Q3** (where the Phase-5 untrusted-plan re-validation binds) is now **PARTLY
+> ANSWERED** — `sq-1fo4` settled *what* is bound and confirmed no landed plumbing had to change;
+> *where* it attaches is still open. **§9 Q4** (B7 authorisation scope) remains **OPEN**.
+>
+> **The audit posture is unchanged by any of this.** Everything landed is *plumbing* —
+> source selection, a combination prune, a disclosed/hidden partition, and leakage
+> accounting + a plan-time policy gate. It performs no MPC and runs no privacy-bearing
+> cryptographic logic. The MPC estate remains research-grade, honest-majority **semi-honest
+> only**, and **NOT externally audited**: the accredited-cryptographer sign-off (`sq-qhy4`)
+> and the collaborative-coZK re-audit (`sq-9hrn`) are pending. Nothing shipped under this
+> record claims soundness or privacy, and the privacy-bearing Phase 5 stays gated on those
+> audits.
 
 **The one-paragraph thesis.** The MPC estate already has a *hand-built* per-query routing
 record — `sparq-mpc::pipeline::FederatedQuery` / `Routing` / `OperatorRouting` — whose own
@@ -240,7 +287,12 @@ downstream MPC protocol.
   *eventual* collaborative proof (the gated, audit-pending step — `proof.rs` is honestly a
   `NotYetImplemented` stub) binds the result to `Eval_PAG(Q, D)` over the *actual* sources, so a
   plan that drops or mis-routes a source yields a proof that fails to verify, not a forged accept.
-  **Until that proof lands and is audited, the soundness claim is NOT met** — see §6.
+  **Until that proof lands and is audited, the soundness claim is NOT met** — see §6. `sq-1fo4` has
+  since landed the *canonicalisation* half of that generalisation (`commit_plan` /
+  `revalidate_plan`, §8 Phase 5): the plan is now reducible to one canonical public-input word, and
+  a recomputed plan is checked against it fail-closed. That word is **not yet bound into any
+  proof**, so it is a transcript-integrity check that a malicious planner passes trivially — C-A
+  stays *designed, not delivered*.
 - **C-B (leakage under an untrusted plan).** Discharged by the §4.3-pass-3 dual ratification:
   the disclosure decision belongs to the data owners and the verifier, not the planner. A
   dishonest planner can at most propose an over-disclosing route, which a holder's fail-closed
@@ -314,6 +366,9 @@ load-bearing caveats that this record does not weaken:
 
 ## 7. Recommendation
 
+> **ACCEPTED** (issue #755 — see the decision log at the top). Option (A) is what shipped:
+> `crates/sparq-fedplan-mpc`, opt-in behind the `fedplan-mpc` feature, OFF by default.
+
 Adopt **Option (A)**: a new opt-in `sparq-fedplan-mpc` glue crate that turns the
 hand-written `FederatedQuery`/`OperatorRouting` into the *output of an untrusted, policy-gated
 routing pass* over `sparq-fedplan` source selection + a per-source privacy descriptor — with the
@@ -336,31 +391,80 @@ Ordered by leverage / dependency. Each is opt-in (`fedplan-mpc` feature), touche
 lean core nor the audit posture, and is differentially testable against the existing
 four-flatmates pipeline.
 
-1. **Phase 1 — `sparq-fedplan-mpc` crate skeleton + privacy descriptor.** Off-by-default opt-in
+> **Status as of 2026-08-01** (issue #755 greenlight — see the decision log at the top).
+> **LANDED:** Phases 1 (`sq-2q1x`), 2 (`sq-fix4`), 3 (`sq-i1wh2`), 4 (`sq-pwr.2`),
+> 6 (`sq-pwr.3` + `sq-xkrt`), in `crates/sparq-fedplan-mpc/`. **PARTLY LANDED:** Phase 5
+> (`sq-1fo4`) — its *canonicalisation* half only; the **soundness** half stays audit-gated on
+> `sq-qhy4` / `sq-9hrn` and on §9 Q3, and nothing in it may be presented as sound.
+> **NOT STARTED:** Phase 7 (needs the §9 Q4 decision). Per-phase annotations below.
+
+1. **Phase 1 — `sparq-fedplan-mpc` crate skeleton + privacy descriptor.** **[LANDED — `sq-2q1x`]** Off-by-default opt-in
    crate depending on `sparq-fedplan` + `sparq-mpc`; define `SourcePrivacyDescriptor`
    (private-term set, attestation key id, reserved authorisation field) with default-deny
    semantics. Dependency-boundary proof (default build pulls neither into the other). *(P2)*
-2. **Phase 2 — source-selection adapter.** Wrap `sparq-fedplan::select_sources` to consume the
+2. **Phase 2 — source-selection adapter.** **[LANDED — `sq-fix4`]** Wrap `sparq-fedplan::select_sources` to consume the
    privacy/authorisation descriptor and prune non-participating / unauthorised sources; surface
    the candidate set. *(P2, depends Phase 1)*
-3. **Phase 3 — disclosed/hidden routing pass.** The policy-parameterised greedy partition (§4.3
+3. **Phase 3 — disclosed/hidden routing pass.** **[LANDED — `sq-i1wh2`]** The policy-parameterised greedy partition (§4.3
    pass 2) emitting `Vec<OperatorRouting>` + a `FederatedQuery`; default mode = disclose
    global-IRI operands, strict mode = honour per-source "hide even public" marks. Differential
    test: the produced routing reproduces the hand-written four-flatmates routing exactly. *(P2,
    depends Phase 2)*
-4. **Phase 4 — leakage-envelope assembly + dual ratification.** Compute the declared leakage
+4. **Phase 4 — leakage-envelope assembly + dual ratification.** **[LANDED — `sq-pwr.2`]** Compute the declared leakage
    envelope; each holder's fail-closed private-column re-check; verifier-side envelope acceptance
    policy. Negative tests: a plan that tries to disclose a private term is rejected by the
    holder; an over-leaking envelope is rejected by the verifier. *(P2, depends Phase 3)*
-5. **Phase 5 — untrusted-plan soundness re-validation (gated).** Bind the produced plan to the
+5. **Phase 5 — untrusted-plan soundness re-validation (gated).** **[CANONICALISATION HALF LANDED
+   — `sq-1fo4`, `crates/sparq-fedplan-mpc/src/binding.rs`; the SOUNDNESS HALF REMAINS BLOCKED]**
+   Bind the produced plan to the
    eventual collaborative proof so a dropped/mis-routed source yields a verification failure, not
    a forged accept. **BLOCKED** on `proof.rs` ceasing to be a stub AND the external audit
    (sq-qhy4) + collaborative coZK re-audit (sq-9hrn) — do NOT present as sound until then. *(P3,
    depends Phase 4 + the audit gates)*
-6. **Phase 6 — FedUP-style result-aware source-combination pruning.** Add provenance/quotient-
+
+   **What `sq-1fo4` landed, and what it deliberately did not.** The phase splits in two, and only
+   one half depends on the gates. The *canonicalisation* half — reducing the produced plan to a
+   single canonical word a proof could later commit to — depends on nothing that is blocked, and
+   is the move `sq-34ml` already made for the M4-v1 freshness binding ("scoping + layout only,
+   still hard-gated on the ZK foundation"). So it landed: `commit_plan` folds the Phase-2
+   per-pattern source assignment, the Phase-3 disclosed/hidden route and the Phase-4 declared
+   participation set into a domain-separated `PlanCommitment` whose `plan_digest()` is a
+   `sparq_mpc::FieldWord` — the estate's public-input word — and `revalidate_plan` fails closed
+   against an independently recomputed commitment, naming the **dropped source** or **re-routed
+   operator** rather than reporting a bare digest mismatch. It binds plan *content*, not the
+   planner's enumeration order, and excludes `estimated_cardinality` (a cost estimate, not plan
+   semantics).
+
+   **This does NOT discharge C-A and is not presented as doing so.** The out-of-circuit check is a
+   *canonicality + transcript-integrity* measure and defends against nothing a **malicious**
+   planner does: the planner computes the plan *and* its commitment, so one that drops a source
+   simply commits to the plan it actually ran and the check passes. What it catches is *accidental*
+   divergence — a plan mutated between ratification and execution, a planner/verifier disagreement,
+   a truncating transport. The half that *would* discharge C-A is `bind_plan_to_proof`, which
+   carries its real signature and returns `SeamError::Deferred` naming every gate: there is no
+   collaborative proof to bind to, and sq-qhy4 / sq-9hrn are pending. **Nothing in this phase may
+   be presented as sound until that step lands and the audits clear.**
+6. **Phase 6 — FedUP-style result-aware source-combination pruning.** **[LANDED — `sq-pwr.3`
+   (Rule C1) + `sq-xkrt` (Rule C2, the quotient-summary rule); the value-overlap prune remains
+   deliberately DECLINED as not recall-safely expressible from the public summary — see the
+   crate README]** Add provenance/quotient-
    summary pruning to Phase 2 to cut the source-combination blow-up before MPC (the highest-
-   leverage pre-MPC cost win). *(P3, depends Phase 2)*
-7. **Phase 7 — B7 authorisation hook (WAC/ACP-aware source skipping).** Design + wire the
+   leverage pre-MPC cost win). **Rule C1** (`sq-pwr.3`) collapses the whole combination space
+   when any conjunct has no candidate source (`∅ ⋈ R = ∅`) — sound, but it only fires on an
+   already-dead query. **Rule C2** (`sq-xkrt`) is the rule that fires on the **live** path, and
+   is the actual FedUP *provenance-over-quotient-summaries* lever: a source's served
+   characteristic sets (`scs:`) partition its subjects by their **exact** predicate set, so if
+   two patterns share a **subject**-position join variable and no characteristic set of a source
+   carries both their predicates, no subject of that source satisfies both conjuncts — that
+   same-source pairing, and every source-combination containing it, is provably dead, while the
+   source stays a valid candidate for each pattern *individually*. Recall-safety rests on a
+   **completeness guard** (`Σ_{C ∋ p} subjects == void:distinctSubjects` over distinct set
+   keys): served characteristic sets are routinely truncated, and truncation strictly lowers
+   that sum, so a truncated / unknown / non-partition summary **declines** rather than
+   over-prunes. *(P3, depends Phase 2)*
+7. **Phase 7 — B7 authorisation hook (WAC/ACP-aware source skipping).** **[NOT STARTED —
+   needs the §9 Q4 decision; only the reserved `participates` field exists (Phase 1), which
+   Phase 2 reads as a bare participation flag, NOT as access control]** Design + wire the
    reserved authorisation field to SAFE-style per-source access control. Separately scoped;
    `ambiguous-ask-user`. *(P3, depends Phase 1; needs maintainer decision)*
 
@@ -368,16 +472,52 @@ four-flatmates pipeline.
 
 ## 9. Open questions for the maintainer
 
-1. **Crate vs feature granularity.** Is a standalone `sparq-fedplan-mpc` member the right shape,
-   or would you prefer a `mpc` feature *inside* `sparq-fedplan` despite the coupling cost? (The
-   recommendation is the standalone crate, per §5, but this is a structural call you own.)
-2. **Default disclosure posture.** Should the routing pass default to *disclose all global IRIs*
-   (cheapest, matches the demo) or to *default-deny even public terms* (most private,
-   `ambiguous-ask-user`)? The leakage envelope makes either explicit, but the default sets the
-   product stance.
-3. **Where does the untrusted-plan re-validation (Phase 5) actually bind?** It depends entirely
-   on the shape the collaborative proof takes when `proof.rs` is built — so Phase 5 is genuinely
-   blocked on a design that does not yet exist, and may need its own record then. Is deferring it
-   the right call, or do you want the binding sketched now so Phases 1–4 are built toward it?
-4. **B7 scope.** Is access-control-aware source skipping in-scope for this track at all, or does
-   it belong with `sparq-solid` (WAC/ACP) and only *reference* this seam?
+*Q1 and Q2 were the two choices [#755](https://github.com/sparq-org/sparq/issues/755) held the build
+on; both are **RESOLVED** (full rationale + code evidence in the decision log at the top of this
+record). **Q3 and Q4 are still OPEN.***
+
+1. ~~**Crate vs feature granularity.**~~ **RESOLVED (#755): the STANDALONE CRATE.**
+   `sparq-fedplan-mpc` is its own `publish = false` workspace member, additionally gated behind
+   an `fedplan-mpc` feature that is OFF by default, so the default build compiles an empty crate
+   and `sparq-fedplan` / `sparq-mpc` stay decoupled from each other. The original question — a
+   standalone member vs an `mpc` feature *inside* `sparq-fedplan` — was answered as §5/§7
+   recommended, the coupling cost being the deciding factor.
+2. ~~**Default disclosure posture.**~~ **RESOLVED (#755): DEFAULT-DENY**, in two layers, because
+   the question as posed (disclose-all-global-IRIs *vs* default-deny) turned out not to be a
+   single knob. **Predicates are default-deny with no exception** — private unless the holding
+   source explicitly marks them public, and an operator discloses only if *every* operand is
+   disclosable for *every* contributing source. **Global IRIs keep the convention-#6 shortcut in
+   the default policy** (`RoutingPolicy::Default`, the cheap demo-matching route) and lose it
+   under `RoutingPolicy::Strict`, the §5 "hide even a public term" knob. Either way the leakage
+   envelope declares the result and Phase 4's dual ratification lets a holder veto it.
+3. **OPEN — where does the untrusted-plan re-validation (Phase 5) actually bind?** It depends
+   entirely on the shape the collaborative proof takes when `proof.rs` is built — so Phase 5 is
+   genuinely blocked on a design that does not yet exist, and may need its own record then. Is
+   deferring it still the right call? (Phases 1–4 + 6 have since landed *without* the binding
+   sketched, so the question is now whether to sketch it before Phase 5 starts, and whether any
+   of the landed plumbing needs to change to accommodate it. It also stays gated on `sq-qhy4` /
+   `sq-9hrn` regardless of the answer.)
+
+   **Partial answer from `sq-1fo4` — the *what* is settled, the *where* is not.** Building the
+   canonicalisation half surfaced that the two sub-questions are separable. **What** must be bound
+   is now fixed and implemented: the per-pattern source assignment (a *dropped* source perturbs
+   it), the per-operator disclosed/hidden route (a *mis-routed* operator perturbs it), and the
+   declared participation set. Binding the per-pattern assignment — not merely the flat
+   participation set — turned out to be load-bearing: moving a source from one pattern to another
+   leaves the participation set identical while changing the plan's meaning entirely. **No landed
+   plumbing needed to change** to accommodate this; `commit_plan` reads the existing Phase-2/3/4
+   outputs unmodified, which is itself a useful negative result.
+
+   **Where** it attaches remains genuinely open and is the part still waiting on the proof's shape.
+   `bind_plan_to_proof`'s signature *proposes* `sparq_mpc::FederatedStatement` — its M4-v1
+   public-input layout already carries the analogous `query_digest` / `key_set_digest` words, so a
+   plan word would sit naturally beside them — but that is a proposal for the maintainer, not a
+   decision, and taking it would mean extending a byte layout `sq-34ml` deliberately pinned. **That
+   layout was NOT touched.** The maintainer's call: accept the `FederatedStatement` attachment
+   point (and schedule the layout extension), or defer the *where* to its own record once the proof
+   exists.
+4. **OPEN — B7 scope.** Is access-control-aware source skipping in-scope for this track at all,
+   or does it belong with `sparq-solid` (WAC/ACP) and only *reference* this seam? (Phase 1's
+   reserved `participates` field exists as the seam's placeholder and Phase 2 reads it as a bare
+   participation flag; nothing interprets an access-control policy, and nothing will until this
+   is decided.)

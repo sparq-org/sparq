@@ -151,6 +151,23 @@ env:
   # TIMEOUT record (and its solver reaped) instead of being allowed to exhaust the ~7 GB runner
   # and kill it silently. Tunable in one place; `timeout(1)` duration syntax (e.g. 20m, 1200s).
   KANI_HARNESS_TIMEOUT: "20m"
+  # [OPUS-5] sq-ko0jt — SUITE-LEVEL budget, and why a PER-HARNESS ceiling alone is not enough.
+  # The per-harness ceiling bounds ONE proof; it does NOT bound a SUITE. The compare ORDER-law
+  # suite carries 26 harnesses, so its worst case is 26 × 20m = 520m against a `timeout-minutes:
+  # 90` job backstop — and a backstop hit is a job CANCELLATION: the loop below never reaches its
+  # summary or its verdict, and the run concludes `cancelled`, not `failure`. That is EXACTLY the
+  # no-verdict failure mode this epic exists to abolish (miri.yml was cancelled at its ceiling 22
+  # consecutive nights and nothing alarmed — see miri.yml's DEAD-LANE POST-MORTEM). Raising the
+  # backstop cannot fix it: 520m exceeds GitHub's 6-hour hosted-runner maximum outright.
+  # So the LOOP is made self-bounding instead. It clamps each harness's timeout to what is LEFT
+  # of this budget and, once the budget is gone, records the remaining harnesses BY NAME as
+  # `NOT RUN` and reds the job. The suite therefore always reaches a recorded, attributable
+  # verdict; the job can no longer be cancelled out from under it.
+  # Sized as: the 90m job backstop − a ~15m allowance for checkout/toolchain/cache + the cold
+  # `cargo install --locked kani-verifier` + `cargo kani setup` − reserve for the summary.
+  # The `KANI_STEP_BUDGET + 15m <= timeout-minutes` relation is PINNED by rule D5 in
+  # scripts/check-fv-manifest.py, so a future backstop edit cannot silently reopen the hole.
+  KANI_STEP_BUDGET: "70m"
 
 jobs:
   kani:
@@ -163,6 +180,18 @@ jobs:
     strategy:
       # One crate's OOM/timeout must NOT cancel the other crate's proofs.
       fail-fast: false
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION. Every suite in the matrix still
+      # runs (the suite list is unchanged, and D3 in scripts/check-fv-manifest.py still pins
+      # it against ci/formal-verification.toml); at most 2 suites are ADMITTED to a hosted
+      # runner at a time. This lane's proofs are long-lived and it overlaps the miri window
+      # whenever either run is delayed, so in the PR-throughput incident that filed #6349 the
+      # two scheduled safety lanes together held most of the account's standard-runner
+      # admissions while PR-head checks queued. Each suite keeps its own 90-minute backstop,
+      # its per-harness KANI_HARNESS_TIMEOUT and its KANI_STEP_BUDGET, so verdict semantics
+      # are untouched; only the ADMISSION rate changes (worst case 3 waves x 90 min = 4.5 h,
+      # well inside the nightly cycle). The per-workflow and combined miri+kani ceilings are
+      # machine-checked by scripts/tests/test_nightly_runner_reservation.py.
+      max-parallel: 2
       matrix:
         # ADD A SUITE = ONE ENTRY (see header). harnesses = space-separated `#[kani::proof]`
         # fn names in that crate; features = extra cargo features the harnesses need.
@@ -322,6 +351,19 @@ jobs:
           set -u
           summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
           tmo="${KANI_HARNESS_TIMEOUT:-20m}"
+          budget="${KANI_STEP_BUDGET:-70m}"
+          # `timeout(1)` duration syntax -> seconds (h/m/s suffix; bare number = seconds).
+          to_seconds() {
+            case "$1" in
+              *h) echo $(( ${1%h} * 3600 )) ;;
+              *m) echo $(( ${1%m} * 60 )) ;;
+              *s) echo "${1%s}" ;;
+              *)  echo "$1" ;;
+            esac
+          }
+          tmo_s=$(to_seconds "$tmo")
+          budget_s=$(to_seconds "$budget")
+          step_start=$(date +%s)
           {
             echo "### 🤖 Kani bounded-proof results — ${SUITE_NAME}"
             echo ""
@@ -329,13 +371,35 @@ jobs:
             echo "invocation under a \`${tmo}\` wall-clock ceiling; a runaway/OOM-prone proof is cut with a"
             echo "clean **TIMEOUT** (solver reaped) rather than silently killing the runner."
             echo ""
+            echo "The whole suite is additionally bounded by a \`${budget}\` step budget, so a suite with"
+            echo "many harnesses always reaches this verdict instead of the job being CANCELLED at its"
+            echo "backstop with nothing recorded. Harnesses left unrun by an exhausted budget are listed"
+            echo "**NOT RUN** below and red the job."
+            echo ""
             echo "| Harness | Result | Wall time |"
             echo "| --- | --- | --- |"
           } >> "$summary"
 
           had_fail=0
           had_timeout=0
+          had_unrun=0
           for h in $SUITE_HARNESSES; do
+            # STEP-BUDGET GUARD: never START a harness we cannot record a verdict for, and never
+            # let the accumulated suite wall-clock reach the job backstop (a cancellation erases
+            # this whole summary). <=60s left is not enough for even a trivial proof's codegen.
+            left=$(( budget_s - ($(date +%s) - step_start) ))
+            if [ "$left" -le 60 ]; then
+              had_unrun=1
+              echo "::error title=Kani harness NOT RUN::${SUITE_CRATE}::${h} never ran — the ${budget} step budget was exhausted by earlier harnesses in this suite. Re-bound or split the suite (see the step summary)."
+              echo "| \`${h}\` | ⏭️ NOT RUN (\`${budget}\` step budget exhausted) | — |" >> "$summary"
+              continue
+            fi
+            # Clamp this harness to whatever is left, so it is CUT with a recorded verdict
+            # rather than running past the budget and taking the job's backstop with it.
+            this_tmo=$tmo_s
+            if [ "$left" -lt "$this_tmo" ]; then
+              this_tmo=$left
+            fi
             log="kani-${SUITE_CRATE}-${h}.log"
             start=$(date +%s)
             # shellcheck disable=SC2086  # SUITE_FEATURES is an intentional word-split arg list.
@@ -343,7 +407,7 @@ jobs:
             # Plain `cmd; ec=$?` would cause bash to abort the script on the first non-zero exit
             # (timeout returns 124, cargo-kani returns non-zero on proof failure) BEFORE ec=$? runs.
             # The `&&`/`||` list is `-e`-exempt; $? inside `|| ec=$?` is the exit of the left side.
-            timeout -k 30s "$tmo" cargo kani -p "$SUITE_CRATE" $SUITE_FEATURES --harness "$h" \
+            timeout -k 30s "${this_tmo}s" cargo kani -p "$SUITE_CRATE" $SUITE_FEATURES --harness "$h" \
               > "$log" 2>&1 && ec=0 || ec=$?
             # Anti-OOM invariant: guarantee the memory-hungry solver is gone before the next
             # harness starts (on a timeout the CBMC child can be orphaned when cargo-kani is
@@ -358,9 +422,19 @@ jobs:
                 res="✅ PASS"
                 ;;
               124 | 137)
-                res="⏱️ TIMEOUT (>${tmo})"
-                had_timeout=1
-                echo "::warning title=Kani timeout::${SUITE_CRATE}::${h} exceeded ${tmo} — recorded as TIMEOUT (see step summary). Bounding is tracked by sq-j3u6o."
+                # A CUT (clamped run) and a TIMEOUT (full budget spent) are different findings:
+                # a TIMEOUT says "this harness needs more than ${tmo}" — known, bead-tracked debt
+                # for a `debt: true` suite. A CUT says "the SUITE ran out of step budget", which is
+                # a missing verdict, so it is fatal for every suite (see the exit rules below).
+                if [ "$this_tmo" -lt "$tmo_s" ]; then
+                  res="⏱️ CUT (only ${this_tmo}s of the \`${budget}\` step budget left)"
+                  had_unrun=1
+                  echo "::error title=Kani harness cut by the step budget::${SUITE_CRATE}::${h} was cut after ${this_tmo}s — earlier harnesses in this suite consumed the ${budget} step budget, so this proof has NO verdict. Re-bound or split the suite."
+                else
+                  res="⏱️ TIMEOUT (>${tmo})"
+                  had_timeout=1
+                  echo "::warning title=Kani timeout::${SUITE_CRATE}::${h} exceeded ${tmo} — recorded as TIMEOUT (see step summary). Bounding is tracked by sq-j3u6o."
+                fi
                 ;;
               *)
                 res="❌ FAIL (exit ${ec})"
@@ -388,6 +462,8 @@ jobs:
             echo ""
             if [ "$had_fail" -eq 1 ]; then
               echo "**Overall: ❌ FAIL** — at least one harness surfaced a counterexample/error above; investigate it."
+            elif [ "$had_unrun" -eq 1 ]; then
+              echo "**Overall: ❌ NO VERDICT for part of this suite** — the \`${budget}\` step budget ran out before every harness had been proved, so the harnesses marked **NOT RUN** / **CUT** above carry NO result. This is fatal even for a \`debt\` suite: an unrecorded proof is the failure mode this lane exists to make impossible. Re-bound the slow harnesses or split the suite across matrix entries — do NOT simply raise the budget past the job's \`timeout-minutes\` backstop (rule D5 in scripts/check-fv-manifest.py reds that)."
             elif [ "$had_timeout" -eq 1 ] && [ "$SUITE_DEBT" = "true" ]; then
               echo "**Overall: ⏱️ TIMEOUT (known debt, non-fatal)** — every harness that finished passed; the totality harness(es) exceeded the \`${tmo}\` budget as expected. This is the KNOWN, BEAD-TRACKED debt suite: bounding is tracked by **sq-j3u6o**, so a pure timeout does NOT red the job (a real counterexample still would). The healthy suites determine tonight's lane verdict."
             elif [ "$had_timeout" -eq 1 ]; then
@@ -406,6 +482,14 @@ jobs:
           # nightly formal-lane alarm, instead of being dragged red forever on pre-existing,
           # already-tracked solver-budget debt. Every result is recorded before this exits.
           if [ "$had_fail" -eq 1 ]; then
+            exit 1
+          fi
+          # A missing verdict is NEVER excused by the debt tier. `debt: true` tolerates a proof
+          # that is KNOWN to need more than ${tmo} (recorded, bead-tracked); it does not tolerate
+          # a proof nobody has an answer for. In practice the two debt suites carry two harnesses
+          # each (2 × 20m, far inside the budget), so this can only fire on a suite that has
+          # genuinely outgrown the runner — which must be loud, not absorbed.
+          if [ "$had_unrun" -eq 1 ]; then
             exit 1
           fi
           if [ "$had_timeout" -eq 1 ] && [ "$SUITE_DEBT" != "true" ]; then

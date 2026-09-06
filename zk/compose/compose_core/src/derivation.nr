@@ -53,7 +53,8 @@
 //! rdfs9/rdfs7 (shipped host-side) + rdfs2/rdfs3/rdfs5/rdfs11 -- all the same
 //! fixed variable-sharing shape, matching `EntailmentRule` in the host module
 //! (single source of truth for the shapes). `owl:sameAs` is gated SEPARATELY
-//! (`sq-rsd3v.6`, the `sameas` module): encoding-equality is UNSOUND under
+//! (`sq-rsd3v.6`, the `sameas` module -- NOT `.7`, which is the distinct
+//! completeness obligation below): encoding-equality is UNSOUND under
 //! equality reasoning and MUST NOT ride this fixed-shape path. A node with an
 //! unknown `rule` tag has no satisfying shape and is rejected.
 //!
@@ -73,7 +74,16 @@
 //! mapper) and the compiled bin-package monomorphisation + `bb gates` cost
 //! measurement are follow-ups. NO cost claim is made here (repo policy forbids
 //! unmeasured numbers; `bb gates` MUST confirm the per-node figure first).
-//! Completeness-under-entailment is explicitly OUT of scope (`sq-rsd3v.7`).
+//! This relation states SOUNDNESS of derivation ("every disclosed derived row IS
+//! entailed"). COMPLETENESS under entailment ("no entailed answer is MISSING") is
+//! the OTHER, DISTINCT obligation (`sq-rsd3v.7`, design sec 3.7) and is explicitly
+//! OUT of scope: it would need a closure-sweep over the flat FULL graph (the
+//! entailment analogue of `scan.nr` step 3, which sweeps only the asserted base)
+//! PLUS a fixpoint-SATURATION proof (no rule fires producing a new triple), and the
+//! saturation half is UNBUILT anywhere in sparq and NOT claimed. The host verifier
+//! REFUSES a relying party that demands it
+//! (`EntailmentPolicy::require_completeness_under_entailment`), so an accept of
+//! this relation can never be read as completeness.
 
 use crate::hashes::{commit_fold, h3};
 

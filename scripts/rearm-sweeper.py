@@ -25,12 +25,16 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 
@@ -221,7 +225,7 @@ except ImportError as _gh_retry_missing:  # pragma: no cover - see the wiring te
 # exclusions were LABEL-keyed (`EXCLUDED_LABELS` + the `needs:*` namespace). Nothing was
 # keyed on the head branch or the author, so the release-plz **Release PR** carrying
 # `review:pass` and no hold label was re-armed like any other PR. Merging it cuts a `v*`
-# tag and (once `publish = true` in release-plz.toml) `cargo publish`es 17 crates to
+# tag and (once `publish = true` in release-plz.toml) `cargo publish`es 37 crates to
 # crates.io — a version that can never be unpublished.
 #
 # A label-keyed exclusion is the wrong key: anything with `pull-requests: write` can add
@@ -912,6 +916,976 @@ class RearmSweeper:
         return outcome
 
 
+# ======================================================================================
+# [OPUS-5] #4548 — THE STUCK-ARM SWEEP: the missing terminal edge out of "armed".
+#
+# The sweep above closes ONE direction: a reviewed PR whose arm GitHub dropped gets
+# re-armed. Nothing closed the OTHER direction. `decision()` above returns
+# "live autoMergeRequest" and SKIPS — so the moment a PR is armed it becomes invisible to
+# every sweep in this repo, forever, whatever happens to it afterwards.
+#
+# MEASURED 2026-07-27T10:45Z on sparq-org/sparq: merge-queue depth 0, 3 PRs armed, 0
+# commits merged in the preceding hour. All three were armed AND individually unmergeable:
+# #4373 CONFLICTING against a sibling that had merged; #4354 armed on a `gate` that was
+# `completed/failure` (a clippy error in sparq-core cascading into 10 opt-in legs); #3451
+# green-gated but BLOCKED for 19h on ten unresolved CodeQL review threads under the
+# ruleset's `required_review_thread_resolution`. Armed LOOKS healthy, so nothing paged;
+# each PR also holds its `area:` partition against the readiness frontier, so the lane was
+# not merely idle, it was self-blocking. This is the missing-terminal-edge defect fixed in
+# registry #753/#754, and per-run success rates structurally cannot express it: every
+# individual run of every sweep was green.
+#
+# The fix is to give the armed population a TOTAL classifier and give every terminal class
+# a visible, counted exit. Two design rules the scars here demand:
+#
+#   FAIL OPEN ON ANYTHING PENDING OR UNREADABLE. `gate` legitimately sits `in_progress`
+#   for 20-40 minutes on heavy lanes, and green-but-BLOCKED is usually asynchronous
+#   ruleset evaluation that self-resolves in ~11 minutes. Wrongly disarming a healthy PR
+#   costs a whole review round; leaving a stuck PR one more tick costs ten minutes. So
+#   every indeterminate reading maps to a NO-ACTION class that is still COUNTED.
+#
+#   EVERY ACTION MUST LEAVE THE POPULATION. The mutating classes all end in a disarm, a
+#   branch update, or a check-run re-request — each of which either drops the PR out of
+#   the armed set or bumps its activity back under the grace window. That is what keeps a
+#   ten-minute cron from commenting on the same PR 144 times a day; there is no marker
+#   comment to latch on, because the state transition IS the latch.
+# ======================================================================================
+
+# The tier-correct required-check names. sparq's ci-summary.yml publishes `gate` on a
+# ready payload and `gate, draft-tier` on a draft one, so a lookup keyed on exactly `gate`
+# finds NOTHING on a draft — the defect that left the registry's repair lane unreachable
+# from 2026-07-17 (registry #761). These are matched by EXACT EQUALITY, never by prefix:
+# `gate` is a strict prefix of `gate, draft-tier`, so a `startswith` lookup would silently
+# resolve a draft's gate for a ready PR (and a fixture that only ever contains one of the
+# two names cannot tell the difference — see the prefix tripwire in the self-test).
+GATE_CHECK_NAME = "gate"
+DRAFT_GATE_CHECK_NAME = "gate, draft-tier"
+
+# Gate-resolution outcomes. UNKNOWN and MISSING are deliberately DISTINCT: an unpaginated
+# or short check-run read must not be reported as "there is no gate". Check-run sets on
+# this repo really do exceed one page — MEASURED 2026-07-27: 155 / 680 / 800 runs on the
+# three stuck heads — so a default `commits/<sha>/check-runs` read returns no `gate` row
+# at all, which is indistinguishable from a genuinely absent gate unless the two are
+# separate values. UNKNOWN is fail-open; MISSING is a real observation about a complete read.
+GATE_SUCCESS = "success"
+GATE_FAILURE = "failure"
+GATE_PENDING = "pending"
+GATE_CANCELLED = "cancelled"
+GATE_MISSING = "missing"
+GATE_UNKNOWN = "unknown"
+
+_GATE_OK_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
+_GATE_BAD_CONCLUSIONS = frozenset(
+    {"failure", "timed_out", "action_required", "startup_failure"}
+)
+# `stale` is GitHub's term for a run superseded before it could report; like `cancelled`
+# it produced no verdict, so both route to the bounded re-trigger rather than to a disarm.
+_GATE_CANCELLED_CONCLUSIONS = frozenset({"cancelled", "stale"})
+
+# Labels that mean a human or the trust plane has taken the PR off the automated path.
+# Mirrors auto-arm.py's HUMAN_OR_TRUST_LABELS intent for the *hold* half only: an
+# `area:sparq-zk` PR is allowed to be armed by a reviewer, but a `needs:*` hold is not.
+STUCK_HOLD_LABELS = frozenset({"review:changes", "review:needs", "trust:untrusted"})
+
+# ---- the class enum. TOTAL over the armed population, and closed: `CLASS_ACTIONS` is the
+# single source of truth for both the class set and its routing, so adding a class without
+# routing it is a KeyError at import time rather than a silent no-op at 03:00. ----------
+ACTION_NONE = "none"
+ACTION_PARK = "park"
+ACTION_ROUTE_FIX = "route-fix"
+ACTION_REBASE = "rebase"
+ACTION_RETRIGGER = "retrigger"
+
+CLASS_ACTIONS = {
+    # --- fail-open: the PR is progressing or unreadable. Counted, never touched. -------
+    "queued": ACTION_NONE,               # live mergeQueueEntry: the queue owns it
+    "gate-pending": ACTION_NONE,         # 20-40 min on heavy lanes is NORMAL
+    "gate-indeterminate": ACTION_NONE,   # short/malformed check-run or label read
+    "gate-missing": ACTION_NONE,         # complete read, no gate row yet
+    "ruleset-grace": ACTION_NONE,        # recent activity; async ruleset eval ~11 min
+    "progressing": ACTION_NONE,          # green and not BLOCKED — about to merge
+    "blocked-unexplained": ACTION_NONE,  # green, BLOCKED, no thread — reported, not acted
+    # --- terminal: each gets a visible, counted exit. ---------------------------------
+    "held": ACTION_PARK,                 # armed while a hard hold label is on it
+    "conflicting": ACTION_REBASE,        # DIRTY — attempt the update, then route
+    "gate-failed": ACTION_ROUTE_FIX,     # armed on red: can never merge
+    "gate-cancelled": ACTION_RETRIGGER,  # no verdict was ever produced
+    "blocked-threads": ACTION_PARK,      # unresolved conversations — human-owned
+    "stale": ACTION_PARK,                # past the stale horizon with no other cause
+}
+# The classes whose action mutates the PR. Used for the per-tick bound and for the report.
+TERMINAL_CLASSES = frozenset(
+    name for name, action in CLASS_ACTIONS.items() if action != ACTION_NONE
+)
+
+STUCK_LIST_FIELDS = (
+    "number,state,isDraft,baseRefName,headRefName,labels,author,title,"
+    "mergeable,mergeStateStatus,updatedAt,headRefOid,autoMergeRequest"
+)
+
+# Live per-PR state. `mergeable`/`mergeStateStatus` and the review threads must come from
+# the SAME read as the arm state, or the classifier decides on a mixture of two snapshots.
+STUCK_LIVE_QUERY = """query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      number
+      state
+      isDraft
+      baseRefName
+      updatedAt
+      headRefOid
+      mergeable
+      mergeStateStatus
+      labels(first:100){nodes{name} pageInfo{hasNextPage}}
+      autoMergeRequest{enabledAt}
+      mergeQueueEntry{id}
+      reviewThreads(first:100){
+        totalCount
+        pageInfo{hasNextPage}
+        nodes{isResolved}
+      }
+    }
+  }
+}"""
+
+OPEN_PR_COUNT_QUERY = """query($owner:String!,$name:String!){
+  repository(owner:$owner,name:$name){
+    pullRequests(states:OPEN){totalCount}
+  }
+}"""
+
+STUCK_MARKER = "> 🤖 SPARQ agent"
+
+
+@dataclass(frozen=True)
+class StuckLimits:
+    """Every bound the sweep obeys, in one place so the self-test can shrink them."""
+
+    # Green-but-BLOCKED is async ruleset evaluation that self-resolves in ~11 minutes, and
+    # a just-pushed head can show the PREVIOUS run's conclusion before the new run is
+    # created. 20 minutes covers both with margin; below it, nothing terminal can fire.
+    grace_seconds: int = 20 * 60
+    # Past this with no other identified cause, the PR is parked WITH A REASON rather than
+    # left to look healthy indefinitely.
+    stale_seconds: int = 6 * 3600
+    # The congestion bound. This repo has a measured congestion-collapse mode: over-
+    # dispatching pushes saturates the runners and manufactures false gate failures. A
+    # backlog that all becomes actionable on one tick must therefore drain over several
+    # ticks, not fire at once. Every deferred PR is still CLASSIFIED and COUNTED.
+    max_actions: int = 5
+
+
+@dataclass(frozen=True)
+class ArmedPull:
+    """The classifier's whole input. Pure data: no gh handle, no clock, no I/O."""
+
+    number: int
+    is_draft: bool
+    base_ref: str
+    labels: frozenset[str]
+    mergeable: str          # MERGEABLE | CONFLICTING | UNKNOWN
+    merge_state: str        # BLOCKED | CLEAN | DIRTY | BEHIND | UNSTABLE | UNKNOWN | ...
+    updated_at: int         # epoch seconds
+    armed_at: int           # epoch seconds
+    head_oid: str
+    has_queue_entry: bool
+    unresolved_threads: int
+    state_truncated: bool = False   # a label or review-thread page overflowed
+
+
+def _iso_epoch(value: object) -> int:
+    """ISO-8601 Z timestamp -> epoch seconds; 0 when absent or unparseable.
+
+    0 makes an unreadable timestamp look INFINITELY OLD, which would push a PR straight to
+    `stale`. That is the wrong direction, so callers combine timestamps with `max()` and
+    the classifier treats a wholly-unknown activity time as indeterminate — see `classify`.
+    """
+    if not isinstance(value, str) or not value:
+        return 0
+    try:
+        return int(
+            datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+            .replace(tzinfo=timezone.utc)
+            .timestamp()
+        )
+    except ValueError:
+        return 0
+
+
+def gate_check_name(is_draft: bool) -> str:
+    """The required-check name for this PR's TIER. See GATE_CHECK_NAME above."""
+    return DRAFT_GATE_CHECK_NAME if is_draft else GATE_CHECK_NAME
+
+
+def _run_order(run: dict) -> tuple:
+    """Newest-run ordering key. `started_at` is ISO-8601 Z so it sorts lexicographically;
+    the numeric check-run id breaks ties and is monotonic per repository."""
+    started = run.get("started_at")
+    ident = run.get("id")
+    return (
+        started if isinstance(started, str) else "",
+        ident if isinstance(ident, int) else -1,
+    )
+
+
+def collect_check_runs(pages: object) -> tuple[list[dict] | None, int | None]:
+    """Flatten `gh api --paginate --slurp .../check-runs` output.
+
+    Returns ``(runs, declared_total)``. ``runs`` is None when the payload shape is not
+    recognisable at all. ``declared_total`` is the API's own ``total_count`` from the first
+    page, used by `resolve_gate` to prove the read was COMPLETE.
+    """
+    if not isinstance(pages, list):
+        return None, None
+    runs: list[dict] = []
+    declared: int | None = None
+    for page in pages:
+        if not isinstance(page, dict):
+            return None, None
+        if declared is None and isinstance(page.get("total_count"), int):
+            declared = page["total_count"]
+        chunk = page.get("check_runs")
+        if not isinstance(chunk, list):
+            return None, None
+        runs.extend(item for item in chunk if isinstance(item, dict))
+    return runs, declared
+
+
+def resolve_gate(pages: object, *, is_draft: bool) -> str:
+    """The TIER-CORRECT, NEWEST-RUN-PER-NAME state of this head's required gate.
+
+    Three properties, each one a scar:
+
+    * COMPLETENESS FIRST. If the API declared more check runs than the read returned, the
+      answer is UNKNOWN — never MISSING. An unpaginated read of an 800-run head returns no
+      `gate` row, and reporting that as "no gate" would disarm a perfectly healthy PR.
+    * EXACT NAME. `gate` and `gate, draft-tier` are matched by equality against the tier's
+      name, so neither can ever stand in for the other.
+    * NEWEST RUN WINS. GitHub leaves the CANCELLED twin of a superseded run on the head
+      alongside the run that replaced it. Resolving by "any cancelled run" would mask a
+      green newest run — MEASURED on PR #3451, where five distinct check names each carry a
+      cancelled twin behind a newer success/skip.
+    """
+    runs, declared = collect_check_runs(pages)
+    if runs is None:
+        return GATE_UNKNOWN
+    if declared is None or len(runs) < declared:
+        return GATE_UNKNOWN
+    wanted = gate_check_name(is_draft)
+    rows = [run for run in runs if run.get("name") == wanted]
+    if not rows:
+        return GATE_MISSING
+    newest = max(rows, key=_run_order)
+    if newest.get("status") != "completed":
+        return GATE_PENDING
+    conclusion = newest.get("conclusion")
+    if conclusion in _GATE_OK_CONCLUSIONS:
+        return GATE_SUCCESS
+    if conclusion in _GATE_BAD_CONCLUSIONS:
+        return GATE_FAILURE
+    if conclusion in _GATE_CANCELLED_CONCLUSIONS:
+        return GATE_CANCELLED
+    return GATE_UNKNOWN
+
+
+def hold_labels(labels: frozenset[str]) -> list[str]:
+    """The hard holds that make an ARM unsafe, not merely unproductive.
+
+    A `needs:*` or `review:changes` PR that is still armed will merge the instant its gate
+    goes green, straight past the hold. That is the one class here where INACTION is the
+    dangerous direction, so it disarms.
+    """
+    return sorted(
+        label
+        for label in labels
+        if label.startswith("needs:") or label in STUCK_HOLD_LABELS
+    )
+
+
+def classify(pull: ArmedPull, gate: str, now: int, limits: StuckLimits) -> str:
+    """TOTAL map from (live PR state, gate state) to exactly one class of `CLASS_ACTIONS`.
+
+    ORDER IS THE POLICY, and it is fail-open first:
+
+      1-3. Anything progressing or unreadable exits here, before any bound is consulted.
+      4.   The grace window. NOTHING terminal fires inside it — a green-but-BLOCKED PR is
+           usually mid-ruleset-evaluation, and a just-pushed head can still be showing the
+           previous run's conclusion.
+      5.   Holds and CONFLICTING are decided BEFORE any gate reading — see below.
+      6+.  The gate readings, fail-open first, then the stale horizon as the backstop so
+           that nothing can sit armed and unexplained forever.
+
+    WHY HOLDS AND `CONFLICTING` OUTRANK THE GATE READING. "Fail open on pending" is the
+    right rule for a PR that is merely waiting, and the WRONG rule for these two, because
+    for them a pending gate is not evidence of progress:
+
+    * A `CONFLICTING` PR cannot merge on any gate result. Its gate — green, red or absent —
+      was computed against a merge that no longer exists, so no CI outcome changes the
+      remedy, and deferring to a pending or unreadable gate simply defers forever. This
+      is #4354's exact shape: `gate` concluded SUCCESS at 10:57 and the branch went dirty
+      at 11:10, so its green is an answer to a question nobody is asking any more.
+      HONESTY ABOUT THE EVIDENCE: this ordering is NOT justified by the stronger claim
+      that a dirty PR never gets CI. MEASURED 2026-07-27 over all 26 open CONFLICTING PRs
+      in this repo: 25 carry check runs on their head (60-788 of them) and six acquired
+      new runs DAYS after going dirty, so workflows plainly do dispatch onto dirty heads.
+      Exactly one (#3815) has zero check runs at all — rare, but it is the case in which a
+      CI-pending fail-open strands a PR permanently, and it costs nothing to exclude.
+    * A HELD PR is the one class where inaction is the dangerous direction: it is armed
+      under a hold, so it merges PAST that hold the instant the gate greens. A pending
+      gate makes that more urgent, not less.
+
+    Both are still inside the grace window and both still fail open on a truncated read.
+    """
+    if pull.has_queue_entry:
+        return "queued"
+    if pull.state_truncated:
+        return "gate-indeterminate"
+    activity = max(pull.updated_at, pull.armed_at)
+    if activity <= 0:
+        # No readable activity timestamp at all: age is unknowable, so no age-derived
+        # class may fire. Fail open rather than treat "unparseable" as "ancient".
+        return "gate-indeterminate"
+    age = now - activity
+    if age < limits.grace_seconds:
+        return "ruleset-grace"
+    # [OPUS-5] The GRACE window and the STALE horizon measure DIFFERENT things, and
+    # conflating them starves the backstop. Grace asks "did something just happen?", so it
+    # is right to take the most recent event of any kind. Stale asks "how long has this arm
+    # been failing to merge?" — and `updatedAt` is bumped by every label flip, every bot
+    # comment and every review event, so a PR under routine pipeline churn would reset the
+    # horizon forever and the one class that exists to catch everything else would be the
+    # easiest of all to starve. MEASURED on #3451: armed 33h, `updatedAt` 83 minutes old.
+    # Falls back to the activity clock only when the arm timestamp is unreadable.
+    armed_age = now - (pull.armed_at or activity)
+    if hold_labels(pull.labels):
+        return "held"
+    if pull.mergeable == "CONFLICTING":
+        return "conflicting"
+    # ---- from here the gate reading decides, and it fails OPEN. -----------------------
+    # The three ways a head can show "no usable gate" are DIFFERENT states with different
+    # remedies, and collapsing them is how a sweeper disarms a healthy PR: `conflicting`
+    # (handled above — rebase, never wait), GATE_UNKNOWN from a short read (paginate and
+    # re-read; never conclude), and GATE_MISSING on a complete read of a mergeable head
+    # (the only genuine "no gate" case). MEASURED on PR #4369: total_count=486, an
+    # unpaginated read returns 30 rows and ZERO gate rows.
+    if gate == GATE_PENDING:
+        return "gate-pending"
+    if gate == GATE_UNKNOWN:
+        return "gate-indeterminate"
+    if gate == GATE_FAILURE:
+        return "gate-failed"
+    if gate == GATE_CANCELLED:
+        return "gate-cancelled"
+    if gate == GATE_MISSING:
+        return "stale" if armed_age >= limits.stale_seconds else "gate-missing"
+    # The gate is green from here.
+    if pull.merge_state != "BLOCKED":
+        return "progressing"
+    if pull.unresolved_threads > 0:
+        return "blocked-threads"
+    if armed_age >= limits.stale_seconds:
+        return "stale"
+    return "blocked-unexplained"
+
+
+CLASS_REASONS = {
+    "held": (
+        "it is armed while carrying a hard hold label. An armed PR merges the moment its "
+        "gate goes green, so the arm has been removed; the hold itself is untouched."
+    ),
+    "conflicting": (
+        "its branch conflicts with the base. The automatic branch update could not resolve "
+        "it, so it needs a manual rebase."
+    ),
+    "gate-failed": (
+        "it was armed on a `gate` that has already concluded FAILURE. It can never merge in "
+        "that state, so the arm has been removed and it is routed to the fix lane."
+    ),
+    "blocked-threads": (
+        "its gate is green but the branch ruleset requires every review thread to be "
+        "resolved, and unresolved threads remain. Nothing automated can resolve them, so "
+        "the arm has been removed and the PR is parked for a human."
+    ),
+    "stale": (
+        "it has been armed and unmergeable past the stale horizon with no other identified "
+        "cause. The arm has been removed so it stops looking healthy while it is not."
+    ),
+}
+
+
+# ---- THE MACHINE-READABLE RECEIPT ------------------------------------------------------
+#
+# [OPUS-5] #4548 follow-through. A park whose only artefact is prose has a HUMAN-ONLY exit,
+# and a human-only exit turns a transient cause into a permanent stall: the PR sits parked
+# long after the thing that parked it went away, because nothing can read "unresolved
+# conversations remain" and check whether that is still true. Registry #766 found exactly
+# this — four PRs human-terminal purely because a human applied the label.
+#
+# So every park additionally emits ONE machine-readable receipt: the class, the head it was
+# bound to, the observation that justified it, and — the load-bearing field — the named
+# CONDITION under which the park is provably over. `unpark_satisfied` evaluates that
+# condition against a FRESH observation, and is fail-CLOSED in every direction: an
+# unrecognised condition, a version it does not know, a receipt from another PR, or an
+# incomplete read all keep the PR parked. Recovery must be PROVEN, never assumed.
+RECEIPT_VERSION = 1
+RECEIPT_OPEN = "<!-- stuck-arm-receipt:"
+RECEIPT_CLOSE = "-->"
+
+# class -> the named condition that ENDS this park. The condition is recorded IN the receipt
+# rather than re-derived from the class at un-park time, so a policy change here can never
+# silently re-interpret a receipt written by an older revision.
+UNPARK_HOLDS_CLEARED = "holds-cleared"
+UNPARK_NOT_CONFLICTING = "not-conflicting"
+UNPARK_GATE_GREEN = "gate-green"
+UNPARK_GATE_CONCLUDED = "gate-concluded"
+UNPARK_THREADS_RESOLVED = "threads-resolved"
+UNPARK_HEAD_MOVED = "head-moved"
+
+UNPARK_CONDITIONS = {
+    "held": UNPARK_HOLDS_CLEARED,
+    "conflicting": UNPARK_NOT_CONFLICTING,
+    "gate-failed": UNPARK_GATE_GREEN,
+    "gate-cancelled": UNPARK_GATE_CONCLUDED,
+    "blocked-threads": UNPARK_THREADS_RESOLVED,
+    # `stale` has no single identified cause by construction, so the only honest proof that
+    # it is over is that somebody moved the branch on.
+    "stale": UNPARK_HEAD_MOVED,
+}
+# Import-time totality. A terminal class added without a machine exit is precisely the
+# "holds need a machine exit" defect, so it must be impossible to add one by omission.
+assert set(UNPARK_CONDITIONS) == TERMINAL_CLASSES, (
+    "every terminal class needs a named un-park condition: "
+    f"missing={sorted(TERMINAL_CLASSES - set(UNPARK_CONDITIONS))} "
+    f"extra={sorted(set(UNPARK_CONDITIONS) - TERMINAL_CLASSES)}"
+)
+
+
+def stuck_receipt(pull: ArmedPull, klass: str, gate: str, now: int) -> dict:
+    """The machine-readable half of a park. Pure: same inputs, same bytes.
+
+    `head` binds the receipt to the exact commit that was observed — a receipt found on a
+    PR whose head has since moved describes a state that no longer exists, which is both the
+    `head-moved` proof and the reason every other condition is re-evaluated live rather than
+    trusted from the receipt.
+    """
+    return {
+        "v": RECEIPT_VERSION,
+        "program": PROGRAM,
+        "phase": "stuck-arm",
+        "pr": pull.number,
+        "class": klass,
+        "action": CLASS_ACTIONS[klass],
+        "head": pull.head_oid,
+        "observed_at": now,
+        "observed": {
+            "gate": gate,
+            "mergeable": pull.mergeable,
+            "merge_state": pull.merge_state,
+            "unresolved_threads": pull.unresolved_threads,
+            "holds": hold_labels(pull.labels),
+        },
+        "unpark_when": UNPARK_CONDITIONS[klass],
+    }
+
+
+def render_receipt(receipt: dict) -> str:
+    """One line, HTML-comment-wrapped so it renders as nothing and greps as everything."""
+    return (
+        f"{RECEIPT_OPEN} "
+        f"{json.dumps(receipt, sort_keys=True, separators=(',', ':'), ensure_ascii=False)} "
+        f"{RECEIPT_CLOSE}"
+    )
+
+
+def parse_stuck_receipt(body: object) -> dict | None:
+    """Recover the receipt from a comment body, or None.
+
+    Tolerant of surrounding prose (the receipt is appended to a human-readable comment) and
+    of a body carrying several — the LAST wins, because a later sweep's observation
+    supersedes an earlier one. Returns None on anything it cannot fully parse: a caller that
+    cannot read the receipt must behave as if the park were opaque, never as if it were
+    satisfied.
+    """
+    if not isinstance(body, str) or RECEIPT_OPEN not in body:
+        return None
+    start = body.rfind(RECEIPT_OPEN)
+    end = body.find(RECEIPT_CLOSE, start + len(RECEIPT_OPEN))
+    if end < 0:
+        return None
+    try:
+        parsed = json.loads(body[start + len(RECEIPT_OPEN):end].strip())
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+def unpark_satisfied(receipt: object, pull: ArmedPull, gate: str) -> bool:
+    """Has the recorded cause of this park PROVABLY gone away?
+
+    FAIL-CLOSED on every axis. The dangerous direction here is un-parking a PR whose cause
+    still holds — that re-admits it to the merge lane where it will wedge again — so
+    anything short of positive proof returns False:
+
+      * a receipt this revision does not understand (version, shape, wrong PR number);
+      * a condition name that is not in the closed set (a receipt from a FUTURE revision
+        naming a condition this one cannot evaluate);
+      * an incomplete live read (`state_truncated`), or a gate that is not a concluded
+        observation, for any condition that depends on those.
+
+    It is deliberately NOT a method: the un-park decision is a pure function of a receipt
+    plus a fresh observation, and keeping it pure is what makes it testable without gh.
+    """
+    if not isinstance(receipt, dict):
+        return False
+    if receipt.get("v") != RECEIPT_VERSION:
+        return False
+    if receipt.get("program") != PROGRAM or receipt.get("phase") != "stuck-arm":
+        return False
+    if receipt.get("pr") != pull.number:
+        return False
+    # A truncated label or review-thread page means the fresh observation is itself partial;
+    # no condition can be PROVEN against it.
+    if pull.state_truncated:
+        return False
+    condition = receipt.get("unpark_when")
+    if condition == UNPARK_HOLDS_CLEARED:
+        return not hold_labels(pull.labels)
+    if condition == UNPARK_NOT_CONFLICTING:
+        # UNKNOWN is GitHub still computing the merge — not proof of anything.
+        return pull.mergeable == "MERGEABLE"
+    if condition == UNPARK_GATE_GREEN:
+        return gate == GATE_SUCCESS
+    if condition == UNPARK_GATE_CONCLUDED:
+        return gate in (GATE_SUCCESS, GATE_FAILURE)
+    if condition == UNPARK_THREADS_RESOLVED:
+        return pull.unresolved_threads == 0
+    if condition == UNPARK_HEAD_MOVED:
+        recorded = receipt.get("head")
+        return bool(pull.head_oid) and isinstance(recorded, str) and pull.head_oid != recorded
+    return False
+
+
+# The exact phrase that CLAIMS the park clears itself. Named once so the self-test can ask
+# the rendered comment whether the claim was made, rather than eyeballing an f-string.
+AUTO_UNPARK_PROMISE = "Un-parks automatically when:"
+
+
+def unpark_production_callers() -> set[str]:
+    """Names of the functions that actually CALL `unpark_satisfied`, minus the self-test.
+
+    Asked of the parse tree, not of the file's text. A containment check ("does
+    'unpark_satisfied' appear outside the self-test?") is vacuous for this guard class —
+    the identifier necessarily appears in its own definition, its docstring and this very
+    function — so it would pass while the evaluator remained dead. The AST question has
+    exactly one answer: for each `Call` to that name, which `FunctionDef` most closely
+    encloses it?
+
+    Returning names (not a bool) is deliberate: the assertion message can then say WHO wired
+    it, which is the difference between a failure a reader can act on and one they cannot.
+    """
+    tree = ast.parse(Path(__file__).resolve().read_text(encoding="utf-8"))
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    callers: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+        if name != "unpark_satisfied":
+            continue
+        enclosing, cursor = "<module>", parents.get(node)
+        while cursor is not None:
+            if isinstance(cursor, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                enclosing = cursor.name
+                break
+            cursor = parents.get(cursor)
+        callers.add(enclosing)
+    return callers - {"stuck_self_test", "unpark_production_callers"}
+
+
+def stuck_comment(pull: ArmedPull, klass: str, gate: str, detail: str, now: int) -> str:
+    """The one comment body: prose for the human, a receipt for the machine.
+
+    Both, not either. The prose is what a maintainer reads; the receipt is what an un-park
+    path evaluates. A park with only the first has no exit that does not require a person.
+    """
+    reason = CLASS_REASONS.get(klass, "it is armed but cannot merge.")
+    receipt = stuck_receipt(pull, klass, gate, now)
+    return (
+        f"{STUCK_MARKER}\n\n"
+        f"**stuck-arm sweep — `{klass}`**\n\n"
+        f"This PR was armed for auto-merge but {reason}\n\n"
+        f"Observed: {detail}\n\n"
+        f"Un-park condition: `{receipt['unpark_when']}` — the named state that ends this "
+        f"park. It is evaluated by `unpark_satisfied`, which is NOT wired into this sweep, "
+        f"so clearing this park is a HUMAN action today (#5041).\n\n"
+        f"_Posted by the `{PROGRAM}` stuck-arm phase because an armed PR that cannot merge "
+        f"is otherwise invisible: it looks healthy, and it holds its `area:` partition "
+        f"against the readiness frontier._\n\n"
+        f"{render_receipt(receipt)}"
+    )
+
+
+class StuckArmSweeper:
+    """Phase two of this lane: classify the ARMED population and give each class an exit.
+
+    Deliberately a sibling of `RearmSweeper` rather than a separate workflow. The two are
+    exact duals over one decision surface — `RearmSweeper.decision()` returns
+    "live autoMergeRequest" and skips, and THAT skip is the edge this class closes — so
+    they share the repo/owner parsing, the one-shot-mutation vs retrying-read split, and
+    the same cron, concurrency group and token.
+    """
+
+    def __init__(
+        self,
+        repo: str,
+        default_branch: str,
+        *,
+        limits: StuckLimits | None = None,
+        gh: Callable[[list[str]], str] = run_gh,
+        gh_read: Callable[[list[str]], str] | None = None,
+        log: Callable[[str], None] = print,
+        now: Callable[[], int] = lambda: int(time.time()),
+        dry_run: bool = False,
+    ) -> None:
+        self.repo = repo
+        self.default_branch = default_branch
+        self.limits = limits or StuckLimits()
+        # OBSERVE-ONLY. Exists so the census can be taken against the live repository
+        # before any remediation is enabled, and so an operator can answer "what would this
+        # tick do" without doing it. The live workflow step MUST NOT pass it — pinned by
+        # test_arm_capability_wiring.py::TestStuckArmWiring, because a sweep permanently
+        # stuck in dry-run is a lane that reports beautifully and repairs nothing.
+        self.dry_run = dry_run
+        self.gh = gh
+        self.gh_read = gh_read if gh_read is not None else gh
+        self.log = log
+        self.now = now
+        self.counts: dict[str, int] = {}
+        self.errors = 0
+        self.observed = 0
+        self.actions = 0
+        self.deferred = 0
+        self.truncated_enumeration = False
+        self.armed_on_red: list[int] = []
+        try:
+            self.owner, self.name = repo.split("/", 1)
+        except ValueError as error:
+            raise ValueError("repo must be OWNER/REPOSITORY") from error
+        if not self.owner or not self.name or "/" in self.name:
+            raise ValueError("repo must be OWNER/REPOSITORY")
+
+    # ---- reads ------------------------------------------------------------------------
+
+    def _read_json(self, argv: list[str]) -> object:
+        return json.loads(self.gh_read(argv))
+
+    def open_pr_total(self) -> int | None:
+        """The repository's own count of open PRs, for the enumeration cross-check."""
+        response = self._read_json(
+            [
+                "api", "graphql",
+                "-f", f"query={OPEN_PR_COUNT_QUERY}",
+                "-f", f"owner={self.owner}",
+                "-f", f"name={self.name}",
+            ]
+        )
+        if not isinstance(response, dict) or response.get("errors"):
+            return None
+        repository = (response.get("data") or {}).get("repository") or {}
+        total = (repository.get("pullRequests") or {}).get("totalCount")
+        return total if isinstance(total, int) else None
+
+    def list_armed(self) -> list[dict]:
+        """Every OPEN PR carrying a live autoMergeRequest, cross-checked against totalCount.
+
+        A SHORT enumeration does not invalidate the PRs we did see — each classification is
+        independent — so the sweep continues, but the run is flagged so nobody reads the
+        class counts as covering the whole population.
+        """
+        raw = self._read_json(
+            [
+                "pr", "list",
+                "--repo", self.repo,
+                "--state", "open",
+                "--limit", "1000",
+                "--json", STUCK_LIST_FIELDS,
+            ]
+        )
+        if not isinstance(raw, list):
+            raise GhError("gh pr list returned a non-list response")
+        total = self.open_pr_total()
+        if total is not None and len(raw) < total:
+            self.truncated_enumeration = True
+            self.log(
+                f"::warning title={PROGRAM} stuck-arm enumeration truncated::"
+                f"listed {len(raw)} open PR(s) but the repository reports {total} — the "
+                "class counts below cover only what was read."
+            )
+        return [item for item in raw if isinstance(item, dict) and item.get("autoMergeRequest")]
+
+    def live_pull(self, number: int) -> ArmedPull | None:
+        response = self._read_json(
+            [
+                "api", "graphql",
+                "-f", f"query={STUCK_LIVE_QUERY}",
+                "-f", f"owner={self.owner}",
+                "-f", f"name={self.name}",
+                "-F", f"number={number}",
+            ]
+        )
+        if not isinstance(response, dict) or response.get("errors"):
+            raise GhError(f"GraphQL returned errors for #{number}")
+        repository = (response.get("data") or {}).get("repository") or {}
+        raw = repository.get("pullRequest")
+        if not isinstance(raw, dict):
+            return None
+        labels = raw.get("labels") or {}
+        threads = raw.get("reviewThreads") or {}
+        nodes = threads.get("nodes")
+        unresolved = 0
+        if isinstance(nodes, list):
+            unresolved = sum(
+                1 for node in nodes
+                if isinstance(node, dict) and node.get("isResolved") is False
+            )
+        # A truncated LABEL page can hide a hold; a truncated THREAD page can hide the
+        # unresolved thread that explains a BLOCKED state. Either way the state is only
+        # partially known, so the classifier must fail open rather than guess.
+        truncated = bool((labels.get("pageInfo") or {}).get("hasNextPage")) or (
+            bool((threads.get("pageInfo") or {}).get("hasNextPage")) and unresolved == 0
+        )
+        return ArmedPull(
+            number=int(raw.get("number", number)),
+            is_draft=bool(raw.get("isDraft")),
+            base_ref=str(raw.get("baseRefName") or ""),
+            labels=normalized_labels(labels.get("nodes")),
+            mergeable=str(raw.get("mergeable") or "UNKNOWN").upper(),
+            merge_state=str(raw.get("mergeStateStatus") or "UNKNOWN").upper(),
+            updated_at=_iso_epoch(raw.get("updatedAt")),
+            armed_at=_iso_epoch((raw.get("autoMergeRequest") or {}).get("enabledAt")),
+            head_oid=str(raw.get("headRefOid") or ""),
+            has_queue_entry=raw.get("mergeQueueEntry") is not None,
+            unresolved_threads=unresolved,
+            state_truncated=truncated,
+        )
+
+    def gate_state(self, pull: ArmedPull) -> tuple[str, int | None]:
+        """`resolve_gate` over a PAGINATED read, plus the newest gate run's id for re-trigger."""
+        if not pull.head_oid:
+            return GATE_UNKNOWN, None
+        pages = self._read_json(
+            [
+                "api", "--paginate", "--slurp",
+                f"repos/{self.repo}/commits/{pull.head_oid}/check-runs?per_page=100",
+            ]
+        )
+        state = resolve_gate(pages, is_draft=pull.is_draft)
+        runs, _declared = collect_check_runs(pages)
+        run_id = None
+        if runs:
+            rows = [r for r in runs if r.get("name") == gate_check_name(pull.is_draft)]
+            if rows:
+                ident = max(rows, key=_run_order).get("id")
+                run_id = ident if isinstance(ident, int) else None
+        return state, run_id
+
+    # ---- mutations. One-shot, never through the retrying read runner. -----------------
+
+    def disarm(self, number: int) -> None:
+        self.gh(["pr", "merge", str(number), "--repo", self.repo, "--disable-auto"])
+
+    def comment(self, number: int, body: str) -> None:
+        self.gh(["pr", "comment", str(number), "--repo", self.repo, "--body", body])
+
+    def relabel(self, number: int, add: list[str], remove: list[str]) -> None:
+        argv = ["pr", "edit", str(number), "--repo", self.repo]
+        for label in add:
+            argv += ["--add-label", label]
+        for label in remove:
+            argv += ["--remove-label", label]
+        self.gh(argv)
+
+    def update_branch(self, number: int, head_oid: str) -> None:
+        self.gh(
+            [
+                "api", "-X", "PUT",
+                f"repos/{self.repo}/pulls/{number}/update-branch",
+                "-f", f"expected_head_sha={head_oid}",
+            ]
+        )
+
+    def rerequest(self, run_id: int) -> None:
+        self.gh(["api", "-X", "POST", f"repos/{self.repo}/check-runs/{run_id}/rerequest"])
+
+    # ---- the per-class exits ----------------------------------------------------------
+
+    def park(self, pull: ArmedPull, klass: str, gate: str, detail: str) -> None:
+        """Disarm, label for a human, and SAY WHY — in prose AND in a machine receipt."""
+        self.disarm(pull.number)
+        self.relabel(pull.number, ["needs:user"], [])
+        self.comment(pull.number, stuck_comment(pull, klass, gate, detail, self.now()))
+
+    def route_fix(self, pull: ArmedPull, klass: str, gate: str, detail: str) -> None:
+        """Disarm and hand the PR to the fix lane.
+
+        `review:pass` is REMOVED with the same call that adds `review:changes`: the arm was
+        only ever justified by that attestation, and leaving a stale `review:pass` behind
+        would let the re-arm phase above immediately re-arm what this phase just disarmed.
+        """
+        self.disarm(pull.number)
+        self.relabel(pull.number, ["review:changes"], ["review:pass"])
+        self.comment(pull.number, stuck_comment(pull, klass, gate, detail, self.now()))
+
+    def rebase(self, pull: ArmedPull, gate: str, detail: str) -> None:
+        """Attempt GitHub's own branch update; fall back to the fix lane when it conflicts."""
+        try:
+            self.update_branch(pull.number, pull.head_oid)
+        except GhError as error:
+            self.route_fix(
+                pull, "conflicting", gate, f"{detail}; branch update refused ({error})"
+            )
+            return
+        self.log(f"[{PROGRAM}] stuck-arm PR #{pull.number}: REBASE — branch update requested")
+
+    def retrigger(self, pull: ArmedPull, run_id: int | None, detail: str) -> None:
+        if run_id is None:
+            self.log(
+                f"[{PROGRAM}] stuck-arm PR #{pull.number}: SKIP — cancelled gate has no "
+                "re-requestable run id"
+            )
+            return
+        self.rerequest(run_id)
+        self.log(
+            f"[{PROGRAM}] stuck-arm PR #{pull.number}: RETRIGGER — re-requested the "
+            f"cancelled gate run {run_id} ({detail})"
+        )
+
+    def apply(
+        self, pull: ArmedPull, klass: str, gate: str, run_id: int | None, detail: str
+    ) -> None:
+        action = CLASS_ACTIONS[klass]
+        if self.dry_run:
+            self.log(
+                f"[{PROGRAM}] stuck-arm PR #{pull.number}: DRY-RUN would {action} ({detail})"
+            )
+            return
+        if action == ACTION_PARK:
+            self.park(pull, klass, gate, detail)
+        elif action == ACTION_ROUTE_FIX:
+            self.route_fix(pull, klass, gate, detail)
+        elif action == ACTION_REBASE:
+            self.rebase(pull, gate, detail)
+        elif action == ACTION_RETRIGGER:
+            self.retrigger(pull, run_id, detail)
+
+    # ---- the sweep --------------------------------------------------------------------
+
+    def run(self) -> int:
+        limits = self.limits
+        now = self.now()
+        armed = self.list_armed()
+        self.observed = len(armed)
+        self.log(
+            f"[{PROGRAM}] stuck-arm: {self.observed} armed PR(s) observed; "
+            f"grace={limits.grace_seconds}s stale={limits.stale_seconds}s "
+            f"max-actions={limits.max_actions}"
+        )
+        for item in armed:
+            number = item.get("number")
+            if not isinstance(number, int):
+                continue
+            try:
+                pull = self.live_pull(number)
+                if pull is None:
+                    self.log(f"[{PROGRAM}] stuck-arm PR #{number}: SKIP — no live state")
+                    self.counts["gate-indeterminate"] = (
+                        self.counts.get("gate-indeterminate", 0) + 1
+                    )
+                    continue
+                if pull.base_ref != self.default_branch:
+                    # Not our lane; still counted so the totals stay closed.
+                    self.counts["progressing"] = self.counts.get("progressing", 0) + 1
+                    continue
+                gate, run_id = self.gate_state(pull)
+            except (GhError, json.JSONDecodeError) as error:
+                self.log(f"[{PROGRAM}] stuck-arm PR #{number}: SKIP — read failed ({error})")
+                self.counts["gate-indeterminate"] = (
+                    self.counts.get("gate-indeterminate", 0) + 1
+                )
+                self.errors += 1
+                continue
+
+            klass = classify(pull, gate, now, limits)
+            self.counts[klass] = self.counts.get(klass, 0) + 1
+            detail = (
+                f"gate={gate} mergeable={pull.mergeable} state={pull.merge_state} "
+                f"unresolved-threads={pull.unresolved_threads} "
+                f"age={now - max(pull.updated_at, pull.armed_at)}s "
+                f"armed-age={now - (pull.armed_at or max(pull.updated_at, pull.armed_at))}s "
+                f"head={pull.head_oid[:12]}"
+            )
+            if klass == "gate-failed":
+                # Nothing in the arm path reads CI state — auto-arm.py arms on LABELS alone
+                # — so a PR can be armed while red, not merely go red after arming. That is
+                # a defect in the ARM policy, not in this PR, and it is reported separately
+                # so it can be fixed at its own layer instead of being absorbed here.
+                self.armed_on_red.append(pull.number)
+            if CLASS_ACTIONS[klass] == ACTION_NONE:
+                self.log(f"[{PROGRAM}] stuck-arm PR #{number}: {klass} — no action ({detail})")
+                continue
+            if self.actions >= limits.max_actions:
+                self.deferred += 1
+                self.log(
+                    f"[{PROGRAM}] stuck-arm PR #{number}: {klass} — DEFERRED "
+                    f"(per-tick action cap {limits.max_actions} reached; the next cron "
+                    f"tick takes it) ({detail})"
+                )
+                continue
+            self.actions += 1
+            try:
+                self.apply(pull, klass, gate, run_id, detail)
+                self.log(
+                    f"[{PROGRAM}] stuck-arm PR #{number}: {klass} -> "
+                    f"{CLASS_ACTIONS[klass]} ({detail})"
+                )
+            except GhError as error:
+                self.errors += 1
+                self.log(
+                    f"[{PROGRAM}] stuck-arm PR #{number}: {klass} -> "
+                    f"{CLASS_ACTIONS[klass]} FAILED ({error})"
+                )
+        self.report()
+        return self.errors
+
+    def report(self) -> None:
+        """The counted, visible state. The census is the point: per-run success rates
+        cannot express a missing edge, but a per-CLASS population with timestamps can."""
+        total = sum(self.counts.values())
+        breakdown = " ".join(
+            f"{name}={self.counts.get(name, 0)}" for name in sorted(CLASS_ACTIONS)
+        )
+        self.log(f"[{PROGRAM}] stuck-arm census: {breakdown}")
+        self.log(
+            f"[{PROGRAM}] stuck-arm complete: observed={self.observed} classified={total} "
+            f"actions={self.actions} deferred={self.deferred} errors={self.errors} "
+            f"enumeration={'TRUNCATED' if self.truncated_enumeration else 'complete'}"
+        )
+        if self.armed_on_red:
+            # Loud, and separate from the per-PR remediation above.
+            self.log(
+                f"::warning title={PROGRAM} PRs were armed on a RED gate::"
+                f"{', '.join('#' + str(n) for n in self.armed_on_red)} — the arm path does "
+                "not consult CI state, so this is an arm-policy defect, not a PR defect."
+            )
+
+
 # Sentinel: "the caller did not mention this key at all" (vs. an explicit None, which
 # means "the key is present and null"). #1135's fail-closed branch needs both.
 _MISSING = object()
@@ -1064,6 +2038,810 @@ def exercise(
     return fake, messages, outcome
 
 
+def check_run(name, conclusion="success", status="completed", started="2026-07-27T00:00:00Z",
+              ident=1):
+    return {"name": name, "status": status, "conclusion": conclusion,
+            "started_at": started, "id": ident}
+
+
+def check_pages(runs, *, declared=None, per_page=100):
+    """Wrap check runs the way `gh api --paginate --slurp` returns them.
+
+    `declared` defaults to len(runs) — a COMPLETE read. Passing a larger value models the
+    unpaginated read the completeness guard exists for.
+    """
+    total = len(runs) if declared is None else declared
+    pages = [runs[i:i + per_page] for i in range(0, len(runs), per_page)] or [[]]
+    return [{"total_count": total, "check_runs": chunk} for chunk in pages]
+
+
+def armed_pull(number=1, **kw):
+    """A classifier input. `armed_at` FOLLOWS `updated_at` unless given explicitly.
+
+    The two clocks are distinct in `classify` (grace reads the latest activity, the stale
+    horizon reads the arm), so a fixture that pinned `armed_at` to a constant while
+    `updated_at` moved would silently make every fixture ancient-armed and hide exactly the
+    starvation this default exists to let the tests express.
+    """
+    base = dict(
+        number=number, is_draft=False, base_ref="main", labels=frozenset(),
+        mergeable="MERGEABLE", merge_state="BLOCKED", updated_at=1_000_000,
+        armed_at=None, head_oid="0" * 40, has_queue_entry=False,
+        unresolved_threads=0, state_truncated=False,
+    )
+    base.update(kw)
+    if base["armed_at"] is None:
+        base["armed_at"] = base["updated_at"]
+    return ArmedPull(**base)
+
+
+class FakeStuckGh:
+    """A scriptable gh for the stuck-arm sweep. Records every argv so the tests can assert
+    on the MUTATIONS actually issued rather than on a log line."""
+
+    def __init__(self, listed, live, pages, *, open_total=None, fail=()):
+        self.listed = listed
+        self.live = live
+        self.pages = pages
+        self.open_total = len(listed) if open_total is None else open_total
+        self.fail = set(fail)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> str:
+        self.calls.append(argv)
+        head = tuple(argv[:2])
+        if self.fail.intersection(
+            {argv[0], " ".join(argv[:2]), " ".join(argv[:3])}
+        ):
+            raise GhError(f"simulated failure: {' '.join(argv[:3])}")
+        if head == ("pr", "list"):
+            return json.dumps(self.listed)
+        if head == ("api", "graphql"):
+            query = next((a for a in argv if a.startswith("query=")), "")
+            if "pullRequests(states:OPEN)" in query:
+                return json.dumps(
+                    {"data": {"repository": {"pullRequests": {"totalCount": self.open_total}}}}
+                )
+            number = int(next(a.split("=", 1)[1] for a in argv if a.startswith("number=")))
+            return json.dumps({"data": {"repository": {"pullRequest": self.live.get(number)}}})
+        if head == ("api", "--paginate"):
+            return json.dumps(self.pages)
+        if head[0] == "api":            # -X PUT / -X POST mutations
+            return "{}"
+        if head == ("pr", "merge") or head == ("pr", "comment") or head == ("pr", "edit"):
+            return ""
+        raise AssertionError(f"unexpected fake gh call: {argv}")
+
+    def mutations(self, *prefix):
+        return [c for c in self.calls if tuple(c[:len(prefix)]) == prefix]
+
+
+def live_pr(number, *, draft=False, mergeable="MERGEABLE", state="BLOCKED",
+            labels=(), updated="2026-07-27T00:00:00Z", armed="2026-07-27T00:00:00Z",
+            queued=False, threads=(), threads_next=False, labels_next=False,
+            head="a" * 40):
+    return {
+        "number": number, "state": "OPEN", "isDraft": draft, "baseRefName": "main",
+        "updatedAt": updated, "headRefOid": head, "mergeable": mergeable,
+        "mergeStateStatus": state,
+        "labels": {"nodes": [{"name": n} for n in labels],
+                   "pageInfo": {"hasNextPage": labels_next}},
+        "autoMergeRequest": {"enabledAt": armed} if armed else None,
+        "mergeQueueEntry": {"id": "MQE"} if queued else None,
+        "reviewThreads": {"totalCount": len(threads),
+                          "pageInfo": {"hasNextPage": threads_next},
+                          "nodes": [{"isResolved": r} for r in threads]},
+    }
+
+
+def stuck_self_test() -> None:
+    # ---------------------------------------------------------------------------------
+    # (1) GATE RESOLUTION — the three properties resolve_gate exists for.
+    # ---------------------------------------------------------------------------------
+    # A CANCELLED TWIN must not mask the GREEN NEWEST RUN. This is the live shape on PR
+    # #3451: the superseded run stays on the head next to the run that replaced it.
+    twin = [
+        check_run("gate", "cancelled", started="2026-07-26T02:33:29Z", ident=1),
+        check_run("gate", "success", started="2026-07-26T02:45:22Z", ident=2),
+    ]
+    assert resolve_gate(check_pages(twin), is_draft=False) == GATE_SUCCESS
+    # ...and the ordering is not an accident of list order.
+    assert resolve_gate(check_pages(list(reversed(twin))), is_draft=False) == GATE_SUCCESS
+    # The converse must also hold: a newest CANCELLED behind an older success is cancelled,
+    # so "take the best conclusion" cannot pass this pair.
+    assert resolve_gate(
+        check_pages([
+            check_run("gate", "success", started="2026-07-26T02:33:29Z", ident=1),
+            check_run("gate", "cancelled", started="2026-07-26T02:45:22Z", ident=2),
+        ]),
+        is_draft=False,
+    ) == GATE_CANCELLED
+
+    # AN UNPAGINATED READ YIELDS `unknown`, NEVER `missing`. 680 runs declared, one page of
+    # 100 read, no `gate` row among them — exactly what a default check-runs read returns.
+    short = [check_run(f"opt-in leg {i}", ident=i) for i in range(100)]
+    assert resolve_gate(check_pages(short, declared=680), is_draft=False) == GATE_UNKNOWN
+    # The SAME rows, honestly declared complete, are a real "no gate on this head".
+    assert resolve_gate(check_pages(short), is_draft=False) == GATE_MISSING
+    assert resolve_gate("not-a-payload", is_draft=False) == GATE_UNKNOWN
+    assert resolve_gate([{"total_count": 1}], is_draft=False) == GATE_UNKNOWN
+
+    # THE DRAFT-TIER NAME IS MATCHED DELIBERATELY, NOT BY PREFIX. `gate` is a strict prefix
+    # of `gate, draft-tier`, so both directions have to be pinned or a `startswith`
+    # implementation passes. A fixture carrying only ONE of the two names cannot detect
+    # this, so both fixtures below carry BOTH names with DIFFERENT conclusions.
+    both = [
+        check_run("gate", "failure", ident=1),
+        check_run("gate, draft-tier", "success", ident=2),
+    ]
+    assert resolve_gate(check_pages(both), is_draft=False) == GATE_FAILURE, (
+        "a ready PR must read the exact `gate` row, not the draft-tier row"
+    )
+    assert resolve_gate(check_pages(both), is_draft=True) == GATE_SUCCESS, (
+        "a draft PR must read `gate, draft-tier`"
+    )
+    # A DRAFT payload carrying ONLY the ready name must be MISSING, not a prefix match.
+    assert resolve_gate(check_pages([check_run("gate", "failure")]), is_draft=True) == (
+        GATE_MISSING
+    )
+    # A READY payload carrying ONLY the draft name must be MISSING — the registry #761
+    # defect in the mirror. A prefix match would return SUCCESS here.
+    assert resolve_gate(
+        check_pages([check_run("gate, draft-tier", "success")]), is_draft=False
+    ) == GATE_MISSING
+    assert gate_check_name(True) == DRAFT_GATE_CHECK_NAME
+    assert gate_check_name(False) == GATE_CHECK_NAME
+    assert GATE_CHECK_NAME != DRAFT_GATE_CHECK_NAME
+    assert DRAFT_GATE_CHECK_NAME.startswith(GATE_CHECK_NAME), (
+        "the prefix relation is the whole reason exact matching is load-bearing; if this "
+        "ever stops being true, revisit the tripwires above"
+    )
+
+    # PENDING and the conclusion map.
+    assert resolve_gate(
+        check_pages([check_run("gate", None, status="in_progress")]), is_draft=False
+    ) == GATE_PENDING
+    assert resolve_gate(
+        check_pages([check_run("gate", None, status="queued")]), is_draft=False
+    ) == GATE_PENDING
+    for conclusion, expected in (
+        ("success", GATE_SUCCESS), ("neutral", GATE_SUCCESS), ("skipped", GATE_SUCCESS),
+        ("failure", GATE_FAILURE), ("timed_out", GATE_FAILURE),
+        ("action_required", GATE_FAILURE), ("cancelled", GATE_CANCELLED),
+        ("stale", GATE_CANCELLED), ("weird-new-conclusion", GATE_UNKNOWN),
+    ):
+        assert resolve_gate(
+            check_pages([check_run("gate", conclusion)]), is_draft=False
+        ) == expected, conclusion
+
+    # A MULTI-PAGE read really is flattened (not just the first page consulted).
+    many = [check_run(f"leg {i}", ident=i) for i in range(250)]
+    many.append(check_run("gate", "success", ident=999))
+    assert resolve_gate(check_pages(many), is_draft=False) == GATE_SUCCESS
+    assert len(check_pages(many)) == 3, "fixture must actually span pages"
+
+    # ---------------------------------------------------------------------------------
+    # (2) CLASSIFICATION — one fixture per class, EXHAUSTIVE over the enum.
+    # ---------------------------------------------------------------------------------
+    limits = StuckLimits(grace_seconds=1200, stale_seconds=21600, max_actions=5)
+    now = 2_000_000
+    fresh = now - 60                 # inside grace
+    settled = now - 3600            # past grace, inside the stale horizon
+    ancient = now - 90000           # past the stale horizon
+
+    class_fixtures = {
+        "queued": (armed_pull(updated_at=settled, has_queue_entry=True), GATE_FAILURE),
+        "gate-pending": (armed_pull(updated_at=ancient), GATE_PENDING),
+        "gate-indeterminate": (armed_pull(updated_at=ancient), GATE_UNKNOWN),
+        "gate-missing": (armed_pull(updated_at=settled), GATE_MISSING),
+        "ruleset-grace": (armed_pull(updated_at=fresh, armed_at=fresh), GATE_FAILURE),
+        "progressing": (
+            armed_pull(updated_at=settled, merge_state="CLEAN"), GATE_SUCCESS),
+        "blocked-unexplained": (armed_pull(updated_at=settled), GATE_SUCCESS),
+        "held": (
+            armed_pull(updated_at=settled, labels=frozenset({"needs:user"})), GATE_SUCCESS),
+        "conflicting": (
+            armed_pull(updated_at=settled, mergeable="CONFLICTING"), GATE_SUCCESS),
+        "gate-failed": (armed_pull(updated_at=settled), GATE_FAILURE),
+        "gate-cancelled": (armed_pull(updated_at=settled), GATE_CANCELLED),
+        "blocked-threads": (
+            armed_pull(updated_at=settled, unresolved_threads=10), GATE_SUCCESS),
+        "stale": (armed_pull(updated_at=ancient), GATE_SUCCESS),
+    }
+    # THE EXHAUSTIVENESS GUARD. A new class with no fixture — the shape that let a
+    # misattribution go uncaught here before — reds RIGHT HERE rather than going untested.
+    assert set(class_fixtures) == set(CLASS_ACTIONS), (
+        "every class must have a routing fixture; missing="
+        f"{sorted(set(CLASS_ACTIONS) - set(class_fixtures))} "
+        f"extra={sorted(set(class_fixtures) - set(CLASS_ACTIONS))}"
+    )
+    for expected_class, (pull, gate) in class_fixtures.items():
+        got = classify(pull, gate, now, limits)
+        assert got == expected_class, (expected_class, got, gate)
+        assert got in CLASS_ACTIONS, got
+
+    # THE STALE HORIZON READS THE ARM CLOCK, NOT THE ACTIVITY CLOCK. `updatedAt` is bumped
+    # by every label flip and bot comment in this pipeline, so keying the backstop on it
+    # lets routine churn reset it forever — the one class that exists to catch everything
+    # else would be the easiest of all to starve. MEASURED on #3451: armed 33h ago,
+    # `updatedAt` 83 minutes old. Both readings are past grace; only the arm clock is stale.
+    churned = armed_pull(armed_at=ancient, updated_at=settled)
+    assert now - churned.updated_at < limits.stale_seconds, "fixture must be churn-fresh"
+    assert classify(churned, GATE_SUCCESS, now, limits) == "stale", classify(
+        churned, GATE_SUCCESS, now, limits
+    )
+    assert classify(churned, GATE_MISSING, now, limits) == "stale"
+    # ...but churn INSIDE the grace window still wins: something is actively happening.
+    assert classify(
+        armed_pull(armed_at=ancient, updated_at=fresh), GATE_SUCCESS, now, limits
+    ) == "ruleset-grace"
+    # ...and a RECENTLY-armed PR is never stale however old its other timestamps are.
+    assert classify(
+        armed_pull(armed_at=settled, updated_at=ancient), GATE_SUCCESS, now, limits
+    ) == "blocked-unexplained"
+    assert classify(
+        armed_pull(armed_at=settled, updated_at=ancient), GATE_MISSING, now, limits
+    ) == "gate-missing"
+
+    # A PENDING GATE IS LEFT ALONE ON A MERGEABLE, UNHELD HEAD. This is the constraint that
+    # makes the sweep safe to run: `gate` sits in_progress 20-40 min on heavy lanes, and
+    # wrongly disarming a healthy PR is worse than leaving a stuck one.
+    for extra in ({}, {"unresolved_threads": 10}, {"merge_state": "BLOCKED"},
+                  {"merge_state": "UNSTABLE"}, {"labels": frozenset({"review:pass"})}):
+        pull = armed_pull(updated_at=ancient, armed_at=ancient, **extra)
+        klass = classify(pull, GATE_PENDING, now, limits)
+        assert CLASS_ACTIONS[klass] == ACTION_NONE, (extra, klass)
+        assert CLASS_ACTIONS[classify(pull, GATE_UNKNOWN, now, limits)] == ACTION_NONE, extra
+    # A truncated LABEL/THREAD read is equally fail-open even with a decisive gate, and
+    # even for the two classes that otherwise outrank the gate reading.
+    for extra in ({}, {"mergeable": "CONFLICTING"}, {"labels": frozenset({"needs:user"})}):
+        assert CLASS_ACTIONS[
+            classify(armed_pull(updated_at=ancient, armed_at=ancient, state_truncated=True,
+                                **extra), GATE_FAILURE, now, limits)
+        ] == ACTION_NONE, extra
+
+    # THE TWO EXCEPTIONS TO FAIL-OPEN-ON-PENDING. For these, a pending or unreadable gate
+    # is not evidence of progress, so deferring to it is what creates the state with no
+    # exit. Both are asserted across EVERY gate reading, including the fail-open ones.
+    for gate_reading in (GATE_PENDING, GATE_UNKNOWN, GATE_MISSING, GATE_SUCCESS,
+                         GATE_FAILURE, GATE_CANCELLED):
+        # A dirty PR cannot merge on ANY gate result: rebase, never wait.
+        assert classify(
+            armed_pull(updated_at=settled, armed_at=settled, mergeable="CONFLICTING"),
+            gate_reading, now, limits,
+        ) == "conflicting", gate_reading
+        # An armed PR under a hold merges PAST the hold the instant the gate greens, so a
+        # pending gate makes disarming MORE urgent, not less. Hold outranks dirty too.
+        assert classify(
+            armed_pull(updated_at=settled, armed_at=settled, mergeable="CONFLICTING",
+                       labels=frozenset({"needs:user"})),
+            gate_reading, now, limits,
+        ) == "held", gate_reading
+    # ...but the grace window still protects both: something just happened, so wait a tick.
+    for extra in ({"mergeable": "CONFLICTING"}, {"labels": frozenset({"needs:user"})}):
+        assert classify(armed_pull(updated_at=fresh, armed_at=fresh, **extra),
+                        GATE_PENDING, now, limits) == "ruleset-grace", extra
+
+    # THE THREE WAYS A HEAD SHOWS "NO USABLE GATE" ARE THREE DIFFERENT CLASSES. Collapsing
+    # any pair of them is how a sweeper either disarms a healthy PR or waits forever.
+    # (a) DIRTY — CI cannot speak to a merge that does not exist. Rebase, do not wait.
+    assert classify(
+        armed_pull(updated_at=settled, armed_at=settled, mergeable="CONFLICTING"),
+        GATE_MISSING, now, limits,
+    ) == "conflicting"
+    # (b) SHORT READ — `resolve_gate` must yield UNKNOWN, never MISSING, so the classifier
+    #     defers instead of concluding. Driven through resolve_gate, not hand-fed, because
+    #     the defect being guarded lives in resolve_gate. Shape MEASURED on PR #4369:
+    #     total_count=486, an unpaginated read returns 30 rows and no `gate` row at all.
+    short_read = check_pages([check_run(f"leg {i}") for i in range(30)], declared=486)
+    assert resolve_gate(short_read, is_draft=False) == GATE_UNKNOWN
+    assert classify(
+        armed_pull(updated_at=settled, armed_at=settled),
+        resolve_gate(short_read, is_draft=False), now, limits,
+    ) == "gate-indeterminate"
+    # (c) GENUINELY ABSENT on a COMPLETE read of a MERGEABLE head — the real "no gate".
+    complete_read = check_pages([check_run(f"leg {i}") for i in range(30)])
+    assert resolve_gate(complete_read, is_draft=False) == GATE_MISSING
+    assert classify(
+        armed_pull(updated_at=settled, armed_at=settled),
+        resolve_gate(complete_read, is_draft=False), now, limits,
+    ) == "gate-missing"
+    # The three land in three DIFFERENT classes with three different actions.
+    assert len({"conflicting", "gate-indeterminate", "gate-missing"}) == 3
+    assert CLASS_ACTIONS["conflicting"] == ACTION_REBASE
+    assert CLASS_ACTIONS["gate-indeterminate"] == ACTION_NONE
+    assert CLASS_ACTIONS["gate-missing"] == ACTION_NONE
+    # An unreadable activity timestamp must NOT read as "infinitely old".
+    assert classify(
+        armed_pull(updated_at=0, armed_at=0), GATE_SUCCESS, now, limits
+    ) == "gate-indeterminate"
+
+    # NOTHING TERMINAL FIRES INSIDE THE GRACE WINDOW.
+    for gate in (GATE_FAILURE, GATE_CANCELLED, GATE_MISSING, GATE_SUCCESS):
+        for extra in ({}, {"mergeable": "CONFLICTING"},
+                      {"labels": frozenset({"needs:user"})}, {"unresolved_threads": 3}):
+            pull = armed_pull(updated_at=fresh, armed_at=fresh, **extra)
+            klass = classify(pull, gate, now, limits)
+            assert klass == "ruleset-grace", (gate, extra, klass)
+    # The grace window is measured from the LATER of the two activity stamps, so a stale
+    # `updatedAt` with a fresh arm is still in grace.
+    assert classify(
+        armed_pull(updated_at=ancient, armed_at=fresh), GATE_FAILURE, now, limits
+    ) == "ruleset-grace"
+
+    # PRECEDENCE: a CONFLICTING PR with a red gate rebases (the red was computed against a
+    # merge that no longer exists) rather than being disarmed on that stale result.
+    assert classify(
+        armed_pull(updated_at=settled, mergeable="CONFLICTING"), GATE_FAILURE, now, limits
+    ) == "conflicting"
+    # ...but a HOLD outranks even that, because a live arm under a hold is the unsafe state.
+    assert classify(
+        armed_pull(updated_at=settled, mergeable="CONFLICTING",
+                   labels=frozenset({"needs:user"})),
+        GATE_FAILURE, now, limits,
+    ) == "held"
+    # mergeable=UNKNOWN is GitHub still computing; it must never be read as CONFLICTING.
+    assert classify(
+        armed_pull(updated_at=settled, mergeable="UNKNOWN", merge_state="CLEAN"),
+        GATE_SUCCESS, now, limits,
+    ) == "progressing"
+    for label in ("needs:user", "needs:security", "review:changes", "review:needs",
+                  "trust:untrusted"):
+        assert hold_labels(frozenset({label})) == [label], label
+    assert hold_labels(frozenset({"review:pass", "area:sparq-core", "trust-surface"})) == []
+
+    # ---------------------------------------------------------------------------------
+    # (3) ROUTING — every terminal class issues the MUTATIONS its action names, and every
+    #     no-action class issues NONE. Asserted on the recorded argv, not on a log line.
+    # ---------------------------------------------------------------------------------
+    def sweep(live_rows, runs, *, limits_=None, open_total=None, fail=(), now_=now):
+        listed = [{"number": n, "autoMergeRequest": {"enabledAt": "x"}} for n in live_rows]
+        fake = FakeStuckGh(listed, live_rows, check_pages(runs),
+                           open_total=open_total, fail=fail)
+        messages: list[str] = []
+        sweeper = StuckArmSweeper(
+            "sparq-org/sparq", "main", limits=limits_ or limits, gh=fake,
+            log=messages.append, now=lambda: now_,
+        )
+        errors = sweeper.run()
+        return fake, messages, errors, sweeper
+
+    old = "2026-07-26T00:00:00Z"          # far outside the grace window at `now_` below
+    clock = _iso_epoch("2026-07-27T00:00:00Z")
+
+    # gate-failed -> disarm + review:changes + DROP review:pass + comment.
+    fake, messages, errors, sweeper = sweep(
+        {10: live_pr(10, labels=("review:pass",), updated=old, armed=old)},
+        [check_run("gate", "failure")], now_=clock,
+    )
+    assert errors == 0, messages
+    assert sweeper.counts == {"gate-failed": 1}, sweeper.counts
+    assert fake.mutations("pr", "merge"), fake.calls
+    assert "--disable-auto" in fake.mutations("pr", "merge")[0]
+    edit = fake.mutations("pr", "edit")[0]
+    assert "--add-label" in edit and "review:changes" in edit, edit
+    assert "--remove-label" in edit and "review:pass" in edit, (
+        "leaving review:pass on a disarmed PR lets the re-arm phase immediately re-arm it"
+    )
+    body = fake.mutations("pr", "comment")[0][-1]
+    assert body.startswith(STUCK_MARKER), body[:40]
+    assert "gate-failed" in body, body
+    # ...and arming on red is reported SEPARATELY as an arm-policy defect.
+    assert sweeper.armed_on_red == [10], sweeper.armed_on_red
+    assert any("armed on a RED gate" in line for line in messages), messages
+
+    # blocked-threads -> disarm + needs:user + a comment that says why. Never forced green.
+    fake, messages, errors, sweeper = sweep(
+        {11: live_pr(11, updated=old, armed=old, threads=(False, False, True))},
+        [check_run("gate", "success")], now_=clock,
+    )
+    assert sweeper.counts == {"blocked-threads": 1}, sweeper.counts
+    assert "--disable-auto" in fake.mutations("pr", "merge")[0]
+    assert "needs:user" in fake.mutations("pr", "edit")[0]
+    body = fake.mutations("pr", "comment")[0][-1]
+    assert "blocked-threads" in body and "unresolved" in body.lower(), body
+    # A park NEVER removes the attestation or resolves anything on the PR's behalf.
+    assert "--remove-label" not in fake.mutations("pr", "edit")[0]
+
+    # conflicting -> attempt GitHub's branch update FIRST, and no disarm when it works.
+    fake, messages, errors, sweeper = sweep(
+        {12: live_pr(12, mergeable="CONFLICTING", updated=old, armed=old)},
+        [check_run("gate", "success")], now_=clock,
+    )
+    assert sweeper.counts == {"conflicting": 1}, sweeper.counts
+    update = [c for c in fake.calls if c[:3] == ["api", "-X", "PUT"]]
+    assert update and "update-branch" in update[0][3], fake.calls
+    assert not fake.mutations("pr", "merge"), "a rebasable PR must stay armed"
+    # ...and when the update is REFUSED (a real conflict), it falls back to the fix lane.
+    fake, messages, errors, sweeper = sweep(
+        {12: live_pr(12, mergeable="CONFLICTING", labels=("review:pass",), updated=old,
+                     armed=old)},
+        [check_run("gate", "success")], fail=("api -X PUT",), now_=clock,
+    )
+    assert sweeper.counts == {"conflicting": 1}, sweeper.counts
+    assert "--disable-auto" in fake.mutations("pr", "merge")[0], fake.calls
+    assert "review:changes" in fake.mutations("pr", "edit")[0]
+    assert "branch update refused" in fake.mutations("pr", "comment")[0][-1]
+
+    # gate-cancelled -> re-request the NEWEST gate run, bounded; nothing is disarmed.
+    fake, messages, errors, sweeper = sweep(
+        {13: live_pr(13, updated=old, armed=old)},
+        [check_run("gate", "success", started="2026-07-20T00:00:00Z", ident=7),
+         check_run("gate", "cancelled", started="2026-07-21T00:00:00Z", ident=8)],
+        now_=clock,
+    )
+    assert sweeper.counts == {"gate-cancelled": 1}, sweeper.counts
+    rerun = [c for c in fake.calls if c[:3] == ["api", "-X", "POST"]]
+    assert rerun and "/check-runs/8/rerequest" in rerun[0][3], (
+        f"must re-request the NEWEST cancelled run, got {rerun}"
+    )
+    assert not fake.mutations("pr", "merge"), "a cancelled gate is not a failed gate"
+
+    # A DRAFT armed PR resolves its own tier. With only `gate, draft-tier` present a
+    # ready-keyed lookup would say MISSING and (past the horizon) park a healthy draft.
+    fake, messages, errors, sweeper = sweep(
+        {14: live_pr(14, draft=True, state="CLEAN", updated=old, armed=old)},
+        [check_run("gate, draft-tier", "success")], now_=clock,
+    )
+    assert sweeper.counts == {"progressing": 1}, sweeper.counts
+    assert not fake.mutations("pr", "merge"), fake.calls
+
+    # Every NO-ACTION class really issues no mutation at all.
+    for rows, runs in (
+        ({20: live_pr(20, queued=True, updated=old, armed=old)},
+         [check_run("gate", "failure")]),
+        ({21: live_pr(21, updated=old, armed=old)},
+         [check_run("gate", None, status="in_progress")]),
+        # gate-missing INSIDE the stale horizon (age 2h): a complete read with no gate row
+        # yet is not evidence of anything, so nothing fires.
+        ({22: live_pr(22, updated="2026-07-26T22:00:00Z", armed="2026-07-26T22:00:00Z")},
+         [check_run("opt-in leg", "success")]),
+        ({23: live_pr(23, updated="2026-07-27T00:00:00Z", armed="2026-07-27T00:00:00Z")},
+         [check_run("gate", "failure")]),
+    ):
+        fake, messages, errors, sweeper = sweep(rows, runs, now_=clock)
+        assert errors == 0, messages
+        for verb in (("pr", "merge"), ("pr", "edit"), ("pr", "comment")):
+            assert not fake.mutations(*verb), (rows, verb, fake.calls)
+
+    # ---------------------------------------------------------------------------------
+    # (4) THE COUNTS SUM TO THE ARMED POPULATION, and the per-tick bound holds.
+    # ---------------------------------------------------------------------------------
+    population = {
+        30: live_pr(30, labels=("review:pass",), updated=old, armed=old),      # gate-failed
+        31: live_pr(31, queued=True, updated=old, armed=old),                  # queued
+        32: live_pr(32, updated="2026-07-27T00:00:00Z",
+                    armed="2026-07-27T00:00:00Z"),                             # grace
+        33: live_pr(33, labels=("needs:user",), updated=old, armed=old),       # held
+        34: live_pr(34, mergeable="CONFLICTING", updated=old, armed=old),      # conflicting
+    }
+    fake, messages, errors, sweeper = sweep(
+        population, [check_run("gate", "failure")], now_=clock
+    )
+    assert errors == 0, messages
+    assert sweeper.observed == 5, sweeper.observed
+    assert sum(sweeper.counts.values()) == sweeper.observed, (
+        f"class counts {sweeper.counts} must partition the {sweeper.observed} armed PRs"
+    )
+    assert sweeper.counts == {"gate-failed": 1, "queued": 1, "ruleset-grace": 1,
+                              "held": 1, "conflicting": 1}, sweeper.counts
+    census = next(line for line in messages if "stuck-arm census" in line)
+    for name in CLASS_ACTIONS:
+        assert f"{name}=" in census, (name, census)
+    assert "classified=5" in " ".join(messages), messages
+
+    # THE PER-TICK BOUND. Three actionable PRs, a cap of one: exactly one mutation fires,
+    # the other two are still CLASSIFIED and COUNTED, and they say they were deferred.
+    backlog = {40 + i: live_pr(40 + i, labels=("review:pass",), updated=old, armed=old)
+               for i in range(3)}
+    fake, messages, errors, sweeper = sweep(
+        backlog, [check_run("gate", "failure")],
+        limits_=StuckLimits(grace_seconds=1200, stale_seconds=21600, max_actions=1),
+        now_=clock,
+    )
+    assert sweeper.actions == 1, sweeper.actions
+    assert sweeper.deferred == 2, sweeper.deferred
+    assert len(fake.mutations("pr", "merge")) == 1, fake.calls
+    assert sum(sweeper.counts.values()) == 3, sweeper.counts
+    assert sum("DEFERRED" in line for line in messages) == 2, messages
+
+    # A NO-ACTION CLASS MUST NOT CONSUME THE ACTION BUDGET. Without the early return in
+    # `run`, `apply` is still a no-op for ACTION_NONE — so the mutation surface looks
+    # identical and only the BUDGET tells the two apart. A tick full of queued/pending PRs
+    # would silently starve the one PR that actually needed repairing.
+    starved = {70: live_pr(70, queued=True, updated=old, armed=old),
+               71: live_pr(71, queued=True, updated=old, armed=old),
+               72: live_pr(72, labels=("review:pass",), updated=old, armed=old)}
+    fake, messages, errors, sweeper = sweep(
+        starved, [check_run("gate", "failure")],
+        limits_=StuckLimits(grace_seconds=1200, stale_seconds=21600, max_actions=1),
+        now_=clock,
+    )
+    assert sweeper.counts == {"queued": 2, "gate-failed": 1}, sweeper.counts
+    assert sweeper.actions == 1, sweeper.actions
+    assert sweeper.deferred == 0, (
+        "two no-action PRs ahead of the actionable one must not have been 'deferred' — "
+        "that would mean they consumed the per-tick budget"
+    )
+    assert len(fake.mutations("pr", "merge")) == 1, fake.calls
+    assert "72" in fake.mutations("pr", "merge")[0], (
+        "the budget must have been spent on the ACTIONABLE PR, not on a queued one"
+    )
+
+    # A cancelled gate with NO re-requestable run id must SKIP, not call the API with None.
+    fake, messages, errors, sweeper = sweep(
+        {73: live_pr(73, updated=old, armed=old)},
+        [check_run("gate", "cancelled", ident=None)], now_=clock,
+    )
+    assert sweeper.counts == {"gate-cancelled": 1}, sweeper.counts
+    assert not [c for c in fake.calls if c[:3] == ["api", "-X", "POST"]], fake.calls
+    assert any("no re-requestable run id" in line for line in messages), messages
+    assert errors == 0, messages
+
+    # A SHORT ENUMERATION is flagged, not silently reported as a full census.
+    fake, messages, errors, sweeper = sweep(
+        {50: live_pr(50, updated=old, armed=old)}, [check_run("gate", None,
+                                                              status="in_progress")],
+        open_total=999, now_=clock,
+    )
+    assert sweeper.truncated_enumeration is True
+    assert any("enumeration truncated" in line for line in messages), messages
+    assert any("enumeration=TRUNCATED" in line for line in messages), messages
+
+    # A per-PR read failure is an ERROR and a counted class, never a silent drop.
+    fake, messages, errors, sweeper = sweep(
+        {60: live_pr(60, updated=old, armed=old)}, [check_run("gate", "failure")],
+        fail=("api --paginate --slurp",), now_=clock,
+    )
+    assert errors == 1, messages
+    assert sweeper.counts == {"gate-indeterminate": 1}, sweeper.counts
+    assert not fake.mutations("pr", "merge"), fake.calls
+
+    # A failed MUTATION is recorded as an error rather than reported as a clean sweep.
+    fake, messages, errors, sweeper = sweep(
+        {61: live_pr(61, labels=("review:pass",), updated=old, armed=old)},
+        [check_run("gate", "failure")], fail=("pr merge",), now_=clock,
+    )
+    assert errors == 1, messages
+    assert any("FAILED" in line for line in messages), messages
+
+    # DRY-RUN MUTATES NOTHING — asserted over EVERY terminal class, not one sample, so a
+    # class added later without a dry-run guard reds here.
+    dry_fixtures = {
+        "gate-failed": (live_pr(80, labels=("review:pass",), updated=old, armed=old),
+                        [check_run("gate", "failure")]),
+        "held": (live_pr(81, labels=("needs:user",), updated=old, armed=old),
+                 [check_run("gate", "success")]),
+        "conflicting": (live_pr(82, mergeable="CONFLICTING", updated=old, armed=old),
+                        [check_run("gate", "success")]),
+        "gate-cancelled": (live_pr(83, updated=old, armed=old),
+                           [check_run("gate", "cancelled")]),
+        "blocked-threads": (live_pr(84, updated=old, armed=old, threads=(False,)),
+                            [check_run("gate", "success")]),
+        # no `gate` row at all on a COMPLETE read, past the stale horizon.
+        "stale": (live_pr(85, updated=old, armed=old),
+                  [check_run("some-other-leg", "success")]),
+    }
+    assert set(dry_fixtures) == TERMINAL_CLASSES, (
+        f"every terminal class needs a dry-run fixture; missing="
+        f"{sorted(TERMINAL_CLASSES - set(dry_fixtures))}"
+    )
+    for expected, (row, runs) in dry_fixtures.items():
+        number = row["number"]
+        listed = [{"number": number, "autoMergeRequest": {"enabledAt": "x"}}]
+        fake = FakeStuckGh(listed, {number: row}, check_pages(runs))
+        messages = []
+        sweeper = StuckArmSweeper(
+            "sparq-org/sparq", "main", limits=limits, gh=fake, log=messages.append,
+            now=lambda: clock, dry_run=True,
+        )
+        assert sweeper.run() == 0, messages
+        assert sweeper.counts == {expected: 1}, (expected, sweeper.counts)
+        for verb in (("pr", "merge"), ("pr", "edit"), ("pr", "comment")):
+            assert not fake.mutations(*verb), (expected, verb, fake.calls)
+        assert not [c for c in fake.calls if c[:2] == ["api", "-X"]], (expected, fake.calls)
+        assert any("DRY-RUN would" in line for line in messages), (expected, messages)
+
+    # ---------------------------------------------------------------------------------
+    # (5) THE ENUM IS CLOSED. Both directions, so neither a new class nor a new action can
+    #     appear without a decision being made about it here.
+    # ---------------------------------------------------------------------------------
+    assert set(CLASS_ACTIONS.values()) <= {
+        ACTION_NONE, ACTION_PARK, ACTION_ROUTE_FIX, ACTION_REBASE, ACTION_RETRIGGER
+    }, CLASS_ACTIONS
+    assert TERMINAL_CLASSES == {
+        "held", "conflicting", "gate-failed", "gate-cancelled", "blocked-threads", "stale"
+    }, TERMINAL_CLASSES
+    assert set(CLASS_REASONS) <= set(CLASS_ACTIONS), set(CLASS_REASONS)
+    # Every PARK/ROUTE_FIX class must have a written reason — a park with no reason is the
+    # "park silently" failure this whole phase exists to remove.
+    for name, action in CLASS_ACTIONS.items():
+        if action in (ACTION_PARK, ACTION_ROUTE_FIX):
+            assert name in CLASS_REASONS, name
+            assert len(CLASS_REASONS[name]) > 40, name
+
+    # ---------------------------------------------------------------------------------
+    # (6) THE MACHINE-READABLE RECEIPT. A park whose only artefact is prose has a
+    #     human-only exit; registry #766 measured four PRs terminal for exactly that
+    #     reason. Every assertion below is about the MACHINE half.
+    # ---------------------------------------------------------------------------------
+    # Every terminal class carries a named un-park condition, and every condition named is
+    # one `unpark_satisfied` can actually evaluate. Both directions: a condition constant
+    # that nothing maps to is as broken as a class with no condition.
+    assert set(UNPARK_CONDITIONS) == TERMINAL_CLASSES, UNPARK_CONDITIONS
+    known_conditions = {
+        UNPARK_HOLDS_CLEARED, UNPARK_NOT_CONFLICTING, UNPARK_GATE_GREEN,
+        UNPARK_GATE_CONCLUDED, UNPARK_THREADS_RESOLVED, UNPARK_HEAD_MOVED,
+    }
+    assert set(UNPARK_CONDITIONS.values()) == known_conditions, UNPARK_CONDITIONS
+    # The assertion above is one belt; the IMPORT-TIME assert is the other, and it is the
+    # one that matters in production, where nothing runs this self-test. A belt nobody
+    # tests is decorative — measured: deleting the import-time assert left this whole
+    # suite green — so prove it fires by importing a copy of this module with one class's
+    # machine exit removed. Hermetic: source text + exec, no subprocess and no network.
+    with open(__file__, encoding="utf-8") as handle:
+        module_source = handle.read()
+    maimed = module_source.replace(
+        f'    "blocked-threads": UNPARK_THREADS_RESOLVED,\n', "", 1
+    )
+    assert maimed != module_source, "the totality-assert probe stopped matching its target"
+    # @dataclass resolves annotations through sys.modules[__name__], so the probe has to be
+    # a real (temporary) module rather than a bare dict namespace. Its output is SWALLOWED:
+    # re-executing the module top level also re-runs the gh_retry degraded-import fallback,
+    # and #3776's "exactly ONE ::warning per run" pin is a real invariant this probe must
+    # not perturb.
+    import io
+    import types
+    from contextlib import redirect_stderr, redirect_stdout
+
+    probe = types.ModuleType("_rearm_sweeper_totality_probe")
+    sys.modules[probe.__name__] = probe
+    try:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            exec(compile(maimed, "<rearm-sweeper-no-machine-exit>", "exec"), probe.__dict__)
+    except AssertionError as error:
+        assert "needs a named un-park condition" in str(error), error
+    else:
+        raise AssertionError(
+            "a TERMINAL class with no un-park condition imported cleanly — the import-time "
+            "totality assert is not firing, so a park could ship with a human-only exit"
+        )
+    finally:
+        sys.modules.pop(probe.__name__, None)
+
+    # ROUND TRIP. The receipt survives being embedded in the prose comment a human reads.
+    parked_pull = armed_pull(
+        3451, head_oid="1f" * 20, unresolved_threads=10, merge_state="BLOCKED"
+    )
+    body = stuck_comment(parked_pull, "blocked-threads", GATE_SUCCESS, "detail", clock)
+    recovered = parse_stuck_receipt(body)
+    assert recovered == stuck_receipt(parked_pull, "blocked-threads", GATE_SUCCESS, clock), (
+        recovered
+    )
+    assert recovered["unpark_when"] == UNPARK_THREADS_RESOLVED, recovered
+    assert recovered["head"] == "1f" * 20, recovered
+    assert recovered["observed"]["unresolved_threads"] == 10, recovered
+    # The receipt renders as NOTHING to a reader: it lives inside an HTML comment.
+    assert body.rstrip().endswith(RECEIPT_CLOSE), body[-80:]
+    assert RECEIPT_OPEN in body, body
+
+    # THE PARK PATH ACTUALLY EMITS IT. Asserted on the posted argv, not on the helper —
+    # a receipt function nothing calls is the vacuous version of this whole section.
+    fake, messages, errors, sweeper = sweep(
+        {30: live_pr(30, updated=old, armed=old, threads=(False,), head="1f" * 20)},
+        [check_run("gate", "success")], now_=clock,
+    )
+    assert sweeper.counts == {"blocked-threads": 1}, sweeper.counts
+    posted = parse_stuck_receipt(fake.mutations("pr", "comment")[0][-1])
+    assert posted is not None, fake.mutations("pr", "comment")
+    assert posted["pr"] == 30 and posted["class"] == "blocked-threads", posted
+    assert posted["unpark_when"] == UNPARK_THREADS_RESOLVED, posted
+    assert posted["head"] == "1f" * 20, posted
+    # ...and so does the ROUTE-FIX path, which is a park in every respect that matters here.
+    fake, messages, errors, sweeper = sweep(
+        {31: live_pr(31, labels=("review:pass",), updated=old, armed=old)},
+        [check_run("gate", "failure")], now_=clock,
+    )
+    routed = parse_stuck_receipt(fake.mutations("pr", "comment")[0][-1])
+    assert routed is not None and routed["class"] == "gate-failed", routed
+    assert routed["unpark_when"] == UNPARK_GATE_GREEN, routed
+
+    # THE CONDITION IS FALSE AT PARK TIME. If it were already satisfied by the very state
+    # that caused the park, the receipt would name an exit that is not an exit.
+    for klass, pull_ in (
+        ("blocked-threads", armed_pull(1, unresolved_threads=3)),
+        ("gate-failed", armed_pull(1)),
+        ("conflicting", armed_pull(1, mergeable="CONFLICTING")),
+        ("held", armed_pull(1, labels=frozenset({"needs:user"}))),
+        ("stale", armed_pull(1, head_oid="ab" * 20)),
+    ):
+        gate_at_park = GATE_FAILURE if klass == "gate-failed" else GATE_SUCCESS
+        rec = stuck_receipt(pull_, klass, gate_at_park, clock)
+        assert not unpark_satisfied(rec, pull_, gate_at_park), (klass, rec)
+
+    # ...AND TRUE ONLY ON REAL RECOVERY. One recovered observation per condition.
+    recoveries = (
+        ("blocked-threads", armed_pull(1, unresolved_threads=3),
+         armed_pull(1, unresolved_threads=0), GATE_SUCCESS),
+        ("gate-failed", armed_pull(1), armed_pull(1), GATE_SUCCESS),
+        ("conflicting", armed_pull(1, mergeable="CONFLICTING"),
+         armed_pull(1, mergeable="MERGEABLE"), GATE_SUCCESS),
+        ("held", armed_pull(1, labels=frozenset({"needs:user"})),
+         armed_pull(1, labels=frozenset({"review:pass"})), GATE_SUCCESS),
+        ("stale", armed_pull(1, head_oid="ab" * 20),
+         armed_pull(1, head_oid="cd" * 20), GATE_SUCCESS),
+    )
+    for klass, before, after, gate_after in recoveries:
+        gate_at_park = GATE_FAILURE if klass == "gate-failed" else GATE_SUCCESS
+        rec = stuck_receipt(before, klass, gate_at_park, clock)
+        assert unpark_satisfied(rec, after, gate_after), (klass, rec)
+
+    # FAIL-CLOSED, one axis at a time. Each of these is a state in which un-parking would
+    # re-admit a PR whose cause still holds, so each must stay parked.
+    healthy = armed_pull(1, unresolved_threads=0)
+    good = stuck_receipt(armed_pull(1, unresolved_threads=4), "blocked-threads",
+                         GATE_SUCCESS, clock)
+    assert unpark_satisfied(good, healthy, GATE_SUCCESS), good      # the control
+    for label, mutated_receipt, observed_pull in (
+        ("version from another revision", {**good, "v": RECEIPT_VERSION + 1}, healthy),
+        ("receipt from another program", {**good, "program": "groom"}, healthy),
+        ("receipt from another phase", {**good, "phase": "rearm"}, healthy),
+        ("receipt copied from another PR", {**good, "pr": 999}, healthy),
+        ("condition this revision cannot evaluate",
+         {**good, "unpark_when": "vibes-improved"}, healthy),
+        ("condition field absent", {k: v for k, v in good.items() if k != "unpark_when"},
+         healthy),
+        ("not a receipt at all", "gate looks fine now", healthy),
+        ("truncated live read", good, armed_pull(1, unresolved_threads=0,
+                                                 state_truncated=True)),
+    ):
+        assert not unpark_satisfied(mutated_receipt, observed_pull, GATE_SUCCESS), label
+    # A gate that was never read cannot prove a gate-green recovery.
+    red = stuck_receipt(armed_pull(1), "gate-failed", GATE_FAILURE, clock)
+    for gate_now in (GATE_UNKNOWN, GATE_MISSING, GATE_PENDING, GATE_CANCELLED, GATE_FAILURE):
+        assert not unpark_satisfied(red, armed_pull(1), gate_now), gate_now
+    assert unpark_satisfied(red, armed_pull(1), GATE_SUCCESS)
+    # mergeable=UNKNOWN is GitHub still computing — never proof the conflict is gone.
+    dirty = stuck_receipt(armed_pull(1, mergeable="CONFLICTING"), "conflicting",
+                          GATE_SUCCESS, clock)
+    assert not unpark_satisfied(dirty, armed_pull(1, mergeable="UNKNOWN"), GATE_SUCCESS)
+    # head-moved needs a head to compare against, and an unreadable one proves nothing.
+    moved = stuck_receipt(armed_pull(1, head_oid="ab" * 20), "stale", GATE_SUCCESS, clock)
+    assert not unpark_satisfied(moved, armed_pull(1, head_oid=""), GATE_SUCCESS)
+    assert not unpark_satisfied({**moved, "head": None}, armed_pull(1, head_oid="cd" * 20),
+                                GATE_SUCCESS)
+
+    # PARSING. Malformed input yields None (opaque), never a dict that reads as satisfied.
+    for bad in (None, 42, "", "no receipt here", f"{RECEIPT_OPEN} not json {RECEIPT_CLOSE}",
+                f"{RECEIPT_OPEN} {{\"v\":1}} no-terminator", f"{RECEIPT_OPEN} [1,2] {RECEIPT_CLOSE}"):
+        assert parse_stuck_receipt(bad) is None, bad
+    # Several receipts on one body: the LAST (most recent observation) wins.
+    first = render_receipt(stuck_receipt(armed_pull(7), "stale", GATE_SUCCESS, clock))
+    second = render_receipt(
+        stuck_receipt(armed_pull(7, unresolved_threads=2), "blocked-threads",
+                      GATE_SUCCESS, clock + 1)
+    )
+    assert parse_stuck_receipt(f"{first}\n\n{second}")["class"] == "blocked-threads"
+
+    # [OPUS-5] #5041. PROMISE vs IMPLEMENTATION. A park that ADVERTISES an exit it does not
+    # perform turns a transient cause into a permanent stall while reading as self-healing:
+    # #4847 carried "Un-parks automatically when: `gate-green`" while `unpark_satisfied` had
+    # no caller at all. The two must ship together, so this is an IFF in both directions —
+    # re-adding the claim without wiring the evaluator fails, and wiring the evaluator
+    # without telling anyone also fails.
+    rendered = stuck_comment(armed_pull(1), "stale", GATE_SUCCESS, "detail", clock)
+    promised = AUTO_UNPARK_PROMISE in rendered
+    wired = unpark_production_callers()
+    assert promised == bool(wired), (
+        "the automatic-un-park PROMISE and its IMPLEMENTATION must ship together: "
+        f"promise_rendered={promised} production_callers={sorted(wired) or 'NONE'}. "
+        "Either wire `unpark_satisfied` into the sweep, or do not claim the park clears "
+        "itself (see #5041)."
+    )
+
+    print("rearm-sweeper stuck-arm self-test: PASS")
+
+
 def self_test() -> None:
     expected_exact_exclusions = {
         "review:changes",
@@ -1116,7 +2894,7 @@ def self_test() -> None:
     # ---------------------------------------------------------------- #1135 Release PR
     # THE GAP THIS CLOSES: this sweep's exclusions were LABEL-keyed only, so the Release
     # PR carrying review:pass and no hold label was re-armed. Merging it tags + (once
-    # `publish = true`) publishes 17 crates to crates.io, irreversibly.
+    # `publish = true`) publishes 37 crates to crates.io, irreversibly.
     #
     # Tripwire (c) directly above PROVES a `review:pass` PR IS re-armed by this harness,
     # so "no arm call" below is a discriminating outcome and not the fixture's default.
@@ -1656,6 +3434,8 @@ def self_test() -> None:
     assert "arm-failure summary: PR #3011" in out.getvalue(), out.getvalue()
     assert "::warning" not in out.getvalue(), out.getvalue()
 
+    stuck_self_test()
+
     print("rearm-sweeper self-test: PASS")
 
 
@@ -1725,6 +3505,50 @@ def probe_arm_capability_exit(sweeper: RearmSweeper) -> int:
     return 0
 
 
+def stuck_arm_exit(args) -> int:
+    """Run the stuck-arm phase and map its outcome onto this lane's exit contract.
+
+    Same policy as `sweep_exit`: a collected per-PR failure is REAL and reds the run, while
+    an exhausted transient on the periodic sweep is a missed cycle the next cron covers.
+    Nothing here can turn a recorded failure into a success — the error count is read off
+    the sweeper AFTER the exception handler, never discarded by it (#3766).
+    """
+    sweeper = StuckArmSweeper(
+        args.repo,
+        args.default_branch,
+        limits=StuckLimits(max_actions=args.max_stuck_actions),
+        gh=run_gh,
+        gh_read=run_gh_read,
+        dry_run=args.dry_run,
+    )
+    transient: str | None = None
+    try:
+        sweeper.run()
+    except gh_retry.GhTransientExhausted as error:
+        transient = str(error)
+    except (GhError, ValueError, json.JSONDecodeError) as error:
+        print(f"[{PROGRAM}] stuck-arm fatal: {error}", file=sys.stderr)
+        return 1
+    if sweeper.errors:
+        print(
+            f"::error title={PROGRAM} stuck-arm recorded {sweeper.errors} failure(s)::"
+            "see the per-PR lines above"
+        )
+        return 1
+    if transient is not None:
+        if args.mode == "event":
+            print(
+                f"[{PROGRAM}] fatal: event-mode exhausted transient retries: {transient}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"::warning title={PROGRAM} stuck-arm skipped a cycle on transient GitHub API "
+            f"failures::{transient} — the next cron run covers this sweep."
+        )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", help="OWNER/REPOSITORY to sweep")
@@ -1748,6 +3572,29 @@ def main() -> int:
         action="store_true",
         help="only verify the token can enable auto-merge here; arm nothing",
     )
+    parser.add_argument(
+        "--phase",
+        choices=("rearm", "stuck-arm"),
+        default="rearm",
+        help=(
+            "rearm: restore auto-merge arms GitHub dropped (the original sweep). "
+            "stuck-arm: classify the ARMED population and give every armed-but-"
+            "unmergeable class a visible, counted terminal exit (#4548). The two are "
+            "duals over one decision surface and share this lane's cron, concurrency "
+            "group and token; `rearm` skips exactly the PRs `stuck-arm` owns."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="stuck-arm only: classify and report, mutate nothing",
+    )
+    parser.add_argument(
+        "--max-stuck-actions",
+        type=int,
+        default=StuckLimits().max_actions,
+        help="stuck-arm only: hard cap on PRs MUTATED per tick (congestion bound)",
+    )
     args = parser.parse_args()
 
     if args.self_test:
@@ -1755,6 +3602,8 @@ def main() -> int:
         return 0
     if not args.repo:
         parser.error("--repo is required unless --self-test is used")
+    if args.phase == "stuck-arm":
+        return stuck_arm_exit(args)
     sweeper: RearmSweeper | None = None
     try:
         sweeper = RearmSweeper(
