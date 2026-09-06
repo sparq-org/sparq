@@ -45,6 +45,18 @@ commitment-value-only = ["dual-leaf", "sparq-zk/commitment-value-only"]
 # UNCHANGED: the verifier is internally re-audited but NOT externally audited
 # (sq-qhy4 pending); no soundness/privacy claim.
 extended-fragment = []
+# [OPUS-4.8] sq-rsd3v.1: the single-use NULLIFIER primitive — the host witness +
+# Prover.toml renderer for the (sq-wvne) nullifier member and the verifier-side
+# per-epoch DOUBLE-SPEND seen-set gate (`SeenNullifiers`, reusing the audit-#4
+# durable store). The in-circuit gadget itself is
+# `sparq_zk_compose_core::nullifier` (compiled + constraint-tested in tests.nr).
+# OFF by default: the default verifier surface is byte-unchanged. LEAN — adds NO new
+# dependency (it consumes `sparq-zk`'s already-present `sig::nullifier` +
+# `poseidon2`). Per-holder-per-epoch RATE-LIMIT granularity, NOT a per-presentation
+# single-use token; NEW in-circuit soundness surface, NOT-yet-sound (sq-qhy4). The
+# compiled/provable member + ProofManifest verify-pipeline wiring (an unlinkable
+# presentation) is the larger sq-wvne follow-up.
+zk-nullifier = []
 
 [dependencies]
 sparq-zk = { path = "../sparq-zk" }
