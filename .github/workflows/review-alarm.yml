@@ -96,13 +96,22 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # review_lane_reach.py (and its release_pr_guard.py dependency) carries the
+          # reachability predicate this alarm SHARES with the sparq-side labeller
+          # (scripts/verdict-bridge.py) — one definition, so the census and the writer
+          # cannot disagree about who is in the review lane (#4677).
           sparse-checkout: |
             scripts/review_lane_alarm.py
+            scripts/review_lane_reach.py
+            scripts/release_pr_guard.py
           sparse-checkout-cone-mode: false
 
       # FIRST, unconditionally: a detector that cannot prove itself never gets to run.
       - name: Self-test the alarm (hermetic fixtures)
-        run: python3 scripts/review_lane_alarm.py --self-test
+        run: |
+          python3 scripts/release_pr_guard.py --self-test
+          python3 scripts/review_lane_reach.py --self-test
+          python3 scripts/review_lane_alarm.py --self-test
 
       - name: Enumerate PRs no review producer can reach
         env:

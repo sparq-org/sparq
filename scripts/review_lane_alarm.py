@@ -138,15 +138,20 @@ import re
 import subprocess
 import sys
 
+import review_lane_reach
+
 BASE_LABELS = ["review-alarm", "auto"]
 KEY_PREFIX = "review-lane-alarm-key"
 ALARM_KEY = "blind-spot"
 
-# The registry review lane's own admission regex, replicated VERBATIM from
-# scripts/dispatch-claim.py (registry, master @ 2026-07-26). Kept byte-identical on
-# purpose: this alarm's whole claim is "the registry lane cannot see these PRs", so the
-# reachability test must be the registry's test and not a paraphrase of it.
-REGISTRY_HEAD_REF_RE = re.compile(r"^sparq-agent/issue-([1-9][0-9]*)-")
+# The registry review lane's own admission regex. [OPUS-5] sparq#4677 moved it (and the
+# reachability predicate below) into scripts/review_lane_reach.py so that this CENSUS and
+# the sparq-side LABELLER (scripts/verdict-bridge.py) read one definition rather than two:
+# the defect #4677 found was not either predicate but their DISAGREEMENT — a labeller with
+# wider vision than its worker manufactures invisible backlog. Re-stated here as a name
+# only, because the alarm's own claim ("the registry lane cannot see these PRs") is what
+# the pin in scripts/tests/test_review_lane_alarm.py asserts.
+REGISTRY_HEAD_REF_RE = review_lane_reach.REGISTRY_HEAD_REF_RE
 
 # A verdict line, anchored to a WHOLE line. The pattern is applied to an individually
 # stripped line — never searched across a body — so no amount of surrounding prose can
@@ -190,6 +195,17 @@ RECEIPT_WINDOW_SECONDS = 300
 # in the blind spot is enumerable by the lane that writes them), but if a human or a
 # migration puts one there we honour it rather than double-reporting.
 LANE_LABELS = frozenset({"review:pass", "review:changes", "review:needs", "review:parked"})
+# The sparq-side INFORMATIONAL flag written by scripts/verdict-bridge.py. Deliberately NOT
+# in LANE_LABELS: it is not a verdict and enrols a PR in nothing, so it must never buy the
+# `lane-labelled` exit. It is counted separately — see LABELLED_UNREVIEWABLE (sparq#4677).
+UNREVIEWED_LABEL = "review:unreviewed"
+# THE DRIFT ROW. Counts open PRs carrying `review:unreviewed` that the review lane cannot
+# enumerate — i.e. PRs this repository has marked "awaiting review" that no review producer
+# in existence can reach. It is emitted EVERY tick, zero included, because zero is the
+# affirmative statement that the labeller and the reviewer still agree; an absent key would
+# be indistinguishable from a deleted check. Non-zero means the two predicates have drifted
+# apart again, which is exactly how the four PRs in sparq#4677 accumulated unnoticed.
+LABELLED_UNREVIEWABLE = "labelled-unreviewable"
 
 DEFAULT_MAX_AGE_HOURS = 24
 
@@ -209,20 +225,22 @@ def registry_lane_reachable(pr: dict, repo: str) -> bool:
     Only the three structural gates are replicated. The registry additionally requires a
     provenance record, but that is a LIVE registry read this repo has no token for, and it
     can only ever narrow admission further — so treating a PR as reachable here is the
-    CONSERVATIVE direction (it under-reports the blind spot, never over-reports it)."""
+    CONSERVATIVE direction (it under-reports the blind spot, never over-reports it).
+
+    Delegates to scripts/review_lane_reach.py (sparq#4677) so the labeller and this census
+    cannot disagree about who is in the lane. This adapts the REST `pulls` shape onto that
+    predicate; the machine-account test is `machine_actor`, which honours `user.type ==
+    "Bot"` as well as the `[bot]` login suffix the registry itself tests for — strictly the
+    under-reporting direction, and true of the same accounts on this surface."""
     if not isinstance(pr, dict):
         raise AlarmError("pull-request listing carried a non-object entry")
     head = pr.get("head") or {}
-    ref = str(head.get("ref") or "")
-    head_repo = (head.get("repo") or {}).get("full_name")
-    login = str((pr.get("user") or {}).get("login") or "")
-    if not REGISTRY_HEAD_REF_RE.match(ref):
-        return False
-    if head_repo != repo:
-        return False
-    if not login.endswith("[bot]"):
-        return False
-    return True
+    return review_lane_reach.lane_reachable(
+        head_ref=head.get("ref"),
+        head_repo=(head.get("repo") or {}).get("full_name"),
+        author_is_machine=review_lane_reach.machine_actor(pr.get("user") or {}),
+        repo=repo,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -450,7 +468,9 @@ def find_blind_spot(
 
     `events_by_pr` maps PR number -> its issue-event log, needed only for PRs carrying a
     hold label; without it every hold reads as `hold-owner-unknown` and stays exempt."""
-    census: dict = {}
+    # Seeded, not accumulated from absent: see LABELLED_UNREVIEWABLE. A row that only
+    # appears when it is non-zero cannot say "still zero" every tick.
+    census: dict = {LABELLED_UNREVIEWABLE: 0}
     findings: list[dict] = []
     for pr in prs:
         number = pr.get("number")
@@ -460,6 +480,13 @@ def find_blind_spot(
         events = (events_by_pr or {}).get(number) or (events_by_pr or {}).get(str(number)) or []
         state = classify_pr(pr, comments, repo, events)
         census[state] = census.get(state, 0) + 1
+        # sparq#4677: the labeller/reviewer DISAGREEMENT, counted independently of the
+        # state exit. A PR here has been marked "awaiting review" by this repository and
+        # is unreachable by every review producer — the label makes it look enrolled while
+        # nothing can ever review it. Counted for drafts and held PRs too: the flag is
+        # wrong on those regardless of whether they would otherwise alarm.
+        if UNREVIEWED_LABEL in _labels(pr) and not registry_lane_reachable(pr, repo):
+            census[LABELLED_UNREVIEWABLE] += 1
         hold_notes: list[str] = []
         if HUMAN_HOLD_LABELS & _labels(pr):
             owner = hold_ownership(pr, events, comments)
@@ -480,6 +507,17 @@ def find_blind_spot(
             census["blind-spot-fresh"] = census.get("blind-spot-fresh", 0) + 1
             continue
         _, discredited = countable_verdict(pr, comments)
+        # sparq#4677 asked for the disposition of each unreachable class to be DECIDED,
+        # not left to silent accumulation. Release and dependabot PRs cannot be enrolled
+        # (reviewer selection inverts `impl_provider` for cross-provider review and those
+        # classes have no implementing model, so admitting one would make the assertion
+        # vacuous rather than merely weaker); they are maintainer-reviewed, and every
+        # automated arming path already refuses them. Say so on the row.
+        klass, disposition = review_lane_reach.unreachable_disposition(
+            head_ref=(pr.get("head") or {}).get("ref"),
+            author_login=(pr.get("user") or {}).get("login"),
+            title=pr.get("title"),
+        )
         findings.append(
             {
                 "number": number,
@@ -490,6 +528,8 @@ def find_blind_spot(
                 "age_hours": round(age, 1),
                 "discredited": discredited,
                 "hold_notes": hold_notes,
+                "class": klass,
+                "disposition": disposition,
             }
         )
     findings.sort(key=lambda f: -f["age_hours"])
@@ -521,17 +561,31 @@ def render_issue_body(findings: list[dict], census: dict, repo: str, max_age_hou
         "worker App bot. That lane is the only verdict producer sparq has, so nothing will "
         "ever dispatch a review for them without a human or an orchestrator doing it by hand.",
         "",
-        "| PR | age (h) | author | head ref | note |",
-        "| --- | --- | --- | --- | --- |",
+        "| PR | age (h) | author | head ref | class | note |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for finding in findings[:50]:
         note = finding_note(finding)
         lines.append(
             f"| #{finding['number']} | {finding['age_hours']} | {finding['author']} | "
-            f"`{finding['head_ref']}` | {note} |"
+            f"`{finding['head_ref']}` | {finding.get('class') or '?'} | {note} |"
         )
     if len(findings) > 50:
-        lines.append(f"| … | | | | {len(findings) - 50} more |")
+        lines.append(f"| … | | | | | {len(findings) - 50} more |")
+    seen_classes = sorted(
+        {(f.get("class") or "?", f.get("disposition") or "") for f in findings[:50]}
+    )
+    if seen_classes:
+        lines += [
+            "",
+            "**What happens to each class instead of an automated review** (sparq#4677 — "
+            "these classes cannot be enrolled: reviewer selection inverts `impl_provider` "
+            "to guarantee cross-provider review, and a release or dependency PR has no "
+            "implementing model to invert, so admitting one would make the cross-provider "
+            "assertion *vacuous* rather than merely weaker):",
+            "",
+            *[f"* `{klass}` — {why}" for klass, why in seen_classes if why],
+        ]
     lines += [
         "",
         "**Census of every state exit** (open PRs in `" + repo + "`):",
@@ -539,6 +593,14 @@ def render_issue_body(findings: list[dict], census: dict, repo: str, max_age_hou
         "```",
         *[f"{state}: {count}" for state, count in sorted(census.items())],
         "```",
+        "",
+        f"`{LABELLED_UNREVIEWABLE}` counts open PRs carrying `{UNREVIEWED_LABEL}` — a label "
+        "written IN THIS REPOSITORY, meaning *awaiting review* — that the review lane "
+        "cannot enumerate. It is printed every tick, **zero included**, because zero is "
+        "the statement that the labeller and the reviewer still agree on who is in the "
+        "lane. Non-zero means they have drifted apart again and this class is silently "
+        "accumulating (sparq#4677: it reached four PRs, including the first crates.io "
+        "release PR, before anyone noticed).",
         "",
         "A verdict is countable only when it is line-anchored (`VERDICT: pass|fail` as the "
         "comment's last non-blank line), names the current head as a standalone 40-hex SHA, "
@@ -1025,6 +1087,58 @@ def _self_test() -> int:  # noqa: C901 - a flat table of named assertions reads 
     check("the aged blind-spot PR alarms", [f["number"] for f in findings] == [3426])
     check("a fresh blind-spot PR does not alarm yet", census.get("blind-spot-fresh") == 1)
     check("the census counts every state exit", census.get("blind-spot") == 2)
+
+    # --- sparq#4677: the LABELLER/REVIEWER drift row, and the disposition of each class.
+    check(
+        "the drift row is printed even at ZERO (absence != agreement)",
+        census.get(LABELLED_UNREVIEWABLE) == 0,
+    )
+    # The four PRs sparq#4677 measured, by their REAL head refs and authors.
+    drifted = [
+        _pr(number=3798, ref="ci/auto-arm-workflows-permission", login="jeswr",
+            labels=(UNREVIEWED_LABEL,), created="2026-07-18T00:00:00Z"),
+        _pr(number=4193, ref="research/knowledge-management-strategy", login="jeswr",
+            labels=(UNREVIEWED_LABEL,), created="2026-07-18T00:00:00Z"),
+        _pr(number=4460, ref="release-plz-2026-07-27T02-19-35Z",
+            login="sparq-orchestrator[bot]", labels=(UNREVIEWED_LABEL,),
+            created="2026-07-18T00:00:00Z"),
+        _pr(number=4488, ref="dependabot/github_actions/actions-minor",
+            login="dependabot[bot]", labels=(UNREVIEWED_LABEL,),
+            created="2026-07-18T00:00:00Z"),
+    ]
+    findings_d, census_d = find_blind_spot(
+        drifted, {}, repo, now, DEFAULT_MAX_AGE_HOURS)
+    check(
+        "every labelled-but-unreviewable PR is counted",
+        census_d.get(LABELLED_UNREVIEWABLE) == 4,
+    )
+    check(
+        "a WORKER PR carrying the flag is NOT drift (it really is in the lane)",
+        find_blind_spot(
+            [_pr(ref="sparq-agent/issue-9-1-1", login="sparq-orchestrator[bot]",
+                 labels=(UNREVIEWED_LABEL,))],
+            {}, repo, now, DEFAULT_MAX_AGE_HOURS,
+        )[1].get(LABELLED_UNREVIEWABLE) == 0,
+    )
+    by_number = {f["number"]: f for f in findings_d}
+    check(
+        "the release PR is classed as a release PR",
+        by_number.get(4460, {}).get("class") == review_lane_reach.CLASS_RELEASE,
+    )
+    check(
+        "the dependabot PR is classed as a dependency PR",
+        by_number.get(4488, {}).get("class") == review_lane_reach.CLASS_DEPENDABOT,
+    )
+    check(
+        "an agent-session PR is classed as not-enrolled",
+        by_number.get(3798, {}).get("class") == review_lane_reach.CLASS_NOT_ENROLLED,
+    )
+    body_d = render_issue_body(findings_d, census_d, repo, DEFAULT_MAX_AGE_HOURS)
+    check(
+        "the issue body states the maintainer disposition for the unenrollable classes",
+        body_d.count("MAINTAINER-REVIEWED") == 2,
+    )
+    check("the issue body names the drift row", LABELLED_UNREVIEWABLE in body_d)
 
     findings2, _ = find_blind_spot(
         [_pr(number=7, created="2026-07-18T00:00:00Z")], {7: good}, repo, now,

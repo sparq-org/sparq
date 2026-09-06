@@ -1036,6 +1036,15 @@ jobs:
       # The suite also pins its OWN call site here, so it cannot silently leave CI.
       - name: Self-test the review-lane blind-spot alarm (verdict obligations + YAML seam)
         run: python3 scripts/tests/test_review_lane_alarm.py
+      # [OPUS-5] #4677: the review lane's VISIBILITY PREDICATE, shared by the census above
+      # and the sparq-side labeller (scripts/verdict-bridge.py). The defect it fixes was
+      # not either predicate but their DISAGREEMENT — the labeller marked four green PRs
+      # `review:unreviewed`, including the first crates.io release PR, that the registry's
+      # `enumerate_review_items` structurally cannot enumerate, so they looked enrolled and
+      # were never reviewed. Gated here so a future edit to one side cannot silently widen
+      # it past the other, and so the head-ref regex stays byte-identical to the registry's.
+      - name: Self-test the shared review-lane reachability predicate (#4677)
+        run: python3 scripts/review_lane_reach.py --self-test
       # [OPUS-5] sq-huwr8: the three DETECTOR lanes (review-alarm / formal-alarm /
       # selection-alarm) RED by design, and each one's header used to assert it "can
       # never enter the `ci-summary / gate` poll set" because it creates no check-run on

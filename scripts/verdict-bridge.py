@@ -192,6 +192,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence
 
 import gh_retry
+import review_lane_reach
 
 
 PROGRAM = "verdict-bridge"
@@ -275,6 +276,19 @@ class PullRequest:
     # False when the commit list was truncated, so the set above is a LOWER BOUND and
     # disjointness cannot be proven.  Refuses every grant; never blocks a retraction.
     contributors_complete: bool = True
+    # [OPUS-5] #4677.  Whether the ONLY review producer sparq has — the registry's review
+    # lane — can EVER enumerate this PR (scripts/review_lane_reach.py).  Computed once in
+    # ``parse_node``; ``decide`` reads it so the pure core stays I/O-free.
+    #
+    # DEFAULTS FALSE, deliberately.  ``review:unreviewed`` asserts "enrolled, awaiting a
+    # review", and a PR nothing can review is not awaiting one — so an unset or unreadable
+    # reachability must never let the flag be written.  Under-labelling costs nothing (the
+    # blind-spot alarm still censuses the PR); over-labelling is the #4677 defect itself.
+    lane_reachable: bool = False
+    # The one-line statement of what happens to an unreachable PR INSTEAD of a review
+    # (maintainer-reviewed release / dependency PR, or simply not enrolled).  Empty for a
+    # reachable PR.  Reported in the decision reason so a refusal is never silent.
+    disposition: str = ""
 
 
 @dataclass(frozen=True)
@@ -553,6 +567,28 @@ def decide(pr: PullRequest, comments: Sequence[dict]) -> Decision:
     has_attestation = REVIEW_ATTESTATION in pr.labels
     flagged = UNREVIEWED_LABEL in pr.labels
 
+    def unreviewable(prefix: str) -> Decision:
+        """The exit for a PR no review producer can ever reach.
+
+        [OPUS-5] #4677.  ``review:unreviewed`` is applied HERE and consumed by a reviewer
+        that lives in ANOTHER repository, and the two predicates had drifted apart: this
+        labeller flagged four green PRs — including the first crates.io release PR — that
+        the registry lane's ``enumerate_review_items`` structurally cannot enumerate. A PR
+        that gets labelled but never reviewed is WORSE than one never labelled, because
+        the label makes it look enrolled: it is then neither reviewed nor noticed, and
+        every success rate the lane reports is computed over a population that excludes
+        it.  So the flag is never written here, and WITHDRAWN where it already was — the
+        withdrawal is not a "retraction on absence" (that rule protects the ``review:pass``
+        ATTESTATION; this label attests nothing and blocks nothing).
+
+        This does not abandon the PR: ``scripts/review_lane_alarm.py`` censuses exactly
+        this population every tick and files the one deduped blind-spot issue.
+        """
+        detail = pr.disposition or "no review producer can reach this PR"
+        if flagged:
+            return out("unflag", f"{prefix}; withdrawing {UNREVIEWED_LABEL} — {detail}")
+        return out("none", f"{prefix} — {detail}")
+
     if verdict is None:
         # A discarded self-review is POSITIVE evidence, not absence.  The "never retract
         # on absence" rule below exists so a hand-applied label with no comment behind it
@@ -572,6 +608,8 @@ def decide(pr: PullRequest, comments: Sequence[dict]) -> Decision:
         # NEVER retract on absence: an orchestrator-applied label has no comment behind
         # it, and removing it would fight the human lane and un-arm a real review.
         if flagged:
+            if not pr.lane_reachable:
+                return unreviewable("flagged but unreviewable")
             return out("none", "flagged, still unreviewed")
         other_review_label = any(
             label.startswith("review:") for label in pr.labels
@@ -579,6 +617,8 @@ def decide(pr: PullRequest, comments: Sequence[dict]) -> Decision:
         if other_review_label or has_attestation:
             return out("none", "already in a review lane")
         if is_green_and_ready(pr):
+            if not pr.lane_reachable:
+                return unreviewable("green + mergeable but unreviewable")
             return out("flag", "green + mergeable but invisible to every lane")
         return out("none", "no head-bound verdict")
 
@@ -598,8 +638,16 @@ def decide(pr: PullRequest, comments: Sequence[dict]) -> Decision:
             and is_green_and_ready(pr)
             and not any(label.startswith("review:") for label in pr.labels)
         ):
+            if not pr.lane_reachable:
+                return unreviewable(
+                    f"ambiguous verdict line by {verdict.author}, and unreviewable"
+                )
             return out(
                 "flag", f"ambiguous verdict line by {verdict.author} — needs a re-review"
+            )
+        if flagged and not pr.lane_reachable:
+            return unreviewable(
+                f"ambiguous verdict line by {verdict.author}, and unreviewable"
             )
         return out(
             "none", f"ambiguous verdict line by {verdict.author} — polarity unreadable"
@@ -654,7 +702,16 @@ def run_gh_read(argv: list[str]) -> str:
 # scripts/tests/test_verdict_bridge.py::TestScopedRunAuthority.
 PR_NODE_FIELDS = """
         number state isDraft baseRefName headRefOid mergeable
-        author{login}
+        # [OPUS-5] #4677: headRefName / headRepository / title are the REVIEW-LANE
+        # REACHABILITY inputs (scripts/review_lane_reach.py).  If any of them stops being
+        # requested here, parse_node reads it as absent and `lane_reachable` fails CLOSED
+        # — the bridge stops writing `review:unreviewed`, never starts writing it wrongly.
+        headRefName title
+        headRepository{nameWithOwner}
+        # `__typename` is the ONLY reliable machine-account signal on GraphQL: it reports
+        # an App's login WITHOUT the `[bot]` suffix the registry's own gate tests for, so
+        # a copied suffix test here would read as a guard while never matching.
+        author{login __typename}
         labels(first:100){nodes{name} pageInfo{hasNextPage}}
         # 100 is GitHub's DOCUMENTED per-connection maximum.  A larger `last:` is
         # currently accepted (probed: `last:250` returns without an error), but resting a
@@ -940,6 +997,24 @@ class VerdictBridge:
             # Fail closed: an unseen label could be a hold.
             raise GhError(f"PR #{node.get('number')}: label set exceeds one page")
         contributors, complete = commit_contributors(node)
+        # [OPUS-5] #4677: resolved HERE, once, from the shared predicate both this writer
+        # and scripts/review_lane_alarm.py import — so the labeller's visibility can no
+        # longer drift wider than the reviewer's.
+        author = node.get("author") or {}
+        head_ref = str(node.get("headRefName") or "")
+        reachable = review_lane_reach.lane_reachable(
+            head_ref=head_ref,
+            head_repo=(node.get("headRepository") or {}).get("nameWithOwner"),
+            author_is_machine=review_lane_reach.machine_actor(author),
+            repo=self.repo,
+        )
+        disposition = ""
+        if not reachable:
+            _, disposition = review_lane_reach.unreachable_disposition(
+                head_ref=head_ref,
+                author_login=author.get("login"),
+                title=node.get("title"),
+            )
         return PullRequest(
             number=int(node["number"]),
             state=str(node.get("state") or "").upper(),
@@ -955,7 +1030,9 @@ class VerdictBridge:
             ),
             contributors=contributors,
             contributors_complete=complete,
-            opener=normalize_login((node.get("author") or {}).get("login")),
+            opener=normalize_login(author.get("login")),
+            lane_reachable=reachable,
+            disposition=disposition,
         )
 
     def reconfirm(
@@ -1157,6 +1234,11 @@ def pr_fixture(**overrides) -> PullRequest:
         "mergeable": "MERGEABLE",
         "gate_conclusion": "success",
         "labels": frozenset(),
+        # The DEFAULT fixture is a worker PR the registry lane can enumerate — the shape
+        # 89 of the 118 open PRs measured on 2026-07-26 actually have.  Unreachable PRs
+        # are opted into explicitly (`lane_reachable=False`), so a test asserting `flag`
+        # is asserting it about a PR that really can be reviewed.
+        "lane_reachable": True,
     }
     base.update(overrides)
     base["labels"] = frozenset(base["labels"])
@@ -1278,6 +1360,30 @@ def self_test() -> None:
     assert decide(pr_fixture(labels={UNREVIEWED_LABEL}), [passing]).action == "unflag"
     assert decide(pr_fixture(labels={UNREVIEWED_LABEL}), [failing]).action == "unflag"
     assert decide(pr_fixture(labels={UNREVIEWED_LABEL}), []).action == "none"
+
+    # [OPUS-5] #4677. THE LABELLER'S VISIBILITY MUST NOT EXCEED THE REVIEWER'S.
+    # A PR the registry review lane cannot enumerate is never flagged — the label would
+    # claim an enrolment nothing can honour — and an existing flag is WITHDRAWN.
+    unreachable = pr_fixture(lane_reachable=False, disposition="not enrolled")
+    flagged_unreachable = pr_fixture(
+        lane_reachable=False, disposition="not enrolled", labels={UNREVIEWED_LABEL}
+    )
+    assert decide(unreachable, []).action == "none", "must not flag what nothing reviews"
+    assert decide(flagged_unreachable, []).action == "unflag", "a stale flag is withdrawn"
+    assert "not enrolled" in decide(unreachable, []).reason, "the refusal states WHY"
+    # The control arm: the ONLY difference is reachability, so this pair reds if the
+    # guard is deleted or inverted rather than passing vacuously.
+    assert decide(pr_fixture(lane_reachable=True), []).action == "flag"
+    # The same guard covers the AMBIGUOUS-verdict flag site, which is a second writer.
+    ambiguous = comment(f"{HEAD}\n\nVERDICT: FAIL")
+    assert decide(pr_fixture(lane_reachable=True), [ambiguous]).action == "flag"
+    assert decide(unreachable, [ambiguous]).action == "none"
+    assert decide(flagged_unreachable, [ambiguous]).action == "unflag"
+    # An unreachable PR is still promoted on a real hand-review: the guard scopes the
+    # informational flag only, and must never suppress an attestation someone earned.
+    assert decide(unreachable, [passing]).action == "promote"
+    # UNREADABLE reachability fails CLOSED — the dataclass default writes no label.
+    assert PullRequest.__dataclass_fields__["lane_reachable"].default is False
 
     # SCOPING (the event path). The number an event payload names is parsed strictly;
     # anything present but non-numeric must RAISE, never degrade to a full sweep.

@@ -470,6 +470,18 @@ you flip.
    an unknown head branch refuses rather than admits. The Release PR is merged by a
    maintainer, by hand, deliberately.
 
+   **…and it is never reviewed by a machine, either — say so rather than implying
+   otherwise.** <!-- [OPUS-5] #4677 --> The registry review lane cannot enrol the Release
+   PR: reviewer selection inverts `impl_provider` to guarantee cross-provider review, and
+   a release PR has no implementing model, so admitting it would require *fabricating* a
+   provider and make the cross-provider assertion vacuous. sparq's own labeller used to
+   mark it `review:unreviewed` anyway — the first crates.io Release PR sat that way for
+   ~22h, looking enrolled in a lane that structurally could not see it. `verdict-bridge.py`
+   now shares its visibility predicate with the reviewer (`scripts/review_lane_reach.py`),
+   so the Release PR is left unlabelled and the blind-spot alarm reports it with an
+   explicit *maintainer-reviewed* disposition instead. **Reviewing the Release PR is the
+   maintainer's job, by design; nothing automated is coming.**
+
    **Read "armed" literally.** The PreToolUse hook recognises `gh pr merge` **with**
    `--auto`. A direct `gh pr merge <n> --squash` (no `--auto`), `--admin`, a
    `gh api graphql … enablePullRequestAutoMerge` mutation, a REST
