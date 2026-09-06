@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-5] sq-huwr8 — the alarm/detector lanes must be DECLARED non-gating, not
-# ASSUMED non-gating. 🤖 SPARQ agent.
+# [GPT-5] #6293 — alarm/detector lanes must be explicitly kept outside the gate,
+# either by schedule-event scoping or a registry declaration. 🤖 SPARQ agent.
 #
 # THE DEFECT THIS PINS. review-alarm.yml / formal-alarm.yml / selection-alarm.yml are
 # detectors: they RED by design when they find a real blind spot, and they RED fail-loud
@@ -15,8 +15,8 @@
 # `workflow_run`-on-main) alarm run puts its check-run on exactly that main head SHA —
 # the one the push-triggered gate is polling. The gate deliberately waits for the
 # check-run NAME SET to stabilise, so a sibling that appears mid-poll is picked up, not
-# missed. Since #3773 the ONLY thing that makes a check-run non-gating is a key in
-# `.github/advisory-registry.json`; none of the three was declared, so all three GATED.
+# missed. Before #6292, the only applicable exclusion was a key in
+# `.github/advisory-registry.json`, so undeclared detectors gated.
 #
 # MEASURED 2026-07-27, ci_summary_gate.render_verdict() over the real, paginated
 # 477-check-run set for main head cb0c6739c7d85420474a2e67be83177660ee1be3:
@@ -27,7 +27,8 @@
 #
 # WHY THIS MATTERS MORE THAN ONE RED SQUARE. An alarm that reds `main` for doing its job
 # is an alarm somebody eventually mutes, and a muted alarm is strictly worse than no
-# alarm — it looks like coverage. The fix is a DECLARATION, never a `|| true`.
+# alarm — it looks like coverage. Schedule runs are now excluded by event scope;
+# workflow_run detectors still need an explicit declaration.
 #
 # HOW THIS SUITE IS BUILT TO FAIL.
 #   * Every behaviour test drives the REAL ci_summary_gate.render_verdict() — the exact
@@ -37,16 +38,13 @@
 #     RED the gate. Without it, a render_verdict() that returned 0 unconditionally (or a
 #     fixture that silently contained no failure at all) would pass every other test
 #     here. If the control ever goes green, this file is measuring nothing.
-#   * test_every_not_a_gate_alarm_workflow_is_declared DISCOVERS the alarm workflows
-#     from the filesystem instead of hard-coding three names, so a FOURTH alarm added
-#     with the same false header and no declaration REDs on arrival.
+#   * test_every_alarm_workflow_has_an_explicit_scoping_mechanism DISCOVERS the alarm
+#     workflows from the filesystem, then pins schedule scoping versus declaration.
 #   * The suite pins its OWN call site in docs-quality.yml, so it cannot silently leave
 #     CI's reachable set.
 #
-# Deleting any of the three registry entries REDs this file with an assertion naming the
-# lane — a BEHAVIOUR kill (the gate's verdict changes), not a crash kill (an import or
-# fixture error). The distinction is checked explicitly: every failure path below runs
-# render_verdict() to completion and asserts on its integer exit code.
+# Deleting the workflow_run alarm's registry entry REDs this file. Adding any swept
+# schedule alarm back also REDs, protecting the registry's advisory-only meaning.
 #
 # Stdlib + PyYAML (already a docs-quality dependency). Run:
 #   python3 scripts/tests/test_alarm_lanes_non_gating.py
@@ -77,6 +75,14 @@ ALARM_WORKFLOWS = {
     "selection-alarm.yml": "nightly selection-bug alarm",
     "ci-latency-alarm.yml": "CI execution-latency alarm",
     "heavy-set-alarm.yml": "HEAVY-set drift alarm",
+}
+SCHEDULE_ALARM_WORKFLOWS = {
+    workflow: lane
+    for workflow, lane in ALARM_WORKFLOWS.items()
+    if workflow != "selection-alarm.yml"
+}
+DECLARED_ALARM_WORKFLOWS = {
+    "selection-alarm.yml": "nightly selection-bug alarm",
 }
 
 # A name that is deliberately NOT in the registry, used by the anti-vacuity control.
@@ -117,34 +123,32 @@ def _job_name(workflow_file: str) -> str:
     return job["name"]
 
 
-class TestAlarmLanesAreDeclaredNonGating(unittest.TestCase):
-    """The DECLARATION half: the gate's own classifier must call each alarm advisory."""
+class TestAlarmLanesAreNonGating(unittest.TestCase):
+    """Pin the distinct scoping mechanisms for schedule and workflow_run alarms."""
 
     def setUp(self) -> None:
         _load_registry()
 
-    def test_every_not_a_gate_alarm_workflow_is_declared(self) -> None:
-        """Discovered from the filesystem, not hard-coded: EVERY *-alarm.yml job name
-        must be declared in the advisory registry. A new alarm workflow that copies the
-        old false header and forgets the declaration REDs here on arrival."""
+    def test_every_alarm_workflow_has_an_explicit_scoping_mechanism(self) -> None:
+        """Discover every alarm, then require schedule scope or a declaration."""
         discovered = sorted(p.name for p in WORKFLOWS.glob("*alarm*.yml"))
         self.assertTrue(discovered, "no *alarm*.yml workflows found — glob broke")
         self.assertEqual(
             discovered,
             sorted(ALARM_WORKFLOWS),
-            "the set of alarm workflows changed; a new detector lane must be declared "
-            "in .github/advisory-registry.json and added to ALARM_WORKFLOWS here",
+            "the alarm workflow set changed; classify its trigger mechanism here",
         )
-        for wf in discovered:
+        for wf, name in SCHEDULE_ALARM_WORKFLOWS.items():
             with self.subTest(workflow=wf):
-                name = _job_name(wf)
-                self.assertTrue(
-                    gate.is_advisory(name),
-                    f"{wf}: job {name!r} is NOT declared in "
-                    f".github/advisory-registry.json, so ci_summary_gate.py GATES on it "
-                    f"(#3773). This detector REDs by design — gating on it blocks merges "
-                    f"on an unrelated backlog condition and gets the alarm muted.",
-                )
+                self.assertFalse(gate.is_advisory(name))
+                doc = yaml.safe_load((WORKFLOWS / wf).read_text())
+                triggers = doc.get(True) or doc.get("on")
+                self.assertIn("schedule", triggers)
+                self.assertNotIn("workflow_run", triggers)
+
+        for wf, name in DECLARED_ALARM_WORKFLOWS.items():
+            with self.subTest(workflow=wf):
+                self.assertTrue(gate.is_advisory(name))
 
     def test_registry_key_matches_the_live_yaml_job_name(self) -> None:
         """C4's binding, asserted from this side too: a rename must not be able to
@@ -161,10 +165,8 @@ class TestAlarmFailureDoesNotRedTheGate(unittest.TestCase):
         _load_registry()
 
     def test_alarm_failure_does_not_red_the_gate(self) -> None:
-        """THE headline guard. A detector concluding `failure` alongside a green sibling
-        set must leave the gate GREEN. Delete any of the three registry entries and this
-        REDs with the lane named — a behaviour kill, on render_verdict's exit code."""
-        for wf, lane in ALARM_WORKFLOWS.items():
+        """The workflow_run detector remains non-gating through its declaration."""
+        for wf, lane in DECLARED_ALARM_WORKFLOWS.items():
             with self.subTest(lane=lane):
                 runs = _healthy_siblings() + [_run(lane, "failure")]
                 rc = gate.render_verdict(runs)
@@ -199,11 +201,11 @@ class TestAlarmFailureDoesNotRedTheGate(unittest.TestCase):
         not make the commit's own legs non-gating. A genuine leg failing alongside a
         failing alarm must still RED — this is what proves the fix did not buy green by
         weakening the gate."""
-        runs = (
-            _healthy_siblings()
-            + [_run("review-lane blind-spot alarm", "failure")]
-            + [_run("run + track benchmarks", "failure")]
-        )
+        runs = _healthy_siblings() + [
+            _run("nightly selection-bug alarm", "failure"),
+            _run("run + track benchmarks", "failure"),
+        ]
+        self.assertTrue(gate.is_advisory("nightly selection-bug alarm"))
         self.assertFalse(gate.is_advisory("run + track benchmarks"))
         rc = gate.render_verdict(runs)
         self.assertEqual(
@@ -217,8 +219,7 @@ class TestTheRefutedPremise(unittest.TestCase):
 
     def test_ci_summary_gate_also_runs_on_pushes_to_main(self) -> None:
         """Half 1 of the refutation: the gate does not only poll PR / merge-group heads.
-        If this ever stops being true the declarations are still correct, but the
-        rationale recorded in the registry needs revisiting — so red loudly."""
+        This remains the reason event scoping is necessary on main."""
         doc = yaml.safe_load((WORKFLOWS / "ci-summary.yml").read_text())
         triggers = doc.get(True) or doc.get("on")
         self.assertIn(
@@ -230,8 +231,8 @@ class TestTheRefutedPremise(unittest.TestCase):
 
     def test_alarm_lanes_run_on_main_so_they_share_that_head_sha(self) -> None:
         """Half 2: each alarm is triggered by `schedule` or `workflow_run` on main, i.e.
-        on a commit that a push-triggered `gate` run polls. Together with half 1 this is
-        exactly why the declaration — not the trigger type — is what keeps them safe."""
+        on a commit that a push-triggered `gate` run polls. The exact trigger type now
+        selects whether schedule scoping or the registry keeps the detector non-gating."""
         for wf in ALARM_WORKFLOWS:
             with self.subTest(workflow=wf):
                 doc = yaml.safe_load((WORKFLOWS / wf).read_text())

@@ -14,16 +14,10 @@
 # touch `bd`/`.beads` in CI — same rule as flow-on.yml / selection-alarm.yml).
 #
 # NOT A GATE (same posture as selection-alarm.yml): scheduled on main, files issues,
-# blocks NO merge. That holds because this job is DECLARED in
-# `.github/advisory-registry.json` — since #3773 the ONLY thing that can make a check-run
-# non-gating. [OPUS-5] sq-huwr8: this header used to reason from "this workflow creates
-# no check-run on a PR head or merge-group ref" to the conclusion that the gate could
-# therefore never see it. The premise is true; the conclusion is not. ci-summary.yml also runs on
-# `push: branches: [main]` (timeout-minutes: 80), so a scheduled run on main lands its
-# check-run on the very head SHA that gate polls — and the gate waits for the name set to
-# stabilise, so a late sibling is picked up, not missed. Measured on main head cb0c6739c,
-# the sibling review-alarm lane was listed as a GATING failure by render_verdict().
-# Pinned by scripts/tests/test_alarm_lanes_non_gating.py. FAIL-LOUD: an
+# blocks NO merge. [GPT-5] #6293: ci-summary excludes workflow runs whose API `event` is exactly
+# `schedule`; missing or other event values remain fail-closed and gating. This lane is
+# deliberately absent from `.github/advisory-registry.json`. Pinned by
+# scripts/tests/test_alarm_lanes_non_gating.py. FAIL-LOUD: an
 # alarm-infrastructure error (unreadable
 # manifest, workflow-runs API failure) exits non-zero so THIS run goes red and a human
 # notices the detector itself is broken — masking a dead lane is the one thing the alarm

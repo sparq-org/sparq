@@ -19,12 +19,9 @@
 # into beads out-of-band, exactly as selection-alarm.yml / formal-alarm.yml do.
 #
 # NOT A GATE (same posture as formal-alarm.yml / selection-alarm.yml): scheduled on main,
-# files issues, blocks NO merge. That holds ONLY because this job is DECLARED in
-# `.github/advisory-registry.json` — since #3773 the sole mechanism that makes a check-run
-# non-gating. The tempting wrong premise (sq-huwr8) is "it creates no check-run on a PR
-# head, so the gate cannot see it": ci-summary.yml ALSO runs on `push: branches: [main]`,
-# so a scheduled run on main lands its check-run on exactly the head SHA that gate polls,
-# and the gate waits for the name set to stabilise. Pinned by
+# files issues, blocks NO merge. [GPT-5] #6293: ci-summary excludes workflow runs whose API `event` is
+# exactly `schedule`; missing or other event values remain fail-closed and gating. This
+# lane is deliberately absent from `.github/advisory-registry.json`. Pinned by
 # scripts/tests/test_alarm_lanes_non_gating.py, which discovers `*alarm*.yml` from disk.
 #
 # FAIL-LOUD: the script exits 2 (red) when the DETECTOR breaks rather than reporting a

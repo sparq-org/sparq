@@ -16,23 +16,11 @@
 # NOT A GATE (same posture as selection-alarm.yml / formal-alarm.yml): scheduled on main,
 # files issues, blocks NO merge. Redding this run blocks nothing — it exists to be SEEN.
 #
-# That is true because this job is DECLARED in `.github/advisory-registry.json`, which
-# #3773 made the ONLY thing that can make a check-run non-gating. It is NOT true because
-# of where the check-run lands. [OPUS-5] sq-huwr8 corrects the argument this header used
-# to make, which reasoned from "this workflow creates no check-run on a PR head or
-# merge-group ref" to the conclusion that the gate could therefore never see it. The
-# premise holds; the conclusion does not follow. ci-summary.yml also runs on
-# `push: branches: [main]` with `timeout-minutes: 80`, and a SCHEDULED run on main puts
-# its check-run on exactly the head SHA that push-triggered gate polls — and the gate
-# deliberately waits for the check-run name set to STABILISE, so a sibling appearing
-# mid-poll is picked up, not missed. MEASURED 2026-07-27: over the real 477-check-run set
-# for main head cb0c6739c, ci_summary_gate.py render_verdict() listed
-# `review-lane blind-spot alarm: failure` as a GATING failure. The registry entry, not
-# the trigger type, is what makes this lane safe to RED.
-#
-# Pinned by scripts/tests/test_alarm_lanes_non_gating.py, which drives the gate's own
-# is_advisory() + render_verdict() so that deleting the declaration REDs a named test
-# rather than silently re-arming this detector as a merge blocker.
+# [GPT-5] #6293: that is true because ci-summary excludes workflow runs whose API `event` is exactly
+# `schedule`; missing or other event values remain fail-closed and gating. This lane is
+# deliberately absent from `.github/advisory-registry.json`, keeping that registry for
+# lanes that are advisory rather than merely triggered outside the gate's event scope.
+# Pinned by scripts/tests/test_alarm_lanes_non_gating.py.
 #
 # WHO APPLIED THE HOLD (sparq#4911). The alarm exempts a PR carrying `needs:user` /
 # `review:needs-user` — but it now resolves that hold's OWNER from the `labeled` timeline

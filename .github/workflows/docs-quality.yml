@@ -1036,19 +1036,11 @@ jobs:
       # The suite also pins its OWN call site here, so it cannot silently leave CI.
       - name: Self-test the review-lane blind-spot alarm (verdict obligations + YAML seam)
         run: python3 scripts/tests/test_review_lane_alarm.py
-      # [OPUS-5] sq-huwr8: the three DETECTOR lanes (review-alarm / formal-alarm /
-      # selection-alarm) RED by design, and each one's header used to assert it "can
-      # never enter the `ci-summary / gate` poll set" because it creates no check-run on
-      # a PR head or merge-group ref. True premise, false conclusion: ci-summary.yml also
-      # runs on `push: branches: [main]`, so a scheduled alarm's check-run lands on the
-      # very head SHA that gate polls. MEASURED on main head cb0c6739c, render_verdict()
-      # listed `review-lane blind-spot alarm: failure` as a GATING failure. What makes
-      # these lanes safe to RED is their advisory-registry declaration, nothing else.
-      # This suite drives the REAL render_verdict() so deleting a declaration REDs on the
-      # gate's own exit code, carries an UNDECLARED-lane control so the assertions cannot
-      # go vacuous, and DISCOVERS *alarm*.yml from disk so a fourth detector added with
-      # the same false header reds on arrival.
-      - name: Self-test the alarm/detector lanes are DECLARED non-gating (sq-huwr8)
+      # [GPT-5] #6293: schedule-triggered detector runs are outside the
+      # gate's event scope; the workflow_run-triggered selection alarm remains declared
+      # advisory. This suite pins both mechanisms, carries an undeclared-lane control,
+      # and discovers *alarm*.yml from disk so a new detector cannot arrive unclassified.
+      - name: Self-test the alarm/detector lanes are explicitly non-gating (sq-huwr8)
         run: python3 scripts/tests/test_alarm_lanes_non_gating.py
       # [OPUS-5] sq-1lc4i: the CI EXECUTION-LATENCY alarm
       # (scripts/ci_execution_latency_alarm.py, .github/workflows/ci-latency-alarm.yml).
