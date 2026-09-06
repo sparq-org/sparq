@@ -1110,11 +1110,12 @@ jobs:
       # whitespace-only-cone no-op). Stdlib-only, no cargo/network.
       - name: Self-test cone_coverage.py (cone selector + cone report — sq-1cb6l)
         run: python3 scripts/tests/test_cone_coverage.py
-      # test_drift_scan.py (37 tests) — the periodic drift scanner
-      # (scripts/drift-scan.py): all 5 scanner classes (bench-missing,
-      # skill-missing, explain-asymmetry, dashboard-row, conformance-split),
-      # the dedup-key stability contract, main(--dry-run), and the CI-guard
-      # that refuses to mint issues outside CI. Stdlib-only, no gh/git/network.
+      # test_drift_scan.py (51 tests) — the periodic drift scanner
+      # (scripts/drift-scan.py): all 6 scanner classes (bench-missing,
+      # skill-missing, explain-asymmetry, dashboard-row, conformance-split,
+      # beads-export-stale), the dedup-key stability contract, main(--dry-run),
+      # and the CI-guard that refuses to mint issues outside CI. Stdlib-only,
+      # no gh/git/network.
       - name: Self-test drift-scan.py (all scanner classes + CI guard — sq-1cb6l)
         run: python3 scripts/tests/test_drift_scan.py
       # test_feature_matrix_tiers.py (50 tests) — the feature-matrix tier
