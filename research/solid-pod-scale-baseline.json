@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "role": "reused smaller-scale canonical WAC reference, not measurements of the new server",
+  "source": "bench/canonical-competitor-results/ac-sparql/ec2-canonical-20260903t085125z/paper-summary.json",
+  "source_sha256": "f4ec650705368956406a828a499547455aef10367cb7e3e84e8d8fbb263d182d",
+  "run_id": "ec2-canonical-20260903t085125z",
+  "source_commit": "b1c05c08d2279885d63a50f5208a943ad4b942b2",
+  "values": {
+    "correctness_passed": {
+      "value": true,
+      "pointer": "/correctness/passed"
+    },
+    "oracle_comparisons": {
+      "value": 5760,
+      "pointer": "/correctness/oracle_comparisons"
+    },
+    "pod_counts": {
+      "value": [
+        1,
+        8,
+        64,
+        512,
+        2048
+      ],
+      "pointer": "/workload/pod_counts"
+    },
+    "process_blocks": {
+      "value": 5,
+      "pointer": "/workload/process_blocks"
+    },
+    "timing_repetitions": {
+      "value": 30,
+      "pointer": "/workload/timing_repetitions"
+    },
+    "routed_pass_count": {
+      "value": 16,
+      "pointer": "/results/h2_rollup/materialized-routed/pass_count"
+    },
+    "native_pass_count": {
+      "value": 0,
+      "pointer": "/results/h2_rollup/native-http-assembly/pass_count"
+    },
+    "cells": {
+      "value": 16,
+      "pointer": "/results/h2_rollup/materialized-routed/cells"
+    }
+  }
+}
