@@ -421,9 +421,10 @@ Frozen campaign #raw(frozen.campaign_id) defines the selected cells in
 The earlier baseline and short HTTP pilot remain separate experiments.
 The full host is a #raw(frozen.host.instance_type) with
 #frozen.host.physical_vcpus vCPUs, #frozen.host.physical_memory_gib GiB RAM and
-a #frozen.host.volume_gib GiB volume. Server and client use disjoint CPU sets.
-A small server quota is a measured process-and-cache allowance, not the total
-host RAM requirement or evidence that every request performs physical disk I/O.
+a #frozen.host.volume_gib GiB volume. Server and client use disjoint CPU-affinity
+sets; CPU counts below are affinity counts, not scheduler quotas. GiB limits are
+server cgroup memory ceilings, not the total host RAM requirement or evidence
+that every request performs physical disk I/O.
 
 Each cell schedules #frozen.seeds.len() independently restarted WAC/ACP pairs with
 alternating order and fresh journals. A #frozen.measurement.warmup_seconds s
@@ -438,7 +439,7 @@ Swap is disabled. These controls do not change the declared demand assumptions.
   {
     set text(size: 8.5pt)
     table(columns: (1.25fr, 1.65fr, 0.55fr, 0.8fr, 0.8fr), inset: 4pt,
-      table.header([*Experiment*], [*Corpus and stored Pods*], [*CPUs*], [*GiB*], [*Offered rps*]),
+      table.header([*Experiment*], [*Corpus and stored Pods*], [*CPU affinity*], [*GiB*], [*Offered rps*]),
       ..frozen.groups.map(g => (
         [#(
           "compact-fixed-population": "Fixed-load population",
@@ -509,8 +510,10 @@ snapshots and no OOM. Content, policies, indexes and measured allocation are
 reported; pre-load disk snapshots exclude subsequent journal growth. Audits check
 durable receipts and replay after each run. The hot-set ladder stops at the first
 memory tier passing both languages in all repetitions. Other resource cells are
-fixed; there is no independent search for the fewest CPUs. Reported small quotas
-identify tested configurations, not a global minimum or a complete hosting budget.
+fixed; there is no independent search for the fewest CPUs. Reported affinity and
+memory limits identify tested configurations, not a global minimum or a complete
+hosting budget. CPU usage differences bracket measurement and drain after warm-up;
+no timestamp-matched CPU-utilization estimate is inferred.
 
 == Comparing WAC and ACP
 
@@ -681,7 +684,7 @@ local bundle; public archival availability remains unresolved.
 
 A capacity statement needs the corpus, request mix, permissions, latency and
 hardware together. Hosted count omits retained volume; successful-response p95
-omits failures; a process quota omits the rest of the host. The campaign separates
+omits failures; a server memory ceiling omits the rest of the host. The campaign separates
 these quantities so that compact controls cannot stand in for a million users'
 retained histories.
 
