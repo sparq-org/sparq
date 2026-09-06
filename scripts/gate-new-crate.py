@@ -130,7 +130,13 @@ def git_diff(base: str) -> tuple[list[str], list[str]]:
 
 
 def added_crates(added: list[str]) -> list[str]:
-    """Crate names whose Cargo.toml was ADDED (a brand-new crate)."""
+    """Crate names whose Cargo.toml was ADDED (a brand-new crate).
+
+    [OPUS-5] (#5242) Also imported by scripts/flow-on.py (build_contexts) as the
+    single definition of "this PR adds crate <x>", so the reactive engine fans its
+    `{crate}` placeholder out over exactly the crate set this gate enforces
+    against. Keep the ALL-crates iteration and the stable order — flow-on relies
+    on both; a PR adding two crates previously got follow-ons for only the first."""
     crates: list[str] = []
     for p in added:
         m = re.match(r"^crates/([^/]+)/Cargo\.toml$", p)
