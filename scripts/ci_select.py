@@ -115,7 +115,8 @@ _FULL_TRIGGERS: list[tuple[str, str]] = [
 # coverage*.py/sh, perf-gate.py, assemble-feature-matrix.py, feature-matrix-tiers.py,
 # check-*.py gates, fetch-*.sh conformance fetchers, ci-bench.sh, ci-free-disk.sh,
 # unsafe/mutants gates, sbom/vex tooling, docker-smoke.sh, wasm-deps-guard.sh, the
-# fv/formal lane scripts, and scripts/tests/* that gate the engine); the Rust-CI
+# fv/formal lane scripts, and scripts/tests/* that gate the engine (the exact
+# flow-on self-test below gates orchestration only); the Rust-CI
 # workflow files themselves (ci.yml, feature-matrix.yml, codeql.yml, supply-chain.yml,
 # bench.yml, fuzz.yml, miri.yml, asan.yml, kani.yml, metamorph.yml,
 # vectorized-feature-off.yml, ci-select.yml, ci-summary.yml, conformance/coverage
@@ -151,6 +152,12 @@ _ORCHESTRATION_SAFE: list[str] = [
     "scripts/batch-merge.py",
     "scripts/save-agent-log.sh",
     "scripts/push-frontier.sh",
+    # [GPT-5] #6060/#6240: reactive maintenance orchestration and its hermetic
+    # self-test. The engine runs in flow-on.yml and the test in flow-on-gates.yml;
+    # neither workflow feeds the Rust matrix.
+    "scripts/flow-on.py",
+    "scripts/flow-on-rules.toml",
+    "scripts/tests/test_flow_on.py",
 ]
 
 
