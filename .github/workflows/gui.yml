@@ -21,8 +21,8 @@
 # the job NAME matching `\b(advisory|informational)\b`, which silently neutralised real gates
 # in THIS file). A job with no declaration GATES, whatever it is called. So:
 #   * "shared TS client typecheck", "site build + typecheck (consuming @sparq/client)", the
-#     operational-GUI frontend job, "GUI Playwright mocked-IPC lane" and — since #3773 —
-#     "GUI hermetic guards (browserName tripwire + no-sleep-gate)" have no registry entry and
+#     operational-GUI frontend job and "GUI Playwright mocked-IPC lane" — which since #5691
+#     also carries the #3773 hermetic guards as its first steps — have no registry entry and
 #     therefore GATE. [OPUS-4.8] This bit gui.yml once (PR #748): a per-platform job that is
 #     not declared advisory is GATING, and a macOS/Windows runner-image/webview flake would
 #     then break the `ci-summary / gate` for EVERY PR.
@@ -39,9 +39,11 @@
 #     branch-protection required-contexts, a `needs:user` repo-settings action) to PROMOTE
 #     them to a hard gate once reliably green.
 #   * HERMETIC checks (grep/find over checked-in files) must NOT live inside those advisory
-#     jobs: #3773 found the browserName tripwire + no-sleep-gate doing exactly that. They are
-#     now their own gating job; the registry's `gate_script_waiver` fields record the one
-#     remaining, deliberately-diagnostic re-run.
+#     jobs: #3773 found the browserName tripwire + no-sleep-gate doing exactly that. They now
+#     run as the FIRST steps of the GATING `gui-mock-ipc` job (#5691 folded away the separate
+#     runner they briefly had — see the note there); the `gate_script_waiver` fields on
+#     `tauri-e2e` + `tauri-e2e-probe` record the deliberately-diagnostic re-runs that remain
+#     in this file's advisory jobs.
 #
 # Every action below is SHA-pinned (Scorecard Pinned-Dependencies); the lane is
 # least-privilege (contents: read).
@@ -334,6 +336,46 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # [OPUS-5] #5691 — HERMETIC GUARDS, folded in from the former `gui-hermetic-guards` job.
+      # #3773 hoisted these two out of the advisory `tauri-e2e` lane (where `continue-on-error`
+      # plus the old advisory-NAME exclusion swallowed them twice) and gave them a job of their
+      # own; that job was then checkout + two greps — no npm, no toolchain, no browser — so its
+      # wall-time was ~entirely runner claim + checkout, the sq-6vshe.7 fold criterion.
+      #
+      # WHY HERE: `gui-mock-ipc` GATES today (no registry entry, no `continue-on-error`), shares
+      # this workflow's trigger + path filter, and carries no `if:`/`needs:` — so a check that
+      # moves into it keeps exactly the blocking power it had. It is also the other GUI e2e lane,
+      # and already hosts the analogous hermetic determinism grep for its OWN harness
+      # (support/no-timeout-gate.sh over gui/e2e-playwright). BE PRECISE about what this is not:
+      # the two guards below cover the SIBLING tauri-driver harness (gui/e2e), which this job
+      # does not run — they are co-located for the gating property and the shared path filter,
+      # not because this job exercises them. A red here can therefore mean "gui/e2e regressed"
+      # rather than "the mocked-IPC journeys failed"; the failing STEP name says which.
+      #
+      # They run FIRST, before the toolchain and node setup, so a violation still reds within
+      # seconds of checkout rather than after the wasm builds.
+      #
+      # WHAT KEEPS THIS HONEST: they must never sit in an advisory job again. If `gui-mock-ipc`
+      # is ever demoted per E2E-GATING-POLICY.md §4, HOIST THESE BACK OUT to a hermetic gating
+      # job — do not write a `gate_script_waiver`. check-advisory-registry.py C3 classifies
+      # `*tripwire.sh` / `*gate.sh` as gate-classified commands, so a demotion REDs until
+      # someone resolves it one way or the other.
+
+      # Issue #1740 regression guard: gui/e2e/run-e2e.mjs must NOT hard-code a browserName
+      # capability (WebKitGTK >= 2.48 hard-rejects a mismatching one, 0-byte driver log). The
+      # script's VERSION-TRIPWIRE half needs webkit2gtk, which is absent here; it exits 0 when
+      # those tools are missing, so the regression guard runs cleanly and the version logging
+      # stays in `tauri-e2e`, where the apt packages are installed.
+      - name: Drift tripwire — browserName regression guard (issue #1740)
+        run: bash scripts/ci/tauri-driver-drift-tripwire.sh
+
+      # Determinism gate — forbids arbitrary time-based waits in the tauri-driver harness.
+      # (Its sibling for THIS job's own Playwright specs, no-timeout-gate.sh, stays down by
+      # the test run it guards.)
+      - name: Determinism gate — no arbitrary sleeps (no-sleep-gate)
+        working-directory: gui/e2e
+        run: bash support/no-sleep-gate.sh
+
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: wasm32-unknown-unknown
@@ -405,38 +447,6 @@ jobs:
       - name: Run Playwright mocked-IPC tests
         working-directory: gui/e2e-playwright
         run: npm test
-
-  # [OPUS-5] #3773 — HARD hermetic guards, hoisted OUT of the advisory `tauri-e2e` lane.
-  #
-  # Both checks below are pure grep/find over checked-in source: no webview, no WebKitWebDriver,
-  # no xvfb, no Rust toolchain, no npm install. They therefore share NONE of the environment
-  # coupling that makes `tauri-e2e` legitimately advisory — yet they lived inside it, so
-  # `continue-on-error: true` PLUS the old advisory-NAME exclusion swallowed them twice and
-  # neither could fail anything:
-  #   1. the browserName regression guard (bead sq-t6492 / issue #1740) whose own comment claims
-  #      "this step FAILS if that regression is re-introduced" — it did not;
-  #   2. the gui/e2e no-sleep-gate (forbids `await sleep(` / `await setTimeout(` /
-  #      `waitForTimeout(` in the tauri-driver harness).
-  # This job carries NO entry in `.github/advisory-registry.json`, so `ci-summary / gate` waits
-  # on it. The VERSION-TRIPWIRE half of the drift script (dpkg/WebKitWebDriver version logging)
-  # is diagnostic and stays in `tauri-e2e`, where webkit2gtk is actually installed; the script
-  # exits 0 when those tools are absent, so the regression guard runs cleanly here.
-  gui-hermetic-guards:
-    name: "GUI hermetic guards (browserName tripwire + no-sleep-gate)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # Issue #1740 regression guard: gui/e2e/run-e2e.mjs must NOT hard-code a browserName
-      # capability (WebKitGTK >= 2.48 hard-rejects a mismatching one, 0-byte driver log).
-      - name: Drift tripwire — browserName regression guard (issue #1740)
-        run: bash scripts/ci/tauri-driver-drift-tripwire.sh
-
-      # Determinism gate — forbids arbitrary time-based waits in the tauri-driver harness.
-      - name: Determinism gate — no arbitrary sleeps (no-sleep-gate)
-        working-directory: gui/e2e
-        run: bash support/no-sleep-gate.sh
 
   # [OPUS-4.8] sq-bu69 — per-platform Tauri build + clippy matrix.
   #
@@ -594,8 +604,9 @@ jobs:
   #   * xvfb-run --auto-servernum (already present; a virtual display is mandatory on Linux).
   #   * workers=1: the smoke is a single-process script (no parallelism; inherent).
   #   * No arbitrary sleeps: all waits use waitForExist / waitUntil with explicit conditions;
-  #     validated by support/no-sleep-gate.sh, which since #3773 runs in the HARD
-  #     `gui-hermetic-guards` job (it used to run here, where it gated nothing). The startup
+  #     validated by support/no-sleep-gate.sh, which since #3773 runs in a HARD gating job
+  #     (it used to run here, where it gated nothing) — since #5691 that is `gui-mock-ipc`,
+  #     as its first steps. The startup
   #     port-poll uses a callback-style setTimeout (not an awaited sleep) — gate-safe.
   #   * Shell-level retry 1: if the first attempt fails (driver start flake, display-server
   #     race), the step retries once before counting as a failure. Evidence of failure is
@@ -636,7 +647,7 @@ jobs:
             xvfb
 
       # [OPUS-5] #3773 — the REGRESSION-GUARD half of this script is now HARD-gated in the
-      # `gui-hermetic-guards` job above (it needs no webview, so it never belonged in this
+      # `gui-mock-ipc` job above (#5691; it needs no webview, so it never belonged in this
       # environment-coupled advisory lane). It is re-run here ONLY for the VERSION TRIPWIRE:
       # logging the runner's webkit2gtk + tauri-driver versions, which requires the apt packages
       # this job installs, so the next runner-image drift is a one-line diagnosis. Diagnostic
@@ -715,7 +726,7 @@ jobs:
         working-directory: gui/e2e
         run: npm ci
 
-      # [OPUS-5] #3773 — the no-sleep-gate MOVED to the HARD `gui-hermetic-guards` job above
+      # [OPUS-5] #3773 — the no-sleep-gate MOVED to the HARD `gui-mock-ipc` job above (#5691)
       # (it is a pure find+grep over gui/e2e/**; re-running it inside this advisory lane would
       # gate nothing).
 

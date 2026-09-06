@@ -128,7 +128,7 @@
    "owner_bead": "sq-ymr2e.11",
    "promotion_criteria": "never promotable; nightly workflows never gate the merge queue by design (sq-ymr2e.11)",
    "registered": "2026-07-06",
-   "gate_script_waiver": "nightly lanes never gate the merge queue by design (sq-ymr2e.11). Both gate-classified scripts it runs (gui/e2e/support/no-sleep-gate.sh and the drift tripwire's regression guard) are hard-gated per-PR in gui.yml `gui-hermetic-guards` (#3773); the nightly copies keep the sweep self-contained."
+   "gate_script_waiver": "nightly lanes never gate the merge queue by design (sq-ymr2e.11). Both gate-classified scripts it runs (gui/e2e/support/no-sleep-gate.sh and the drift tripwire's regression guard) are hard-gated per-PR in gui.yml `gui-mock-ipc` (#3773); the nightly copies keep the sweep self-contained."
   },
   "tauri-driver GUI smoke ${{ matrix.os }} (advisory, documented-untested)": {
    "workflow": "nightly-full-sweep.yml",
@@ -157,7 +157,7 @@
    "owner_bead": "sq-ymr2e.6",
    "promotion_criteria": "advisory forever; real WebKitWebDriver + xvfb is environment-coupled by nature (E2E-GATING-POLICY.md §2)",
    "registered": "2026-07-06",
-   "gate_script_waiver": "scripts/ci/tauri-driver-drift-tripwire.sh is re-run here for its VERSION TRIPWIRE only (it logs the runner's webkit2gtk + tauri-driver versions, which needs the apt packages this job installs). Its GATING half — the #1740 browserName regression guard — is hard-gated in gui.yml `gui-hermetic-guards`, so nothing load-bearing depends on this invocation (#3773)."
+   "gate_script_waiver": "scripts/ci/tauri-driver-drift-tripwire.sh is re-run here for its VERSION TRIPWIRE only (it logs the runner's webkit2gtk + tauri-driver versions, which needs the apt packages this job installs). Its GATING half — the #1740 browserName regression guard — is hard-gated in gui.yml `gui-mock-ipc`, which since #5691 runs both hermetic guards as its first steps (they had a standalone `gui-hermetic-guards` job between #3773 and #5691), so nothing load-bearing depends on this invocation."
   },
   "GUI tauri-driver flake probe (Linux, advisory)": {
    "workflow": "gui.yml",
@@ -165,7 +165,7 @@
    "owner_bead": "sq-ymr2e.6",
    "promotion_criteria": "never promotable; workflow_dispatch flake probe only — not a PR check",
    "registered": "2026-07-06",
-   "gate_script_waiver": "workflow_dispatch-only flake probe, never a PR check; it re-runs the drift tripwire purely to log versions alongside each probe iteration. The #1740 regression guard is hard-gated in gui.yml `gui-hermetic-guards` (#3773)."
+   "gate_script_waiver": "workflow_dispatch-only flake probe, never a PR check; it re-runs the drift tripwire purely to log versions alongside each probe iteration. The #1740 regression guard is hard-gated in gui.yml `gui-mock-ipc` (#3773)."
   },
   "kani ${{ matrix.suite.name }} (bounded proofs, informational)": {
    "workflow": "kani.yml",
