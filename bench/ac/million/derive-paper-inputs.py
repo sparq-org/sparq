@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
 
@@ -27,7 +28,7 @@ def main():
     parser.add_argument("--calibration", type=Path, default=HERE / "corpus-calibration.json")
     args = parser.parse_args()
     workload_path = HERE / "workload.json"
-    workload = json.loads(workload_path.read_text())
+    workload = json.loads(workload_path.read_text(), parse_float=Decimal)
     per_active = sum(
         item["actions_per_active_person_day"]
         * item["logical_reads_per_action"]
@@ -48,7 +49,7 @@ def main():
     for pods in (1000, 10000, 100000, 1000000, 2000000):
         for scenario, multiplier in workload["offered_multiplier_scenarios"].items():
             components = {
-                key: pods * count / 86400 * multiplier
+                key: Decimal(pods) * count / 86400 * multiplier
                 for key, count in per_person.items()
             }
             rates.append({"pods": pods, "scenario": scenario,
@@ -58,12 +59,20 @@ def main():
         "source": "workload.json",
         "source_sha256": digest(workload_path),
         "source_role": "declared scenario, not measured demand",
+        "numeric_encoding": "Decimal arithmetic; JSON numbers rounded half-even to nine decimal places",
         "journeys_per_active_person_day": sum(x["actions_per_active_person_day"] for x in workload["journeys"]),
         "per_active_person_daily_foreground_queries": per_active,
         "per_hosted_person_daily_requests": per_person,
         "population_rates": rates,
     }
-    (HERE / "workload-derived.json").write_text(json.dumps(derived, indent=2) + "\n")
+    def encode_decimal(value):
+        if not isinstance(value, Decimal):
+            raise TypeError(f"Unsupported JSON value: {type(value)}")
+        return float(value.quantize(Decimal("0.000000001"), rounding=ROUND_HALF_EVEN))
+
+    (HERE / "workload-derived.json").write_text(
+        json.dumps(derived, indent=2, default=encode_decimal) + "\n"
+    )
 
     source = ROOT / "bench/canonical-competitor-results/ac-sparql/ec2-canonical-20260903t085125z/paper-summary.json"
     baseline = json.loads(source.read_text())
@@ -100,4 +109,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with localcontext() as context:
+        context.prec = 50
+        main()
