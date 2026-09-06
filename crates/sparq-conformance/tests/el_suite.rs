@@ -215,11 +215,19 @@ mod gated {
         ),
         (
             "New-Feature-SelfRestriction-002",
-            "PERMANENT — conclusion types individual Peter into an owl:hasSelf restriction (the \
-             CONVERSE of CR-Self-1: a raw self-loop forces ∃r.Self class membership); the realiser \
-             handles the forward direction (hasSelf restriction → self-loop, sq-pbz04.2.6) but not \
-             the reverse nominal readoff that adds a ClassAssertion for the anonymous hasSelf class \
-             (documented sq-pbz04.2.6 follow-up)",
+            // [OPUS-5] sq-8zqwb (issue #2487) shipped CRs3 nominal reflexivity, so the REASONING
+            // half of the old rationale ("not the reverse nominal readoff") is no longer the
+            // cause. Re-pinned to the remaining OUTPUT-VOCABULARY gap, verified against the
+            // realiser's readoff dispatch in sparq-reason-el/src/abox.rs.
+            "PERMANENT — conclusion types individual Peter into an ANONYMOUS owl:hasSelf \
+             restriction bnode. The reverse reasoning is IMPLEMENTED: CRs3 nominal reflexivity \
+             (sq-8zqwb) derives `∃likes.Self ∈ S({Peter})` from the raw self-link `Peter likes \
+             Peter`. The gap is output vocabulary — the realiser's readoff dispatches an \
+             `∃r.Self` subsumer to the self-loop branch (emitting the property assertion `a r a`, \
+             sq-pbz04.2.6) and emits rdf:type rows only for subsumers that are NAMED classes, so \
+             no anonymous restriction node is ever materialized and the bnode-homomorphism check \
+             has nothing to map the conclusion's bnode onto — the same anonymous-class output gap \
+             as WebOnt-I5.5-005",
         ),
         (
             "WebOnt-equivalentProperty-001",
