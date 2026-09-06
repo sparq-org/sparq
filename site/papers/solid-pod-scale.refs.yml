@@ -187,3 +187,19 @@ tidal:
     volume: 14
     issue: 5
   url: https://doi.org/10.3233/SW-223220
+dona:
+  type: article
+  title: "Development and evaluation of Dona, a privacy-preserving donation platform for messaging data from WhatsApp, Facebook, and Instagram"
+  author:
+    - Hakobyan, Olya
+    - Hillmann, Paul-Julius
+    - Martin, Florian
+    - Böttinger, Erwin
+    - Drimalla, Hanna
+  date: 2025-02-14
+  parent:
+    type: periodical
+    title: Behavior Research Methods
+    volume: 57
+  serial-number: "94"
+  url: https://doi.org/10.3758/s13428-024-02593-z

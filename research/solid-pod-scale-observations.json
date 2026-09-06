@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "author_model": "GPT-6",
+  "dona": {
+    "doi": "10.3758/s13428-024-02593-z",
+    "source_url": "https://d-nb.info/1370487746/34",
+    "source_locator": "Table 3, printed page 8; participant and donation description, printed page 7",
+    "extraction": "Manual transcription of published aggregate observations; checked against source text on 2026-09-06",
+    "participants": 85,
+    "reported_age_median_years": 25.5,
+    "age_reporters": 82,
+    "whatsapp": {"donations": 78, "message_count_median": 31000, "message_count_range": [670, 188000], "timespan_median_days": 1956.5, "requested_important_chats": [5, 7]},
+    "facebook": {"donations": 7, "message_count_median": 36000, "message_count_range": [1248, 166000], "timespan_median_days": 1093, "chat_scope": "all chats in requested export"},
+    "limitations": "Young self-selected cohort; selected WhatsApp chats; different export procedures. Counts and timespans do not define a population arrival-rate distribution."
+  },
+  "messaging_sensitivity": {
+    "monthly_records": 1000,
+    "history_months": 60,
+    "role": "prospective volume sensitivity motivated by retained-count scale; not a fitted rate or a completed benchmark"
+  }
+}
