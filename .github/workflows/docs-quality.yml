@@ -1302,6 +1302,20 @@ jobs:
         run: python3 scripts/check-sticky-failure-exits.py --self-test
       - name: "Reject exception handlers that erase collected failures (#3770) — GATING"
         run: python3 scripts/check-sticky-failure-exits.py
+      # [SONNET-4.6] FO-KM validator (bench/fo-km/validate_tasks.py, epic sq-mztg8): the
+      # benchmark itself is `external` (it needs a cargo build with the `close` feature, so
+      # no CI lane runs it), which is exactly why its GOLD-CHECK logic must be pinned here —
+      # cc03/cc05 carry a dict-of-ints `gold_keys` behind a SINGLE query and used to escape
+      # every count branch, so any non-empty result passed with wrong per-category values.
+      # th03's multi-part `select` likewise carried a per-part ENTITY list that only the
+      # per-part COUNT was checked against, so either sub-query could answer with arbitrary
+      # entities of the right cardinality.
+      # The suite drives the pure comparison AND main() (with `run()` monkeypatched to a
+      # canned table) in both directions: gold-matching results validate, while a mutated
+      # category value — or one swapped entity at an unchanged row count — exits non-zero.
+      # Stdlib-only, no cargo/git/network.
+      - name: Self-test the FO-KM gold checks (cc03/cc05 value drift, th03 per-part entities)
+        run: python3 scripts/tests/test_fo_km_gold_check.py
 
   # ----------------------------- ADVISORY -----------------------------
   # [FABLE-5] sq-6vshe.20: the three former advisory jobs as step-groups on ONE
