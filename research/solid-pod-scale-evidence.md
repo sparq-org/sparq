@@ -16,6 +16,8 @@ by `bench/ac/million/derive-paper-inputs.py`, with source hashes and locators.
 | [Federal Reserve payment diary](https://frbservices.org/binaries/content/assets/crsocms/news/research/2026-diary-consumer-payments-choice.pdf) | Observed consumer payment means, used to anchor transaction volume | Rounded U.S. means do not establish retained record counts, the synthetic tail or other countries; the record-per-payment conversion is assumed. |
 | [Geolife user guide](https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/) | A public example of timestamped location histories | Historical volunteer sampling is not a modern population distribution; choosing location summaries also changes volume. |
 | [MovieLens stable dataset](https://grouplens.org/datasets/movielens/1m/) | An empirical marginal distribution of retained rating records | Selected rating-service users, historical collection and minimum participation; cannot stand in for photos, messages or all-service activity. |
+| [Dona messaging donations](https://doi.org/10.3758/s13428-024-02593-z) | Retained message counts and spans motivate the messaging-volume sensitivity | Young, selected donors and selected WhatsApp chats do not supply population rates or a joint service-data distribution. |
+| [Google Photos engineering](https://cloud.google.com/blog/products/databases/google-photos-builds-user-experience-on-spanner) | Metadata serves interactive services and batch pipelines | Establishes the existence of both work types, not their per-person frequency in Solid. |
 | [Andrews et al.](https://doi.org/10.1371/journal.pone.0139004) | Objective interaction counts and substantial between-person variation | Small historical Android cohort; device interactions are not backend requests. The numeric observation and source locator are in the workload file. |
 | [Ofcom Online Nation](https://www.ofcom.org.uk/media-use-and-attitudes/online-habits/from-apps-to-ai-search-how-the-uk-goes-online-in-2025) | Breadth and heterogeneity of contemporary service use | Online time and app reach do not identify Pod storage volume or requests per second. |
 | [Scaling Memcache at Facebook](https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf) | Why fanout, batching and caching belong in a demand model | Historical cache traffic cannot be transferred as a Solid workload. |
@@ -29,12 +31,13 @@ calling the complete corpus a validated representation of future Solid users.
 
 ## Access-control justification
 
-The workload models private personal records, a household, collaborators and public
-profile information. These scenarios explain why the benchmark needs owners,
-named recipients, reusable recipient sets, inherited folder permissions and direct
-exceptions. They do not establish the prevalence of any sharing pattern. The
-protocol therefore varies recipient count, explicit policy placement, hierarchy
-depth and churn independently of content volume.
+The frozen workload models owner-private service records, calendar sharing,
+shared media metadata and public ratings. These scenarios motivate owners,
+named recipients, fixed recipient groups, inherited permissions and private
+exceptions; they do not establish their prevalence. The executed campaign keeps
+membership, hierarchy and policy placement fixed. Owner administration changes
+calendar grants and checks revocation, eviction and restart. Broader permission
+and demand sweeps belong to the prospective protocol, not the frozen results.
 
 Both serializers implement a neutral effective-rights relation. WAC inheritance
 stops at the nearest applicable ACL; ACP gathers applicable policies and resolves
@@ -47,7 +50,8 @@ belong in a separate feature experiment.
 The oracle evaluates generated scenario records directly. A second compiler is
 not automatically an independent oracle, and agreement between WAC and ACP is
 insufficient if both grant the same unauthorized access. Policy checks cover
-positive and negative principals, content and policy writes, and revocation across
+positive and negative principals, content writes, the shared owner-only policy
+administration boundary, and revocation across
 cache hits, eviction and restart. If reference queries use the same SPARQL engine,
 the supported independence claim concerns authorization selection.
 
@@ -79,7 +83,17 @@ repository as its root:
 typst compile --root . site/papers/solid-pod-scale.typ output/pdf/solid-pod-scale.pdf
 ```
 
-The source displays a draft status while no admitted expanded campaign artifact
-is supplied. Its compact reference observations and prospective demand targets
-remain distinct. The PDF is a local review artifact, not an automatic site
-publication.
+The default binding is the finalized [main analysis](solid-pod-scale-main.json),
+with a separately hashed [audit summary](solid-pod-scale-main-report.json). Compile
+the exhaustive companion beside the manuscript:
+
+```sh
+typst compile --root . site/papers/solid-pod-scale-companion.typ output/pdf/solid-pod-scale-companion.pdf
+```
+
+The manuscript links to the sibling companion and local source bundle. Its
+main response table distinguishes queue-only guard misses from failed delivery;
+full matrices, resource counters and indexed-component diagnostics remain in the
+companion and JSON. An explicit empty `--input campaign=` selects the older pilot
+fallback; partial or unreviewed supplied evidence cannot emit final main claims.
+Both PDFs are local review artifacts, not automatic site publications.

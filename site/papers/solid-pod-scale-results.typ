@@ -80,11 +80,22 @@
     packed_index_bytes: if packed == none or index == none { none } else { packed + index },
     allocated_bytes: if allocated != none and (type(allocated) == int or type(allocated) == float) and allocated >= 0 { allocated } else { none })
 }
+#let grouped-integer(value) = {
+  let digits = str(value)
+  let result = ""
+  for i in range(digits.len()) {
+    if i > 0 and calc.rem(digits.len() - i, 3) == 0 { result += "," }
+    result += digits.slice(i, i + 1)
+  }
+  result
+}
 #let storage-number(value, divisor: 1, digits: 0) = {
   if value == none { return "—" }
   let scaled = value / divisor
   let step = calc.pow(10, -digits)
-  if scaled > 0 and scaled < step { "<" + str(step) } else { num(scaled, digits: digits) }
+  if scaled > 0 and scaled < step { "<" + str(step) } else if divisor == 1 and digits == 0 {
+    grouped-integer(calc.round(scaled))
+  } else { num(scaled, digits: digits) }
 }
 #let range-label(observation, scale: 1, digits: 1) = {
   if observation.n == 0 { return "—" }
@@ -110,7 +121,11 @@
   let hi = calc.max(..rates)
   if lo == hi { num(lo) } else { num(lo) + "–" + num(hi) }
 }
-#let dataset-label(dataset) = dataset.replace("-", " ")
+#let dataset-label(dataset) = (
+  "compact-1000": "compact 1,000", "compact-10000": "compact 10,000",
+  "compact-100000": "compact 100,000", "compact-1000000": "compact 1M",
+  "compact-2000000": "compact 2M", "history-1000": "history 1,000",
+).at(dataset, default: dataset.replace("-", " "))
 #let group-label(group) = (
   "compact-fixed-population": "fixed load",
   "population-control": "derived demand",
@@ -120,9 +135,73 @@
   "retained-history-hot": "hot history",
 ).at(group, default: group)
 
-#let main-tables(data) = {
+// Main-text selection is fixed by experiment role, never by observed performance.
+#let primary-pairs(data) = data.paired_comparisons.filter(p =>
+  not (p.group == "compact-fixed-population" and p.dataset == "compact-1000") and
+  not (p.group == "compact-rate-bracket" and p.rate_override == "32") and
+  not (p.group == "retained-history-hot" and p.memory_gib != 1)).sorted(key: p => {
+    let group = ("compact-fixed-population": 0, "population-control": 1,
+      "compact-rate-bracket": 2, "retained-history-hot": 3,
+      "retained-history-cold": 4, "retained-history-larger": 5).at(p.group, default: 9)
+    let corpus = ("compact-1000000": 0, "compact-2000000": 1,
+      "history-8": 0, "history-64": 0, "history-1000": 0,
+      "entropy-8": 1, "messaging-8": 2).at(p.dataset, default: 9)
+    group * 100 + corpus * 10 + if p.rate_override == "512" { 1 } else { 0 }
+  })
+#let queue-only(cell, measurement) = {
+  let r = cell.requests
+  (cell.valid_for_inference and cell.local_guard == "fail" and cell.resources.passed and
+    r.success_fraction_of_offered >= measurement.success_fraction and
+    r.deadline_fraction_of_offered >= measurement.deadline_fraction_of_all_offered and
+    r.within_server_production_deadline / r.offered >= measurement.deadline_fraction_of_all_offered and
+    not r.queue.passed)
+}
+#let summary-verdicts(cells, model, measurement) = {
+  let rows = cells.filter(c => c.model == model)
+  assert(rows.all(c => c.valid_for_inference), message: "Main narrative requires valid measured cells; inspect full evidence for gaps")
+  let passed = rows.filter(c => c.local_guard == "pass").len()
+  let queue = rows.filter(c => queue-only(c, measurement)).len()
+  (passed, queue, rows.len() - passed - queue)
+}
+#let main-response-summary(data) = {
+  assert(main-state(data) == "finalized and reviewed")
+  [#figure({
+    set text(size: 8.5pt)
+    table(columns: (1.35fr, 0.65fr, 0.42fr, 0.9fr, 0.8fr, 0.8fr, 0.7fr, 0.6fr), inset: 3pt,
+      table.header([*Corpus*\ *CPU / GiB*], [*rps*], [*Policy*], [*OK p95*\ *ms*],
+        [*Timely*\ *% offered*], [*OK*\ *% offered*], [*Peak*\ *MiB*], [*P/Q/O*]),
+      ..primary-pairs(data).map(p => {
+        let rows = paired-cells(data, p)
+        ("wac", "acp").map(model => {
+          let response = model-responses(rows, model)
+          let resource = model-resources(rows, model)
+          let values = (
+            [#upper(model)], [#range-label(response.successful_p95_us, scale: 0.001)],
+            [#range-label(response.timely_fraction, scale: 100, digits: 2)],
+            [#range-label(response.success_fraction, scale: 100, digits: 2)],
+            [#if resource.peak_bytes.n == 0 { "—" } else { str(calc.ceil(resource.peak_bytes.upper / calc.pow(2, 20))) }],
+            [#summary-verdicts(rows, model, data.campaign.measurement).map(str).join("/")],
+          )
+          if model == "wac" {
+            (table.cell(rowspan: 2)[#dataset-label(p.dataset)\ #p.cpus / #p.memory_gib],
+             table.cell(rowspan: 2)[#offered-label(rows, p)], ..values)
+          } else { values }
+        }).flatten()
+      }).flatten(),
+    )
+  }, caption: [Primary service results; ranges span the independent runs, rounded
+    outward. OK p95 conditions on successful full-body responses from scheduled
+    arrival; Timely and OK retain *all offered requests*. Peak is the maximum
+    cgroup memory, including warm-up. P/Q/O counts passing runs, queue-only guard
+    failures with adequate delivery, and other guard failures. CPU means affinity
+    count; GiB is the server ceiling. Supplementary controls, memory tiers and
+    paired intervals are in the companion; exact counters and full validity flags
+    remain in the linked analysis.]) <main-response-latency>]
+}
+
+#let main-tables(data, summary: false) = {
   assert(main-state(data) == "finalized and reviewed", message: "Main tables require finalized, source-reviewed analysis")
-  figure({
+  if summary { main-response-summary(data) } else { figure({
     set text(size: 8pt)
     table(columns: (1.8fr, 0.72fr, 0.85fr, 0.95fr, 0.72fr, 0.85fr, 0.95fr, 1.03fr), inset: 3pt,
       table.header(
@@ -160,17 +239,18 @@
     count and server cgroup ceiling, not a CPU quota or whole-host memory minimum.
     Absolute columns show between-run min–max ranges except “Peak”, the maximum
     cgroup memory across valid runs, rounded up, including warm-up and charged file
-    pages. CPU seconds are the cgroup usage-counter difference after warm-up through
-    measurement and drain, not utilization. Superscripts count contributing valid
+    pages. CPU seconds are cgroup counter differences across the measured client
+    window, potentially including outstanding warm-up work; they do not establish
+    utilization or CPU per journey. Superscripts count contributing valid
     runs; dashes mean unavailable. “OK p95” uses successful responses only,
     from scheduled arrival to complete body. “Timely” and “OK” divide successful
     responses within #data.campaign.measurement.server_deadline_ms ms and all
     successful responses by *all offered requests*, including
     errors and drops. The ACP/WAC p95 CI resamples matched runs; it neither pools
-    requests nor establishes a service pass by itself.])
+    requests nor establishes a service pass by itself.]) }
 
   let brackets = data.capacity_brackets
-  if brackets.len() > 0 {
+  if not summary and brackets.len() > 0 {
     figure({
       set text(size: 8.5pt)
       table(columns: (1.35fr, 0.8fr, 0.8fr, 1fr, 1fr), inset: 4pt,
@@ -190,7 +270,8 @@
       rounded outward; decisions use full precision.])
   }
 
-  let stored = data.campaign.at("corpora", default: ())
+  let stored = data.campaign.at("corpora", default: ()).filter(d => not summary or
+    ("compact-1000000", "compact-2000000", "history-8", "history-64", "history-1000").contains(d.id))
   if stored.len() > 0 {
     figure({
       set text(size: 8pt)
@@ -219,7 +300,7 @@
   }
 
   let indexed = data.at("indexed_component_diagnostics", default: ()).filter(d => d.valid_for_component_inference)
-  if indexed.len() > 0 {
+  if not summary and indexed.len() > 0 {
     figure({
       set text(size: 8.5pt)
       table(columns: (0.5fr, 0.75fr, 1fr, 1fr, 0.75fr, 1fr), inset: 4pt,
@@ -241,7 +322,7 @@
       indexed-capacity result follows.])
   }
 
-  [The source-bound analysis retains cache hit, miss and missing-header counts
+  if not summary [The source-bound analysis retains cache hit, miss and missing-header counts
   alongside phase distributions; missing headers are never inferred misses.
   Per-operation failures, resolved mutations, no-ops, policy probes, inventories
   and cgroup snapshots remain available for every measured cell. The full table

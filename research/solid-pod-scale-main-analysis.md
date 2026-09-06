@@ -25,7 +25,7 @@ Mutation acknowledgements must match exactly one durable receipt for the same Po
 
 Resource admission requires both cgroup snapshots, the configured peak-memory ceiling and no OOM events. CPU and process I/O differences, charged page-cache statistics, peak RSS and PSS remain separately available. The cgroup peak includes warmup. Stored population and record/byte totals are recomputed from the complete inventory and compared with the manifest. Pre-load disk allocation excludes later journal allocation unless additional measurements are supplied.
 
-`storage_inventory_consistent` describes inventory/count agreement separately from query-verification admission; `inventory_consistent` additionally requires all representative verification evidence. Serialized source bytes are N-Quads volume, while packed payload plus offset-index bytes are file lengths. Whole-directory allocated bytes additionally include the uncompressed inventory and manifest. The packer records payload/index digests at creation; opening checks index length and representative verification checks query results, but does not rehash both complete payload files. The local review bundle may omit those payload files. Server CPU counts describe affinity, not a CPU bandwidth quota; CPU-time deltas bracket measurement and drain after warmup, while cgroup memory peaks include warmup and charged page cache. Neither these measurements nor the smallest tested ceiling establishes a whole-host resource minimum.
+`storage_inventory_consistent` describes inventory/count agreement separately from query-verification admission; `inventory_consistent` additionally requires all representative verification evidence. Serialized source bytes are N-Quads volume, while packed payload plus offset-index bytes are file lengths. Whole-directory allocated bytes additionally include the uncompressed inventory and manifest. The packer records payload/index digests at creation; opening checks index length and representative verification checks query results, but does not rehash both complete payload files. The local review bundle may omit those payload files. Server CPU counts describe affinity, not a CPU bandwidth quota; changing the count also changes workers, total queue slots and per-worker cache partitioning. CPU-time deltas cover the measured client window and can include outstanding warmup work, because the runner does not drain server queues between client warmup completion and measurement. Timed-out client requests can continue on workers; remaining work is stopped at server termination. The counters therefore do not establish CPU per measured journey. Cgroup memory peaks include warmup and charged page cache, while driver state and other host allocations remain outside that cgroup. Neither the smallest tested ceiling nor these measurements establishes a whole-host resource minimum.
 
 Paired latency intervals resample independent matched runs. Matching requires the same replicate, seed, offered rate and intended request-schedule hash; requests inside one run are not independent replicates. The schedule fingerprint includes request order/timing, target Pod, principal, channel, operation and template identity. For non-policy requests it also includes the recorded query digest, complete mutation request (including batch identity, offset, revision and count), and expected inserted/deleted triple counts. Equal template IDs or record counts therefore cannot hide changed query content or record targets. Policy attempts use their common intended rights, including the desired grant state, rather than language-specific policy query bytes. Outcomes, receipts and observed timings are excluded from the intent fingerprint. The estimate is the geometric mean ACP/WAC ratio, with a percentile bootstrap interval. A same-load completion-rate ratio is explicitly offered-load-capped and is not a capacity comparison.
 
@@ -35,9 +35,37 @@ The full-service million-history admission field remains false in this extractor
 
 ## Manuscript binding
 
-The standalone paper keeps the completed exploratory pilot visible by default. To replace its detailed pilot table with the finalized main summary, compile `site/papers/solid-pod-scale.typ` with `--input campaign=../../research/solid-pod-scale-main.json`. The input must be this extractor's main schema, not a free-form summary or conclusion. `site/papers/solid-pod-scale-results.typ` requires verified complete checksums and a matching passed source review; quarantine takes precedence. Absent, partial, incompatible and unreviewed inputs retain the pilot and print the evidence status.
+The standalone paper now binds the finalized [main analysis](solid-pod-scale-main.json)
+by default. The [audit summary](solid-pod-scale-main-report.json) binds its numerical
+cohorts to the main file's digest. Render the concise manuscript and exhaustive
+companion from the repository root:
 
-The main presentation counts all planned repetitions as pass, valid failure, inconclusive or unmeasured. It keeps paired response intervals separate from conservative capacity bounds and rounds displayed interval endpoints outward. It does not generate an overall retained-history million-Pod or network-journey conclusion from local cell passes. Main evidence replaces pilot detail rather than creating a second full results section. The synthetic presentation tests check the guard branches and the extractor-to-Typst schema without producing a benchmark paper PDF; run them with `TYPST_BIN=/path/to/typst python3 -m unittest discover -s bench/ac/million -p test_paper_results.py`.
+```sh
+typst compile --root . site/papers/solid-pod-scale.typ output/pdf/solid-pod-scale.pdf
+typst compile --root . site/papers/solid-pod-scale-companion.typ output/pdf/solid-pod-scale-companion.pdf
+```
+
+The companion uses relative links compatible with the same output directory.
+The paper links to that sibling PDF and to source/audit JSON in the local review
+bundle; these are not public archival URLs. An explicit empty `--input campaign=`
+selects the historical pilot fallback. A supplied analysis must use the extractor's
+schema and pass complete-checksum and matching source-review guards; quarantine
+takes precedence. The final narrative also checks the valid run set and factual
+conditions supporting its headline claims, rather than applying those claims to
+an arbitrary future artifact.
+
+The main response table selects experiment roles, not successful outcomes. It
+omits secondary compact controls and additional hot-set memory tiers, which remain
+in the companion together with every planned pass/fail/inconclusive/unmeasured
+count, resource counter and paired interval. The main table separates queue-only
+guard failures from other failures and keeps all offered requests in success and
+deadline denominators. Conditional successful-response percentiles remain absent
+when no request succeeds. Physical storage totals use their independent inventory
+check, so representative admission failure does not erase valid stored totals.
+
+The focused tests exercise source gates, queue-only classification, missing-value
+handling, paired intervals and physical/resource accounting. Run them with
+`TYPST_BIN=/path/to/typst python3 -m unittest discover -s bench/ac/million -p test_paper_results.py`.
 
 ## Cache and indexed component diagnosis
 
