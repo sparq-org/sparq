@@ -1193,6 +1193,15 @@ jobs:
         run: python3 scripts/check-advisory-registry.py --self-test
       - name: "Enforce advisory-job registry + gate-intent placement (C2/C3/C4) — GATING"
         run: python3 scripts/check-advisory-registry.py
+      # [OPUS-5] #5799 / #6226: freeze every way a step in a gating job can
+      # launder a failed command into success. W1 covers `|| true` / `|| :`, W2
+      # covers `set +e` without immediate status handling, W3 rejects stale or
+      # malformed waivers, and W4 covers step-level `continue-on-error` including
+      # expression values. The advisory registry is the shared source of gate intent.
+      - name: Self-test the workflow failure-swallow checker (W1/W2/W3/W4)
+        run: python3 scripts/check-workflow-run-swallow.py --self-test
+      - name: "Enforce workflow failure-swallow waivers (W1/W2/W3/W4) — GATING"
+        run: python3 scripts/check-workflow-run-swallow.py
       # [OPUS-4.8] sparq-org/sparq#3475: the fast-fix ring's ONLY privileged
       # capability is the cross-repo REGISTRY_RING_TOKEN doorbell. Because a
       # `workflow_run` workflow is ALSO delivered for fork / cross-repo triggering
