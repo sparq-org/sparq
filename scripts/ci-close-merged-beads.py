@@ -132,6 +132,40 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _dumps(obj) -> str:
+    """Serialize one bead row the way `bd export` does — byte-for-byte.
+
+    bd is Go, so `.beads/issues.jsonl` carries Go `encoding/json` conventions, which differ
+    from Python's json defaults in BOTH directions (issue #6087):
+
+      * non-ASCII is emitted RAW. Python's `ensure_ascii=True` would `\\uXXXX`-escape it, and
+        this repo's bead titles are full of em-dashes — measured on the committed file, 971 of
+        its 1262 lines fail to round-trip under `ensure_ascii=True`.
+      * `<`, `>` and `&` ARE escaped (Go's HTML-safe default, `SetEscapeHTML(true)`), which
+        Python's json never does. 452 committed lines carry such an escape; none carries a
+        literal `<`, `>` or `&`.
+      * U+2028 / U+2029 are escaped too — Go does this unconditionally, not only in HTML-safe
+        mode. (Unexercised by the current corpus, which contains neither character; included
+        because a raw one from Python would be a divergence bd could never have produced.)
+
+    The post-pass over the dumped text is exact, not a heuristic: JSON's grammar uses none of
+    these characters structurally, and `json.dumps` never emits them inside an escape sequence
+    (a `\\uXXXX` escape is a backslash, `u`, and four hex digits), so every occurrence in the
+    dump is already a literal inside a string and every one of them must be escaped.
+
+    Getting this wrong is not cosmetic-only in effect: `close_beads_in_jsonl` re-serializes the
+    lines it mutates and leaves the rest verbatim, so a non-round-tripping dump rewrites those
+    lines in a style the next real `bd export` immediately churns back — the noisy-diff failure
+    mode that function exists to avoid.
+    """
+    return (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+
+
 def close_beads_in_jsonl(path: str, bead_ids, reason: str, now: str = None):
     """Minimal in-place close. Returns (closed, skipped_already_closed, not_found, changed).
 
@@ -176,13 +210,12 @@ def close_beads_in_jsonl(path: str, bead_ids, reason: str, now: str = None):
             obj["updated_at"] = now
             if reason:
                 obj["close_reason"] = reason
-            # Preserve trailing newline if the original line had one. Re-serialize in
-            # the SAME compact, ASCII-escaped style `bd export` emits (verified against
-            # the committed .beads/issues.jsonl) so the mutated line is byte-style
-            # consistent with its neighbours and the orchestrator's next `bd export`
-            # does not re-churn it.
+            # Preserve trailing newline if the original line had one. Re-serialize through
+            # _dumps, which reproduces bd's Go serializer byte-for-byte (issue #6087), so the
+            # mutated line is byte-style consistent with its neighbours and the orchestrator's
+            # next `bd export` does not re-churn it.
             nl = "\n" if line.endswith("\n") else ""
-            out.append(json.dumps(obj, ensure_ascii=True, separators=(",", ":")) + nl)
+            out.append(_dumps(obj) + nl)
             closed.append(bid)
             changed = True
         else:
@@ -363,21 +396,60 @@ def self_test() -> int:
           map_beads_to_open_issues(["sq-dup1"], dup_issues),
           ([], [], [], [("sq-dup1", [20, 21])]))
 
+    # Serializer parity with bd's Go `encoding/json` (issue #6087). Each half of _dumps is
+    # pinned separately and byte-exactly: `ensure_ascii=True` reds the first, dropping the
+    # HTML post-pass reds the second. Both halves are load-bearing — a line this script
+    # rewrites in Python's default style is re-churned by the very next real `bd export`.
+    check("_dumps leaves non-ASCII RAW (Go emits it unescaped; \\u2014 would churn)",
+          _dumps({"t": "red — solid"}), '{"t":"red — solid"}')
+    check("_dumps escapes < > & (Go's HTML-safe default; Python's json never does)",
+          _dumps({"t": "a<b>c&d"}), '{"t":"a\\u003cb\\u003ec\\u0026d"}')
+    check("_dumps escapes U+2028/U+2029 (Go escapes these unconditionally)",
+          _dumps({"t": "a\u2028b\u2029c"}), '{"t":"a\\u2028b\\u2029c"}')
+    check("_dumps is compact (no whitespace after ',' or ':')",
+          _dumps({"a": 1, "b": [2, 3]}), '{"a":1,"b":[2,3]}')
+
+    # The corpus assertion: every committed bead line must survive _dumps(json.loads(line))
+    # byte-for-byte. This is the assertion #6087 could not have survived — under the old
+    # `ensure_ascii=True` serializer 971 of the 1262 committed lines diverge. Skipped (not
+    # failed) when the file is absent, so the self-test stays runnable outside a checkout.
+    corpus = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          ".beads", "issues.jsonl")
+    if os.path.exists(corpus):
+        with open(corpus, encoding="utf-8") as fh:
+            corpus_lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+        diverged = [n for n, ln in enumerate(corpus_lines, 1)
+                    if _dumps(json.loads(ln)) != ln]
+        check(f"all {len(corpus_lines)} committed bead lines round-trip byte-for-byte",
+              diverged[:5], [])
+        # …and that the corpus actually exercises BOTH halves, so the assertion above cannot
+        # go vacuously green if bead text ever stops containing the characters at issue.
+        check("corpus exercises the raw-non-ASCII half",
+              any(any(ord(c) > 127 for c in ln) for ln in corpus_lines), True)
+        check("corpus exercises the HTML-escape half",
+              any("\\u003c" in ln or "\\u003e" in ln or "\\u0026" in ln
+                  for ln in corpus_lines), True)
+    else:
+        print(f"  skip corpus round-trip ({corpus} not present)")
+
     # End-to-end minimal-edit close against a temp JSONL.
     fd, tmp = tempfile.mkstemp(suffix=".jsonl")
     os.close(fd)
     try:
+        # Titles carry both characters at issue so the end-to-end path exercises the
+        # serializer too: an em-dash (must stay raw) and `<`/`&` (must stay escaped).
         rows = [
-            {"_type": "issue", "id": "sq-open1", "title": "open one",
+            {"_type": "issue", "id": "sq-open1", "title": "open one — <b>bold</b> & bare",
              "status": "in_progress", "priority": 3, "issue_type": "task"},
             {"_type": "issue", "id": "sq-done2", "title": "already closed",
              "status": "closed", "priority": 3, "issue_type": "task"},
-            {"_type": "issue", "id": "sq-other3", "title": "unrelated open",
+            {"_type": "issue", "id": "sq-other3", "title": "unrelated open — <i>italic</i>",
              "status": "open", "priority": 3, "issue_type": "task"},
         ]
+        written = [_dumps(r) for r in rows]
         with open(tmp, "w", encoding="utf-8") as f:
-            for r in rows:
-                f.write(json.dumps(r) + "\n")
+            for ln in written:
+                f.write(ln + "\n")
 
         closed, skipped, not_found, changed = close_beads_in_jsonl(
             tmp, ["sq-open1", "sq-done2", "sq-ghost9"], "merged via PR #1 (test)",
@@ -387,10 +459,25 @@ def self_test() -> int:
         check("unmatched id reported not_found", not_found, ["sq-ghost9"])
         check("changed flag set", changed, True)
 
+        with open(tmp, encoding="utf-8") as fh:
+            raw_after = fh.read().splitlines()
         after = {}
-        for line in open(tmp, encoding="utf-8"):
+        for line in raw_after:
             d = json.loads(line)
             after[d["id"]] = d
+
+        # The REWRITTEN line must be in bd's own byte style, not Python's default (#6087).
+        # Asserted on the bytes, because a decoded-object comparison cannot see the churn.
+        mutated = raw_after[0]
+        check("rewritten line keeps its em-dash RAW (no \\u2014 churn)",
+              "—" in mutated and "\\u2014" not in mutated, True)
+        check("rewritten line keeps < > & HTML-escaped (no literal angle bracket)",
+              "\\u003cb\\u003ebold\\u003c/b\\u003e \\u0026 bare" in mutated, True)
+        check("rewritten line round-trips through bd's serializer",
+              _dumps(json.loads(mutated)), mutated)
+        # …and the lines this function did NOT touch are byte-for-byte the input.
+        check("untouched lines are preserved verbatim", raw_after[1:], written[1:])
+
         check("sq-open1 now closed", after["sq-open1"]["status"], "closed")
         check("sq-open1 has closed_at", after["sq-open1"].get("closed_at"), "2026-06-19T00:00:00Z")
         check("sq-open1 has close_reason", after["sq-open1"].get("close_reason"), "merged via PR #1 (test)")
