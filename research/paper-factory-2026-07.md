@@ -163,6 +163,31 @@ records remain scoped as internally re-audited with external sign-off pending.
 | F4 | sq-gum8.16 | `site/` papers lib + sync | opus | `canonical-timing` class: `sync-canonical-timing.mjs` auto-derivation from `canonical: true` envelopes + `timing.typ` provenance-forced `headline_timing()` | F1, F3 (site serialisation) |
 | F5 | sq-gum8.17 | `site/papers/sparq-engine-systems.typ` | sonnet | Flagship consumer: live canonical-timing evaluation section, accessor-only numbers | F4 (+ sq-gum8.3 coordination) |
 
+**AS-BUILT (F4 / sq-gum8.16, [OPUS-5]).** Landed as designed, with three deviations worth
+recording:
+
+1. **No `--input timing=`.** `timing.typ` reads the derived JSON from the Typst project root
+   instead of taking it as an injected argument. Same anti-drift property (both the PDF and the
+   HTML compile from the same committed file in the same build) without the OS single-argument
+   size ceiling a growing envelope set would eventually hit.
+2. **Provenance is inline + block, not a `footnote()`.** Typst's native HTML export is
+   experimental and drops layout-only constructs, so a real footnote would render in the PDF and
+   vanish from the in-site page — i.e. the provenance would be droppable, which is exactly what
+   the design forbids. `headline_timing()` therefore emits a compact inline tag (aggregate · host
+   class · commit) and `timing_provenance()` the full block form; both survive both exports.
+3. **Two admission rules the design did not anticipate, both found by reading the real
+   envelopes.** (a) *COUNT BEFORE TIME* — the envelopes themselves say "this is why COUNT is
+   checked before trusting any timing", so a row is admitted only if that engine's own count
+   matches the suite's committed `expected-rows`; this is what keeps a comparator that returned
+   0 rows on SP2Bench q08/q12b out of the class. (b) An envelope carrying a free-text
+   `disqualified_note` is refused *whole* — the note scopes a disqualification in prose a machine
+   cannot bound.
+
+Also deliberately NOT built: any ratio / speed-up accessor (a cross-engine ratio is a claim, not
+a derivation), and the HTTP / materialization / HDT envelope families, which are recognised and
+skipped with a recorded reason rather than guessed at. F5 (the first consuming paper) remains
+open, so no published paper headlines a measured timing yet.
+
 Each bead's full spec (files, invariant, acceptance test) lives on the bead itself; the
 invariants in one line: **F1** fail-closed value↔source verification; **F2**
 result-equivalence between the Rust consts and the JSON mirror; **F3** zero unverified
