@@ -33,10 +33,38 @@
   let rows = cells.filter(c => c.model == model)
   ("pass", "fail", "inconclusive", "unmeasured").map(state => str(rows.filter(c => c.local_guard == state).len())).join("/")
 }
+// Per-run summaries remain separate. Invalid/inconclusive records supply no
+// apparent zero, while a valid all-failure run retains its measured zero fractions.
+#let observed-range(values) = {
+  let present = values.filter(v => v != none and (type(v) == int or type(v) == float) and v >= 0)
+  (n: present.len(), lower: if present.len() > 0 { calc.min(..present) } else { none },
+    upper: if present.len() > 0 { calc.max(..present) } else { none })
+}
+#let model-responses(cells, model) = {
+  let planned = cells.filter(c => c.model == model)
+  let valid = planned.filter(c => c.at("valid_for_inference", default: false) and
+    ("pass", "fail").contains(c.local_guard) and c.at("requests", default: none) != none)
+  let p95 = valid.map(c => c.requests.at("latency_us", default: (:)).at("successful:scheduled_latency_us", default: (:)).at("p95", default: none))
+  let timely = valid.map(c => c.requests.at("deadline_fraction_of_offered", default: none))
+  let successful = valid.map(c => c.requests.at("success_fraction_of_offered", default: none))
+  (planned_runs: planned.len(), valid_runs: valid.len(),
+    successful_p95_us: observed-range(p95), timely_fraction: observed-range(timely),
+    success_fraction: observed-range(successful))
+}
+#let range-label(observation, scale: 1, digits: 1) = {
+  if observation.n == 0 { return "—" }
+  // Outward rounding prevents nearly complete service fractions displaying 100%.
+  let precision = calc.pow(10, digits)
+  let lo = calc.floor(observation.lower * (scale * precision)) / precision
+  let hi = calc.ceil(observation.upper * (scale * precision)) / precision
+  if lo == hi { str(lo) } else { str(lo) + "–" + str(hi) }
+}
+#let range-cell(observation, scale: 1, digits: 1) = [#range-label(observation, scale: scale, digits: digits)#if observation.n > 0 { super(str(observation.n)) }]
+
 #let offered-label(cells, pair) = {
   if pair.rate_override != "derived" { return pair.rate_override }
   let rates = cells.filter(c => c.valid_for_inference and c.at("requests", default: none) != none).map(c => c.requests.offered_rate)
-  if rates.len() == 0 { return "derived; unmeasured" }
+  if rates.len() == 0 { return "derived; unavailable" }
   let lo = calc.min(..rates)
   let hi = calc.max(..rates)
   if lo == hi { num(lo) } else { num(lo) + "–" + num(hi) }
@@ -54,25 +82,41 @@
 #let main-tables(data) = {
   assert(main-state(data) == "finalized and reviewed", message: "Main tables require finalized, source-reviewed analysis")
   figure({
-    set text(size: 8.5pt)
-    table(columns: (1.5fr, 0.55fr, 0.68fr, 0.8fr, 0.8fr, 0.9fr), inset: 4pt,
-      table.header([*Corpus / lane*], [*CPU / GiB*], [*Offered rps*], [*WAC*\ *P/F/I/U*], [*ACP*\ *P/F/I/U*], [*p95 ratio*\ *95% CI*]),
+    set text(size: 8pt)
+    table(columns: (1.8fr, 0.72fr, 0.85fr, 0.95fr, 0.72fr, 0.85fr, 0.95fr, 1.03fr), inset: 3pt,
+      table.header(
+        table.cell(rowspan: 2)[*Corpus / lane*\ *CPU/GiB · rps*],
+        table.cell(colspan: 3)[*WAC*], table.cell(colspan: 3)[*ACP*],
+        table.cell(rowspan: 2)[*p95 ratio*\ *95% CI*],
+        [*P/F/I/U*], [*OK p95*\ *ms*], [*Timely %*\ *OK %*],
+        [*P/F/I/U*], [*OK p95*\ *ms*], [*Timely %*\ *OK %*],
+      ),
       ..data.paired_comparisons.map(p => {
         let rows = paired-cells(data, p)
         let ci = p.paired_p95_scheduled_response_ratio
+        let wac = model-responses(rows, "wac")
+        let acp = model-responses(rows, "acp")
         (
-          [#dataset-label(p.dataset)\ #text(size: 7.5pt)[#group-label(p.group)]],
-          [#p.cpus / #p.memory_gib], [#offered-label(rows, p)],
-          [#verdict-counts(rows, "wac")], [#verdict-counts(rows, "acp")],
+          [#dataset-label(p.dataset)\ #text(size: 7pt)[#group-label(p.group)\ #p.cpus/#p.memory_gib · #offered-label(rows, p)]],
+          [#verdict-counts(rows, "wac")],
+          [#range-cell(wac.successful_p95_us, scale: 0.001)],
+          [#range-cell(wac.timely_fraction, scale: 100, digits: 2)\ #range-cell(wac.success_fraction, scale: 100, digits: 2)],
+          [#verdict-counts(rows, "acp")],
+          [#range-cell(acp.successful_p95_us, scale: 0.001)],
+          [#range-cell(acp.timely_fraction, scale: 100, digits: 2)\ #range-cell(acp.success_fraction, scale: 100, digits: 2)],
           [#if ci.available { bounds(ci.ci95) } else { "unavailable" }],
         )
       }).flatten(),
     )
-  }, caption: [Main local HTTP cells. Counts retain every planned repetition:
-    P pass, F valid failure, I inconclusive, U unmeasured. The p95 ACP/WAC ratio
-    resamples matched independent runs and concerns successful scheduled-arrival
-    to complete-body responses. A ratio alone does not establish a service pass;
-    admission retains failures in every offered-request denominator.])
+  }, caption: [Main local HTTP cells. P/F/I/U count passing, valid failing,
+    inconclusive and unmeasured repetitions. Absolute columns show between-run
+    min–max ranges, rounded outward; superscripts count contributing valid runs.
+    A dash is unavailable, not zero. “OK p95” uses successful responses only,
+    from scheduled arrival to complete body. “Timely” and “OK” divide successful
+    responses within #data.campaign.measurement.server_deadline_ms ms and all
+    successful responses by *all offered requests*, including
+    errors and drops. The ACP/WAC p95 CI resamples matched runs; it neither pools
+    requests nor establishes a service pass by itself.])
 
   let brackets = data.capacity_brackets
   if brackets.len() > 0 {
