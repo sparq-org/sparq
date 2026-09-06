@@ -959,6 +959,15 @@ class ClassifyOnlyMainTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "orchestration-only")
 
+    # [GPT-5] #6222: promotion is the third trust/triage orchestration script;
+    # keep its classify-only contract pinned independently of its siblings.
+    def test_promote_script_classifies_as_orchestration_only(self):
+        changed = self._write("scripts/promote.py\n")
+        code, out = self._run_main(["--classify-only", "--event", "pull_request",
+                                    "--changed-file", changed])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "orchestration-only")
+
 
 class OrchestrationSafeInertnessTests(unittest.TestCase):
     """[OPUS-4.8] THE INERTNESS OBLIGATION: every _ORCHESTRATION_SAFE entry must be
