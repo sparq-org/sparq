@@ -14,6 +14,23 @@ proof-of-possession (mTLS cert-bound tokens, DPoP-SK), notifications
 
 ## 🚀 Quickstart
 
+### Persisted population research example
+
+<!-- [GPT-6] -->
+`cargo build --release -p sparq-lws-core --example pod_population_http`
+builds an opt-in experiment over compressed, fully persisted Pod snapshots.
+It adds no route to the shipping server. Its `pack`, `verify`, `auth`, `serve`
+and scheduled `load` commands are documented in
+[`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md#persisted-population-research-example).
+
+The experiment verifies signed access tokens and request-bound DPoP through
+the existing authentication implementation, then loads and authorizes only
+the requested Pod. It supports WAC and ACP reads and data updates. Policy
+editing uses the same separate, manifest-owner administration rule for both
+languages: this does not implement ACP authorization of ACR editing. The
+corpus, cache admission limits, whole-response client measurements, and
+unimplemented production-server facilities must accompany capacity claims.
+
 ```bash
 # Build + run the server binary (in-memory store, plain TCP)
 cargo run -p sparq-lws-core

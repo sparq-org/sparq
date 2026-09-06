@@ -9,6 +9,128 @@ metadata:
 
 # sparq native Solid/LWS server
 
+## Persisted population research example
+
+<!-- [GPT-6] -->
+`pod_population_http` is an explicitly invoked research example, separate
+from the native LDP server and its production routes. Build and prepare a
+small controlled corpus:
+
+```sh
+cargo build --release --locked -p sparq-lws-core --example pod_population_http
+target/release/examples/pod_population_http auth --auth-dir /tmp/pod-auth
+target/release/examples/pod_population_http pack --corpus /tmp/pod-wac --profile smoke --pods 8 --model wac
+target/release/examples/pod_population_http verify --corpus /tmp/pod-wac --verify-pods 8
+target/release/examples/pod_population_http serve --corpus /tmp/pod-wac --auth-dir /tmp/pod-auth --bind 127.0.0.1:3100
+```
+
+In another process, send scheduled real HTTP requests:
+
+```sh
+target/release/examples/pod_population_http load --corpus /tmp/pod-wac --auth-dir /tmp/pod-auth --pods 8 --requests 1000 --rate 10 --arrival poisson --selection uniform --query-set population --out /tmp/pod-load.jsonl
+```
+
+All options are `--name value`. `pack --model acp` emits the alternative
+policy encoding. `--profile history` selects the documented service-history
+scenario; `--config-file file.json` supplies an explicit `PopulationConfig`.
+The `smoke` profile is a small control fixture and does not justify realistic
+population capacity. `pack` refuses to overwrite existing packed files.
+See the access-control benchmark skill for source evidence and assumptions.
+
+The packed layout is `pods.nqpack` (one independent Zstandard frame per
+populated Pod), `pods.index` (three little-endian unsigned 64-bit integers
+per Pod: offset, compressed length, uncompressed length),
+`pod-summaries.jsonl`, and a final `manifest.json` with configuration,
+counts and file hashes. A Pod is generated and persisted before it can be
+served; there is no request-time procedural population generation. Direct
+indexed file lookup avoids keeping the whole population route map in RAM.
+
+`serve` defaults to one Pod worker, a bounded queue, and a cache limited by
+both `--cache-pods` and `--cache-bytes`. Those bytes are uncompressed source
+bytes, **not measured graph heap bytes**. `--workers` divides both budgets
+among deterministic Pod-affine workers. `--max-pod-bytes` rejects oversized
+source snapshots rather than dropping their records. `--max-journal-bytes`
+limits each Pod's update history. Use an external Linux cgroup with swap
+disabled for a hard RAM limit and report charged page cache, process RSS,
+admission failures and queue rejections. The example does not claim that
+its source-byte cache limit is a complete memory bound.
+
+`auth` generates distinct benchmark issuer and DPoP client keys. The private
+`client-secrets.json` is created exclusively with owner-only permissions;
+the server reads only `issuer-public.json`. Access tokens and fresh DPoP
+proofs are cryptographically checked through `AuthContext`, including
+audience, expiry, issuer trust, client identity and replay protection.
+WebIDs passed to `Session` come from the verified token. The experiment
+pins the benchmark issuer key and excludes live OIDC discovery, WebID
+fetching, login/token-endpoint traffic, and TLS setup in its loopback
+profile. It performs full token verification on each request. Set
+`--base-url` identically in `serve` and `load` for the token audience and
+DPoP target; `load --connect` independently selects the HTTP dial address.
+
+The routes are:
+
+| Route | Body | Authorization |
+|---|---|---|
+| `POST /pods/{id}/sparql` | SELECT or ASK | Verified session; WAC/ACP readable graph view |
+| `POST /pods/{id}/update` | SPARQL Update | WAC/ACP data-update checks |
+| `POST /pods/{id}/policy` | Explicit INSERT DATA / DELETE DATA | Shared manifest-owner administration |
+
+Policy administration checks the verified WebID against the owner derived
+from the trusted corpus manifest. It accepts only existing policy graphs
+of the addressed Pod, validates all operations before applying any, rebuilds
+authorization, atomically replaces the durable update journal, and syncs
+the journal and directory entries before acknowledging success. A denied
+or failed mutation evicts the affected cached dataset. Replay after
+eviction/restart reconstructs the current policy view. A Pod is assigned
+to one worker, so queries admitted after an acknowledged update observe
+the new rights. This owner-management rule is identical for both language
+variants and is **outside their policy-editing authorization semantics**.
+The library's unsupported ACP ACR-editing path is not presented as working.
+
+For ACP grant/revoke experiments, detach and restore the reader policy's
+`acp:apply` link. Removing its sole matcher attribute can create an invalid
+empty matcher and is not the benchmark's revocation encoding. The example
+does not establish complete ACP conformance.
+
+`verify` compares all generated query templates and principal classes
+against physically filtered readable records, using the same SPARQ engine
+for reference evaluation. It compares exact bags or ordered results and
+checks record counts with an independent arithmetic oracle. This provides
+independent authorization selection, not an independent SPARQL evaluator.
+Sampling is controlled by `--verify-pods`; an exploratory sample is not a
+claim that every Pod has undergone every query.
+
+The load driver supports `--arrival constant|poisson`,
+`--selection sequential|uniform|hot|skew80-20`, `--seed`,
+`--principal owner|recipient|outsider|public`, `--max-inflight`,
+`--timeout-ms`, `--query-file`, and `--query-set population`.
+`hot` is an explicitly named diagnostic with most requests to a small
+working set; `skew80-20` is the protocol's declared skew scenario.
+`--mix population --workload-file file.json` derives query/background/data
+write/policy-write proportions from the workload input. Reads currently
+sample declared templates uniformly; content writes replace one existing
+record value, and policy writes alternate intended grant/revoke states.
+These implementation choices must be frozen in the campaign protocol.
+Policy triple deltas expose idempotent/no-op operations after drops or
+failures; successful requests alone do not prove effective policy churn.
+
+Raw JSONL preserves every offered request, including unsent requests at
+the client's concurrency limit. The schedule is computed before load and
+never slowed in response to the server. Records separate preparation and
+dispatch lag, complete client response-body latency, scheduled-arrival
+latency, failures and server diagnostic timers. `x-server-us` starts in
+request middleware before body extraction and ends after result
+serialization; it excludes socket delivery and any earlier transport
+waiting. Use complete local HTTP latency as the conservative local SLO
+measure and scheduled latency to expose overload. Neither component
+percentiles nor this loopback profile establish a remote network SLO.
+
+`bench/ac/million/run-instance.sh pilot` runs a bounded exploratory matrix
+on a disposable Linux host. The cloud launcher preserves the study budget,
+watchdog and teardown controls. Canonical mode requires an explicitly
+frozen population ladder, rate and request count; workstation timings and
+exploratory pilots remain noncanonical.
+
 Use `sparq-lws-core` as an experimental native Solid/LDP server. It is not a
 replacement for the supported TypeScript `prod-solid-server`, and its default
 storage is ephemeral. Use `skills/javascript-wasm/SKILL.md` instead for the

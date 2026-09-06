@@ -284,6 +284,8 @@ getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 js-sys = "0.3"
 
 [dev-dependencies]
+# [GPT-6] Research-only packed population snapshots; already pinned transitively.
+zstd = "0.13"
 # Paper artefact: the many-Pod runner compares the native HTTP assembly path with
 # the independently generated corpus and the routed materialized authorization view.
 # These edges are example/test-only and do not enter the server's shipping graph.
