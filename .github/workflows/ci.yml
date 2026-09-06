@@ -230,7 +230,7 @@ jobs:
       # change-class gate in the decide step below (dorny's push/merge_group base-diff is
       # unreliable; the merge_group event payload's base_sha/head_sha pair is not), and
       # every other event force-runs the full matrix, so the filter is irrelevant there.
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
@@ -494,7 +494,7 @@ jobs:
       # item 2) lets a residual transient binary race self-heal. SHA-pinned install
       # action (a pin already vetted elsewhere in this workflow).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: nextest
       # [OPUS-4.8] Build + ARCHIVE the whole workspace test set once. `--all-targets`
@@ -695,7 +695,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: nextest
       - name: Download nextest archive
@@ -3335,7 +3335,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: taiki-e/install-action picks the tool from its @<tool> ref;
         # SHA-pinning (our code-scanning=0 policy) drops that ref, so an explicit `with: tool:`
         # is MANDATORY — without it install-action installs NOTHING and `cargo llvm-cov` ENOENTs.
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Compute coverage cone (ENFORCE mode, sq-3dr4t) [SONNET-4.6]
@@ -3543,7 +3543,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action (the @<tool> ref is dropped by the pin). Both tools are needed:
         # llvm-cov for instrumentation, nextest for the partitioning.
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Fetch W3C fixtures (engine tests need them)
@@ -3611,7 +3611,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: coverage-engine-run-1
       - name: Install cargo-llvm-cov + nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Build instrumented engine objects (for `report`, no test run)
@@ -3962,7 +3962,7 @@ jobs:
         # [OPUS-4.8] sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action — the @<tool> ref is dropped by the SHA pin, so without this the
         # tool is silently NOT installed and `cargo llvm-cov` ENOENTs (see per-commit job).
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-llvm-cov
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Test-presence gate
@@ -4381,7 +4381,7 @@ jobs:
           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-mutants
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # cargo-mutants
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # cargo-mutants
         with:
           tool: cargo-mutants@25.3.1
       - name: Run cargo-mutants for this crate + ratchet against the baseline
@@ -4534,7 +4534,7 @@ jobs:
           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-geiger
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: cargo-geiger
         continue-on-error: true
@@ -4577,7 +4577,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build image (load into the local daemon)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:

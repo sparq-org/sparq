@@ -161,7 +161,7 @@ jobs:
       # behavior is unchanged; only the invocation is now wrapped and captured. The unchanged
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)

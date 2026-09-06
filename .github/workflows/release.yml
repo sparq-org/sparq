@@ -226,7 +226,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: cargo-cyclonedx
       # [OPUS-4.8] sq-toze.27 (GS-3): Node for the JS/npm SBOM of the published WASM client.
@@ -250,7 +250,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.version }}
         run: scripts/gen-js-sbom.sh
       - name: Attest build provenance (SBOM + VEX)
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             sbom/*.sbom.cdx.json
@@ -338,7 +338,7 @@ jobs:
             --bin served-conformance-report -- \
             --out "conformance/served-conformance-${VERSION}.json"
       - name: Attest build provenance (served-surface conformance report)
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: conformance/served-conformance-*.json
       # [OPUS-5] #4570 (GX-11 residual): same digest hand-off as the SBOM lane — the conformance
@@ -706,7 +706,7 @@ jobs:
       # and verifiable with `gh attestation verify <bundle> --repo <repo>`. (Provenance != OS
       # code-signing; see the job header.)
       - name: Attest build provenance (GUI bundles)
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: gui-bundles/*
 
@@ -1088,9 +1088,9 @@ jobs:
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           platforms: arm64
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Log in to ghcr.io
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1165,7 +1165,7 @@ jobs:
           trivyignores: .trivyignore
       - name: Upload Trivy SARIF to code-scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-results.sarif
           category: trivy-release-image

@@ -127,7 +127,7 @@ jobs:
       # INTO the released binary, so the shipped artifact is self-describing for post-build audit
       # (`cargo audit bin <file>` / `auditable info <file>`). Negligible size cost; no runtime overhead.
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: cargo-auditable
       - name: Build sparq-cli + sparq-server (${{ matrix.cpu || 'default-cpu' }})
@@ -182,7 +182,7 @@ jobs:
       # below + release.yml#provenance (sq-toze.25 / GX-11).
       - name: Attest build provenance (archives)
         if: inputs.mode == 'archive'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             pkg/*.tar.gz
@@ -251,7 +251,7 @@ jobs:
       # the basis of the L3 claim — see the digest step below + dist.yml#provenance (#4570).
       - name: Attest build provenance (dist binaries)
         if: inputs.mode == 'binary'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}

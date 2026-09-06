@@ -194,11 +194,11 @@ jobs:
         # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: typos@1.47.2
       - name: Install lychee (for the site-links self-test)
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: lychee@0.23.0
 

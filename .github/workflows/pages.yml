@@ -256,7 +256,7 @@ jobs:
       # 0.23.0 is the version lycheeverse/lychee-action@v2.8.0 ships, so behaviour matches the
       # markdown gate.
       - name: Install lychee
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: lychee@0.23.0
       - name: Link-check the static-export HTML (lychee --offline)
@@ -269,7 +269,7 @@ jobs:
       # lanes are only equivalent if they build with the same renderer, and
       # scripts/check-guide-publish-wiring.py fails the build if they diverge.
       - name: Install mdbook (pinned)
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: mdbook@0.4.40
       # Shared with docs.yml so the validate lane and the publish lane cannot drift. The script

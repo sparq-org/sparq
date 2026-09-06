@@ -83,7 +83,7 @@ jobs:
       # touches none of the `rust` path set below cannot change it — so we now diff the queued
       # batch's base_sha..head_sha against the SAME `rust` path set the PR filter uses and skip
       # the heavy rust step-groups when nothing matched (fail-safe: any diff error → full run).
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
@@ -269,7 +269,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny + cargo-vet + cargo-cyclonedx
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: cargo-deny,cargo-vet@0.10.2,cargo-cyclonedx
 

@@ -85,7 +85,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           tool: nextest
       # THE MEASUREMENT. Three flags are load-bearing:

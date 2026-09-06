@@ -43,7 +43,7 @@ jobs:
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install pinned cargo-mutants
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d
         with:
           # 25.3.1 supports --in-diff (available since 23.11.1).
           tool: cargo-mutants@25.3.1

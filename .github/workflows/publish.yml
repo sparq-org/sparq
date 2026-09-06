@@ -396,7 +396,7 @@ jobs:
       # Same SHA-pinned attest action + version as release.yml — one signed SLSA provenance
       # predicate per .crate, binding its digest to this workflow run.
       - name: Attest crate-package provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: crate-pkgs/*.crate
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -513,7 +513,7 @@ jobs:
       # the default) generates + uploads a PEP-740 attestation per file. No static API token.
       # `print-hash` echoes the uploaded digests into the log for audit.
       - name: Publish to PyPI with provenance attestations
-        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
           print-hash: true
