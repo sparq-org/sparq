@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "study_id": "solid-pod-scale",
+  "model_provenance": "[GPT-6]",
+  "version": "1.0.0",
+  "status": "prospective-scenario-model",
+  "population": {
+    "unit": "one hosted Pod per registered person",
+    "interpretation": "hypothetical adult all-service migration population; not an observed deployed Solid population",
+    "daily_active_fraction": 0.6,
+    "inactive_pods_remain_populated": true,
+    "daily_active_fraction_sensitivity": [0.2, 0.6, 1.0]
+  },
+  "journeys": [
+    {"id":"communication","actions_per_active_person_day":20,"logical_reads_per_action":2,"client_cache_hit_fraction":0.75,"batch_factor":1,"pod_fanout":1,"query_families":["point","star","join"]},
+    {"id":"social","actions_per_active_person_day":30,"logical_reads_per_action":3,"client_cache_hit_fraction":0.6,"batch_factor":1,"pod_fanout":1,"query_families":["star","join","optional"]},
+    {"id":"calendar","actions_per_active_person_day":8,"logical_reads_per_action":1,"client_cache_hit_fraction":0.5,"batch_factor":1,"pod_fanout":1,"query_families":["star","not-exists"]},
+    {"id":"purchases","actions_per_active_person_day":2,"logical_reads_per_action":1,"client_cache_hit_fraction":0.25,"batch_factor":1,"pod_fanout":1,"query_families":["join","aggregate"]},
+    {"id":"activity","actions_per_active_person_day":4,"logical_reads_per_action":2,"client_cache_hit_fraction":0.5,"batch_factor":1,"pod_fanout":1,"query_families":["path","aggregate"]},
+    {"id":"media","actions_per_active_person_day":6,"logical_reads_per_action":2,"client_cache_hit_fraction":0.5,"batch_factor":1,"pod_fanout":1,"query_families":["point","optional"]},
+    {"id":"cross-domain-search","actions_per_active_person_day":2,"logical_reads_per_action":3,"client_cache_hit_fraction":0.0,"batch_factor":1,"pod_fanout":1,"query_families":["join","graph-scan"]}
+  ],
+  "background": {
+    "read_requests_per_hosted_person_day": 12,
+    "content_write_requests_per_active_person_day": 40,
+    "policy_changes_per_hosted_person_day": 0.02,
+    "description": "Cache validation/synchronization reads and batched content ingestion; request counts are after batching, not raw event counts. Policy changes alternate grant/revoke for a deterministic recipient."
+  },
+  "demand_formula": "N / 86400 * (active_fraction * sum(actions * logical_reads * (1-cache_hit) * pod_fanout / batch_factor) + background_reads + active_fraction * content_writes + policy_changes) * offered_multiplier",
+  "rate_components": ["query", "background-read", "content-write", "policy-write"],
+  "offered_multiplier_scenarios": {"daily-average":1,"busy-period":4,"burst":8},
+  "sensitivity": {
+    "activity_multiplier": [0.25,1,4],
+    "client_cache_hit_override": [0,0.5,0.9],
+    "cross_pod_fanout": [1,4,16],
+    "content_write_multiplier": [0,1,4],
+    "policy_change_multiplier": [0,1,50],
+    "target_distribution": ["uniform-all-hosted", "80-percent-requests-to-20-percent-pods"]
+  },
+  "arrival_schedule": {
+    "method": "Poisson scheduled arrivals; schedule generated before run; same schedule replayed in paired languages",
+    "seeds": [2026090601,2026090602,2026090603,2026090604,2026090605],
+    "retry_policy": "no automatic retries; every offered request retains its first scheduled timestamp",
+    "overload": "count unsent, rejected, timed-out and late arrivals; never lower offered rate when responses slow",
+    "cross_pod": "fanout creates separately authorized target-Pod requests; this does not measure an unbounded federation operator"
+  },
+  "network_profiles": [
+    {"id":"local","round_trip_delay_ms":0,"one_way_jitter_ms":0,"packet_loss_fraction":0,"bandwidth_mbit_per_second":1000},
+    {"id":"regional","round_trip_delay_ms":40,"one_way_jitter_ms":5,"packet_loss_fraction":0,"bandwidth_mbit_per_second":100},
+    {"id":"mobile-stress","round_trip_delay_ms":100,"one_way_jitter_ms":20,"packet_loss_fraction":0.001,"bandwidth_mbit_per_second":20}
+  ],
+  "latency_budget": {
+    "complete_server_response_p95_ms":200,
+    "interactive_journey_p95_ms":1000,
+    "client_processing_budget_ms":200,
+    "sequential_request_counts":[1,3],
+    "three_sequential_requests_server_budget_ms_each":100,
+    "interpretation":"Declared usability targets. Measure complete journeys; component p95 values cannot be added to infer a journey p95. Network profiles are experimental conditions, not population measurements."
+  },
+  "evidence": [
+    {"url":"https://www.ofcom.org.uk/media-use-and-attitudes/online-habits/from-apps-to-ai-search-how-the-uk-goes-online-in-2025","supports":"many service domains and heterogeneity of online use","does_not_support":"chosen action counts, retention, daily-active fraction or backend QPS"},
+    {"url":"https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf","supports":"application fanout and caching affect backend request volume","does_not_support":"transferring Facebook rates or cache-hit fractions to Solid"},
+    {"url":"https://github.com/giltene/wrk2","supports":"scheduled-arrival latency avoids coordinated omission","does_not_support":"this workload's empirical representativeness"},
+    {"url":"https://sre.google/workbook/implementing-slos/","supports":"measure user-relevant latency and availability objectives explicitly","does_not_support":"a universal 200 ms Solid deadline"}
+  ],
+  "activity_anchor": {
+    "source":"https://doi.org/10.1371/journal.pone.0139004",
+    "source_locator":"Results / Objective Data; Methods / Participants and Procedure",
+    "observed_mean_uses_per_person_day":84.68,
+    "observed_sd_uses_per_person_day":55.23,
+    "analyzed_participants":23,
+    "measurement_days":14,
+    "recruitment":"University of Lincoln staff and students, Android owners, recruited age range 18 to 33",
+    "measured_unit":"device entering an interactive state; includes some calls/music, not necessarily screen-on or an application/backend request",
+    "model_connection":"The chosen 72 journeys per active person per day is an order-of-magnitude scenario near this observed interaction count; the activity sensitivity spans 18 to 288 journeys. No one-to-one conversion is assumed.",
+    "limitations":"Small selected historical cohort; device interactions can trigger zero or many journeys and backend requests; does not estimate contemporary population traffic or a statistical confidence bound on Solid demand."
+  },
+  "calibration_status":"Numeric journey, caching, activity, network and background parameters are declared scenario assumptions. The external activity anchor supplies a limited scale check, not fitted backend request rates. No empirical claim about future all-service Solid request rates is licensed by this file."
+}
