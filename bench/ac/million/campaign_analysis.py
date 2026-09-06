@@ -255,6 +255,7 @@ class RequestAnalysis:
         self.explicit_timeout_fields = self.unknown_mutations = self.acknowledged_mutations = 0
         self.receipt_counts, self.policy, self.mutation_errors = Counter(), Counter(), []
         self.cache = Counter(); self.cache_by_outcome = defaultdict(Counter); self.cache_successful = Counter()
+        self.http_status = Counter({"missing": 0, "invalid": 0}); self.http_status_by_outcome = defaultdict(Counter)
 
     def audit(self, rows):
         for row in rows:
@@ -277,6 +278,11 @@ class RequestAnalysis:
             self.recorded += 1
             outcome, operation = row.get("outcome", "missing"), row.get("operation", "unclassified")
             self.outcomes[outcome] += 1; self.operations[operation][outcome] += 1
+            # [GPT-6] Count recorded statuses independently of outcomes; never impute a response.
+            status = row.get("status")
+            status_key = str(status) if type(status) is int and 100 <= status <= 599 else ("missing" if status is None else "invalid")
+            self.http_status[status_key] += 1
+            self.http_status_by_outcome[outcome][status_key] += 1
             self.query_families[row.get("query_id", "unclassified")][outcome] += 1
             self.principals[row.get("principal", "unclassified")][outcome] += 1
             intended = {k: row.get(k) for k in ("sequence", "pod", "principal", "channel", "scheduled_us", "operation", "service", "query_id", "desired_grant", "planned_records")}
@@ -384,6 +390,9 @@ class RequestAnalysis:
                 "success_fraction_of_offered": self.successful / offered if offered else None,
                 "deadline_fraction_of_offered": self.timely / offered if offered else None,
                 "outcomes": dict(self.outcomes), "operations": {k: dict(v) for k, v in sorted(self.operations.items())},
+                "http_status": {"counts_of_recorded": dict(sorted(self.http_status.items())),
+                                "by_outcome": {k: dict(sorted(v.items())) for k, v in sorted(self.http_status_by_outcome.items())},
+                                "scope": "recorded request rows only; integer statuses 100–599 retain their code, absent/null is missing, other values are invalid; unrecorded requests receive no status and offered denominators are unchanged"},
                 "query_templates": {k: dict(v) for k, v in sorted(self.query_families.items())},
                 "principals": {k: dict(v) for k, v in sorted(self.principals.items())},
                 "offered_rate": rate, "elapsed_including_drain_us": elapsed,

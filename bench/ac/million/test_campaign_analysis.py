@@ -95,6 +95,64 @@ def complete_fixture(root):
 
 
 class CampaignAnalysisTests(unittest.TestCase):
+    def test_http_status_retains_success_and_fast_errors_without_changing_deadlines(self):
+        with tempfile.TemporaryDirectory() as temp:
+            analyzer = RequestAnalysis(Path(temp) / "test.sqlite", MEASUREMENT)
+            analyzer.requests(records([request(0), request(1),
+                request(2, status=503, outcome="http-error", scheduled_latency_us=50, http_latency_us=40, server_us=30),
+                request(3, status=401, outcome="http-error", scheduled_latency_us=60, http_latency_us=50, server_us=40)]))
+            result = analyzer.result(); analyzer.close()
+        self.assertEqual(result["http_status"]["counts_of_recorded"], {"200": 2, "401": 1, "503": 1, "missing": 0, "invalid": 0})
+        self.assertEqual(result["http_status"]["by_outcome"], {"ok": {"200": 2}, "http-error": {"401": 1, "503": 1}})
+        self.assertEqual(result["successful"], 2)
+        self.assertEqual(result["success_fraction_of_offered"], .5)
+        self.assertEqual(result["deadline_fraction_of_offered"], .5)
+        self.assertEqual(result["latency_us"]["successful:scheduled_latency_us"], {"n": 2, "p50": 10000, "p95": 10000, "p99": 10000, "maximum": 10000})
+        self.assertEqual(result["latency_us"]["all:scheduled_latency_us"]["n"], 4)
+        self.assertTrue(result["complete_valid_schedule"])
+
+    def test_http_status_does_not_infer_responses_for_transport_or_unsent_requests(self):
+        missing_status = request(3, outcome="client-plan-exhausted")
+        del missing_status["status"]
+        with tempfile.TemporaryDirectory() as temp:
+            analyzer = RequestAnalysis(Path(temp) / "test.sqlite", MEASUREMENT)
+            analyzer.requests(records([request(0), request(1, status=None, outcome="transport-error", is_timeout=True),
+                request(2, status=None, outcome="client-admission-drop"), missing_status]))
+            result = analyzer.result(); analyzer.close()
+        self.assertEqual(result["http_status"]["counts_of_recorded"], {"200": 1, "missing": 3, "invalid": 0})
+        for outcome in ("transport-error", "client-admission-drop", "client-plan-exhausted"):
+            self.assertEqual(result["http_status"]["by_outcome"][outcome], {"missing": 1})
+        self.assertEqual(result["explicit_timeouts"], 1)
+        self.assertEqual(result["success_fraction_of_offered"], .25)
+        self.assertEqual(result["deadline_fraction_of_offered"], .25)
+        self.assertTrue(result["client_limited"])
+
+    def test_http_status_counts_only_present_rows_in_an_incomplete_schedule(self):
+        incomplete = request(2, outcome="http-error")
+        del incomplete["status"]
+        with tempfile.TemporaryDirectory() as temp:
+            analyzer = RequestAnalysis(Path(temp) / "test.sqlite", MEASUREMENT)
+            analyzer.requests(records([request(0), request(1, status=503, outcome="http-error"), incomplete]))
+            result = analyzer.result(); analyzer.close()
+        self.assertEqual(result["http_status"]["counts_of_recorded"], {"200": 1, "503": 1, "missing": 1, "invalid": 0})
+        self.assertEqual(sum(result["http_status"]["counts_of_recorded"].values()), result["recorded"])
+        self.assertEqual((result["recorded"], result["offered"]), (3, 4))
+        self.assertEqual(result["success_fraction_of_offered"], .25)
+        self.assertEqual(result["deadline_fraction_of_offered"], .25)
+        self.assertFalse(result["complete_valid_schedule"])
+        self.assertIn("offered-sequence-coverage-incomplete", result["issues"])
+
+    def test_http_status_rejects_invalid_values_without_coercion(self):
+        for status in (True, False, "200", 200.0, 99, 600, [], {}):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temp:
+                analyzer = RequestAnalysis(Path(temp) / "test.sqlite", MEASUREMENT)
+                analyzer.requests(records([request(0, status=status, outcome="http-error"), *[request(i) for i in (1, 2, 3)]]))
+                result = analyzer.result(); analyzer.close()
+                self.assertEqual(result["http_status"]["counts_of_recorded"], {"200": 3, "missing": 0, "invalid": 1})
+                self.assertEqual(result["http_status"]["by_outcome"]["http-error"], {"invalid": 1})
+                self.assertEqual(result["success_fraction_of_offered"], .75)
+                self.assertTrue(result["complete_valid_schedule"])
+
     def test_end_to_end_admission_failure_does_not_poison_verified_compact_cells(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "artifacts"; root.mkdir()
