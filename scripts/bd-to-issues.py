@@ -6,7 +6,10 @@ DEFAULT is --dry-run: it parses `bd export`, computes the issue payloads + label
 dependency edges, and prints a summary WITHOUT creating anything. `--apply` does the real
 three-pass run (create issues, then stamp the `Blocked-by:`/`Parent:` body markers, then reconcile
 labels — see apply_migration) and writes the `sq-… ↔ #NN` map — held for the maintainer's go-ahead
-because it bulk-creates hundreds of issues.
+because it bulk-creates hundreds of issues. It is resumable, and it FAILS CLOSED on a resume it
+cannot resolve unambiguously: a marker with no migration provenance (a possible decoy) and a bd-id
+carried by two equally-provenanced issues (issue #5155) both abort the run for operator review
+rather than resolve themselves by picking one.
 
 Label mapping (bd -> issue):
   priority 0..4            -> priority:P{n}
@@ -390,20 +393,42 @@ def migration_owned(issues, writers):
 
 
 def fetch_bd_map(repo, issues=None):
-    """(trusted, unverified) {bd-id: issue_number} maps from existing issues carrying a
-    `<!-- bd-id:... -->` marker (resume). trusted = the issue ALSO carries MIGRATION_LABEL
-    (attaching one needs triage/write permission); unverified = marker-only — could be a
-    pre-label legacy migration OR an attacker decoy, so never trusted on its own
-    (see resolve_resume_map, PR #2528 review round 2)."""
+    """(trusted, unverified, ambiguous) from existing issues carrying a `<!-- bd-id:... -->` marker
+    (resume). The first two are {bd-id: issue_number} maps: trusted = the issue ALSO carries
+    MIGRATION_LABEL (attaching one needs triage/write permission); unverified = marker-only —
+    could be a pre-label legacy migration OR an attacker decoy, so never trusted on its own
+    (see resolve_resume_map, PR #2528 review round 2).
+
+    Both maps are built by plain assignment, so a bd-id carried by two issues in the SAME trust
+    class COLLAPSES to whichever the list API happened to yield last — an arbitrary pick that
+    resolve_resume_map cannot see and therefore cannot fail closed on (issue #5155). `ambiguous`
+    is that lost information: {bd-id: [every issue number in the colliding class(es)]}, which
+    apply_migration refuses to resume from for any bd-id the run touches.
+
+    Ambiguity is per trust CLASS on purpose, and an unverified-class collision is suppressed
+    entirely once the same bd-id has a trusted entry. A marker-only copy of an ALREADY-authenticated
+    issue is not ambiguity — resolve_resume_map drops EVERY marker-only copy the moment `trusted`
+    holds the bd-id, so the arbitrary pick among them is never read — and reporting it would hand
+    any unprivileged user a way to stop `--apply` by pasting a marker into one issue, or two."""
     issues = fetch_issues(repo) if issues is None else issues
     trusted, unverified = {}, {}
+    by_class = {}
     for it in issues:
         mm = MARKER_RE.search(it.get("body") or "")
         if not mm:
             continue
         labels = {lb["name"] if isinstance(lb, dict) else lb for lb in it.get("labels") or []}
-        (trusted if MIGRATION_LABEL in labels else unverified)[mm.group(1)] = it["number"]
-    return trusted, unverified
+        is_trusted = MIGRATION_LABEL in labels
+        (trusted if is_trusted else unverified)[mm.group(1)] = it["number"]
+        by_class.setdefault((mm.group(1), is_trusted), []).append(it["number"])
+    ambiguous = {}
+    for (bid, is_trusted), nums in by_class.items():
+        # `bid not in trusted` is the DoS guard: N marker-only decoys behind an authenticated issue
+        # are inert for the same reason ONE is, so they must not abort a resume the trusted entry
+        # already resolves. A trusted-class collision is still always reported.
+        if len(nums) > 1 and (is_trusted or bid not in trusted):
+            ambiguous.setdefault(bid, []).extend(nums)
+    return trusted, unverified, {bid: sorted(nums) for bid, nums in ambiguous.items()}
 
 
 def resolve_resume_map(trusted, unverified, checkpoint_map, owned=frozenset()):
@@ -658,7 +683,7 @@ def apply_migration(repo, open_ids, blockers, parents, limit=None, checkpoint="/
     node_ids = {it["number"]: it["id"] for it in issues_snapshot}
     have_labels = {it["number"]: [lb["name"] if isinstance(lb, dict) else lb
                                   for lb in it.get("labels") or []] for it in issues_snapshot}
-    trusted, unverified = fetch_bd_map(repo, issues_snapshot)
+    trusted, unverified, ambiguous = fetch_bd_map(repo, issues_snapshot)
     try:
         ckpt = json.load(open(checkpoint, encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -668,6 +693,22 @@ def apply_migration(repo, open_ids, blockers, parents, limit=None, checkpoint="/
     owned = migration_owned(issues_snapshot, _writer_logins(repo, {a for a in authors if a}))
     id_map, backfill, unverifiable = resolve_resume_map(trusted, unverified, ckpt, owned)
     ids = list(open_ids)[: limit] if limit else list(open_ids)
+    # Fail closed (issue #5155): a bd-id carried by two issues of the same trust class collapsed to
+    # an arbitrary one of them in fetch_bd_map, and NOTHING downstream can recover the choice —
+    # resolve_resume_map only ever sees the survivor. Resuming would map the bead to whichever the
+    # list API yielded last, land pass 2's edge markers on that one only, and hand the same
+    # arbitrary issue to ci-close-merged-beads.py, which reads the identical marker channel.
+    # Scoped to the bd-ids this run actually touches — the beads being migrated PLUS the endpoints
+    # of their edges, since an ambiguous endpoint is what puts an arbitrary `#N` in a marker.
+    touched = set(ids)
+    touched |= {dep for b in touched for dep in blockers.get(b, []) + parents.get(b, [])}
+    dup = {b: nums for b, nums in ambiguous.items() if b in touched}
+    if dup:
+        raise SystemExit(
+            f"refusing --apply: {len(dup)} bd-id(s) are carried by MORE THAN ONE issue with the "
+            f"same provenance, so the resume map would pick one of them arbitrarily (list order) "
+            f"— close or re-marker the extras: "
+            f"{sorted((b, ['#' + str(n) for n in nums]) for b, nums in dup.items())[:10]}")
     # Fail closed (PR #2528 review round 2): a marker-only issue with NO migration provenance
     # (not labeled, not in the trusted checkpoint) may be an attacker decoy pre-created to
     # capture a bd-id. Refuse to label it, map to it, OR create a competing issue — stop for
@@ -759,9 +800,9 @@ def marker_index(issues):
     A marker-only issue is therefore an unfinished migration or a decoy — never a pass.
 
     Duplicates are kept because "one bd-id, two issues" is a defect this reconcile looks for.
-    fetch_bd_map collapses a repeated bd-id by dict assignment (last write wins). That is right for
-    resume — resolve_resume_map re-derives provenance afterwards — but it is precisely the wrong
-    shape for a count reconcile."""
+    fetch_bd_map's two maps still collapse a repeated bd-id by dict assignment (last write wins),
+    which is the wrong shape for a count reconcile; it reports the collision separately so that
+    `--apply` fails closed on it (issue #5155) rather than resuming from the arbitrary survivor."""
     authenticated, marker_only = {}, {}
     for it in issues:
         mm = MARKER_RE.search(it.get("body") or "")
@@ -1152,6 +1193,95 @@ def _self_test():
     idm, bf, unv = resolve_resume_map({}, {"sq-victim": 43}, {}, {"sq-legit"})
     chk("un-owned marker-only issue still fails closed",
         (idm, bf, unv), ({}, {}, {"sq-victim": 43}))
+
+    # --- duplicate bd-id on the TRUSTED resume path (issue #5155) --------------------------------
+    # fetch_bd_map's maps are plain dicts, so two issues sharing a bd-id collapse to whichever the
+    # list API yielded last. resolve_resume_map only ever sees the survivor, so the fail-closed
+    # rule migration_owned applies to the marker-only path had NO counterpart on the labelled one:
+    # a resume mapped the bead to an arbitrary issue and pass 2's edge markers followed it there.
+    def _mk(num, bid, labeled=True):
+        return {"number": num, "id": f"I_{num}", "title": f"{bid}: do the thing",
+                "body": f"x\n<!-- bd-id:{bid} -->\n", "author": {"login": "maintainer"},
+                "labels": [{"name": MIGRATION_LABEL}] if labeled else []}
+
+    tr, unlab, amb = fetch_bd_map(None, [_mk(1, "sq-dup"), _mk(2, "sq-dup"), _mk(3, "sq-uniq")])
+    chk("two authenticated issues on one bd-id are reported ambiguous", amb, {"sq-dup": [1, 2]})
+    chk("a bd-id on exactly one issue is never ambiguous", "sq-uniq" in amb, False)
+    # The collapse itself is unchanged — the map still carries ONE arbitrary number — which is
+    # exactly why the caller has to consult `ambiguous` instead of trusting the map.
+    chk("the collapsed map still holds a single (arbitrary) number for the duplicate",
+        (tr["sq-dup"] in (1, 2), unlab), (True, {}))
+    # A marker-only COPY of an authenticated issue is inert, not ambiguity: resolve_resume_map
+    # already makes the labelled issue canonical, and calling this ambiguous would let any
+    # unprivileged user stop --apply by pasting a marker into a new issue.
+    _, _, amb = fetch_bd_map(None, [_mk(1, "sq-a"), _mk(9, "sq-a", labeled=False)])
+    chk("a marker-only copy shadowing an authenticated issue is not ambiguity", amb, {})
+    # TWO decoys behind the authenticated issue are inert for the same reason one is: they collide
+    # only with each other, and resolve_resume_map never reads the unverified entry for a bd-id the
+    # trusted map already holds. Reporting that collision would let any user who can open two issues
+    # abort --apply for the bead — the exact DoS the per-class rule exists to prevent.
+    _, _, amb = fetch_bd_map(None, [_mk(1, "sq-a"), _mk(8, "sq-a", labeled=False),
+                                    _mk(9, "sq-a", labeled=False)])
+    chk("two marker-only decoys behind an authenticated issue are not ambiguity", amb, {})
+    # …but two issues in the SAME class are, labelled or not: which one wins is list order.
+    _, _, amb = fetch_bd_map(None, [_mk(8, "sq-a", labeled=False), _mk(9, "sq-a", labeled=False)])
+    chk("two marker-only issues on one bd-id are ambiguous", amb, {"sq-a": [8, 9]})
+
+    # …and --apply must REFUSE rather than resume from the arbitrary survivor. Stubs the two
+    # network seams (`fetch_issues`, `_run`) so the write path is exercised without a token.
+    dup_bead = {"sq-dup": {"id": "sq-dup", "priority": 2, "issue_type": "task",
+                           "title": "bug(sparq-core): x", "labels": []}}
+    real_fetch, real_run = globals()["fetch_issues"], globals()["_run"]
+    globals()["_run"] = lambda a, check=True: type("R", (), {
+        "returncode": 0, "stdout": "admin\n", "stderr": ""})()
+    try:
+        globals()["fetch_issues"] = lambda repo: [_mk(1, "sq-dup"), _mk(2, "sq-dup")]
+        try:
+            # reconcile=False so that DELETING the guard renders as a NAMED FAIL below rather than
+            # as a traceback out of the stubbed label reconcile — an abort would take every later
+            # assertion with it (the same reasoning as the defensive indexing further down).
+            apply_migration("o/r", dup_bead, {}, {}, checkpoint="/nonexistent/bd-map.json",
+                            reconcile=False)
+            chk("--apply refuses to resume from an ambiguous bd-id", "returned", "SystemExit")
+        except SystemExit as exc:
+            chk("--apply refuses to resume from an ambiguous bd-id",
+                "SystemExit" if "sq-dup" in str(exc) and "#1" in str(exc) and "#2" in str(exc)
+                else f"unnamed: {exc}", "SystemExit")
+        # The refusal is SCOPED: an ambiguous bd-id this run does not touch must not block it,
+        # and an unambiguous board must resume exactly as before (creating nothing).
+        globals()["fetch_issues"] = lambda repo: [_mk(1, "sq-dup"), _mk(4, "sq-elsewhere"),
+                                                  _mk(5, "sq-elsewhere")]
+        idm, created, rec, edged = apply_migration(
+            "o/r", dup_bead, {}, {}, checkpoint="/nonexistent/bd-map.json", reconcile=False)
+        chk("an unambiguous resume is unaffected by ambiguity outside the plan",
+            (idm["sq-dup"], created, rec, edged), (1, 0, 0, 0))
+        # …unless the ambiguous bd-id is the ENDPOINT of a planned edge: pass 2 would then write
+        # `Blocked-by: #<arbitrary>` into the source issue's body.
+        try:
+            apply_migration("o/r", dup_bead, {"sq-dup": ["sq-elsewhere"]}, {},
+                            checkpoint="/nonexistent/bd-map.json", reconcile=False)
+            chk("--apply refuses when an ambiguous bd-id is an edge endpoint",
+                "returned", "SystemExit")
+        except SystemExit as exc:
+            chk("--apply refuses when an ambiguous bd-id is an edge endpoint",
+                "SystemExit" if "sq-elsewhere" in str(exc) else f"unnamed: {exc}", "SystemExit")
+        # The decoy shape end-to-end: two marker-only copies of a bd-id this run DOES touch must not
+        # abort it, because the authenticated #1 is canonical and resolve_resume_map never reads the
+        # unverified entry. Resume maps to #1 and creates nothing; before the trusted-entry
+        # suppression in fetch_bd_map this raised SystemExit — a DoS any user with two issues could
+        # trigger. Kept LAST in this block: it rebinds the `fetch_issues` stub.
+        globals()["fetch_issues"] = lambda repo: [_mk(1, "sq-dup"), _mk(8, "sq-dup", labeled=False),
+                                                  _mk(9, "sq-dup", labeled=False)]
+        try:
+            idm, created, rec, edged = apply_migration(
+                "o/r", dup_bead, {}, {}, checkpoint="/nonexistent/bd-map.json", reconcile=False)
+            got = (idm["sq-dup"], created, rec, edged)
+        except SystemExit as exc:   # render the regression as a NAMED fail, not a bare traceback
+            got = f"refused: {exc}"
+        chk("two marker-only decoys do not block resuming the authenticated issue",
+            got, (1, 0, 0, 0))
+    finally:
+        globals()["fetch_issues"], globals()["_run"] = real_fetch, real_run
 
     # --- area (package) derivation (audit 2026-07-25) --------------------------------------------
     # A no-area issue reserves the readiness engine's serializing __global__ partition and triage.py
