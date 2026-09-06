@@ -12,15 +12,19 @@ done
 INSTANCE_ID="$(<"${RESULTS}/instance-id.txt")"
 RUN_TOKEN="$(<"${RESULTS}/study-run-token.txt")"
 [[ "${INSTANCE_ID}" =~ ^i-[0-9a-f]+$ ]] || exit 2
-[[ "${RUN_TOKEN}" =~ ^sparq-pod-(pilot|canonical)-[0-9TZ]+-[0-9]+$ ]] || exit 2
+[[ "${RUN_TOKEN}" =~ ^sparq-pod-(pilot|canonical|build)-[0-9TZ]+-[0-9]+$ ]] || exit 2
 case "${INSTANCE_ID}" in
   i-090531b4ede8f2d3f|i-00f76802f345b6b77) echo 'protected instance' >&2; exit 2 ;;
 esac
-DEADLINE="$(python3 - "${RESULTS}/price-checked-at.txt" <<'PY'
+WATCHDOG=43200
+if [[ -r "${RESULTS}/watchdog-seconds.txt" ]]; then WATCHDOG="$(<"${RESULTS}/watchdog-seconds.txt")"; fi
+[[ "${WATCHDOG}" =~ ^[0-9]+$ ]] && (( WATCHDOG >= 60 && WATCHDOG <= 43200 )) || exit 2
+if [[ "${RUN_TOKEN}" == sparq-pod-build-* ]]; then (( WATCHDOG <= 14400 )) || exit 2; fi
+DEADLINE="$(python3 - "${RESULTS}/price-checked-at.txt" "${WATCHDOG}" <<'PY'
 import datetime,sys
 from pathlib import Path
 started=datetime.datetime.fromisoformat(Path(sys.argv[1]).read_text().strip().replace('Z','+00:00'))
-print(int(started.timestamp())+43200)
+print(int(started.timestamp())+int(sys.argv[2]))
 PY
 )"
 [[ "${DEADLINE}" =~ ^[0-9]+$ ]] || exit 2
@@ -33,8 +37,8 @@ while true; do
     --filters 'Name=tag:purpose,Values=sparq-bench' "Name=tag:study-run,Values=${RUN_TOKEN}" \
     --query 'Reservations[].Instances[].State.Name' --output text)"; then
     case "${MATCH}" in
-      terminated|shutting-down) echo 'supervisor-complete'; exit 0 ;;
-      pending|running|stopping|stopped) ;;
+      terminated) echo 'supervisor-complete'; exit 0 ;;
+      pending|running|stopping|stopped|shutting-down) ;;
       *) echo 'supervisor-refused: exact tags/state unavailable' >&2; exit 1 ;;
     esac
     if (( $(date +%s) >= DEADLINE )); then
