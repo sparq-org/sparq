@@ -42,6 +42,17 @@
 #      two drift apart again, hence this assertion. It says nothing about WHICH version
 #      is right; bumping is fine, bumping one lane only is not.
 #
+# One DOC-SIDE property is asserted, by ContributorHintsMatchThePin below:
+#
+#   6. THE CONTRIBUTOR HINTS NAME THAT VERSION. js/README.md and the two
+#      guardrails/prepare-build.mjs files tell a human whose PATH lacks wasm-pack to
+#      `cargo install` it. Unversioned (#5777) that floats to the current release, so
+#      a local `npm ci` builds the very bundle CI publishes with a wasm-pack — and the
+#      wasm-bindgen CLI that release bundles — no lane validates. The expected value is
+#      read FROM the workflow pin, so bumping the lanes without the hints goes red.
+#      These are prose and JS string literals, not shell steps, so no workflow-scoped
+#      checker can see them; they need this doc-side extractor.
+#
 # The step splitter is single-sourced from scripts/check-install-action-tool.py
 # rather than re-implemented. Hermetic: stdlib only (no PyYAML, no network, no gh).
 # Run:  python3 scripts/tests/test_js_wasm_pack_install.py
@@ -432,6 +443,163 @@ jobs:
                     f"{label}: must count as a DISTINCT pin so the single-version "
                     "assertion goes red",
                 )
+
+
+# --- (6) contributor-facing install hints track that pin (#5777) -------------
+
+# The three places the repo tells a HUMAN how to put wasm-pack on PATH. They are
+# prose and JS string literals, not shell steps, so no workflow-scoped checker sees
+# them (which is why #5777 was filed rather than folded into an existing gate).
+HINT_FILES = (
+    Path("js") / "guardrails" / "prepare-build.mjs",
+    Path("packages") / "eyereasoner-compat" / "guardrails" / "prepare-build.mjs",
+    Path("js") / "README.md",
+)
+
+HINT_START = "cargo install wasm-pack"
+# Whichever delimiter closes the literal carrying the command: a JS single quote in
+# the .mjs guardrails, a markdown backtick in the README. Deliberately NOT a newline
+# — markdown renders an inline code span wrapped across two source lines as one
+# command, so a re-wrapped README must still be read as the command it displays.
+HINT_DELIMS = "'\"`"
+# An unterminated literal must not swallow the rest of the file.
+HINT_WINDOW = 200
+# cargo's `--version` takes a version REQUIREMENT: a bare `0.15.0` is the caret range
+# ^0.15.0, i.e. still floating. Only the `=` form installs the release CI installs.
+EXACT_VERSION_RE = re.compile(r"--version\s+=(\d+\.\d+\.\d+)(?:\s|$)")
+
+
+def _hint_commands(text: str) -> list[tuple[str, str]]:
+    """`(version-or-sentinel, normalised command)` per `cargo install wasm-pack`
+    occurrence, in order.
+
+    A sentinel rather than an omission, for the same reason as `_step_version`: a
+    hint that lost its `--version` is precisely the #5777 regression, and if it
+    simply contributed no entry the assertion below would pass vacuously.
+    """
+    out: list[tuple[str, str]] = []
+    pos = 0
+    while True:
+        start = text.find(HINT_START, pos)
+        if start < 0:
+            return out
+        pos = start + len(HINT_START)
+        window = text[start : start + HINT_WINDOW]
+        ends = [window.find(d) for d in HINT_DELIMS if d in window]
+        if not ends:
+            out.append((f"<unterminated hint literal: {window!r}>", window))
+            continue
+        command = " ".join(window[: min(ends)].split())
+        match = EXACT_VERSION_RE.search(command)
+        out.append(
+            (
+                match.group(1)
+                if match
+                else f"<no exact `--version =X.Y.Z`: {command!r}>",
+                command,
+            )
+        )
+
+
+class ContributorHintsMatchThePin(unittest.TestCase):
+    """(6) Every contributor-facing `cargo install wasm-pack` hint names the SAME
+    release the gating lanes install.
+
+    Unversioned, those hints float to whatever wasm-pack's current release is, so a
+    local `npm ci` builds the very bundle CI publishes with a wasm-pack — and the
+    wasm-bindgen CLI that release carries — that no lane validates (#5777). The
+    expected value is READ FROM the workflows rather than restated here, so bumping
+    the action pin reds this test until the hints are bumped with it; nothing else in
+    the tree would notice.
+
+    SCOPE: human-facing hints only. Several workflows (gui.yml, pages.yml,
+    publish.yml, nightly-full-sweep.yml) still `cargo install wasm-pack --locked`
+    unversioned; converting those is separate work and this file's silence about
+    them is not a claim that they are pinned.
+    """
+
+    @staticmethod
+    def _canonical_pin() -> str:
+        """The one version the workflows agree on, without its leading `v`."""
+        distinct = {
+            v for vs in WasmPackVersionUnified._pins().values() for v in vs
+        }
+        assert len(distinct) == 1, (
+            "the workflows do not agree on one wasm-pack version, so there is no "
+            f"canonical pin for the hints to track: {sorted(distinct)} "
+            "(test_single_version_across_workflows reports this properly)"
+        )
+        pin = distinct.pop()
+        assert VERSION_RE.match(pin), f"canonical pin is not an exact release: {pin!r}"
+        return pin[1:]
+
+    def test_hint_files_still_carry_a_hint(self):
+        """Anti-vacuity: a file that stopped mentioning the command (renamed, reworded)
+        must not silently drop out of the sample."""
+        for rel in HINT_FILES:
+            with self.subTest(file=str(rel)):
+                path = REPO_ROOT / rel
+                self.assertTrue(path.is_file(), f"{rel} must exist to be checked")
+                self.assertTrue(
+                    _hint_commands(path.read_text(encoding="utf-8")),
+                    f"{rel} must still show a `{HINT_START}` command — if the hint "
+                    "moved, point this test at its new home rather than deleting "
+                    "the entry (#5777).",
+                )
+
+    def test_every_hint_pins_the_ci_version(self):
+        expected = self._canonical_pin()
+        for rel in HINT_FILES:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            for i, (version, command) in enumerate(_hint_commands(text)):
+                with self.subTest(file=str(rel), hint=i):
+                    self.assertEqual(
+                        version,
+                        expected,
+                        f"{rel}: hint #{i} must install the wasm-pack CI installs — "
+                        f"`{HINT_START} --locked --version ={expected}` (the "
+                        f"`with: version:` pin on {WASM_PACK_ACTION} in the "
+                        f"workflows). Got {version!r} from {command!r}. Unversioned, "
+                        "a local build uses a wasm-pack — and bundled wasm-bindgen "
+                        "CLI — that no lane validates (#5777). Bump the hints and "
+                        "the workflows together.",
+                    )
+
+    # --- mutation guard ------------------------------------------------------
+    # Each entry is a synthetic hint that MUST NOT read as the canonical pin, so the
+    # assertion above cannot pass on a hint that floats.
+    _MUT_HINTS = (
+        ("unversioned (the #5777 bug)", "'    cargo install wasm-pack --locked',"),
+        ("caret range, not exact", "'    cargo install wasm-pack --version 0.15.0',"),
+        ("pins a DIFFERENT release", "'    cargo install wasm-pack --version =0.13.1',"),
+        ("unterminated literal", "    cargo install wasm-pack --locked"),
+    )
+
+    def test_mutation_floating_hints_are_rejected(self):
+        good = _hint_commands("'    cargo install wasm-pack --locked --version =0.15.0',")
+        self.assertEqual([v for v, _ in good], ["0.15.0"], "the fixed form must parse")
+
+        for label, text in self._MUT_HINTS:
+            with self.subTest(mutation=label):
+                found = _hint_commands(text)
+                self.assertEqual(
+                    len(found),
+                    1,
+                    f"{label}: the occurrence must still be COUNTED — a hint that "
+                    "disappears from the sample passes the assertion vacuously",
+                )
+                self.assertNotEqual(
+                    found[0][0],
+                    "0.15.0",
+                    f"{label}: must not read as the canonical pin, got {found[0]!r}",
+                )
+
+    def test_mutation_wrapped_markdown_span_still_parses(self):
+        """A README re-wrap splits the inline code span across two source lines; it is
+        still one command to a reader, so it must still be read as pinned (rather than
+        reding the gate for a purely cosmetic edit)."""
+        wrapped = "(`cargo install wasm-pack --locked\n--version =0.15.0`); without"
+        self.assertEqual([v for v, _ in _hint_commands(wrapped)], ["0.15.0"])
 
 
 if __name__ == "__main__":

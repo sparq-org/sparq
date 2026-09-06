@@ -53,7 +53,15 @@ if (!hasWasmPack) {
       '`wasm-pack` was not found on PATH. Install the toolchain, then reinstall:',
       '',
       '    rustup target add wasm32-unknown-unknown',
-      '    cargo install wasm-pack --locked',
+      '    cargo install wasm-pack --locked --version =0.15.0',
+      '',
+      // [OPUS-5] #5777: name the version, do not float. That `=0.15.0` (cargo reads a bare
+      // `0.15.0` as the caret range ^0.15.0) is the pin CI's gating `js` lane installs — the
+      // `with: version:` input to jetli/wasm-pack-action in .github/workflows/js.yml. Each
+      // wasm-pack release bundles its own wasm-bindgen CLI, so an unversioned local install
+      // builds this same bundle with a toolchain no lane exercises. Kept in step with the
+      // workflow pin by scripts/tests/test_js_wasm_pack_install.py (nothing else would go red).
+      'That is the wasm-pack CI installs; an unpinned one bundles a wasm-bindgen CLI no lane tests.',
       '',
       'Or depend on the published @sparq-org/sparq registry tarball (ships prebuilt dist/ + wasm/).',
     ].join('\n'),

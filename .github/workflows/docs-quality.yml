@@ -1011,7 +1011,16 @@ jobs:
       # [OPUS-5] #5771: it also pins that every lane installing wasm-pack through that
       # action asks for the SAME version — ci.yml's `wasm` job (which RUNS the headless
       # suites) had drifted two minors behind js.yml (which BUILDS the artifact).
-      - name: wasm-pack install posture (prebuilt + pinned + one version — sq-khm3f, #5771)
+      # [OPUS-5] #5777: and that the contributor-facing `cargo install wasm-pack` hints
+      # (js/README.md + the two guardrails/prepare-build.mjs) name that same pinned
+      # release instead of floating to the current one — otherwise a local `npm ci`
+      # builds the published bundle with a wasm-pack, and bundled wasm-bindgen CLI, no
+      # lane validates. The expected value is read from the workflow pin, so this reds
+      # when the lanes are bumped and the hints are not.
+      # NB: the name is QUOTED. Unquoted, YAML reads the space-preceded `#` as a
+      # comment and truncates the name at "sq-khm3f," — which is what the previous,
+      # unquoted version of this line silently did to its own `#5771` ref.
+      - name: "wasm-pack install posture (prebuilt + pinned + one version + hints — sq-khm3f, #5771, #5777)"
         run: python3 scripts/tests/test_js_wasm_pack_install.py
       # [OPUS-4.8] sq-va7at: the nightly selection-bug ALARM
       # (scripts/ci_selection_alarm.py, .github/workflows/selection-alarm.yml,
