@@ -1,4 +1,5 @@
 opt-in sparq-algos (centrality-extended)
+opt-in sparq-algos (ranking)
 opt-in sparq-algos (topology)
 opt-in sparq-arrow (arrow — QueryResult -> RecordBatch columnar export)
 opt-in sparq-arrow (csv — QueryResult <-> CSV byte round-trip)

@@ -7,6 +7,8 @@ pub mod centrality_extended;
 pub mod community;
 pub mod graph;
 pub mod pagerank;
+#[cfg(feature = "ranking")]
+pub mod ranking;
 #[cfg(feature = "topology")]
 pub mod topology;
 
@@ -18,6 +20,8 @@ pub use community::{
 };
 pub use graph::{NodeFilter, NodeGraph};
 pub use pagerank::{pagerank, PageRankConfig};
+#[cfg(feature = "ranking")]
+pub use ranking::{pagerank_scores_by_dict_id, scores_by_dict_id, ScoreBudget};
 #[cfg(feature = "topology")]
 pub use topology::{
     is_acyclic, num_strongly_connected_components, strongly_connected_components, topological_sort,
