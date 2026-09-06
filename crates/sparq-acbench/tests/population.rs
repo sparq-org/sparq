@@ -2,8 +2,8 @@
 
 use oxttl::NQuadsParser;
 use sparq_acbench::population::{
-    PolicyModel, PopulationConfig, Service, VOCAB, can_read, expected_record_count, owner_webid,
-    pod_root, recipient_webid, write_pod, write_readable_content,
+    LiteralProfile, PolicyModel, PopulationConfig, Service, VOCAB, can_read, expected_record_count,
+    owner_webid, pod_root, recipient_webid, write_pod, write_readable_content,
 };
 use std::collections::BTreeSet;
 use std::io::{self, Write};
@@ -224,4 +224,64 @@ fn streaming_propagates_storage_failure_and_rejects_bad_config_before_writing() 
     config.history_months = 0;
     assert!(write_pod(&config, 0, PolicyModel::Wac, &mut writer).is_err());
     assert_eq!(writer.calls, 20);
+}
+
+#[test]
+fn entropy_variant_preserves_counts_but_varies_literal_values_between_pods() {
+    let mut config = PopulationConfig::smoke();
+    config.literal_profile = LiteralProfile::Seeded {
+        message_text_bytes: 1024,
+        short_text_bytes: 64,
+    };
+    let first = render(&config, 0, PolicyModel::Wac);
+    let second = render(&config, 1, PolicyModel::Wac);
+    let messages = |text: &str| {
+        NQuadsParser::new()
+            .for_slice(text.as_bytes())
+            .map(Result::unwrap)
+            .filter_map(|quad| {
+                if quad.predicate.as_str() != format!("{VOCAB}text") {
+                    return None;
+                }
+                let oxrdf::Term::Literal(value) = quad.object else {
+                    panic!("message text is not literal")
+                };
+                Some(value.value().to_owned())
+            })
+            .collect::<BTreeSet<_>>()
+    };
+    let first_messages = messages(&first);
+    let second_messages = messages(&second);
+    assert_eq!(first_messages.len(), 8);
+    assert!(first_messages.iter().all(|text| text.len() == 1024));
+    assert!(first_messages.is_disjoint(&second_messages));
+    assert_eq!(
+        first_messages,
+        messages(&render(&config, 0, PolicyModel::Acp))
+    );
+    let owner = owner_webid(&config, 0);
+    assert_eq!(expected_record_count(&config, 0, Some(&owner)).unwrap(), 48);
+}
+
+#[test]
+fn compact_profile_keeps_the_original_serialization_size() {
+    let original: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../bench/ac/million/calibration/serialization-preview.json"
+    ))
+    .unwrap();
+    let legacy_config: PopulationConfig =
+        serde_json::from_value(original["config"].clone()).unwrap();
+    let summary = write_pod(&legacy_config, 0, PolicyModel::Wac, io::sink()).unwrap();
+    assert_eq!(
+        summary.bytes,
+        original["observations"][0]["summary"]["bytes"]
+            .as_u64()
+            .unwrap()
+    );
+    assert_eq!(
+        summary.records,
+        original["observations"][0]["summary"]["records"]
+            .as_u64()
+            .unwrap()
+    );
 }

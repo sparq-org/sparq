@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "author_model": "GPT-6",
-  "profile": "service-history-central-v1",
+  "profile": "service-history-central-v2",
   "status": "partially calibrated scenario; not validated as representative of a future all-service Solid population",
   "snapshot_exclusive": "2026-01-01T00:00:00Z",
   "history_months": {
@@ -169,5 +169,45 @@
       ]
     },
     "correctness": "Independent intended-rights oracle and independently parsed policy-language references; server must additionally compare actual enforcement and query results before timing."
+  },
+  "literal_compressibility": {
+    "compact_profile": "service-history-central-v1",
+    "compact_limitation": "Repeated message excerpts and regular labels make compressed storage more favorable than unknown complete personal exports. Compact numeric values repeat across corresponding Pod record positions.",
+    "entropy_profile": "service-history-entropy-v1",
+    "literal_profile": {
+      "kind": "seeded",
+      "message_text_bytes": 1024,
+      "short_text_bytes": 64
+    },
+    "evidence_class": "declared compressibility and text-length sensitivity; not observed population text statistics",
+    "changed_fields": [
+      "message text",
+      "message subjects",
+      "contact names",
+      "appointment titles",
+      "media filenames",
+      "captions",
+      "Pod-specific numeric values"
+    ],
+    "unchanged": [
+      "record counts",
+      "history horizon",
+      "access-control rights",
+      "RDF resource layout",
+      "categorical currencies, units and media types"
+    ],
+    "alphabet": "64 safe ASCII characters, six pseudo-random bits per character; deterministic Pod-specific seed",
+    "sensitivity_message_text_bytes": [
+      256,
+      1024,
+      4096
+    ],
+    "interpretation": "Compare actual independently compressed per-Pod frames. Neither the regular compact strings nor high-entropy synthetic strings establish the compressibility of complete future service exports.",
+    "legacy_profile": "service-history-central-v1",
+    "regular_profile": "service-history-central-v2",
+    "regular_literal_profile": {
+      "kind": "pod_specific"
+    },
+    "regular_limitation": "Repeated excerpts and regular labels remain favorable to compression even though numeric values now vary independently per Pod. Version1 is preserved by deserializing its config with the omitted literal_profile defaulting to compact."
   }
 }
