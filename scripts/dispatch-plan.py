@@ -49,6 +49,19 @@ resolve = _route.resolve
 # readiness engine so the orchestrator reports a real number for sparq instead of degrading.
 roleless_ready = _ready.roleless_ready
 ready_candidates = _ready.ready_candidates
+# [OPUS-5 2026-07-29] Re-exported for the SAME reason as `roleless_ready` above: the registry's
+# readiness step reads its probes off THIS module, so a measurement that lives only in the
+# readiness engine is one the orchestrator cannot print. `ready_candidates` already rides here and
+# feeds dispatch.yml's partition census — the census that ranks CONTENDED keys, i.e. how many
+# candidates WANT each key. `refusal_attribution` is the missing companion: how many rows the
+# frontier could actually carry, and which of the refusals are in-flight occupancy that widening
+# can never recover. Reading the first as the second is what produced sparq#5119.
+#
+# Deliberately NOT added to `orchestration/registry-contract.toml`: that file records names the
+# registry is KNOWN to read, and declaring an expectation the other side does not yet hold would
+# make this repo's self-test assert a contract nobody is party to. It is exported so the registry
+# CAN adopt it via the same `getattr(planner, ...)` degradation path as every other probe.
+refusal_attribution = _ready.refusal_attribution
 GLOBAL = _ready.GLOBAL
 # [OPUS-5] sparq#4365 — THE PARTITION RESOLVER, ON THE MODULE THE REGISTRY ALREADY LOADS.
 #
