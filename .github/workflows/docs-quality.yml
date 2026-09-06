@@ -1036,6 +1036,19 @@ jobs:
       # The suite also pins its OWN call site here, so it cannot silently leave CI.
       - name: Self-test the review-lane blind-spot alarm (verdict obligations + YAML seam)
         run: python3 scripts/tests/test_review_lane_alarm.py
+      # [OPUS-5] #5462: the registry's `enumerate_review_items` head-ref admission regex is
+      # replicated into review_lane_alarm.py / ready-issues.py / batch-merge.py because each
+      # workflow sparse-checks-out only its own script — they have no importable common
+      # module. Before this suite the only pin was the alarm asserting ITSELF against a
+      # literal; nothing bound the copies to each other, so ready-issues.py and
+      # batch-merge.py could each drift alone with a green CI — exactly the "two components
+      # disagree about which PRs are visible" defect class.
+      # This suite binds every copy to one string on three axes: the COMPILED patterns
+      # (imported, so it reads the object that actually matches), every SOURCE occurrence
+      # including prose quotes in workflow headers, and a declared census so a new copy
+      # reds on arrival. Hermetic — no gh, no git, no network.
+      - name: Self-test the review-lane head-ref regex is a singleton by value (#5462)
+        run: python3 scripts/tests/test_head_ref_regex_singleton.py
       # [OPUS-5] sq-huwr8: the three DETECTOR lanes (review-alarm / formal-alarm /
       # selection-alarm) RED by design, and each one's header used to assert it "can
       # never enter the `ci-summary / gate` poll set" because it creates no check-run on
