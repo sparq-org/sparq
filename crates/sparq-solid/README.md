@@ -100,16 +100,14 @@ smoke test (`tests/wasm_materialize.rs`, `wasm-pack test --node`) guards it. Den
   are stripped at load. `ldp:contains` is PSS-written opaque content, never derived from IRI structure or
   read into the reasoner; containment *ancestry* drives ACL inheritance only (`tests/containment_view_ownership.rs`).
 - **Empty ACP matchers.** [GPT-6] A matcher with no supported context attributes is never satisfied
-  ([ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher)). Removing its last attribute revokes
-  dependent grants on rematerialization; an empty `noneOf` matcher cannot suppress a grant.
+  ([ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher)); removing its last attribute revokes dependent grants on rematerialization. An empty `noneOf` matcher cannot suppress a grant.
 
 ## 📚 Learn more
 
 - **How-to** — [`skills/access-control/SKILL.md`](../../skills/access-control/SKILL.md) (public API,
   WAC/ACP notes, conformance harnesses + the differential oracle, the **request-pipeline / WAC-Allow
   example**, ODRL-bridge mapping detail).
-- **Design + threat model** —
-  [`research/solid-access-control-design.md`](../../research/solid-access-control-design.md) (model,
+- **Design + threat model** — [`research/solid-access-control-design.md`](../../research/solid-access-control-design.md) (model,
   matrix, strata, boundaries) + [scope](../../research/sparq-solid-scope.md).
 - **API reference** — [docs.rs/sparq-solid](https://docs.rs/sparq-solid); walk-through `cargo run -p
   sparq-solid --example quickstart --release`. Migrating from Oxigraph?
