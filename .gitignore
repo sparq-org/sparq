@@ -127,3 +127,6 @@ metrics/runtime/
 # If a specific property test's seeds are genuinely not worth pinning, opt OUT per-test
 # instead, via `failure_persistence: None` in its proptest Config — see
 # crates/sparq-terse/tests/proptest_keyword.rs for the in-repo precedent.
+
+# [GPT-6] Local rendering of the separate Pod-scale manuscript; Typst source is tracked.
+/output/pdf/solid-pod-scale.pdf
