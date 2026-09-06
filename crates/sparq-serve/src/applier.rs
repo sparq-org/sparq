@@ -129,3 +129,95 @@ impl ApplyUpdates for GraphApplier {
         Footprint::of_sparql(update)
     }
 }
+
+/// [SONNET-5] (sq-artifact-keeper-topk) [`ApplyUpdates`] over
+/// [`sparq_engine::PreparedUpdate`] instead of raw SPARQL Update text — for a caller that
+/// submits the SAME update template repeatedly with only a bound value changing (a
+/// job-queue claim, an upsert, any recurring parameterized write), avoiding the re-parse
+/// [`GraphApplier`] pays on every single commit.
+///
+/// `GraphApplier::apply` calls [`sparq_engine::update_in_place`], which parses the update's
+/// full text FRESH every time — measured ~13.5 µs of a ~21.2 µs total per-update cost
+/// (~63%) on a representative claim template, because [`PreparedUpdate::bind`] (a
+/// structural placeholder substitution over the already-parsed algebra, never string
+/// concatenation) costs under 1 µs by comparison. A caller parses its template ONCE (e.g.
+/// [`PreparedUpdate::parse`] at startup or on first use), binds a fresh value per
+/// submission, and submits the bound [`PreparedUpdate`](sparq_engine::PreparedUpdate) —
+/// this applier then pays only bind + eval + apply, roughly half the raw-text cost.
+///
+/// Same compaction policy as [`GraphApplier`] (module docs): `fork`/`seal` are identical,
+/// only `apply`'s update type and engine entry point differ.
+///
+/// Only with the opt-in `params` feature — the serving core (ring + sequenced writer) is
+/// fully buildable without it; a build without the feature is byte-identical to before.
+#[cfg(feature = "params")]
+#[derive(Debug)]
+pub struct PreparedGraphApplier {
+    compact_threshold: usize,
+}
+
+#[cfg(feature = "params")]
+impl Default for PreparedGraphApplier {
+    fn default() -> Self {
+        PreparedGraphApplier {
+            compact_threshold: DEFAULT_COMPACT_THRESHOLD,
+        }
+    }
+}
+
+#[cfg(feature = "params")]
+impl PreparedGraphApplier {
+    /// An applier with the default compaction threshold.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An applier compacting once the pending delta reaches `threshold` entries
+    /// (values below 1 are treated as 1 — compact after every batch).
+    pub fn with_compact_threshold(threshold: usize) -> Self {
+        PreparedGraphApplier {
+            compact_threshold: threshold.max(1),
+        }
+    }
+}
+
+#[cfg(feature = "params")]
+impl ApplyUpdates for PreparedGraphApplier {
+    type Snapshot = Graph;
+    type Working = Graph;
+    type Update = sparq_engine::PreparedUpdate;
+
+    /// O(pending delta): identical to [`GraphApplier::fork`] — see the module docs.
+    fn fork(&mut self, base: &Graph) -> Result<Graph, String> {
+        Ok(base.fork())
+    }
+
+    /// O(batch): the same T17 delta-overlay path as [`GraphApplier::apply`]
+    /// ([`sparq_engine::update_in_place_prepared`]), over an ALREADY-PARSED,
+    /// already-bound update — no text re-parse on the writer thread. Same partial-apply
+    /// hazard on `Err` as [`GraphApplier::apply`]; the writer's re-fork-and-replay
+    /// recovery handles it identically.
+    fn apply(&mut self, working: &mut Graph, update: &sparq_engine::PreparedUpdate) -> Result<(), String> {
+        sparq_engine::update_in_place_prepared(working, update)
+    }
+
+    /// Identical compaction policy to [`GraphApplier::seal`] — see the module docs.
+    fn seal(&mut self, mut working: Graph) -> Result<Graph, String> {
+        if working.pending_delta_len() >= self.compact_threshold {
+            let _ = working.compact();
+        }
+        Ok(working)
+    }
+
+    /// Always [`Footprint::Barrier`] (the trait's own documented safe default): there is
+    /// no parsed-algebra entry point into [`Footprint::of_sparql`] (text-only), and
+    /// re-serialising the already-parsed update back to text just to re-parse it would
+    /// defeat this applier's entire purpose. Under the opt-in
+    /// [`CommitGranularity::CommuteGroup`](crate::CommitGranularity) mode this degrades to
+    /// one generation per update (correct, just not maximally batched) — CommuteGroup is
+    /// orthogonal to this applier's goal (avoiding re-parse under the default `Window`
+    /// granularity, which never calls `footprint`).
+    fn footprint(&self, _update: &sparq_engine::PreparedUpdate) -> Footprint {
+        Footprint::Barrier
+    }
+}

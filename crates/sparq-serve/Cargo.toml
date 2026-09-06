@@ -76,6 +76,21 @@ change-sink = ["change-stream"]
 # (library-first §6.1: the cache stores opaque bytes + a caller-derived visibility-scope
 # key and never depends on `sparq-solid`). The default build carries zero cache code.
 result-cache = []
+# [SONNET-5] (sq-artifact-keeper-topk) `params` (default OFF): adds `PreparedGraphApplier`,
+# an `ApplyUpdates` strategy over `sparq_engine::PreparedUpdate` instead of raw SPARQL Update
+# text. `GraphApplier::apply` calls `sparq_engine::update_in_place`, which re-parses the
+# update's FULL text on every single commit — for a recurring update template (the same
+# claim/upsert-shaped query submitted repeatedly with only a bound value changing, e.g. a
+# job-queue claim), that repeated parse is pure waste: measured ~13.5us of a ~21.2us total
+# per-update cost on a representative claim template (~63%), because `PreparedUpdate::bind`
+# (structural placeholder substitution over the already-parsed algebra, not text
+# concatenation) costs under 1us. `PreparedGraphApplier` calls
+# `sparq_engine::update_in_place_prepared` instead, so a caller that parses its update
+# template ONCE (e.g. at startup) and binds a fresh value per submission pays only the bind +
+# eval + apply cost. The serving core (ring + sequenced writer) is fully buildable WITHOUT
+# this feature: `PreparedGraphApplier` is `#[cfg]`-stripped, so a build without it is
+# byte-identical to before. Forwards to `sparq-engine/params` (already dependency-free).
+params = ["sparq-engine/params"]
 
 [dependencies]
 # Lock-free current-generation pointer (§6.4): readers `load()` without blocking

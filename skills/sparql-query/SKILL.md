@@ -1098,6 +1098,37 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   }
   # Ok::<(), String>(())
   ```
+
+  `execute_txn_with_retry` (bead `sq-it1x` follow-up) wraps the begin/update/commit loop
+  above with automatic retry on `CommitError::Conflict`: it owns the transaction lifecycle
+  (the closure must not call `commit`/`rollback` itself), retries up to `max_attempts`
+  total tries with a caller-supplied delay between attempts, and returns `RetryError::Update`
+  immediately (no retry) if the closure's own update fails, or `RetryError::Exhausted` if
+  every attempt conflicted. `decorrelated_jitter_backoff` is a dependency-free jitter
+  generator (AWS's "Exponential Backoff and Jitter") for the delay argument — it keeps the
+  `txn` feature's zero-new-dependency contract (no `rand` crate). Recommended for
+  claim-style job-queue updates against a single-sequenced-writer store: claim **one row
+  per transaction** (conflict detection is per-triple, so disjoint single-row claims never
+  conflict with each other) and let each caller's jittered backoff decorrelate retries on a
+  hot row.
+
+  ```rust
+  // Cargo.toml: sparq-engine = { version = "0.1", features = ["txn"] }
+  use sparq_engine::txn::{decorrelated_jitter_backoff, execute_txn_with_retry, TransactionManager};
+  use std::time::Duration;
+
+  let m = TransactionManager::new(graph);
+  let backoff = decorrelated_jitter_backoff(Duration::from_millis(5), Duration::from_millis(200));
+  let version = execute_txn_with_retry(&m, 5, backoff, |txn| {
+      txn.update(
+          "PREFIX ak: <http://example.org/ak#> \
+           DELETE { ?t ak:status \"pending\" } \
+           INSERT { ?t ak:status \"claimed\" } \
+           WHERE  { SELECT ?t WHERE { ?t ak:status \"pending\" } LIMIT 1 }",
+      )
+  });
+  # Ok::<(), String>(())
+  ```
 - **Default cargo features** (`parallel`, `regex`, `digest`): `regex` powers REGEX/REPLACE; `digest`
   powers MD5/SHA*; `parallel` enables rayon scan/join/sort/aggregate. The **wasm** crate
   (`sparq-wasm`) disables defaults, so on `wasm32-unknown-unknown` REGEX/hash builtins and
