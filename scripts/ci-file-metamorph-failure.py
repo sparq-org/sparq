@@ -45,8 +45,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gh_dedupe  # noqa: E402  (sibling module; the sys.path insert above is the seam)
+
 PROG = "ci-file-metamorph-failure"
 MARKER = "[metamorph]"
+# The label the filer stamps on every issue it opens, and the one its own dedupe lookup
+# reads back (#5804).
+LABEL = "metamorph"
 
 _FAIL_RE = re.compile(r"^(?:VIOLATION|ENGINE-FAILURE) seed=(\d+) ", re.MULTILINE)
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -211,19 +217,25 @@ def gh(*argv: str) -> str:
 
 
 def find_open_issue(shard: str) -> str | None:
-    """Number of an existing open metamorph issue for this shard, if any."""
-    try:
-        out = gh(
-            "issue", "list", "--state", "open",
-            "--search", f'in:title "{MARKER} shard={shard}"',
-            "--json", "number,title", "--limit", "10",
-        )
-        for item in json.loads(out or "[]"):
-            if MARKER in item.get("title", "") and f"shard={shard}" in item.get("title", ""):
-                return str(item["number"])
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        log(f"warning: issue dedupe search failed ({e}) — will attempt creation")
-    return None
+    """Number of an existing open metamorph issue for this shard, if any.
+
+    [OPUS-5] #5804: LIST BY LABEL and exact-substring-match the title locally
+    (scripts/gh_dedupe.py) rather than trusting `gh --search`. A title of the shape
+    `[metamorph] shard=nightly` (metamorph.yml's shards are `smoke` and `nightly`)
+    carries exactly the punctuation gh's search tokeniser handles unreliably, and the
+    search index also lags — either would MISS an issue this filer already opened and
+    mint a duplicate.
+    """
+    res = gh_dedupe.find_open_issue(
+        LABEL,
+        (MARKER, f"shard={shard}"),
+        legacy_search=f'in:title "{MARKER} shard={shard}"',
+        log=log,
+        backfill_label=True,
+    )
+    if res.issue is None and not res.probed:
+        log("warning: issue dedupe lookup failed — will attempt creation")
+    return res.number
 
 
 def file_github_issue(bead_id: str, shard: str, parsed: dict, args) -> None:
@@ -234,6 +246,13 @@ def file_github_issue(bead_id: str, shard: str, parsed: dict, args) -> None:
         f"{MARKER} shard={shard}: {n} TLP/NoREC oracle failure(s) "
         f"(first seed={first})"
     )
+    # The label is load-bearing for dedupe (find_open_issue reads it back), so upsert
+    # it BEFORE the lookup — an unlabelled issue is one the next tick cannot see.
+    gh_dedupe.ensure_label(
+        LABEL, color="b60205",
+        description="TLP/NoREC metamorphic oracle failure (internal inconsistency)",
+        log=log,
+    )
     existing = find_open_issue(shard)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
         tf.write(body)
@@ -243,7 +262,8 @@ def file_github_issue(bead_id: str, shard: str, parsed: dict, args) -> None:
             gh("issue", "comment", existing, "--body-file", body_file)
             log(f"commented the fresh window on existing open issue #{existing} (deduped)")
         else:
-            url = gh("issue", "create", "--title", title, "--body-file", body_file)
+            url = gh("issue", "create", "--title", title, "--body-file", body_file,
+                     "--label", LABEL)
             log(f"filed GitHub issue: {url}")
     except subprocess.CalledProcessError as e:
         log(f"warning: gh issue filing failed (exit {e.returncode}): {e.stderr.strip() if e.stderr else e}")
