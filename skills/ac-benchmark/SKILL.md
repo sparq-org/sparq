@@ -49,3 +49,20 @@ volumes, retention, correlations, packaging, and sharing frequencies are assumpt
 Changing configuration fields or generator APIs requires updating this skill and
 the crate README in the same change. Preserve the separate earlier `deployment`
 generator and frozen scaling-study protocol.
+
+`PopulationConfig::service_history_entropy()` retains central record counts and
+effective rights while using `literal_profile: {kind: "seeded",
+message_text_bytes: 1024, short_text_bytes: 64}`. Its diverse synthetic text and
+numeric values have independent Pod seeds. These byte lengths and the fixed safe
+ASCII alphabet are compressibility stress assumptions, not fitted text distributions.
+Compare compressed storage with the compact profile and declare which profile a
+capacity claim uses. Omitted `literal_profile` in an older config selects `compact`
+and preserves the original N-Quads bytes. Changing the seeded byte lengths supports
+additional storage sensitivity runs without altering record counts or access rights.
+
+The default central constructor now emits `service-history-central-v2` with
+`literal_profile: {kind: "pod_specific"}`. Its numeric values vary between Pods;
+regular text remains a favorable-compression case. Existing version-one configs
+without `literal_profile` deserialize as `compact`, preserving their original
+N-Quads. The configuration schema remains compatible while the profile identifies
+the changed data distribution.

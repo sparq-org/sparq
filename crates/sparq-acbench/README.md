@@ -76,6 +76,13 @@ See the [usage skill](../../skills/ac-benchmark/SKILL.md) and
 [calibration manifest](../../bench/ac/million/corpus-calibration.json). The earlier
 `deployment` generator and its frozen study remain separate.
 
+The separate `PopulationConfig::service_history_entropy()` profile changes literal
+compressibility while retaining record counts and rights. It generates Pod-specific
+numeric values and diverse text under declared byte-length assumptions. The original
+compact profile remains byte reproducible. Report the literal profile with every
+compressed storage result; repeated synthetic placeholders do not establish the
+storage cost of complete personal service exports.
+
 ## 📚 Learn more
 
 - Design record: [`research/ac-query-benchmark.md`](../../research/ac-query-benchmark.md)
@@ -89,3 +96,10 @@ See the [usage skill](../../skills/ac-benchmark/SKILL.md) and
 ## License
 
 [MIT](../../LICENSE).
+
+The default central constructor now emits `service-history-central-v2` with
+`literal_profile: {kind: "pod_specific"}`. Its numeric values vary between Pods;
+regular text remains a favorable-compression case. Existing version-one configs
+without `literal_profile` deserialize as `compact`, preserving their original
+N-Quads. The configuration schema remains compatible while the profile identifies
+the changed data distribution.
