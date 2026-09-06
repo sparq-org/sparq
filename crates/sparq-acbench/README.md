@@ -103,3 +103,14 @@ regular text remains a favorable-compression case. Existing version-one configs
 without `literal_profile` deserialize as `compact`, preserving their original
 N-Quads. The configuration schema remains compatible while the profile identifies
 the changed data distribution.
+
+`population::planned_record_counts` provides cheap service inventory. The
+`population::mutation` module supplies chronological baseline record references and
+bounded ingestion, expiry, and value-edit SPARQL batches. Ingestion reuses the full
+record schema and literal profile in an existing governed graph; unique batch IDs
+reserve disjoint record ranges. Expiry removes all current outgoing triples, so
+editing a value first cannot leave an orphan. Edits replace the current value and
+require the record to exist. The result distinguishes expected changes from observed
+server deltas and reports an exhausted finite baseline through an empty request.
+See the usage skill for request types, virtual-date assumptions, batch bounds,
+resume-safe ID requirements, and the stateful-oracle interface.
