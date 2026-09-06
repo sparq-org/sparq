@@ -248,6 +248,94 @@ What is **not** risked: no committed floor is ever silently lowered (the monoton
 never left the queue, and a deliberate lowering stays a governed, loud re-baseline), and
 the nightly full-coverage tier (`coverage-nightly`) is untouched.
 
+## Slotless gate evaluation
+
+<!-- [OPUS-5] sq-lfmvd stage-1 / issue #6110. Records the outcome of the two §3.4
+     assumptions in research/ci-gate-slotless-aggregation.md. Findings only — this
+     section describes no shipped lane. -->
+
+`research/ci-gate-slotless-aggregation.md` proposes replacing the resident
+`ci-summary / gate` waiter with a short-lived `workflow_run` evaluator that publishes a
+**commit status** on the head SHA, so the gate stops occupying a hosted-runner slot while
+it waits. **Nothing of that design is shipped**: there is no evaluator workflow in
+`.github/workflows/`, the required check is still the `ci-summary / gate` job described
+above, and the ruleset is unchanged. This section records what is now known about the two
+delivery assumptions the design flagged as unsettleable from the repo (§3.4), because both
+are gating criteria for the stage-2 required-check migration.
+
+### Assumption 1 — `workflow_run` fires for `merge_group` siblings, and the publication lands on the group head SHA
+
+**Confirmed**, by a fail-closed coupling that has been running in production since #3511.
+It is not an inference from documentation: the repo already contains a `workflow_run`
+publisher whose failure to reach a merge-group head would stall the queue, and the queue
+does not stall.
+
+1. `feature-matrix.yml` carries a bare `merge_group:` trigger, and is one of the eight
+   workflows measured on a healthy group head (`merge-group-doorbell.yml` header: 8
+   `merge_group` runs and exactly 8 check-suites on `6b291b28`, and the same 8/8 on
+   `37aac5a4`, `e5a9d403`, `bef48bee`).
+2. On a Rust-bearing batch its `changes` job resolves `rust_changed=true` from the change
+   class, so `setup` assembles legs and the group jobs post real `opt-in group (…)`
+   check-runs **on the merge-group head**.
+3. `ci_summary_gate.py::fm_report_status` then **structurally awaits** a `feature-matrix
+   report` check-run on that same head — `pending` until it lands, and the gate fails
+   closed when the poll budget expires. That await is a pure function of the check-runs
+   present on the head SHA; it carries no `pull_request`-only condition, so it applies to a
+   `merge_group` ref exactly as to a PR head.
+4. `feature-matrix report` can only be posted by `feature-matrix-report.yml`, whose **only**
+   trigger is `workflow_run` on `feature-matrix` completion, and which posts to the
+   server-supplied `github.event.workflow_run.head_sha` after matching it byte-for-byte
+   against the artifact's recorded SHA.
+
+So if `workflow_run` were not delivered for `merge_group`-triggered runs, or the
+publication landed anywhere but the group head, **every Rust-bearing merge group would hang
+the required gate and time out RED**. The measured entry-failure rate over the profile
+window is **0 failed of the last 250 `merge_group` runs** (cited under *Merge-queue
+throughput settings* below). The one step not directly measured is that some of those 250
+batches were Rust-bearing — a non-Rust batch resolves `rust_changed=false`, spawns no legs,
+and `fm_report_status` returns `n/a`, so it exercises nothing. On a 37-crate Rust workspace
+whose queue drains worker PRs continuously that is not a live doubt, but it is an inference
+rather than a reading. Both halves of the assumption therefore hold.
+
+Two qualifications, stated honestly:
+
+- What is proven is delivery plus head-SHA targeting for a **check-run** written with
+  `checks: write`. The design publishes a **commit status** (`statuses: write`) — a
+  different API against the same SHA. The SHA identification is settled; the status write
+  path is exercised nowhere in this repo and stays open until the shadow lane's first
+  merge-group batch.
+- The evaluator must publish to `github.event.workflow_run.head_sha` **explicitly**. On a
+  `workflow_run` event GitHub sets `GITHUB_SHA` to the **default-branch** head, not the
+  triggering head (the property `verdict-bridge.yml`, `batch-merge.yml` and `pr-backlog.yml`
+  already rely on to argue they are structurally non-gating). An evaluator that published to
+  `github.sha` would silently annotate `main` and never report on the ref the ruleset checks.
+
+### Assumption 2 — an unfiltered `workflow_run` trigger fires for every workflow
+
+**Not settled here, and moot**: a recursion property makes the `workflows:` enumeration
+mandatory regardless of how the unfiltered form behaves.
+
+All six `workflow_run` lanes in the repo — `batch-merge`, `fast-fix-ring`, `pr-backlog`,
+`verdict-bridge` (all on `ci-summary`), `feature-matrix-report` (on `feature-matrix`) and
+`selection-alarm` (on `CI`) — carry an explicit `workflows:` filter. The repo has no
+instance of the unfiltered form and so cannot evidence it either way.
+
+The filter is also what discharges self-recursion. `fast-fix-ring.yml` and
+`feature-matrix-report.yml` both answer their §ADVERSARIAL *"can this workflow trigger
+itself?"* with *"no — it triggers only on completion of the workflow named X, and it is not
+itself named X"*. An evaluator with no `workflows:` filter loses that argument by
+construction: its own completion is a workflow completion. So the enumeration (or an
+explicit self-exclusion `if:`, which still spends a run per firing) is required for
+recursion-safety on its own terms.
+
+The design's contingency — *"if `workflows:` is required, the fix is to enumerate the
+sibling workflows"* — is therefore the decision, not a fallback. It carries a maintenance
+obligation the implementation bead owns: a gating workflow added without being added to the
+list is silently un-awaited, which fails **open**. Whatever ships must pair the list with a
+check that it covers every gating workflow, in the spirit of
+`scripts/check-advisory-registry.py`'s C4 (a declaration that drifts from the live YAML goes
+RED rather than quietly changing what gates).
+
 ## Draft-tier CI (reduced matrix on draft PR heads)
 
 <!-- [FABLE-5] Draft-tier CI design record (2026-07-17). Motivation: the autonomous
