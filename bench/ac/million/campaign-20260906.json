@@ -48,7 +48,7 @@
     "minimum_offered": 1000,
     "request_timeout_ms": 5000,
     "server_deadline_ms": 200,
-    "maximum_inflight": 256,
+    "maximum_inflight": 8192,
     "queue_capacity_per_worker": 64,
     "arrival": "poisson",
     "full_response_body": true,
@@ -56,7 +56,16 @@
     "success_fraction": 0.99,
     "deadline_fraction_of_all_offered": 0.95,
     "independent_restart_per_run": true,
-    "paired_model_order": "alternate by replicate; first WAC for even zero-based replicate, ACP for odd"
+    "paired_model_order": "alternate by replicate; first WAC for even zero-based replicate, ACP for odd",
+    "queue_stability": {
+      "quarter_definition": "First and last quarters of scheduled measurement arrivals",
+      "metric": "p95 server queue wait among returned requests",
+      "required_timer_coverage_fraction_of_offered": 0.99,
+      "allowed_growth_us_floor": 1000,
+      "allowed_growth_fraction_of_first_quarter": 0.1,
+      "decision": "Missing coverage or larger growth prevents capacity admission; report the diagnostic values."
+    },
+    "resource_admission": "Require successful before/after cgroup capture, no oom or oom_kill events, and recorded server memory.peak no greater than its configured tier. A missing measurement prevents a resource claim."
   },
   "corpora": [
     {
@@ -148,11 +157,22 @@
         "wac",
         "acp"
       ]
+    },
+    {
+      "id": "messaging-8",
+      "profile": "history",
+      "config_file": "bench/ac/million/messaging-volume-config.json",
+      "pods": 8,
+      "role": "observation-motivated-message-stock-sensitivity",
+      "models": [
+        "wac",
+        "acp"
+      ]
     }
   ],
   "groups": [
     {
-      "id": "population-control",
+      "id": "compact-fixed-population",
       "datasets": [
         "compact-1000",
         "compact-1000000",
@@ -166,6 +186,30 @@
       ],
       "cpus": [
         1
+      ],
+      "cache_source_bytes": 67108864,
+      "cache_pods": 256,
+      "max_pod_bytes": 1048576,
+      "rates": [
+        32
+      ],
+      "repeat": 5,
+      "purpose": "Fixed offered load and resource tier across physically populated scales; uniform target working set. The earlier fixed-target isolation result remains separately scoped."
+    },
+    {
+      "id": "population-control",
+      "datasets": [
+        "compact-1000000",
+        "compact-2000000"
+      ],
+      "lane": "journeys",
+      "scenario": "busy-period",
+      "selection": "uniform",
+      "memory_gib": [
+        1
+      ],
+      "cpus": [
+        4
       ],
       "cache_source_bytes": 67108864,
       "cache_pods": 256,
@@ -186,7 +230,6 @@
         1
       ],
       "cpus": [
-        1,
         4
       ],
       "cache_source_bytes": 67108864,
@@ -195,8 +238,7 @@
       "rates": [
         32,
         128,
-        512,
-        2048
+        512
       ],
       "repeat": 5,
       "purpose": "Highest tested passing offered rate and next failing rate per language; fixed grid, no interpolated maximum."
@@ -213,7 +255,6 @@
         16
       ],
       "cpus": [
-        1,
         4
       ],
       "cache_source_bytes": 8589934592,
@@ -229,7 +270,8 @@
       "id": "retained-history-larger",
       "datasets": [
         "history-1000",
-        "entropy-8"
+        "entropy-8",
+        "messaging-8"
       ],
       "lane": "journeys",
       "scenario": "busy-period",

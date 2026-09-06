@@ -109,3 +109,9 @@ and compares exact authorized results through in-memory, raw indexed, and compre
 indexed graphs. See [`indexed-preview.md`](../../bench/ac/million/indexed-preview.md)
 for phase boundaries, physical storage accounting, descriptor estimates, and the
 uncontrolled-cache limitation. This example is not a million-Pod or HTTP capacity run.
+
+The optional `bench/ac/million/messaging-volume-config.json` is a declared message-stock
+sensitivity used through `pack --config-file`; it leaves the central constructor
+unchanged. Its evidence and sampling limits are recorded in
+`bench/ac/million/calibration/messaging-observations.json`. It is not a fitted
+distribution of future Solid users or a measurement of full message body sizes.

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "model_provenance": "[GPT-6]",
+  "observations": [
+    {
+      "id": "dona-2025",
+      "doi": "10.3758/s13428-024-02593-z",
+      "url": "https://link.springer.com/article/10.3758/s13428-024-02593-z",
+      "location": "Table 3, PDF page 8",
+      "cohorts": [
+        {
+          "platform": "WhatsApp",
+          "donations": 78,
+          "selection": "Participants asked for their most important five to seven chats; donated range five to twenty-one chats.",
+          "median_messages": 31000,
+          "median_timespan_days": 1956.5,
+          "message_range": [
+            670,
+            188000
+          ]
+        },
+        {
+          "platform": "Facebook",
+          "donations": 7,
+          "selection": "All exported chats; small self-selected sample.",
+          "median_messages": 36000,
+          "median_timespan_days": 1093,
+          "message_range": [
+            1248,
+            166000
+          ]
+        }
+      ],
+      "scope": "De-identified message metadata. Young sample (reported median age 25.5); donated timespans differ. Separate medians do not determine the distribution of individual message rates. No joint population distribution or full-message byte-size distribution is established."
+    },
+    {
+      "id": "de-leon-2026",
+      "doi": "10.1177/08944393261435088",
+      "url": "https://journals.sagepub.com/doi/10.1177/08944393261435088",
+      "location": "Data and Methods; Effects on Data Received",
+      "scope": "Actual Facebook/Instagram download-package study supports sensitivity to retained timespan and platform-specific truncation. Package MB sizes are not used to calibrate this metadata-only RDF corpus because their binary/content boundary differs or is unclear."
+    }
+  ],
+  "sensitivity": {
+    "config_file": "messaging-volume-config.json",
+    "profile": "service-history-messaging-volume-v1",
+    "monthly_communication_records": 1000,
+    "history_months": 60,
+    "one_times_volume_message_stock": 60000,
+    "half_volume_message_stock": 30000,
+    "other_parameters": "Identical to service-history-central-v2, including seeded volume classes and effective rights.",
+    "interpretation": "A declared higher-volume sensitivity motivated by observed retained-message stocks, not a fitted empirical distribution, inferred mean message rate, or validated all-service population model. Central-v2 and the completed pilot are unchanged."
+  }
+}
