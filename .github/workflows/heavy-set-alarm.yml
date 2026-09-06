@@ -89,8 +89,8 @@ jobs:
         with:
           tool: nextest
       # THE MEASUREMENT. Three flags are load-bearing:
-      #   * `--features approx-ann,filtered-ann,vec-predicate` MIRRORS ci.yml's
-      #     `cargo nextest archive` line. The shards run that archive, so measuring a
+      #   * `--features ${ARCHIVE_FEATURES}` mirrors ci.yml's canonical declaration.
+      #     The shards run that archive, so measuring a
       #     different feature set would measure a different test POPULATION and could
       #     report drift against tests the shards never run (or miss ones they do).
       #   * `--all-targets`, likewise, matches the archive's target set.
@@ -104,9 +104,12 @@ jobs:
       - name: Measure per-test wall-time across the workspace
         env:
           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+          # Must equal ci.yml's build-archive ARCHIVE_FEATURES. A hermetic gate
+          # reds on drift: scripts/tests/test_archive_feature_parity.py.
+          ARCHIVE_FEATURES: approx-ann,filtered-ann,vec-predicate
         run: |
           cargo nextest run --workspace --all-targets \
-            --features approx-ann,filtered-ann,vec-predicate \
+            --features "${ARCHIVE_FEATURES}" \
             --no-fail-fast \
             --message-format libtest-json-plus --message-format-version 0.1 \
             > heavy-set-events.jsonl \

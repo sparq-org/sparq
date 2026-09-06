@@ -1094,6 +1094,12 @@ jobs:
       # so a finding cannot be raised and then dropped before it is rendered.
       - name: Self-test the HEAVY-set drift alarm (drift classes + empty-measurement fail-loud)
         run: python3 scripts/heavy_set_alarm.py --self-test
+      # [GPT-5] #6273: ci.yml owns the archive feature set; the HEAVY timing
+      # alarm and EC2 build farm must exercise that exact same test population.
+      # The suite includes mutation cases proving that drift in either consumer
+      # makes the check fail.
+      - name: Gate nextest archive feature-set parity across CI consumers
+        run: python3 scripts/tests/test_archive_feature_parity.py
       # [SONNET-4.6] sq-1cb6l: the 5 remaining hermetic test suites found by the
       # #1670 audit, wired here alongside the other ci-scripts self-tests.
       #

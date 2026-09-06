@@ -22,7 +22,7 @@
 #   1. cargo build --workspace
 #   2. cargo clippy --workspace --exclude sparq-py --all-targets -- -D warnings    (GATING)
 #   3. cargo test  --workspace                                                     (default features)
-#   4. cargo test  --workspace --features approx-ann,filtered-ann,vec-predicate    (CI archive opt-in set)
+#   4. cargo test --workspace --features "${ARCHIVE_FEATURES}" (CI archive opt-in set)
 #      + cargo clippy ... --features <archive set> -- -D warnings
 # (3) and (4) are the BOTH feature states the contract requires: default-OFF, then the canonical
 # CI opt-in feature set (the same set ci.yml's nextest archive + doctests carry). fmt is run
