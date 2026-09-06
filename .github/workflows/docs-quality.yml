@@ -971,15 +971,17 @@ jobs:
         run: python3 scripts/tests/test_path_ownership.py
       - name: Selection wiring inspection (fail-closed guards + real crate needles — sq-fmx4u.3)
         run: python3 scripts/tests/test_ci_select_wiring.py
-      # [SONNET-4.6] sq-6vshe.15: the merge-queue cache/artifact posture is two
-      # single-line YAML properties that are INVISIBLE when absent — a dropped
-      # `save-if` just makes the queue slower and churns the shared 10 GB cache
-      # budget again, and a dropped `compression-level: 0` just re-compresses the
-      # already-zstd nextest archive on the critical path. Neither reds anything on
-      # its own, so both are pinned structurally over every workflow that still
-      # triggers on `merge_group`, together with the archive's producer/consumer
-      # content-parity contract. Hermetic + stdlib-only (no PyYAML needed).
-      - name: Merge-queue cache/artifact posture (save-if + archive diet — sq-6vshe.15)
+      # [SONNET-4.6] sq-6vshe.15 / [OPUS-5] #5231: the merge-queue cache/artifact
+      # posture is three single-line YAML properties that are INVISIBLE when wrong — a
+      # dropped `save-if` just makes the queue slower and churns the shared 10 GB cache
+      # budget again, a dropped `compression-level: 0` just re-compresses the
+      # already-zstd nextest archive on the critical path, and a `key:` where
+      # `shared-key:` was meant just stops coverage-engine-merge from restoring the run
+      # partitions' dep cache. None reds anything on its own, so all three are pinned
+      # structurally over every workflow that still triggers on `merge_group`, together
+      # with the archive's producer/consumer content-parity contract. Hermetic +
+      # stdlib-only (no PyYAML needed).
+      - name: Merge-queue cache/artifact posture (save-if + archive diet + shared-key — sq-6vshe.15, 5231)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
       # [OPUS-5] issue #5165 — the LANE INVENTORY half of the same problem. The
       # `merge_group` trigger set and the prose in docs/branch-protection.md
