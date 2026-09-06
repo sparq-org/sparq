@@ -15,8 +15,11 @@
 #let old(key) = baseline.values.at(key).value
 #let rounded(number, digits: 0) = str(calc.round(number, digits: digits))
 #let rate(pods, scenario) = derived.population_rates.find(x => x.pods == pods and x.scenario == scenario)
+#import "solid-pod-scale-results.typ": main-state, main-tables
 #let campaign_path = sys.inputs.at("campaign", default: "")
 #let campaign = if campaign_path == "" { none } else { json(campaign_path) }
+#let campaign_state = main-state(campaign)
+#let campaign_ready = campaign_state == "finalized and reviewed"
 #let review_root = sys.inputs.at("artifact-root", default: "../../")
 #let anon = sys.inputs.at("anon", default: "false") == "true"
 #set document(title: "Access-Controlled SPARQL over Solid Pods on One Machine")
@@ -36,10 +39,10 @@
   #if anon [Anonymous submission] else [Jesse Wright\ #text(size: 9pt)[SPARQ project]]
 ]
 
-#if campaign == none {
+#if not campaign_ready {
   block(fill: luma(95%), inset: 8pt, width: 100%)[
-    #text(size: 9pt)[Research draft. The larger benchmark campaign is in progress.
-    It includes the earlier compact WAC study and a completed exploratory HTTP pilot.
+    #text(size: 9pt)[Research draft. Main campaign evidence: #campaign_state.
+    The results retain the earlier compact WAC study and completed exploratory HTTP pilot.
     Million-Pod service capacity and WAC/ACP equivalence remain unestablished.]
   ]
 }
@@ -64,8 +67,10 @@ decision but does not establish million-Pod capacity. The HTTP pilot further
 shows that compact fixtures conceal a material limitation: whole-Pod loading
 under cache churn fails the interactive target for the richer retained histories,
 even at small populations. The expanded evaluation separates this working-set
-problem from hosted-Pod count and tests storage, authentication, queueing, network
-delay and policy updates before making a deployment claim.
+problem from hosted-Pod count. Its measurement boundary covers authenticated
+local HTTP requests and queueing, with separate resource accounting. Network journeys
+remain unmeasured; the latency target reserves time for network transit and client
+work rather than establishing an end-to-end deployment result.
 
 #text(size: 9.5pt)[*Keywords:* Solid, SPARQL, access control, WAC, ACP, multi-tenancy, benchmarking]
 
@@ -237,9 +242,9 @@ claim: a shared CPU, cache or disk can still reveal contention through timing.
 
 == From service records to populated Pods
 
-We use two kinds of corpus. A compact control preserves the earlier study's small
-social and health fixtures for controlled comparisons. The main personal-data
-corpus represents retained service histories across communication, contacts,
+The earlier baseline uses small social and health fixtures. The new campaign
+uses a distinct compact control containing small personal service records, plus
+a larger personal-data corpus representing retained service histories across communication, contacts,
 calendar, transactions, activity, location and media metadata. Records share
 identities, dates and relationships so that joins have meaning. Increasing the
 population creates additional people with their own stored content; it does not
@@ -502,13 +507,13 @@ transit and client work within the declared one-second interactive journey. The
 target is an experimental usability criterion, not a deadline specified by Solid.
 User-relevant latency and availability must be measured explicitly @sre.
 
-The network experiments use local, regional and mobile-stress conditions, with
-the delay, jitter, bandwidth and loss parameters recorded in the workload file.
-They measure whole journeys with one and three sequential requests. Sequential
-requests consume the same user budget repeatedly, so the three-request scenario
-uses a tighter per-request server budget. It would be incorrect to sum component
-95th percentiles and call the result a journey percentile; the experiment measures
-the completed journey directly.
+The workload also declares local, regional and mobile-stress network profiles,
+but the current campaign measures local HTTP requests only. Its network and
+client allowance remains a budget, not a measured journey result. A deployment
+evaluation must measure whole journeys under the declared delay, jitter, bandwidth
+and loss conditions. Sequential requests consume the same user budget repeatedly;
+the proposed three-request journey therefore has a tighter per-request budget.
+Summing component 95th percentiles would not establish a journey percentile.
 
 = Evaluation method
 
@@ -539,7 +544,7 @@ shorter, fixed-rate schedule and does not satisfy this protocol.
         #workload.latency_budget.interactive_journey_p95_ms ms journey p95;
         #workload.latency_budget.client_processing_budget_ms ms client allowance],
       ..workload.network_profiles.map(n => (
-        [Network: #n.id], [RTT #n.round_trip_delay_ms ms; one-way jitter #n.one_way_jitter_ms ms;
+        [Unmeasured network: #n.id], [RTT #n.round_trip_delay_ms ms; one-way jitter #n.one_way_jitter_ms ms;
           loss #rounded(100 * n.packet_loss_fraction, digits: 1)%; #n.bandwidth_mbit_per_second Mbit/s],
       )).flatten(),
     )
@@ -571,8 +576,10 @@ Every persisted Pod is verified against a manifest and checksum. A seeded query
 sample spans volume quantiles, domains, policy placement and sharing scenarios;
 all distinct generated policy scenarios receive oracle coverage. This verifies
 the actual population on disk without claiming that a small sample exhaustively
-proves every possible query. Any correctness failure quarantines its affected
-run and prevents a capacity claim.
+proves every possible query. A wrong authorization result, durable receipt or
+replayed state quarantines all inferential results from that source. A resource
+or admission failure instead rejects its dataset/configuration; it does not
+invalidate independently verified compact controls.
 
 == Storage, working set and service capacity
 
@@ -630,12 +637,16 @@ Confidence intervals resample independent paired runs, rather than pretending
 that every request in one run is an independent experiment. The primary comparison
 uses p95 at the same hardware and offered load. Sustainable goodput is established
 separately for each language by a saturation search under the same service
-objective: each run pair supplies the two independently established highest
-passing rates. Their ratio is the throughput comparison. Equal completion rates
+objective. Each language supplies a highest tested passing rate and, where
+reached, a consistently failing upper rate. Equal completion rates
 at a shared low offered rate are capped by the client and cannot establish
-capacity equivalence. The search reports each highest tested passing rate and
-adjacent failing rate, without inventing an interpolated maximum. If a bracket
-or required repetition is missing, throughput equivalence remains undetermined.
+capacity equivalence. Let the passing and failing bounds be $L_W, U_W$ for
+WAC and $L_A, U_A$ for ACP. Under the stated monotonic-capacity assumption, the
+conservative ratio bounds are $[L_A/U_W, U_A/L_W]$. They must lie within the
+equivalence margin: identical highest passing points on a coarse grid are
+insufficient. A paired confidence interval for the tested-grid statistic does
+not narrow untested intervals. Missing bounds or repetitions, mixed pass/fail
+repetitions, or nonmonotone results leave capacity equivalence unestablished.
 Cold loading, policy materialization, memory and update
 latency are reported separately; similar warm queries would not erase differences
 in those costs.
@@ -716,6 +727,7 @@ archival availability remains unresolved.
 
 == Expanded capacity evidence
 
+#if not campaign_ready [
 #let pilot_order = (("smoke", 8), ("smoke", 64), ("history", 8), ("history", 64), ("entropy", 8))
 The completed HTTP pilot used source commit #raw(pilot.source_commit.slice(0, 12)).
 Its input checksums and all request sequences pass the extractor's integrity
@@ -793,33 +805,51 @@ WAC/ACP equivalence verdict. Its summary records source hashes, per-operation
 failures, absent coverage, loading phases and resource snapshots so those limits
 remain auditable.
 
-#if campaign == none [
-  The canonical population-scale campaign has not yet supplied an admitted result
-  artifact. Million-Pod service capacity remains unestablished.
-
+The main campaign has not yet supplied finalized, reviewed evidence for this
+manuscript. Its status is *#campaign_state*. The completed pilot remains visible;
+no partial main timings are used for capacity or equivalence claims.
 ] else [
-  #campaign.summary
+The main campaign uses source #raw(campaign.source_commit.slice(0, 12)). Its final
+checksum manifest is verified, and the analysis is bound to the benchmark-method
+and request-accounting review of that source. This is a scoped experimental
+review, not a proof of complete implementation correctness. The tables retain
+all planned cells and apply the extractor's validity flags before inference.
+The #link(review_root + "research/solid-pod-scale-main.json")[accompanying analysis]
+binds source, input and extraction hashes to the full request-accounting and
+resource evidence; public archival availability remains unresolved.
+
+#main-tables(campaign)
+
+The original pilot remains relevant context: at #history8.pods retained-history
+Pods, each language completed #history8.requests.successful of
+#history8.requests.offered requests, with none within the diagnostic deadline.
+The compact smoke requests all met that deadline. That single-schedule pilot
+used uniform query templates and existing-value replacements; the main campaign
+uses journey weights and stock-derived mutations. Their response times must not
+be pooled as repetitions of one workload.
+
+A local passing cell supports only its named corpus, offered rate and resource
+tier. Compact populated-Pod controls test hosted count separately from the larger
+retained histories. The requested million-Pod retained-history service remains
+unestablished without its full storage, operation and population coverage.
+Network journeys remain unmeasured in this campaign.
 ]
 
 = Discussion
 
-The strongest useful outcome is a bounded capacity statement: a particular
-machine stores a particular populated corpus and sustains its declared request
-mix under the stated authorization and latency conditions. Every part matters.
-Pod count alone ignores retained volume. Queries per second alone ignores
-tail latency and failure. A small active cache alone ignores persistent storage
-and page cache. The proposed measurements keep these quantities together so a
-reader can assess whether their own deployment fits the same conditions.
+A useful capacity statement must identify the populated corpus, request mix,
+permissions, latency and hardware together. Pod count omits retained volume;
+throughput omits failures and tail latency; an application cache limit omits
+persistent storage and charged page cache. The reported conditions let readers
+assess whether the result applies to their deployment.
 
-The representativeness argument is necessarily partial. Public schemas and
-selected traces establish that the corpus includes recognizable personal service
-data. A rating history supplies an observed volume distribution for one domain,
-and a payment diary anchors a transaction mean. The other retained volumes,
-cross-domain correlations and future app behavior
-remain model assumptions. The planned sensitivities will quantify how much the
-engineering conclusion depends on them. They cannot turn uncertain assumptions into a
-probability sample. Richer consenting export samples could materially change
-the inferred storage and service requirements.
+Representativeness remains partial. Schemas establish recognizable service data;
+ratings supply one retained-volume distribution; payment diaries anchor a mean;
+selected chat donations motivate a messaging sensitivity. Other volumes,
+cross-domain correlations and future application behavior remain assumptions.
+Sensitivity experiments can expose dependence on those choices, but cannot turn
+them into a population sample. Richer consenting exports could change the
+inferred storage and service requirements.
 
 The binary-payload exclusion is also substantive. Media metadata can be queried
 without transferring original photos or videos, but a complete Pod hosting
@@ -835,14 +865,11 @@ dataset-view interface makes similar steady-state execution plausible, but only
 the paired measurements can establish practical equivalence. A difference in
 cold cost or update latency is useful even if repeated warm queries look alike.
 
-Finally, this is a single-machine query study. It does not evaluate high
-availability, disaster recovery, denial-of-service resistance or the entire
-Solid protocol. Queries that span many Pods add both authorization work and
-distributed-query costs; our fanout scenario accounts for target-Pod requests
-without claiming to solve arbitrary federation. The authentication configuration
-also fixes issuer discovery during measurement. These boundaries identify what
-additional work a deployment must provision rather than weakening the measured
-request path.
+This single-machine query study excludes high availability, disaster recovery,
+denial-of-service resistance and full Solid conformance. Fanout counts separately
+authorized target-Pod requests; arbitrary federation remains outside scope.
+Issuer discovery is fixed during measurement. A deployment must provision these
+additional operations and its unmeasured network journeys.
 
 = Related work
 
@@ -879,16 +906,14 @@ controlled evidence supports selecting the Pod before graph enumeration. The
 expanded design tests whether persistent storage and a bounded active cache turn
 that property into practical single-machine capacity.
 
-#if campaign == none [
-  The retained-history pilot misses the interactive target under whole-Pod cache
-  churn even for small populations. Thus Pod-local routing is supported, while
-  million-Pod service capacity for the larger workload remains unestablished.
-  Resolving that limitation and testing the complete service conditions at the
-  claimed population are necessary next steps.
-] else [#campaign.conclusion]
+The retained-history pilot misses the interactive target under whole-Pod cache
+churn even for small populations. Pod-local routing is supported; the broader
+claim requires both sufficient retained-data capacity and a passing service
+workload at the claimed population. The campaign distinguishes these conditions,
+while its unmeasured network journeys remain a separate deployment limitation.
 
 #{
-  set text(size: 9.5pt)
-  set par(leading: 0.5em, justify: false)
+  set text(size: 9pt)
+  set par(leading: 0.45em, justify: false)
   bibliography("solid-pod-scale.refs.yml", style: "ieee", title: [References])
 }
