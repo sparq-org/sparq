@@ -519,6 +519,12 @@ discovery; neither is itself a conformance-tested HTTP layer.
   **`acp:vc`** — the context agent must hold a verified credential satisfying the named
   requirement, resolved against the TRUSTED holdings supplied via
   `materialize_acp_with_credentials` (above), and fail-closed with none supplied.
+  [GPT-6] A matcher without any `acp:agent`, `acp:client`, `acp:issuer`, or `acp:vc`
+  attribute is never satisfied ([ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher)).
+  Deleting its final attribute and rematerializing removes grants that require
+  that matcher to match, including cached query access. An empty matcher used by `noneOf`
+  cannot suppress an otherwise satisfied policy; it differs from an absent `noneOf`
+  condition only in the stored policy structure.
 - Principal lattice — three independent dimensions (agent, client, issuer):
   `Public ⊒ Authenticated ⊒ concrete-WebID`, `AnyClient ⊒ concrete-client`, and
   ([OPUS-4.8] sq-3jtd.6) `AnyIssuer ⊒ concrete-issuer`. A session expands to the agent
