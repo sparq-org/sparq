@@ -1,37 +1,19 @@
 <!-- [FABLE-5] sq-gg0qq.2: imported from jeswr/solid-server-rs@1e555b10 (see epic sq-gg0qq). -->
 # sparq-lws-core
 
-> **EXPERIMENTAL** — a parallel-track Rust implementation of a Solid/LDP (Linked Web
-> Storage) server. It does **not** replace the TypeScript prod-solid-server. Imported
-> whole from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs)
-> (rev `1e555b10`); the 3-way lws-core / lws / solid-server split is a later bead.
+> **EXPERIMENTAL** — a parallel-track Rust implementation of a Solid/LDP (Linked Web Storage) server. It does **not** replace the TypeScript prod-solid-server. Imported whole from [jeswr/solid-server-rs](https://github.com/jeswr/solid-server-rs) (rev `1e555b10`); the 3-way lws-core / lws / solid-server split is a later bead.
 
-A Solid/LDP server core: SPARQ-authoritative for RDF and access control (WAC),
-`object_store`/S3 backup-only for bytes. Solid-OIDC + DPoP auth (via the pinned
-[solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier)), tiered
-proof-of-possession (mTLS cert-bound tokens, DPoP-SK), notifications
-(WebSocketChannel2023), and a DoS-hardened hyper/axum transport.
+A Solid/LDP server core: SPARQ-authoritative for RDF and access control (WAC), `object_store`/S3 backup-only for bytes. Solid-OIDC + DPoP auth (via the pinned [solid-oidc-verifier](https://github.com/jeswr/solid-oidc-verifier)), tiered proof-of-possession (mTLS cert-bound tokens, DPoP-SK), notifications (WebSocketChannel2023), and a DoS-hardened hyper/axum transport.
 
 ## 🚀 Quickstart
 
 ### Persisted population research example
 
 <!-- [GPT-6] -->
-`cargo build --release -p sparq-lws-core --example pod_population_http`
-builds an opt-in experiment over compressed, fully persisted Pod snapshots.
-It adds no route to the shipping server. Its `pack`, `verify`, `auth`, `serve`
-and scheduled `load` commands are documented in
-[`skills/solid-lws-server/SKILL.md`](../../skills/solid-lws-server/SKILL.md#persisted-population-research-example).
-
-The experiment verifies signed access tokens and request-bound DPoP through
-the existing authentication implementation, then loads and authorizes only
-the requested Pod. It supports WAC and ACP reads and data updates. Policy
-editing uses the same separate, manifest-owner administration rule for both
-languages: this does not implement ACP authorization of ACR editing. The
-corpus, cache admission limits, whole-response client measurements, and
-unimplemented production-server facilities must accompany capacity claims.
-The `history` and `entropy` pack profiles compare declared literal-volume
-and compression assumptions while retaining the same records and rights.
+Build `cargo build --release -p sparq-lws-core --example pod_population_http` for persisted WAC/ACP HTTP query experiments, separate from the shipping server.
+The [research guide](../../skills/solid-lws-server/SKILL.md#persisted-population-research-example) documents `pack`, `verify`, `auth`, `serve`, journey-weighted `load`, and durable mutation `audit`.
+Signed access tokens and DPoP are verified; policy editing uses shared manifest-owner administration, not ACP ACR-edit authorization. Source-byte cache limits are not heap/RSS limits; report cgroup memory, failures and complete HTTP body latency.
+The compact control, history and entropy profiles have distinct claim boundaries; canonical campaigns require frozen workload/schema, paired runs, exact mutation checks and actual persisted population evidence.
 
 ```bash
 # Build + run the server binary (in-memory store, plain TCP)

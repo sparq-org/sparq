@@ -11,14 +11,14 @@ use tokio::task::JoinSet;
 use super::auth::Credentials;
 use super::{Result, Settings};
 
-fn emit(output: &Mutex<BufWriter<File>>, value: Value) -> Result<()> {
+pub(super) fn emit(output: &Mutex<BufWriter<File>>, value: Value) -> Result<()> {
     let mut output = output.lock().expect("output lock poisoned");
     serde_json::to_writer(&mut *output, &value)?;
     output.write_all(b"\n")?;
     Ok(())
 }
 
-fn random(seed: u64, sequence: u64, stream: u64) -> u64 {
+pub(super) fn random(seed: u64, sequence: u64, stream: u64) -> u64 {
     let mut value = sequence
         .wrapping_add(seed)
         .wrapping_add(stream.wrapping_mul(0x9e3779b97f4a7c15));
@@ -27,7 +27,7 @@ fn random(seed: u64, sequence: u64, stream: u64) -> u64 {
     value ^ (value >> 31)
 }
 
-fn unit(value: u64) -> f64 {
+pub(super) fn unit(value: u64) -> f64 {
     ((value >> 11) as f64 + 0.5) / ((1_u64 << 53) as f64)
 }
 
@@ -73,6 +73,9 @@ fn workload_weights(settings: &Settings) -> Result<[f64; 4]> {
 }
 
 pub(super) async fn run(settings: Settings) -> Result<()> {
+    if settings.text("mix", "reads") == "journeys" {
+        return super::journeys::run(settings).await;
+    }
     let credentials = Arc::new(Credentials::load(&settings)?);
     let requests = settings.number("requests", 1000)?;
     let rate: f64 = settings.text("rate", "10").parse()?;
@@ -249,67 +252,18 @@ pub(super) async fn run(settings: Settings) -> Result<()> {
         running.spawn(async move {
             let suffix = if operation == 3 { "policy" } else if operation == 2 { "update" } else { "sparql" };
             let path = format!("/pods/{pod}/{suffix}");
-            let prepare = Instant::now();
-            let mut request = client.post(format!("{connect}{path}"))
-                .header("content-type", if operation >= 2 { "application/sparql-update" } else { "application/sparql-query" })
-                .body(query_text);
-            if principal != "public" {
-                let webid = match (principal.as_str(),population.as_ref()) {
-                    ("owner",Some(config)) => population::owner_webid(config,pod),
-                    ("recipient",Some(config)) => population::recipient_webid(config,pod,0),
-                    ("recipient",_) => recipient_template.replace("{pod}", &pod.to_string()),
-                    ("outsider",_) => "https://outsider.benchmark.example/profile#me".into(),
-                    _ => owner_template.replace("{pod}", &pod.to_string()),
-                };
-                let (access, proof) = credentials.headers(&webid, &path);
-                request = request.header("authorization", access).header("dpop", proof);
-            }
-            let sent = Instant::now();
-            let result = request.send().await;
-            let mut record = json!({"record_type":"request", "sequence":sequence,
+            let webid = match (principal.as_str(), population.as_ref()) {
+                ("public", _) => None,
+                ("owner", Some(config)) => Some(population::owner_webid(config,pod)),
+                ("recipient", Some(config)) => Some(population::recipient_webid(config,pod,0)),
+                ("recipient", _) => Some(recipient_template.replace("{pod}", &pod.to_string())),
+                ("outsider", _) => Some("https://outsider.benchmark.example/profile#me".into()),
+                _ => Some(owner_template.replace("{pod}", &pod.to_string())),
+            };
+            let record = json!({"record_type":"request", "sequence":sequence,
                 "pod":pod, "scheduled_us":scheduled.duration_since(start).as_micros() as u64,
-                "operation":(["query","background-read","content-write","policy-write"][operation]),"query_id":query_id,
-                "dispatch_lag_us":prepare.duration_since(scheduled).as_micros() as u64,
-                "credential_preparation_us":sent.duration_since(prepare).as_micros() as u64});
-            match result {
-                Ok(response) => {
-                    record["status"] = json!(response.status().as_u16());
-                    if let Some(delta) = response.headers().get("x-policy-triple-delta")
-                        .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<i64>().ok()) {
-                        record["policy_triple_delta"] = json!(delta);
-                    }
-                    for name in ["queue", "auth", "operation", "load", "materialize", "server"] {
-                        if let Some(value) = response.headers().get(format!("x-{name}-us"))
-                            .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()) {
-                            record[format!("{name}_us")] = json!(value);
-                        }
-                    }
-                    for name in ["cache-hit", "cache-entries", "cache-source-bytes"] {
-                        if let Some(value) = response.headers().get(format!("x-{name}"))
-                            .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()) {
-                            record[name.replace('-', "_")] = json!(value);
-                        }
-                    }
-                    match response.bytes().await {
-                        Ok(bytes) => {
-                            record["response_bytes"] = json!(bytes.len());
-                            record["outcome"] = json!(if record["status"] == 200 { "ok" } else { "http-error" });
-                            if record["status"] != 200 {
-                                record["error"] = json!(String::from_utf8_lossy(&bytes).chars().take(512).collect::<String>());
-                            }
-                            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
-                                if let Some(count) = value.pointer("/results/bindings/0/count/value") {
-                                    record["count"] = count.clone();
-                                }
-                            }
-                        }
-                        Err(error) => { record["outcome"] = json!("body-error"); record["error"] = json!(error.to_string()); }
-                    }
-                }
-                Err(error) => { record["status"] = Value::Null; record["outcome"] = json!("transport-error"); record["error"] = json!(error.to_string()); }
-            }
-            record["http_latency_us"] = json!(sent.elapsed().as_micros() as u64);
-            record["scheduled_latency_us"] = json!(scheduled.elapsed().as_micros() as u64);
+                "operation":(["query","background-read","content-write","policy-write"][operation]),"query_id":query_id});
+            let record = send(&client, &credentials, &connect, Outgoing {path, query_text, webid, update:operation>=2, observation:None, record, scheduled}).await?;
             emit(&output, record)
         });
     }
@@ -323,4 +277,146 @@ pub(super) async fn run(settings: Settings) -> Result<()> {
     )?;
     output.lock().expect("output lock poisoned").flush()?;
     Ok(())
+}
+
+// Shared request transport: both pilot and journey schedules retain all offered outcomes.
+pub(super) struct Outgoing {
+    pub(super) path: String,
+    pub(super) query_text: String,
+    pub(super) webid: Option<String>,
+    pub(super) update: bool,
+    pub(super) observation: Option<Value>,
+    pub(super) record: Value,
+    pub(super) scheduled: Instant,
+}
+
+pub(super) async fn send(
+    client: &reqwest::Client,
+    credentials: &Credentials,
+    connect: &str,
+    outgoing: Outgoing,
+) -> Result<Value> {
+    let Outgoing {
+        path,
+        query_text,
+        webid,
+        update,
+        observation,
+        mut record,
+        scheduled,
+    } = outgoing;
+    let prepare = Instant::now();
+    let mut request = client
+        .post(format!("{connect}{path}"))
+        .header(
+            "content-type",
+            if update {
+                "application/sparql-update"
+            } else {
+                "application/sparql-query"
+            },
+        )
+        .body(query_text);
+    if let Some(webid) = webid {
+        let (access, proof) = credentials.headers(&webid, &path);
+        request = request
+            .header("authorization", access)
+            .header("dpop", proof);
+    }
+    if let Some(observation) = observation {
+        request = request.header("x-benchmark-records", serde_json::to_string(&observation)?);
+    }
+    let sent = Instant::now();
+    let result = request.send().await;
+    record["dispatch_lag_us"] = json!(prepare.duration_since(scheduled).as_micros() as u64);
+    record["credential_preparation_us"] = json!(sent.duration_since(prepare).as_micros() as u64);
+    match result {
+        Ok(response) => {
+            record["status"] = json!(response.status().as_u16());
+            if let Some(delta) = response
+                .headers()
+                .get("x-policy-triple-delta")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i64>().ok())
+            {
+                record["policy_triple_delta"] = json!(delta);
+            }
+            for name in [
+                "queue",
+                "auth",
+                "operation",
+                "load",
+                "materialize",
+                "server",
+            ] {
+                if let Some(value) = response
+                    .headers()
+                    .get(format!("x-{name}-us"))
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                {
+                    record[format!("{name}_us")] = json!(value);
+                }
+            }
+            for name in ["cache-hit", "cache-entries", "cache-source-bytes"] {
+                if let Some(value) = response
+                    .headers()
+                    .get(format!("x-{name}"))
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                {
+                    record[name.replace('-', "_")] = json!(value);
+                }
+            }
+            match response.bytes().await {
+                Ok(bytes) => {
+                    record["response_bytes"] = json!(bytes.len());
+                    record["outcome"] = json!(if record["status"] == 200 {
+                        "ok"
+                    } else {
+                        "http-error"
+                    });
+                    if record["status"] != 200 {
+                        record["error"] = json!(String::from_utf8_lossy(&bytes)
+                            .chars()
+                            .take(512)
+                            .collect::<String>());
+                    }
+                    if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                        if let Some(receipt) = value.get("mutation_receipt") {
+                            record["mutation_receipt"] = receipt.clone();
+                        }
+                        if let Some(count) = value.pointer("/results/bindings/0/count/value") {
+                            record["count"] = count.clone();
+                        }
+                    }
+                }
+                Err(error) => {
+                    record["outcome"] = json!("body-error");
+                    record["error"] = json!(format!("{error:?}"));
+                    record["is_timeout"] = json!(error.is_timeout());
+                    record["commit_status"] = json!(if update {
+                        "unknown-until-journal-reconciliation"
+                    } else {
+                        "not-a-mutation"
+                    });
+                }
+            }
+        }
+        Err(error) => {
+            record["status"] = Value::Null;
+            record["outcome"] = json!("transport-error");
+            record["error"] = json!(format!("{error:?}"));
+            record["is_timeout"] = json!(error.is_timeout());
+            record["is_connect"] = json!(error.is_connect());
+            record["commit_status"] = json!(if update {
+                "unknown-until-journal-reconciliation"
+            } else {
+                "not-a-mutation"
+            });
+        }
+    }
+    record["http_latency_us"] = json!(sent.elapsed().as_micros() as u64);
+    record["scheduled_latency_us"] = json!(scheduled.elapsed().as_micros() as u64);
+    Ok(record)
 }

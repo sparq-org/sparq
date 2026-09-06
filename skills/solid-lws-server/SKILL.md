@@ -99,7 +99,11 @@ against physically filtered readable records, using the same SPARQ engine
 for reference evaluation. It compares exact bags or ordered results and
 checks record counts with an independent arithmetic oracle. This provides
 independent authorization selection, not an independent SPARQL evaluator.
-Sampling is controlled by `--verify-pods`; an exploratory sample is not a
+Sampling uses `--verify-pods` or explicit `--verify-pod-ids`. The campaign
+selects minimum/maximum source sizes in every observed intensity class, verifies
+each in a separate capped cgroup, and records OOM/admission separately from wrong
+results. An unverified class prevents dataset capacity/equivalence admission.
+An exploratory sample is not a
 claim that every Pod has undergone every query.
 
 The load driver supports `--arrival constant|poisson`,
@@ -115,6 +119,65 @@ record value, and policy writes alternate intended grant/revoke states.
 These implementation choices must be frozen in the campaign protocol.
 Policy triple deltas expose idempotent/no-op operations after drops or
 failures; successful requests alone do not prove effective policy churn.
+
+For the prospective main workload use schema v2:
+
+```sh
+target/release/examples/pod_population_http load --mix journeys --corpus /tmp/pod-wac --auth-dir /tmp/pod-auth --workload-file bench/ac/million/workload.json --scenario busy-period --selection uniform --seed 2026090601 --mutation-epoch 1 --duration-seconds 120 --requests 1000 --out /tmp/journeys.jsonl
+# After stopping the server, reconcile durable commits and verify replayed record state:
+target/release/examples/pod_population_http audit --corpus /tmp/pod-wac
+```
+
+`--mix population` preserves the exploratory pilot approximation. `--mix journeys`
+selects journeys by their derived server-request demand and templates by their
+frozen conditional family weights. Read identities use the declared owner,
+recipient and anonymous proportions; writes use the owner. Every template uses
+explicit named graphs, with the unnamed default graph empty. `verify
+--workload-file ...` adds all journey templates to the neutral result oracle.
+
+The main loader streams the complete persisted inventory into per-service prefix
+counts; this driver memory is reported separately from server memory. It derives
+ingestion and expiry volume from the actual retained service counts and declared
+retention horizon, with modification rates and batch sizes from `execution_v2`.
+Half of ingestion is background across all hosted Pods, including inactive ones;
+foreground ingestion targets the active cohort. Write targets are weighted by
+service inventory; the selected read skew does not erase heavy-user write demand.
+Contacts are a snapshot, modified at the explicit annual rate. These are finite
+stationary-retention scenarios, not observed future Solid traffic. New records go
+into existing allowed resource graphs with the full corpus schema and literal
+profile; resource/container creation is outside this workload.
+
+`--plan-only true` emits demand/inventory metadata without sending requests.
+Without `--rate`, the selected scenario's actual-inventory rate is used; an
+explicit rate is a saturation/diagnostic override and both rates are recorded.
+`--duration-seconds` and `--requests` are joint minima on the precomputed Poisson
+schedule. The mutation epoch must be unique for repeated runs on mutated data;
+independent paired runs reset journals and use the same epoch/seed. Scheduled
+expiry ranges never overlap or wrap; exhausted ranges remain offered failures.
+
+The optional `x-benchmark-records` observation header is accepted only on verified
+owner mutations. It names at most eight existing content resource graphs/record
+subjects, snapshots their current outgoing triples before/after, and writes actual
+record/triple deltas and final hashes into the atomic journal before returning
+the receipt. Snapshot work is included in request time. Policy observations name
+only an ID and record the actual policy triple delta. These are bounded benchmark
+instruments, not a second authorization path. `churn --state grant|revoke|probe-granted|probe-revoked` tests generated calendar
+inheritance/private exceptions over HTTP with owner, recipient and anonymous
+probes. `--expected-delta` requires an actual transition or declared no-op;
+`--evict-pod` uses another Pod to test a one-entry cache. The campaign restarts
+the server between revoked-state probes and reconciles policy receipts too.
+`audit` must run without a live
+writer; it reopens touched Pods, reconciles committed IDs (including responses
+lost to transport errors), and compares the last recorded state of every selected
+record with reconstructed data. Acknowledged operations, actual changed records,
+no-ops, planned/unsent operations and unknown commits remain separate.
+
+`bench/ac/million/run-campaign.py` consumes a frozen campaign JSON, uses separate
+server systemd cgroups inside the capped study slice, records charged page cache
+and CPU/I/O, compresses raw JSONL losslessly, and retains stop/quarantine outcomes.
+The launcher owns paid resource creation and budget authorization; this runner
+does not provision cloud resources. Network journey experiments remain separate
+and unmeasured unless an explicit implementation and run artifact establish them.
 
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
