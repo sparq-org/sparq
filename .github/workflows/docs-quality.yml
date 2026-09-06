@@ -944,7 +944,13 @@ jobs:
       # must pass, newest failure must fail, and cancelled-run redispatch must stop at one.
       - name: "Self-test ci-summary #3505 mutations (supersession + failure + bounded redispatch)"
         run: python3 scripts/ci_summary_gate.py --self-test
-      - name: Self-test ci-summary gate loop (verdict semantics + adaptive saturation budget — sq-90cv4)
+      # [FABLE-5] sq-lfmvd adds the SLOTLESS transport's own safety properties to this
+      # same suite (TestSlotlessEvaluation* — never waits, confirm re-fetch as the
+      # startup-race floor, empty set never passes, no-information-no-write, the draft
+      # head cannot write the required status context, and the ci-gate-status.yml
+      # wiring incl. the staged-not-swapped required-check invariant). Same call site
+      # on purpose: the two transports share one brain, so they share one gate.
+      - name: Self-test ci-summary gate loop + slotless evaluator (verdict semantics, saturation budget, ci-gate status — sq-90cv4/sq-lfmvd)
         run: python3 scripts/tests/test_ci_summary_gate.py
       # [FABLE-5] sq-fmx4u.3: the change-based test-selection stack is now
       # LOAD-BEARING (the select pre-job feeds every wide lane's skip guard and

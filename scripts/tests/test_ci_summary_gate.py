@@ -2403,14 +2403,37 @@ class TestUnsatisfiableHoldFastFail(unittest.TestCase):
             f"{fetch.state['calls']} polls")
 
     def test_the_fast_path_only_ever_reds(self):
-        """No new exit-0 path: the detector's only outcome is the refusal."""
+        """No new exit-0 path: the detector's only outcome is the refusal.
+
+        [FABLE-5] sq-lfmvd scoped this to the POLL-LOOP transport. The `--evaluate`
+        transport below the EXIT-0 SURFACE BOUNDARY does not encode its verdict in
+        the exit code at all (the verdict is the published commit status; the exit
+        code only says whether the POST worked), so counting its `return 0`s against
+        the gate's budget would measure the wrong thing. The budget above the line is
+        unchanged at five, and the section below carries its own exact budget so a new
+        exit-0 path cannot hide on either side.
+        """
         source = (REPO_ROOT / "scripts" / "ci_summary_gate.py").read_text(
             encoding="utf-8")
+        boundary = "# --- EXIT-0 SURFACE BOUNDARY"
         self.assertEqual(
-            len(re.findall(r"^\s*return 0\b", source, re.M)), 5,
+            source.count(boundary), 1,
+            f"the {boundary!r} split point must appear EXACTLY once — without it "
+            "this test silently measures the whole file against the poll loop's "
+            "budget (or nothing at all)")
+        poll_loop, evaluator = source.split(boundary, 1)
+        self.assertEqual(
+            len(re.findall(r"^\s*return 0\b", poll_loop, re.M)), 5,
             "the #3781 detector must add only `return 1` paths — the gate's exit-0 "
             "surface is FIXED and enumerated in the module header (_draft_recheck's "
             "two, render_verdict's empty-set + PASS, and _self_test's)")
+        self.assertEqual(
+            len(re.findall(r"^\s*return 0\b", evaluator, re.M)), 3,
+            "the --evaluate transport's exit-0 surface is FIXED at three, all in "
+            "run_evaluator: unknown tier (publish nothing), the `skip` no-information "
+            "outcome (publish nothing), and a successfully published status. A fourth "
+            "means an evaluation can now exit 0 without either publishing or "
+            "deliberately declining to publish — enumerate it here or delete it.")
 
     # ---- (d) the discrimination: a still-settling set is NOT unsatisfiable ---
     def test_a_still_settling_set_is_not_declared_unsatisfiable(self):
@@ -3032,6 +3055,371 @@ class TestLatestRunRelativePresence(unittest.TestCase):
         self.assertEqual(g.fm_report_status([FM_GROUP, _skel("222"), GREEN]), "pending")
         # With any legacy report present it degrades to any-report (never a false RED).
         self.assertEqual(g.fm_report_status([FM_GROUP, FM_REPORT_OK, GREEN]), "ok")
+
+
+# =================================================================================
+# [FABLE-5] SLOTLESS EVENT-DRIVEN EVALUATION (bead sq-lfmvd; design record
+# research/ci-gate-slotless-aggregation.md §2/§3). The `--evaluate` transport swaps
+# the resident poll loop for short-lived, `workflow_run`-fired evaluations that
+# publish a COMMIT STATUS. The verdict brain is shared verbatim, so what needs
+# pinning is NOT the verdict semantics (already covered above) but the TRANSPORT's
+# own safety properties — every one of which is a way the new transport could admit
+# a merge the poll loop would have blocked:
+#
+#   (1) it never waits (a still-running set publishes `pending` and returns);
+#   (2) a green is only ever published after a CONFIRM re-fetch re-observes the
+#       terminal set — the design §3.6 startup-race floor, replacing MIN_POLLS;
+#   (3) an EMPTY sibling set never passes, unlike the poll loop's stable-empty pass
+#       (design divergence 1) — asserted against the poll loop's real behaviour so
+#       the contrast is measured, not assumed;
+#   (4) NO INFORMATION => NO WRITE: an unobservable set, or an unreadable PR draft
+#       state, publishes NOTHING rather than overwriting a verdict with a guess;
+#   (5) a DRAFT head can never write the required context (the status-context
+#       analogue of the tiered `gate, draft-tier` job name);
+#   (6) the job exits 0 for EVERY verdict — the verdict is the status — and 1 only
+#       when the status could not be published;
+#   (7) fail-fast survives the transport change (a mid-flight red still REDs, but
+#       only when the confirm re-fetch re-observes the IDENTICAL failing-leg key).
+#
+# ANTI-VACUITY: test_control_* drives the SAME fixtures through the SAME code with
+# one property inverted and asserts the outcome flips. Every behaviour test below
+# calls the REAL g.evaluate_once / g.run_evaluator — no re-implementation lives here.
+# =================================================================================
+
+
+def eval_cfg(**over):
+    """Zero-delay EvalConfig: the settle/confirm windows are real sleeps in prod and
+    injected no-ops here, so the suite stays hermetic and instant."""
+    base = dict(self_run_id="999", settle_seconds=0, confirm_seconds=0,
+                max_fetch_attempts=3, summary_path="")
+    base.update(over)
+    return g.EvalConfig(**base)
+
+
+class Recorder:
+    """Stand-in for make_publish_status()'s POST. Records every publish; `explode`
+    makes the POST fail the way a `statuses: write` denial would."""
+
+    def __init__(self, explode=False):
+        self.calls = []
+        self.explode = explode
+
+    def __call__(self, context, state, description, target_url=""):
+        if self.explode:
+            raise g.FetchError("403 Resource not accessible by integration")
+        self.calls.append({"context": context, "state": state,
+                           "description": description, "target_url": target_url})
+
+    @property
+    def states(self):
+        return [c["state"] for c in self.calls]
+
+    @property
+    def contexts(self):
+        return [c["context"] for c in self.calls]
+
+
+def evaluate(polls, cfg=None, tier_ctx=None):
+    """Drive the REAL evaluate_once over scripted fetches. Returns
+    (state, description, fetch_call_count, captured_output)."""
+    cfg = cfg or eval_cfg()
+    fetch = scripted(polls)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        state, description = g.evaluate_once(fetch, cfg, sleep_fn=lambda s: None,
+                                             tier_ctx=tier_ctx)
+    return state, description, fetch.state["calls"], out.getvalue()
+
+
+class TestSlotlessEvaluation(unittest.TestCase):
+    """(1)(2)(3)(4)(7) — the one-shot evaluation's own semantics."""
+
+    # ---- (1) it never becomes a waiter -------------------------------------
+    def test_a_still_running_set_publishes_pending_and_does_not_wait(self):
+        state, desc, calls, _ = evaluate([[GREEN, PENDING]])
+        self.assertEqual(state, "pending", desc)
+        self.assertIn("still running", desc)
+        # THE slot-occupancy property: an unsettled set costs exactly ONE fetch.
+        # A regression that re-polls until terminal would reintroduce the waiter
+        # this whole bead exists to delete.
+        self.assertEqual(calls, 1)
+
+    def test_control_a_settled_set_does_conclude(self):
+        """Anti-vacuity for the test above: the same code path over a TERMINAL set
+        must reach a verdict, or `pending` would be measuring nothing."""
+        state, desc, calls, _ = evaluate([[GREEN, GREEN2]])
+        self.assertEqual(state, "success", desc)
+        self.assertEqual(calls, 2, "one observation + the confirm re-fetch")
+
+    # ---- (2) the confirm re-fetch IS the startup-race floor -----------------
+    def test_a_partial_early_set_is_never_greened_by_the_first_observation(self):
+        """Design §3.6. The first fetch sees ONE terminal green (the fast leg that
+        fired this evaluation); the rest of the matrix registers a moment later. The
+        poll loop's MIN_POLLS floor forbade verdicting that; here the CONFIRM
+        re-fetch must catch it. A success here would be the transport's worst
+        failure mode: a merge admitted over a matrix that never ran."""
+        state, desc, calls, _ = evaluate([[GREEN], [GREEN, PENDING]])
+        self.assertEqual(state, "pending", desc)
+        self.assertEqual(calls, 2)
+        self.assertIn("still running", desc)
+
+    def test_control_a_stable_terminal_set_survives_the_confirm(self):
+        state, desc, _, _ = evaluate([[GREEN, GREEN2], [GREEN, GREEN2]])
+        self.assertEqual(state, "success", desc)
+
+    def test_a_real_failure_publishes_failure(self):
+        state, desc, _, _ = evaluate([[GREEN, RED]])
+        self.assertEqual(state, "failure", desc)
+        self.assertIn("FAILED", desc)
+
+    def test_the_description_comes_from_the_real_render(self):
+        """The status description must be lifted from render_verdict's own headline,
+        never composed here — otherwise a status could describe a verdict the brain
+        did not render."""
+        _, desc, _, text = evaluate([[GREEN, GREEN2]])
+        self.assertIn("PASSED", desc)
+        self.assertIn(desc[:40], text, "the headline must appear in the real render")
+
+    # ---- (3) the empty set NEVER passes (divergence 1) ----------------------
+    def test_an_empty_sibling_set_publishes_nothing(self):
+        state, desc, _, text = evaluate([[]])
+        self.assertEqual(state, "skip", desc)
+        self.assertIn("publishing nothing", text)
+
+    def test_control_the_poll_loop_really_does_pass_an_empty_set(self):
+        """The contrast is MEASURED, not assumed: run the poll loop over the same
+        empty set and prove it passes. If the poll loop ever stopped passing an
+        empty set, the test above would be pinning a divergence that no longer
+        exists."""
+        code, out = run(tiny_cfg(), [[]])
+        self.assertEqual(code, 0, out)
+        self.assertIn("stable empty set", out)
+
+    # ---- (4) no information => no write -------------------------------------
+    def test_an_unobservable_set_publishes_nothing(self):
+        err = g.FetchError("boom")
+        state, desc, calls, text = evaluate([err])
+        self.assertEqual(state, "skip", desc)
+        self.assertEqual(calls, g.EvalConfig().max_fetch_attempts,
+                         "the fetch must be bounded-retried before giving up")
+        self.assertIn("could not be fetched", text)
+
+    def test_a_transient_fetch_failure_is_retried_not_abandoned(self):
+        state, desc, _, _ = evaluate([g.FetchError("blip"), [GREEN, GREEN2]])
+        self.assertEqual(state, "success", desc)
+
+    def test_superseded_legs_publish_nothing_rather_than_red(self):
+        """The poll loop REDs on SupersededLegsError because it has a job conclusion
+        to spend. An evaluation has a DURABLE status instead: overwriting a verdict
+        because a re-run is needed would be a guess, so it declines to write and lets
+        the fresh run's own event re-evaluate."""
+        state, _, _, text = evaluate([g.SupersededLegsError("superseded-legs")])
+        self.assertEqual(state, "skip")
+        self.assertIn("superseded legs", text)
+
+    # ---- (7) fail-fast survives the transport change ------------------------
+    def test_failfast_reds_a_mid_flight_red_after_the_confirm(self):
+        red_with_pending = [GREEN, RED, PENDING]
+        state, desc, calls, _ = evaluate([red_with_pending, red_with_pending])
+        self.assertEqual(state, "failure", desc)
+        self.assertIn("fail-fast", desc)
+        self.assertEqual(calls, 2)
+
+    def test_failfast_stands_down_when_the_confirm_does_not_reobserve_it(self):
+        """The grace re-poll's whole purpose: a red observed once, gone on the
+        re-fetch (a re-run landed / an API read race), must NOT publish failure."""
+        state, desc, _, _ = evaluate([[GREEN, RED, PENDING], [GREEN, PENDING]])
+        self.assertEqual(state, "pending", desc)
+
+
+class TestSlotlessEvaluationPublishing(unittest.TestCase):
+    """(5)(6) — what actually reaches the commit status, and what the job's own exit
+    code means. These drive the REAL g.run_evaluator."""
+
+    def _run(self, tier, polls, publish=None, seed=False, event_name="pull_request"):
+        publish = publish if publish is not None else Recorder()
+        fetch = scripted(polls)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.run_evaluator(eval_cfg(), fetch, publish, tier, event_name,
+                                   seed=seed, sleep_fn=lambda s: None,
+                                   target_url="https://github.test/run/1")
+        return code, publish, out.getvalue()
+
+    # ---- (5) a draft head can never write the required context --------------
+    def test_a_draft_tier_evaluation_never_writes_the_required_context(self):
+        code, rec, _ = self._run("draft", [[GREEN, GREEN2]])
+        self.assertEqual(code, 0)
+        self.assertEqual(rec.contexts, [g.STATUS_DRAFT_CONTEXT])
+        self.assertNotIn(g.STATUS_CONTEXT, rec.contexts,
+                         "a reduced draft matrix must never satisfy the context the "
+                         "branch-protection ruleset requires (docs/branch-protection.md "
+                         "§Draft-tier CI — the structural half of the invariant)")
+
+    def test_control_a_full_tier_evaluation_does_write_the_required_context(self):
+        code, rec, _ = self._run("full", [[GREEN, GREEN2]])
+        self.assertEqual(code, 0)
+        self.assertEqual(rec.contexts, [g.STATUS_CONTEXT])
+
+    def test_the_two_contexts_are_distinct(self):
+        self.assertNotEqual(g.STATUS_CONTEXT, g.STATUS_DRAFT_CONTEXT)
+        self.assertTrue(g.STATUS_DRAFT_CONTEXT.startswith(g.STATUS_CONTEXT + "/"))
+
+    def test_an_unknown_tier_publishes_nothing(self):
+        """An unreadable PR draft state must not guess a context. Publishing
+        `ci-gate` for a draft head would hand the queue a reduced-matrix green."""
+        code, rec, _ = self._run("unknown", [[GREEN, GREEN2]])
+        self.assertEqual(code, 0)
+        self.assertEqual(rec.calls, [])
+
+    # ---- (6) the exit code is not the verdict ------------------------------
+    def test_a_failure_verdict_still_exits_zero(self):
+        """The job is DECLARED advisory and its check-run lands on the default-branch
+        head that ci-summary's push gate polls. If a red verdict red the JOB, every
+        red PR would also red main's own gate. The verdict is the STATUS."""
+        code, rec, _ = self._run("full", [[GREEN, RED]])
+        self.assertEqual(code, 0)
+        self.assertEqual(rec.states, ["failure"])
+
+    def test_a_failed_publish_is_the_one_thing_that_reds_the_job(self):
+        code, rec, text = self._run("full", [[GREEN, GREEN2]], publish=Recorder(explode=True))
+        self.assertEqual(code, 1)
+        self.assertEqual(rec.calls, [])
+        self.assertIn("could not publish", text)
+
+    def test_a_skip_publishes_nothing_and_exits_zero(self):
+        code, rec, _ = self._run("full", [[]])
+        self.assertEqual(code, 0)
+        self.assertEqual(rec.calls, [])
+
+    # ---- the seed path (design §3.3: quiet PRs get a status immediately) ----
+    def test_the_seed_path_publishes_pending_without_fetching(self):
+        publish = Recorder()
+        fetch = scripted([[GREEN, GREEN2]])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = g.run_evaluator(eval_cfg(), fetch, publish, "full", "pull_request",
+                                   seed=True, sleep_fn=lambda s: None)
+        self.assertEqual(code, 0)
+        self.assertEqual(publish.states, ["pending"])
+        self.assertEqual(fetch.state["calls"], 0,
+                         "a `requested` event means a run was just CREATED on this "
+                         "head — the set cannot be all-terminal, so the seed must "
+                         "cost no API reads at all")
+
+    def test_the_description_is_truncated_to_the_api_limit(self):
+        self.assertLessEqual(g.STATUS_MAX_DESCRIPTION, 140)
+        code, rec, _ = self._run("full", [[GREEN, RED]])
+        self.assertEqual(code, 0)
+        for call in rec.calls:
+            self.assertLessEqual(len(call["description"]), g.STATUS_MAX_DESCRIPTION)
+
+
+class TestSlotlessEvaluationTier(unittest.TestCase):
+    """resolve_eval_tier: the tier is read from the PR's LIVE draft state, because a
+    `workflow_run` payload describes the SIBLING run, not the PR."""
+
+    def test_no_pr_is_full_tier(self):
+        self.assertEqual(g.resolve_eval_tier("merge_group", None), "full")
+
+    def test_a_live_draft_pr_is_draft_tier(self):
+        self.assertEqual(g.resolve_eval_tier("pull_request", lambda: True), "draft")
+
+    def test_a_ready_pr_is_full_tier(self):
+        self.assertEqual(g.resolve_eval_tier("pull_request", lambda: False), "full")
+
+    def test_an_unreadable_draft_state_is_unknown_not_full(self):
+        """Fail-closed: `unknown` publishes nothing. Defaulting to `full` here would
+        write the REQUIRED context for a head whose tier is unknown — the exact way a
+        reduced draft matrix could reach the merge queue."""
+        def boom():
+            raise g.FetchError("api down")
+        self.assertEqual(g.resolve_eval_tier("pull_request", boom), "unknown")
+
+
+class TestSlotlessEvaluationWiring(unittest.TestCase):
+    """Cross-file inspection of ci-gate-status.yml — the same class of test as
+    TestAdvisoryRegistryWiring. Text-based on purpose (no PyYAML dependency), so it
+    runs everywhere the gate's own suite runs."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = REPO_ROOT / ".github" / "workflows" / "ci-gate-status.yml"
+        cls.text = cls.path.read_text(encoding="utf-8")
+        cls.summary = (REPO_ROOT / ".github" / "workflows" / "ci-summary.yml").read_text(
+            encoding="utf-8")
+
+    def test_the_evaluator_is_invoked_with_the_evaluate_flag(self):
+        self.assertIn("scripts/ci_summary_gate.py --evaluate", self.text)
+
+    def test_the_sparse_checkout_includes_the_script_and_the_registry(self):
+        block = self.text.split("sparse-checkout:", 1)[1].split(
+            "sparse-checkout-cone-mode", 1)[0]
+        self.assertIn("scripts/ci_summary_gate.py", block)
+        self.assertIn(g.ADVISORY_REGISTRY_PATH, block,
+                      "the registry is LOAD-BEARING: without it the evaluator "
+                      "fail-closes and publishes nothing")
+
+    def test_the_checkout_is_the_default_branch_not_the_pr_head(self):
+        """Design §3.2: the evaluator's own code must not be PR-attested."""
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", self.text)
+
+    def test_the_recursion_guard_excludes_this_workflow(self):
+        """Without it, each evaluation's completion fires another evaluation."""
+        self.assertIn("name: ci-gate-status", self.text)
+        self.assertIn("github.event.workflow_run.name != 'ci-gate-status'", self.text)
+
+    def test_it_triggers_on_both_requested_and_completed(self):
+        self.assertIn("types: [requested, completed]", self.text)
+
+    def test_it_debounces_per_head_sha(self):
+        self.assertIn("group: ci-gate-status-${{ github.event.workflow_run.head_sha }}",
+                      self.text)
+        self.assertIn("cancel-in-progress: true", self.text)
+
+    def test_it_holds_statuses_write_and_no_other_write(self):
+        self.assertIn("statuses: write", self.text)
+        writes = re.findall(r"^\s+([a-z-]+): write$", self.text, re.M)
+        self.assertEqual(sorted(set(writes)), ["statuses"],
+                         f"the evaluator must hold exactly one write scope; found {writes}")
+
+    def test_the_job_is_declared_in_the_advisory_registry(self):
+        """A workflow_run run's check-runs land on the DEFAULT-BRANCH head SHA — the
+        SHA ci-summary's `push: [main]` gate polls (the sq-huwr8 lesson). Non-gating
+        must be DECLARED, never assumed."""
+        registry = json.loads(
+            (REPO_ROOT / g.ADVISORY_REGISTRY_PATH).read_text(encoding="utf-8"))
+        entry = registry["jobs"].get("ci-gate status (advisory)")
+        self.assertIsNotNone(entry, "ci-gate-status.yml's job is not declared")
+        self.assertEqual(entry["workflow"], "ci-gate-status.yml")
+        self.assertEqual(entry["job_id"], "evaluate")
+        self.assertIn("gate_script_waiver", entry,
+                      "the job deliberately invokes a gate-classified script (C3)")
+        self.assertIn(f"name: {'ci-gate status (advisory)'}", self.text)
+
+    def test_the_required_check_migration_is_STAGED_not_swapped(self):
+        """Design §3.1, and the reason this bead is marked design-sensitive: a
+        required context that no run produces blocks EVERY merge. So while this lane
+        exists, ci-summary.yml must STILL define the `gate` job the ruleset requires.
+        Deleting the poll job in the same change that adds this one is exactly the
+        atomic swap the design forbids — this assertion is what makes that a red CI
+        run instead of a wedged repository."""
+        self.assertIn("jobs:\n  gate:", self.summary,
+                      "ci-summary.yml no longer defines the `gate` job. The slotless "
+                      "evaluator publishes a STATUS context; dropping the required "
+                      "JOB before the maintainer has moved the ruleset onto that "
+                      "context wedges main. Stage it (docs/branch-protection.md "
+                      "§Slotless gate evaluation).")
+        anchor = "name: gate${{ github.event.pull_request.draft == true"
+        self.assertIn(anchor, self.summary,
+                      "the required check's tiered NAME anchor moved; re-point this "
+                      "assertion rather than deleting it")
+
+    def test_the_doc_of_record_describes_the_staged_migration(self):
+        doc = (REPO_ROOT / "docs" / "branch-protection.md").read_text(encoding="utf-8")
+        self.assertIn("Slotless gate evaluation", doc)
+        self.assertIn(g.STATUS_CONTEXT, doc)
+        self.assertIn("ci-gate-status.yml", doc)
 
 
 if __name__ == "__main__":

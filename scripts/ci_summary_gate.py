@@ -244,6 +244,45 @@
 # REDs outright) AND the draft-tier integrity checks above pass. There is no other
 # `return 0`.
 #
+# SLOTLESS EVENT-DRIVEN EVALUATION — `--evaluate` (bead sq-lfmvd, design record
+# research/ci-gate-slotless-aggregation.md §2). [FABLE-5] The poll loop above is a
+# RESIDENT WAITER: it holds a hosted-runner slot for as long as the slowest sibling
+# takes. `--evaluate` is the SAME BRAIN with a different transport — one short-lived
+# evaluation, fired by .github/workflows/ci-gate-status.yml on each sibling
+# `workflow_run` requested/completed event, publishing its result as a COMMIT STATUS
+# on the head SHA instead of as this job's own conclusion. It never waits for a
+# sibling: an unsettled set publishes `pending` and exits in seconds.
+#
+# It re-uses forgive_superseded / is_self / is_draft_gate_artifact / is_advisory /
+# draft_selects_unsuperseded / fm_report_status / failfast_failures / render_verdict
+# verbatim — the verdict semantics are the ONE implementation, so the two transports
+# cannot drift. Only the *when do I look* changes.
+#
+# The three deliberate DIVERGENCES from the poll loop (each strictly more
+# fail-closed, each pinned by scripts/tests/test_ci_summary_gate.py):
+#   1. AN EMPTY SIBLING SET NEVER PASSES. The poll loop passes a stable-empty set
+#      (a docs-only PR triggering no other workflow). An evaluation is fired BY a
+#      sibling run on that SHA, so an empty set means the API has not caught up —
+#      an API artifact, not evidence — and the evaluation publishes NOTHING
+#      (leaving whatever status is already there), never a green.
+#   2. NO INFORMATION => NO WRITE. A fetch failure, or a PR whose live draft state
+#      cannot be read, publishes nothing rather than overwriting a verdict with a
+#      guess. The next sibling completion re-evaluates; a required-but-absent
+#      status blocks the merge in the meantime, which is the safe direction.
+#   3. THE STARTUP-RACE FLOOR IS A CONFIRM RE-FETCH (§3.6). Instead of MIN_POLLS,
+#      a would-be-terminal observation must be RE-OBSERVED terminal after a short
+#      confirm window before any success/failure is published — the settle_polls==2
+#      analogue, and simultaneously the fail-fast grace re-poll.
+# The draft tier is derived from the PR's LIVE draft state, and a draft-tier
+# evaluation publishes to a SEPARATE context (`<context>/draft-tier`), so the
+# required context is never written by a reduced-matrix evaluation — the same
+# structural invariant the tiered `gate` / `gate, draft-tier` job NAME encodes.
+#
+# STAGED MIGRATION (design §3.1): the status is published ALONGSIDE the existing
+# required `ci-summary / gate` job and is NOT required by the ruleset yet. See
+# docs/branch-protection.md §Slotless gate evaluation for the parity phase and the
+# maintainer-only ruleset edit that ends it.
+#
 # Hermetic tests: scripts/tests/test_ci_summary_gate.py (stdlib-only unittest; no
 # network — fetchers are injected). Run: python3 scripts/tests/test_ci_summary_gate.py
 
@@ -2402,11 +2441,313 @@ def _self_test() -> int:
     return 0
 
 
+# --- EXIT-0 SURFACE BOUNDARY -----------------------------------------------------
+# [FABLE-5] sq-lfmvd. Everything ABOVE this line is the POLL-LOOP transport, whose
+# exit code IS the gate verdict and whose exit-0 surface is therefore FIXED and
+# enumerated in the module header (_draft_recheck's two, render_verdict's empty-set
+# + PASS, and _self_test's — five, no more). Everything BELOW is the `--evaluate`
+# transport, where the verdict is the published STATUS and the exit code only says
+# whether publishing worked, so its exit-0 paths are counted separately. This exact
+# line is the split point used by scripts/tests/test_ci_summary_gate.py
+# ::TestUnsatisfiableHoldFastFail::test_the_fast_path_only_ever_reds — moving code
+# across it changes which budget the checker applies to it, deliberately.
+# ---------------------------------------------------------------------------------
+
+# =================================================================================
+# SLOTLESS EVENT-DRIVEN EVALUATION (bead sq-lfmvd; research/ci-gate-slotless-
+# aggregation.md §2). [FABLE-5] One short-lived evaluation per sibling
+# `workflow_run` event, publishing a COMMIT STATUS. See the module header
+# §SLOTLESS EVENT-DRIVEN EVALUATION for the three deliberate divergences.
+# =================================================================================
+
+# The commit-status context the evaluator publishes. This is the context the
+# branch-protection ruleset will require INSTEAD of `ci-summary / gate` once the
+# staged migration completes (docs/branch-protection.md §Slotless gate evaluation).
+# A DRAFT-tier evaluation publishes to STATUS_DRAFT_CONTEXT instead, so a reduced
+# draft matrix can never satisfy the required context — the status-context analogue
+# of the tiered `gate` / `gate, draft-tier` job name.
+STATUS_CONTEXT = "ci-gate"
+STATUS_DRAFT_CONTEXT = STATUS_CONTEXT + "/draft-tier"
+# GitHub truncates a commit-status description past 140 characters.
+STATUS_MAX_DESCRIPTION = 140
+# The four evaluation outcomes. "skip" is the NO-INFORMATION outcome: publish
+# nothing at all rather than overwrite a real verdict with a guess (divergence 2).
+EVAL_STATES = ("pending", "success", "failure", "skip")
+
+
+@dataclass
+class EvalConfig:
+    """One-shot evaluation tunables. Prod values are seconds, not minutes: the whole
+    point is that this never becomes a waiter. `settle_seconds` doubles as the
+    DEBOUNCE window (design §3.5) — ci-gate-status.yml's per-head-SHA
+    `cancel-in-progress` concurrency group means a burst of sibling completions
+    collapses to one surviving evaluation, and the burst is absorbed inside this
+    sleep. `confirm_seconds` is the startup-race floor + fail-fast grace re-poll
+    (§3.6). Tests inject zeros."""
+
+    self_run_id: str = ""
+    settle_seconds: int = 25
+    confirm_seconds: int = 15
+    max_fetch_attempts: int = 3
+    summary_path: str = field(default_factory=lambda: os.environ.get("GITHUB_STEP_SUMMARY", ""))
+
+
+@dataclass
+class Observation:
+    """One fetch of the head SHA's sibling set, filtered EXACTLY as the poll loop
+    filters it (forgive_superseded -> drop self -> drop draft-gate artifacts), so
+    `runs` is the set render_verdict would judge."""
+
+    runs: list[dict]
+    pending: int
+    awaiting_full: bool
+    awaiting_report: bool
+    failfast_key: tuple
+
+    @property
+    def settled(self) -> bool:
+        return not (self.pending or self.awaiting_full or self.awaiting_report)
+
+    def describe(self) -> str:
+        holds = []
+        if self.pending:
+            holds.append(f"{self.pending} of {len(self.runs)} check(s) still running")
+        if self.awaiting_full:
+            holds.append("awaiting the full-tier re-run (draft-tier selection present)")
+        if self.awaiting_report:
+            holds.append("awaiting the feature-matrix reporter verdict")
+        return "; ".join(holds) or f"{len(self.runs)} check(s) observed"
+
+
+def observe_once(fetch_runs, cfg: EvalConfig, tier_ctx: TierContext | None = None):
+    """Fetch + filter the sibling set once. Returns an Observation, or None when the
+    set could not be observed at all (bounded-retried FetchError / SupersededLegsError
+    — divergence 2: no information means no write)."""
+    raw: list[dict] | None = None
+    for _ in range(max(1, cfg.max_fetch_attempts)):
+        try:
+            raw = fetch_runs()
+            break
+        except SupersededLegsError as exc:
+            # The poll loop REDs here because it has a job conclusion to spend. An
+            # evaluation has a durable status instead: a superseded newest run needs
+            # a fresh run or head, which will itself fire another evaluation.
+            print(f"::notice::ci-gate: superseded legs ({exc}) — publishing nothing this evaluation.")
+            return None
+        except FetchError as exc:
+            print(f"ci-gate: check-run fetch failed ({exc}) — retrying.")
+    if raw is None:
+        print("::notice::ci-gate: the sibling set could not be fetched — publishing nothing.")
+        return None
+    kept, _forgiven = forgive_superseded(raw)
+    runs = [
+        r for r in kept
+        if not is_self(r, cfg.self_run_id)
+        and not is_draft_gate_artifact(r.get("name", ""))
+    ]
+    pending = sum(1 for r in runs if r.get("status") != "completed")
+    awaiting_full = bool(
+        tier_ctx
+        and tier_ctx.run_tier == "full"
+        and tier_ctx.event_name == "pull_request"
+        and draft_selects_unsuperseded(runs)
+    )
+    awaiting_report = fm_report_status(runs) == "pending"
+    ff = failfast_failures(runs) if (pending or awaiting_full or awaiting_report) else []
+    ff_key = tuple(sorted((r.get("name", ""), r.get("id") or 0) for r in ff))
+    return Observation(runs, pending, awaiting_full, awaiting_report, ff_key)
+
+
+def _verdict_headline(runs: list[dict], summary_path: str,
+                      tier_ctx: TierContext | None) -> tuple[int, str]:
+    """Run the REAL render_verdict and lift its headline for the status description.
+    The full render is still printed (and still appended to the step summary by
+    _emit); only the one-line headline is extracted, so the description can never
+    describe a verdict the brain did not actually render."""
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = render_verdict(runs, summary_path, tier_ctx)
+    text = buf.getvalue()
+    print(text, end="", flush=True)
+    headline = ""
+    for line in text.splitlines():
+        marker = "ci-summary:"
+        if marker in line and (line.startswith("### ") or line.startswith(marker)):
+            headline = line.split(marker, 1)[1].strip()
+            break
+    if not headline:
+        headline = "verdict rendered" if code == 0 else "gate FAILED"
+    return code, headline
+
+
+def evaluate_once(fetch_runs, cfg: EvalConfig, sleep_fn=time.sleep,
+                  tier_ctx: TierContext | None = None) -> tuple[str, str]:
+    """ONE short-lived evaluation. Returns (state, description) with state in
+    EVAL_STATES. Never blocks on a sibling: an unsettled set is `pending`.
+
+    A success or failure is published ONLY after the same conclusion survives a
+    CONFIRM re-fetch (the MIN_POLLS/settle_polls analogue, §3.6), which is also the
+    fail-fast grace re-poll — so a mid-flight red must be re-observed with the
+    IDENTICAL failing-leg key before it is published."""
+    sleep_fn(cfg.settle_seconds)
+    first = observe_once(fetch_runs, cfg, tier_ctx)
+    if first is None:
+        return ("skip", "sibling set unobservable")
+    if not first.runs:
+        # Divergence 1: an evaluation is fired BY a run on this SHA, so an empty set
+        # is API lag, never the poll loop's genuine stable-empty set.
+        print("::notice::ci-gate: zero sibling check-runs on this head (API lag) — publishing nothing.")
+        return ("skip", "no sibling check-runs observed yet")
+    if not (first.settled or first.failfast_key):
+        return ("pending", first.describe())
+
+    sleep_fn(cfg.confirm_seconds)
+    second = observe_once(fetch_runs, cfg, tier_ctx)
+    if second is None or not second.runs:
+        return ("skip", "confirm re-fetch did not observe the sibling set")
+    if second.settled:
+        code, headline = _verdict_headline(second.runs, cfg.summary_path, tier_ctx)
+        return ("success" if code == 0 else "failure", headline)
+    if first.failfast_key and first.failfast_key == second.failfast_key:
+        names = ", ".join(name for name, _ in second.failfast_key[:3])
+        return ("failure", f"fail-fast — gating check(s) concluded failure: {names}")
+    return ("pending", second.describe())
+
+
+def make_publish_status(repo: str, sha: str):
+    """POST a commit status on `sha`. Needs `statuses: write`. Raises FetchError on
+    failure so the caller can exit loudly — an evaluation that cannot publish is the
+    ONE condition that must red the evaluator job itself."""
+
+    def publish(context: str, state: str, description: str, target_url: str = "") -> None:
+        args = [
+            "gh", "api", "--method", "POST", f"repos/{repo}/statuses/{sha}",
+            "-f", f"state={state}",
+            "-f", f"context={context}",
+            "-f", f"description={description[:STATUS_MAX_DESCRIPTION]}",
+        ]
+        if target_url:
+            args += ["-f", f"target_url={target_url}"]
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            raise FetchError(f"status POST subprocess raised: {exc}") from exc
+        if proc.returncode != 0:
+            raise FetchError(proc.stderr.strip()[:300] or f"status POST exited {proc.returncode}")
+
+    return publish
+
+
+def resolve_eval_tier(event_name: str, fetch_pr_draft) -> str:
+    """The tier THIS evaluation is allowed to publish. Derived from the PR's LIVE
+    draft state rather than a trigger payload, because a `workflow_run` payload
+    carries the SIBLING run's context, not the PR's. Returns "full", "draft", or
+    "unknown" — and "unknown" means publish nothing (divergence 2), never a guess
+    about which context to write."""
+    if fetch_pr_draft is None:
+        return "full"  # push / merge_group: no PR, so no draft tier exists
+    probe = TierContext(run_tier="draft", event_name=event_name, fetch_pr_draft=fetch_pr_draft)
+    still_draft, last_err = _bounded_draft_read(probe)
+    if still_draft is None:
+        print(f"::notice::ci-gate: the PR's draft state is unreadable ({last_err}) — publishing nothing.")
+        return "unknown"
+    return "draft" if still_draft else "full"
+
+
+def run_evaluator(cfg: EvalConfig, fetch_runs, publish, tier: str,
+                  event_name: str, fetch_pr_draft=None, seed: bool = False,
+                  sleep_fn=time.sleep, target_url: str = "") -> int:
+    """Publish ONE commit status for the head SHA. `seed=True` is the cheap
+    `workflow_run: requested` path — a run has just been created on this head, so
+    the set is by construction not all-terminal and the evaluation short-circuits to
+    `pending` without fetching anything. Returns the process exit code, which is 0
+    for EVERY verdict (the verdict is the STATUS, not this job's conclusion) and 1
+    only when the status could not be published at all."""
+    if tier == "unknown":
+        return 0
+    context = STATUS_DRAFT_CONTEXT if tier == "draft" else STATUS_CONTEXT
+    if seed:
+        state, description = ("pending", "a sibling workflow run was just requested on this head")
+    else:
+        tier_ctx = TierContext(run_tier=tier, event_name=event_name, fetch_pr_draft=fetch_pr_draft)
+        state, description = evaluate_once(fetch_runs, cfg, sleep_fn=sleep_fn, tier_ctx=tier_ctx)
+    if state == "skip":
+        print(f"ci-gate: no status published ({description}).")
+        return 0
+    # GitHub truncates a description past STATUS_MAX_DESCRIPTION; do it HERE (not only
+    # in the POST helper) so the length invariant holds for every publisher, and mark
+    # the cut so a reader knows the TEXT is elided, not the verdict partial.
+    if len(description) > STATUS_MAX_DESCRIPTION:
+        description = description[: STATUS_MAX_DESCRIPTION - 1].rstrip() + "…"
+    try:
+        publish(context, state, description, target_url)
+    except FetchError as exc:
+        print(
+            f"::error::ci-gate: could not publish the `{context}` commit status "
+            f"({exc}). The evaluation itself concluded {state}."
+        )
+        return 1
+    _emit(
+        f"ci-gate: published `{context}` = **{state}** — {description}",
+        cfg.summary_path,
+    )
+    return 0
+
+
+def _evaluate_main() -> int:
+    """`--evaluate` entry point, driven by .github/workflows/ci-gate-status.yml."""
+    repo = os.environ.get("REPO", "")
+    sha = os.environ.get("SHA", "")
+    self_run_id = os.environ.get("SELF_RUN_ID", "")
+    if not repo or not sha:
+        print("::error::ci-gate: REPO and SHA must both be set.")
+        return 1
+    registry_path = os.environ.get("ADVISORY_REGISTRY", ADVISORY_REGISTRY_PATH)
+    try:
+        declared = load_advisory_registry(registry_path)
+    except AdvisoryRegistryError as exc:
+        # Same fail-closed posture as the poll loop: without the registry the
+        # evaluator cannot know which checks are DECLARED non-gating. It publishes
+        # nothing and reds ITSELF, so the required status simply stays where it was.
+        print(
+            f"::error::ci-gate: the advisory registry is unreadable ({exc}). No status "
+            f"published. Ensure ci-gate-status.yml's sparse-checkout includes "
+            f"{ADVISORY_REGISTRY_PATH}."
+        )
+        return 1
+    trigger_event = os.environ.get("TRIGGER_EVENT", "")
+    pr_number = os.environ.get("PR_NUMBER", "").strip()
+    fetch_pr_draft = make_fetch_pr_draft(repo, pr_number) if pr_number else None
+    # The evaluated tier's `event_name` mirrors what the poll loop would see for this
+    # head: a PR head is "pull_request" (which arms render_verdict's draft-tier belt),
+    # a merge-group ref is not.
+    event_name = "pull_request" if pr_number else trigger_event
+    tier = resolve_eval_tier(event_name, fetch_pr_draft)
+    print(
+        f"ci-gate: {len(declared)} declared-advisory job name(s) loaded; evaluating "
+        f"{repo}@{sha[:12]} (trigger={trigger_event or '<unset>'}, tier={tier})."
+    )
+    return run_evaluator(
+        EvalConfig(self_run_id=self_run_id),
+        make_fetch_runs(repo, sha, self_run_id),
+        make_publish_status(repo, sha),
+        tier,
+        event_name,
+        fetch_pr_draft=fetch_pr_draft,
+        seed=os.environ.get("TRIGGER_ACTION", "") == "requested",
+        target_url=os.environ.get("TARGET_URL", ""),
+    )
+
+
 def main() -> int:
     if sys.argv[1:] == ["--self-test"]:
         return _self_test()
+    # [FABLE-5] sq-lfmvd: the SLOTLESS transport — one short-lived evaluation that
+    # publishes a commit status instead of residing on a runner slot. Same brain.
+    if sys.argv[1:] == ["--evaluate"]:
+        return _evaluate_main()
     if sys.argv[1:]:
-        print("usage: ci_summary_gate.py [--self-test]", file=sys.stderr)
+        print("usage: ci_summary_gate.py [--self-test | --evaluate]", file=sys.stderr)
         return 2
     repo = os.environ.get("REPO", "")
     sha = os.environ.get("SHA", "")
