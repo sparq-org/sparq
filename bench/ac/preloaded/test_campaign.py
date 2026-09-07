@@ -30,7 +30,7 @@ def campaign():
         'host': {'instance_type': 'r7gd.12xlarge', 'physical_memory_gib': 384, 'physical_vcpus': 48,
                  'overall_memory_fraction': .8, 'swap': False, 'server_cpu_pool': list(range(16)), 'client_cpu_pool': list(range(16, 20))},
         'seeds': [11, 13], 'measurement': old['measurement'],
-        'preloaded': {'version': 1, 'fixed_server_cpus': 16, 'startup_timeout_seconds': 100,
+        'preloaded': {'version': 1, 'admission_outcomes_version': 1, 'fixed_server_cpus': 16, 'startup_timeout_seconds': 100,
                       'drain_timeout_seconds': 30, 'cell_timeout_seconds': 500},
         'execution': {'version': 1, 'data_mount': str(MAIN.PREP.DATA), 'data1_allocated': False,
                       'preparation_memory_gib': 128, 'phase_timeout_seconds': 200,
@@ -114,7 +114,10 @@ class MainCampaignTests(unittest.TestCase):
     def test_global_stop_between_cells_does_not_relabel_prior_completed_evidence(self):
         self.run_fake(False, stop_between_cells=True)
 
-    def run_fake(self, fail, cell_failure_at=None, stop_between_cells=False):
+    def test_confirmed_low_memory_admission_failures_continue_to_higher_tier(self):
+        self.run_fake(False, low_memory_failure=True)
+
+    def run_fake(self, fail, cell_failure_at=None, stop_between_cells=False, low_memory_failure=False):
         trace = []; spec = campaign(); planned = MAIN.plan_cells(spec)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); auth = root / 'auth'; auth.mkdir()
@@ -138,10 +141,14 @@ class MainCampaignTests(unittest.TestCase):
             class FakeCell:
                 def __init__(self, owner, selection, result_dir):
                     result_dir.mkdir()
+                    self.memory = selection['memory_gib']
                     self.selection = (spec['corpora'][0], spec['groups'][0], selection['rate'], str(len(trace)))
                 def cell(self, *args):
                     trace.append('cell')
                     if cell_failure_at == trace.count('cell'): raise RuntimeError('fixture cell failed after partial output')
+                    if low_memory_failure and self.memory == 64:
+                        from test_preload_admission import admission
+                        raise MAIN.CELL.ADMISSION.AdmissionFailure(admission('memory-limit', memory=64))
                     return {'correctness_passed': True, 'passes_local_guard': False}
                 def stop_server(self): pass
             with patch.object(MAIN, 'MainCell', FakeCell):
@@ -165,6 +172,11 @@ class MainCampaignTests(unittest.TestCase):
                 self.assertEqual([row['status'] for row in result['cells']], ['complete', 'complete', 'partial'] + ['unattempted'] * 5)
                 self.assertIn('fixture cell failed', result['cells'][2]['error'])
                 self.assertFalse(result['source_quarantined'])
+            elif low_memory_failure:
+                self.assertEqual(result['status'], 'complete')
+                self.assertEqual([row['status'] for row in result['cells']], ['admission-failed'] * 4 + ['complete'] * 4)
+                self.assertTrue(all('summary' not in row and row['admission']['timed_load_started'] is False for row in result['cells'][:4]))
+                self.assertEqual(trace.count('cell'), 8)
             else:
                 self.assertEqual(trace[:3], ['prepare-wac', 'prepare-acp', 'cell'])
                 self.assertEqual(result['status'], 'complete')

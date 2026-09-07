@@ -18,9 +18,9 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2) + '\n')
 
 
-def snapshot(sequence=0):
+def snapshot(sequence=0, memory=128):
     return {'errors': [], 'systemd': {'ControlGroup': '/sparq.slice/sparq-pod.slice/sparq-pod-bench.slice/native-fixture.service'},
-        'cgroup': {'memory.current': '1500', 'memory.peak': '1600', 'memory.max': str(128 * N.GIB), 'memory.swap.max': '0',
+        'cgroup': {'memory.current': '1500', 'memory.peak': '1600', 'memory.max': str(memory * N.GIB), 'memory.swap.max': '0',
                    'memory.events': 'oom 0\noom_kill 0\n',
                    'memory.stat': f'anon 800\nfile 700\npgfault {sequence * 10}\npgmajfault {sequence}\nworkingset_refault_file {sequence * 2}\n',
                    'cpu.stat': f'usage_usec {1000 + sequence * 100}\n', 'io.stat': f'259:0 rbytes={sequence * 4096} wbytes=0\n'},
@@ -45,7 +45,7 @@ def seal(root, review):
     review['manifest_sha256'] = N.OLD.sha_file(manifest)
 
 
-def fixture(root):
+def fixture(root, memory_tiers=(128,), repeats=2):
     source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=N.ROOT, text=True).strip()
     config = {'volume_classes': [{'weight': 1, 'numerator': 1, 'denominator': 1}]}
     dataset = {'id': 'fixture-1', 'pods': 1, 'models': ['wac', 'acp'], 'role': 'synthetic-unit-fixture',
@@ -54,9 +54,10 @@ def fixture(root):
         'source_commit': source, 'binary_build_source_commit': source, 'binary_sha256': 'b' * 64,
         'bindings': {path: N.OLD.sha_file(N.ROOT / path) for path in N.RUNNER.REQUIRED_BINDINGS},
         'corpora': [dataset], 'measurement': MEASUREMENT | {'queue_capacity_per_worker': 64}, 'seeds': [11, 22],
-        'groups': [{'id': 'native', 'datasets': ['fixture-1'], 'memory_gib': [128], 'cpus': [16], 'rates': [4],
-                    'repeat': 2, 'scenario': 'busy-period', 'selection': 'uniform', 'storage_mode': 'native', 'max_pod_bytes': 100}],
-        'execution': {'maximum_cells': 4},
+        'groups': [{'id': 'native', 'datasets': ['fixture-1'], 'memory_gib': list(memory_tiers), 'cpus': [16], 'rates': [4],
+                    'repeat': repeats, 'scenario': 'busy-period', 'selection': 'uniform', 'storage_mode': 'native', 'max_pod_bytes': 100}],
+        'execution': {'maximum_cells': len(memory_tiers) * repeats * 2},
+        'preloaded': {'admission_outcomes_version': 1, 'startup_timeout_seconds': 100}, 'stop_rules': dict(N.RUNNER.STOP_BEHAVIOR),
         'host': {'instance_type': 'r7gd.12xlarge', 'physical_memory_gib': 384, 'physical_vcpus': 48, 'swap': False,
                  'server_cpu_pool': list(range(16)), 'client_cpu_pool': list(range(16, 20))}}
     write(root / 'frozen-campaign.json', campaign); campaign_hash = N.OLD.sha_file(root / 'frozen-campaign.json')
@@ -90,10 +91,10 @@ def fixture(root):
         write(root / (label + '-population.json'), population); completion['populations'].append(population)
     for index, selection in enumerate(N.RUNNER.plan_cells(campaign)):
         directory = root / f'cell-{index:05d}'; directory.mkdir()
-        label = f'fixture-1-native-ram128-cpu16-r4.0-{selection["replicate"]}-{selection["model"]}'
+        label = f'fixture-1-native-ram{selection["memory_gib"]}-cpu16-r4.0-{selection["replicate"]}-{selection["model"]}'
         pop = next(row for row in completion['populations'] if row['model'] == selection['model']); native = pop['native_manifest']
         seed = campaign['seeds'][selection['replicate']]
-        summary = {'dataset': 'fixture-1', 'group': 'native', 'memory_gib': 128, 'cpus': 16, 'rate_override': 4.0,
+        summary = {'dataset': 'fixture-1', 'group': 'native', 'memory_gib': selection['memory_gib'], 'cpus': 16, 'rate_override': 4.0,
                    'replicate': selection['replicate'], 'model': selection['model'], 'seed': seed, 'offered_rate': 4,
                    'load_exit_code': 0, 'warmup_exit_code': 0, 'audit_exit_code': 0}
         write(directory / (label + '-summary.json'), summary); write(directory / (label + '-reconciliation.json'), {'passed': True})
@@ -114,7 +115,7 @@ def fixture(root):
         write(directory / (label + '-startup-boundary.json'), {'complete': True, 'elapsed_seconds': 1,
             'cold_os_caches_before_launch': True, 'unit': 'native-fixture.service'})
         for phase, sequence in [('preload', 0), ('before', 1), ('after', 2)]:
-            write(directory / (label + '-' + phase + '-native-accounting.json'), snapshot(sequence))
+            write(directory / (label + '-' + phase + '-native-accounting.json'), snapshot(sequence, selection['memory_gib']))
             if phase != 'preload':
                 write(directory / (label + '-' + phase + '-drain.jsonl'), {'record_type': 'worker-drain-complete', 'passed': True,
                     'workers': [{'processed_requests': sequence * 4, 'state': worker(i)['state']} for i in range(16)]})
@@ -242,6 +243,52 @@ class NativeAnalysisTests(unittest.TestCase):
             self.assertFalse(result['cells'][0]['valid_for_inference'])
             self.assertEqual(result['cells'][0]['local_guard'], 'inconclusive')
             self.assertEqual(result['cells'][0]['reported_guard_disagreements'], [{'field': 'passes_local_guard', 'recorded': False, 'independent': True}])
+
+    def test_failed_low_tier_is_negative_admission_only_and_higher_tier_remains_valid(self):
+        for outcome in ('memory-limit', 'startup-timeout'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); review = fixture(root, memory_tiers=(64, 128), repeats=1)
+                self.replace_low_tier(root, outcome); seal(root, review)
+                result = self.analyze_fixture(root, review)
+                self.assertFalse(result['global_issues'], result['global_issues'])
+                self.assertEqual(len(result['admission_failure_cells']), 2)
+                self.assertEqual(len(result['headline_eligible_cells']), 2)
+                for row in result['cells'][:2]:
+                    self.assertTrue(row['valid_for_admission_inference'], row['issues'])
+                    self.assertFalse(row['valid_for_inference']); self.assertIsNone(row['requests'])
+                    self.assertEqual(row['local_guard'], 'admission-failed')
+                self.assertTrue(all(row['valid_for_inference'] for row in result['cells'][2:]))
+                self.assertFalse(result['paired_comparisons'][0]['paired_p95_scheduled_response_ratio']['available'])
+
+    def test_unsubstantiated_admission_continuation_or_request_output_rejects_campaign(self):
+        for corrupt in ('global-oom', 'request-output', 'bad-readiness', 'missing-capture'):
+            with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); review = fixture(root, memory_tiers=(64, 128), repeats=1)
+                self.replace_low_tier(root, 'memory-limit', corrupt); seal(root, review)
+                result = self.analyze_fixture(root, review)
+                self.assertIn('unsupported-admission-continuation', result['global_issues'])
+                self.assertEqual(result['headline_eligible_cells'], [])
+
+    def replace_low_tier(self, root, outcome, corrupt=None):
+        from test_preload_admission import admission
+        completion = json.loads((root / 'campaign-result.json').read_text())
+        for row in completion['cells'][:2]:
+            directory = root / row['directory']; label = row['label']
+            for path in directory.glob(label + '-*'): path.unlink()
+            record = admission(outcome, memory=64)
+            record['archive_manifest'] = next(p['native_manifest'] for p in completion['populations'] if p['model'] == row['selection']['model'])
+            if corrupt == 'global-oom': record['terminal_capture']['cgroup']['memory.events.local'] = 'oom 0\noom_kill 1\n'
+            rows = [{'record_type': 'native-archive-verified', 'manifest': record['archive_manifest']}]
+            if corrupt == 'bad-readiness': rows.append({'record_type': 'all-population-ready', 'population': 0})
+            log = directory / (label + '-server.log'); write_rows(log, rows)
+            record['server_log_sha256'] = N.OLD.sha_file(log)
+            write(directory / (label + '-preload-admission.json'), record)
+            if corrupt != 'missing-capture': write(directory / (label + '-preload-terminal.json'), record['terminal_capture'])
+            write(directory / (label + '-startup-boundary.json'), {'complete': False, 'elapsed_seconds': 102, 'cold_os_caches_before_launch': True, 'unit': record['unit']})
+            write_rows(directory / 'campaign-events.jsonl', [{'record_type': 'preload-admission-failed', 'outcome': outcome, 'unit': record['unit'], 'population': 1, 'artifact': label + '-preload-admission.json'}])
+            if corrupt == 'request-output': write_rows(directory / (label + '-requests.jsonl'), records([request(0)]))
+            row.pop('summary'); row.update(status='admission-failed', admission=record)
+        write(root / 'campaign-result.json', completion)
 
 
 if __name__ == '__main__': unittest.main()
