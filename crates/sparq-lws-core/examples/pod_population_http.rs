@@ -175,7 +175,7 @@ async fn drain(State(state): State<Arc<HttpState>>, headers: HeaderMap) -> Respo
     });
     let body = json!({"record_type":"worker-drain-complete","passed":valid,
         "elapsed_us":start.elapsed().as_micros(),"workers":reports,
-        "scope":"all previously admitted operations finished; admission was paused while every worker acknowledged its FIFO fence"});
+        "scope":"previously admitted HTTP handlers completed body extraction and handling; all worker operations finished before their FIFO fences; never-admitted transport connections are outside this barrier"});
     (
         if valid {
             StatusCode::OK
@@ -252,7 +252,6 @@ async fn dispatch(
     policy_administration: bool,
     received: Instant,
 ) -> Response {
-    let _admitted = state.admission.read().await;
     let suffix = if policy_administration {
         "policy"
     } else if update {
@@ -280,8 +279,20 @@ async fn dispatch(
     })
 }
 
-async fn mark_received(mut request: Request, next: Next) -> Response {
+async fn mark_received(
+    State(state): State<Arc<HttpState>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     request.extensions_mut().insert(Instant::now());
+    // [GPT-6] Track routed requests before body extraction. A slow warmup body
+    // must finish or fail before a drain can fence workers. The independently
+    // authenticated control route cannot take the read lock it needs to drain.
+    let _admitted = if request.uri().path() == "/__benchmark/drain" {
+        None
+    } else {
+        Some(state.admission.read().await)
+    };
     next.run(request).await
 }
 
@@ -440,18 +451,22 @@ async fn serve(settings: Settings) -> Result<()> {
             "archive_verification":archive_verification})
         );
     }
+    let state = Arc::new(HttpState {
+        workers: senders,
+        admission: RwLock::new(()),
+        control_token,
+    });
     let router = Router::new()
         .route("/pods/{pod}/sparql", post(query))
         .route("/pods/{pod}/update", post(update))
         .route("/pods/{pod}/policy", post(policy))
         .route("/__benchmark/drain", post(drain))
         .layer(DefaultBodyLimit::max(1024 * 1024))
-        .layer(middleware::from_fn(mark_received))
-        .with_state(Arc::new(HttpState {
-            workers: senders,
-            admission: RwLock::new(()),
-            control_token,
-        }));
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            mark_received,
+        ))
+        .with_state(state);
     let bind = settings.text("bind", "127.0.0.1:3100");
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!(
@@ -489,6 +504,77 @@ async fn main() -> Result<()> {
 mod drain_tests {
     use super::*;
     use std::time::Duration;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn drain_waits_for_body_extraction_before_fencing_workers() -> Result<()> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let secret = "a".repeat(32);
+        let state = Arc::new(HttpState {
+            workers: vec![sender],
+            admission: RwLock::new(()),
+            control_token: Some(secret.clone()),
+        });
+        let router = Router::new()
+            .route("/slow", post(|_body: String| async { StatusCode::OK }))
+            .route("/__benchmark/drain", post(drain))
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                mark_received,
+            ))
+            .with_state(Arc::clone(&state));
+        let (started, wait_started) = oneshot::channel();
+        let (release, wait_release) = oneshot::channel();
+        let body = axum::body::Body::from_stream(futures_util::stream::once(async move {
+            let _ = started.send(());
+            wait_release.await.map_err(std::io::Error::other)?;
+            Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"complete"))
+        }));
+        let request = Request::builder().method("POST").uri("/slow").body(body)?;
+        let client = tokio::spawn(router.clone().oneshot(request));
+        wait_started.await?;
+        let (fenced, mut wait_fenced) = oneshot::channel();
+        let worker = std::thread::spawn(move || {
+            let WorkerCommand::Fence(reply) = receiver.recv().expect("fence") else {
+                panic!("expected fence")
+            };
+            let _ = fenced.send(());
+            let _ = reply.send(json!({"processed_requests":0,"state":{"poisoned":false,
+                "activations":{"attempted_activations_after_ready":0}}}));
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/__benchmark/drain")
+            .header("x-benchmark-control", secret)
+            .body(axum::body::Body::empty())?;
+        let controller = tokio::spawn(router.oneshot(request));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while state.admission.try_read().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(!controller.is_finished());
+        assert!(matches!(
+            wait_fenced.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        release.send(()).map_err(|_| "body reader disappeared")?;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), client)
+                .await???
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), controller)
+                .await???
+                .status(),
+            StatusCode::OK
+        );
+        worker.join().map_err(|_| "fake worker panicked")?;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn drain_waits_for_timed_out_work_and_pauses_admission() -> Result<()> {

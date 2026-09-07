@@ -200,8 +200,10 @@ Keep archive bytes and length immutable for every derived graph view lifetime.
 Preloaded serving requires `--control-token-file PATH`: an unpredictable
 alphanumeric operator capability in an owner-readable-only file, separate from
 Pod ownership and DPoP. `drain` sends it to `POST /__benchmark/drain`, pausing
-admission and waiting for a FIFO fence from every worker, including work whose
-HTTP client stopped waiting. `--connect URL` and `--drain-timeout-seconds N`
+admission before body extraction and waiting for a FIFO fence from every worker,
+including work whose HTTP client stopped waiting. A previously admitted slow body
+must finish or fail first; never-admitted transport connections are outside the
+barrier. `--connect URL` and `--drain-timeout-seconds N`
 configure this operator request. Never publish the secret. Use read-only warmup
 and a successful full drain before measurement; drain again after the client
 finishes. Independent repetitions stop the server and reset task-owned application

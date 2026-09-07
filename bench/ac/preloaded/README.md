@@ -40,6 +40,9 @@ an unpredictable alphanumeric secret in an owner-readable-only file; the
 `run-cell.py` adapter creates it with exclusive creation when absent. Do not copy
 that file into public artifacts. `POST /__benchmark/drain` authenticates this
 capability, pauses request admission and places a FIFO fence in each worker.
+The admission guard begins in request middleware before body extraction, so a
+previously admitted slow body must complete or fail before the fence. Connections
+that have not entered request middleware are outside this boundary.
 Its JSON response includes each worker's processing and activation counters.
 The barrier includes work whose client stopped waiting. The same barrier runs
 after the measured client window, while all stores remain alive.
@@ -59,6 +62,14 @@ commit and binary digest. It holds a corpus lock through journal reset, preload,
 measurement and audit; stop any manually launched server first. CPU pools must
 contain the fixed server allocation and disjoint client allocation, and the
 server RAM tier must leave space under the declared outer study memory cap.
+
+Every cell synchronizes and drops clean OS page caches on the dedicated host
+before starting the server. The archive digest check, mapped validation and all
+population initialization then run inside the measured server cgroup. Run cells
+exclusively: another process warming the same file could charge pages outside
+that cgroup and invalidate a RAM-tier comparison. Keep `memory.stat` anonymous
+and file-page charges, I/O and memory events alongside the configured limit;
+low-RAM paging must be demonstrated from those observations.
 
 Independent repetitions stop the previous process and reset only its task-owned
 application journals before starting every store from the same immutable archive.
@@ -82,3 +93,11 @@ The scoped Rust tests include complete partition ownership, prevention of lazy
 activation, failed-commit rollback of graph and authorization, and native
 revocation replay. Remote compilation, Clippy, these tests, authenticated HTTP
 drain smoke and independent source review remain required before timing admission.
+
+`test_preloaded_http.py --binary PATH` is the bounded functional HTTP smoke for
+either a debug or release binary with `population-native`. With no path it uses
+`$CARGO_TARGET_DIR/release/examples/pod_population_http` (or the local `target`
+directory). It checks every small native Pod against the decision/result oracle,
+both languages' rejected policy callers and revocation after restart, complete
+drains, retained counters, real journey writes, journal replay and receipt audit.
+Its output is correctness evidence only.
