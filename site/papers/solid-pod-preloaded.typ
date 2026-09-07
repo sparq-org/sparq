@@ -1,24 +1,18 @@
 // [GPT-6] Prospective native-index manuscript. No new result binding exists.
-// The cache study is used only in the explicitly labelled motivation paragraph.
 #let protocol = json("../../bench/ac/preloaded/protocol.json")
 #let workload = json("../../bench/ac/million/workload.json")
 #let derived = json("../../bench/ac/million/workload-derived.json")
 #let corpus = json("../../research/solid-pod-scale-corpus.json").calibration
 #let observations = json("../../research/solid-pod-scale-observations.json")
 #let messaging = json("../../bench/ac/million/messaging-volume-config.json")
-#let inherited = json("../../bench/ac/million/campaign-20260906.json")
-#let previous = json("../../research/solid-pod-scale-main.json")
-#import "solid-pod-scale-results.typ": main-state, grouped-integer
-#assert(main-state(previous) == "finalized and reviewed", message: "Previous-study motivation requires verified evidence")
+// Reuse the declared response criteria and number formatter, not previous results.
+#let response-criteria = json("../../bench/ac/million/campaign-20260906.json").measurement
+#import "solid-pod-scale-results.typ": grouped-integer
 #assert(protocol.study_id == "solid-pod-preloaded-v1")
 #assert(protocol.preloaded.admission_outcomes_version == 1, message: "Method requires reviewed typed preload outcomes")
 #let number(value, digits: 0) = str(calc.round(value, digits: digits))
 #let percent(value) = number(100 * value) + "%"
 #let demand(population, scenario) = derived.population_rates.find(r => r.pods == population and r.scenario == scenario)
-#let old-small = previous.cells.filter(c => c.dataset == "compact-2000000" and c.group == "compact-fixed-population")
-#let old-history = previous.cells.filter(c => c.dataset == "history-1000")
-#assert(old-small.len() > 0 and old-small.all(c => c.valid_for_inference and c.local_guard == "pass"))
-#assert(old-history.len() > 0 and old-history.all(c => c.valid_for_inference and c.requests.successful == 0))
 #set document(title: "Access-Controlled SPARQL over Solid Pods with Prepared Native Indexes")
 #set page(paper: "a4", margin: (x: 24mm, y: 22mm), numbering: "1")
 #set text(font: "Libertinus Serif", size: 10.5pt)
@@ -39,8 +33,7 @@
 #block(fill: luma(95%), inset: 8pt, width: 100%)[
   #text(size: 9pt)[*Research draft: new measurements pending.* The native preparation
   pilot and final performance matrix are not complete. This manuscript specifies
-  the approach and prospective method; it establishes no new capacity result.
-  The earlier cache experiment is identified separately.]
+  the approach and prospective method; it establishes no new capacity result.]
 ]
 
 #heading(numbering: none, outlined: false)[Abstract]
@@ -103,24 +96,6 @@ admission from response delivery, and distinguishes mapped content from heap
 metadata. Its new empirical findings will occupy the results section after the
 source and performance campaign are frozen and the evidence is verified.
 
-== What the earlier experiment establishes
-
-The completed cache study motivates this design but is not a measurement of it.
-That implementation stored independent compressed N-Quads frames and rebuilt a
-Pod's in-memory indexes and authorization on a cache miss. Both policy variants
-passed its low-load control over #(old-small.first().requests.load_metadata.corpus.pods / 1000000)
-million compact Pods at #old-small.first().requests.offered_rate requests/s.
-Its #grouped-integer(old-history.first().requests.load_metadata.corpus.pods)\-Pod retained-history
-configuration returned no successful measured responses. The complete evidence
-and its scope remain in the accompanying cache-study analysis.
-
-This is a reason to change the request path, not evidence that native paging
-will succeed. The old study used different hardware, a bounded materialized-Pod
-cache, and no server drain between warmup and measurement. Missing phase headers
-on failed requests do not identify their execution cost. The new experiment is
-an independent evaluation; it does not attribute a cross-study speedup to one
-isolated change.
-
 = Querying prepared, authorized data
 
 == Access rights define the query dataset
@@ -176,7 +151,7 @@ updates can differ. Similarity is an empirical question.
 The prepared archive preserves the engine's native dictionary and index encoding
 for each resource graph. An archive directory locates those components without
 one operating-system file and mapping per resource. Construction consumes the
-same complete generated RDF corpus used for the cache study. It checks the input
+complete generated RDF corpus specified below. It checks the input
 manifest and hashes, then writes a new archive and sidecar; it refuses to replace
 an existing archive. Serialization time and both intermediate and native storage
 remain part of the preparation account.
@@ -499,9 +474,9 @@ latency begins at scheduled arrival and ends after the complete successful body;
 the HTTP-only and server production timers are diagnostics. Fast errors do not
 establish responsive service. Missing phase or cache headers remain unknown.
 
-The retained admission criteria require at least
-#percent(inherited.measurement.success_fraction) successful responses and
-#percent(inherited.measurement.deadline_fraction_of_all_offered) of all offered
+The response criteria require at least
+#percent(response-criteria.success_fraction) successful responses and
+#percent(response-criteria.deadline_fraction_of_all_offered) of all offered
 requests successful within #workload.latency_budget.complete_server_response_p95_ms ms.
 That local budget leaves room for network transit and
 #workload.latency_budget.client_processing_budget_ms ms of client processing
@@ -513,8 +488,8 @@ all-offered fractions and HTTP/transport failures. A run without successful
 responses has no successful-response p95. A separate conservative queue guard
 compares first- and last-quarter queue p95 with required timer coverage. Its
 allowance is the larger of
-#(inherited.measurement.queue_stability.allowed_growth_us_floor / 1000) ms and
-#percent(inherited.measurement.queue_stability.allowed_growth_fraction_of_first_quarter)
+#(response-criteria.queue_stability.allowed_growth_us_floor / 1000) ms and
+#percent(response-criteria.queue_stability.allowed_growth_fraction_of_first_quarter)
 of the first quarter. A small guard miss with good delivery is reported as such,
 not proof of an unstable queue or a need for more RAM. The protocol retains
 that criterion without treating its short window as a steady-state proof.
@@ -556,8 +531,7 @@ and failing rates. The highest tested passing point is not an exact maximum.
 Equal values on a coarse grid cannot resolve a ten-percent capacity difference,
 and a ratio of completed requests at the same offered load is not a ratio of
 sustainable capacities. The final rate grid and repetition count must be fixed
-before new performance measurements; this draft does not inherit the old grid
-as though it had been run against native storage.
+before performance measurements.
 
 = Results: native campaign pending
 
@@ -571,8 +545,7 @@ fractions, with storage and peak server memory. Preparation failure, evidenced
 negative admission attempts, unmeasured cells and queue-only guard misses will
 remain distinct.
 
-The earlier cache results cannot fill this section. Nor can archive-size
-projections, a completed startup pilot, or a successful small correctness test
+Archive-size projections, a completed startup pilot, or a successful small correctness test cannot
 establish million-Pod service capacity. The final abstract and conclusion require
 verified native request and resource evidence for the claimed population.
 
@@ -621,14 +594,11 @@ populations, and whether WAC and ACP have practically equivalent cost, awaits
 the new measurements. No new capacity conclusion is asserted in this draft.
 
 #heading(numbering: none)[Artifact status]
-The accompanying repository contains the corpus calibration, journey workload,
-prospective preloaded protocol and preserved cache-study evidence. The new
-protocol is `bench/ac/preloaded/protocol.json`; the earlier analysis is
-`research/solid-pod-scale-main.json` at source
-#raw(previous.source_commit.slice(0, 8)). Full earlier artifacts remain in the
-supplied local study bundle. Public archival availability is unresolved. This
-source deliberately has no input that silently substitutes old results for the
-pending native campaign.
+The accompanying repository contains the corpus calibration, journey workload
+and prospective protocol at `bench/ac/preloaded/protocol.json`. Source inputs
+and supporting observations remain available in the supplied local study bundle.
+Public archival availability is unresolved. This manuscript has no measurement
+result input while the native campaign is pending.
 
 #{
   set text(size: 9pt)
