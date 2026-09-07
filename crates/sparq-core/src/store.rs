@@ -688,15 +688,24 @@ impl TripleStore {
         self.save_pred_stats(dir)
     }
 
-    /// Persists the per-predicate stats so `open` need not RE-SCAN the POS/PSO indexes
+    /// Persists per-predicate statistics in ascending predicate-ID order.
+    ///
+    /// This lets `open` avoid re-scanning the POS/PSO indexes
     /// (a ~2-permutation read — the dominant out-of-core open cost + resident RSS once the
     /// dict is mmap'd). Small: a handful of fields per distinct predicate.
+    ///
+    /// # Errors
+    /// Returns an error if creating, writing, or flushing the statistics file fails.
     #[cfg(feature = "mmap")]
     pub fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
-        for (&p, s) in self.pred_stats.iter() {
+        // [GPT-6] Hash-map iteration can change after loading/reserving identical stats.
+        // Canonicalize the shared writer so external builds and re-saves agree bytewise.
+        let mut entries: Vec<_> = self.pred_stats.iter().collect();
+        entries.sort_unstable_by_key(|&(&p, _)| p);
+        for (&p, s) in entries {
             w.write_all(&p.to_le_bytes())?;
             w.write_all(&(s.count as u64).to_le_bytes())?;
             w.write_all(&(s.ndv_subj as u64).to_le_bytes())?;
@@ -1747,6 +1756,61 @@ mod tests {
             .expect("persisted predstats.bin must load, not fall back to a POS+PSO re-scan");
         assert_eq!(loaded, *store.pred_stats, "loaded pred stats must equal the saved ones");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// [GPT-6] Persisted bytes depend on statistics, not hash-map layout or reloads.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn pred_stats_serialization_is_canonical_across_map_layouts() {
+        // The same records had different iteration orders after external-build reload.
+        let records: [(Id, PredStat); 4] = [
+            (1, PredStat { count: 400, ndv_subj: 400, ndv_obj: 140 }),
+            (2, PredStat { count: 400, ndv_subj: 400, ndv_obj: 400 }),
+            (182, PredStat { count: 400, ndv_subj: 400, ndv_obj: 400 }),
+            (424, PredStat { count: 400, ndv_subj: 400, ndv_obj: 90 }),
+        ];
+        // Independent format oracle: u64 record count, then u32 ID + three u64 values.
+        let mut expected = 4u64.to_le_bytes().to_vec();
+        for (id, stats) in &records {
+            expected.extend_from_slice(&id.to_le_bytes());
+            for value in [stats.count, stats.ndv_subj, stats.ndv_obj] {
+                expected.extend_from_slice(&(value as u64).to_le_bytes());
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("sparq_predstats_order_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("predstats.bin");
+        for capacity in [0, 4, 64, 1024] {
+            for order in [[0, 1, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]] {
+                let mut stats = FxHashMap::default();
+                stats.reserve(capacity);
+                for i in order {
+                    stats.insert(records[i].0, records[i].1);
+                }
+                let mut store = TripleStore::from_triples(Vec::new());
+                store.pred_stats = std::sync::Arc::new(stats);
+                store.save_pred_stats(&dir).unwrap();
+                assert_eq!(
+                    std::fs::read(&path).unwrap(),
+                    expected,
+                    "capacity {capacity}, order {order:?}"
+                );
+                let loaded = TripleStore::load_pred_stats(&dir).unwrap();
+                assert_eq!(loaded, *store.pred_stats);
+                store.pred_stats = std::sync::Arc::new(loaded);
+                store.save_pred_stats(&dir).unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), expected, "reload must preserve exact bytes");
+            }
+        }
+        // Existing files need not already be ordered: read compatibility is unchanged.
+        let mut legacy = expected[..8].to_vec();
+        for record in expected[8..].chunks_exact(28).rev() {
+            legacy.extend_from_slice(record);
+        }
+        std::fs::write(&path, legacy).unwrap();
+        let loaded = TripleStore::load_pred_stats(&dir).unwrap();
+        assert_eq!(loaded, records.into_iter().collect::<FxHashMap<_, _>>());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The delta-overlay must be INVISIBLE in results: a store with an overlay must answer

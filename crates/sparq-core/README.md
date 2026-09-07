@@ -56,6 +56,8 @@ assert_eq!(count, 1);
   point lookups for an id that is ABSENT from the permutation (result-equivalent, never
   serialised; for a PRESENT id the zone map already narrows the candidate window to about one
   block, so there is little left to skip).
+  [GPT-6] Persisted predicate statistics have deterministic record order across builds and
+  re-saves; older unordered statistics files remain readable.
 - **Compressed-seek column codecs (prototype)** — the opt-in `elias-fano` feature adds
   Elias-Fano and Partitioned-Elias-Fano codecs whose `next_geq(target)` answers a successor
   query *directly on the compressed data*, without the whole-block decode the varint block codec
