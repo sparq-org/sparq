@@ -220,3 +220,44 @@ Cleanup/finalization failure prevents a complete result. Guard failures are
 preserved even when all cells execute; execution completion does not establish
 capacity, WAC/ACP equivalence or fit on a smaller physical machine. The original
 campaign, request criteria and completed evidence remain separate.
+
+Run `analyze-campaign.py ARTIFACT_DIRECTORY --review REVIEW_JSON --output
+research/solid-pod-preloaded-main.json` only after finalization. Optional
+`--scratch-directory` selects temporary SQLite storage; `--source-root` selects
+the local repository containing the exact measured Git revision. The review
+object must bind `source_commit`, `binary_sha256`, `campaign_sha256` and
+`manifest_sha256`, with `status: passed`, before any cell is headline-eligible.
+The extractor rehashes every manifest member and compares declared source inputs
+to blobs in the measured revision. It reads the recursive cell directories and
+both `.jsonl.zst` and `.log.zst`; ambiguous plain/compressed inputs are rejected.
+
+The output's distinct analysis kind is
+`native-preloaded-campaign-independent-accounting`. `corpora` separates complete
+metadata inventories, native logical/allocated storage, explicit preparation
+reuse and actual preparation-unit resources. `cells` retains every planned row,
+its execution status, `valid_for_inference`, `local_guard`, request counters,
+`preload` and `resources`. Existing request keys are reused, including
+`requests.latency_us["successful:scheduled_latency_us"].p95`,
+`success_fraction_of_offered`, `deadline_fraction_of_offered`, HTTP status counts
+and exact neutral schedule fingerprints. Missing quantities stay null; incomplete
+campaigns and rejected evidence cannot feed `headline_eligible_cells`.
+Canonical correctness-quarantine events override a passing completion summary.
+Disagreements between recorded counters or guards and independent accounting
+remain visible and make the affected cell inconclusive.
+
+Resource samples are separate for `preload`, `before` and `after`, with anonymous
+memory, mapped-file charges, peaks, actual CPU affinity, per-device I/O, process
+faults and host headroom. `resources.paging` preserves measured refault/major-fault
+and read-I/O deltas with an explicit attribution limit; a low quota alone never
+establishes paging. Complete startup time remains separate from worker-only
+preload time and response latency. Physical host size and server cgroup limits
+remain distinct throughout.
+
+`sampled_authorization_correctness` reports the exact common-rights result/count
+oracle checks separately from `paired_comparisons`. The latter reuses independent
+paired-run bootstrap intervals for response and deadline-completion ratios.
+Formal practical equivalence requires the optional
+`statistical_plan.practical_equivalence_margin_ratio` in the prospectively frozen
+campaign, expressed as a finite ratio greater than one. Without that field,
+comparison remains descriptive. A nonsignificant difference, equal tested rates
+or a narrow latency interval does not establish sustainable capacity equivalence.

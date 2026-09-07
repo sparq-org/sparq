@@ -231,6 +231,15 @@ complete request schedules, drain accounting and native offline receipt audits.
 Partial execution and unattempted populations/cells remain explicit in the
 source-bound result rather than being counted as successful capacity evidence.
 
+`bench/ac/preloaded/analyze-campaign.py` independently reads that recursive native
+result format. Its separate `native-preloaded-campaign-independent-accounting`
+analysis kind requires exact source/binary/campaign/manifest review binding,
+complete native population/storage checks, both no-activation drains and the
+existing complete-offered response/mutation validators before headline eligibility.
+It keeps partial/rejected evidence descriptive and does not fall back to the
+earlier cached analysis. The reference documents resource/paging fields and the
+optional prospectively frozen practical-equivalence margin.
+
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
 never slowed in response to the server. Records separate preparation and
