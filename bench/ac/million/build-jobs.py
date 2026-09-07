@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import tarfile
 import time
@@ -36,6 +37,8 @@ def validate_job(job):
             raise ValueError("invalid source identity")
     if type(job["timeout_seconds"]) is not int or not 1 <= job["timeout_seconds"] <= 12600:
         raise ValueError("job timeout must be bounded by 12600 seconds")
+    if type(job.get("expected_failure")) is not bool:
+        raise ValueError("expected_failure must be an explicit boolean")
     commands = job["commands"]
     if not isinstance(commands, list) or not 1 <= len(commands) <= 20:
         raise ValueError("job needs explicit bounded command list")
@@ -44,8 +47,46 @@ def validate_job(job):
             raise ValueError("commands must be argv arrays")
         cargo = argv[0] == "cargo" and argv[1] in {"build", "test", "check", "clippy", "doc"} and "--locked" in argv
         python = argv[0] == "python3" and re.fullmatch(r"(?:[A-Za-z0-9_-]+/)*test[-_][A-Za-z0-9_-]+\.py", argv[1])
+        if cargo and any(a in {"--target-dir", "--config"} or a.startswith(("--target-dir=", "--config=")) for a in argv):
+            raise ValueError("Cargo cache configuration is owned by the runner")
         if not (cargo or python) or any("\x00" in a for a in argv):
             raise ValueError("only locked cargo build/test/check/clippy/doc or named Python tests are accepted")
+
+
+def target_directory(job):
+    return BASE / 'negative-targets' / job['id'] if job['expected_failure'] else BASE / 'target'
+
+
+def runner_identity():
+    path = Path(__file__).resolve()
+    return dict(runner_sha256=digest(path), runner_revision=subprocess.check_output(
+        ['git', '-C', str(path.parents[3]), 'rev-parse', 'HEAD'], text=True).strip())
+
+
+def regular_files(root):
+    return [p for p in root.rglob('*') if stat.S_ISREG(p.lstat().st_mode)]
+
+
+def normalize_source_mtimes(source, target):
+    # git archive preserves commit timestamps. Cargo can otherwise treat older
+    # extracted sources as fresh against a different checkout's newer artifacts.
+    previous = max((p.stat().st_mtime_ns for p in regular_files(target)), default=0)
+    now = time.time_ns()
+    epoch = max(now, previous + 1_000_000_000)
+    if epoch > now + 60_000_000_000:
+        raise ValueError('target timestamp is too far ahead of the host clock')
+    files = regular_files(source)
+    for path in files:
+        os.utime(path, ns=(epoch, epoch), follow_symlinks=False)
+        if path.stat().st_mtime_ns <= previous:
+            raise ValueError('filesystem did not preserve a newer source timestamp')
+    # Avoid leaving source timestamps in the future when Cargo starts. The guard
+    # above bounds this wait; ordinary serialized jobs wait at most one second.
+    remaining = (epoch - time.time_ns()) / 1_000_000_000
+    if remaining > 0:
+        time.sleep(remaining)
+    return dict(epoch_ns=epoch, previous_target_max_mtime_ns=previous,
+                regular_files=len(files), policy='all extracted regular source files newer than prior target artifacts')
 
 
 def stop_process(process):
@@ -79,13 +120,24 @@ def run_job(job, deadline):
         if source.exists():
             shutil.rmtree(source)
         archive.unlink(missing_ok=True)
+        if job["expected_failure"]:
+            target = target_directory(job)
+            if target.exists():
+                shutil.rmtree(target)
 
 
 def execute_job(job, deadline, archive, source):
     name = job["id"]
-    result = dict(job, scope="build-and-functional-tests-only", started_epoch=time.time(), commands_run=[])
     if shutil.disk_usage(BASE).free < 20 * GIB:
         raise ValueError("disk admission below 20 GiB")
+    result = dict(job, scope="build-and-functional-tests-only", started_epoch=time.time(), commands_run=[], **runner_identity())
+    target = target_directory(job)
+    result["target_policy"] = dict(directory=str(target),
+        namespace="per-job-negative-control" if job["expected_failure"] else "shared-normal",
+        removed_after_job=job["expected_failure"], first_party_rebuild="normalized source mtimes; incremental and external wrappers disabled",
+        registry_dependencies_may_remain_cached=not job["expected_failure"])
+    if job["expected_failure"] and target.exists():
+        raise ValueError("negative-control target must start absent")
     if digest(archive) != job["archive_sha256"]:
         raise ValueError("source archive checksum mismatch")
     source.mkdir(parents=True, exist_ok=False)
@@ -95,13 +147,17 @@ def execute_job(job, deadline, archive, source):
         if sum(member.size for member in bundle.getmembers()) > 2 * GIB:
             raise ValueError("unpacked source exceeds build-only bound")
         bundle.extractall(source, filter="data")
+    result["source_mtime_normalization"] = normalize_source_mtimes(source, target)
+    write_json(RESULTS / (name + "-admission.json"), result)
     for required in ("Cargo.lock", "rust-toolchain.toml"):
         result[required + "_sha256"] = digest(source / required)
     limit = min(time.monotonic() + job["timeout_seconds"], time.monotonic() + deadline - time.time() - 900)
     if limit <= time.monotonic():
         raise ValueError("host deadline has insufficient time")
-    environment = dict(os.environ, CARGO_TARGET_DIR=str(BASE / "target"), CARGO_BUILD_JOBS="8", RUSTDOCFLAGS="-D warnings")
-    result["build_environment"] = {key: environment[key] for key in ("CARGO_TARGET_DIR", "CARGO_BUILD_JOBS", "RUSTDOCFLAGS")}
+    environment = dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_BUILD_BUILD_DIR=str(target),
+                       CARGO_INCREMENTAL="0", RUSTC_WRAPPER="", RUSTC_WORKSPACE_WRAPPER="",
+                       CARGO_BUILD_JOBS="8", RUSTDOCFLAGS="-D warnings")
+    result["build_environment"] = {key: environment[key] for key in ("CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR", "CARGO_INCREMENTAL", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_JOBS", "RUSTDOCFLAGS")}
     failure = None
     for index, argv in enumerate(job["commands"]):
         log = RESULTS / f"{name}-{index}.log"
@@ -124,7 +180,8 @@ def execute_job(job, deadline, archive, source):
         if failure or process.returncode:
             failure = failure or "command-failed"
             break
-    result.update(finished_epoch=time.time(), status=failure or "passed")
+    result.update(finished_epoch=time.time(), status=failure or "passed",
+                  expectation_matched=(failure == "command-failed") if job["expected_failure"] else failure is None)
     write_json(RESULTS / (name + ".json"), result)
     return result
 
@@ -145,7 +202,7 @@ def serve(deadline):
     (BASE / "inbox").mkdir(parents=True, exist_ok=True)
     (BASE / "sources").mkdir(exist_ok=True)
     (RESULTS / "stage.txt").write_text("build-host-setup\n")
-    write_json(RESULTS / "runner-scope.json", dict(scope="build-and-functional-tests-only", benchmark=False, deadline_epoch=deadline))
+    write_json(RESULTS / "runner-scope.json", dict(scope="build-and-functional-tests-only", benchmark=False, deadline_epoch=deadline, **runner_identity()))
     with (RESULTS / "environment.txt").open("w") as stream:
         for argv in (["uname", "-a"], ["lscpu"], ["df", "-B1", "/var/tmp"], ["rustc", "--version"], ["cargo", "--version"]):
             subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=900)
@@ -168,7 +225,7 @@ def serve(deadline):
                     raise ValueError("job filename differs from identity")
                 run_job(job, deadline)
             except Exception as error:
-                write_json(RESULTS / (path.stem + ".json"), dict(status="rejected-or-runner-error", error=str(error), submitted_job=job))
+                write_json(RESULTS / (path.stem + ".json"), dict(status="rejected-or-runner-error", error=str(error), submitted_job=job, **runner_identity()))
         print("build-host ready; no campaign is running", flush=True)
         time.sleep(45)
     (RESULTS / "failure-detail.txt").write_text("Host deadline reached; explicit FINISH was not received.\n")
@@ -186,7 +243,7 @@ def submit(args):
     source = args.source.resolve()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=source):
         raise ValueError("source snapshot must be committed and clean")
-    job = dict(id=args.id, source_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip(), timeout_seconds=args.timeout, commands=json.loads(args.commands.read_text()), archive_sha256="0" * 64)
+    job = dict(id=args.id, source_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip(), timeout_seconds=args.timeout, expected_failure=args.expected_failure, commands=json.loads(args.commands.read_text()), archive_sha256="0" * 64)
     validate_job(job)
     staging = args.host.parent / "submitted" / args.id
     staging.mkdir(parents=True, exist_ok=False)
@@ -217,6 +274,7 @@ def main():
     job.add_argument("--source", type=Path, required=True)
     job.add_argument("--id", required=True)
     job.add_argument("--timeout", type=int, required=True)
+    job.add_argument("--expected-failure", action="store_true", help="isolate an intentional negative control; retain raw command failures")
     job.add_argument("--commands", type=Path, required=True, help="JSON array of explicit argv arrays")
     finish = commands.add_parser("finish")
     finish.add_argument("--host", type=Path, required=True)
