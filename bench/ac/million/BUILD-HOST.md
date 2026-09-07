@@ -48,7 +48,8 @@ python3 bench/ac/million/build-jobs.py submit \
 
 The submitter hashes a complete committed source archive; the host verifies it
 before extraction. Commands run serially against a shared Cargo target directory,
-with the repository's pinned Rust toolchain. The host service enforces aggregate
+with the repository's pinned Rust toolchain. Bootstrap installs CMake for workspace
+all-features native dependency builds, including the rustdoc gate. The host service enforces aggregate
 memory and no-swap bounds. Source admission and in-flight disk floors, heartbeat
 and deadline checks are enforced by the job runner. Named Python test files and
 locked Cargo build, test, check, clippy and doc commands are accepted; rustdoc
