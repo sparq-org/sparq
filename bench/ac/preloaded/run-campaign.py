@@ -143,6 +143,9 @@ def validate_campaign(spec, root=ROOT):
     if set(row['dataset'] for row in planned) != datasets: raise ValueError('population has no declared cell')
     if not spec['shipping_commits'] or any(not re.fullmatch('[0-9a-f]{40}', value) for value in spec['shipping_commits']):
         raise ValueError('explicit merged shipping commit identities required')
+    margin = spec.get('statistical_plan', {}).get('practical_equivalence_margin_ratio')
+    if margin is not None and (positive(margin, 'practical equivalence margin') <= 1):
+        raise ValueError('a frozen practical-equivalence ratio margin must exceed one')
     return planned
 
 

@@ -70,6 +70,9 @@ class MainCampaignTests(unittest.TestCase):
             with self.assertRaises(ValueError): MAIN.validate_campaign(wrong)
         wrong = copy.deepcopy(spec); wrong['host']['overall_memory_fraction'] = .1; wrong['groups'][0]['memory_gib'] = [1]
         with self.assertRaises(ValueError): MAIN.validate_campaign(wrong)
+        for margin in (1, 0, True, '10%'):
+            wrong = copy.deepcopy(spec); wrong['statistical_plan'] = {'practical_equivalence_margin_ratio': margin}
+            with self.assertRaises(ValueError): MAIN.validate_campaign(wrong)
 
     def test_inventory_requires_every_actual_pod_index_and_unchanged_config(self):
         with tempfile.TemporaryDirectory() as directory:
