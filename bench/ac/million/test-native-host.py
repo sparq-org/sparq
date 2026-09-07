@@ -2,6 +2,7 @@
 """[GPT-6] Hermetic native-host safety checks. No AWS or real block devices."""
 import io
 import tarfile
+import sys
 from types import SimpleNamespace
 from decimal import Decimal
 import importlib.util
@@ -198,7 +199,7 @@ else exit 9; fi
             self.assertEqual(retrieval.plan(rows,root,500),rows)
             with self.assertRaisesRegex(ValueError,'headroom'): retrieval.plan(rows,root,150)
             with self.assertRaisesRegex(ValueError,'aggregate'):
-                retrieval.plan(rows+[dict(path='b.json',size=200,mtime_ns=1)],root,1000)
+                retrieval.plan([dict(path='a.json',size=150,mtime_ns=1),dict(path='b.json',size=151,mtime_ns=1)],root,1000)
             with self.assertRaises(ValueError): retrieval.plan([dict(path='../escape',size=1,mtime_ns=1)],root,1000)
             with self.assertRaises(ValueError): retrieval.plan(rows+rows,root,1000)
 
@@ -217,6 +218,50 @@ else exit 9; fi
                 with self.assertRaisesRegex(ValueError,'validated file list'):
                     retrieval.receive(SimpleNamespace(stdout=stream(3)),rows,root)
                 self.assertEqual((root/'cell/result.json').read_bytes(),b'{}')
+
+    def test_final_reconciliation_keeps_locally_modified_received_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);original=root/'old.json';original.write_bytes(b'original received bytes')
+            retrieval.save_owned(root,{'old.json':retrieval.digest(original)})
+            original.write_bytes(b'local edit must survive')
+            rows=[dict(path='FAILED',size=0,mtime_ns=1,finalized=True,sha256='a'*64),
+                  dict(path='MANIFEST.sha256',size=1,mtime_ns=1,finalized=True,sha256='b'*64)]
+            retrieval.reconcile_final(rows,root)
+            self.assertEqual(original.read_bytes(),b'local edit must survive')
+
+    def test_failure_finalization_after_near_cap_live_pull_preserves_local_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base=Path(directory);remote=base/'remote';local=base/'local';remote.mkdir();local.mkdir()
+            payload=b'{"data":"'+b'x'*48000+b'"}'
+            (remote/'result.json').write_bytes(payload)
+            protected={'source-commit.txt':b'local source identity', 'config.json':b'{"local":true}', 'cost-estimate.json':b'{"reserved":true}'}
+            for name,content in protected.items(): (local/name).write_bytes(content)
+            def inventory():
+                script=retrieval.INVENTORY.replace("'/var/tmp/sparq-pod-study'",repr(str(remote)))
+                return json.loads(subprocess.check_output([sys.executable,'-c',script],text=True))
+            def transfer(rows):
+                data=io.BytesIO()
+                with tarfile.open(fileobj=data,mode='w') as archive:
+                    for row in rows:
+                        info=tarfile.TarInfo(row['path']);info.size=row['size']
+                        with (remote/row['path']).open('rb') as source: archive.addfile(info,source)
+                data.seek(0);retrieval.receive(SimpleNamespace(stdout=data),rows,local)
+            with patch.object(retrieval,'MAX_TOTAL',64*1024), patch.object(retrieval,'MAX_FILE',64*1024), \
+                 patch.object(retrieval.shutil,'disk_usage',return_value=SimpleNamespace(free=10*1024**3)):
+                rows=inventory();transfer(retrieval.plan(rows,local,10*1024**3))
+                self.assertGreater(retrieval.received_bytes(local),retrieval.MAX_TOTAL*.7)
+                with patch.object(host,'RESULTS',remote): host.finalize_failure(ValueError('fixture failed after live collection'))
+                rows=inventory()
+                with self.assertRaisesRegex(ValueError,'aggregate'): retrieval.plan(rows,local,10*1024**3)
+                retrieval.reconcile_final(rows,local)
+                transfer(retrieval.plan(rows,local,10*1024**3))
+                self.assertTrue((local/'FAILED').exists())
+                self.assertLessEqual(retrieval.received_bytes(local),retrieval.MAX_TOTAL)
+                for row in (local/'MANIFEST.sha256').read_text().splitlines():
+                    checksum,name=row.split('  ',1);self.assertEqual(checksum,host.digest(local/name))
+                for name,content in protected.items(): self.assertEqual((local/name).read_bytes(),content)
+                self.assertFalse((local/'result.json').exists())
+                self.assertTrue(any(p.read_bytes()==payload for p in local.glob('failure-evidence-*/result.json')))
 
     def test_nested_manifest_is_complete_and_native_payload_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(host, 'RESULTS', Path(directory)):

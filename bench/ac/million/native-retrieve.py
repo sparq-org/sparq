@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """[GPT-6] Receive only a validated bounded evidence list, retaining disk headroom."""
 import argparse
+import hashlib
+import os
 import json
 from pathlib import Path
 import re
@@ -15,13 +17,16 @@ MAX_TOTAL = 2 * 1024**3
 MAX_FILE = 512 * 1024**2
 HEADROOM = 2 * 1024**3
 REMOTE_ROOT = '/var/tmp/sparq-pod-study'
+OWNED = '.native-retrieval-owned.json'
 
 INVENTORY = r'''
-import json,os,pathlib,sys
-root=pathlib.Path('/var/tmp/sparq-pod-study')
+import hashlib,json,os,pathlib,sys
+root=pathlib.Path('/var/tmp/sparq-pod-study').resolve()
 closed=(root/'MANIFEST.sha256').is_file() and any((root/n).exists() for n in ('DONE','FAILED'))
+checksums={}
 if closed:
-    names=[line.split('  ',1)[1] for line in (root/'MANIFEST.sha256').read_text().splitlines()]
+    checksums=dict((name,checksum) for checksum,name in (line.split('  ',1) for line in (root/'MANIFEST.sha256').read_text().splitlines()))
+    names=list(checksums)
     names+=['MANIFEST.sha256']+[n for n in ('DONE','FAILED') if (root/n).exists()]
 else:
     names=[]
@@ -37,12 +42,15 @@ for name in sorted(set(names)):
     path=root/name
     if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file(): raise ValueError('unsafe evidence path')
     st=path.stat()
-    rows.append(dict(path=name,size=st.st_size,mtime_ns=st.st_mtime_ns))
+    checksum=checksums.get(name)
+    if closed and checksum is None:
+        with path.open('rb') as stream: checksum=hashlib.file_digest(stream,'sha256').hexdigest()
+    rows.append(dict(path=name,size=st.st_size,mtime_ns=st.st_mtime_ns,finalized=closed,sha256=checksum))
 print(json.dumps(rows))
 '''
 SENDER = r'''
 import json,os,pathlib,sys,tarfile
-root=pathlib.Path('/var/tmp/sparq-pod-study')
+root=pathlib.Path('/var/tmp/sparq-pod-study').resolve()
 rows=json.load(sys.stdin)
 with tarfile.open(fileobj=sys.stdout.buffer,mode='w|') as archive:
     for row in rows:
@@ -65,6 +73,76 @@ def validate_name(name):
         raise ValueError('unsafe or excluded evidence path')
 
 
+def digest(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream,'sha256').hexdigest()
+
+
+def owned_files(results):
+    path=results/OWNED
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def save_owned(results, owned):
+    temporary=results/(OWNED+'.tmp')
+    temporary.write_text(json.dumps(owned,sort_keys=True)+'\n')
+    temporary.replace(results/OWNED)
+
+
+def validate_inventory(rows):
+    if not isinstance(rows,list) or len(rows)>10000:
+        raise ValueError('invalid inventory count')
+    names=set()
+    for row in rows:
+        name=row['path'];validate_name(name)
+        if name in names: raise ValueError('duplicate evidence path')
+        names.add(name)
+        if type(row['size']) is not int or not 0<=row['size']<=MAX_FILE or type(row['mtime_ns']) is not int or row['mtime_ns']<0:
+            raise ValueError('invalid evidence size or timestamp')
+        if type(row.get('finalized',False)) is not bool:
+            raise ValueError('invalid finalization flag')
+        if row.get('finalized') and not re.fullmatch('[0-9a-f]{64}',row.get('sha256') or ''):
+            raise ValueError('finalized file lacks its manifest checksum')
+    if sum(row['size'] for row in rows)>MAX_TOTAL:
+        raise ValueError('receiver aggregate 2 GiB bound exceeded')
+
+
+def reconcile_final(rows, results):
+    """Retire only unchanged, receiver-owned provisional files superseded by a terminal manifest."""
+    validate_inventory(rows)
+    if not rows or not all(row.get('finalized') is True for row in rows): return
+    required={row['path'] for row in rows}
+    if 'MANIFEST.sha256' not in required or not required.intersection({'DONE','FAILED'}):
+        raise ValueError('final inventory needs a terminal marker and manifest')
+    local_bytes(results)  # Reject local symlinks before considering ownership.
+    owned=owned_files(results); reusable={}
+    for name, checksum in owned.items():
+        validate_name(name)
+        path=results/name
+        if name not in required and path.is_file() and digest(path)==checksum:
+            reusable.setdefault(checksum,[]).append(name)
+    retired=[]
+    wanted_hashes={row["path"]:row["sha256"] for row in rows}
+    for row in rows:
+        destination=results/row['path']
+        matches=reusable.get(row['sha256'],[])
+        if not destination.exists() and matches:
+            original=matches.pop();destination.parent.mkdir(parents=True,exist_ok=True)
+            (results/original).replace(destination)
+            os.utime(destination,ns=(row['mtime_ns'],row['mtime_ns']))
+            owned.pop(original);owned[row['path']]=row['sha256']
+            retired.append(dict(path=original,sha256=row['sha256'],retained_as=row['path']))
+    for name, checksum in list(owned.items()):
+        path=results/name
+        if (name not in required or wanted_hashes.get(name)!=checksum) and path.is_file() and digest(path)==checksum:
+            path.unlink();owned.pop(name)
+            retired.append(dict(path=name,sha256=checksum,reason='superseded provisional snapshot differs from terminal manifest'))
+    save_owned(results,owned)
+    if retired:
+        with (results/'.native-retrieval-retired.jsonl').open('a') as stream:
+            for record in retired: stream.write(json.dumps(record,sort_keys=True)+'\n')
+
+
 def local_bytes(results):
     total = 0
     for path in results.rglob('*'):
@@ -74,28 +152,30 @@ def local_bytes(results):
     return total
 
 
+def received_bytes(results):
+    # The transfer ceiling covers our evidence and replacement scratch. Locally
+    # authored source/config/cost artifacts are protected; free-space checks still
+    # account for every byte on their filesystem.
+    local_bytes(results)
+    return sum((results/name).stat().st_size for name in owned_files(results) if (results/name).is_file())
+
+
 def plan(rows, results, free_bytes):
-    if not isinstance(rows, list) or len(rows) > 10000:
-        raise ValueError('invalid inventory count')
-    names = set(); selected = []; declared = 0; increase = 0
+    validate_inventory(rows)
+    selected=[]
+    current=received_bytes(results); peak=current; projected=current
     for row in rows:
-        name = row['path']; validate_name(name)
-        if name in names: raise ValueError('duplicate evidence path')
-        names.add(name)
-        if type(row['size']) is not int or not 0 <= row['size'] <= MAX_FILE or type(row['mtime_ns']) is not int or row['mtime_ns'] < 0:
-            raise ValueError('invalid evidence size or timestamp')
-        declared += row['size']
-        target = results / name
+        target=results/row['path']
         if target.exists() and not target.is_file(): raise ValueError('local path is not a regular file')
-        old = target.stat() if target.exists() else None
-        if old and (old.st_size, old.st_mtime_ns) == (row['size'], row['mtime_ns']): continue
+        old=target.stat() if target.exists() else None
+        if old and (old.st_size,old.st_mtime_ns)==(row['size'],row['mtime_ns']):
+            if not row.get('sha256') or digest(target)==row['sha256']: continue
         selected.append(row)
-        increase += max(0, row['size'] - (old.st_size if old else 0))
-    current = local_bytes(results)
-    scratch = max((row['size'] for row in selected), default=0)
-    if declared > MAX_TOTAL or current + increase + scratch > MAX_TOTAL:
+        peak=max(peak,projected+row['size'])
+        projected+=row['size']-(old.st_size if old else 0)
+    if peak>MAX_TOTAL:
         raise ValueError('receiver aggregate 2 GiB bound exceeded, including replacement scratch')
-    if free_bytes < HEADROOM + increase + scratch:
+    if free_bytes<HEADROOM+peak-current:
         raise ValueError('receiver must retain 2 GiB free headroom')
     return selected
 
@@ -108,7 +188,8 @@ def ssh_command(host, script):
 
 
 def receive(process, selected, results):
-    current = local_bytes(results)
+    current = received_bytes(results)
+    owned=owned_files(results)
     with tempfile.TemporaryDirectory(prefix='native-transfer-', dir=results.parent) as directory:
         with tarfile.open(fileobj=process.stdout, mode='r|') as archive:
             for row in selected:
@@ -125,11 +206,16 @@ def receive(process, selected, results):
                         if not block: raise ValueError('truncated evidence file')
                         destination.write(block); remaining -= len(block)
                 target = results / row['path']; target.parent.mkdir(parents=True, exist_ok=True)
+                checksum=digest(temporary)
+                if row.get('sha256') and checksum!=row['sha256']:
+                    raise ValueError('received bytes differ from the terminal manifest')
                 old_size = target.stat().st_size if target.exists() else 0
+                if target.exists() and (row['path'] not in owned or digest(target)!=owned[row['path']]):
+                    raise ValueError('refusing to overwrite a locally created or modified artifact')
                 temporary.replace(target)
-                import os
                 os.utime(target, ns=(row['mtime_ns'], row['mtime_ns']))
-                current += member.size - old_size
+                owned[row['path']]=checksum;save_owned(results,owned)
+                current=received_bytes(results)
             if archive.next() is not None:
                 raise ValueError('sender emitted an unselected artifact')
 
@@ -137,6 +223,7 @@ def receive(process, selected, results):
 def pull(host, results):
     inventory = subprocess.run(ssh_command(host, INVENTORY), capture_output=True, text=True, check=True, timeout=60)
     rows = json.loads(inventory.stdout)
+    reconcile_final(rows,results)
     selected = plan(rows, results, shutil.disk_usage(results).free)
     if not selected: return
     process = subprocess.Popen(ssh_command(host, SENDER), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
