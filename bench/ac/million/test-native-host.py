@@ -219,6 +219,31 @@ else exit 9; fi
                     retrieval.receive(SimpleNamespace(stdout=stream(3)),rows,root)
                 self.assertEqual((root/'cell/result.json').read_bytes(),b'{}')
 
+    def test_unowned_identity_collision_preserves_bytes_and_rejects_different_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); path=root/'source-commit.txt';path.write_bytes(b'local-source')
+            os.utime(path,ns=(1_000_000_000,1_000_000_000))
+            row=dict(path=path.name,size=12,mtime_ns=2_000_000_000)
+            def stream(content):
+                data=io.BytesIO()
+                with tarfile.open(fileobj=data,mode='w') as archive:
+                    info=tarfile.TarInfo(path.name);info.size=len(content);archive.addfile(info,io.BytesIO(content))
+                data.seek(0);return SimpleNamespace(stdout=data)
+            with patch.object(retrieval.shutil,'disk_usage',return_value=SimpleNamespace(free=10*1024**3)):
+                self.assertEqual(retrieval.plan([row],root,10*1024**3),[row])
+                retrieval.receive(stream(b'local-source'),[row],root)
+                self.assertEqual(path.stat().st_mtime_ns,1_000_000_000)
+                self.assertNotIn(path.name,retrieval.owned_files(root))
+                self.assertEqual(retrieval.received_bytes(root),0)
+                with self.assertRaisesRegex(ValueError,'locally created'):
+                    retrieval.receive(stream(b'other-source'),[row],root)
+                self.assertEqual(path.read_bytes(),b'local-source')
+            # Large unowned bytes may not reduce the projected received payload.
+            path.write_bytes(b'x'*1000)
+            with patch.object(retrieval,'MAX_TOTAL',100),patch.object(retrieval,'MAX_FILE',100):
+                rows=[dict(path=path.name,size=1,mtime_ns=3),dict(path='new.json',size=100,mtime_ns=3),dict(path='more.json',size=1,mtime_ns=3)]
+                with self.assertRaisesRegex(ValueError,'aggregate'): retrieval.plan(rows,root,10*1024**3)
+
     def test_final_reconciliation_keeps_locally_modified_received_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);original=root/'old.json';original.write_bytes(b'original received bytes')
@@ -236,6 +261,9 @@ else exit 9; fi
             (remote/'result.json').write_bytes(payload)
             protected={'source-commit.txt':b'local source identity', 'config.json':b'{"local":true}', 'cost-estimate.json':b'{"reserved":true}'}
             for name,content in protected.items(): (local/name).write_bytes(content)
+            (remote/'source-commit.txt').write_bytes(protected['source-commit.txt'])
+            os.utime(local/'source-commit.txt',ns=(1_000_000_000,1_000_000_000))
+            os.utime(remote/'source-commit.txt',ns=(2_000_000_000,2_000_000_000))
             def inventory():
                 script=retrieval.INVENTORY.replace("'/var/tmp/sparq-pod-study'",repr(str(remote)))
                 return json.loads(subprocess.check_output([sys.executable,'-c',script],text=True))
@@ -250,6 +278,8 @@ else exit 9; fi
                  patch.object(retrieval.shutil,'disk_usage',return_value=SimpleNamespace(free=10*1024**3)):
                 rows=inventory();transfer(retrieval.plan(rows,local,10*1024**3))
                 self.assertGreater(retrieval.received_bytes(local),retrieval.MAX_TOTAL*.7)
+                self.assertNotIn('source-commit.txt',retrieval.owned_files(local))
+                self.assertEqual((local/'source-commit.txt').stat().st_mtime_ns,1_000_000_000)
                 with patch.object(host,'RESULTS',remote): host.finalize_failure(ValueError('fixture failed after live collection'))
                 rows=inventory()
                 with self.assertRaisesRegex(ValueError,'aggregate'): retrieval.plan(rows,local,10*1024**3)

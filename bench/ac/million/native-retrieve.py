@@ -163,16 +163,22 @@ def received_bytes(results):
 def plan(rows, results, free_bytes):
     validate_inventory(rows)
     selected=[]
+    owned=owned_files(results)
     current=received_bytes(results); peak=current; projected=current
     for row in rows:
         target=results/row['path']
         if target.exists() and not target.is_file(): raise ValueError('local path is not a regular file')
         old=target.stat() if target.exists() else None
-        if old and (old.st_size,old.st_mtime_ns)==(row['size'],row['mtime_ns']):
-            if not row.get('sha256') or digest(target)==row['sha256']: continue
+        if old:
+            if row.get('sha256') and digest(target)==row['sha256']: continue
+            if row['path'] in owned and (old.st_size,old.st_mtime_ns)==(row['size'],row['mtime_ns']):
+                if not row.get('sha256'): continue
         selected.append(row)
         peak=max(peak,projected+row['size'])
-        projected+=row['size']-(old.st_size if old else 0)
+        # Existing unowned files are verified for identical bytes, never replaced
+        # or charged/subtracted as receiver-owned payload.
+        if not old: projected+=row['size']
+        elif row['path'] in owned: projected+=row['size']-old.st_size
     if peak>MAX_TOTAL:
         raise ValueError('receiver aggregate 2 GiB bound exceeded, including replacement scratch')
     if free_bytes<HEADROOM+peak-current:
@@ -209,9 +215,16 @@ def receive(process, selected, results):
                 checksum=digest(temporary)
                 if row.get('sha256') and checksum!=row['sha256']:
                     raise ValueError('received bytes differ from the terminal manifest')
-                old_size = target.stat().st_size if target.exists() else 0
-                if target.exists() and (row['path'] not in owned or digest(target)!=owned[row['path']]):
-                    raise ValueError('refusing to overwrite a locally created or modified artifact')
+                if target.exists():
+                    existing=digest(target)
+                    if row['path'] not in owned or existing!=owned[row['path']]:
+                        if checksum!=existing:
+                            raise ValueError('refusing to overwrite a locally created or modified artifact')
+                        temporary.unlink()
+                        # Retain identical unowned bytes, metadata and ownership.
+                        owned.pop(row['path'],None);save_owned(results,owned)
+                        current=received_bytes(results)
+                        continue
                 temporary.replace(target)
                 os.utime(target, ns=(row['mtime_ns'], row['mtime_ns']))
                 owned[row['path']]=checksum;save_owned(results,owned)
