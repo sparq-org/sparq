@@ -248,6 +248,11 @@ optional prospectively frozen practical-equivalence margin.
 Failed startup attempts have a separate `valid_for_admission_inference` field and
 `admission_failure_cells` list. Their request metrics stay null and they cannot
 enter latency headline cells; unsupported continuation invalidates the campaign.
+The separate `retained_history_million_pod_admission` account derives per-model
+startup states from validated central-history shapes and complete populations;
+it excludes compact controls and keeps admission distinct from response capacity.
+The optional `site/papers/solid-pod-preloaded-results.typ` helper accepts only
+finalized, reviewed native analysis and loads no default or cached result JSON.
 
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and

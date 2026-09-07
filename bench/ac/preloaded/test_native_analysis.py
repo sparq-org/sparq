@@ -127,6 +127,33 @@ def fixture(root, memory_tiers=(128,), repeats=2):
 
 
 class NativeAnalysisTests(unittest.TestCase):
+    def test_retained_million_admission_is_derived_and_not_a_response_conclusion(self):
+        shape = {'id': 'history-8', 'profile': 'history', 'role': 'partially-calibrated-retained-history-scenario', 'models': ['wac', 'acp']}
+        dataset = shape | {'id': 'history-million', 'shape_reference': 'history-8', 'pods': 1_000_000}
+        binding = {'passed': True, 'corpus_shape_definitions': [shape]}
+        cell = {'label': 'synthetic-unit-admission', 'dataset': dataset['id'], 'model': 'wac', 'population': 1_000_000,
+            'memory_gib': 128, 'cpus': 16, 'group': 'native', 'replicate': 0, 'execution_status': 'complete',
+            'valid_for_inference': True, 'local_guard': 'fail',
+            'preload': {'passed': True, 'readiness': {'population': 1_000_000, 'retained_pods': 1_000_000}}}
+        describe = lambda row: N.retained_history_admission({'corpora': [dataset]}, [row], binding)
+        result = describe(cell)
+        self.assertEqual(result['by_model']['wac']['state'], 'admitted')
+        self.assertEqual(result['by_model']['acp']['state'], 'unmeasured')
+        self.assertEqual(result['attempts'][0]['response_guard'], 'fail')
+        failed = cell | {'execution_status': 'admission-failed', 'valid_for_inference': False,
+            'valid_for_admission_inference': True, 'admission': {'outcome': 'memory-limit'}, 'preload': {'complete': False}}
+        self.assertEqual(describe(failed)['by_model']['wac']['state'], 'failed')
+        self.assertEqual(describe(cell | {'execution_status': 'unattempted', 'valid_for_inference': False})['by_model']['wac']['state'], 'unmeasured')
+        self.assertEqual(describe(cell | {'valid_for_inference': False})['by_model']['wac']['state'], 'inconclusive')
+        self.assertEqual(N.retained_history_admission({'corpora': [dataset]}, [], binding)['by_model']['wac']['state'], 'unmeasured')
+        for changed in ({'profile': 'smoke', 'role': 'populated-control'}, {'role': 'synthetic-unit-fixture'},
+                        {'shape_reference': 'unknown'}, {'pods': 999_999}):
+            result = N.retained_history_admission({'corpora': [dataset | changed]}, [cell], binding)
+            self.assertEqual(result['eligible_datasets'], [])
+            self.assertEqual(result['by_model']['wac']['state'], 'unmeasured')
+        result = N.retained_history_admission({'corpora': [dataset]}, [cell], binding | {'passed': False})
+        self.assertEqual(result['eligible_datasets'], [])
+
     def analyze_fixture(self, root, review):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'review.json'; write(path, review)
@@ -140,6 +167,8 @@ class NativeAnalysisTests(unittest.TestCase):
             seal(root, review)
             result = self.analyze_fixture(root, review)
             self.assertFalse(result['global_issues'], result['global_issues'])
+            self.assertNotIn('full_service_million_history_admitted', result)
+            self.assertEqual(result['retained_history_million_pod_admission']['eligible_datasets'], [])
             self.assertTrue(all(row['valid_for_inference'] for row in result['cells']), [row['issues'] for row in result['cells']])
             self.assertEqual(len(result['headline_eligible_cells']), 4)
             self.assertTrue(all(row['local_guard'] == 'pass' for row in result['cells']))
