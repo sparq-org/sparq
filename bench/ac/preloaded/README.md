@@ -241,6 +241,17 @@ source, population, archive, raw log, terminal capture and canonical event.
 Unsupported admission continuation invalidates the campaign; it is never used
 to turn an unknown failure into a negative capacity result.
 
+The native analysis reports `retained_history_million_pod_admission` instead of
+an all-service admission boolean. Its per-model states and labeled attempts use
+complete validated startup or typed admission failures for populations of at
+least one million, matching the central history profile and role to the measured
+source's frozen shape definitions. Compact controls and separately named stress
+profiles cannot establish central retained-history admission. An admitted state
+means at least one listed attempt admitted the full population; models may need
+different resource tiers, and a response guard can still fail. Unmeasured and
+inconclusive evidence remain separate. These states do not establish responsive
+service capacity or empirical representativeness of all service data.
+
 Run `analyze-campaign.py ARTIFACT_DIRECTORY --review REVIEW_JSON --output
 research/solid-pod-preloaded-main.json` only after finalization. Optional
 `--scratch-directory` selects temporary SQLite storage; `--source-root` selects
@@ -281,3 +292,13 @@ Formal practical equivalence requires the optional
 campaign, expressed as a finite ratio greater than one. Without that field,
 comparison remains descriptive. A nonsignificant difference, equal tested rates
 or a narrow latency interval does not establish sustainable capacity equivalence.
+
+The optional `site/papers/solid-pod-preloaded-results.typ` presentation helper
+loads no default JSON. `native-result-state` rejects cached schemas, incomplete,
+quarantined, integrity-invalid and review-mismatched native analysis.
+`native-response-rows` and `native-response-table` keep admission-failure latency
+and response fractions null; optional explicit labels select rows before display.
+`native-history-admission` exposes the separate derived startup account only
+after the same evidence gate. The prospective manuscript is not bound to a
+placeholder result. Run `test_native_paper.py` with `TYPST_BIN` to check the
+adapter using temporary synthetic fixtures.

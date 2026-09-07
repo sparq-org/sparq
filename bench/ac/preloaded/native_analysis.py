@@ -33,7 +33,7 @@ class Evidence(OLD.Evidence):
 
 
 def source_bindings(campaign, root=ROOT):
-    errors = []; verified = {}
+    errors = []; verified = {}; shapes = []
     source = campaign.get('source_commit', '')
     if not re.fullmatch('[0-9a-f]{40}', source): return {'passed': False, 'issues': ['invalid-source-commit'], 'verified': {}}
     if not RUNNER.REQUIRED_BINDINGS <= campaign.get('bindings', {}).keys(): errors.append('required-source-bindings-missing')
@@ -44,14 +44,16 @@ def source_bindings(campaign, root=ROOT):
             content = subprocess.check_output(['git', 'show', source + ':' + name], cwd=root, stderr=subprocess.PIPE, timeout=30)
             actual = hashlib.sha256(content).hexdigest()
             if actual != digest: errors.append('source-binding-differs:' + name)
-            else: verified[name] = actual
+            else:
+                verified[name] = actual
+                if name == 'bench/ac/million/campaign-20260906.json': shapes = json.loads(content)['corpora']
         except (OSError, subprocess.SubprocessError): errors.append('source-binding-unavailable:' + name)
     for name in ('bench/ac/preloaded/run-cell.py', 'bench/ac/million/run-campaign.py'):
         try:
             content = subprocess.check_output(['git', 'show', source + ':' + name], cwd=root, stderr=subprocess.PIPE, timeout=30)
             verified[name] = hashlib.sha256(content).hexdigest()
         except (OSError, subprocess.SubprocessError): errors.append('runtime-source-unavailable:' + name)
-    return {'passed': not errors, 'issues': errors, 'verified': verified,
+    return {'passed': not errors, 'issues': errors, 'verified': verified, 'corpus_shape_definitions': shapes,
             'scope': 'Compare each declared input to its blob in the exact locally available measured Git revision; no working-tree or latest-source substitution.'}
 
 
@@ -377,6 +379,40 @@ def analyze_cell(evidence, campaign, metadata, declared, pop, scratch):
     return result
 
 
+def retained_history_admission(campaign, cells, binding):
+    """Describe observed central-history startup admission, not service capacity."""
+    shapes = {row['id']: row for row in binding.get('corpus_shape_definitions', [])}
+    eligible = set()
+    for dataset in campaign['corpora']:
+        shape = shapes.get(dataset.get('shape_reference'), {})
+        if (binding.get('passed') is True and type(dataset.get('pods')) is int and dataset['pods'] >= 1_000_000
+                and shape.get('profile') == 'history' and shape.get('role') == 'partially-calibrated-retained-history-scenario'
+                and all(dataset.get(key) == shape.get(key) for key in ('profile', 'role', 'models', 'config_file'))):
+            eligible.add(dataset['id'])
+    attempts = []
+    for cell in cells:
+        if cell['dataset'] not in eligible: continue
+        ready = (cell.get('preload') or {}).get('readiness') or {}
+        if cell.get('execution_status') == 'unattempted': state = 'unmeasured'
+        elif (cell.get('valid_for_inference') is True and (cell.get('preload') or {}).get('passed') is True
+              and ready.get('population') == cell['population'] == ready.get('retained_pods')):
+            state = 'admitted'
+        elif cell.get('execution_status') == 'admission-failed' and cell.get('valid_for_admission_inference') is True:
+            state = 'failed'
+        else: state = 'inconclusive'
+        attempts.append({key: cell[key] for key in ('label', 'dataset', 'model', 'population', 'memory_gib', 'cpus', 'group', 'replicate')} |
+            {'state': state, 'admission_failure': (cell.get('admission') or {}).get('outcome') if state == 'failed' else None,
+             'response_guard': cell.get('local_guard') if cell.get('valid_for_inference') else None})
+    states = {}
+    for model in ('wac', 'acp'):
+        rows = [row for row in attempts if row['model'] == model]
+        observed = {row['state'] for row in rows}
+        state = next((value for value in ('admitted', 'inconclusive', 'failed') if value in observed), 'unmeasured')
+        states[model] = {'state': state, 'counts': {value: sum(row['state'] == value for row in rows) for value in ('admitted', 'failed', 'unmeasured', 'inconclusive')}}
+    return {'minimum_population': 1_000_000, 'eligible_datasets': sorted(eligible), 'by_model': states, 'attempts': attempts,
+        'scope': 'Central partially calibrated retained-history shapes only, matched to source-bound profile/role/config references. Each model state says whether any validated attempt admitted that complete population; failed tiers and unattempted cells remain listed. Models may admit at different resources. Startup admission does not establish responsive-service capacity, physical-machine fit at the cgroup limit, or a representative all-service joint distribution. Compact controls and separately named stress profiles are excluded.'}
+
+
 def analyze(root, review_path=None, scratch_root=None, source_root=ROOT):
     evidence = Evidence(root)
     campaign = evidence.document('frozen-campaign.json')
@@ -493,5 +529,5 @@ def analyze(root, review_path=None, scratch_root=None, source_root=ROOT):
         'corpora': list(inventories.values()), 'sampled_authorization_correctness': authorization, 'cells': cells, 'paired_comparisons': pairs,
         'headline_eligible_cells': [row['label'] for row in cells if row['valid_for_inference']],
         'admission_failure_cells': [row['label'] for row in cells if row.get('valid_for_admission_inference')],
-        'full_service_million_history_admitted': False,
+        'retained_history_million_pod_admission': retained_history_admission(campaign, cells, binding),
         'scope': 'Complete execution alone admits no capacity claim. Only fully checked, reviewed native cells can support scoped inferences; partial/rejected evidence remains descriptive. Network journeys and general all-service representativeness remain separate questions.'}
