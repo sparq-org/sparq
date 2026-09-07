@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 HERE = Path(__file__).parent
+REVIEWED_PROPOSAL = HERE.parent / 'preloaded/preparation-pilot-v2.json'
 
 def load(name):
     spec = importlib.util.spec_from_file_location(name.replace('-', '_'), HERE / (name + '.py'))
@@ -175,6 +176,21 @@ else exit 9; fi
             with patch.object(host.subprocess, 'check_output', side_effect=['a'*40, b'']):
                 with self.assertRaisesRegex(ValueError, 'frozen'): host.receipt_identity(receipt)
 
+    def test_reviewed_preparation_proposal_matches_the_real_executor_and_source(self):
+        # [GPT-6] Do not substitute a synthetic hash: the deployed pin must admit this file.
+        self.assertEqual(host.digest(REVIEWED_PROPOSAL), host.PREPARATION_PROPOSAL_SHA256)
+        proposal = json.loads(REVIEWED_PROPOSAL.read_text())
+        self.assertEqual(proposal['proposal_revision'], 2)
+        self.assertEqual(proposal['protocol_rebinding']['original_proposal_sha256'],
+                         'ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7')
+        spec = importlib.util.spec_from_file_location('reviewed_preparation', HERE.parent / 'preloaded/run-preparation.py')
+        preparation = importlib.util.module_from_spec(spec); spec.loader.exec_module(preparation)
+        preparation.validate_proposal(proposal, HERE.parents[2])
+        # The old protocol binding must remain rejected, not accepted as a second version.
+        proposal['bindings']['bench/ac/preloaded/protocol.json'] = proposal['protocol_rebinding']['previous_protocol_sha256']
+        with self.assertRaisesRegex(ValueError, 'source binding differs'):
+            preparation.validate_proposal(proposal, HERE.parents[2])
+
     def test_preparation_receipt_verifies_distinct_commits_and_all_compile_inputs(self):
         # Synthetic local Git fixture; no compiler, executable binary or real result.
         with tempfile.TemporaryDirectory() as directory:
@@ -183,15 +199,18 @@ else exit 9; fi
             def git(*argv):
                 return subprocess.check_output(['git','-c','commit.gpgsign=false',*argv],cwd=source,text=True,stderr=subprocess.DEVNULL).strip()
             git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@example.invalid')
+            # Exact reviewed proposal/source inputs; only Git history and binary/result are synthetic.
+            for relative in json.loads(REVIEWED_PROPOSAL.read_text())['bindings']:
+                bound = source / relative; bound.parent.mkdir(parents=True, exist_ok=True)
+                bound.write_bytes((HERE.parents[2] / relative).read_bytes())
             (source/'Cargo.lock').write_text('synthetic unchanged lock fixture')
             (source/'rules.n3').write_text('synthetic unchanged rule fixture')
-            script=source/'bench/ac/preloaded/run-preparation.py';script.parent.mkdir(parents=True);script.write_text('# old fixture')
+            script=source/'bench/ac/preloaded/run-preparation.py';script.parent.mkdir(parents=True,exist_ok=True);script.write_text('# old fixture')
             git('add','.');git('commit','-qm','synthetic binary source');built=git('rev-parse','HEAD')
             script.write_text('# new fixture executor only')
             git('add','.');git('commit','-qm','synthetic executor source');executor=git('rev-parse','HEAD')
             binary=data/'binary';binary.write_bytes(b'not an executable; synthetic receipt fixture')
-            proposal=data/'proposal.json';proposal.write_text(json.dumps(dict(schema_version=1,status=host.PREPARATION_PROPOSAL_STATUS,
-                bindings={'Cargo.lock':host.digest(source/'Cargo.lock')})))
+            proposal=data/'proposal.json';proposal.write_bytes(REVIEWED_PROPOSAL.read_bytes())
             report=results/'preparation-result.json'
             receipt=dict(kind='preparation-proposal',status='completed',executor_source_commit=executor,
                 binary_build_source_commit=built,source_path=str(source),proposal_path=str(proposal),proposal_sha256=host.digest(proposal),
@@ -203,8 +222,7 @@ else exit 9; fi
                     allowed_changed_paths=sorted(host.EXECUTOR_ONLY_PATHS),actual_changed_paths=changed or ['bench/ac/preloaded/run-preparation.py']))))
                 receipt['preparation_result_sha256']=host.digest(report)
             write_report()
-            with patch.object(host,'DATA',data),patch.object(host,'RESULTS',results), \
-                 patch.object(host,'PREPARATION_PROPOSAL_SHA256',receipt['proposal_sha256']):
+            with patch.object(host,'DATA',data),patch.object(host,'RESULTS',results):
                 host.receipt_identity(receipt)
                 self.assertNotEqual(receipt['executor_source_commit'],receipt['binary_build_source_commit'])
                 for flag in ('timed_load','slo_admission','capacity_admission'): self.assertIs(receipt[flag],False)

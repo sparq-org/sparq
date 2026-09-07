@@ -94,8 +94,12 @@ the same terminal statuses. Include `executor_source_commit`,
 `binary_path`, `binary_sha256`, `preparation_result_path`, and
 `preparation_result_sha256`. Source/proposal/binary paths resolve under data0; the
 result resolves under the retrieved results directory. The proposal is the immutable
-input with SHA-256 `ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7`
-and its original prospective-footprint status. It is not relabelled as a frozen main
+input [preparation-pilot-v2.json](../preloaded/preparation-pilot-v2.json), with SHA-256
+`aec29b165ec7ef6a7436c0dbcdb5398588da24f934693b9c4f338646c4901e23`
+and its original prospective-footprint status. Before any pilot, v2 rebound only
+the protocol checksum and added revision provenance; its populations, observations
+and bounds are unchanged. The original proposal is retained as historical evidence
+and is not accepted by this receipt validator. V2 is not relabelled as a frozen main
 campaign. The result must have kind `native-preparation-pilot-result`, bind the same
 identities, and be complete before a `completed` receipt is accepted.
 

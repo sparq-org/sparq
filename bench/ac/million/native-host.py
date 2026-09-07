@@ -16,7 +16,8 @@ DATA = Path('/mnt/sparq-native/data0')
 MAX_EVIDENCE_BYTES = 2 * 1024**3
 
 
-PREPARATION_PROPOSAL_SHA256 = 'ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7'
+# [GPT-6] Exact reviewed bench/ac/preloaded/preparation-pilot-v2.json bytes.
+PREPARATION_PROPOSAL_SHA256 = 'aec29b165ec7ef6a7436c0dbcdb5398588da24f934693b9c4f338646c4901e23'
 PREPARATION_PROPOSAL_STATUS = 'prospective footprint proposal only; no preparation performed, no main matrix frozen'
 EXECUTOR_ONLY_PATHS = frozenset({
     'bench/ac/preloaded/run-preparation.py', 'bench/ac/preloaded/test_preparation.py',

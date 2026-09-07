@@ -1,0 +1,764 @@
+{
+  "bindings": {
+    "bench/ac/million/campaign-20260906.json": "77749b980956d61c322a6189f6d4857c105d0a0a62c0237a813e304a9d6e1055",
+    "bench/ac/million/workload.json": "1b97480d624a9c356d25c0d748c2d94eb6c4feaab80457239096a51c5991c75f",
+    "bench/ac/preloaded/protocol.json": "09e74e2973062028dd814f2314350ceff7c0ea85fa6d5dac6478bc3b12df2037",
+    "crates/sparq-acbench/src/population.rs": "1bfd8c2656b3f937d321e630d3fc5f97fbf489cfcf18f521c9f4069e5d0a2e30",
+    "research/solid-pod-scale-main.json": "9f90a2ac6727fb2c4235db298c92c795e7eed45f9df7529ef61e0d7db26b5e4d"
+  },
+  "cells": [
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "compact-1000",
+      "definition": {
+        "id": "compact-1000",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 1000,
+        "profile": "smoke",
+        "role": "populated-control"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 109020
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 100,
+          "source_bytes": 111754
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 24000,
+        "index_sha256": "2ffe349bd9857d2614cf16d6abdd7967d5b253ec785fab489eaf53301386c9f5",
+        "maximum_pod_source_bytes": 111754,
+        "packed_bytes": 4515744,
+        "packed_sha256": "d411a11c54d9e75c4abb1586926580f6611a428df862cd9fc829db526069592f",
+        "pods": 1000,
+        "quads": 595000,
+        "records": 48000,
+        "source_bytes": 111603630
+      },
+      "prior_population_role": "populated-control",
+      "purpose": "Small descriptor and retained-history baselines; history8 does not include every intensity class.",
+      "stage": "first-cost-check"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "compact-1000",
+      "definition": {
+        "id": "compact-1000",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 1000,
+        "profile": "smoke",
+        "role": "populated-control"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 126058
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 100,
+          "source_bytes": 129234
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 24000,
+        "index_sha256": "4f39501d738b442b9bd21f335cc809de1249bfff37d8171233258c2cf5237371",
+        "maximum_pod_source_bytes": 129234,
+        "packed_bytes": 5785987,
+        "packed_sha256": "956c6009e53661cd32910094154ef6b54967a77e0fe43e29de06c5bee4e304a3",
+        "pods": 1000,
+        "quads": 679000,
+        "records": 48000,
+        "source_bytes": 129059320
+      },
+      "prior_population_role": "populated-control",
+      "purpose": "Small descriptor and retained-history baselines; history8 does not include every intensity class.",
+      "stage": "first-cost-check"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "history-8",
+      "definition": {
+        "id": "history-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "history",
+        "role": "partially-calibrated-retained-history-scenario"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 42117505
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 42363575
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 84414044
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 84705074
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "5ce309c12d13298c213173777995ad49970c8030b807dacf89afd029b1fb3f9d",
+        "maximum_pod_source_bytes": 84705074,
+        "packed_bytes": 10922146,
+        "packed_sha256": "bdd29e04f78e2482ba42bde5f7643d22c6390085438ce5cfe2e00995b6aa5fa4",
+        "pods": 8,
+        "quads": 2569040,
+        "records": 259010,
+        "source_bytes": 507086538
+      },
+      "prior_population_role": "partially-calibrated-retained-history-scenario",
+      "purpose": "Small descriptor and retained-history baselines; history8 does not include every intensity class.",
+      "stage": "first-cost-check"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "history-8",
+      "definition": {
+        "id": "history-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "history",
+        "role": "partially-calibrated-retained-history-scenario"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 42162508
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 42408578
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 84459047
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 84750077
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "0fac5767480a00d84aaec67a5bfeda83741b363105a6688a7c06a79279460703",
+        "maximum_pod_source_bytes": 84750077,
+        "packed_bytes": 10943585,
+        "packed_sha256": "be40a0af6185edad9b675f910f6ae051656d8a4ac89b82ee3f166dbfe4edbd78",
+        "pods": 8,
+        "quads": 2570792,
+        "records": 259010,
+        "source_bytes": 507446562
+      },
+      "prior_population_role": "partially-calibrated-retained-history-scenario",
+      "purpose": "Small descriptor and retained-history baselines; history8 does not include every intensity class.",
+      "stage": "first-cost-check"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "compact-10000",
+      "definition": {
+        "id": "compact-10000",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 10000,
+        "profile": "smoke",
+        "role": "populated-control"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 109020
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 1000,
+          "source_bytes": 113121
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 240000,
+        "index_sha256": "6d229db6c3303defe42d461a5f2a4434fac8920d7e6dcf2ac6df56f85ab495f6",
+        "maximum_pod_source_bytes": 113121,
+        "packed_bytes": 45187577,
+        "packed_sha256": "731ce8b47223c6ec989642802734b5c179a2fb9ff93926ca86084bdf9541a5a6",
+        "pods": 10000,
+        "quads": 5950000,
+        "records": 480000,
+        "source_bytes": 1129692630
+      },
+      "prior_population_role": "populated-control",
+      "purpose": "Compact descriptor/startup scaling plus complete observed intensity classes, including20x history.",
+      "stage": "scaling-and-heavy-tail"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "compact-10000",
+      "definition": {
+        "id": "compact-10000",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 10000,
+        "profile": "smoke",
+        "role": "populated-control"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 126058
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 1000,
+          "source_bytes": 130822
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 240000,
+        "index_sha256": "f277d34971e510c9bb354e1538b6d307756aa912919cf0876183b1ef32e956bb",
+        "maximum_pod_source_bytes": 130822,
+        "packed_bytes": 57830056,
+        "packed_sha256": "0c8f753aa20eef8528464ec0cff6a18cd6873efd19be2ef1bcfb56c0b49e9586",
+        "pods": 10000,
+        "quads": 6790000,
+        "records": 480000,
+        "source_bytes": 1306457320
+      },
+      "prior_population_role": "populated-control",
+      "purpose": "Compact descriptor/startup scaling plus complete observed intensity classes, including20x history.",
+      "stage": "scaling-and-heavy-tail"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "history-64",
+      "definition": {
+        "id": "history-64",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 64,
+        "profile": "history",
+        "role": "partially-calibrated-retained-history-scenario"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 42117505
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 84414044
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 20,
+          "source_bytes": 43391485
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 4,
+          "pod": 39,
+          "source_bytes": 341503009
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 20,
+          "pod": 42,
+          "source_bytes": 1716198508
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 4,
+          "pod": 45,
+          "source_bytes": 342915351
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 20,
+          "pod": 58,
+          "source_bytes": 1716826191
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 61,
+          "source_bytes": 86326157
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 1536,
+        "index_sha256": "cf692f54ab9a63cae4712ffd0bf2dffa8b737603e04c0d32938aa446db02210a",
+        "maximum_pod_source_bytes": 1716826191,
+        "packed_bytes": 257597296,
+        "packed_sha256": "a5d5f823de32900907c012fdb5a708224237365a219137b504cea816d4ce7a21",
+        "pods": 64,
+        "quads": 61631916,
+        "records": 6220055,
+        "source_bytes": 12372804393
+      },
+      "prior_population_role": "partially-calibrated-retained-history-scenario",
+      "purpose": "Compact descriptor/startup scaling plus complete observed intensity classes, including20x history.",
+      "stage": "scaling-and-heavy-tail"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "history-64",
+      "definition": {
+        "id": "history-64",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 64,
+        "profile": "history",
+        "role": "partially-calibrated-retained-history-scenario"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 42162508
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 84459047
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 20,
+          "source_bytes": 43437064
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 4,
+          "pod": 39,
+          "source_bytes": 341548588
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 20,
+          "pod": 42,
+          "source_bytes": 1716244087
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 4,
+          "pod": 45,
+          "source_bytes": 342960930
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 20,
+          "pod": 58,
+          "source_bytes": 1716871770
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 61,
+          "source_bytes": 86371736
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 1536,
+        "index_sha256": "2402207e8d8a867f1b4c323b1f3760a82490174014a994320ec8518cb13c8bc5",
+        "maximum_pod_source_bytes": 1716871770,
+        "packed_bytes": 257981448,
+        "packed_sha256": "8fe6ffef75ef589ebc467caffab8bbb1bbf70482c1428f348fe99753781e4ac4",
+        "pods": 64,
+        "quads": 61645932,
+        "records": 6220055,
+        "source_bytes": 12375715689
+      },
+      "prior_population_role": "partially-calibrated-retained-history-scenario",
+      "purpose": "Compact descriptor/startup scaling plus complete observed intensity classes, including20x history.",
+      "stage": "scaling-and-heavy-tail"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "entropy-8",
+      "definition": {
+        "id": "entropy-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "entropy",
+        "role": "literal-compressibility-stress"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 50971520
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 51217590
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 102115194
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 102406224
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "e03527e52a7365b3704d1f0c5b3f88f3b4304869f6805c43865082eb49573db8",
+        "maximum_pod_source_bytes": 102406224,
+        "packed_bytes": 101889767,
+        "packed_sha256": "b92d4ab3edec01d05c673e9fc8291916b5607a18d7dcd6467a5230c0b5303fd5",
+        "pods": 8,
+        "quads": 2569040,
+        "records": 259010,
+        "source_bytes": 613307198
+      },
+      "prior_population_role": "literal-compressibility-stress",
+      "purpose": "Retain distinct literal entropy and communication-volume sensitivity definitions.",
+      "stage": "literal-and-message-sensitivity"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "dataset": "entropy-8",
+      "definition": {
+        "id": "entropy-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "entropy",
+        "role": "literal-compressibility-stress"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 51016523
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 51262593
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 102160197
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 102451227
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "d9c92e93cb1b80a4c04c4b1cfd1d6e633322f388cce93bfc440d8c3c22ba6182",
+        "maximum_pod_source_bytes": 102451227,
+        "packed_bytes": 101905361,
+        "packed_sha256": "38c2f354326779389a55202be80c61fbe7cd16ce6b17b57c2195c31f62a4a525",
+        "pods": 8,
+        "quads": 2570792,
+        "records": 259010,
+        "source_bytes": 613667222
+      },
+      "prior_population_role": "literal-compressibility-stress",
+      "purpose": "Retain distinct literal entropy and communication-volume sensitivity definitions.",
+      "stage": "literal-and-message-sensitivity"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "config_sha256": "b9159d172193207adbe3235c94e6bdaf7fce35a24db07f7926ec0211e7816c8f",
+      "dataset": "messaging-8",
+      "definition": {
+        "config_file": "bench/ac/million/messaging-volume-config.json",
+        "id": "messaging-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "history",
+        "role": "observation-motivated-message-stock-sensitivity"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 85534635
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 85780792
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 171308857
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 171599991
+        }
+      ],
+      "model": "wac",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "db11b477b511f16c2bfb9583f7de56d2dd362c3ee36cda8599d124ed86376813",
+        "maximum_pod_source_bytes": 171599991,
+        "packed_bytes": 20880744,
+        "packed_sha256": "9f9283c595b3521d448b1f0565980ef67a9ca686706f95cbf962968206a4e215",
+        "pods": 8,
+        "quads": 5089040,
+        "records": 511010,
+        "source_bytes": 1028334811
+      },
+      "prior_population_role": "observation-motivated-message-stock-sensitivity",
+      "purpose": "Retain distinct literal entropy and communication-volume sensitivity definitions.",
+      "stage": "literal-and-message-sensitivity"
+    },
+    {
+      "all_ready_elapsed_seconds": null,
+      "config_sha256": "b9159d172193207adbe3235c94e6bdaf7fce35a24db07f7926ec0211e7816c8f",
+      "dataset": "messaging-8",
+      "definition": {
+        "config_file": "bench/ac/million/messaging-volume-config.json",
+        "id": "messaging-8",
+        "models": [
+          "wac",
+          "acp"
+        ],
+        "pods": 8,
+        "profile": "history",
+        "role": "observation-motivated-message-stock-sensitivity"
+      },
+      "existing_intensity_extrema": [
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 0,
+          "source_bytes": 85579638
+        },
+        {
+          "intensity_denominator": 2,
+          "intensity_numerator": 1,
+          "pod": 2,
+          "source_bytes": 85825795
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 4,
+          "source_bytes": 171353860
+        },
+        {
+          "intensity_denominator": 1,
+          "intensity_numerator": 1,
+          "pod": 7,
+          "source_bytes": 171644994
+        }
+      ],
+      "model": "acp",
+      "native_archive_bytes": null,
+      "observed_native_peak_memory_bytes": null,
+      "prepare_elapsed_seconds": null,
+      "prior_observations": {
+        "index_bytes": 192,
+        "index_sha256": "dd206fe55b5647a51dae4351e343aa822449e2e50686b5a0a57e5f44e60d0268",
+        "maximum_pod_source_bytes": 171644994,
+        "packed_bytes": 20921967,
+        "packed_sha256": "aaf160fb54a3629aad4a4701e45dcbf1a74ea0849315e0a4729cd87aef3c0e19",
+        "pods": 8,
+        "quads": 5090792,
+        "records": 511010,
+        "source_bytes": 1028694835
+      },
+      "prior_population_role": "observation-motivated-message-stock-sensitivity",
+      "purpose": "Retain distinct literal entropy and communication-volume sensitivity definitions.",
+      "stage": "literal-and-message-sensitivity"
+    }
+  ],
+  "cost_estimation": {
+    "budget": "Compare the complete projected wall time and accumulated artifact/native storage against the authorized host runtime/cost/disk bounds before freezing the final matrix. No projection is a measured capacity result.",
+    "compact": "Use compact1000 and10000 observations to separate fixed setup/hash work from incremental per-Pod preparation/startup and retained metadata. Report empirical slopes and residuals; extrapolations to1M/2M are estimates until whole-population readiness is observed.",
+    "history": "History8 lacks4x/20x classes. History64 supplies those classes and expensive individual Pods; do not infer history1000 or million-history cost from a simple prefix per-Pod mean. Record per-Pod preparation progress by ID/source bytes where available and require actual larger-population admission before any claim.",
+    "matrix": "For every candidate group add regeneration/preparation (if needed), full archive hash validation, all-Pod startup, read-only warmup, handler/worker drains, max(measurement_seconds,minimum_offered/actual_source_derived_rate), client drain, stop, and durable receipt audit for every model/repetition. CPU/RAM/storage are fixed per declared comparison; use the unchanged workload planner for actual source-derived offered rates.",
+    "memory": "Choose constrained native tiers only after retained anonymous metadata plus file-page charges are measured. A native file larger than a RAM cap does not itself prove paging or cap ownership; record file charges/read I/O/faults. Use the SAME native encoding and16serverCPUs at constrained/128/256GiB.",
+    "storage": "Estimate native storage from measured archive bytes and full corpus allocation, not N-Quads source length or old compressed-pack length. Include both policy models, sidecars, original packs/indexes, journals and measured temporary peak."
+  },
+  "harness_source_commit": "a9052f23eb14212e153be62b7db2df0931a5eb0c",
+  "model_provenance": "[GPT-6]",
+  "ordered_operations": [
+    "Generate exact selected existing definition/model once if pack is unavailable; separately record generation time/CPU/peak and verify packed/index hashes plus record/quad/population counts against prior observations. A mismatch requires explanation before calling it the same corpus.",
+    "Run prepare-native once per complete packed population under its own bounded cgroup; record time/CPU/peak and native sidecar, logical/allocated native bytes, total stored corpus bytes, files/inodes and preparation scratch peak.",
+    "Verify each native population using existing exact policy-neutral result/decision tests, including inventory-derived min/max each observed intensity class. Keep model-specific policy bytes separate while preserving intended rights.",
+    "Stop preparation/verifier processes; synchronize and drop clean OS caches on the exclusive dedicated host. Run full archive digest/validation and all-Pod preload INSIDE the limited server cgroup.",
+    "Require all-population-ready and a complete operator drain, exact retained/load/materialization counts and no poisoning. Record startup wall/CPU/peak, anon/file/current/peak memory, page faults, read I/O, process RSS/PSS, and actual open descriptors. Stop the server after readiness accounting; issue no timed journey load in this pilot."
+  ],
+  "prior_totals_for_selected_cells": {
+    "maximum_pod_source_bytes": 1716871770,
+    "packed_plus_index_bytes": 896893902,
+    "pods": 22176,
+    "populations": 12,
+    "records": 15554170,
+    "source_bytes": 31723870148
+  },
+  "proposed_bounds": {
+    "per_command_timeout_seconds": 900,
+    "pilot_total_wall_seconds": 3600,
+    "stop_policy": "Stop or leave later stages incomplete when a reviewed host resource/runtime guard is reached; do not omit expensive Pods from a completed population."
+  },
+  "proposed_environment": {
+    "disjoint_client_cpus": 4,
+    "max_pod_bytes": 2147483648,
+    "native_encoding": "compressed=true at every stage/model",
+    "preparation_and_reference_startup_memory_gib": 128,
+    "purpose": "Reference preparation/metadata footprint on the candidate dedicated host; no RAM-tier performance comparison. Final constrained/128/256GiB request cells remain unfrozen.",
+    "server_cpus": 16
+  },
+  "schema_version": 1,
+  "source_evidence_scope": "All numeric population/storage observations below come from the completed earlier packed-corpus campaign. They are not native archive measurements or preloaded capacity results.",
+  "status": "prospective footprint proposal only; no preparation performed, no main matrix frozen",
+  "proposal_revision": 2,
+  "protocol_rebinding": {
+    "kind": "prospective-protocol-binding-only",
+    "original_proposal_file": "native-preparation-pilot-proposal.json",
+    "original_proposal_sha256": "ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7",
+    "protocol_file": "bench/ac/preloaded/protocol.json",
+    "previous_protocol_sha256": "a1c8863ade395eb20ae21f1cb35a4c181742195ffef2bb8bddb5679b007c10be",
+    "current_protocol_sha256": "09e74e2973062028dd814f2314350ceff7c0ea85fa6d5dac6478bc3b12df2037",
+    "validated_against_private_study_commit": "f22a45f75ac0bf85dbd85b0fe39a95a110b782bb",
+    "reason": "Before any preparation pilot, the protocol gained reviewed typed preload-admission failure accounting and clarified mapped dictionary bytes versus heap descriptors. This separately versioned proposal binds those current protocol bytes; it preserves every other original field and all selected populations, generator/workload definitions, observations, resource bounds and operations. It does not freeze a main performance matrix or claim a pilot occurred.",
+    "historical_harness_field": "The original harness_source_commit remains unchanged as historical provenance; actual executor and binary build identities still require explicit command/receipt binding and source-equivalence validation."
+  }
+}
