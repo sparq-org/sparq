@@ -157,17 +157,22 @@ fn all_dataset_views_share_mapping_and_outlive_archive_handle() {
     let views: Vec<_> = (0..archive.len())
         .map(|id| archive.load_dataset(id).unwrap())
         .collect();
-    for view in &views {
-        let NumData::Mapped(MappedBytes::Region { mapping, .. }, _) = &view.numerics else {
+    fn assert_shared(graph: &Graph, archive: &NativeArchive) {
+        let NumData::Mapped(MappedBytes::Region { mapping, .. }, _) = &graph.numerics else {
             panic!("expected shared mapped numerics")
         };
         assert!(Arc::ptr_eq(mapping, &archive.mapping));
-        for (_, child) in &view.named {
-            let NumData::Mapped(MappedBytes::Region { mapping, .. }, _) = &child.numerics else {
-                panic!("expected shared named view")
-            };
-            assert!(Arc::ptr_eq(mapping, &archive.mapping));
+        let TempData::Mapped(MappedBytes::Region { mapping, .. }, _) = &graph.temporals else {
+            panic!("expected shared mapped temporals")
+        };
+        assert!(Arc::ptr_eq(mapping, &archive.mapping));
+        for (_, child) in &graph.named {
+            assert_shared(child, archive);
         }
+    }
+    for view in &views {
+        assert_shared(view, &archive);
+        assert_shared(&view.fork(), &archive);
     }
     drop(archive);
     for view in views {
@@ -354,4 +359,42 @@ fn validate_archive_rows_rejects_dictionary_escape_and_duplicate_rows() {
     assert!(good.validate_archive_rows(2).is_err());
     let duplicate = crate::compress::CompressedPerm::encode(&[[1, 2, 3], [1, 2, 3]]);
     assert!(duplicate.validate_archive_rows(3).is_err());
+}
+
+#[test]
+fn archive_rejects_trailing_dictionary_metadata_without_legacy_fallback() {
+    let temp = Temp::new();
+    let path = temp.path("good");
+    write(&path, &Graph::new(), false);
+    let mut bytes = std::fs::read(path).unwrap();
+    let entry = components(&bytes)
+        .into_iter()
+        .find(|entry| entry.name == "dict-meta.bin")
+        .unwrap();
+    // The empty native metadata occupies 28 bytes followed by alignment padding.
+    assert_eq!(entry.length, 28);
+    let length_field = entry.extent_position + 8;
+    bytes[length_field..length_field + 8].copy_from_slice(&29_u64.to_le_bytes());
+    rejected(&temp.path("bad"), &bytes);
+}
+
+#[cfg(feature = "spqcprm2")]
+#[test]
+fn native_v2_archive_roundtrips_with_the_shared_checked_decoder() {
+    let temp = Temp::new();
+    let path = temp.path("v2");
+    let graph = sample();
+    crate::compress::with_emit_format(crate::compress::EmitFormat::V2, || {
+        write(&path, &graph, true)
+    });
+    let bytes = std::fs::read(&path).unwrap();
+    let perm = components(&bytes)
+        .into_iter()
+        .find(|entry| entry.name == "perm0.bin")
+        .unwrap();
+    assert_eq!(
+        &bytes[perm.offset..perm.offset + 8],
+        &crate::compress::FILE_MAGIC_V2
+    );
+    assert_eq!(dump(&open(&path).load_dataset(0).unwrap()), dump(&graph));
 }
