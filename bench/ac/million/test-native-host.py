@@ -175,6 +175,59 @@ else exit 9; fi
             with patch.object(host.subprocess, 'check_output', side_effect=['a'*40, b'']):
                 with self.assertRaisesRegex(ValueError, 'frozen'): host.receipt_identity(receipt)
 
+    def test_preparation_receipt_verifies_distinct_commits_and_all_compile_inputs(self):
+        # Synthetic local Git fixture; no compiler, executable binary or real result.
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';results=root/'results';source=data/'source'
+            source.mkdir(parents=True);results.mkdir()
+            def git(*argv):
+                return subprocess.check_output(['git','-c','commit.gpgsign=false',*argv],cwd=source,text=True,stderr=subprocess.DEVNULL).strip()
+            git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@example.invalid')
+            (source/'Cargo.lock').write_text('synthetic unchanged lock fixture')
+            (source/'rules.n3').write_text('synthetic unchanged rule fixture')
+            script=source/'bench/ac/preloaded/run-preparation.py';script.parent.mkdir(parents=True);script.write_text('# old fixture')
+            git('add','.');git('commit','-qm','synthetic binary source');built=git('rev-parse','HEAD')
+            script.write_text('# new fixture executor only')
+            git('add','.');git('commit','-qm','synthetic executor source');executor=git('rev-parse','HEAD')
+            binary=data/'binary';binary.write_bytes(b'not an executable; synthetic receipt fixture')
+            proposal=data/'proposal.json';proposal.write_text(json.dumps(dict(schema_version=1,status=host.PREPARATION_PROPOSAL_STATUS,
+                bindings={'Cargo.lock':host.digest(source/'Cargo.lock')})))
+            report=results/'preparation-result.json'
+            receipt=dict(kind='preparation-proposal',status='completed',executor_source_commit=executor,
+                binary_build_source_commit=built,source_path=str(source),proposal_path=str(proposal),proposal_sha256=host.digest(proposal),
+                binary_path=str(binary),binary_sha256=host.digest(binary),preparation_result_path=str(report),preparation_result_sha256='0'*64)
+            def write_report(changed=None):
+                identity={key:receipt[key] for key in ('executor_source_commit','binary_build_source_commit','proposal_sha256','binary_sha256')}
+                report.write_text(json.dumps(dict(record_type='native-preparation-pilot-result',status='complete',**identity,
+                    source_input_equivalence=dict(passed=True,binary_build_source_commit=built,executor_source_commit=receipt['executor_source_commit'],
+                    allowed_changed_paths=sorted(host.EXECUTOR_ONLY_PATHS),actual_changed_paths=changed or ['bench/ac/preloaded/run-preparation.py']))))
+                receipt['preparation_result_sha256']=host.digest(report)
+            write_report()
+            with patch.object(host,'DATA',data),patch.object(host,'RESULTS',results), \
+                 patch.object(host,'PREPARATION_PROPOSAL_SHA256',receipt['proposal_sha256']):
+                host.receipt_identity(receipt)
+                self.assertNotEqual(receipt['executor_source_commit'],receipt['binary_build_source_commit'])
+                for flag in ('timed_load','slo_admission','capacity_admission'): self.assertIs(receipt[flag],False)
+                for relative in ('Cargo.lock','rules.n3','crates/example/src/lib.rs'):
+                    git('reset','--hard',executor)
+                    path=source/relative;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('synthetic changed compile input')
+                    git('add','.');git('commit','-qm','synthetic forbidden change')
+                    receipt['executor_source_commit']=git('rev-parse','HEAD');write_report()
+                    with self.assertRaisesRegex(ValueError,'Rust/Cargo or other'): host.receipt_identity(receipt)
+                git('reset','--hard',executor);receipt['executor_source_commit']=executor
+                write_report(['invented changed path'])
+                with self.assertRaisesRegex(ValueError,'equivalence'): host.receipt_identity(receipt)
+                write_report();receipt['proposal_sha256']='0'*64
+                with self.assertRaisesRegex(ValueError,'immutable'): host.receipt_identity(receipt)
+                receipt['proposal_sha256']=host.digest(proposal);write_report()
+                report_body=json.loads(report.read_text());report_body['status']='incomplete'
+                report.write_text(json.dumps(report_body));receipt['preparation_result_sha256']=host.digest(report)
+                with self.assertRaisesRegex(ValueError,'incomplete preparation'): host.receipt_identity(receipt)
+                receipt['status']='stopped-with-partial-evidence';host.receipt_identity(receipt)
+                receipt['status']='completed'
+                write_report();receipt['capacity_admission']=True
+                with self.assertRaisesRegex(ValueError,'timed performance'): host.receipt_identity(receipt)
+
     def test_failure_manifest_survives_invalid_and_oversized_evidence(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(host,'RESULTS',Path(directory)):
             root=Path(directory);(root/'READY').touch();(root/'result.json').write_text('{"closed":true}')
