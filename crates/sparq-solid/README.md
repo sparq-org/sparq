@@ -38,12 +38,7 @@ let _public_only = store.query_as(&Session::default(), Mode::Read, q)?.rows.len(
 - **WAC + ACP** — Web Access Control (`.acl`) and Access Control Policy (`.acr`): inheritance, agent
   classes, groups, `allOf`/`anyOf`/`noneOf`, the ACP `(agent, client, issuer)` principal,
   `acp:CreatorAgent`/`acp:OwnerAgent`, normative deny-overrides.
-  [GPT-6] Empty matchers never match a request context: removing the final supported
-  attribute and rematerializing revokes any grant that requires that matcher.
-  An empty `noneOf` exception cannot block an otherwise satisfied policy; policies
-  require at least one positive `allOf` or `anyOf` condition. See
-  [ACP §6.4](https://solidproject.org/TR/acp#satisfied-policy) and
-  [§6.5](https://solidproject.org/TR/acp#satisfied-matcher).
+  [GPT-6] Empty matchers never match; policies require a positive `allOf` or `anyOf` condition ([ACP §§6.4–6.5](https://solidproject.org/TR/acp#satisfied-policy)).
 - **Trusted caller-asserted channels — creator/owner and verified credentials** — `acp:CreatorAgent`/`acp:OwnerAgent` resolve only against per-resource WebIDs the storage layer supplies through the trusted `AccessProvenance` channel, and `acp:vc <requirement>` (`sq-ysv3u`) only against holdings supplied through the trusted `VerifiedCredentials` channel — **never** graph content (the loader hard-rejects `solidx:` triples, so a writer cannot self-grant). `acp:vc` matches its requirement by exact IRI, conjunctively with `acp:agent`/`acp:client`/`acp:issuer`, and is **fail-closed**: with no credential supplied it accepts nobody (before `sq-ysv3u`, `acp:vc` was an unrecognized attribute, so a credential-gated matcher looked agent-unconstrained and granted everyone, anonymous included).
   Verification never runs in the reasoner — the opt-in `acp-vc` feature adds the [`sparq-vc`](../sparq-vc) **trust-the-issuer** backend that populates the channel (`VcRequirement` + `VerifiedCredentials::admit_data_integrity`: W3C Data Integrity `eddsa-rdfc-2022`, checking issuer, credential type and exact-match claims). Authenticity/integrity only — **no** privacy, unlinkability or selective disclosure, and no revocation or expiry check; a zero-knowledge backend would need the ZK estate, whose external crypto audit is pending (`sq-qhy4`).
 - **Triples-native + zero-copy enforcement** — pods, ACL/ACR docs, and the auth view are all ordinary
