@@ -68,6 +68,8 @@ class MainCampaignTests(unittest.TestCase):
         wrong = copy.deepcopy(spec); wrong['execution']['maximum_cells'] = 1
         with patch.object(MAIN, 'plan_cells', side_effect=AssertionError('must not allocate oversized plan')):
             with self.assertRaises(ValueError): MAIN.validate_campaign(wrong)
+        wrong = copy.deepcopy(spec); wrong['host']['overall_memory_fraction'] = .1; wrong['groups'][0]['memory_gib'] = [1]
+        with self.assertRaises(ValueError): MAIN.validate_campaign(wrong)
 
     def test_inventory_requires_every_actual_pod_index_and_unchanged_config(self):
         with tempfile.TemporaryDirectory() as directory:
