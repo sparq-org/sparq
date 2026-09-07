@@ -265,7 +265,14 @@ fn missing_tables_unaligned_overlapping_and_duplicate_components_are_rejected() 
         rejected(&bad, &changed);
     }
     let mut changed = bytes.clone();
-    let second = &entries[1];
+    // Compact-index deliberately leaves some permutation components empty. An
+    // empty extent has no overlapping bytes; corrupt two populated components.
+    let second = entries
+        .iter()
+        .skip(1)
+        .find(|entry| entry.name.starts_with("perm") && entry.length > 0)
+        .unwrap();
+    assert!(first.length > 0);
     changed[second.extent_position..second.extent_position + 8]
         .copy_from_slice(&(first.offset as u64).to_le_bytes());
     rejected(&bad, &changed);
