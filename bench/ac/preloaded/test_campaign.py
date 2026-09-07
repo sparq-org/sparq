@@ -108,7 +108,10 @@ class MainCampaignTests(unittest.TestCase):
     def test_cell_error_preserves_completed_partial_and_unattempted_rows(self):
         self.run_fake(False, cell_failure_at=3)
 
-    def run_fake(self, fail, cell_failure_at=None):
+    def test_global_stop_between_cells_does_not_relabel_prior_completed_evidence(self):
+        self.run_fake(False, stop_between_cells=True)
+
+    def run_fake(self, fail, cell_failure_at=None, stop_between_cells=False):
         trace = []; spec = campaign(); planned = MAIN.plan_cells(spec)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); auth = root / 'auth'; auth.mkdir()
@@ -118,7 +121,9 @@ class MainCampaignTests(unittest.TestCase):
                 binary_sha256='b' * 64, campaign_sha256='c' * 64)
             args.results.mkdir(); args.corpora.mkdir(); args.campaign.write_text(json.dumps(spec))
             runner = MAIN.Campaign(args, spec, planned)
-            runner.guard = lambda estimate=0: None
+            def guard(estimate=0):
+                if stop_between_cells and trace.count('cell') == 1: raise RuntimeError('fixture global disk stop')
+            runner.guard = guard
             runner.verify_inputs = lambda: None
             runner.preparation = SimpleNamespace(require_exclusive_jobs=lambda: None, stop=lambda: trace.append('cleanup'))
             def prepare(dataset, model):
@@ -137,7 +142,7 @@ class MainCampaignTests(unittest.TestCase):
                     return {'correctness_passed': True, 'passes_local_guard': False}
                 def stop_server(self): pass
             with patch.object(MAIN, 'MainCell', FakeCell):
-                if fail or cell_failure_at:
+                if fail or cell_failure_at or stop_between_cells:
                     with self.assertRaises(RuntimeError): runner.execute()
                 else: runner.execute()
             result = json.loads((args.results / 'campaign-result.json').read_text())
@@ -147,6 +152,11 @@ class MainCampaignTests(unittest.TestCase):
                 self.assertEqual(set(row['status'] for row in result['cells']), {'unattempted'})
                 self.assertEqual(result['unattempted_populations'], [{'dataset': 'history-1000000', 'model': 'acp'}])
                 self.assertNotIn('cell', trace)
+            elif stop_between_cells:
+                self.assertEqual(result['status'], 'partial')
+                self.assertEqual([row['status'] for row in result['cells']], ['complete'] + ['unattempted'] * 7)
+                self.assertNotIn('error', result['cells'][0])
+                self.assertIn('fixture global disk stop', result['error'])
             elif cell_failure_at:
                 self.assertEqual(result['status'], 'partial')
                 self.assertEqual([row['status'] for row in result['cells']], ['complete', 'complete', 'partial'] + ['unattempted'] * 5)
