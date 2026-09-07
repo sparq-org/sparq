@@ -79,8 +79,8 @@ correctness checks retain journals and are separate from resetting repetitions.
 Readiness counters and source-byte totals do not establish heap size or memory
 residency of every content page. Record cgroup peak/current memory, page-cache
 charges, faults, process RSS/PSS, native file sizes, allocated bytes, inode counts,
-open descriptors and startup CPU/time. Dictionaries, descriptors and authorization
-remain heap metadata even when mapped content pages leave RAM. Keep preload
+open descriptors and startup CPU/time. Graph/dictionary descriptors and authorization
+remain heap metadata even when mapped dictionary/content bytes leave RAM. Keep preload
 failures visible and retain the all-offered response denominators after timeouts.
 
 Local source checks can run without Rust compilation:
@@ -101,3 +101,50 @@ directory). It checks every small native Pod against the decision/result oracle,
 both languages' rejected policy callers and revocation after restart, complete
 drains, retained counters, real journey writes, journal replay and receipt audit.
 Its output is correctness evidence only.
+
+`run-preparation.py` executes the separately supplied, checksum-bound preparation
+proposal. It requires `--proposal`, `--proposal-sha256`, `--source-commit` (the
+executor checkout), `--binary-source-commit`, `--binary-sha256`, `--binary`,
+`--corpora`, `--auth`, `--results`, and explicit `--server-cpus` / `--client-cpus`
+comma-separated CPU lists. It runs only on the dedicated Linux candidate host:
+corpora, binaries and auth stay below `/mnt/sparq-native/data0`, data1 is untouched,
+and small results go below `/var/tmp/sparq-pod-study` in an empty directory.
+
+The proposal supplies complete populations and phase/global time bounds. Each
+generation, native preparation, representative oracle check and full startup
+runs in a named `sparq-native-job-pilot-*` systemd unit with the proposal's memory
+limit, disabled swap and fixed CPU affinity. A complete source payload is hashed
+against prior observations before reuse. Partial packs/archives are retained on
+failure for inspection; the executor neither replaces them nor removes mutation
+journals. Reused inputs have no newly measured generation/preparation duration.
+
+Before startup, the executor checks for other active native workload jobs,
+synchronizes and drops clean caches, then keeps the coordinator and every worker
+inside the startup cgroup. It records full archive validation, all-Pod readiness,
+the complete zero-workload drain, cgroup anonymous/file/peak memory, CPU/I/O,
+process RSS/PSS and open descriptors while the stores remain alive. Host
+`MemAvailable`/memory pressure and combined study-slice accounting record observed
+OS/other-process headroom. The physical host remains distinct from each server
+quota; these checks do not prove the same application fits a smaller physical
+machine together with its OS and clients. Phase logs and
+resource JSON remain separate from logical/allocated corpus storage inventory.
+No journey load or response percentile is measured by this executor.
+
+`preparation-input.json` and `preparation-result.json` identify
+`executor_source_commit`, `binary_build_source_commit`, `binary_sha256`,
+`proposal_sha256` and `source_input_equivalence`. Reusing a previously built binary
+requires a full source-path diff that changes only the explicitly listed executor,
+tests and documentation files; changes to rules, embedded assets, configuration,
+Rust or Cargo inputs are rejected. The result preserves incomplete phases and
+unattempted populations. A completed footprint pilot does not admit the final
+performance campaign or establish capacity.
+
+`preparation-projections.json` uses both completed history prefixes, including the
+heavy class, to scale observed per-Pod native storage, retained anonymous memory
+and phase times to larger candidate populations. These are explicitly modeled,
+unmeasured scenario ranges, with no statistical or safe upper-bound interpretation.
+Cgroup anonymous memory is a heap proxy that also includes stacks and allocator
+state; complete dictionary bytes are mapped. Projections inform which larger full
+history population to prepare next within the actual storage, runtime and cost
+limits. They never substitute for complete preparation or cap history scale at a
+population chosen by the earlier cache-based study.

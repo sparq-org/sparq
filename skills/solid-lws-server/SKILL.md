@@ -212,6 +212,15 @@ Failed timed mutations restore both graph and authorization without dataset
 reload; ambiguous journal failures poison the worker and require restart/replay.
 These rules do not retroactively change the completed cached campaign.
 
+The prospective `bench/ac/preloaded/run-preparation.py` executor consumes a
+separate checksum-bound footprint proposal, keeps generated/native data and auth
+on the dedicated data0 mount, and writes only bounded logs/JSON under the result
+root. It measures complete native preparation and all-Pod readiness/drain in
+separate bounded cgroups, preserving incomplete and unattempted populations.
+It performs no timed workload. Its [reference](../../bench/ac/preloaded/README.md)
+documents CLI identities, source equivalence, reuse, resource accounting and
+the distinction between footprint completion and final capacity admission.
+
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
 never slowed in response to the server. Records separate preparation and

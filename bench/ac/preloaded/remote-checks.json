@@ -5,6 +5,7 @@
   "environment": {"CARGO_BUILD_JOBS": "2"},
   "commands": [
     ["python3", "bench/ac/preloaded/test_preloaded.py"],
+    ["python3", "bench/ac/preloaded/test_preparation.py"],
     ["cargo", "test", "--locked", "-p", "sparq-core", "--features", "native-archive", "--lib", "archive::"],
     ["cargo", "test", "--locked", "-p", "sparq-lws-core", "--example", "pod_population_http", "--features", "population-native"],
     ["cargo", "clippy", "--locked", "-p", "sparq-lws-core", "--example", "pod_population_http", "--features", "population-native", "--", "-D", "warnings"],
