@@ -65,7 +65,7 @@ fi
 if [[ "${MODE}" == native ]]; then
   [[ "${INSTANCE_TYPE}" == r7gd.12xlarge && "${VOLUME_GB}" == 80 ]] \
     || die "native mode requires r7gd.12xlarge and 80 GiB gp3 root"
-  for runner in native-host.py native-storage.py native-cost.py; do
+  for runner in native-host.py native-storage.py native-cost.py native-retrieve.py; do
     [[ -r "${ROOT}/bench/ac/million/${runner}" ]] || die "native setup is incomplete"
   done
 fi
@@ -223,12 +223,15 @@ stage_pull() {
   # [GPT-6] A nonempty array is safe with Bash 3's nounset handling.
   local rsync_args=(-az --partial) transfer_status=0
   if [[ "${MODE}" == native ]]; then
-    rsync_args+=(--max-size=512m --exclude='*.native' --exclude='*.spqa' --exclude='*.bundle')
+    python3 "${WORK}/native-retrieve.py" \
+      --host "${RESULTS_LOCAL}/native-host.json" --results "${RESULTS_LOCAL}" || transfer_status=$?
+    if [[ "${1:-live}" == final ]]; then return "${transfer_status}"; fi
+    return 0
   fi
   # [GPT-6] Closed request streams arrive as zstd artifacts. Avoid retaining a
   # second, uncompressed copy of every live stream on the smaller client disk.
   # The final pull includes unfinished streams when a run stops early.
-  if [[ ( "${MODE}" == canonical || "${MODE}" == native ) && "${1:-live}" != final ]]; then
+  if [[ "${MODE}" == canonical && "${1:-live}" != final ]]; then
     rsync_args+=(--exclude='*-requests.jsonl' --exclude='*-warmup.jsonl' --exclude='*-audit.jsonl')
   fi
   rsync "${rsync_args[@]}" -e "ssh ${SSH_OPTIONS[*]}" \
@@ -420,6 +423,9 @@ log "creating exact source bundle for ${SOURCE_COMMIT}"
 git -C "${ROOT}" bundle create "${BUNDLE}" HEAD origin/main
 git -C "${ROOT}" bundle verify "${BUNDLE}" >/dev/null
 verify_bundle_source "${BUNDLE}" "${SOURCE_COMMIT}"
+if [[ "${MODE}" == native ]]; then
+  git -C "${ROOT}" show "${SOURCE_COMMIT}:bench/ac/million/native-retrieve.py" >"${WORK}/native-retrieve.py"
+fi
 ssh-keygen -t ed25519 -N '' -f "${KEYFILE}" -q
 SSH_OPTIONS=(
   -i "${KEYFILE}"

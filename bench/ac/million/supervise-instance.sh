@@ -12,7 +12,7 @@ done
 INSTANCE_ID="$(<"${RESULTS}/instance-id.txt")"
 RUN_TOKEN="$(<"${RESULTS}/study-run-token.txt")"
 [[ "${INSTANCE_ID}" =~ ^i-[0-9a-f]+$ ]] || exit 2
-[[ "${RUN_TOKEN}" =~ ^sparq-pod-(pilot|canonical|build)-[0-9TZ]+-[0-9]+$ ]] || exit 2
+[[ "${RUN_TOKEN}" =~ ^sparq-pod-(pilot|canonical|build|native)-[0-9TZ]+-[0-9]+$ ]] || exit 2
 case "${INSTANCE_ID}" in
   i-090531b4ede8f2d3f|i-00f76802f345b6b77) echo 'protected instance' >&2; exit 2 ;;
 esac
