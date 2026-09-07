@@ -261,6 +261,11 @@ object must bind `source_commit`, `binary_sha256`, `campaign_sha256` and
 The extractor rehashes every manifest member and compares declared source inputs
 to blobs in the measured revision. It reads the recursive cell directories and
 both `.jsonl.zst` and `.log.zst`; ambiguous plain/compressed inputs are rejected.
+Completed offline audit units retain an exact cell audit copy and a losslessly
+compressed parent phase log. The parent log is compressed immediately after the
+unit stops and its copy succeeds, so raw duplicates do not accumulate between
+cells. Failed closed audits retain the same evidence; active writers are never
+compressed. Request schedules, receipts and retrieval limits are unchanged.
 
 The output's distinct analysis kind is
 `native-preloaded-campaign-independent-accounting`. `corpora` separates complete

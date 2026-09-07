@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -42,6 +43,50 @@ def campaign():
 
 
 class MainCampaignTests(unittest.TestCase):
+    def test_closed_offline_audits_keep_exact_cell_and_compressed_parent_evidence(self):
+        payload = b'{"record_type":"mutation-audit-complete","committed_receipts":0}\n'
+        for failed in (False, True):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); cell_dir = root / 'cell'; cell_dir.mkdir()
+                preparation = SimpleNamespace(current=None)
+                owner = SimpleNamespace(args=SimpleNamespace(results=root), preparation=preparation, guard=lambda: None)
+                cell = object.__new__(MAIN.MainCell); cell.owner = owner
+                def phase(command, label):
+                    self.assertEqual(command[-2:], ['--storage-mode', 'native'])
+                    preparation.current = 'fixture-audit.service'
+                    try:
+                        with (root / (label + '.log')).open('wb') as stream: stream.write(payload)
+                        if failed: raise RuntimeError('closed failed audit fixture')
+                    finally: preparation.current = None
+                preparation.phase = phase
+                for index in range(2):
+                    log = cell_dir / f'fixture-{index}-audit.jsonl'
+                    self.assertEqual(cell.run(['fixture-binary', 'audit'], log), int(failed))
+                    self.assertEqual(log.read_bytes(), payload)
+                    parent = root / (log.stem + '-native-offline.log.zst')
+                    self.assertEqual(subprocess.check_output(['zstd', '-q', '-d', '-c', str(parent)]), payload)
+                    # These are the same retained bytes the normal finalization would emit.
+                    MAIN.BASE.compress(log)
+                    self.assertEqual(parent.read_bytes(), log.with_suffix('.jsonl.zst').read_bytes())
+                    self.assertEqual(list(root.glob('*.log')), [])
+                self.assertEqual(len(list(root.glob('*.log.zst'))), 2)
+
+    def test_offline_audit_with_unstopped_writer_keeps_raw_evidence_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); log = root / 'cell-audit.jsonl'
+            source = root / (log.stem + '-native-offline.log')
+            preparation = SimpleNamespace(current='fixture-audit.service', phase=lambda *_: None)
+            owner = SimpleNamespace(args=SimpleNamespace(results=root), preparation=preparation, guard=lambda: None)
+            cell = object.__new__(MAIN.MainCell); cell.owner = owner
+            with source.open('wb') as writer, patch.object(MAIN.BASE, 'compress') as compress:
+                writer.write(b'partial'); writer.flush()
+                with self.assertRaisesRegex(RuntimeError, 'not stopped'):
+                    cell.run(['fixture-binary', 'audit'], log)
+                compress.assert_not_called()
+                self.assertFalse(log.exists())
+                writer.write(b' continued'); writer.flush()
+                self.assertEqual(source.read_bytes(), b'partial continued')
+
     def test_frozen_larger_population_preserves_shape_and_paired_fixed_cpu_grid(self):
         spec = campaign(); rows = MAIN.validate_campaign(spec)
         self.assertEqual(len(rows), 8)

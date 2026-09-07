@@ -228,6 +228,8 @@ of every selected population before any timed cell. Its versioned input and
 explicit stop rules are documented in the same reference; it never invokes
 the original cached server path. Every repetition retains preloaded state,
 complete request schedules, drain accounting and native offline receipt audits.
+[GPT-6] Closed offline audit logs are copied into their cell and losslessly compressed
+at the parent location before the next cell; both evidence copies remain available.
 Partial execution and unattempted populations/cells remain explicit in the
 source-bound result rather than being counted as successful capacity evidence.
 With `preloaded.admission_outcomes_version: 1`, the frozen
