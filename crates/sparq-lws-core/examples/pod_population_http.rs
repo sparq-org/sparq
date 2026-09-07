@@ -1,5 +1,5 @@
 // [GPT-6] Research HTTP path for persisted, independently authorized Pods.
-//! Run a bounded-cache Pod query experiment with real token and DPoP verification.
+//! Run a cached or fully preloaded Pod query experiment with real token verification.
 //!
 //! This example is not the native LDP server: it isolates Pod-local SPARQL and
 //! durable update journals. Its pinned benchmark issuer omits live OIDC discovery.
@@ -27,7 +27,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Extension, Router};
 use serde_json::json;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, RwLock};
 
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -80,7 +80,137 @@ struct Work {
 }
 
 struct HttpState {
-    workers: Vec<mpsc::SyncSender<Work>>,
+    workers: Vec<mpsc::SyncSender<WorkerCommand>>,
+    admission: RwLock<()>,
+    control_token: Option<String>,
+}
+
+// [GPT-6] FIFO fences include work whose HTTP receiver has timed out or closed.
+enum WorkerCommand {
+    Request(Work),
+    Fence(oneshot::Sender<serde_json::Value>),
+}
+
+fn control_token(settings: &Settings) -> Result<Option<String>> {
+    if !settings.0.contains_key("control-token-file") {
+        return Ok(None);
+    }
+    let path = settings.path("control-token-file", "");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(&path)?.permissions().mode() & 0o077 != 0 {
+            return Err("control token file must be readable only by its owner".into());
+        }
+    }
+    let value = std::fs::read_to_string(path)?.trim().to_owned();
+    if !(32..=256).contains(&value.len()) || !value.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err("control token must be 32..256 random alphanumeric bytes".into());
+    }
+    Ok(Some(value))
+}
+
+async fn drain(State(state): State<Arc<HttpState>>, headers: HeaderMap) -> Response {
+    let Some(expected) = &state.control_token else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let supplied = headers
+        .get("x-benchmark-control")
+        .map(|v| v.as_bytes())
+        .unwrap_or_default();
+    // Fixed-size comparison for this independent operator capability; no caller
+    // WebID can grant itself permission to stop admission across other Pods.
+    let equal = supplied.len() == expected.len()
+        && supplied
+            .iter()
+            .zip(expected.as_bytes())
+            .fold(0_u8, |v, (a, b)| v | (a ^ b))
+            == 0;
+    if !equal {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let start = Instant::now();
+    let _exclusive = state.admission.write().await;
+    let workers = state.workers.clone();
+    let fences = tokio::task::spawn_blocking(
+        move || -> Result<Vec<oneshot::Receiver<serde_json::Value>>> {
+            let mut responses = Vec::new();
+            for worker in workers {
+                let (tx, rx) = oneshot::channel();
+                worker
+                    .send(WorkerCommand::Fence(tx))
+                    .map_err(|_| "worker unavailable at drain")?;
+                responses.push(rx);
+            }
+            Ok(responses)
+        },
+    )
+    .await;
+    let receivers = match fences {
+        Ok(Ok(receivers)) => receivers,
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "worker fence admission failed",
+            )
+                .into_response()
+        }
+    };
+    let mut reports = Vec::new();
+    for receiver in receivers {
+        match receiver.await {
+            Ok(report) => reports.push(report),
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "worker fence acknowledgement missing",
+                )
+                    .into_response()
+            }
+        }
+    }
+    let valid = reports.iter().all(|r: &serde_json::Value| {
+        r["state"]["poisoned"] == false
+            && r["state"]["activations"]["attempted_activations_after_ready"] == 0
+    });
+    let body = json!({"record_type":"worker-drain-complete","passed":valid,
+        "elapsed_us":start.elapsed().as_micros(),"workers":reports,
+        "scope":"all previously admitted operations finished; admission was paused while every worker acknowledged its FIFO fence"});
+    (
+        if valid {
+            StatusCode::OK
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        },
+        axum::Json(body),
+    )
+        .into_response()
+}
+
+async fn request_drain(settings: &Settings) -> Result<()> {
+    let token = control_token(settings)?.ok_or("drain requires control-token-file")?;
+    let connect = settings.text("connect", "http://127.0.0.1:3100");
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/__benchmark/drain",
+            connect.trim_end_matches('/')
+        ))
+        .header("x-benchmark-control", token)
+        .timeout(std::time::Duration::from_secs(
+            settings.number("drain-timeout-seconds", 600)?,
+        ))
+        .send()
+        .await?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+    println!("{body}");
+    if !status.is_success()
+        || body["record_type"] != "worker-drain-complete"
+        || body["passed"] != true
+    {
+        return Err("worker drain did not establish a valid barrier".into());
+    }
+    Ok(())
 }
 
 async fn query(
@@ -122,6 +252,7 @@ async fn dispatch(
     policy_administration: bool,
     received: Instant,
 ) -> Response {
+    let _admitted = state.admission.read().await;
     let suffix = if policy_administration {
         "policy"
     } else if update {
@@ -141,7 +272,7 @@ async fn dispatch(
         reply,
     };
     let worker = &state.workers[(pod % state.workers.len() as u64) as usize];
-    if worker.try_send(work).is_err() {
+    if worker.try_send(WorkerCommand::Request(work)).is_err() {
         return (StatusCode::SERVICE_UNAVAILABLE, "bounded worker queue full").into_response();
     }
     response.await.unwrap_or_else(|_| {
@@ -155,11 +286,19 @@ async fn mark_received(mut request: Request, next: Next) -> Response {
 }
 
 fn worker_loop(
-    input: mpsc::Receiver<Work>,
+    input: mpsc::Receiver<WorkerCommand>,
     mut pods: storage::PodCache,
     auth: Arc<auth::Authentication>,
 ) {
-    while let Ok(work) = input.recv() {
+    let mut processed = 0_u64;
+    while let Ok(command) = input.recv() {
+        let work = match command {
+            WorkerCommand::Request(work) => work,
+            WorkerCommand::Fence(reply) => {
+                let _ = reply.send(json!({"processed_requests":processed,"state":pods.state()}));
+                continue;
+            }
+        };
         let queue_us = work.received.elapsed().as_micros() as u64;
         let start = Instant::now();
         let token = auth.authenticate(&work.headers, &work.path);
@@ -213,6 +352,7 @@ fn worker_loop(
             }
         };
         let _ = work.reply.send(response);
+        processed += 1;
     }
 }
 
@@ -221,25 +361,97 @@ async fn serve(settings: Settings) -> Result<()> {
     if workers == 0 || workers > 64 {
         return Err("workers must be between 1 and 64".into());
     }
+    let archive_verification = storage::validate_native(&settings)?;
+    if let Some(record) = &archive_verification {
+        println!("{record}");
+    }
     let auth = Arc::new(auth::Authentication::load(&settings)?);
+    let control_token = control_token(&settings)?;
+    let preloaded = settings.text("storage-mode", "cached") != "cached";
+    if preloaded && control_token.is_none() {
+        return Err(
+            "preloaded evaluation requires an independent control-token-file for draining".into(),
+        );
+    }
     let mut senders = Vec::new();
+    let (ready_tx, ready_rx) = mpsc::channel();
     for worker in 0..workers {
-        let cache = storage::PodCache::open(&settings, workers)?;
         let capacity = usize::try_from(settings.number("queue-capacity", 256)?)?;
         let (tx, rx) = mpsc::sync_channel(capacity);
         let auth = Arc::clone(&auth);
+        let settings = settings.clone();
+        let ready = ready_tx.clone();
         std::thread::Builder::new()
             .name(format!("pod-worker-{worker}"))
-            .spawn(move || worker_loop(rx, cache, auth))?;
+            .spawn(move || {
+                let initialize = || -> Result<(storage::PodCache, serde_json::Value)> {
+                    let mut cache = storage::PodCache::open(&settings, workers)?;
+                    let report = cache.preload(worker, workers)?;
+                    Ok((cache, report))
+                };
+                match initialize() {
+                    Ok((cache, report)) => {
+                        if ready.send(Ok(report)).is_ok() {
+                            worker_loop(rx, cache, auth);
+                        }
+                    }
+                    Err(error) => {
+                        let _ = ready.send(Err(error.to_string()));
+                    }
+                }
+            })?;
         senders.push(tx);
+    }
+    drop(ready_tx);
+    let startup = tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>> {
+        let mut reports = Vec::new();
+        for result in ready_rx {
+            reports.push(result.map_err(|e| format!("worker preload failed: {e}"))?);
+            if reports.len() == workers {
+                break;
+            }
+        }
+        if reports.len() != workers {
+            return Err("population initialization worker missing".into());
+        }
+        Ok(reports)
+    })
+    .await??;
+    if preloaded {
+        let population = startup
+            .first()
+            .and_then(|r| r["state"]["population"].as_u64())
+            .ok_or("ready population missing")?;
+        let retained: u64 = startup
+            .iter()
+            .map(|r| r["assigned_pods"].as_u64().unwrap_or(0))
+            .sum();
+        if retained != population
+            || !startup
+                .iter()
+                .all(|r| r["state"]["ready"] == true && r["state"]["poisoned"] == false)
+        {
+            return Err("all-population-ready barrier failed".into());
+        }
+        println!(
+            "{}",
+            json!({"record_type":"all-population-ready","population":population,
+            "retained_pods":retained,"worker_reports":startup,"settings":settings.0,
+            "archive_verification":archive_verification})
+        );
     }
     let router = Router::new()
         .route("/pods/{pod}/sparql", post(query))
         .route("/pods/{pod}/update", post(update))
         .route("/pods/{pod}/policy", post(policy))
+        .route("/__benchmark/drain", post(drain))
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(mark_received))
-        .with_state(Arc::new(HttpState { workers: senders }));
+        .with_state(Arc::new(HttpState {
+            workers: senders,
+            admission: RwLock::new(()),
+            control_token,
+        }));
     let bind = settings.text("bind", "127.0.0.1:3100");
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!(
@@ -261,12 +473,98 @@ async fn main() -> Result<()> {
         "auth" => auth::provision(&settings),
         "load" => load::run(settings).await,
         "pack" => storage::pack(&settings),
+        "prepare-native" => storage::prepare_native(&settings),
+        "drain" => request_drain(&settings).await,
         "verify" => storage::verify(&settings),
         "audit" => storage::audit(&settings),
         "churn" => churn::run(settings).await,
         _ => {
-            println!("pod_population_http auth|pack|serve|load|verify|audit|churn --name value\nSee skills/solid-lws-server/SKILL.md for the research-only interface.");
+            println!("pod_population_http auth|pack|prepare-native|serve|drain|load|verify|audit|churn --name value\nSee skills/solid-lws-server/SKILL.md for the research-only interface.");
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn drain_waits_for_timed_out_work_and_pauses_admission() -> Result<()> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let secret = "a".repeat(32);
+        let state = Arc::new(HttpState {
+            workers: vec![sender.clone()],
+            admission: RwLock::new(()),
+            control_token: Some(secret.clone()),
+        });
+        let (reply, abandoned) = oneshot::channel();
+        drop(abandoned);
+        sender
+            .send(WorkerCommand::Request(Work {
+                pod: 0,
+                path: String::new(),
+                headers: HeaderMap::new(),
+                body: String::new(),
+                update: false,
+                policy_administration: false,
+                received: Instant::now(),
+                reply,
+            }))
+            .map_err(|_| "fake worker queue unavailable")?;
+        let (started, wait_started) = oneshot::channel();
+        let (release, wait_release) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let WorkerCommand::Request(work) = receiver.recv().expect("queued work") else {
+                panic!("work must precede fence")
+            };
+            let _ = started.send(());
+            wait_release.recv().expect("release work");
+            assert!(work.reply.send(StatusCode::OK.into_response()).is_err());
+            let WorkerCommand::Fence(reply) = receiver.recv().expect("queued fence") else {
+                panic!("expected fence")
+            };
+            let _ = reply.send(json!({"processed_requests":1,"state":{"poisoned":false,
+                "activations":{"attempted_activations_after_ready":0}}}));
+        });
+        wait_started.await?;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-benchmark-control", secret.parse()?);
+        let controller = tokio::spawn(drain(State(Arc::clone(&state)), headers));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while state.admission.try_read().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(!controller.is_finished());
+        release.send(())?;
+        let response = tokio::time::timeout(Duration::from_secs(2), controller).await??;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.admission.try_read().is_ok());
+        worker.join().map_err(|_| "fake worker panicked")?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn drain_rejects_non_operator_without_enqueuing_a_fence() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let state = Arc::new(HttpState {
+            workers: vec![sender],
+            admission: RwLock::new(()),
+            control_token: Some("a".repeat(32)),
+        });
+        assert_eq!(
+            drain(State(Arc::clone(&state)), HeaderMap::new())
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(state.admission.try_read().is_ok());
     }
 }

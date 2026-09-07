@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "model_provenance": "[GPT-6]",
+  "scope": "Run on the admitted build host from the exact clean transported merged core/harness revision. These commands do not attest the complete workspace merge gates or performance admission.",
+  "environment": {"CARGO_BUILD_JOBS": "2"},
+  "commands": [
+    {"name": "preloaded-python-admission", "argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "bench/ac/preloaded", "-p", "test_*.py"]},
+    {"name": "native-archive-unit-tests", "argv": ["cargo", "test", "--locked", "-p", "sparq-core", "--features", "native-archive", "--lib", "archive::"]},
+    {"name": "preloaded-and-existing-http-unit-tests", "argv": ["cargo", "test", "--locked", "-p", "sparq-lws-core", "--example", "pod_population_http", "--features", "population-native"]},
+    {"name": "preloaded-http-scoped-clippy", "argv": ["cargo", "clippy", "--locked", "-p", "sparq-lws-core", "--example", "pod_population_http", "--features", "population-native", "--", "-D", "warnings"]},
+    {"name": "preloaded-http-release", "argv": ["cargo", "build", "--release", "--locked", "-p", "sparq-lws-core", "--example", "pod_population_http", "--features", "population-native"]}
+  ],
+  "execution_contract": "Capture each exit status and source/binary hash. Run sequentially under the build-host runtime, disk and memory guards. A failed or skipped command is incomplete, not a pass. Authenticated HTTP preload/drain/restart smoke and corpus-native result parity follow the binary build before benchmark admission."
+}

@@ -17,6 +17,37 @@ use super::{Result, Settings};
 
 const INDEX_BYTES: u64 = 24;
 
+// [GPT-6] Startup population ownership is separate from the old bounded-cache lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum StorageMode {
+    Cached,
+    Memory,
+    Native,
+}
+
+impl StorageMode {
+    fn parse(settings: &Settings) -> Result<Self> {
+        match settings.text("storage-mode", "cached").as_str() {
+            "cached" => Ok(Self::Cached),
+            "memory" => Ok(Self::Memory),
+            "native" => Ok(Self::Native),
+            _ => Err("storage-mode must be cached, memory or native".into()),
+        }
+    }
+}
+
+#[derive(Default, Serialize)]
+struct ActivationCounts {
+    rdf_parses: u64,
+    native_dataset_loads: u64,
+    initial_authorizations: u64,
+    journal_entries_replayed: u64,
+    attempted_activations_after_ready: u64,
+    mutation_rollbacks: u64,
+    rollback_authorizations: u64,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Policy {
@@ -72,6 +103,12 @@ pub(super) struct PodCache {
     maximum_journal_bytes: u64,
     bytes: u64,
     clock: u64,
+    storage_mode: StorageMode,
+    ready: bool,
+    poisoned: bool,
+    counts: ActivationCounts,
+    #[cfg(feature = "population-native")]
+    archive: Option<sparq_core::archive::NativeArchive>,
 }
 
 pub(super) struct Outcome {
@@ -114,6 +151,11 @@ impl JournalEntry {
 
 impl PodCache {
     pub(super) fn open(settings: &Settings, workers: usize) -> Result<Self> {
+        let storage_mode = StorageMode::parse(settings)?;
+        #[cfg(not(feature = "population-native"))]
+        if storage_mode == StorageMode::Native {
+            return Err("native storage requires the population-native feature".into());
+        }
         let directory = settings.path("corpus", "population-corpus");
         let manifest: Value = serde_json::from_slice(&fs::read(directory.join("manifest.json"))?)?;
         if manifest["format"] != "sparq-pod-pack-zstd-v1" {
@@ -126,12 +168,46 @@ impl PodCache {
         if index.metadata()?.len() != pods.checked_mul(INDEX_BYTES).ok_or("index overflow")? {
             return Err("index length does not match populated Pod count".into());
         }
-        let maximum_entries = usize::try_from(settings.number("cache-pods", 64)?)? / workers;
-        let maximum_bytes = settings.number("cache-bytes", 256 * 1024 * 1024)? / workers as u64;
+        let maximum_entries = if storage_mode == StorageMode::Cached {
+            usize::try_from(settings.number("cache-pods", 64)?)? / workers
+        } else {
+            usize::MAX
+        };
+        let maximum_bytes = if storage_mode == StorageMode::Cached {
+            settings.number("cache-bytes", 256 * 1024 * 1024)? / workers as u64
+        } else {
+            u64::MAX
+        };
         if maximum_entries == 0 || maximum_bytes == 0 {
             return Err("each worker needs a positive cache allocation".into());
         }
         let packed = File::open(directory.join("pods.nqpack"))?;
+        #[cfg(feature = "population-native")]
+        let archive = if storage_mode == StorageMode::Native {
+            let path = settings.path(
+                "native-archive",
+                &directory.join("pods.native").to_string_lossy(),
+            );
+            let sidecar: Value =
+                serde_json::from_slice(&fs::read(path.with_extension("native-manifest.json"))?)?;
+            if sidecar["source_manifest_sha256"] != digest_file(directory.join("manifest.json"))?
+                || sidecar["pods"].as_u64() != Some(pods)
+                || sidecar["format"] != "sparq-population-native-v1"
+            {
+                return Err("native archive is not bound to this complete corpus manifest".into());
+            }
+            // SAFETY: This research process owns a finalized immutable archive. The
+            // harness never overwrites/truncates it; all writes use in-memory graph
+            // overlays and separate application journals. Operators must preserve
+            // archive immutability until this process and all mapped views exit.
+            let archive = unsafe { sparq_core::archive::NativeArchive::open(path)? };
+            if archive.len() != pods {
+                return Err("native archive omits or adds population datasets".into());
+            }
+            Some(archive)
+        } else {
+            None
+        };
         Ok(Self {
             directory,
             index,
@@ -146,10 +222,59 @@ impl PodCache {
             maximum_journal_bytes: settings.number("max-journal-bytes", 8 * 1024 * 1024)?,
             bytes: 0,
             clock: 0,
+            storage_mode,
+            ready: false,
+            poisoned: false,
+            counts: ActivationCounts::default(),
+            #[cfg(feature = "population-native")]
+            archive,
         })
     }
 
+    pub(super) fn preload(&mut self, worker: usize, workers: usize) -> Result<Value> {
+        if self.storage_mode == StorageMode::Cached {
+            return Ok(self.state());
+        }
+        if self.ready || !self.entries.is_empty() || worker >= workers {
+            return Err("preload must start with an empty valid worker partition".into());
+        }
+        let start = Instant::now();
+        let mut heartbeat = Instant::now();
+        let mut assigned = 0_u64;
+        for pod in (worker as u64..self.pods).step_by(workers) {
+            self.get(pod)?;
+            assigned += 1;
+            if heartbeat.elapsed().as_secs() >= 30 {
+                println!(
+                    "{}",
+                    json!({"record_type":"preload-progress", "worker":worker,
+                    "loaded_pods":assigned,"population":self.pods,"elapsed_us":start.elapsed().as_micros()})
+                );
+                heartbeat = Instant::now();
+            }
+        }
+        if self.entries.len() as u64 != assigned || self.counts.initial_authorizations != assigned {
+            return Err("preload ownership/authorization count mismatch".into());
+        }
+        self.ready = true;
+        Ok(
+            json!({"record_type":"worker-population-ready", "worker":worker,
+            "assigned_pods":assigned,"elapsed_us":start.elapsed().as_micros(),"state":self.state()}),
+        )
+    }
+
+    pub(super) fn state(&self) -> Value {
+        json!({"storage_mode":self.storage_mode,"population":self.pods,"ready":self.ready,
+            "retained_pods":self.entries.len(),"retained_source_bytes":self.bytes,
+            "poisoned":self.poisoned,"activations":self.counts,
+            "memory_scope":"source bytes are not heap usage; native content mappings may page, heap metadata and authorization remain resident"})
+    }
+
     fn evict(&mut self, pod: u64) {
+        if self.ready {
+            self.poisoned = true;
+            return;
+        }
         if let Some(entry) = self.entries.remove(&pod) {
             self.bytes -= entry.source_bytes;
         }
@@ -163,10 +288,18 @@ impl PodCache {
     }
 
     fn get(&mut self, pod: u64) -> Result<(bool, u64, u64)> {
+        if self.poisoned {
+            return Err("worker state is poisoned; restart and replay required".into());
+        }
         self.clock += 1;
         if let Some(entry) = self.entries.get_mut(&pod) {
             entry.used = self.clock;
             return Ok((true, 0, 0));
+        }
+        if self.ready {
+            self.counts.attempted_activations_after_ready += 1;
+            self.poisoned = true;
+            return Err("all-population-ready invariant: Pod was not retained".into());
         }
         if pod >= self.pods {
             return Err("Pod outside persisted corpus".into());
@@ -202,19 +335,29 @@ impl PodCache {
                 .ok_or("cache budget invariant")?;
             self.evict(oldest);
         }
-        self.packed.seek(SeekFrom::Start(offset))?;
-        let decoder = zstd::stream::read::Decoder::new((&mut self.packed).take(packed_bytes))?;
-        let mut source = String::with_capacity(usize::try_from(raw_bytes)?);
-        decoder.take(raw_bytes + 1).read_to_string(&mut source)?;
-        if source.len() as u64 != raw_bytes {
-            return Err("decoded Pod length differs from committed index".into());
-        }
-        let graph = sparq_core::Graph::load_dataset(&source, "nquads")?;
-        drop(source);
+        let graph = if self.storage_mode == StorageMode::Native {
+            #[cfg(feature = "population-native")]
+            {
+                let graph = self
+                    .archive
+                    .as_ref()
+                    .ok_or("native archive missing")?
+                    .load_dataset(pod)?;
+                self.counts.native_dataset_loads += 1;
+                graph
+            }
+            #[cfg(not(feature = "population-native"))]
+            return Err("native storage feature unavailable".into());
+        } else {
+            let graph = read_packed_graph(&mut self.packed, offset, packed_bytes, raw_bytes)?;
+            self.counts.rdf_parses += 1;
+            graph
+        };
         let mut store = PodStore::new(graph);
         let load_us = start.elapsed().as_micros() as u64;
         let start = Instant::now();
         self.model.materialize(&mut store)?;
+        self.counts.initial_authorizations += 1;
         let journal_path = self.journal_path(pod);
         if journal_path.exists() {
             let file = File::open(journal_path)?;
@@ -236,6 +379,7 @@ impl PodCache {
                     self.model
                         .update(&mut store, &entry.session(), &entry.query)?;
                 }
+                self.counts.journal_entries_replayed += 1;
             }
         }
         let materialize_us = start.elapsed().as_micros() as u64;
@@ -277,11 +421,32 @@ impl PodCache {
                 message: "unknown Pod".into(),
             });
         }
+        // [GPT-6] A native snapshot shares immutable archive mappings. Savepoints
+        // restore overlays without activation, parsing or cache replacement.
+        let checkpoint = if update && self.ready {
+            self.entries.get(&pod).map(|entry| entry.store.graph.fork())
+        } else {
+            None
+        };
         let result = self.execute_inner(pod, token, query, update, administration, observation);
         result.map_err(|error| {
             // An unsuccessful mutation may have changed an in-memory graph: discard it,
             // then reconstruct solely from the durable snapshot and accepted journal.
-            if update {
+            if let Some(graph) = checkpoint {
+                let entry = self.entries.get_mut(&pod).expect("retained update Pod");
+                entry.store.graph = graph;
+                self.counts.mutation_rollbacks += 1;
+                if self.model.materialize(&mut entry.store).is_err() {
+                    self.poisoned = true;
+                } else {
+                    self.counts.rollback_authorizations += 1;
+                }
+                if error.to_string().starts_with("durable-journal-commit:") {
+                    // Rename may have succeeded before an fsync error. Never
+                    // continue from an ambiguous commit until offline replay.
+                    self.poisoned = true;
+                }
+            } else if update && !self.ready {
                 self.evict(pod);
             }
             OperationError {
@@ -403,7 +568,8 @@ impl PodCache {
             if current + serialized.len() as u64 + 1 > self.maximum_journal_bytes {
                 return Err("journal including mutation receipt is full".into());
             }
-            commit_journal(&journal_path, &serialized)?;
+            commit_journal(&journal_path, &serialized)
+                .map_err(|error| format!("durable-journal-commit: {error}"))?;
             json!({"updated":true,"policy_administration":administration,"mutation_receipt":journal.mutation_receipt}).to_string()
         } else {
             match spargebra::SparqlParser::new().parse_query(query)? {
@@ -427,6 +593,158 @@ impl PodCache {
             cache_bytes: self.bytes,
         })
     }
+}
+
+fn read_packed_graph(
+    packed: &mut File,
+    offset: u64,
+    packed_bytes: u64,
+    raw_bytes: u64,
+) -> Result<sparq_core::Graph> {
+    packed.seek(SeekFrom::Start(offset))?;
+    let decoder = zstd::stream::read::Decoder::new(packed.take(packed_bytes))?;
+    let mut source = String::with_capacity(usize::try_from(raw_bytes)?);
+    decoder.take(raw_bytes + 1).read_to_string(&mut source)?;
+    if source.len() as u64 != raw_bytes {
+        return Err("decoded Pod length differs from committed index".into());
+    }
+    Ok(sparq_core::Graph::load_dataset(&source, "nquads")?)
+}
+
+/// [GPT-6] Verify the complete immutable archive once before any workers map it.
+pub(super) fn validate_native(settings: &Settings) -> Result<Option<Value>> {
+    if StorageMode::parse(settings)? != StorageMode::Native {
+        return Ok(None);
+    }
+    let directory = settings.path("corpus", "population-corpus");
+    let path = settings.path(
+        "native-archive",
+        &directory.join("pods.native").to_string_lossy(),
+    );
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(path.with_extension("native-manifest.json"))?)?;
+    let corpus: Value = serde_json::from_slice(&fs::read(directory.join("manifest.json"))?)?;
+    let population = corpus["pods"]
+        .as_u64()
+        .filter(|n| *n > 0)
+        .ok_or("native source population must be positive")?;
+    let metadata = fs::metadata(&path)?;
+    if manifest["format"] != "sparq-population-native-v1"
+        || manifest["pods"].as_u64() != Some(population)
+        || manifest["source_manifest_sha256"] != digest_file(directory.join("manifest.json"))?
+        || manifest["archive_bytes"].as_u64() != Some(metadata.len())
+        || manifest["archive_sha256"] != digest_file(path)?
+        || !metadata.permissions().readonly()
+    {
+        return Err(
+            "native archive size, digest, population or immutable-source binding failed".into(),
+        );
+    }
+    Ok(Some(
+        json!({"record_type":"native-archive-verified","manifest":manifest,
+        "scope":"full file size and SHA256 verified by coordinator before worker mappings; archive must remain immutable for every mapped view lifetime"}),
+    ))
+}
+
+/// [GPT-6] Persist every baseline Pod's native indexes before server startup.
+#[cfg(feature = "population-native")]
+pub(super) fn prepare_native(settings: &Settings) -> Result<()> {
+    let mut options = settings.clone();
+    options.0.insert("storage-mode".into(), "cached".into());
+    let mut corpus = PodCache::open(&options, 1)?;
+    let source_manifest = corpus.directory.join("manifest.json");
+    let manifest: Value = serde_json::from_slice(&fs::read(&source_manifest)?)?;
+    for (filename, key) in [
+        ("pods.nqpack", "packed_sha256"),
+        ("pods.index", "index_sha256"),
+    ] {
+        if manifest[key].as_str() != Some(digest_file(corpus.directory.join(filename))?.as_str()) {
+            return Err(format!("source corpus checksum mismatch: {filename}").into());
+        }
+    }
+    let path = settings.path(
+        "native-archive",
+        &corpus.directory.join("pods.native").to_string_lossy(),
+    );
+    let sidecar = path.with_extension("native-manifest.json");
+    if sidecar.exists() {
+        return Err("native archive sidecar already exists".into());
+    }
+    let compressed = match settings.text("native-compressed", "true").as_str() {
+        "true" => true,
+        "false" => false,
+        _ => return Err("native-compressed must be true or false".into()),
+    };
+    let mut writer = sparq_core::archive::NativeArchiveWriter::create(&path)?;
+    let start = Instant::now();
+    let mut heartbeat = Instant::now();
+    let mut source_bytes = 0_u64;
+    for pod in 0..corpus.pods {
+        let mut record = [0_u8; INDEX_BYTES as usize];
+        corpus.index.read_exact(&mut record)?;
+        let offset = u64::from_le_bytes(record[0..8].try_into()?);
+        let packed_bytes = u64::from_le_bytes(record[8..16].try_into()?);
+        let raw_bytes = u64::from_le_bytes(record[16..24].try_into()?);
+        if raw_bytes == 0
+            || raw_bytes > corpus.maximum_pod_bytes
+            || packed_bytes == 0
+            || offset
+                .checked_add(packed_bytes)
+                .ok_or("packed extent overflow")?
+                > corpus.packed.metadata()?.len()
+        {
+            return Err(format!("invalid or oversized source Pod {pod}").into());
+        }
+        let graph = read_packed_graph(&mut corpus.packed, offset, packed_bytes, raw_bytes)?;
+        if writer.append(&graph, compressed)? != pod {
+            return Err("native dataset order differs from persisted Pod IDs".into());
+        }
+        source_bytes = source_bytes
+            .checked_add(raw_bytes)
+            .ok_or("source size overflow")?;
+        if heartbeat.elapsed().as_secs() >= 30 || pod + 1 == corpus.pods {
+            println!(
+                "{}",
+                json!({"record_type":"native-prepare-progress","pods":pod+1,
+                "target_pods":corpus.pods,"source_bytes":source_bytes,"elapsed_us":start.elapsed().as_micros()})
+            );
+            heartbeat = Instant::now();
+        }
+    }
+    if manifest["source_bytes"].as_u64() != Some(source_bytes) {
+        return Err("native preparation did not consume the complete serialized population".into());
+    }
+    let _ = writer.finish()?;
+    let mut permissions = fs::metadata(&path)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions)?;
+    let result = json!({"format":"sparq-population-native-v1","pods":corpus.pods,
+        "source_manifest_sha256":digest_file(source_manifest)?,
+        "archive_sha256":digest_file(path.clone())?,"archive_bytes":fs::metadata(&path)?.len(),
+        "compressed":compressed,"source_bytes":source_bytes,"elapsed_us":start.elapsed().as_micros(),
+        "scope":"all baseline native data indexes persisted; authorization and trusted journal replay occur at server startup"});
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&sidecar)?;
+    serde_json::to_writer_pretty(&mut file, &result)?;
+    file.sync_all()?;
+    File::open(
+        sidecar
+            .parent()
+            .ok_or("native sidecar parent unavailable")?,
+    )?
+    .sync_all()?;
+    println!(
+        "{}",
+        json!({"record_type":"native-prepare-complete","manifest":result})
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "population-native"))]
+pub(super) fn prepare_native(_settings: &Settings) -> Result<()> {
+    Err("prepare-native requires the population-native feature".into())
 }
 
 // Only explicitly selected owner-owned records are observed; no full Pod scan or unbounded audit copy.
@@ -727,6 +1045,7 @@ pub(super) fn pack(settings: &Settings) -> Result<()> {
 }
 
 pub(super) fn verify(settings: &Settings) -> Result<()> {
+    let _ = validate_native(settings)?;
     let mut cache = PodCache::open(settings, 1)?;
     let manifest: Value =
         serde_json::from_slice(&fs::read(cache.directory.join("manifest.json"))?)?;
@@ -832,6 +1151,7 @@ pub(super) fn verify(settings: &Settings) -> Result<()> {
 /// Reopens each touched Pod from snapshot + journal; the last observation of each record
 /// must equal its actual reconstructed state. Transport-error IDs can be joined offline.
 pub(super) fn audit(settings: &Settings) -> Result<()> {
+    let _ = validate_native(settings)?;
     let mut cache = PodCache::open(settings, 1)?;
     let updates = cache.directory.join("updates");
     let mut checked = 0_u64;
@@ -1036,6 +1356,152 @@ mod tests {
             .and_then(Value::as_str)
             .ok_or("missing count")?
             .parse()?)
+    }
+
+    #[test]
+    fn preloaded_partitions_keep_every_pod_without_read_activation() -> Result<()> {
+        for model in [Policy::Wac, Policy::Acp] {
+            let (mut settings, directory) = fixture(model)?;
+            settings.0.insert("storage-mode".into(), "memory".into());
+            let mut first = PodCache::open(&settings, 2)?;
+            let mut second = PodCache::open(&settings, 2)?;
+            first.preload(0, 2)?;
+            second.preload(1, 2)?;
+            assert_eq!(first.entries.len() + second.entries.len(), 2);
+            assert_eq!(first.counts.initial_authorizations, 1);
+            assert_eq!(second.counts.initial_authorizations, 1);
+            for _ in 0..3 {
+                assert_eq!(count(&mut first, 0, RECIPIENT)?, 1);
+                assert_eq!(count(&mut second, 1, RECIPIENT)?, 1);
+            }
+            assert_eq!(first.counts.rdf_parses, 1);
+            assert_eq!(second.counts.rdf_parses, 1);
+            assert!(first.get(1).is_err());
+            assert_eq!(first.counts.attempted_activations_after_ready, 1);
+            assert!(first.poisoned);
+            assert_eq!(first.entries.len(), 1);
+            drop((first, second));
+            fs::remove_dir_all(directory)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn preloaded_failed_commit_restores_graph_and_authorization_without_reload() -> Result<()> {
+        for model in [Policy::Wac, Policy::Acp] {
+            let (mut settings, directory) = fixture(model)?;
+            settings.0.insert("storage-mode".into(), "memory".into());
+            let mut cache = PodCache::open(&settings, 1)?;
+            cache.preload(0, 1)?;
+            let revoke = match model {
+                Policy::Wac => format!("DELETE DATA {{ GRAPH <{DOC}.acl> {{ <{DOC}.acl#recipient> <{ACL}agent> <{RECIPIENT}> }} }}"),
+                Policy::Acp => format!("DELETE DATA {{ GRAPH <{DOC}.acr> {{ <{DOC}.acr#ctl1> <{ACP}apply> <{DOC}.acr#pol1> }} }}"),
+            };
+            assert!(cache
+                .execute(0, &token(RECIPIENT), &revoke, true, true)
+                .is_err());
+            assert!(!cache.poisoned);
+            assert_eq!(count(&mut cache, 0, RECIPIENT)?, 1);
+            fs::write(
+                directory.join("updates"),
+                b"injected journal directory error",
+            )?;
+            assert!(cache
+                .execute(0, &token(OWNER), &revoke, true, true)
+                .is_err());
+            assert!(cache.poisoned);
+            assert_eq!(cache.entries.len(), 2);
+            assert_eq!(cache.counts.rdf_parses, 2);
+            assert_eq!(cache.counts.initial_authorizations, 2);
+            assert_eq!(cache.counts.mutation_rollbacks, 2);
+            assert_eq!(cache.counts.rollback_authorizations, 2);
+            let session = Session {
+                agent: Some(RECIPIENT),
+                client: None,
+                issuer: None,
+                now: None,
+            };
+            let answer: Value = serde_json::from_str(&cache.entries[&0].store.query_json_as(
+                &session,
+                Mode::Read,
+                QUERY,
+            )?)?;
+            assert_eq!(
+                answer
+                    .pointer("/results/bindings/0/count/value")
+                    .and_then(Value::as_str),
+                Some("1")
+            );
+            assert!(count(&mut cache, 0, RECIPIENT).is_err());
+            drop(cache);
+            fs::remove_file(directory.join("updates"))?;
+            let mut restarted = PodCache::open(&settings, 1)?;
+            restarted.preload(0, 1)?;
+            assert_eq!(count(&mut restarted, 0, RECIPIENT)?, 1);
+            drop(restarted);
+            fs::remove_dir_all(directory)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "population-native")]
+    #[test]
+    fn native_preload_replays_revocation_without_parsing_or_late_activation() -> Result<()> {
+        for model in [Policy::Wac, Policy::Acp] {
+            let (mut settings, directory) = fixture(model)?;
+            let mut manifest: Value =
+                serde_json::from_slice(&fs::read(directory.join("manifest.json"))?)?;
+            manifest["source_bytes"] = json!(source(model).len() * 2);
+            manifest["packed_sha256"] = json!(digest_file(directory.join("pods.nqpack"))?);
+            manifest["index_sha256"] = json!(digest_file(directory.join("pods.index"))?);
+            fs::write(directory.join("manifest.json"), manifest.to_string())?;
+            prepare_native(&settings)?;
+            settings.0.insert("storage-mode".into(), "native".into());
+            assert!(validate_native(&settings)?.is_some());
+            let sidecar = directory.join("pods.native-manifest.json");
+            let original = fs::read(&sidecar)?;
+            for (field, invalid) in [
+                ("archive_sha256", json!("wrong")),
+                ("archive_bytes", json!(1)),
+                ("pods", json!(1)),
+                ("source_manifest_sha256", json!("wrong")),
+            ] {
+                let mut changed: Value = serde_json::from_slice(&original)?;
+                changed[field] = invalid;
+                fs::write(&sidecar, changed.to_string())?;
+                assert!(
+                    validate_native(&settings).is_err(),
+                    "accepted invalid {field}"
+                );
+            }
+            fs::write(sidecar, original)?;
+            let mut cache = PodCache::open(&settings, 1)?;
+            cache.preload(0, 1)?;
+            assert_eq!(count(&mut cache, 0, RECIPIENT)?, 1);
+            let revoke = match model {
+                Policy::Wac => format!("DELETE DATA {{ GRAPH <{DOC}.acl> {{ <{DOC}.acl#recipient> <{ACL}agent> <{RECIPIENT}> }} }}"),
+                Policy::Acp => format!("DELETE DATA {{ GRAPH <{DOC}.acr> {{ <{DOC}.acr#ctl1> <{ACP}apply> <{DOC}.acr#pol1> }} }}"),
+            };
+            cache
+                .execute(0, &token(OWNER), &revoke, true, true)
+                .map_err(|e| e.message)?;
+            assert_eq!(count(&mut cache, 0, RECIPIENT)?, 0);
+            assert_eq!(count(&mut cache, 1, RECIPIENT)?, 1);
+            assert_eq!(cache.counts.rdf_parses, 0);
+            assert_eq!(cache.counts.native_dataset_loads, 2);
+            drop(cache);
+            let mut restarted = PodCache::open(&settings, 1)?;
+            restarted.preload(0, 1)?;
+            assert_eq!(restarted.counts.journal_entries_replayed, 1);
+            assert_eq!(count(&mut restarted, 0, RECIPIENT)?, 0);
+            assert_eq!(count(&mut restarted, 1, RECIPIENT)?, 1);
+            assert_eq!(restarted.counts.rdf_parses, 0);
+            assert_eq!(restarted.counts.native_dataset_loads, 2);
+            assert_eq!(restarted.counts.attempted_activations_after_ready, 0);
+            drop(restarted);
+            fs::remove_dir_all(directory)?;
+        }
+        Ok(())
     }
 
     #[test]

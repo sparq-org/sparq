@@ -183,6 +183,33 @@ including wrapper children, and a failed warmup cannot pass a measured cell.
 Network journey experiments remain separate
 and unmeasured unless an explicit implementation and run artifact establish them.
 
+<!-- [GPT-6] -->
+The separate [preloaded evaluation](../../bench/ac/preloaded/README.md) adds
+`--features population-native`, `prepare-native --corpus PATH`, and
+`serve --storage-mode native|memory|cached`. Preparation writes `pods.native`
+and its source-bound checksum sidecar; `--native-archive PATH` overrides the
+archive location and `--native-compressed true|false` selects its encoding.
+Native startup validates the whole archive once, opens every data index,
+materializes real WAC/ACP authorization and replays trusted update journals.
+Every worker retains its disjoint Pod partition before `all-population-ready`
+and HTTP listening. No dataset opening, RDF parsing, journal replay or initial
+materialization is allowed after readiness. Mapped content pages can leave RAM;
+heap metadata, authorization and mutation overlays do not automatically spill.
+Keep archive bytes and length immutable for every derived graph view lifetime.
+
+Preloaded serving requires `--control-token-file PATH`: an unpredictable
+alphanumeric operator capability in an owner-readable-only file, separate from
+Pod ownership and DPoP. `drain` sends it to `POST /__benchmark/drain`, pausing
+admission and waiting for a FIFO fence from every worker, including work whose
+HTTP client stopped waiting. `--connect URL` and `--drain-timeout-seconds N`
+configure this operator request. Never publish the secret. Use read-only warmup
+and a successful full drain before measurement; drain again after the client
+finishes. Independent repetitions stop the server and reset task-owned application
+journals, while dedicated restart correctness checks deliberately retain them.
+Failed timed mutations restore both graph and authorization without dataset
+reload; ambiguous journal failures poison the worker and require restart/replay.
+These rules do not retroactively change the completed cached campaign.
+
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
 never slowed in response to the server. Records separate preparation and
