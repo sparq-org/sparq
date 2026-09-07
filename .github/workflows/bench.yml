@@ -97,23 +97,17 @@ on:
 permissions:
   contents: read
 
-# Do NOT cancel an in-progress benchmark run on main/schedule (it would corrupt the
-# stored series). push/schedule therefore keep cancel-in-progress false (see below).
-# [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a PER-RUN
-# group (the run_id suffix) so a label flip is ISOLATED — it can neither cancel nor
-# replace the in-flight/pending real run in the shared per-ref group on the same head
-# SHA (a group holds at most ONE PENDING run; without isolation a flip would evict a
-# pending real run even under cancel-in-progress:false). All other events resolve to
-# the constant `-shared` suffix.
-# [FABLE-5] Draft-tier CI: pull_request runs ARE cancelled when superseded — they
-# never write history (the ratchet/history steps are push-to-main-gated below), so a
-# stale PR bench run burning a runner slot buys nothing. This AND the label guard
-# compose: a label flip sits ALONE in its per-run group, so cancel-in-progress=true
-# there is a no-op on the real run; a PR synchronize sits in `-shared` and correctly
-# supersedes its predecessor; push/schedule stay in `-shared` and are never cancelled.
+# [GPT-6-ASTRA] #6080: ordinary PR and main-push generations share a per-ref
+# group; a later arrival cancels the running predecessor and replaces pending work.
+# Label events use run_id groups, so a label flip cannot cancel OR evict the real
+# PR run (a concurrency group holds at most one pending run even when cancellation
+# is false). Schedule, workflow_dispatch and unknown events also use run_id groups
+# with cancellation disabled. These groups isolate runs; they do not serialize
+# writes from separate groups. Existing writer guards still allow manual-main
+# publishing; schedule runs verify without publishing. No merge_group trigger.
 concurrency:
-  group: bench-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: bench-${{ github.ref }}-${{ (!contains(fromJSON('["pull_request","push"]'), github.event_name) || (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action))) && github.run_id || 'shared' }}
+  cancel-in-progress: ${{ contains(fromJSON('["pull_request","push"]'), github.event_name) }}
 
 jobs:
   # [SONNET-4.6] sq-mel85 (design §5.2, phase 2b): the change-based test-selection
@@ -177,12 +171,11 @@ jobs:
     # `mode != 'selected'` disjunct means an empty/missing selection output RUNS the
     # lane; a selection-skipped job reports conclusion `skipped` (= satisfied) to the
     # ci-summary gate — no per-leg name is individually required (bead sq-fmx4u.4).
-    # CRITICAL (design §6.1 continuity): push-to-main + schedule are NOT pull_request/
-    # merge_group events, so ci_select.py returns mode=full and this disjunct is TRUE =>
-    # the FULL suite runs on every main commit + on the nightly backstop. Selection can
-    # ONLY narrow on pull_request / merge_group. That is what keeps the auto-ratchet
-    # floor + benchmark-data history (both depend on every main commit being benchmarked)
-    # continuous — see the push-gated history/ratchet steps below.
+    # [GPT-6-ASTRA] Push, schedule and manual dispatch select the FULL suite.
+    # Superseded main-push runs may be cancelled by the per-ref group above, so
+    # benchmark history contains completed measurements, not every main commit.
+    # Selection can narrow only on pull_request / merge_group; this workflow has
+    # no merge_group trigger. Writer predicates below are unchanged by coalescing.
     # [FABLE-5] Draft-tier CI: benchmarks are SKIPPED ENTIRELY on draft PR heads
     # (first conjunct — fail-open off the PR path: push/schedule/dispatch satisfy
     # `github.event_name != 'pull_request'` => the selection disjunction decides as
@@ -723,56 +716,93 @@ jobs:
       # Idempotent + MAIN ONLY (PRs/forks get a read-only token and never write the history branch),
       # mirroring the "Ensure benchmark-data history branch exists" bootstrap above.
       - name: Seed Pages dashboard onto benchmark-data (if absent)
-        # [SONNET-4.6] sq-mel85: push-to-main ONLY — the nightly `schedule` backstop never
-        # writes the history branch, so it must not seed/update the Pages dashboard either.
+        # [GPT-6-ASTRA] Preserve main push/manual publishing; schedules verify only.
         if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # [GPT-6-ASTRA] Retry only a verified concurrent fast-forward. Rebuild
+          # the asset-only commit on the fetched tip; never rebase/force-push data.js.
+          export LC_ALL=C
           src="$GITHUB_WORKSPACE/bench/dashboard"
           tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
           git -C "$tmp" init -q
           git -C "$tmp" remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git -C "$tmp" fetch -q --depth=1 origin benchmark-data
-          git -C "$tmp" checkout -q -B benchmark-data FETCH_HEAD
-          mkdir -p "$tmp/dev/bench"
-          changed=0
-          # [OPUS-4.8] metric-labels.json (sq-ocuf) is part of the served dashboard — copy it
-          # alongside index.html/dashboard.js/dashboard.css so dashboard.js can fetch it.
-          # [OPUS-4.8] vendor/Chart.min.js (sq-0rv3) is loaded by index.html now that the
-          # CDN dep is dropped — seed it (in its subdir) so the published Pages dashboard
-          # doesn't 404. The path has a dirname, so mkdir -p before copying.
-          # [OPUS-4.8] competitors.json (sq-kehk) is FETCHED by dashboard.js boot() (sq-rltn / #200)
-          # as the single competitor-data sink — copy it alongside metric-labels.json so the live
-          # fetch resolves instead of 404ing into the empty embedded COMPETITORS_DATA mirror.
-          for f in index.html dashboard.js dashboard.css metric-labels.json competitors.json vendor/Chart.min.js; do
-            if [ ! -f "$tmp/dev/bench/$f" ] || ! cmp -s "$src/$f" "$tmp/dev/bench/$f"; then
-              mkdir -p "$(dirname "$tmp/dev/bench/$f")"
-              cp "$src/$f" "$tmp/dev/bench/$f"
+          tip="$(git -C "$tmp" rev-parse FETCH_HEAD)"
+          for attempt in 1 2 3; do
+            git -C "$tmp" checkout -q -B benchmark-data "$tip"
+            mkdir -p "$tmp/dev/bench"
+            changed=0
+            # [OPUS-4.8] metric-labels.json (sq-ocuf) is part of the served dashboard — copy it
+            # alongside index.html/dashboard.js/dashboard.css so dashboard.js can fetch it.
+            # [OPUS-4.8] vendor/Chart.min.js (sq-0rv3) is loaded by index.html now that the
+            # CDN dep is dropped — seed it (in its subdir) so the published Pages dashboard
+            # doesn't 404. The path has a dirname, so mkdir -p before copying.
+            # [OPUS-4.8] competitors.json (sq-kehk) is FETCHED by dashboard.js boot() (sq-rltn / #200)
+            # as the single competitor-data sink — copy it alongside metric-labels.json so the live
+            # fetch resolves instead of 404ing into the empty embedded COMPETITORS_DATA mirror.
+            for f in index.html dashboard.js dashboard.css metric-labels.json competitors.json vendor/Chart.min.js; do
+              if [ ! -f "$tmp/dev/bench/$f" ] || ! cmp -s "$src/$f" "$tmp/dev/bench/$f"; then
+                mkdir -p "$(dirname "$tmp/dev/bench/$f")"
+                cp "$src/$f" "$tmp/dev/bench/$f"
+                changed=1
+              fi
+            done
+            # [OPUS-4.8] root redirect (sq-pages-root): the bare Pages root would 404 because the
+            # dashboard lives under dev/bench/. Seed bench/dashboard/root-redirect.html to the
+            # benchmark-data branch ROOT as index.html so https://sparq.jeswr.org/ bounces to
+            # dev/bench/. github-action-benchmark only writes data.js + dev/bench/index.html (never a
+            # root index.html), so this coexists with its data and is preserved across runs.
+            if [ ! -f "$tmp/index.html" ] || ! cmp -s "$src/root-redirect.html" "$tmp/index.html"; then
+              cp "$src/root-redirect.html" "$tmp/index.html"
               changed=1
             fi
+            if [ "$changed" = "0" ]; then
+              echo "dev/bench dashboard already up to date — nothing to seed."
+              exit 0
+            fi
+            git -C "$tmp" -c user.name='github-actions[bot]' \
+                          -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                          add index.html dev/bench/index.html dev/bench/dashboard.js dev/bench/dashboard.css \
+                              dev/bench/metric-labels.json dev/bench/competitors.json dev/bench/vendor/Chart.min.js
+            git -C "$tmp" -c user.name='github-actions[bot]' \
+                          -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                          commit -q -m "chore(bench): seed/update Pages dashboard (dev/bench + root redirect) [skip ci]"
+            if git -C "$tmp" push --porcelain origin benchmark-data:benchmark-data \
+                >"$tmp/.git/push.stdout" 2>"$tmp/.git/push.stderr"; then
+              echo "Seeded/updated the custom Pages dashboard on benchmark-data."
+              exit 0
+            else
+              push_rc=$?
+            fi
+            cat "$tmp/.git/push.stdout"
+            cat "$tmp/.git/push.stderr" >&2
+            # Porcelain's exact ref/status record excludes hook/auth/transport
+            # failures. A changed tip alone never makes an arbitrary error retryable.
+            push_status="$(grep $'\t' "$tmp/.git/push.stdout" || true)"
+            case "$push_status" in
+              $'!\trefs/heads/benchmark-data:refs/heads/benchmark-data\t[rejected] (fetch first)'|\
+              $'!\trefs/heads/benchmark-data:refs/heads/benchmark-data\t[rejected] (non-fast-forward)') ;;
+              *)
+                echo "::error::Dashboard push failed without a single retryable non-fast-forward rejection."
+                exit "$push_rc" ;;
+            esac
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Dashboard publication exhausted its bounded push attempts."
+              exit "$push_rc"
+            fi
+            # Do not repeat --depth=1: retain the fetched ancestry back to tip so
+            # the old snapshot must be an ancestor, not merely a different object.
+            git -C "$tmp" fetch -q origin benchmark-data
+            next_tip="$(git -C "$tmp" rev-parse FETCH_HEAD)"
+            if [ "$next_tip" = "$tip" ] || ! git -C "$tmp" merge-base --is-ancestor "$tip" "$next_tip"; then
+              echo "::error::Dashboard rejection was not followed by a verified branch advance."
+              exit "$push_rc"
+            fi
+            tip="$next_tip"
+            echo "::notice::Concurrent benchmark-data advance verified; rebuilding the dashboard commit."
           done
-          # [OPUS-4.8] root redirect (sq-pages-root): the bare Pages root would 404 because the
-          # dashboard lives under dev/bench/. Seed bench/dashboard/root-redirect.html to the
-          # benchmark-data branch ROOT as index.html so https://sparq.jeswr.org/ bounces to
-          # dev/bench/. github-action-benchmark only writes data.js + dev/bench/index.html (never a
-          # root index.html), so this coexists with its data and is preserved across runs.
-          if [ ! -f "$tmp/index.html" ] || ! cmp -s "$src/root-redirect.html" "$tmp/index.html"; then
-            cp "$src/root-redirect.html" "$tmp/index.html"
-            changed=1
-          fi
-          if [ "$changed" = "0" ]; then
-            echo "dev/bench dashboard already up to date — nothing to seed."
-            exit 0
-          fi
-          git -C "$tmp" -c user.name='github-actions[bot]' \
-                        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                        add index.html dev/bench/index.html dev/bench/dashboard.js dev/bench/dashboard.css \
-                            dev/bench/metric-labels.json dev/bench/competitors.json dev/bench/vendor/Chart.min.js
-          git -C "$tmp" -c user.name='github-actions[bot]' \
-                        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                        commit -q -m "chore(bench): seed/update Pages dashboard (dev/bench + root redirect) [skip ci]"
-          git -C "$tmp" push -q origin benchmark-data:benchmark-data
-          echo "Seeded/updated the custom Pages dashboard on benchmark-data."

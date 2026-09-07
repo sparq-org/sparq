@@ -729,6 +729,9 @@ jobs:
         run: python3 scripts/check-dashboard-publish-wiring.py --self-test
       - name: "Enforce every served bench/dashboard asset is wired into the Pages publisher — GATING"
         run: python3 scripts/check-dashboard-publish-wiring.py
+      # [GPT-6-ASTRA] Exercise the actual publisher shell with file-only Git races.
+      - name: Test bounded dashboard publication recovery (local Git)
+        run: python3 scripts/tests/test_bench_dashboard_publish.py
       # [OPUS-5] issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
       # one deploy slot, so the guide has no workflow of its own — docs.yml VALIDATES it on PRs
       # and pages.yml BUILDS + OVERLAYS it into the single Pages artifact at out/guide/. Three
