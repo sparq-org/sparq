@@ -9,6 +9,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
@@ -101,6 +102,29 @@ class BuildHostTests(unittest.TestCase):
             self.assertEqual(result["build_environment"]["RUSTDOCFLAGS"], "-D warnings")
             self.assertFalse(archive.exists())
             self.assertFalse((base / "sources" / "test-job").exists())
+
+    def test_submit_archives_captured_commit_even_if_head_later_moves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            host = root / "host.json"
+            host.write_text(json.dumps(dict(deadline_epoch=time.time()+3600, ip="192.0.2.1",
+                                            key_path=str(root / "key"), known_hosts=str(root / "known_hosts"))))
+            commands = root / "commands.json"
+            commands.write_text(json.dumps([["cargo", "test", "--locked"]]))
+            captured = "a" * 40
+            calls = []
+            def run(argv, **kwargs):
+                calls.append(argv)
+                if argv[:2] == ["git", "archive"]:
+                    self.assertEqual(argv[-1], captured)
+                    archive = Path(next(a.removeprefix("--output=") for a in argv if a.startswith("--output=")))
+                    archive.write_bytes(b"synthetic archive fixture")
+            with patch.object(jobs.subprocess, "check_output", side_effect=[b"", captured + "\n"]), \
+                 patch.object(jobs.subprocess, "run", side_effect=run), patch("builtins.print"):
+                jobs.submit(SimpleNamespace(host=host, source=root, id="snapshot-fixture", timeout=60, commands=commands))
+            self.assertEqual(sum(argv[:2] == ["git", "archive"] for argv in calls), 1)
+            submitted = json.loads((root / "submitted" / "snapshot-fixture" / "snapshot-fixture.json").read_text())
+            self.assertEqual(submitted["source_commit"], captured)
 
     def test_final_marker_follows_manifest_and_all_evidence_hashes_match(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(jobs, "RESULTS", Path(directory)):

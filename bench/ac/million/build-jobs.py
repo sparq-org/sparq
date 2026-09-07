@@ -191,7 +191,7 @@ def submit(args):
     staging = args.host.parent / "submitted" / args.id
     staging.mkdir(parents=True, exist_ok=False)
     archive = staging / (args.id + ".tar.gz")
-    subprocess.run(["git", "archive", "--format=tar.gz", "--output=" + str(archive), "HEAD"], cwd=source, check=True)
+    subprocess.run(["git", "archive", "--format=tar.gz", "--output=" + str(archive), job["source_commit"]], cwd=source, check=True)
     job["archive_sha256"] = digest(archive)
     job_file = staging / (args.id + ".json")
     write_json(job_file, job)
