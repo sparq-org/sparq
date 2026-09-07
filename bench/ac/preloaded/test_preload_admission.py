@@ -3,6 +3,7 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 SPEC = importlib.util.spec_from_file_location('admission_tested', Path(__file__).with_name('preload_admission.py'))
 A = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(A)
@@ -25,6 +26,15 @@ def admission(outcome='memory-limit', memory=128):
 
 
 class AdmissionEvidenceTests(unittest.TestCase):
+    def test_closed_partial_log_is_strict_while_live_partial_utf8_is_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'server.log'
+            log.write_bytes(b'{"record_type":"preload-progress"}\n{"partial":"\xc3')
+            self.assertEqual(A.read_records(log), [{'record_type': 'preload-progress'}])
+            with self.assertRaises(UnicodeDecodeError): A.read_records(log, closed=True)
+            log.write_bytes(b'{broken}\n')
+            with self.assertRaises(ValueError): A.read_records(log)
+
     def test_only_confirmed_local_oom_and_live_declared_timeout_are_typed(self):
         for outcome in ('memory-limit', 'startup-timeout'):
             self.assertEqual(A.classify(admission(outcome)), outcome)
@@ -51,6 +61,8 @@ class AdmissionEvidenceTests(unittest.TestCase):
                 lambda r: r['resources']['systemd'].update(Result='exit-code'),
                 lambda r: r.update(startup_elapsed_seconds=99),
                 lambda r: r.update(startup_elapsed_seconds=float('nan')),
+                lambda r: r['resources']['cgroup'].update({'memory.events': ''}),
+                lambda r: r['terminal_capture']['cgroup'].update({'memory.events.local': ''}),
                 lambda r: r['terminal_capture'].update(service_result='oom-kill')):
             record = admission('startup-timeout'); mutate(record)
             with self.assertRaises(ValueError): A.classify(record)

@@ -16,6 +16,15 @@ def counters(text):
     return {key: int(value) for key, value in (line.split() for line in text.splitlines())}
 
 
+def read_records(path, closed=False):
+    """Live readers defer the final unfinished line, including partial UTF-8."""
+    payload = path.read_bytes() if path.exists() else b''
+    if not closed: payload = payload[:payload.rfind(b'\n') + 1]
+    records = [json.loads(line) for line in payload.decode('utf-8').splitlines()]
+    if any(not isinstance(row, dict) for row in records): raise ValueError('startup record must be an object')
+    return records
+
+
 def validate_records(records, population, workers, native):
     """Permit only a valid partial prefix of the native startup protocol."""
     seen = set(); progress = {}; archive = False
@@ -61,6 +70,8 @@ def classify(record):
     if 'sparq-pod-bench.slice' not in path.split('/') or not path.endswith('/' + unit):
         raise ValueError('terminal evidence belongs to another cgroup')
     group = terminal['cgroup']; events = counters(group['memory.events.local'])
+    if not {'oom', 'oom_kill'} <= events.keys():
+        raise ValueError('terminal OOM counters unavailable')
     if int(group['memory.max']) != limit or int(group['memory.swap.max']) != 0:
         raise ValueError('terminal memory/swap limit differs')
     cleanup = record.get('cleanup', {})
@@ -77,11 +88,14 @@ def classify(record):
         if type(timeout) not in (int, float) or timeout <= 0 or type(elapsed) not in (int, float) or not timeout <= elapsed < float('inf'):
             raise ValueError('declared startup deadline not observed')
         live = snapshot['cgroup']
+        live_events = counters(live['memory.events'])
+        if not {'oom', 'oom_kill'} <= live_events.keys():
+            raise ValueError('live OOM counters unavailable')
         if properties.get('ControlGroup') != path:
             raise ValueError('live timeout cgroup path missing')
         if properties.get('ActiveState') != 'active' or properties.get('SubState') != 'running' or int(properties.get('MainPID', '0')) <= 0 or properties.get('Result') != 'success':
             raise ValueError('startup deadline did not observe a running unit')
-        if int(live['memory.max']) != limit or int(live['memory.swap.max']) != 0 or any(counters(live['memory.events']).get(key, 0) for key in ('oom', 'oom_kill')):
+        if int(live['memory.max']) != limit or int(live['memory.swap.max']) != 0 or any(live_events[key] for key in ('oom', 'oom_kill')):
             raise ValueError('timeout resource evidence missing or contains an OOM')
         if terminal.get('service_result') != 'success' or any(events.get(key, 0) for key in ('oom', 'oom_kill')):
             raise ValueError('unit failed during timeout cleanup')

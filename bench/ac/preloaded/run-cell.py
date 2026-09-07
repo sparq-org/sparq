@@ -156,11 +156,12 @@ class PreloadedCell(BASE.Campaign):
         while time.monotonic() < deadline:
             self.guard()
             records = []
-            if log.exists():
+            if admission_enabled:
+                records = ADMISSION.read_records(log)
+            elif log.exists():
                 for line in log.read_text().splitlines():
                     try: records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        if admission_enabled: raise ValueError('non-JSON startup output; not a classified resource outcome')
+                    except json.JSONDecodeError: pass
             ready = [r for r in records if r.get('record_type') == 'all-population-ready']
             listening = any(r.get('record_type') == 'server-ready' for r in records)
             if ready and listening:
@@ -222,7 +223,7 @@ class PreloadedCell(BASE.Campaign):
         log = self.results / f'{label}-server.log'
         record['server_log_sha256'] = BASE.sha(log)
         BASE.write_json(path, record)
-        final_records = [json.loads(line) for line in log.read_text().splitlines()]
+        final_records = ADMISSION.read_records(log, closed=True)
         ADMISSION.validate_records(final_records, self.population, self.workers, native)
         ADMISSION.classify(record)
         self.event({'record_type': 'preload-admission-failed', 'outcome': outcome, 'unit': unit,
