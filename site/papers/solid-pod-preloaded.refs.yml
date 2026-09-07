@@ -1,0 +1,14 @@
+# [GPT-6] Additional primary references for native memory accounting.
+cgroup:
+  type: reference
+  title: Control Group v2
+  author: Heo, Tejun
+  publisher: The Linux Kernel documentation
+  url: https://docs.kernel.org/admin-guide/cgroup-v2.html
+  note: Memory ownership and accounting; accessed 2026-09-07
+drop-caches:
+  type: reference
+  title: Documentation for /proc/sys/vm/
+  publisher: The Linux Kernel documentation
+  url: https://docs.kernel.org/admin-guide/sysctl/vm.html
+  note: drop_caches; accessed 2026-09-07
