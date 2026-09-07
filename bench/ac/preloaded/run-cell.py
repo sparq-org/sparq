@@ -128,6 +128,7 @@ class PreloadedCell(BASE.Campaign):
         command = ['sudo', 'systemd-run', '--quiet', f'--unit={unit}', '--slice=sparq-pod-bench.slice',
             f'--uid={os.getuid()}', f'--gid={os.getgid()}', f'--working-directory={ROOT}',
             '--property=MemoryAccounting=yes', '--property=CPUAccounting=yes', '--property=IOAccounting=yes',
+            '--property=KillMode=control-group', '--property=TimeoutStopSec=15',
             f'--property=MemoryMax={memory * 1024**3}', '--property=MemorySwapMax=0',
             f'--property=StandardOutput=append:{log}', f'--property=StandardError=append:{log}',
             'taskset', '-c', ','.join(map(str, self.spec['host']['server_cpu_pool'][:cpus])),
@@ -135,6 +136,9 @@ class PreloadedCell(BASE.Campaign):
             '--workers', str(cpus), '--storage-mode', mode, '--control-token-file', str(self.control_file),
             '--max-pod-bytes', str(group['max_pod_bytes']),
             '--queue-capacity', str(self.measurement['queue_capacity_per_worker'])]
+        if 'cell_timeout_seconds' in self.preloaded:
+            command.insert(command.index('taskset'),
+                           '--property=RuntimeMaxSec=' + str(self.preloaded['cell_timeout_seconds']))
         subprocess.run(command, check=True)
         deadline = time.monotonic() + self.preloaded['startup_timeout_seconds']
         while time.monotonic() < deadline:
