@@ -102,8 +102,12 @@ both languages' rejected policy callers and revocation after restart, complete
 drains, retained counters, real journey writes, journal replay and receipt audit.
 Its output is correctness evidence only.
 
-`run-preparation.py` executes the separately supplied, checksum-bound preparation
-proposal. It requires `--proposal`, `--proposal-sha256`, `--source-commit` (the
+`run-preparation.py` executes the explicitly supplied, checksum-bound preparation
+proposal. Use the exact reviewed [preparation-pilot-v2.json](preparation-pilot-v2.json)
+bytes and the SHA-256 pinned in `../million/native-host.py`; finalization accepts
+only that version. V2 records a pre-pilot protocol rebinding while preserving the
+original data shapes, observations, bounds and historical harness provenance.
+It requires `--proposal`, `--proposal-sha256`, `--source-commit` (the
 executor checkout), `--binary-source-commit`, `--binary-sha256`, `--binary`,
 `--corpora`, `--auth`, `--results`, and explicit `--server-cpus` / `--client-cpus`
 comma-separated CPU lists. It runs only on the dedicated Linux candidate host:

@@ -220,6 +220,8 @@ separate bounded cgroups, preserving incomplete and unattempted populations.
 It performs no timed workload. Its [reference](../../bench/ac/preloaded/README.md)
 documents CLI identities, source equivalence, reuse, resource accounting and
 the distinction between footprint completion and final capacity admission.
+[GPT-6] The reviewed proposal is `bench/ac/preloaded/preparation-pilot-v2.json`;
+the native host receipt pins its exact bytes, retaining the original as historical evidence.
 
 The separate `bench/ac/preloaded/run-campaign.py` consumes an externally frozen
 main matrix after that pilot. It requires identical executor/binary build
