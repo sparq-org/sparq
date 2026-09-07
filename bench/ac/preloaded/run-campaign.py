@@ -218,7 +218,13 @@ class MainCell(CELL.PreloadedCell):
                 self.owner.guard()
                 status = 1
             source = self.owner.args.results / (label + '.log')
-            if source.exists(): shutil.copyfile(source, log)
+            if self.owner.preparation.current is not None:
+                raise RuntimeError('offline audit unit is not stopped; retain its raw log')
+            if source.exists():
+                shutil.copyfile(source, log)
+                # [GPT-6] phase() has stopped the writer; preserve both copies losslessly
+                # without accumulating raw parent audit logs between completed cells.
+                BASE.compress(source)
             return status
         timeout = min(timeout or self.owner.spec['execution']['phase_timeout_seconds'], self.owner.remaining())
         return super().run(command, log, timeout)
