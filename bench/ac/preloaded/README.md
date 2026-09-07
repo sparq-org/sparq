@@ -221,6 +221,26 @@ preserved even when all cells execute; execution completion does not establish
 capacity, WAC/ACP equivalence or fit on a smaller physical machine. The original
 campaign, request criteria and completed evidence remain separate.
 
+`preloaded.admission_outcomes_version: 1` and the frozen stop rule
+`preload_admission_failure: continue-only-confirmed-local-oom-or-startup-timeout`
+allow the declared grid to continue after two narrowly evidenced startup outcomes.
+A memory-limit outcome requires cgroup-local `oom` and `oom_kill` counters plus
+systemd's `oom-kill` result. A startup-timeout outcome requires a running unit at
+the frozen deadline, followed by successful owned-unit cleanup. An `ExecStopPost`
+collector preserves local counters before systemd removes the cgroup; collector
+failure, unknown exits, bad readiness, integrity failures and global wall/disk
+limits stop execution. Its small post-exit process is included in terminal
+counters and remains outside request measurements.
+
+Such cells have execution status `admission-failed`, an explicit admission record
+and incomplete-startup boundary, with no warmup or request workload. They are
+completed negative attempts; later RAM tiers still execute. The analyzer keeps
+`requests: null` and `valid_for_inference: false`, while separately reporting
+`valid_for_admission_inference` and `admission_failure_cells` after verifying the
+source, population, archive, raw log, terminal capture and canonical event.
+Unsupported admission continuation invalidates the campaign; it is never used
+to turn an unknown failure into a negative capacity result.
+
 Run `analyze-campaign.py ARTIFACT_DIRECTORY --review REVIEW_JSON --output
 research/solid-pod-preloaded-main.json` only after finalization. Optional
 `--scratch-directory` selects temporary SQLite storage; `--source-root` selects

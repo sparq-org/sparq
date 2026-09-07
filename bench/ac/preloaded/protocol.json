@@ -13,13 +13,14 @@
   },
   "preloaded": {
     "version": 1,
+    "admission_outcomes_version": 1,
     "fixed_server_cpus": 16,
     "client_cpus": 4,
     "primary_representation": "native archive at every memory tier",
     "memory_tiers": "Constrained native mapping tiers first; then 128 and 256 GiB on the same hardware. Exact constrained tiers are chosen prospectively after preparation footprint and time are measured.",
     "memory_mode": "Optional small diagnostic only; not substituted at high RAM in the primary memory comparison.",
     "readiness": "Every Pod assigned exactly once to a worker; every Graph and PodStore exists, real WAC/ACP AuthIndex is materialized, trusted journals are replayed, all states remain alive before HTTP listen and the all-population-ready record.",
-    "native_memory_scope": "Immutable native content mappings may page under memory pressure. Dictionaries, descriptors, overlays and authorization are measured resident metadata; no claim that all heap state spills.",
+    "native_memory_scope": "Immutable native content and dictionary bytes may page under memory pressure. Graph/dictionary descriptors, overlays and authorization remain measured heap metadata; no claim that all heap state spills.",
     "archive_integrity": "Coordinator checks complete archive bytes, SHA256, source-manifest binding and read-only mode before workers map. Archive bytes/length must remain immutable throughout every view lifetime.",
     "read_activation": "No RDF parsing, native dataset opening, journal replay or initial authorization materialization after readiness; FIFO drain snapshots must prove these counters unchanged.",
     "failure_recovery": "Failed timed mutations restore a shared graph snapshot and rebuild authorization without reopening any dataset. An ambiguous durable commit or failed rollback poisons the worker until offline replay.",
@@ -28,6 +29,7 @@
     "independent_runs": "Stop the prior server, remove only the task corpus application update journals, retain the identical immutable archive, start all stores anew, and replay the now-empty journal set. Measurement writes are not carried into another repetition. Dedicated durability/restart tests deliberately retain journals and are separate.",
     "measurement_end": "After client completion/drain, pause admission and drain workers before the after-resource snapshot. Record client response deadlines separately from work completed after a client timeout.",
     "preparation_accounting": "Report generation, native preparation, full validation, all-Pod startup and timed requests separately. Record preparation/startup elapsed time, cgroup peak and CPU, logical/allocated storage, inode and descriptor counts. Failed preload is not a query percentile or a smaller admitted population.",
+    "admission_failure": "Frozen stop_rules.preload_admission_failure must be continue-only-confirmed-local-oom-or-startup-timeout. A confirmed cgroup-local OOM or a still-running unit at the declared startup deadline is a completed negative startup attempt. Preserve startup logs, actual limits, terminal cgroup counters and checked cleanup, then continue the declared higher-memory grid. ExecStopPost captures local OOM counters before cgroup removal; its own error or missing output prevents classification. No warmup/load or query percentile exists for admission-failed cells. Unknown exits, malformed or mismatched readiness, integrity errors and correctness failures remain stopping errors. Global wall/disk/cancellation limits are never reclassified as startup timeouts.",
     "source_identity": "Freeze the merged shipping-core revision, private harness revision, source bundle hashes, binary SHA256, workload/config hashes and archive sidecars before final evaluation."
   }
 }

@@ -5,6 +5,7 @@
   "environment": {"CARGO_BUILD_JOBS": "2"},
   "commands": [
     ["python3", "bench/ac/preloaded/test_preloaded.py"],
+    ["python3", "bench/ac/preloaded/test_preload_admission.py"],
     ["python3", "bench/ac/preloaded/test_preparation.py"],
     ["python3", "bench/ac/preloaded/test_campaign.py"],
     ["python3", "bench/ac/preloaded/test_native_analysis.py"],

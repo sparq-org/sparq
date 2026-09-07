@@ -255,26 +255,71 @@ def population(evidence, dataset, model, completion):
         'scope': 'Full retrieved inventory reconciled; source-side pack/index hash and index-entry validation recorded by the reviewed executor. Exact source-manifest bytes and native digest are rebound at startup; large payload archives are not copied locally for rehashing.'}
 
 
-def analyze_cell(evidence, campaign, metadata, declared, pop, scratch):
-    issues = []; label = declared.get('label'); directory = declared.get('directory')
-    result = {**metadata, 'execution_status': declared.get('status', 'unattempted'), 'valid_for_inference': False,
-              'local_guard': 'unmeasured', 'issues': [], 'requests': None, 'resources': None, 'preload': None}
-    if declared.get('status') == 'unattempted':
-        result['issues'] = ['cell-not-complete']; result['execution_error'] = declared.get('error')
-        return result
-    if declared.get('status') != 'complete': issues.append('cell-not-complete')
-    if not isinstance(directory, str) or not re.fullmatch(r'cell-[0-9]{5}', directory) or label != metadata['label']:
-        result.update(local_guard='inconclusive', issues=['recursive-cell-location-or-label-disagrees']); return result
-    prefix = directory + '/' + label
-    reported = evidence.document(prefix + '-summary.json') or {}
-    reconciliation = evidence.document(prefix + '-reconciliation.json') or {}
-    if declared.get('summary') != reported: issues.append('completion-summary-differs-from-cell-file')
+def runtime_issues(evidence, directory, campaign):
+    issues = []
     runtime = evidence.document(directory + '/preloaded-runtime.json') or {}
     for key in ('source_commit', 'binary_sha256'):
         if runtime.get(key) != campaign.get(key): issues.append('cell-runtime-binding-disagrees:' + key)
     if runtime.get('campaign_sha256') != campaign['_sha256']: issues.append('cell-campaign-hash-disagrees')
     for key, path in [('runner_sha256', 'bench/ac/preloaded/run-cell.py'), ('base_runner_sha256', 'bench/ac/million/run-campaign.py'), ('workload_sha256', 'bench/ac/million/workload.json')]:
         if not campaign['_source_bindings'].get(path) or runtime.get(key) != campaign['_source_bindings'][path]: issues.append('cell-runtime-source-disagrees:' + key)
+    return issues
+
+
+def admission_attempt(evidence, campaign, metadata, declared, pop, prefix, result):
+    issues = runtime_issues(evidence, declared['directory'], campaign)
+    record = evidence.document(prefix + '-preload-admission.json') or {}
+    terminal = evidence.document(prefix + '-preload-terminal.json')
+    boundary = evidence.document(prefix + '-startup-boundary.json') or {}
+    if record != declared.get('admission'): issues.append('completion-admission-record-disagrees')
+    if terminal != record.get('terminal_capture'): issues.append('terminal-cgroup-record-disagrees')
+    if record.get('population') != metadata['population'] or record.get('memory_max_bytes') != metadata['memory_gib'] * GIB or record.get('startup_timeout_seconds') != campaign['preloaded']['startup_timeout_seconds']:
+        issues.append('admission-population-limit-or-deadline-disagrees')
+    if record.get('archive_manifest') != pop.get('native_manifest'): issues.append('admission-archive-binding-disagrees')
+    if not pop['complete']: issues.append('complete-population-preparation-not-admitted')
+    try: RUNNER.CELL.ADMISSION.classify(record)
+    except (KeyError, TypeError, ValueError) as error: issues.append('unsubstantiated-admission-failure:' + str(error))
+    log = evidence.text(prefix + '-server.log')
+    if log is None or hashlib.sha256(log.encode()).hexdigest() != record.get('server_log_sha256'):
+        issues.append('admission-startup-log-binding-disagrees')
+    try:
+        rows = [json.loads(line) for line in (log or '').splitlines()]
+        RUNNER.CELL.ADMISSION.validate_records(rows, metadata['population'], 16, pop.get('native_manifest'))
+    except (KeyError, TypeError, ValueError) as error: issues.append('invalid-partial-startup-output:' + str(error))
+    if boundary.get('complete') is not False or boundary.get('unit') != record.get('unit') or boundary.get('cold_os_caches_before_launch') is not True or not OLD.numeric(boundary.get('elapsed_seconds')) or not OLD.numeric(record.get('startup_elapsed_seconds')) or boundary.get('elapsed_seconds', -1) < record.get('startup_elapsed_seconds', 0):
+        issues.append('failed-startup-boundary-not-bound')
+    for suffix in ('requests.jsonl', 'warmup.jsonl', 'audit.jsonl', 'summary.json'):
+        if evidence.locate(prefix + '-' + suffix) is not None: issues.append('workload-output-present-for-failed-admission:' + suffix)
+    events = list(evidence.rows(declared['directory'] + '/campaign-events.jsonl'))
+    matches = [row for row in events if row.get('record_type') == 'preload-admission-failed']
+    if len(matches) != 1 or any(matches[0].get(key) != record.get(key) for key in ('outcome', 'unit', 'population')) or matches[0].get('artifact') != Path(prefix).name + '-preload-admission.json':
+        issues.append('canonical-admission-event-disagrees')
+    result.update(local_guard='admission-failed' if not issues else 'inconclusive', issues=sorted(set(issues)),
+        valid_for_admission_inference=not issues, admission=record,
+        resources={'failure_snapshot': native_snapshot(record.get('resources')), 'terminal_cgroup': terminal,
+                   'physical_host': campaign['host'], 'server_memory_gib': metadata['memory_gib'],
+                   'scope': 'Startup and terminal collector counters only; no measured request-window deltas or paging inference. ExecStopPost adds a small collector process after the server exits.'},
+        preload={'complete': False, 'startup_boundary': boundary})
+    return result
+
+
+def analyze_cell(evidence, campaign, metadata, declared, pop, scratch):
+    issues = []; label = declared.get('label'); directory = declared.get('directory')
+    result = {**metadata, 'execution_status': declared.get('status', 'unattempted'), 'valid_for_inference': False,
+              'valid_for_admission_inference': False, 'local_guard': 'unmeasured', 'issues': [], 'requests': None, 'resources': None, 'preload': None}
+    if declared.get('status') == 'unattempted':
+        result['issues'] = ['cell-not-complete']; result['execution_error'] = declared.get('error')
+        return result
+    if declared.get('status') not in ('complete', 'admission-failed'): issues.append('cell-not-complete')
+    if not isinstance(directory, str) or not re.fullmatch(r'cell-[0-9]{5}', directory) or label != metadata['label']:
+        result.update(local_guard='inconclusive', issues=['recursive-cell-location-or-label-disagrees']); return result
+    prefix = directory + '/' + label
+    if declared.get('status') == 'admission-failed':
+        return admission_attempt(evidence, campaign, metadata, declared, pop, prefix, result)
+    reported = evidence.document(prefix + '-summary.json') or {}
+    reconciliation = evidence.document(prefix + '-reconciliation.json') or {}
+    if declared.get('summary') != reported: issues.append('completion-summary-differs-from-cell-file')
+    issues.extend(runtime_issues(evidence, directory, campaign))
     for key in ('dataset', 'group', 'memory_gib', 'cpus', 'rate_override', 'replicate', 'model', 'seed'):
         if reported.get(key) != metadata[key]: issues.append('runner-metadata-disagrees:' + key)
     for key in ('load_exit_code', 'warmup_exit_code', 'audit_exit_code'):
@@ -350,6 +395,8 @@ def analyze(root, review_path=None, scratch_root=None, source_root=ROOT):
     if completion.get('record_type') != 'native-preloaded-campaign-result' or completion.get('status') != 'complete': global_issues.append('whole-campaign-incomplete')
     if completion.get('cleanup_errors') or completion.get('finalization_error') or completion.get('error'): global_issues.append('campaign-cleanup-or-execution-error')
     if completion.get('source_quarantined') is not False: global_issues.append('source-quarantined-or-quarantine-status-missing')
+    if campaign.get('preloaded', {}).get('admission_outcomes_version') != 1 or any(campaign.get('stop_rules', {}).get(key) != value for key, value in RUNNER.STOP_BEHAVIOR.items()):
+        global_issues.append('frozen-preload-admission-stop-rules-missing-or-different')
     if evidence.manifest_status != 'verified': global_issues.append('final-manifest-not-verified')
     review = json.loads(Path(review_path).read_text()) if review_path else {}
     review_matches = all(review.get(key) == expected for key, expected in {
@@ -401,13 +448,17 @@ def analyze(root, review_path=None, scratch_root=None, source_root=ROOT):
             cells.append(cell)
             print(json.dumps({'record_type': 'native-analysis-progress', 'processed_cells': index + 1, 'total_cells': len(planned)}), flush=True)
     if evidence.errors or evidence.parse_errors: global_issues.append('artifact-integrity-or-decoding-error')
+    if any(row['execution_status'] == 'admission-failed' and not row.get('valid_for_admission_inference') for row in cells):
+        global_issues.append('unsupported-admission-continuation')
     for cell in cells:
         if any(row.get('record_type') == 'dataset-not-capacity-eligible' and row.get('dataset') == cell['dataset'] and row.get('model') in (None, cell['model']) for row in events):
             cell['valid_for_inference'] = False
+            cell['valid_for_admission_inference'] = False
             if cell['local_guard'] != 'unmeasured': cell['local_guard'] = 'inconclusive'
             cell['issues'] = sorted(set(cell['issues'] + ['canonical-dataset-exclusion']))
         if global_issues:
             cell['valid_for_inference'] = False
+            cell['valid_for_admission_inference'] = False
             if cell['local_guard'] != 'unmeasured': cell['local_guard'] = 'inconclusive'
             cell['issues'] = sorted(set(cell['issues'] + global_issues))
     margin = campaign.get('statistical_plan', {}).get('practical_equivalence_margin_ratio')
@@ -441,5 +492,6 @@ def analyze(root, review_path=None, scratch_root=None, source_root=ROOT):
         'analysis_sources_sha256': {str(path.relative_to(ROOT)): OLD.sha_file(path) for path in (Path(__file__), Path(__file__).with_name('run-campaign.py'), Path(__file__).with_name('run-cell.py'), ROOT / 'bench/ac/million/campaign_analysis.py')},
         'corpora': list(inventories.values()), 'sampled_authorization_correctness': authorization, 'cells': cells, 'paired_comparisons': pairs,
         'headline_eligible_cells': [row['label'] for row in cells if row['valid_for_inference']],
+        'admission_failure_cells': [row['label'] for row in cells if row.get('valid_for_admission_inference')],
         'full_service_million_history_admitted': False,
         'scope': 'Complete execution alone admits no capacity claim. Only fully checked, reviewed native cells can support scoped inferences; partial/rejected evidence remains descriptive. Network journeys and general all-service representativeness remain separate questions.'}

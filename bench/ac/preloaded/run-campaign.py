@@ -29,6 +29,7 @@ REQUIRED_BINDINGS = {
     'bench/ac/preloaded/protocol.json', 'bench/ac/million/campaign-20260906.json',
     'bench/ac/million/workload.json', 'bench/ac/million/corpus-calibration.json',
     'crates/sparq-acbench/src/population.rs', 'crates/sparq-acbench/src/population_ratings_cdf.json',
+    'bench/ac/preloaded/preload_admission.py',
 }
 STOP_BEHAVIOR = {
     'grid': 'complete-declared-grid',
@@ -36,6 +37,7 @@ STOP_BEHAVIOR = {
     'execution_error': 'stop-and-preserve-partial',
     'correctness_failure': 'quarantine-source-and-stop',
     'observed_guard_failure': 'continue-declared-grid',
+    'preload_admission_failure': 'continue-only-confirmed-local-oom-or-startup-timeout',
 }
 
 
@@ -67,6 +69,8 @@ def validate_campaign(spec, root=ROOT):
         raise ValueError('require a separately named frozen preloaded campaign')
     if spec['execution']['version'] != 1 or spec['execution']['data_mount'] != str(PREP.DATA) or spec['execution']['data1_allocated'] is not False:
         raise ValueError('unknown executor version or data allocation')
+    if spec['preloaded'].get('admission_outcomes_version') != 1:
+        raise ValueError('explicit typed preload admission outcomes required')
     for key, expected in STOP_BEHAVIOR.items():
         if spec['stop_rules'].get(key) != expected: raise ValueError(f'unsupported or missing frozen stop rule: {key}')
     if not REQUIRED_BINDINGS <= spec['bindings'].keys(): raise ValueError('required generator/workload/protocol source binding missing')
@@ -126,6 +130,8 @@ def validate_campaign(spec, root=ROOT):
         positive(execution[key], key)
     for key in ('startup_timeout_seconds', 'drain_timeout_seconds', 'cell_timeout_seconds'):
         positive(spec['preloaded'][key], key)
+    if spec['preloaded']['startup_timeout_seconds'] + 60 >= spec['preloaded']['cell_timeout_seconds']:
+        raise ValueError('startup deadline must leave bounded evidence/cleanup time before the cell runtime limit')
     for key in ('runtime_ceiling_seconds', 'disk_floor_bytes', 'result_disk_reserve_bytes', 'result_maximum_bytes', 'result_maximum_file_bytes'):
         positive(bounds[key], key)
     if bounds['runtime_ceiling_seconds'] > 43200 or bounds['disk_floor_bytes'] < 20 * PREP.GIB or bounds['result_disk_reserve_bytes'] < 2 * PREP.GIB:
@@ -220,14 +226,28 @@ class MainCell(CELL.PreloadedCell):
     def start_server(self, *args):
         self.owner.preparation.require_exclusive_jobs()
         started = time.monotonic()
-        unit = super().start_server(*args)
-        BASE.write_json(self.results / (args[-1] + '-startup-boundary.json'), {
-            'complete': True, 'elapsed_seconds': time.monotonic() - started,
-            'cold_os_caches_before_launch': True,
-            'boundary': 'After the inherited checked sync/drop_caches command and exclusive-job check, before systemd launch through coordinator archive hashing, all-worker preload, readiness observation and its resource capture; no HTTP workload yet.',
-            'unit': unit,
-        })
-        return unit
+        complete = False; unit = None
+        try:
+            unit = super().start_server(*args); complete = True
+            return unit
+        except CELL.ADMISSION.AdmissionFailure as error:
+            unit = error.record['unit']; raise
+        finally:
+            BASE.write_json(self.results / (args[-1] + '-startup-boundary.json'), {
+                'complete': complete, 'elapsed_seconds': time.monotonic() - started,
+                'cold_os_caches_before_launch': True,
+                'boundary': 'After the inherited checked sync/drop_caches command and exclusive-job check, before systemd launch through complete readiness/resource capture or failed admission capture and owned-unit cleanup; no HTTP workload yet.',
+                'unit': unit or self.current_server,
+            })
+
+    def admission_snapshot(self, unit):
+        try: return self.owner.preparation.snapshot(unit)
+        except ValueError as error:
+            # An exited unit's cgroup may already have been destroyed. Preserve
+            # the missing snapshot explicitly; its ExecStopPost record is the
+            # authoritative local OOM evidence, not an invented zero counter.
+            return {'systemd': self.owner.preparation.properties(unit), 'cgroup': {},
+                    'process': {}, 'errors': [str(error)]}
 
     def resource(self, unit, label):
         super().resource(unit, label)
@@ -241,14 +261,6 @@ class MainCell(CELL.PreloadedCell):
         except (ValueError, KeyError) as error:
             path = self.results / (label + '-resources.json')
             values = json.loads(path.read_text()); values['error'] = str(error); BASE.write_json(path, values)
-
-    def stop_server(self):
-        if self.current_server:
-            unit = self.current_server
-            subprocess.run(['sudo', 'systemctl', 'stop', unit], check=True, timeout=30)
-            subprocess.run(['sudo', 'systemctl', 'reset-failed', unit], capture_output=True, timeout=10)
-            self.current_server = None
-
 
 class Campaign:
     def __init__(self, args, spec, planned):
@@ -342,11 +354,18 @@ class Campaign:
                 with (corpus / 'preloaded-cell.lock').open('a') as lock:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     self.preparation.require_exclusive_jobs()
-                    with PREP.bounded_inspection(min(self.spec['preloaded']['cell_timeout_seconds'], self.remaining())):
-                        row['summary'] = cell.cell(dataset, corpus, row['selection']['model'], group, row['selection']['memory_gib'], 16, rate, row['selection']['replicate'])
+                    try:
+                        with PREP.bounded_inspection(min(self.spec['preloaded']['cell_timeout_seconds'], self.remaining())):
+                            row['summary'] = cell.cell(dataset, corpus, row['selection']['model'], group, row['selection']['memory_gib'], 16, rate, row['selection']['replicate'])
+                    except CELL.ADMISSION.AdmissionFailure as failure:
+                        CELL.ADMISSION.classify(failure.record)
+                        row['admission'] = failure.record
                     cell.stop_server(); self.active_cell = None
-                if row['summary'].get('dataset_quarantined') or not row['summary']['correctness_passed']: raise RuntimeError('unverified mutation state; source retained and campaign stopped')
-                row['status'] = 'complete'
+                if 'admission' in row:
+                    row['status'] = 'admission-failed'
+                else:
+                    if row['summary'].get('dataset_quarantined') or not row['summary']['correctness_passed']: raise RuntimeError('unverified mutation state; source retained and campaign stopped')
+                    row['status'] = 'complete'
                 self.active_selection = None
                 print(json.dumps({'record_type': 'preloaded-campaign-progress', 'completed_cells': index + 1, 'total_cells': len(self.cells)}), flush=True)
             status = 'complete'

@@ -230,6 +230,12 @@ the original cached server path. Every repetition retains preloaded state,
 complete request schedules, drain accounting and native offline receipt audits.
 Partial execution and unattempted populations/cells remain explicit in the
 source-bound result rather than being counted as successful capacity evidence.
+With `preloaded.admission_outcomes_version: 1`, the frozen
+`preload_admission_failure` stop rule permits only confirmed local OOM and live
+startup-deadline failures to continue the declared memory grid after checked unit
+cleanup. `ExecStopPost` preserves local cgroup counters; missing/failed capture,
+unknown exits and integrity/readiness errors remain stopping errors. These are
+`admission-failed` attempts with no warmup or request workload, never percentiles.
 
 `bench/ac/preloaded/analyze-campaign.py` independently reads that recursive native
 result format. Its separate `native-preloaded-campaign-independent-accounting`
@@ -239,6 +245,9 @@ existing complete-offered response/mutation validators before headline eligibili
 It keeps partial/rejected evidence descriptive and does not fall back to the
 earlier cached analysis. The reference documents resource/paging fields and the
 optional prospectively frozen practical-equivalence margin.
+Failed startup attempts have a separate `valid_for_admission_inference` field and
+`admission_failure_cells` list. Their request metrics stay null and they cannot
+enter latency headline cells; unsupported continuation invalidates the campaign.
 
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and

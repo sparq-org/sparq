@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location('population_campaign', ROOT / 'bench/ac/million/run-campaign.py')
 BASE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BASE)
+SPEC = importlib.util.spec_from_file_location('preload_admission', Path(__file__).with_name('preload_admission.py'))
+ADMISSION = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ADMISSION)
 
 
 def selected_cell(args, spec):
@@ -136,18 +139,28 @@ class PreloadedCell(BASE.Campaign):
             '--workers', str(cpus), '--storage-mode', mode, '--control-token-file', str(self.control_file),
             '--max-pod-bytes', str(group['max_pod_bytes']),
             '--queue-capacity', str(self.measurement['queue_capacity_per_worker'])]
+        admission_enabled = self.preloaded.get('admission_outcomes_version') == 1
+        terminal = self.results / f'{label}-preload-terminal.json'
+        if admission_enabled:
+            # systemd interprets quoted Exec* arguments (including % specifiers).
+            quoted = lambda value: json.dumps(str(value)).replace('%', '%%')
+            hook = '/usr/bin/python3 ' + quoted(Path(__file__).with_name('preload_admission.py')) + ' --capture ' + quoted(terminal) + ' --unit ' + unit
+            command.insert(command.index('taskset'), '--property=ExecStopPost=' + hook)
         if 'cell_timeout_seconds' in self.preloaded:
             command.insert(command.index('taskset'),
                            '--property=RuntimeMaxSec=' + str(self.preloaded['cell_timeout_seconds']))
-        subprocess.run(command, check=True)
-        deadline = time.monotonic() + self.preloaded['startup_timeout_seconds']
+        started = time.monotonic()
+        subprocess.run(command, check=True, timeout=15)
+        deadline = started + self.preloaded['startup_timeout_seconds']
+        records = []
         while time.monotonic() < deadline:
             self.guard()
             records = []
             if log.exists():
                 for line in log.read_text().splitlines():
                     try: records.append(json.loads(line))
-                    except json.JSONDecodeError: pass
+                    except json.JSONDecodeError:
+                        if admission_enabled: raise ValueError('non-JSON startup output; not a classified resource outcome')
             ready = [r for r in records if r.get('record_type') == 'all-population-ready']
             listening = any(r.get('record_type') == 'server-ready' for r in records)
             if ready and listening:
@@ -158,11 +171,76 @@ class PreloadedCell(BASE.Campaign):
                 return unit
             active = subprocess.run(['sudo', 'systemctl', 'is-active', unit], capture_output=True, text=True).stdout.strip()
             if active in ('failed', 'inactive'):
+                if admission_enabled:
+                    self.admission_failure('memory-limit', corpus, unit, label, memory, started, records)
                 super().resource(unit, label + '-preload-failed')
                 raise RuntimeError('preload process exited before complete readiness')
             time.sleep(.5)
+        if admission_enabled:
+            self.guard()  # A campaign/global deadline is never a cell admission outcome.
+            self.admission_failure('startup-timeout', corpus, unit, label, memory, started, records)
         super().resource(unit, label + '-preload-timeout')
         raise TimeoutError('complete population preload exceeded its declared deadline')
+
+    def admission_snapshot(self, unit):
+        output = subprocess.check_output(['sudo', 'systemctl', 'show', unit,
+            '--property=ActiveState,SubState,Result,MainPID,ControlGroup,MemoryPeak,ExecMainStatus,ExecMainCode'], text=True, timeout=10)
+        properties = dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
+        result = {'systemd': properties, 'cgroup': {}, 'process': {}, 'errors': []}
+        try:
+            group = self.cgroup(unit)
+            for name in ('memory.max', 'memory.swap.max', 'memory.events', 'memory.stat', 'memory.peak', 'memory.current', 'cpu.stat', 'io.stat'):
+                result['cgroup'][name] = (group / name).read_text()
+        except OSError as error: result['errors'].append(str(error))
+        return result
+
+    def admission_failure(self, outcome, corpus, unit, label, memory, started, records):
+        """MainCell supplies full snapshots and checked cleanup; legacy cells opt out."""
+        native = json.loads((corpus / 'pods.native-manifest.json').read_text())
+        ADMISSION.validate_records(records, self.population, self.workers, native)
+        ready = any(row.get('record_type') in ('all-population-ready', 'server-ready') for row in records)
+        verifications = [row for row in records if row.get('record_type') == 'native-archive-verified']
+        if len(verifications) > 1 or any(row.get('manifest') != native for row in verifications):
+            raise ValueError('startup archive identity disagrees; resource classification forbidden')
+        record = {'record_type': 'preload-admission-outcome', 'version': 1, 'outcome': outcome,
+            'unit': unit, 'population': self.population, 'storage_mode': self.mode,
+            'memory_max_bytes': memory * 1024**3, 'startup_timeout_seconds': self.preloaded['startup_timeout_seconds'],
+            'startup_elapsed_seconds': time.monotonic() - started, 'ready_observed': ready,
+            'timed_load_started': False, 'warmup_started': False, 'archive_manifest': native,
+            'resources': self.admission_snapshot(unit), 'terminal_capture': None,
+            'cleanup': {'unit': unit, 'stopped': False},
+            'scope': 'Completed negative startup attempt only; no admitted population, offered requests, latency or capacity percentile.'}
+        path = self.results / f'{label}-preload-admission.json'
+        BASE.write_json(path, record)
+        # The owned unit must be inactive, and ExecStopPost must finish, before
+        # evidence is classified or the next memory tier can begin.
+        record['cleanup'] = self.stop_server()
+        terminal = self.results / f'{label}-preload-terminal.json'
+        if terminal.exists(): record['terminal_capture'] = json.loads(terminal.read_text())
+        # Re-read after process termination; late errors/readiness must not be
+        # hidden by the last poll made while the process was still running.
+        log = self.results / f'{label}-server.log'
+        record['server_log_sha256'] = BASE.sha(log)
+        BASE.write_json(path, record)
+        final_records = [json.loads(line) for line in log.read_text().splitlines()]
+        ADMISSION.validate_records(final_records, self.population, self.workers, native)
+        ADMISSION.classify(record)
+        self.event({'record_type': 'preload-admission-failed', 'outcome': outcome, 'unit': unit,
+                    'population': self.population, 'artifact': path.name})
+        raise ADMISSION.AdmissionFailure(record)
+
+    def stop_server(self):
+        if not self.current_server: return None
+        unit = self.current_server
+        subprocess.run(['sudo', 'systemctl', 'stop', unit], check=True, timeout=30)
+        observed = subprocess.run(['sudo', 'systemctl', 'show', unit, '--property=LoadState,ActiveState'], capture_output=True, text=True, timeout=10)
+        properties = dict(line.split('=', 1) for line in observed.stdout.splitlines() if '=' in line)
+        state = properties.get('ActiveState')
+        if state not in ('failed', 'inactive') or (observed.returncode and properties.get('LoadState') != 'not-found'):
+            raise RuntimeError('owned preload unit did not confirm inactive cleanup')
+        subprocess.run(['sudo', 'systemctl', 'reset-failed', unit], capture_output=True, timeout=10)
+        self.current_server = None
+        return {'unit': unit, 'stopped': True, 'active_state': state, 'load_state': properties.get('LoadState')}
 
     def resource(self, unit, label):
         if label.endswith(('-before', '-after')):
