@@ -333,6 +333,7 @@ class Campaign:
                     cell.stop_server(); self.active_cell = None
                 if row['summary'].get('dataset_quarantined') or not row['summary']['correctness_passed']: raise RuntimeError('unverified mutation state; source retained and campaign stopped')
                 row['status'] = 'complete'
+                self.active_selection = None
                 print(json.dumps({'record_type': 'preloaded-campaign-progress', 'completed_cells': index + 1, 'total_cells': len(self.cells)}), flush=True)
             status = 'complete'
         except BaseException as failure:
