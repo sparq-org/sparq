@@ -56,6 +56,25 @@ warnings are errors. Benchmark and arbitrary shell command dispatch are rejected
 Conformance and performance executables invoked through `cargo run` remain PR-CI
 gates; this host's narrower dispatch is not a replacement for the full merge gate.
 
+Every submitted descriptor now includes an explicit `expected_failure` boolean. The
+submitter defaults it to false; use `--expected-failure` only for a deliberate negative
+control. Such jobs use an empty `negative-targets/<job-id>` namespace, removed after
+success, failure or extraction error. They never share compiled outputs with normal
+jobs. Their raw command status remains unchanged; `expectation_matched` records only
+whether a command failed as requested, not whether the intended assertion caused it.
+Inspect the retained log to establish that mutation witness.
+
+After archive extraction and before any command, all regular source files receive one
+recorded timestamp newer than every existing artifact in their selected target. This
+prevents historical `git archive` timestamps from making a different source revision
+look fresh to Cargo. Source bytes remain unchanged. Normal jobs therefore rebuild
+first-party inputs while registry dependency artifacts may remain cached. Target/build
+directories are fixed by the runner; command-line cache overrides are rejected, and
+incremental compilation and external rustc wrappers are disabled. Result and admission
+records include the normalization epoch, previous artifact timestamp, runner source
+revision/hash, target namespace and cleanup policy. Cargo's documented target/build
+directory controls are described in the [Cargo Book](https://doc.rust-lang.org/cargo/reference/build-cache.html).
+
 Each completed job publishes its command log hashes, source identity, lockfile and
 toolchain hashes, command outcomes and stop reason. A passed build is functional
 evidence only. The collector retrieves these small results, not the shared Cargo

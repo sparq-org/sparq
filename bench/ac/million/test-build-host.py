@@ -32,7 +32,7 @@ launcher_tests = load("test-launcher")
 class BuildHostTests(unittest.TestCase):
     def job(self):
         return dict(id="test-job", source_commit="a" * 40, archive_sha256="b" * 64,
-                    timeout_seconds=60, commands=[["cargo", "test", "--locked", "-p", "sparq-core"]])
+                    timeout_seconds=60, expected_failure=False, commands=[["cargo", "test", "--locked", "-p", "sparq-core"]])
 
     def test_jobs_require_source_identity_bounded_time_and_build_commands(self):
         jobs.validate_job(self.job())
@@ -46,6 +46,63 @@ class BuildHostTests(unittest.TestCase):
                 jobs.validate_job(dict(self.job(), commands=[argv]))
         with self.assertRaises(ValueError):
             jobs.validate_job(dict(self.job(), id="../escape"))
+
+    def test_expected_failure_is_explicit_and_cannot_override_target_policy(self):
+        for value in (None, 0, 1, 'true'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                jobs.validate_job(dict(self.job(), expected_failure=value))
+        missing = self.job(); missing.pop('expected_failure')
+        with self.assertRaises(ValueError): jobs.validate_job(missing)
+        for argv in (['cargo', 'test', '--locked', '--target-dir=/tmp/escape'],
+                     ['cargo', 'test', '--locked', '--config', 'build.target-dir="/tmp/escape"']):
+            with self.assertRaises(ValueError): jobs.validate_job(dict(self.job(), commands=[argv]))
+
+    def test_historical_source_mtimes_become_newer_than_shared_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / 'source'; target = root / 'target'
+            source.mkdir(); target.mkdir()
+            first_party = source / 'lib.rs'; first_party.write_text('historical source fixture')
+            artifact = target / 'test-binary'; artifact.write_text('previous build fixture')
+            old = time.time_ns() - 5_000_000_000
+            os.utime(first_party, ns=(1_000_000_000, 1_000_000_000))
+            os.utime(artifact, ns=(old, old))
+            receipt = jobs.normalize_source_mtimes(source, target)
+            self.assertEqual(receipt['previous_target_max_mtime_ns'], old)
+            self.assertEqual(first_party.stat().st_mtime_ns, receipt['epoch_ns'])
+            self.assertGreater(first_party.stat().st_mtime_ns, artifact.stat().st_mtime_ns)
+            self.assertEqual(first_party.read_text(), 'historical source fixture')
+            self.assertEqual(artifact.stat().st_mtime_ns, old)
+
+    def test_negative_target_is_separate_and_removed_after_real_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); base = root / 'host'; results = root / 'results'; fixture = root / 'fixture'
+            (base / 'inbox').mkdir(parents=True); (base / 'target').mkdir(); results.mkdir(); fixture.mkdir()
+            normal = base / 'target' / 'binary'; normal.write_text('normal sentinel')
+            for name in ('Cargo.lock', 'rust-toolchain.toml'):
+                (fixture / name).write_text('fixture')
+            (fixture / 'test_fixture.py').write_text(
+                "import os,pathlib,sys\np=pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n"
+                "assert os.environ['CARGO_BUILD_BUILD_DIR']==str(p)\n"
+                "assert os.environ['CARGO_INCREMENTAL']=='0'\n"
+                "p.mkdir(parents=True)\n(p/'binary').write_text('intentional mutant')\nsys.exit(1)\n")
+            archive = base / 'inbox' / 'test-job.tar.gz'
+            with tarfile.open(archive, 'w:gz') as stream:
+                for path in fixture.iterdir():
+                    info = stream.gettarinfo(path, arcname=path.name); info.mtime = 1
+                    with path.open('rb') as content: stream.addfile(info, content)
+            job = dict(self.job(), expected_failure=True, archive_sha256=jobs.digest(archive), commands=[['python3','test_fixture.py']])
+            sleep = time.sleep
+            with patch.object(jobs, 'BASE', base), patch.object(jobs, 'RESULTS', results), \
+                 patch.object(jobs.shutil, 'disk_usage', return_value=SimpleNamespace(free=100*jobs.GIB)), \
+                 patch.object(jobs.time, 'sleep', side_effect=lambda _: sleep(.01)):
+                result = jobs.run_job(job, time.time()+1800)
+            self.assertEqual(result['status'], 'command-failed')
+            self.assertTrue(result['expectation_matched'])
+            self.assertEqual(result['target_policy']['namespace'], 'per-job-negative-control')
+            self.assertFalse((base / 'negative-targets' / 'test-job').exists())
+            self.assertEqual(normal.read_text(), 'normal sentinel')
+            self.assertGreater(result['source_mtime_normalization']['epoch_ns'], 1_000_000_000)
+            self.assertEqual(result['runner_sha256'], jobs.digest(Path(jobs.__file__)))
 
     def test_low_disk_prevents_source_extraction_or_process_start(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(jobs, "BASE", Path(directory)), \
@@ -89,7 +146,8 @@ class BuildHostTests(unittest.TestCase):
             archive = base / "inbox" / "test-job.tar.gz"
             with tarfile.open(archive, "w:gz") as stream:
                 for path in fixture.iterdir():
-                    stream.add(path, arcname=path.name)
+                    info = stream.gettarinfo(path, arcname=path.name); info.mtime = 1
+                    with path.open("rb") as content: stream.addfile(info, content)
             job = dict(self.job(), archive_sha256=jobs.digest(archive), commands=[["python3", "test_fixture.py"]])
             sleep = time.sleep
             with patch.object(jobs, "BASE", base), patch.object(jobs, "RESULTS", results), \
@@ -97,6 +155,9 @@ class BuildHostTests(unittest.TestCase):
                  patch.object(jobs.time, "sleep", side_effect=lambda _: sleep(.01)):
                 result = jobs.run_job(job, time.time() + 1800)
             self.assertEqual(result["status"], "passed")
+            self.assertEqual(result["target_policy"]["namespace"], "shared-normal")
+            self.assertGreater(result["source_mtime_normalization"]["epoch_ns"], 1_000_000_000)
+            self.assertEqual(result["source_mtime_normalization"]["regular_files"], 3)
             self.assertEqual(result["source_commit"], job["source_commit"])
             self.assertEqual(result["commands_run"][0]["sha256"], jobs.digest(results / "test-job-0.log"))
             self.assertEqual(result["build_environment"]["RUSTDOCFLAGS"], "-D warnings")
@@ -121,7 +182,7 @@ class BuildHostTests(unittest.TestCase):
                     archive.write_bytes(b"synthetic archive fixture")
             with patch.object(jobs.subprocess, "check_output", side_effect=[b"", captured + "\n"]), \
                  patch.object(jobs.subprocess, "run", side_effect=run), patch("builtins.print"):
-                jobs.submit(SimpleNamespace(host=host, source=root, id="snapshot-fixture", timeout=60, commands=commands))
+                jobs.submit(SimpleNamespace(host=host, source=root, id="snapshot-fixture", timeout=60, commands=commands, expected_failure=False))
             self.assertEqual(sum(argv[:2] == ["git", "archive"] for argv in calls), 1)
             submitted = json.loads((root / "submitted" / "snapshot-fixture" / "snapshot-fixture.json").read_text())
             self.assertEqual(submitted["source_commit"], captured)
