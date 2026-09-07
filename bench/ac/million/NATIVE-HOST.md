@@ -71,7 +71,7 @@ The per-cell runner owns these operations and the warmup/measurement drain barri
 Write small evidence under `/var/tmp/sparq-pod-study`, with separate cell directories.
 The ready monitor checks a 2 GiB total / 512 MiB per-file evidence bound. The native
 receiver independently validates a bounded file list, limits streamed bytes, includes
-replacement scratch in its 2 GiB aggregate ceiling, and retains 2 GiB local free-space
+replacement scratch in its 2 GiB aggregate ceiling for receiver-owned evidence, and retains 2 GiB local free-space
 headroom. It cannot receive native archives or unselected files. Each transfer has a
 five-minute deadline. Final retrieval selects only published manifest entries and
 terminal markers; live snapshots remain provisional. The final recursive manifest covers retrieved evidence;
@@ -96,3 +96,13 @@ Original files remain on the host for diagnosis. These immutable snapshots retai
 available evidence without making incomplete runs valid or calling live files closed.
 The receiver retrieves only this failure manifest's entries, so an oversized or unsafe
 original cannot defeat the receiver's limits.
+
+The receiver records the checksum of each file it owns. When a terminal manifest
+arrives, it reuses identical owned files under their final snapshot paths and removes
+only unchanged owned provisional copies superseded by that manifest. Retired paths
+and checksums are recorded locally. Files created or modified locally are never
+removed or overwritten by this reconciliation. Thus failure snapshots do not double
+the space used by previous live pulls. Local source/configuration/cost files and the
+small receiver audit records are outside the evidence ceiling; filesystem headroom
+checks account for their actual disk use. Final files are checked against the terminal
+manifest before installation as well as by the launcher's final manifest verification.
