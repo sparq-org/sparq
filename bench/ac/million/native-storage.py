@@ -31,7 +31,7 @@ def plan(topology, signatures):
             raise ValueError('device size differs from the r7gd.12xlarge disk layout')
         if disk.get('children') or disk.get('fstype') or any(disk.get('mountpoints') or []):
             raise ValueError('instance-store disk is partitioned, formatted or mounted')
-        if signatures[name].get('signatures'):
+        if type(signatures[name].get('signatures')) is not list or signatures[name]['signatures'] != []:
             raise ValueError('instance-store disk has an existing signature')
         selected.append(disk)
     if len(selected) != 2 or len({d['path'] for d in selected}) != 2 or len({d['serial'] for d in selected}) != 2:

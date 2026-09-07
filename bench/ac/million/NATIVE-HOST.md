@@ -69,8 +69,12 @@ is not proof that every pinned page is absent ([drop_caches](https://docs.kernel
 The per-cell runner owns these operations and the warmup/measurement drain barriers.
 
 Write small evidence under `/var/tmp/sparq-pod-study`, with separate cell directories.
-The ready monitor checks a 2 GiB total / 512 MiB per-file evidence bound and excludes
-native archives from collection. The final recursive manifest covers retrieved evidence;
+The ready monitor checks a 2 GiB total / 512 MiB per-file evidence bound. The native
+receiver independently validates a bounded file list, limits streamed bytes, includes
+replacement scratch in its 2 GiB aggregate ceiling, and retains 2 GiB local free-space
+headroom. It cannot receive native archives or unselected files. Each transfer has a
+five-minute deadline. Final retrieval selects only published manifest entries and
+terminal markers; live snapshots remain provisional. The final recursive manifest covers retrieved evidence;
 large native/packed corpora and build targets stay on NVMe and are not retrieved.
 
 After all job and worker services stop, atomically upload
@@ -83,3 +87,12 @@ If no experiment was run, use `status: not-run` and a nonempty `reason` instead;
 records an explicit cancellation, not a successful benchmark. Launcher cleanup then
 terminates the host. Neither `DONE` nor a matching manifest establishes an SLO pass;
 that decision belongs to the source-bound benchmark analysis.
+
+If evidence validation fails, finalization does not repeat that failed validation.
+It instead copies a bounded set of stable diagnostic snapshots into a separate
+`failure-evidence-*` directory, records excluded or changing files in
+`failure-evidence.json`, publishes a manifest of the copied bytes, and creates `FAILED`.
+Original files remain on the host for diagnosis. These immutable snapshots retain
+available evidence without making incomplete runs valid or calling live files closed.
+The receiver retrieves only this failure manifest's entries, so an oversized or unsafe
+original cannot defeat the receiver's limits.

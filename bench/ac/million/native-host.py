@@ -3,8 +3,10 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 import subprocess
 import time
 
@@ -76,6 +78,72 @@ def finalize(marker):
     (RESULTS / marker).touch()
 
 
+def finalize_failure(error):
+    """Publish bounded immutable diagnostic snapshots without re-running a failed gate."""
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    (RESULTS / 'failure-detail.txt').write_text(str(error)[:4096] + '\n')
+    (RESULTS / 'finished-at.txt').write_text(time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()) + '\n')
+    candidates = []
+    exclusions = []
+    for directory, dirs, files in os.walk(RESULTS, followlinks=False):
+        for d in dirs:
+            if (Path(directory) / d).is_symlink():
+                exclusions.append(dict(path=str((Path(directory) / d).relative_to(RESULTS)), reason='symlink directory excluded'))
+        dirs[:] = [d for d in dirs if not d.startswith('failure-evidence-') and not (Path(directory) / d).is_symlink()]
+        for name in files:
+            path = Path(directory) / name
+            if str(path.relative_to(RESULTS)) in {'READY', 'DONE', 'FAILED', 'MANIFEST.sha256', 'MANIFEST.tmp', 'failure-detail.txt', 'finished-at.txt'}:
+                continue
+            candidates.append(path)
+            if len(candidates) >= 10000:
+                exclusions.append(dict(path='remaining entries', reason='10000-entry diagnostic bound'))
+                break
+        if len(candidates) >= 10000:
+            break
+    snapshots = Path(tempfile.mkdtemp(prefix='failure-evidence-', dir=RESULTS))
+    admitted = []
+    used = 0
+    # Keep small structured evidence before potentially large request streams.
+    candidates.sort(key=lambda p: (p.suffix != '.json', str(p)))
+    for source in candidates:
+        relative = str(source.relative_to(RESULTS))
+        destination = snapshots / relative
+        try:
+            if source.is_symlink() or not source.is_file() or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,400}', relative):
+                raise ValueError('unsafe or unsupported diagnostic path')
+            before = source.stat()
+            if source.suffix in {'.native', '.spqa', '.bundle'} or before.st_size > 512 * 1024**2:
+                raise ValueError('payload or oversized diagnostic excluded')
+            if used + before.st_size > MAX_EVIDENCE_BYTES - 16 * 1024**2:
+                raise ValueError('aggregate diagnostic bound')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with source.open('rb') as inp, destination.open('xb') as out:
+                remaining = before.st_size
+                while remaining:
+                    block = inp.read(min(1024**2, remaining))
+                    if not block:
+                        raise ValueError('source became shorter while snapshotting')
+                    out.write(block); remaining -= len(block)
+            after = source.stat()
+            if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
+                raise ValueError('source changed while snapshotting')
+            admitted.append(destination)
+            used += before.st_size
+        except (OSError, ValueError) as failure:
+            destination.unlink(missing_ok=True)
+            exclusions.append(dict(path=relative[:401], reason=str(failure)[:512]))
+    report = RESULTS / 'failure-evidence.json'
+    report.write_text(json.dumps(dict(scope='immutable diagnostic snapshots; benchmark admission remains independent',
+        bytes=used, snapshots=len(admitted), exclusions=exclusions), indent=2) + '\n')
+    admitted += [report, RESULTS / 'failure-detail.txt', RESULTS / 'finished-at.txt']
+    rows = [f'{digest(p)}  {p.relative_to(RESULTS)}\n' for p in admitted]
+    (RESULTS / 'MANIFEST.tmp').write_text(''.join(rows))
+    (RESULTS / 'MANIFEST.tmp').replace(RESULTS / 'MANIFEST.sha256')
+    (RESULTS / 'READY').unlink(missing_ok=True)
+    (RESULTS / 'DONE').unlink(missing_ok=True)
+    (RESULTS / 'FAILED').touch()
+
+
 def serve(deadline):
     RESULTS.mkdir(parents=True, exist_ok=True)
     CONTROL.mkdir(exist_ok=True)
@@ -117,7 +185,5 @@ if __name__ == '__main__':
     try:
         serve(args.deadline)
     except Exception as error:
-        RESULTS.mkdir(parents=True, exist_ok=True)
-        (RESULTS / 'failure-detail.txt').write_text(str(error) + '\n')
-        finalize('FAILED')
+        finalize_failure(error)
         raise

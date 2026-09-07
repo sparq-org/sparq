@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """[GPT-6] Hermetic native-host safety checks. No AWS or real block devices."""
+import io
+import tarfile
+from types import SimpleNamespace
 from decimal import Decimal
 import importlib.util
 import json
@@ -18,7 +21,7 @@ def load(name):
     spec.loader.exec_module(module)
     return module
 
-storage, host, cost = (load(name) for name in ('native-storage', 'native-host', 'native-cost'))
+storage, host, cost, retrieval = (load(name) for name in ('native-storage', 'native-host', 'native-cost', 'native-retrieve'))
 
 
 def disk(number, **changes):
@@ -59,6 +62,17 @@ class NativeHostTests(unittest.TestCase):
                 with self.assertRaises(ValueError): storage.prepare(root / 'receipt.json')
                 run.assert_not_called()
 
+    def test_ambiguous_wipefs_output_never_formats_a_device(self):
+        for invalid in ({}, {'signatures':None}, {'signatures':False}, {'signatures':0}, {'signatures':{}}, {'signatures':''}):
+            with self.subTest(output=invalid), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory)
+                with patch.object(storage,'MOUNT',root/'mount'), patch.object(storage.os,'geteuid',return_value=0), \
+                     patch.object(storage,'snapshot',return_value=topology()), \
+                     patch.object(storage,'command',side_effect=[json.dumps({'signatures':[]}),json.dumps(invalid)]), \
+                     patch.object(storage.subprocess,'run') as run:
+                    with self.assertRaises(ValueError): storage.prepare(root/'receipt.json')
+                    run.assert_not_called()
+
     def test_success_formats_only_validated_devices_and_second_invocation_rejects(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -89,6 +103,37 @@ class NativeHostTests(unittest.TestCase):
                 env=dict(os.environ, SPARQ_POD_PRIOR_AWS_USD='25', **changes), capture_output=True, text=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn('orphan check', result.stderr)
+
+    def test_native_supervisor_requires_exact_token_and_confirms_termination(self):
+        for mode in ('match','wrong-tag','invalid-token'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory); commands=root/'bin';commands.mkdir()
+                token='sparq-pod-native-20260907T000000Z-123'
+                (root/'instance-id.txt').write_text('i-1234')
+                (root/'study-run-token.txt').write_text(token if mode!='invalid-token' else token+'-extra')
+                (root/'price-checked-at.txt').write_text('2000-01-01T00:00:00Z')
+                (root/'watchdog-seconds.txt').write_text('60')
+                (commands/'sleep').write_text('#!/bin/bash\nexit 0\n');(commands/'sleep').chmod(0o755)
+                (commands/'aws').write_text(r'''#!/bin/bash
+printf '%s\n' "$*" >> "$FIXTURE/trace"
+[[ "$*" == *'--instance-ids i-1234'* ]] || exit 9
+if [[ "$*" == *describe-instances* ]]; then
+  [[ "$*" == *"Name=tag:study-run,Values=$EXPECTED_TOKEN"* ]] || exit 9
+  [[ "$*" == *'Name=tag:purpose,Values=sparq-bench'* ]] || exit 9
+  if [[ "$TEST_MODE" == wrong-tag ]]; then printf 'None\n'
+  elif [[ -e "$FIXTURE/terminated" ]]; then printf 'terminated\n'
+  else printf 'running\n'; fi
+elif [[ "$*" == *terminate-instances* ]]; then touch "$FIXTURE/terminated"; printf 'shutting-down\n'
+else exit 9; fi
+''')
+                (commands/'aws').chmod(0o755)
+                result=subprocess.run(['/bin/bash',str(HERE/'supervise-instance.sh'),str(root)],
+                    env=dict(os.environ,PATH=str(commands)+':'+os.environ['PATH'],FIXTURE=str(root),EXPECTED_TOKEN=token,TEST_MODE=mode),
+                    capture_output=True,text=True,timeout=5)
+                self.assertEqual(result.returncode==0,mode=='match',result.stderr)
+                self.assertEqual((root/'terminated').exists(),mode=='match')
+                if mode=='match': self.assertIn('supervisor-complete',result.stdout)
+                if mode=='invalid-token': self.assertFalse((root/'trace').exists())
 
     def test_native_price_keeps_one_prior_reserve_and_fails_over_total_budget(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,6 +173,50 @@ class NativeHostTests(unittest.TestCase):
             campaign.write_text('{"status":"unfrozen"}'); receipt['campaign_sha256'] = host.digest(campaign)
             with patch.object(host.subprocess, 'check_output', side_effect=['a'*40, b'']):
                 with self.assertRaisesRegex(ValueError, 'frozen'): host.receipt_identity(receipt)
+
+    def test_failure_manifest_survives_invalid_and_oversized_evidence(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(host,'RESULTS',Path(directory)):
+            root=Path(directory);(root/'READY').touch();(root/'result.json').write_text('{"closed":true}')
+            with (root/'oversized.log').open('wb') as out: out.truncate(513*1024**2)
+            (root/'link').symlink_to(root/'result.json')
+            with self.assertRaises(ValueError): host.evidence_files()
+            host.finalize_failure(ValueError('fixture evidence validation failed'))
+            self.assertTrue((root/'FAILED').exists());self.assertFalse((root/'READY').exists())
+            entries=(root/'MANIFEST.sha256').read_text().splitlines()
+            self.assertTrue(any('/result.json' in row for row in entries))
+            self.assertFalse(any('oversized.log' in row for row in entries))
+            for row in entries:
+                checksum,name=row.split('  ',1);self.assertEqual(checksum,host.digest(root/name))
+            excluded=json.loads((root/'failure-evidence.json').read_text())['exclusions']
+            self.assertEqual({r['path'] for r in excluded},{'oversized.log','link'})
+
+    def test_receiver_enforces_aggregate_and_free_space_before_transfer(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(retrieval,'MAX_TOTAL',300), \
+             patch.object(retrieval,'MAX_FILE',200), patch.object(retrieval,'HEADROOM',100):
+            root=Path(directory)
+            rows=[dict(path='a.json',size=100,mtime_ns=1)]
+            self.assertEqual(retrieval.plan(rows,root,500),rows)
+            with self.assertRaisesRegex(ValueError,'headroom'): retrieval.plan(rows,root,150)
+            with self.assertRaisesRegex(ValueError,'aggregate'):
+                retrieval.plan(rows+[dict(path='b.json',size=200,mtime_ns=1)],root,1000)
+            with self.assertRaises(ValueError): retrieval.plan([dict(path='../escape',size=1,mtime_ns=1)],root,1000)
+            with self.assertRaises(ValueError): retrieval.plan(rows+rows,root,1000)
+
+    def test_receiver_copies_only_the_declared_files_and_rejects_size_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); rows=[dict(path='cell/result.json',size=2,mtime_ns=1000000000)]
+            def stream(size):
+                data=io.BytesIO()
+                with tarfile.open(fileobj=data,mode='w') as archive:
+                    info=tarfile.TarInfo('cell/result.json');info.size=size
+                    archive.addfile(info,io.BytesIO(b'{}x'[:size]))
+                data.seek(0);return data
+            with patch.object(retrieval.shutil,'disk_usage',return_value=SimpleNamespace(free=10*1024**3)):
+                retrieval.receive(SimpleNamespace(stdout=stream(2)),rows,root)
+                self.assertEqual((root/'cell/result.json').read_bytes(),b'{}')
+                with self.assertRaisesRegex(ValueError,'validated file list'):
+                    retrieval.receive(SimpleNamespace(stdout=stream(3)),rows,root)
+                self.assertEqual((root/'cell/result.json').read_bytes(),b'{}')
 
     def test_nested_manifest_is_complete_and_native_payload_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(host, 'RESULTS', Path(directory)):
