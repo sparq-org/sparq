@@ -456,9 +456,13 @@ fn load_graph(
         return Err(invalid("named graph nesting exceeds archive limit"));
     }
     let meta = component(files, prefix, "dict-meta.bin")?;
-    let dict = crate::dict::Dict::open_mapped_with(&*meta, meta.len(), |name| {
+    let mut metadata = &*meta;
+    let dict = crate::dict::Dict::open_mapped_with(&mut metadata, meta.len(), |name| {
         component(files, prefix, name)
     })?;
+    if !metadata.is_empty() {
+        return Err(invalid("trailing dictionary metadata"));
+    }
     let store =
         crate::store::TripleStore::open_archive(|name| component(files, prefix, name), dict.len())?;
     let numeric = component(files, prefix, "numerics.bin")?;
