@@ -216,7 +216,15 @@ class MainCell(CELL.PreloadedCell):
 
     def start_server(self, *args):
         self.owner.preparation.require_exclusive_jobs()
-        return super().start_server(*args)
+        started = time.monotonic()
+        unit = super().start_server(*args)
+        BASE.write_json(self.results / (args[-1] + '-startup-boundary.json'), {
+            'complete': True, 'elapsed_seconds': time.monotonic() - started,
+            'cold_os_caches_before_launch': True,
+            'boundary': 'After the inherited checked sync/drop_caches command and exclusive-job check, before systemd launch through coordinator archive hashing, all-worker preload, readiness observation and its resource capture; no HTTP workload yet.',
+            'unit': unit,
+        })
+        return unit
 
     def resource(self, unit, label):
         super().resource(unit, label)
@@ -283,6 +291,9 @@ class Campaign:
             else: record['generation'] = {'status': 'reused', 'new_preparation_time': None}
             with self.inspect(): manifest, representatives = validate_population(corpus, dataset, model)
             record['manifest'] = manifest; record['representatives'] = representatives
+            source_copy = self.args.results / (label + '-source-manifest.json')
+            shutil.copyfile(corpus / 'manifest.json', source_copy)
+            with self.inspect(): record['source_manifest_sha256'] = PREP.digest(source_copy)
             maximum = max(group['max_pod_bytes'] for group in self.spec['groups'] if dataset['id'] in group['datasets'])
             if any(group['max_pod_bytes'] < manifest['maximum_pod_source_bytes'] for group in self.spec['groups'] if dataset['id'] in group['datasets']):
                 raise ValueError('a frozen group excludes an actual heavy Pod via its source-size cap')
