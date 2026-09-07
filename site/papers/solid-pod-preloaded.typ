@@ -11,6 +11,7 @@
 #import "solid-pod-scale-results.typ": main-state, grouped-integer
 #assert(main-state(previous) == "finalized and reviewed", message: "Previous-study motivation requires verified evidence")
 #assert(protocol.study_id == "solid-pod-preloaded-v1")
+#assert(protocol.preloaded.admission_outcomes_version == 1, message: "Method requires reviewed typed preload outcomes")
 #let number(value, digits: 0) = str(calc.round(value, digits: digits))
 #let percent(value) = number(100 * value) + "%"
 #let demand(population, scenario) = derived.population_rates.find(r => r.pods == population and r.scenario == scenario)
@@ -435,11 +436,16 @@ not a claim that a complete deployment fits a physical machine of that size.
 The host must also support the client, operating system and preparation tools.
 
 The lower tiers will be chosen from measured preparation and startup footprints.
-Each selected complete population must fit its retained metadata and start
-successfully before receiving timed requests. A failed startup remains an
-admission outcome for that exact population and limit. It cannot be converted
-into a faster query result by dropping large Pods or shortening their histories.
-Million-Pod retained histories remain a target, not a presumed feasible cell.
+Each selected complete population must start successfully before receiving timed
+requests. A confirmed cgroup-local out-of-memory kill or a still-running unit at
+the declared startup deadline is recorded as a negative admission attempt. After
+checked cleanup, the frozen grid continues to larger RAM tiers. Startup logs,
+actual limits and terminal cgroup counters substantiate the outcome; an exit
+signal alone is insufficient. A deadline failure means that startup did not
+finish within the allowed time, not that the hardware could never admit that
+population. Neither outcome has offered requests or a query latency percentile.
+Dropping large Pods or shortening histories cannot turn it into a successful
+cell. Million-Pod retained histories remain a target, not a presumed feasible cell.
 
 == Count page-cache memory where it is used
 
@@ -525,19 +531,25 @@ private exceptions and visible graph enumeration require regression coverage.
 
 Mutation IDs must match exactly one identical durable receipt when committed.
 Missing, duplicate or unexpected receipts, wrong query answers, and incorrect
-restart state quarantine inference from that source. Resource exhaustion or
-inability to admit a complete population instead rejects that configuration;
-it does not invent an authorization error or erase separately verified evidence.
-Required source review, build identity and scoped functional checks precede
-the final timing freeze.
+restart state quarantine inference from that source. Among failed startup
+attempts, only the evidenced outcomes above permit continuation. Missing or ambiguous failure evidence,
+malformed readiness, integrity errors and other execution failures halt the
+campaign; global time and disk limits are never reclassified as cell timeouts.
+Final analysis requires verified file hashes and matching source, binary,
+campaign and review identities. Canonical correctness failures override a
+successful summary; disagreement between reported and independently computed
+counters or guards makes the affected cell inconclusive. Required source review,
+build identity and scoped functional checks precede the final timing freeze.
 
 WAC/ACP repetitions pair the same population, query schedule, requester roles,
 memory and CPU allocation, with alternating model order and independent restarts.
 Each run retains its own percentile. Paired 95% bootstrap intervals summarize the
 ACP/WAC latency ratio; independent runs are not pooled as a single percentile.
-The predeclared practical-equivalence interval is $[1/1.10, 1.10]$. It must contain
-the relevant interval before claiming equivalence, and both models must meet
-the response criteria at the comparison load.
+The proposed practical-equivalence interval is $[1/1.10, 1.10]$; its margin must
+be recorded in the frozen campaign before measurement. Without a frozen margin,
+paired intervals remain descriptive. Equivalence requires the complete confidence
+interval to lie inside that margin and both models to meet the response criteria
+at the comparison load.
 
 Operational capacity is bounded separately by independently established passing
 and failing rates. The highest tested passing point is not an exact maximum.
@@ -555,8 +567,9 @@ the complete populations that can be prepared and retained; response delivery
 at population-derived demand; the measured effect of the fixed-CPU memory
 tiers; and paired WAC/ACP costs. For each decisive configuration, absolute
 successful-response p95 will appear beside all-offered success and timely-success
-fractions, with storage and peak server memory. Preparation failure, unmeasured
-cells and queue-only guard misses will remain distinct.
+fractions, with storage and peak server memory. Preparation failure, evidenced
+negative admission attempts, unmeasured cells and queue-only guard misses will
+remain distinct.
 
 The earlier cache results cannot fill this section. Nor can archive-size
 projections, a completed startup pilot, or a successful small correctness test
