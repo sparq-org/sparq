@@ -336,3 +336,22 @@ fn too_deep_append_poisoning_cannot_publish_partial_dataset() {
     assert!(writer.append(&Graph::new(), false).is_err());
     assert!(writer.finish().is_err());
 }
+
+#[test]
+fn validate_row_rejects_zero_absent_duplicate_and_unsorted_ids() {
+    let mut previous = None;
+    assert!(validate_row([1, 2, 3], &mut previous, 3).is_ok());
+    for row in [[1, 2, 3], [1, 2, 2], [0, 2, 3], [1, 2, 4]] {
+        assert!(validate_row(row, &mut previous, 3).is_err());
+    }
+    assert!(validate_row([2, 2, 3], &mut previous, 3).is_ok());
+}
+
+#[test]
+fn validate_archive_rows_rejects_dictionary_escape_and_duplicate_rows() {
+    let good = crate::compress::CompressedPerm::encode(&[[1, 2, 3], [2, 2, 3]]);
+    assert!(good.validate_archive_rows(3).is_ok());
+    assert!(good.validate_archive_rows(2).is_err());
+    let duplicate = crate::compress::CompressedPerm::encode(&[[1, 2, 3], [1, 2, 3]]);
+    assert!(duplicate.validate_archive_rows(3).is_err());
+}

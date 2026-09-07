@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**99 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -69,10 +69,25 @@ Recurring invariant shorthands used below:
   borrow's duration and is not mutated by us; external concurrent mutation is explicitly
   out of contract (documented stance, same as the rest of the mmap surface).
 
-### `sparq-core` — 51 sites (the unsafe core: mmap loaders, zero-copy dict, parallel build, N-Triples span decode)
+### `sparq-core` — 56 sites (the unsafe core: mmap loaders, zero-copy dict, parallel build, N-Triples span decode)
+
+[GPT-6] The opt-in native archive shares one mapping through aligned byte regions.
+Every region starts on an eight-byte boundary and has checked bounds inside the
+dataset payload, preserving the scalar-alignment invariants of the existing
+dictionary, permutation, numeric and temporal readers. Before a dataset is returned,
+native validators check dictionary records/lookup tables, permutation rows/blocks
+and required cache lengths. This is structural validation, not a content checksum.
+The application must keep the mapped file immutable through **all** derived graph
+and snapshot lifetimes. The focused archive corruption tests cover this file-backed
+path; the ordinary pure-Rust Miri lane does not execute file-backed mappings.
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
+| `src/archive.rs:309` | `unsafe fn NativeArchive::open` | immutable file bytes and length for every derived view's lifetime | Public safety contract makes the external file-mutation obligation explicit. Container and native-component bounds are checked before use; archive-handle drop does not end a retained graph's obligation. [GPT-6] |
+| `src/archive.rs:315` | `Mmap::map` | own-for-lifetime, extended to all shared views | One `Arc<Mmap>` backs every checked region. `all_dataset_views_share_mapping_and_outlive_archive_handle` pins ownership after handle drop; raw/compressed corruption tests pin rejection before graph use. [GPT-6] |
+| `src/archive/tests.rs:79` | test call of unsafe `open` | test owns an immutable temporary archive | Writers finish before opening; file removal happens after all local views drop. Tests exercise native byte parity and overlay persistence. [GPT-6] |
+| `src/archive/tests.rs:214` | test call of unsafe `open` | mutation precedes mapping; all mapped views drop before next mutation | The rejection helper writes a fresh corrupt candidate and completes open/load/drop in one expression, so no live view overlaps the next candidate write. [GPT-6] |
+| `src/archive/tests.rs:319` | test call of unsafe `open` | unfinished writer has been dropped; candidate bytes remain immutable | Pins rejection of unpublished/unfinished archive headers without modifying a mapped file. [GPT-6] |
 | `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
 | `src/lib.rs:389` | ptr read | page-align; instant section is `n` f64 at offset 0 | `i < n` checked at the call; f64 at `base+i`. |
 | `src/lib.rs:456` | slice reinterpret (read) | page-align; instants are `n` f64 at offset 0 | `n = mapped_len`; materialises the cells. |
@@ -243,16 +258,17 @@ Miri does not cover it (Miri supplies its own allocator and does not model a
 | `tests/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `tests/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
 
-### `sparq-lws-core` — 9 sites (example-only allocators and process clock) [FABLE-5]
+### `sparq-lws-core` — 10 sites (example-only allocators, process clock and immutable archive) [FABLE-5, GPT-6]
 
 (sq-gg0qq.2 — crate imported whole from jeswr/solid-server-rs.) The **library and the
-server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 9 sites
+server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 10 sites
 live entirely in **example** benchmark harnesses (never the shipped server): the
 deterministic allocation-count microbench `examples/read_response_alloc_microbench.rs`
 (counts `GlobalAlloc::alloc`/`realloc` ops on the GET/HEAD read-response header path) and
 the shared harness module `examples/support/mod.rs` (`#[path]`-included by the
 `bench_harness`, `adversarial_bench`, and paper runner; counts allocation ops + bytes),
-plus `ac_query_scale.rs`'s Linux process-CPU clock. A
+plus `ac_query_scale.rs`'s Linux process-CPU clock and native archive opening in
+the population HTTP research example. A
 `#[global_allocator]` unavoidably requires `unsafe` (the `GlobalAlloc` trait is `unsafe`
 by definition; there is no safe substitute for a deterministic allocation counter) — the
 same class as `sparq-engine`'s test allocator above. **Not** a B5 (untrusted-input)
