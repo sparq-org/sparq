@@ -208,8 +208,14 @@ bounded preparation unit after the server stops. It is not a response timing.
 
 The output includes copied frozen inputs, per-population storage/verification,
 per-cell native cgroup/process/host accounting, complete or partial cell rows,
-unattempted populations/cells, and `campaign-result.json`. Closed logs and JSONL
-are losslessly compressed, then bound by the recursive `MANIFEST.sha256`.
+unattempted populations/cells, and `campaign-result.json`. It also includes
+an exact copy of every source manifest for independent native-sidecar
+hash binding. Each cell's `startup-boundary.json` separately measures systemd
+launch through coordinator hashing, all-worker preload, readiness observation
+and its resource capture, after the successful cold-cache command. Per-worker
+preload times remain separate and do not include the complete startup boundary.
+Closed logs and JSONL are losslessly compressed, then bound by the recursive
+`MANIFEST.sha256`.
 Cleanup/finalization failure prevents a complete result. Guard failures are
 preserved even when all cells execute; execution completion does not establish
 capacity, WAC/ACP equivalence or fit on a smaller physical machine. The original

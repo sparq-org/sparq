@@ -268,7 +268,7 @@ class Preparation:
         for name in ('memory.current', 'memory.peak', 'memory.max', 'memory.events', 'memory.stat', 'cpu.stat'):
             try: result['study_slice'][name] = (parent / name).read_text()
             except OSError as error: result['host_errors'].append(f'study_slice/{name}: {error}')
-        result['host_scope'] = 'Host MemAvailable includes OS and all processes; study-slice peak is cumulative across pilot phases. Physical host size is distinct from this unit\'s128GiB quota; no smaller physical-machine fit is inferred.'
+        result['host_scope'] = 'Host MemAvailable includes OS and all processes; study-slice peak is cumulative across phases. Physical host size is distinct from the unit ceiling recorded in memory.max; no smaller physical-machine fit is inferred.'
         pid = int(properties.get('MainPID', '0'))
         if pid:
             for name in ('status', 'io', 'smaps_rollup', 'stat'):
