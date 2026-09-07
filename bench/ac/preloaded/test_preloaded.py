@@ -1,10 +1,12 @@
 """[GPT-6] Admission checks for complete preload and worker drain records."""
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 import tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location('preloaded_cell', Path(__file__).with_name('run-cell.py'))
 CELL = importlib.util.module_from_spec(SPEC)
@@ -23,6 +25,29 @@ def barrier(mode='native'):
 
 
 class PreloadAdmissionTests(unittest.TestCase):
+    def test_live_split_readiness_write_waits_for_complete_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); corpus = root / 'corpus'; corpus.mkdir()
+            (corpus / 'manifest.json').write_text('{"pods": 1}')
+            (corpus / 'pods.native-manifest.json').write_text('{}')
+            cell = CELL.PreloadedCell.__new__(CELL.PreloadedCell)
+            cell.preloaded = {'fixed_server_cpus': 16, 'admission_outcomes_version': 1, 'startup_timeout_seconds': 5}
+            cell.spec = {'host': {'server_cpu_pool': list(range(16))}}
+            cell.results = root; cell.binary = root / 'binary'; cell.auth = root; cell.control_file = root / 'token'
+            cell.measurement = {'queue_capacity_per_worker': 64}; cell.counter = 0
+            cell.guard = lambda: None; captured = []; cell.resource = lambda unit, label: captured.append(label)
+            log = root / 'fixture-server.log'
+            ready = json.dumps({'record_type': 'all-population-ready', 'population': 1, 'retained_pods': 1})
+            def run(command, **kwargs):
+                if 'systemd-run' in command: log.write_text(ready[:20])
+                return SimpleNamespace(stdout='active\n', returncode=0)
+            def finish_write(_seconds):
+                with log.open('a') as stream: stream.write(ready[20:] + '\n{"record_type":"server-ready"}\n')
+            with patch.object(CELL.subprocess, 'run', side_effect=run), patch.object(CELL.time, 'sleep', side_effect=finish_write):
+                unit = cell.start_server(corpus, {'storage_mode': 'native', 'max_pod_bytes': 100}, 64, 16, 'fixture')
+            self.assertTrue(unit.startswith('sparq-pod-preloaded-'))
+            self.assertEqual(captured, ['fixture-preload'])
+
     def test_cell_identity_and_fixed_resource_admission_precede_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(dataset='compact', group='native', model='wac', memory_gib=128,
