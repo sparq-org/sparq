@@ -9,7 +9,7 @@
 // bundle (built by site/scripts/bundle-wasm-esm.mjs, published into the static export). So the
 // named `Dataset` import works with zero dependency on a third-party CDN — the ~MB engine wasm
 // is still fetched lazily by the first `await Dataset.…` (the bundle keeps the binary external).
-// The ESM-CDN form (`https://esm.sh/@jeswr/sparq`) stays documented as an alternative.
+// The ESM-CDN form (`https://esm.sh/@sparq-org/sparq`) stays documented as an alternative.
 
 import { FileCode2 } from "lucide-react";
 
@@ -46,8 +46,8 @@ const SNIPPET = `<script type="module">
 </script>`;
 
 const CDN_SNIPPET = `<script type="module">
-  // Alternative: the same named entry from an ESM CDN (the published @jeswr/sparq npm package).
-  import { Dataset } from "https://esm.sh/@jeswr/sparq";
+  // Alternative: the same named entry from an ESM CDN (the published @sparq-org/sparq npm package).
+  import { Dataset } from "https://esm.sh/@sparq-org/sparq";
 </script>`;
 
 const GLUE_SNIPPET = `<script type="module">
@@ -89,7 +89,7 @@ export function EsmImportSnippet() {
           <code className="font-mono">/wasm/sparq.js</code> — the engine{" "}
           <code className="font-mono">.wasm</code> stays out of it, fetched lazily by the
           first <code className="font-mono">await</code>. The same named entry is also on an
-          ESM CDN (the <code className="font-mono">@jeswr/sparq</code> npm package):
+          ESM CDN (the <code className="font-mono">@sparq-org/sparq</code> npm package):
         </p>
         <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-[12.5px] leading-relaxed">
           {CDN_SNIPPET}

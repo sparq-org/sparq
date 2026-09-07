@@ -16,7 +16,7 @@
 **What sparq is, for CIS scoping**
 
 sparq is a Rust RDF/SPARQL **data engine** consumed as a dependency, plus an HTTP `sparq-server`
-and a SHA-pinned distroless container image (`Dockerfile` → `ghcr.io/jeswr/sparq-server`). It is
+and a SHA-pinned distroless container image (`Dockerfile` → `ghcr.io/sparq-org/sparq-server`). It is
 **not** an enterprise IT estate. The CIS Controls v8 are written for an *organisation* securing its
 asset/software inventory, accounts, networks, and endpoints — so a large fraction of v8 maps to the
 **operator** who deploys sparq, not to the source/CI of sparq itself. This slice scopes each

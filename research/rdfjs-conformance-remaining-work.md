@@ -1,4 +1,4 @@
-# RDF/JS conformance for `@jeswr/sparq`: what is done, what "100%" still costs
+# RDF/JS conformance for `@sparq-org/sparq`: what is done, what "100%" still costs
 
 **Epic:** sq-iwhl8 (issue #2938, from maintainer issue #1116) · **Status:** design record for
 maintainer review — an honest re-derivation of the epic's remaining surface, NOT an implementation ·
@@ -31,7 +31,7 @@ confirm, it is marked as such.
 | `Source`/`Sink`/`Store` | `js/src/source.ts:142` | `implements RDF.Store<RDF.Quad>` — `match`/`import`/`remove`/`removeMatches`/`deleteGraph` |
 | Query-spec surface | `js/src/store.ts:155`, `js/src/bindings.ts:14` | `implements RDF.StringSparqlQueryable<…>` and `implements RDF.Bindings` |
 | Shared harness | `packages/rdfjs-conformance/src/index.mjs:128,345,645,719` | `runDataFactoryTests` / `runDatasetTests` / `runStreamTests` / `runAll`, zero runtime deps |
-| sparq runs the harness | `js/test/rdfjs-conformance.test.mjs` | all three runners against `@jeswr/sparq` |
+| sparq runs the harness | `js/test/rdfjs-conformance.test.mjs` | all three runners against `@sparq-org/sparq` |
 | N3.js parity | `packages/rdfjs-conformance/test/n3-parity.test.mjs` | same harness against N3.js `DataFactory` + `Store`, and `@rdfjs/dataset` |
 | CI | `.github/workflows/js.yml:128-132` | harness typecheck + parity suite; the root `npm test` step runs the sparq-side suite |
 
@@ -116,7 +116,7 @@ than a fourth restatement of the data-model tests.
 (`import type * as RDF from '@rdfjs/types'`) and reference `RDF.*` in *exported* signatures — e.g.
 `add(quad: RDF.Quad): this` on the exported `Dataset`. With `declaration: true`
 (`js/tsconfig.json`), `tsc` must therefore re-emit that import into `dist/*.d.ts`, so an installed
-`@jeswr/sparq` carries a type reference to a package npm never installed for the consumer.
+`@sparq-org/sparq` carries a type reference to a package npm never installed for the consumer.
 
 **This is the epic's own headline claim failing at the package boundary**: "TS bindings that extend
 the RDF/JS types" only holds for a consumer who happens to depend on `@rdfjs/types` themselves. How
@@ -134,7 +134,7 @@ records that policy). Options:
 |---|---|---|
 | `dependencies` | adds a types-only package to the published runtime tree (it ships no executable code, but it *is* an SBOM component) | always resolves; matches what most RDF/JS libraries do |
 | `peerDependencies`, **not** optional | stays out of the published runtime tree | npm 7+ auto-installs it, so it resolves — at the cost of a hard unmet-peer failure on version conflict, and pnpm does not auto-install peers by default |
-| `peerDependencies` + `peerDependenciesMeta.optional` | stays out of the runtime tree | **not** auto-installed — npm skips optional peers entirely — so a consumer who installs only `@jeswr/sparq` is exactly where they started |
+| `peerDependencies` + `peerDependenciesMeta.optional` | stays out of the runtime tree | **not** auto-installed — npm skips optional peers entirely — so a consumer who installs only `@sparq-org/sparq` is exactly where they started |
 | vendor the used declarations into `dist/` | clean | always resolves, but sparq's types then *restate* rather than extend RDF/JS's, and must be kept in sync |
 | leave as-is | clean | the claim above is not true for a fresh consumer |
 
@@ -142,7 +142,7 @@ There is no option that keeps the runtime tree at `{fzstd}` *and* satisfies defi
 below without a caveat, so this is a genuine tradeoff for the maintainer rather than a recommendation
 this record can make for them:
 
-- to hold (iii) as written — types resolve for a consumer who installs only `@jeswr/sparq` — the
+- to hold (iii) as written — types resolve for a consumer who installs only `@sparq-org/sparq` — the
   choices are `dependencies` or vendoring;
 - to keep the SBOM at `{fzstd}`, the choice is a non-optional peer (resolves under npm 7+ only) or an
   optional peer with (iii) *weakened* to "resolves for a consumer who also installs the declared
@@ -167,10 +167,10 @@ Do **not** chase the literal words "100%". As written the epic is unfalsifiable:
 specs and per-package tests, not a numbered conformance suite with a percentage. Replace the headline
 with a definition of done that can actually be checked, and then close the epic against it:
 
-> `@jeswr/sparq` is RDF/JS-conformant when, for each of the four RDF/JS specs, (i) every interface
+> `@sparq-org/sparq` is RDF/JS-conformant when, for each of the four RDF/JS specs, (i) every interface
 > member sparq claims via an `implements` clause is exercised un-skipped by the shared harness,
 > (ii) the harness's verdict is corroborated by at least one independent upstream suite, (iii) the
-> published package's types resolve for a consumer who installs only `@jeswr/sparq`, and (iv) a
+> published package's types resolve for a consumer who installs only `@sparq-org/sparq`, and (iv) a
 > recorded floor makes a lost capability a red gate rather than a quieter log.
 
 Against that definition the standing is roughly: data-model strong (needs (ii)), dataset strong

@@ -160,7 +160,7 @@ embeddings = ["provider", "dep:reqwest"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 oxrdf.workspace = true
 rustc-hash.workspace = true
 # HNSW (pure Rust, minimal deps, maintained). Evaluated against hnsw_rs 0.3 (heavier
@@ -177,7 +177,7 @@ serde_json = { version = "1", optional = true }
 # that does not opt in) never compiles the engine, so `sparq-core`/`sparq-engine` stay
 # lean and this crate stays a pure storage+ANN crate by default. `spargebra` walks/edits
 # the parsed algebra; it is already in the workspace tree via sparq-engine.
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", optional = true }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", optional = true }
 spargebra = { workspace = true, optional = true }
 # [OPUS-4.8] Concrete HTTP transport for the non-default `embeddings` feature only.
 # Blocking by design (the embed call is synchronous and this crate must not drag an
@@ -190,13 +190,13 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # storage+ANN crate by default and the lean-core constraint holds. `sparq-reason` materialises the
 # RDFS/OWL-RL closure (already property-tested incremental == from-scratch); `sparq-introspect`
 # mines declared + observed domain/range. Neither pulls the engine.
-sparq-reason = { path = "../sparq-reason", version = "0.1.0", optional = true }
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0", optional = true }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", optional = true }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1", optional = true }
 # [OPUS-4.8] sq-0wo9e.3: the P2 SHACL/OWL prior extractor reads a parsed shapes model. OPTIONAL and
 # ONLY pulled in by `structure-shacl`, so the default build (and the lean `structure` feature) never
 # compile it — `sparq-vectors` stays free of any SHACL/engine dependency unless this reader is opted
 # in. sparq-shacl is itself an opt-in crate that nothing in the workspace depends on by default.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", optional = true }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", optional = true }
 
 # [FABLE-5] sq-98c: memmap2 is NATIVE-ONLY — target-gated out of every wasm32 build so the
 # crate compiles to wasm without a memory-map dependency. This is a TARGET cfg rather than a
@@ -232,7 +232,7 @@ sparq-sim = { path = "../sparq-sim" }
 # feature, so we enable it for the test build ONLY. This does NOT change the published default build:
 # a dev-dependency feature is local to this crate's test/example/bench targets and never propagates
 # to downstream consumers of `sparq-vectors`.
-sparq-core = { path = "../sparq-core", version = "0.1.0", features = ["mmap"] }
+sparq-core = { path = "../sparq-core", version = "0.1.1", features = ["mmap"] }
 # [OPUS-4.8] sq-xhiv: DEV-only. The fingerprint thread-count-stability regression tests drive the
 # SAME parallel sharded dict merge the loader uses at two explicit thread counts via a scoped rayon
 # pool (`RAYON_NUM_THREADS` is read once per process, so it cannot be varied mid-test). rayon is NOT

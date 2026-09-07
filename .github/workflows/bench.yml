@@ -380,7 +380,7 @@ jobs:
       # Benchmarks runs #27827073571 and #27826231986 (both push:main):
       #     1 file changed, 2 insertions(+), 2 deletions(-)
       #     ! [rejected]        HEAD -> main (fetch first)
-      #     error: failed to push some refs to 'https://github.com/jeswr/sparq.git'
+      #     error: failed to push some refs to 'https://github.com/sparq-org/sparq.git'
       # Under `set -euo pipefail` that turned the whole Benchmarks job RED on every improving push, AND
       # the floor never landed (the ratchet is silently a no-op on this path). Two changes below:
       #   (1) FETCH-REBASE: before the push, fetch the latest origin/main and rebase the floor-only commit

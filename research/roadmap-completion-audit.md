@@ -32,7 +32,7 @@ CI-ratcheted); wasm cargo-artifact baseline 1,573,887 B (tracked); 19 crates.
 | Thread | Status | Evidence |
 |---|---|---|
 | T13 conformance in CI | **Landed** | runner `abdaed9`; gating ratchet ≥1229 `dea2be2`/`9917404`; divergence allowlist with stale-entry detection |
-| T14 RDF/JS bindings | **Built; npm publish user-gated** | `1400908` — `js/` package `@jeswr/sparq` 0.1.0, RDF/JS-typed, 16 node tests, js.yml CI, pack dry-run OK; *publication deferred to the user (account + final-name confirmation)* |
+| T14 RDF/JS bindings | **Built; npm publish user-gated** | `1400908` — `js/` package `@sparq-org/sparq` 0.1.0, RDF/JS-typed, 16 node tests, js.yml CI, pack dry-run OK; *publication deferred to the user (account + final-name confirmation)* |
 | T15 server hardening | **Landed** | `f9e9cd4` |
 | T16 CONSTRUCT/DESCRIBE + streaming | **Landed** | `a9bbbd5` — engine + server negotiation, streamed SELECT (−200–355 MB RSS), conformance construct suite |
 | T17 incremental updates + WAL | **Landed** | `ed5dd61` (delta-overlay, append-only dict, torn-record-safe WAL, ~1.3 M× on 10-triple inserts); server wiring `0818178` (2.65 s→330 µs) |

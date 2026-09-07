@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Opt-in shared zero-overhead evaluation substrate for the sparq SPARQL engine and the reasoners: the id-tuple row/key/posting vocabulary, the XSD numeric value tower (Num/Dec/as_numeric + arithmetic), the four id-tuple join kernels (behind a generic JoinKeys descriptor) and the SPARQL term total order (compare_terms, behind a generic CompareTerm trait), monomorphic over Id=u32 with no dynamic dispatch on the hot path."
+description = "Shared evaluation substrate for sparq: ID-tuple types, XSD numerics, join kernels, and SPARQL term ordering"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
@@ -82,7 +82,7 @@ overhead = ["join", "numeric", "compare"]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`). sparq-core is the ONLY dependency: this
 # crate sits at the leaf, below the engine, so the reasoners can reach it without a cycle.
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # Inline small rows (avoid a heap allocation per solution row / join key). Same crate the
 # engine already uses for its `Row`/`Key` aliases, so the representation is byte-identical.
 smallvec.workspace = true

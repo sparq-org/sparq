@@ -13,8 +13,8 @@ readme = "README.md"
 # Research/interop crate (issue #908, bead sq-ylbrq). The vetted, STANDARDS-INTEROP
 # complement to the deliberately non-interop ZK estate (sparq-zk): authenticity +
 # integrity + non-repudiation over RDF, NOT confidentiality and NOT zero-knowledge.
-# Not published while the surface settles.
-publish = false
+# [GPT-5.6] Published because sparq-solid exposes the surface behind a default-off feature;
+# its research/interop status remains part of the public contract while the API settles.
 
 # [OPUS-4.8] docs.rs: build with all features so the did:web surface is documented.
 [package.metadata.docs.rs]
@@ -30,9 +30,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 # single-sourced. [OPUS-4.8] sq-ylbrq.
 [dependencies]
 # RDFC-1.0 canonical N-Quads — the canonical unit eddsa-rdfc-2022 hashes and signs.
-sparq-canon = { path = "../sparq-canon" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.1" }
 # sparq term model (oxrdf 0.3 re-export) + store Graph (sign a named graph / store).
-sparq-core = { path = "../sparq-core", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 
 # VETTED Ed25519 (dalek). This is the WHOLE point of this crate vs the ZK estate's

@@ -30,7 +30,7 @@ and must stay **under $5/month**. This is the security + cost design.
    assumes for a short-lived token. A leaked workflow log then exposes nothing reusable.
 2. **Never run on untrusted triggers.** The EC2 workflow runs ONLY on `schedule` (weekly) and
    `workflow_dispatch` (a maintainer clicks "run"). **Never** `pull_request` — a fork PR must not be
-   able to assume the role or spend money. Guard every job with `if: github.repository == 'jeswr/sparq'`.
+   able to assume the role or spend money. Guard every job with `if: github.repository == 'sparq-org/sparq'`.
 3. **Self-limiting spend.** Spot instance + hard `timeout-minutes` + **always-terminate** (even on
    failure/cancel) + a low weekly cadence. 4–5 runs/month × a ~30-min spot box ≈ **well under $5**.
 
@@ -50,12 +50,12 @@ and must stay **under $5/month**. This is the security + cost design.
        "Action": "sts:AssumeRoleWithWebIdentity",
        "Condition": {
          "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-         "StringLike": { "token.actions.githubusercontent.com:sub": "repo:jeswr/sparq:ref:refs/heads/main" }
+         "StringLike": { "token.actions.githubusercontent.com:sub": "repo:sparq-org/sparq:ref:refs/heads/main" }
        }
      }]
    }
    ```
-   (The `sub` condition pins it to the `main` branch of `jeswr/sparq` — fork PRs and other refs
+   (The `sub` condition pins it to the `main` branch of `sparq-org/sparq` — fork PRs and other refs
    cannot assume it.)
 3. **Permissions policy** — least-privilege, tag-scoped so CI can only touch its own instances:
    ```json
@@ -88,7 +88,7 @@ permissions: { id-token: write, contents: write }
 concurrency: { group: bench-ec2, cancel-in-progress: false }
 jobs:
   ec2-bench:
-    if: github.repository == 'jeswr/sparq'   # never on forks
+    if: github.repository == 'sparq-org/sparq'   # never on forks
     runs-on: ubuntu-latest
     timeout-minutes: 60                       # hard wall-clock cap
     steps:

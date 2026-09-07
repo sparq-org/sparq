@@ -44,7 +44,7 @@ documentation) would inspect.
 |---|---|---|
 | Security-fix flow (main → next release) + supported versions | `SECURITY.md` §"Supported versions" | Read; matches the release pipeline. |
 | Per-advisory **ungrouped** security PRs, 4 ecosystems | `.github/dependabot.yml` | cargo / github-actions / npm / pip; security updates left ungrouped (each its own PR). |
-| Integrity-protected distribution: SHA256SUMS + SLSA provenance | `.github/workflows/release.yml` (`SHA256SUMS`, `actions/attest-build-provenance`, buildkit `provenance: mode=max` + `sbom: true`) | `gh attestation verify <archive> --repo jeswr/sparq`; `shasum -a 256 -c SHA256SUMS`. |
+| Integrity-protected distribution: SHA256SUMS + SLSA provenance | `.github/workflows/release.yml` (`SHA256SUMS`, `actions/attest-build-provenance`, buildkit `provenance: mode=max` + `sbom: true`) | `gh attestation verify <archive> --repo sparq-org/sparq`; `shasum -a 256 -c SHA256SUMS`. |
 | **Reproducible-build statement** (build integrity — GX-8) — characterised, single named cause | [`../slsa/reproducible-build.md`](../slsa/reproducible-build.md) | Run the auditor quick-run in that doc: two `--release --locked` builds of `sparq-cli` → identical size + **byte-identical apart from 22 bytes** (the `mimalloc` build-time `__DATE__`/`__TIME__` banner + the build-id it perturbs). The bit-for-bit *enforcement* (CI rebuild-and-diff) is the residual, tracked under `sq-toze.9`. |
 | `cargo-auditable` self-describing binaries | `release.yml#package`, `Dockerfile` (`cargo auditable build`) | `cargo audit bin <binary>` / `auditable info <binary>` reads the embedded manifest. |
 | `cargo-vet` per-dependency audit attestations (GATING ratchet) | `supply-chain.yml#vet`, `supply-chain/{config.toml,audits.toml,imports.lock}` | `cargo vet --locked` exits 0; a new unaudited dep fails until audited/exempted. |
@@ -107,7 +107,7 @@ cargo cyclonedx --all --format json        # CI SBOM shape
 cat supply-chain/vex.cdx.json              # checked-in VEX (mirrors deny.toml ignores)
 
 # Release-artifact provenance (on a published release)
-gh attestation verify <archive> --repo jeswr/sparq
+gh attestation verify <archive> --repo sparq-org/sparq
 shasum -a 256 -c SHA256SUMS
 
 # Disclosure channel

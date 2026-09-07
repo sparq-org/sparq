@@ -4,7 +4,7 @@ description: "Pod-side certification-edge trust-graph admission with the opt-in 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq trust-graph — certification-edge admission (pod-side closure)

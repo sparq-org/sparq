@@ -1,6 +1,6 @@
 //! Well-formedness guard for the trust-expression conformance suite DATA
 //! (`tests/trust-expression/**`; bead `sq-6syab.3`, epic `sq-6syab`, issue
-//! [#1592](https://github.com/jeswr/sparq/issues/1592); design record
+//! [#1592](https://github.com/sparq-org/sparq/issues/1592); design record
 //! `research/trust-expression-spec.md` §6).
 //!
 //! The companion `trust_expression_conformance.rs` runs the suite's SEMANTICS

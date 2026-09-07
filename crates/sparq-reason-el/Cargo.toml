@@ -114,14 +114,14 @@ incremental = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 rustc-hash.workspace = true
 # [FABLE-5] sq-pbz04.2.2: the shared zero-overhead evaluation substrate — ONLY its
 # `numeric` slice (the exact `Num`/`Dec` XSD value tower) and ONLY under `cdomain`
 # (`dep:` + optional), so the default build links nothing new. Like sparq-core it sits
 # below the engine, so no dependency cycle.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, optional = true }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.1", default-features = false, optional = true }
 
 # [OPUS-4.8] sq-s2nob: the Hasse scale benchmark uses the `hasse`-gated DirectHierarchy API, so it
 # only builds with the feature on. `required-features` keeps a default `cargo build --all-targets`

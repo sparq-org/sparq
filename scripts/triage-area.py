@@ -336,7 +336,7 @@ RULES = [
 
     # -- javascript / wasm client -----------------------------------------------
     ("js", "text",
-     r"js/src/|js/package\.json|@jeswr/sparq|rdf/js conformance|\bjs gate\b",
+     r"js/src/|js/package\.json|@sparq-org/sparq|rdf/js conformance|\bjs gate\b",
      ["js"], "the js/ RDF-JS client"),
 
     # -- website + desktop GUI ---------------------------------------------------

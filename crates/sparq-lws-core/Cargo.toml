@@ -370,6 +370,8 @@ default = ["embedded-sparq", "sparql-endpoint"]
 # feature wraps that same allocator and the storage doubles with deterministic counters; those
 # observations are analyzed separately because the counters perturb wall time.
 ac-query-scale-instrumentation = []
+# [GPT-6] Private research harness: immutable native archives with all-Pod startup.
+population-native = ["embedded-sparq", "sparq-core/native-archive"]
 # Opt-in: compile the distributed Redis-backed DPoP-`jti` replay store (`src/redis_replay.rs`) + its
 # `redis`/`r2d2` deps. OFF by default so the standard build, tests, and conformance are byte-identical
 # and carry no extra dependency. Enable for a horizontally-scaled deployment that shares one replay set

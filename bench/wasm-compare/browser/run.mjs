@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // [FABLE-5] sq-3ul2n.1 — cross-engine BROWSER wasm measurement harness (orchestrator).
 //
-// Drives the SAME shipped @jeswr/sparq web bundle (js `build:wasm` output) +
+// Drives the SAME shipped @sparq-org/sparq web bundle (js `build:wasm` output) +
 // the SAME deterministic workload through headless Chromium, Firefox and
 // WebKit (via Playwright) plus a plain-Node baseline, timing each PHASE
 // separately — fetch / compile / instantiate (and the shipped overlapped

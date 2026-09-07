@@ -1,6 +1,6 @@
 //! [OPUS-4.8] sq-1dd5t (#1047): the opt-in `canonicalizeNQuads(nquads)` wasm
 //! binding — RDFC-1.0 (RDF Dataset Canonicalization, the URDNA2015 successor)
-//! surfaced to JS so the `@jeswr/sparq` RDF/JS `Dataset` can implement
+//! surfaced to JS so the `@sparq-org/sparq` RDF/JS `Dataset` can implement
 //! `toCanonical` / `equals` / `contains` by RDF-dataset **isomorphism** (blank
 //! nodes relabelled to a canonical form) rather than by blank-node LABEL.
 //!
@@ -12,7 +12,7 @@
 //! Behind the non-default `canon` Cargo feature: the lean default bundle links
 //! zero canonicalization code (and never pulls `rdf-canon` / its oxrdf-0.2
 //! bridge), so the `wasm_bundle_bytes` baseline is byte-identical. The published
-//! `@jeswr/sparq` bundle (js `build:wasm`) turns it on.
+//! `@sparq-org/sparq` bundle (js `build:wasm`) turns it on.
 
 use wasm_bindgen::prelude::*;
 

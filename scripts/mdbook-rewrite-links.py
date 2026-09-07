@@ -15,7 +15,7 @@
 # This preprocessor closes that gap: at book-build time it rewrites repo-relative
 # markdown links in the (already-assembled, post-`{{#include}}`) chapter text to the
 # mount-portable canonical form
-#     https://github.com/jeswr/sparq/blob/main/<path>
+#     https://github.com/sparq-org/sparq/blob/main/<path>
 # so the SAME content renders correctly under BOTH mounts (raw GitHub view of the
 # source file AND the mdBook site) WITHOUT the source files having to carry absolute
 # URLs that the lychee gate cannot offline-resolve. Single source of truth stays in
@@ -48,7 +48,7 @@ import json
 import re
 import sys
 
-GITHUB_BLOB_BASE = "https://github.com/jeswr/sparq/blob/main/"
+GITHUB_BLOB_BASE = "https://github.com/sparq-org/sparq/blob/main/"
 
 # Repo-relative targets we rewrite: a path under one of these tracked top-level dirs,
 # or a bare root-level *.md file. Kept explicit (not "any relative path") so we never

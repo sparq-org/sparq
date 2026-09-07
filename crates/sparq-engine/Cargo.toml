@@ -418,7 +418,7 @@ required-features = ["vectorized"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # [OPUS-4.8] sq-ev41x + sq-hknqs + sq-vezew (epic sq-qonbz): the shared id-level evaluation
 # substrate — the numeric value tower (`Num` / `Dec` / `as_numeric` + XSD lexical helpers,
 # Phase 2), the four id-tuple join kernels (merge / hash / bind / leapfrog-trie behind the
@@ -431,7 +431,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = fal
 # here, not optionally — `oxrdf` and `rustc-hash` (which `numeric`/`join` pull) are already in
 # the engine's dep tree and `compare` is pure-`std`, so this pulls no new crate and the lean
 # wasm bundle delta is only the moved code itself.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, features = ["numeric", "join", "compare"] }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.1", default-features = false, features = ["numeric", "join", "compare"] }
 oxrdf.workspace = true
 spargebra.workspace = true
 # Relative-IRI resolution for IRI()/URI() against the query's BASE (already in the
@@ -451,14 +451,14 @@ serde_json = { version = "1", optional = true }
 # (which forwards to its own `serialize-rdf`/`streaming-serialization`), so the default + wasm
 # builds never compile it or its transitive `sparq-jsonld` dependency — the byte-identical
 # feature-off contract is preserved. `default-features = false`: an empty (feature-off) build.
-sparq-engine-serialize = { path = "../sparq-engine-serialize", version = "0.1.0", optional = true, default-features = false }
+sparq-engine-serialize = { path = "../sparq-engine-serialize", version = "0.1.1", optional = true, default-features = false }
 # [OPUS-4.8] (sq-6vshe.4) Seam A2 of the facade split: the SPARQL 1.1 federated-SERVICE client
 # (`service` module — HTTP transport, SPARQL-Results JSON/XML parse, bound-join batching, SSRF
 # egress policy) moved to this internal sub-crate, re-exported through the facade (src/lib.rs + the
 # `service` feature above). OPTIONAL + pulled in ONLY by `service` (which forwards to its own
 # `service` feature), so the default + wasm builds never compile it or its ureq/serde/serde_json/
 # quick-xml stack — the byte-identical feature-off contract is preserved. `default-features = false`.
-sparq-engine-service = { path = "../sparq-engine-service", version = "0.1.0", optional = true, default-features = false }
+sparq-engine-service = { path = "../sparq-engine-service", version = "0.1.1", optional = true, default-features = false }
 regex = { version = "1", optional = true }
 md-5 = { version = "0.11", optional = true }
 sha1 = { version = "0.11", optional = true }
@@ -477,7 +477,7 @@ uuid = { version = "1", features = ["v4"] }
 # external (out-of-core) build paths — the tests need sparq-core's mmap feature even
 # though the library itself doesn't. `dict-spill` adds the spilled-dictionary build's
 # byte-identity differential (tests/dict_spill_differential.rs).
-sparq-core = { path = "../sparq-core", version = "0.1.0", features = ["mmap", "parallel", "dict-spill"] }
+sparq-core = { path = "../sparq-core", version = "0.1.1", features = ["mmap", "parallel", "dict-spill"] }
 rayon.workspace = true
 # [OPUS-4.8] (sq-7d3dj.30.1) DEV-only re-listing of the ALREADY-present `spargebra` dep so
 # tests/rewrite_pass.rs can parse a query to RAW `spargebra` algebra (the un-rewritten
@@ -488,7 +488,7 @@ rayon.workspace = true
 spargebra.workspace = true
 # The cs-planner q-error gate builds its characteristic-set tables through the
 # dict-id accessor (dev-only; the library never depends on introspection).
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0" }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1" }
 # [FABLE-5] sq-3dyje.3: property-based eval tests (tests/proptest_eval.rs — engine ≡
 # naive reference / join-order invariance / ORDER BY laws). DEV/TEST ONLY, exactly like
 # the sparq-core + sparq-substrate proptest dev-deps: it never appears in [dependencies]

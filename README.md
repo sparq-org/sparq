@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jeswr/sparq/actions/workflows/ci.yml"><img src="https://github.com/jeswr/sparq/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/sparq-org/sparq/actions/workflows/ci.yml"><img src="https://github.com/sparq-org/sparq/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://sparq.jeswr.org/dev/bench"><img src="https://img.shields.io/badge/benchmarks-dashboard-f5a623.svg" alt="Benchmarks dashboard"></a>
   <img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="MSRV 1.88">
@@ -80,8 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 The CLI, HTTP server, Python (`sparq-rdf` on PyPI — `import sparq`), and JS/WASM
-(`@jeswr/sparq`) mirror the same surface. [GPT-5.6] The separate
-`@jeswr/solid-server` package hosts the Solid/LDP wasm adapter for loopback-only
+(`@sparq-org/sparq`) mirror the same surface. [GPT-5.6] The separate
+`@sparq-org/solid-server` package hosts the Solid/LDP wasm adapter for loopback-only
 local development. Per-surface how-tos live in the [usage skills](skills/SKILL.md).
 
 ## ✨ Features
@@ -95,7 +95,7 @@ standard it implements.
      book/src/getting-started/capabilities.md. Keep the per-surface `skills/<x>/SKILL.md`
      links REPO-RELATIVE (the lychee internal-links gate requires that); the book's
      `link-fixup` preprocessor (scripts/mdbook-rewrite-links.py) rewrites them to portable
-     github.com/jeswr/sparq/blob/main URLs at build time. The two research-scaffold bullets
+     github.com/sparq-org/sparq/blob/main URLs at build time. The two research-scaffold bullets
      (ZK / MPC) and the Interfaces bullet are intentionally OUTSIDE this anchor: the book
      expands them from their own canonical anchors (the SKILL.md `scaffold-caveat` includes
      for the load-bearing honesty caveats, and the `interfaces` anchor below). Keep the
@@ -172,7 +172,7 @@ See [`AGENTS.md`](AGENTS.md) for the full crate map and what each one does.
 - **Use it** — [`AGENTS.md`](AGENTS.md) (start here), then [`skills/SKILL.md`](skills/SKILL.md),
   the router pointing at the per-surface usage skill (Rust, CLI, HTTP, Python, JS/WASM, plus
   reasoning, SHACL, full-text, vector, GeoSPARQL, RSP-QL, ZK query proofs). In Claude Code:
-  `/plugin marketplace add jeswr/sparq` then `/plugin install sparq@sparq-tools`.
+  `/plugin marketplace add sparq-org/sparq` then `/plugin install sparq@sparq-tools`.
 - **Design** — [`research/ARCHITECTURE.md`](research/ARCHITECTURE.md) (blueprint),
   [`research/roadmap.md`](research/roadmap.md) and its
   [completion audit](research/roadmap-completion-audit.md). The `research/` tree holds the design

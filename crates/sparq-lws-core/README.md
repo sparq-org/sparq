@@ -15,6 +15,18 @@ The [research guide](../../skills/solid-lws-server/SKILL.md#persisted-population
 Signed access tokens and DPoP are verified; policy editing uses shared manifest-owner administration, not ACP ACR-edit authorization. Source-byte cache limits are not heap/RSS limits; report cgroup memory, failures and complete HTTP body latency.
 The compact control, history and entropy profiles have distinct claim boundaries; canonical campaigns require frozen workload/schema, paired runs, exact mutation checks and actual persisted population evidence.
 
+The opt-in `population-native` feature adds `prepare-native` and
+`serve --storage-mode native` for the [preloaded evaluation](../../bench/ac/preloaded/README.md).
+It verifies a finalized immutable native archive, opens every Pod's native data
+indexes, materializes every authorization index, and retains all PodStores before
+HTTP listening. Mapped content may page; heap descriptors, dictionaries,
+authorization and mutation overlays remain measured memory. The alternative
+`memory` mode parses all Pods once at startup; default `cached` behavior is unchanged.
+The independent owner-only operator capability `--control-token-file` enables
+`drain` / `POST /__benchmark/drain`, which fences all worker work including
+requests whose clients timed out. Application journals provide mutation durability;
+the immutable archive itself is not a write-ahead log.
+
 ```bash
 # Build + run the server binary (in-memory store, plain TCP)
 cargo run -p sparq-lws-core

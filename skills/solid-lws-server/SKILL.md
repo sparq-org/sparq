@@ -1,10 +1,10 @@
 ---
 name: solid-lws-server
-description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@jeswr/solid-server` JavaScript development host."
+description: "Run and use the experimental native `sparq-lws-core` Solid/LDP (Linked Web Storage) server: configure its environment and storage backend, make authenticated LDP and WAC requests, negotiate Turtle or profile-aware JSON-LD, and query the WAC-scoped `/sparql` endpoint. Use for the Rust LWS server, not the separate `@sparq-org/solid-server` JavaScript development host."
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq native Solid/LWS server
@@ -183,6 +183,44 @@ including wrapper children, and a failed warmup cannot pass a measured cell.
 Network journey experiments remain separate
 and unmeasured unless an explicit implementation and run artifact establish them.
 
+<!-- [GPT-6] -->
+The separate [preloaded evaluation](../../bench/ac/preloaded/README.md) adds
+`--features population-native`, `prepare-native --corpus PATH`, and
+`serve --storage-mode native|memory|cached`. Preparation writes `pods.native`
+and its source-bound checksum sidecar; `--native-archive PATH` overrides the
+archive location and `--native-compressed true|false` selects its encoding.
+Native startup validates the whole archive once, opens every data index,
+materializes real WAC/ACP authorization and replays trusted update journals.
+Every worker retains its disjoint Pod partition before `all-population-ready`
+and HTTP listening. No dataset opening, RDF parsing, journal replay or initial
+materialization is allowed after readiness. Mapped content pages can leave RAM;
+heap metadata, authorization and mutation overlays do not automatically spill.
+Keep archive bytes and length immutable for every derived graph view lifetime.
+
+Preloaded serving requires `--control-token-file PATH`: an unpredictable
+alphanumeric operator capability in an owner-readable-only file, separate from
+Pod ownership and DPoP. `drain` sends it to `POST /__benchmark/drain`, pausing
+admission before body extraction and waiting for a FIFO fence from every worker,
+including work whose HTTP client stopped waiting. A previously admitted slow body
+must finish or fail first; never-admitted transport connections are outside the
+barrier. `--connect URL` and `--drain-timeout-seconds N`
+configure this operator request. Never publish the secret. Use read-only warmup
+and a successful full drain before measurement; drain again after the client
+finishes. Independent repetitions stop the server and reset task-owned application
+journals, while dedicated restart correctness checks deliberately retain them.
+Failed timed mutations restore both graph and authorization without dataset
+reload; ambiguous journal failures poison the worker and require restart/replay.
+These rules do not retroactively change the completed cached campaign.
+
+The prospective `bench/ac/preloaded/run-preparation.py` executor consumes a
+separate checksum-bound footprint proposal, keeps generated/native data and auth
+on the dedicated data0 mount, and writes only bounded logs/JSON under the result
+root. It measures complete native preparation and all-Pod readiness/drain in
+separate bounded cgroups, preserving incomplete and unattempted populations.
+It performs no timed workload. Its [reference](../../bench/ac/preloaded/README.md)
+documents CLI identities, source equivalence, reuse, resource accounting and
+the distinction between footprint completion and final capacity admission.
+
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
 never slowed in response to the server. Records separate preparation and
@@ -203,7 +241,7 @@ exploratory pilots remain noncanonical.
 Use `sparq-lws-core` as an experimental native Solid/LDP server. It is not a
 replacement for the supported TypeScript `prod-solid-server`, and its default
 storage is ephemeral. Use `skills/javascript-wasm/SKILL.md` instead for the
-separate `@jeswr/solid-server` loopback development host.
+separate `@sparq-org/solid-server` loopback development host.
 
 ## Start a local server
 

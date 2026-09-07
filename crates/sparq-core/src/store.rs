@@ -77,7 +77,7 @@ pub struct PredStat {
 enum PermData {
     Owned(Vec<[Id; 3]>),
     #[cfg(feature = "mmap")]
-    Mapped(memmap2::Mmap),
+    Mapped(crate::mapped::MappedBytes),
     /// Block-compressed (~4-6 B/triple vs 12). The memory-bound storage mode for the
     /// browser: scans decode only the blocks the key-range touches. See [`compress`].
     Compressed(crate::compress::CompressedPerm),
@@ -655,6 +655,13 @@ impl TripleStore {
     #[cfg(feature = "mmap")]
     fn save_with(&self, dir: &std::path::Path, compressed: bool) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
+        self.write_native(&mut crate::native_io::DirectorySink(dir), compressed)
+    }
+
+    // [GPT-6] Directory/archive containers share all permutation and delta-folding codecs.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn write_native(&self, sink: &mut impl crate::native_io::NativeSink, compressed: bool) -> std::io::Result<()> {
+        use std::io::Write;
         for (i, p) in self.perms.iter().enumerate() {
             // Raw modes borrow zero-copy; a compressed perm is decoded back to raw rows so
             // `save` is total (e.g. a `load_str_compressed` graph can still be persisted).
@@ -671,21 +678,21 @@ impl TripleStore {
                 }
                 _ => rows,
             };
-            let path = dir.join(format!("perm{i}.bin"));
+            sink.component(&format!("perm{i}.bin"), |w| {
             if compressed && !rows.is_empty() {
                 // Unbuilt (empty) permutations stay raw-empty so `open` skips them by size.
                 // [FABLE-5] sq-7d3dj.32.2.7: `encode_emit` honours the emit-format config gate —
                 // `SPQCPRM1` by default, `SPQCPRM2` only when a `spqcprm2` build has opted in.
-                let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
-                crate::compress::CompressedPerm::encode_emit(&rows).write_to(&mut w)?;
-                std::io::Write::flush(&mut w)?;
+                crate::compress::CompressedPerm::encode_emit(&rows).write_to(w)?;
             } else {
                 // SAFETY: reinterpret the contiguous [u32;3] rows as bytes for writing.
                 let bytes = unsafe { std::slice::from_raw_parts(rows.as_ptr().cast::<u8>(), std::mem::size_of_val(rows.as_ref())) };
-                std::fs::write(path, bytes)?;
+                w.write_all(bytes)?;
             }
+            Ok(())
+            })?;
         }
-        self.save_pred_stats(dir)
+        sink.component("predstats.bin", |w| self.write_pred_stats(w))
     }
 
     /// Persists the per-predicate stats so `open` need not RE-SCAN the POS/PSO indexes
@@ -695,6 +702,12 @@ impl TripleStore {
     pub fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
+        self.write_pred_stats(&mut w)?;
+        w.flush()
+    }
+
+    #[cfg(feature = "mmap")]
+    fn write_pred_stats(&self, mut w: impl std::io::Write) -> std::io::Result<()> {
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
         for (&p, s) in self.pred_stats.iter() {
             w.write_all(&p.to_le_bytes())?;
@@ -702,7 +715,7 @@ impl TripleStore {
             w.write_all(&(s.ndv_subj as u64).to_le_bytes())?;
             w.write_all(&(s.ndv_obj as u64).to_le_bytes())?;
         }
-        w.flush()
+        Ok(())
     }
 
     /// Loads persisted per-predicate stats (written by [`save_pred_stats`]); `None` if the
@@ -777,13 +790,65 @@ impl TripleStore {
             {
                 PermData::Compressed(crate::compress::CompressedPerm::from_mmap(map)?)
             } else {
-                PermData::Mapped(map)
+                PermData::Mapped(map.into())
             };
         }
         // Use the persisted stats if present (no POS/PSO re-scan — keeps open fast and the
         // resident set small); else recompute (backward compatible with older saved dirs).
         let pred_stats = Self::load_pred_stats(dir).unwrap_or_else(|| Self::compute_pred_stats(&perms));
         Ok(TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None })
+    }
+
+    // [GPT-6] Strict native archive loading: required stats, aligned raw rows, and
+    // the same checked compressed codec. No directory I/O or rebuilding fallback.
+    #[cfg(feature = "native-archive")]
+    pub(crate) fn open_archive(
+        mut component: impl FnMut(&str) -> std::io::Result<crate::mapped::MappedBytes>,
+        dict_len: usize,
+    ) -> std::io::Result<Self> {
+        let mut perms: [PermData; 6] = std::array::from_fn(|_| PermData::default());
+        for (i, slot) in perms.iter_mut().enumerate() {
+            let bytes = component(&format!("perm{i}.bin"))?;
+            if bytes.is_empty() { continue; }
+            *slot = if bytes.starts_with(&crate::compress::FILE_MAGIC)
+                || bytes.starts_with(&crate::compress::FILE_MAGIC_V2) {
+                let perm = crate::compress::CompressedPerm::from_mapped_bytes(bytes)?;
+                perm.validate_archive_rows(dict_len)?;
+                PermData::Compressed(perm)
+            } else {
+                if bytes.len() % std::mem::size_of::<[Id; 3]>() != 0 {
+                    return Err(crate::archive::invalid("raw permutation length is not whole rows"));
+                }
+                let perm = PermData::Mapped(bytes);
+                let mut previous = None;
+                for &row in perm.as_slice() {
+                    crate::archive::validate_row(row, &mut previous, dict_len)?;
+                }
+                perm
+            };
+        }
+        let triples = perms[Perm::Spo as usize].len();
+        for perm in BUILT {
+            if perms[*perm as usize].len() != triples {
+                return Err(crate::archive::invalid("required permutation is missing rows"));
+            }
+        }
+        let bytes = component("predstats.bin")?;
+        let mut input = crate::archive::Input::new(&bytes);
+        let count = input.usize()?;
+        // Native predstats records are one u32 ID and three u64 values.
+        if count != input.remaining() / 28 || !input.remaining().is_multiple_of(28) {
+            return Err(crate::archive::invalid("invalid native predicate statistics length"));
+        }
+        let mut pred_stats = FxHashMap::default();
+        for _ in 0..count {
+            let id = input.u32()?;
+            let stat = PredStat { count: input.usize()?, ndv_subj: input.usize()?, ndv_obj: input.usize()? };
+            if id == 0 || id as usize > dict_len || pred_stats.insert(id, stat).is_some() {
+                return Err(crate::archive::invalid("invalid or duplicate predicate statistics ID"));
+            }
+        }
+        Ok(Self { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None })
     }
 
     /// Per-predicate stats: count + distinct objects from POS (always built), and

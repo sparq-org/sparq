@@ -285,6 +285,16 @@ readers = ["sparq-acbench"]
 # re-verifies this every run (a crate that starts reading a safe path FAILS the
 # audit, forcing a re-evaluation). Docs/site lanes still run — they are separate
 # workflows, not gated by this selector.
+#
+# [OPUS-5] #5249: a `safe = true` verdict is now inert for BOTH selector layers.
+# It always emptied the affected CLOSURE; since #5249 `ci_select.classify_change`
+# reads this list too, so such a path also classifies `map-safe` (one of
+# `_INERT_CLASSES`) instead of `engine` — which is what lets a merge_group batch
+# confined to safe paths skip the rust_changed-only lanes and the CodeQL analysis.
+# Adding an entry here therefore now affects the change CLASS as well: hold it to
+# the same audit bar. FIRST-MATCH-WINS still applies (the sq-1s2.4 zk-anchor
+# entries above keep `site/src/lib/zk-prover.ts` engine-classified), and a `safe`
+# entry can still never rescue a §4.1 trigger or a `crates/`-owned path.
 # ---------------------------------------------------------------------------
 
 # Design records / research notes. No crate compiles or reads research/.

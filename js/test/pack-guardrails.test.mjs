@@ -16,6 +16,23 @@ import { parsePackJson } from '../guardrails/pack-json.mjs';
 const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(resolve(pkgDir, 'package.json'), 'utf8'));
 
+// wasm-pack forwards its trailing arguments to Cargo, but an explicit `--` makes
+// Cargo treat options such as `--features` as rustc arguments. [GPT-5.6]
+test('wasm-pack build scripts keep Cargo options before the argument separator', () => {
+  const wasmBuildScripts = Object.entries(manifest.scripts ?? {}).filter(([, body]) =>
+    body.includes('wasm-pack build'),
+  );
+  assert.ok(wasmBuildScripts.length > 0, 'expected at least one wasm-pack build script');
+
+  for (const [name, body] of wasmBuildScripts) {
+    assert.doesNotMatch(
+      body,
+      /\s--\s--(?:features|config|profile)\b/,
+      `${name} places a Cargo option after the argument separator`,
+    );
+  }
+});
+
 /** Every `node <script>` reachable from the `prepare`/`prepack` lifecycles. */
 const lifecycleNodeScripts = () => {
   const scripts = manifest.scripts ?? {};
@@ -61,7 +78,7 @@ test('parsePackJson reads the trailing JSON value even when stdout is polluted',
 
   // A lifecycle script printing progress lines ahead of the JSON — including one that
   // itself starts with a bracket, so a naive "first bracket wins" scan would be fooled.
-  const noisy = ['prepare: building @jeswr/sparq ...', '[build] wasm-pack done', manifestJson].join('\n');
+  const noisy = ['prepare: building @sparq-org/sparq ...', '[build] wasm-pack done', manifestJson].join('\n');
   assert.deepEqual(parsePackJson(noisy), parsePackJson(manifestJson));
 
   // Compact (non-pretty-printed) output behind noise still resolves.

@@ -157,7 +157,7 @@ datalog = ["sparq-reason/datalog"]
 [dependencies]
 # `version` alongside `path` on the sparq-* deps: cargo uses the path locally and the
 # version on crates.io (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", features = ["mmap"] }
+sparq-core = { path = "../sparq-core", version = "0.1.1", features = ["mmap"] }
 # [SONNET-4.6] sq-7d3dj.30.5: enable the opt-in DPccp join-order planner so the CLI
 # (the canonical bench binary) uses the cost-optimal bushy join tree by default for
 # small BGPs. sparq-engine's default features are unchanged; the feature is ON only for
@@ -176,14 +176,14 @@ sparq-core = { path = "../sparq-core", version = "0.1.0", features = ["mmap"] }
 # Same rationale as `algebra-rewrite`: the shipped CLI and canonical bench measure the fixed
 # plan, the LIBRARY default stays OFF, zero new deps / no `unsafe`. Its equivalence witnesses
 # run in the `sparq-engine (antijoin-static-decline)` feature-matrix leg.
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", features = ["dp-planner", "algebra-rewrite", "antijoin-static-decline"] }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", features = ["dp-planner", "algebra-rewrite", "antijoin-static-decline"] }
 # [OPUS-4.8] (sq-l4ki) `query` reuses sparq-server's W3C SELECT result serialisers
 # (XML/CSV/TSV) for its `--format` flag instead of re-implementing them. We take ONLY
 # the pure serialiser library (`results`) — `default-features = false` drops the `server`
 # feature so axum/tokio/hyper are NOT pulled into the CLI (verified: `cargo tree -p
 # sparq-cli -e normal | grep -c axum` == 0). JSON / ASK-boolean / CONSTRUCT come straight
 # from sparq-engine (`query_json` / `construct_ntriples`), so the dep is serialiser-only.
-sparq-server = { path = "../sparq-server", version = "0.1.0", default-features = false }
+sparq-server = { path = "../sparq-server", version = "0.1.1", default-features = false }
 # [OPUS-4.8] Classify the parsed query form (Select / Ask / Construct / Describe) so
 # `query` can dispatch SELECT→rows, ASK→boolean, CONSTRUCT/DESCRIBE→triples. Mirrors how
 # sparq-server classifies before dispatch; already in the CLI's tree transitively via
@@ -197,19 +197,19 @@ rayon = "1"
 mimalloc = { version = "0.1", optional = true }
 # Opt-in reasoning (RDFS/OWL-RL materialization) — engaged only by `--reason` / the `reason`
 # subcommand; the default query/build path never touches it.
-sparq-reason = { path = "../sparq-reason", version = "0.1.0" }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1" }
 # [OPUS-5] (sq-2ch27) Behind the opt-in `el` feature only: the OWL 2 EL consequence-based
 # classifier (`sparq_reason_el::classify_graph`) behind `--reason el` / `classify`. OFF by
 # default — a build without the feature links none of it. Adds no third-party dependency
 # (sparq-core + oxrdf + rustc-hash are all already in the CLI's tree).
-sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.0", optional = true }
+sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.1", optional = true }
 # Opt-in HDT ingestion (the `hdt` feature; see [features] for why it is not default).
-sparq-hdt = { path = "../sparq-hdt", version = "0.1.0", optional = true }
+sparq-hdt = { path = "../sparq-hdt", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-vczh2) Behind the opt-in `terse` feature only: the verifiable LLM-ergonomic
 # transpiler (`sparq_terse::terse_to_sparql`) for the `terse` subcommand. Pulled WITHOUT its
 # `vectors` feature, so this is the LEAN build (depends only on `spargebra`, already in the CLI's
 # tree). OFF by default — a build without the `terse` feature carries no terse code.
-sparq-terse = { path = "../sparq-terse", version = "0.1.0", optional = true }
+sparq-terse = { path = "../sparq-terse", version = "0.1.1", optional = true }
 oxttl.workspace = true
 oxrdf.workspace = true
 # Streaming decompression: gzip + bzip2, and zstd (the fast, parallel-friendly bulk

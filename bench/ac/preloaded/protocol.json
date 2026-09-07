@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "model_provenance": "[GPT-6]",
+  "study_id": "solid-pod-preloaded-v1",
+  "status": "prospective method; hardware, cell matrix and source revision must be frozen after the archive preparation pilot",
+  "prior_evidence": "research/solid-pod-scale-main.json",
+  "unchanged_inputs": {
+    "corpus_definitions": "bench/ac/million/campaign-20260906.json",
+    "workload": "bench/ac/million/workload.json",
+    "rights": "Generator policy-neutral intended rights, WAC group versus ACP member enumeration, private exceptions and shared owner policy administration remain unchanged.",
+    "updates": "Full-record ingestion, deletion of all outgoing record triples, value-only modification, actual durable receipts and unknown-commit reconciliation remain timed.",
+    "criteria": "Preserve complete offered schedules, source-derived rates, all-offered success/deadline denominators, queue criterion, independent correctness and per-cell cgroup resource admission."
+  },
+  "preloaded": {
+    "version": 1,
+    "fixed_server_cpus": 16,
+    "client_cpus": 4,
+    "primary_representation": "native archive at every memory tier",
+    "memory_tiers": "Constrained native mapping tiers first; then 128 and 256 GiB on the same hardware. Exact constrained tiers are chosen prospectively after preparation footprint and time are measured.",
+    "memory_mode": "Optional small diagnostic only; not substituted at high RAM in the primary memory comparison.",
+    "readiness": "Every Pod assigned exactly once to a worker; every Graph and PodStore exists, real WAC/ACP AuthIndex is materialized, trusted journals are replayed, all states remain alive before HTTP listen and the all-population-ready record.",
+    "native_memory_scope": "Immutable native content mappings may page under memory pressure. Dictionaries, descriptors, overlays and authorization are measured resident metadata; no claim that all heap state spills.",
+    "archive_integrity": "Coordinator checks complete archive bytes, SHA256, source-manifest binding and read-only mode before workers map. Archive bytes/length must remain immutable throughout every view lifetime.",
+    "read_activation": "No RDF parsing, native dataset opening, journal replay or initial authorization materialization after readiness; FIFO drain snapshots must prove these counters unchanged.",
+    "failure_recovery": "Failed timed mutations restore a shared graph snapshot and rebuild authorization without reopening any dataset. An ambiguous durable commit or failed rollback poisons the worker until offline replay.",
+    "warmup": "Read-only warmup after complete preload; complete the client run before the control call. Controller pauses middleware admission before body extraction, waits for previously admitted handlers and drains every worker before the before-resource snapshot. Client timeout does not cancel worker work. Never-admitted transport connections are outside this barrier.",
+    "page_cache_ownership": "Every cell synchronizes and drops clean OS caches on the dedicated exclusive host before server launch. Full archive digest validation, native opening and preload then run inside the limited server cgroup so file-cache and anonymous charges count toward the same ceiling. Retain memory.stat anon/file, memory events, read I/O and faults; demonstrate low-RAM paging from measurements rather than assuming a limit guarantees it.",
+    "independent_runs": "Stop the prior server, remove only the task corpus application update journals, retain the identical immutable archive, start all stores anew, and replay the now-empty journal set. Measurement writes are not carried into another repetition. Dedicated durability/restart tests deliberately retain journals and are separate.",
+    "measurement_end": "After client completion/drain, pause admission and drain workers before the after-resource snapshot. Record client response deadlines separately from work completed after a client timeout.",
+    "preparation_accounting": "Report generation, native preparation, full validation, all-Pod startup and timed requests separately. Record preparation/startup elapsed time, cgroup peak and CPU, logical/allocated storage, inode and descriptor counts. Failed preload is not a query percentile or a smaller admitted population.",
+    "source_identity": "Freeze the merged shipping-core revision, private harness revision, source bundle hashes, binary SHA256, workload/config hashes and archive sidecars before final evaluation."
+  }
+}

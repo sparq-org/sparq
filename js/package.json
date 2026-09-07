@@ -1,16 +1,16 @@
 {
-  "name": "@jeswr/sparq",
-  "version": "0.1.0",
+  "name": "@sparq-org/sparq",
+  "version": "0.1.1",
   "description": "RDF/JS interface to the sparq SPARQL engine (Rust → WebAssembly): an in-memory, dictionary-encoded RDF store with SELECT/ASK and SPARQL Update.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeswr/sparq.git",
+    "url": "git+https://github.com/sparq-org/sparq.git",
     "directory": "js"
   },
-  "homepage": "https://github.com/jeswr/sparq#readme",
+  "homepage": "https://github.com/sparq-org/sparq#readme",
   "bugs": {
-    "url": "https://github.com/jeswr/sparq/issues"
+    "url": "https://github.com/sparq-org/sparq/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -35,18 +35,22 @@
     "skills"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "_copy:wasm": "rm -rf wasm && mkdir wasm && cp ../crates/sparq-wasm/pkg/sparq_wasm.js ../crates/sparq-wasm/pkg/sparq_wasm.d.ts ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm.d.ts wasm/",
-    "build:wasm": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm -- --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm",
-    "build:wasm:lean": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm -- --config profile.release-wasm.strip=false && npm run _copy:wasm",
+    "build:wasm": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm",
+    "build:wasm:lean": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "_copy:wasm:node": "node scripts/copy-wasm-node.mjs",
-    "build:wasm:node": "wasm-pack build ../crates/sparq-wasm --target nodejs --out-dir pkg-node --profile release-wasm -- --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm:node",
-    "build:reason-wasm": "wasm-pack build ../crates/sparq-reason-wasm --target web --profile release-wasm -- --features explain --config profile.release-wasm.strip=false",
-    "build:rsp-wasm": "wasm-pack build ../crates/sparq-rsp-wasm --target web --profile release-wasm -- --config profile.release-wasm.strip=false",
-    "build:text-wasm": "wasm-pack build ../crates/sparq-text-wasm --target web --profile release-wasm -- --config profile.release-wasm.strip=false",
+    "build:wasm:node": "wasm-pack build ../crates/sparq-wasm --target nodejs --out-dir pkg-node --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm:node",
+    "build:reason-wasm": "wasm-pack build ../crates/sparq-reason-wasm --target web --profile release-wasm --features explain --config profile.release-wasm.strip=false",
+    "build:rsp-wasm": "wasm-pack build ../crates/sparq-rsp-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false",
+    "build:text-wasm": "wasm-pack build ../crates/sparq-text-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:wasm:node && npm run build:ts",
     "typecheck": "tsc --noEmit",
