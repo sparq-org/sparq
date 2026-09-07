@@ -576,5 +576,4 @@ const _: fn() = || {
 };
 
 #[cfg(test)]
-#[path = "archive_tests.rs"]
 mod tests;
