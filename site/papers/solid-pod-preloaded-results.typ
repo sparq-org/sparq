@@ -62,10 +62,11 @@
   let state = native-result-state(data)
   if state != "finalized and reviewed" { return [Native results: #state.] }
   let display(value, scale: 1) = if value == none { "—" } else if scale == 1 { str(value) } else { str(calc.round(value * scale, digits: 3)) }
+  [The full cell label identifies the dataset, group, resource tier, rate selection, repetition and model. Latency is measured from scheduled arrival for successful responses; both fractions use all offered requests. RAM is the server cgroup ceiling.]
   table(columns: (2fr, 1fr, 1.5fr, 1fr, 1fr, 1fr),
-    table.header([*Dataset / model*], [*RAM GiB*], [*Result*], [*p95 ms*], [*Successful fraction*], [*Timely fraction*]),
+    table.header([*Cell label*], [*RAM GiB*], [*Result*], [*Successful p95 (ms)*], [*Successful / offered*], [*Timely / offered*]),
     ..native-response-rows(data, labels: labels).map(row => (
-      [#row.dataset / #row.model], [#row.memory_gib], [#row.state],
+      [#row.label], [#row.memory_gib], [#row.state],
       [#display(row.successful_p95_us, scale: 0.001)],
       [#display(row.success_fraction_of_offered)], [#display(row.deadline_fraction_of_offered)],
     )).flatten(),
