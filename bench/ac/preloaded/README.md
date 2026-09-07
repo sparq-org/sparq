@@ -148,3 +148,69 @@ state; complete dictionary bytes are mapped. Projections inform which larger ful
 history population to prepare next within the actual storage, runtime and cost
 limits. They never substitute for complete preparation or cap history scale at a
 population chosen by the earlier cache-based study.
+
+`run-campaign.py` is the main executor after the preparation pilot and shipping
+source review. Its required arguments are `--campaign`, `--campaign-sha256`,
+`--source-commit`, `--binary-source-commit`, `--binary-sha256`, `--binary`,
+`--corpora`, `--auth` and `--results`. The main binary must have been built from
+the exact executor revision; the preparation-only input-equivalence exception
+does not apply. The coordinator checks that the declared shipping commits are
+ancestors of this source. The operator remains responsible for confirming that
+the reviewed shipping PRs have landed before dispatch. No matrix is supplied by
+the executor or selected from observed response results.
+
+The external JSON extends the original campaign structure with the following
+input contract. The tests use a labeled synthetic fixture, not a proposed matrix.
+
+| Field | Required content |
+| --- | --- |
+| `status`, `campaign_id` | `frozen-before-measurement`, a new `solid-pod-preloaded-` identity |
+| `source_commit`, `binary_build_source_commit`, `binary_sha256`, `shipping_commits` | Exact execution/build identities and the merged shipping ancestry |
+| `bindings` | Relative source paths mapped to SHA256, including the protocol, old corpus definitions, workload, calibration, generator and ratings histogram; also every selected config file |
+| `corpora` | Existing definition fields plus a unique new `id`, positive `pods`, `shape_reference` naming an old definition, `expected_config` copied in full from its pilot manifest, and `expected_config_sha256` |
+| `groups`, `seeds` | Complete dataset/RAM/rate/repetition grid, `storage_mode: native`, `lane: journeys`, fixed CPU allocation, and distinct nonnegative integer seeds |
+| `preloaded` | Existing version/CPU/startup/drain settings plus `cell_timeout_seconds` |
+| `execution` | `version: 1`, `data_mount: /mnt/sparq-native/data0`, `data1_allocated: false`, `preparation_memory_gib: 128`, positive `phase_timeout_seconds`, `inspection_timeout_seconds`, and integer `maximum_cells` |
+| `stop_rules` | Runtime, data disk floor, result disk reserve, aggregate/per-file retrieval limits, and the exact execution behaviors below |
+
+The config digest uses Python `json.dumps(config, sort_keys=True,
+separators=(',', ':'))` encoded as UTF-8. New Pod counts do not change retention,
+literal entropy, service record distributions or rights. The executor accepts
+larger complete history populations without a history-size ceiling, reconciles
+every inventory row with its packed index entry and manifest totals, and verifies
+full payload/native hashes. A frozen source-size cap that omits an observed heavy
+Pod is rejected. Existing inputs may be reused only after this validation, with
+no newly measured preparation duration. Corpora containing old journals are
+rejected during preparation; independent timed runs reset only their own
+application journals while holding the corpus lock.
+
+This executor version requires these machine-readable stop behaviors:
+
+```json
+{
+  "grid": "complete-declared-grid",
+  "preparation_failure": "stop-before-all-timed-cells",
+  "execution_error": "stop-and-preserve-partial",
+  "correctness_failure": "quarantine-source-and-stop",
+  "observed_guard_failure": "continue-declared-grid"
+}
+```
+
+The matrix itself chooses the preparation, cell and total deadlines. The
+dedicated-host execution envelope and bounded plan size are checked before
+allocating the plan. Generation, native preparation, representative oracle checks
+and lossless inventory compression use bounded preparation units. Every selected
+population completes these steps before any timed cell. Each cell uses the
+existing preloaded adapter, read-only warmup, both worker drains, fixed client
+affinity, real journey writes and all-offered criteria. The server has an
+independent systemd runtime limit; offline native receipt replay runs in its own
+bounded preparation unit after the server stops. It is not a response timing.
+
+The output includes copied frozen inputs, per-population storage/verification,
+per-cell native cgroup/process/host accounting, complete or partial cell rows,
+unattempted populations/cells, and `campaign-result.json`. Closed logs and JSONL
+are losslessly compressed, then bound by the recursive `MANIFEST.sha256`.
+Cleanup/finalization failure prevents a complete result. Guard failures are
+preserved even when all cells execute; execution completion does not establish
+capacity, WAC/ACP equivalence or fit on a smaller physical machine. The original
+campaign, request criteria and completed evidence remain separate.

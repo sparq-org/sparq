@@ -221,6 +221,16 @@ It performs no timed workload. Its [reference](../../bench/ac/preloaded/README.m
 documents CLI identities, source equivalence, reuse, resource accounting and
 the distinction between footprint completion and final capacity admission.
 
+The separate `bench/ac/preloaded/run-campaign.py` consumes an externally frozen
+main matrix after that pilot. It requires identical executor/binary build
+revisions, preserved generator shape references and complete native preparation
+of every selected population before any timed cell. Its versioned input and
+explicit stop rules are documented in the same reference; it never invokes
+the original cached server path. Every repetition retains preloaded state,
+complete request schedules, drain accounting and native offline receipt audits.
+Partial execution and unattempted populations/cells remain explicit in the
+source-bound result rather than being counted as successful capacity evidence.
+
 Raw JSONL preserves every offered request, including unsent requests at
 the client's concurrency limit. The schedule is computed before load and
 never slowed in response to the server. Records separate preparation and
