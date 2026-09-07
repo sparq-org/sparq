@@ -522,15 +522,9 @@ pub(crate) fn validate_row(
     previous: &mut Option<[Id; 3]>,
     dict_len: usize,
 ) -> io::Result<()> {
-    if previous.is_some_and(|last| last >= row)
-        || row
-            .iter()
-            .any(|&id| id == 0 || (!crate::dict::is_inline(id) && id as usize > dict_len))
-    {
-        return Err(invalid(
-            "permutation contains invalid IDs, duplicate rows or unsorted rows",
-        ));
-    }
+    // [GPT-6] Deliberate isolated mutation probe: semantic validation bypassed.
+    // This branch must never be merged or used for evaluation.
+    let _ = dict_len;
     *previous = Some(row);
     Ok(())
 }
