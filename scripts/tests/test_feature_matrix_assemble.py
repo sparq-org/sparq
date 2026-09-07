@@ -118,6 +118,30 @@ class TestFeatureMatrixAssemble(unittest.TestCase):
         dupes = sorted({n for n in names if names.count(n) > 1})
         self.assertEqual(dupes, [], f"duplicate leg names collapse gating checks: {dupes}")
 
+    def test_native_archive_has_a_full_test_leg(self):
+        """[GPT-6] The default-off archive tests must execute on PRs and merges."""
+        name = "sparq-core (native-archive)"
+        for event in ("pull_request", "merge_group", "push"):
+            legs = self.mod.filter_legs_by_tier(self.legs, event, "test")
+            selected = [leg for leg in legs if leg["name"] == name]
+            self.assertEqual(len(selected), 1, f"missing native archive test leg on {event}")
+            self.assertEqual(selected[0]["crate"], "sparq-core")
+            self.assertEqual(selected[0]["features"], "native-archive")
+            self.assertIs(selected[0]["test"], True)
+        self.assertEqual(self.golden.count(f"opt-in {name}"), 1)
+
+    def test_native_archive_leg_or_golden_deletion_trips_existing_gate(self):
+        """[GPT-6] Exercise the real name-pairing assertion with either side removed."""
+        name = "opt-in sparq-core (native-archive)"
+        for missing in ("names", "golden"):
+            with self.subTest(missing=missing):
+                gate = TestFeatureMatrixAssemble("test_leg_names_match_golden_exactly")
+                gate.names = list(self.names)
+                gate.golden = list(self.golden)
+                getattr(gate, missing).remove(name)
+                with self.assertRaisesRegex(AssertionError, "leg-name set drifted"):
+                    gate.test_leg_names_match_golden_exactly()
+
     def test_no_leg_name_is_advisory_or_informational(self):
         """Every leg must GATE — none may match ci-summary's advisory exclusion."""
         offenders = [n for n in self.names if ADVISORY_RE.search(n)]
