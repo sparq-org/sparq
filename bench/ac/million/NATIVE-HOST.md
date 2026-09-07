@@ -88,6 +88,27 @@ records an explicit cancellation, not a successful benchmark. Launcher cleanup t
 terminates the host. Neither `DONE` nor a matching manifest establishes an SLO pass;
 that decision belongs to the source-bound benchmark analysis.
 
+The reviewed preparation pilot instead uses `kind: preparation-proposal`, retaining
+the same terminal statuses. Include `executor_source_commit`,
+`binary_build_source_commit`, `source_path`, `proposal_path`, `proposal_sha256`,
+`binary_path`, `binary_sha256`, `preparation_result_path`, and
+`preparation_result_sha256`. Source/proposal/binary paths resolve under data0; the
+result resolves under the retrieved results directory. The proposal is the immutable
+input with SHA-256 `ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7`
+and its original prospective-footprint status. It is not relabelled as a frozen main
+campaign. The result must have kind `native-preparation-pilot-result`, bind the same
+identities, and be complete before a `completed` receipt is accepted.
+
+The monitor independently compares the binary build commit with the clean executor
+checkout using an all-path Git diff. Only the five reviewed executor/documentation
+paths listed in `native-host.py` may differ: any Rust, Cargo, rule, embedded asset or
+other input change rejects the receipt. The comparison must match the executor's
+`source_input_equivalence` report. Preserve the separately recorded binary build
+provenance; a matching binary checksum and source comparison do not reproduce the
+build. The finalized receipt explicitly records `timed_load`, `slo_admission` and
+`capacity_admission` as false. Preparation may establish footprint and startup
+outcomes, but cannot admit a response-time or capacity result.
+
 If evidence validation fails, finalization does not repeat that failed validation.
 It instead copies a bounded set of stable diagnostic snapshots into a separate
 `failure-evidence-*` directory, records excluded or changing files in

@@ -16,6 +16,14 @@ DATA = Path('/mnt/sparq-native/data0')
 MAX_EVIDENCE_BYTES = 2 * 1024**3
 
 
+PREPARATION_PROPOSAL_SHA256 = 'ee0ae1b7ed5b628c36c1b798636f7c86426688b02b0485539650e46467e41fd7'
+PREPARATION_PROPOSAL_STATUS = 'prospective footprint proposal only; no preparation performed, no main matrix frozen'
+EXECUTOR_ONLY_PATHS = frozenset({
+    'bench/ac/preloaded/run-preparation.py', 'bench/ac/preloaded/test_preparation.py',
+    'bench/ac/preloaded/README.md', 'bench/ac/preloaded/remote-checks.json',
+    'skills/solid-lws-server/SKILL.md',
+})
+
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -26,6 +34,11 @@ def receipt_identity(receipt):
         return
     if receipt.get('status') not in ('completed', 'stopped-with-partial-evidence'):
         raise ValueError('completion receipt needs an explicit terminal status')
+    if receipt.get('kind') == 'preparation-proposal':
+        preparation_receipt(receipt)
+        return
+    if receipt.get('kind', 'campaign') != 'campaign':
+        raise ValueError('unknown completion receipt kind')
     for key, length in (('source_commit', 40), ('campaign_sha256', 64), ('binary_sha256', 64)):
         if not re.fullmatch('[0-9a-f]{' + str(length) + '}', receipt.get(key, '')):
             raise ValueError('completion receipt lacks exact source/campaign/binary identity')
@@ -44,6 +57,61 @@ def receipt_identity(receipt):
     campaign = json.loads(Path(receipt['campaign_path']).read_text())
     if campaign.get('status') != 'frozen-before-measurement':
         raise ValueError('completion campaign was not frozen')
+
+
+def preparation_receipt(receipt):
+    """Validate preparation provenance without admitting a timed campaign or capacity claim."""
+    for key, length in (('executor_source_commit',40), ('binary_build_source_commit',40),
+                        ('proposal_sha256',64), ('binary_sha256',64), ('preparation_result_sha256',64)):
+        if not re.fullmatch('[0-9a-f]{'+str(length)+'}',receipt.get(key,'')):
+            raise ValueError('preparation receipt lacks exact input identity')
+    for key in ('source_path','proposal_path','binary_path'):
+        path=Path(receipt[key]).resolve()
+        if not path.is_relative_to(DATA.resolve()) or not path.exists():
+            raise ValueError('preparation inputs must be retained under data0')
+    result_path=Path(receipt['preparation_result_path']).resolve()
+    if not result_path.is_relative_to(RESULTS.resolve()) or not result_path.is_file():
+        raise ValueError('preparation result must be in retrieved evidence')
+    if receipt['proposal_sha256'] != PREPARATION_PROPOSAL_SHA256 or digest(Path(receipt['proposal_path'])) != PREPARATION_PROPOSAL_SHA256:
+        raise ValueError('preparation proposal differs from the immutable reviewed input')
+    if digest(Path(receipt['binary_path'])) != receipt['binary_sha256'] or digest(result_path) != receipt['preparation_result_sha256']:
+        raise ValueError('preparation binary/result checksum mismatch')
+    proposal=json.loads(Path(receipt['proposal_path']).read_text())
+    if proposal.get('schema_version') != 1 or proposal.get('status') != PREPARATION_PROPOSAL_STATUS:
+        raise ValueError('preparation proposal has the wrong scope')
+    source=Path(receipt['source_path'])
+    executor=receipt['executor_source_commit']; binary=receipt['binary_build_source_commit']
+    revision=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
+    if revision != executor or subprocess.check_output(['git','-C',str(source),'status','--porcelain']):
+        raise ValueError('preparation executor checkout is not the clean selected revision')
+    if subprocess.check_output(['git','-C',str(source),'cat-file','-t',binary],text=True).strip()!='commit':
+        raise ValueError('binary build source identity is not a commit')
+    changes=subprocess.check_output(['git','-C',str(source),'diff','--name-only','--no-renames','-z',binary,executor,'--'])
+    changed=sorted(path.decode('utf-8') for path in changes.split(b'\0') if path)
+    if set(changed)-EXECUTOR_ONLY_PATHS:
+        raise ValueError('binary and executor differ in Rust/Cargo or other non-executor inputs')
+    for relative, checksum in proposal['bindings'].items():
+        path=(source/relative).resolve()
+        if not path.is_relative_to(source.resolve()) or digest(path)!=checksum:
+            raise ValueError('preparation proposal source binding mismatch')
+    result=json.loads(result_path.read_text())
+    if result.get('record_type') != 'native-preparation-pilot-result' or result.get('status') not in {'complete','incomplete'}:
+        raise ValueError('wrong preparation result kind/status')
+    if receipt['status']=='completed' and result['status']!='complete':
+        raise ValueError('incomplete preparation cannot be finalized as completed')
+    for key in ('executor_source_commit','binary_build_source_commit','proposal_sha256','binary_sha256'):
+        if result.get(key)!=receipt[key]: raise ValueError('preparation result input identity mismatch')
+    equivalence=result.get('source_input_equivalence',{})
+    if (equivalence.get('passed') is not True or equivalence.get('executor_source_commit')!=executor
+        or equivalence.get('binary_build_source_commit')!=binary
+        or equivalence.get('allowed_changed_paths')!=sorted(EXECUTOR_ONLY_PATHS)
+        or equivalence.get('actual_changed_paths')!=changed):
+        raise ValueError('preparation equivalence receipt differs from independent git comparison')
+    for key in ('timed_load','slo_admission','capacity_admission'):
+        if receipt.get(key,False) is not False: raise ValueError('preparation receipt cannot admit timed performance')
+        receipt[key]=False
+    receipt['source_input_equivalence_verified']={'passed':True,'actual_changed_paths':changed,
+        'method':'independent all-path git diff; only the five reviewed executor/docs paths may differ'}
 
 
 def child_services_stopped():
