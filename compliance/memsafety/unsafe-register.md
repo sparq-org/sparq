@@ -286,6 +286,7 @@ fields before arithmetic.
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
+| `examples/population_http/storage.rs:203` | `NativeArchive::open` | complete archive bytes/length remain immutable through all PodStore and fork lifetimes | The research coordinator verifies the finalized read-only archive digest before workers map it. The harness never writes archive bytes; durable application journals and retained graph overlays are separate. Operators must preserve the archive for all mapped views. EXAMPLE-only. [GPT-6] |
 | `examples/read_response_alloc_microbench.rs:41` | `unsafe impl GlobalAlloc for CountingAlloc` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only an ARMED-flag read + a `Relaxed` counter bump. EXAMPLE-only; lib + bin stay `forbid(unsafe_code)`. |
 | `examples/read_response_alloc_microbench.rs:42` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; only the armed counter is touched before the forward. |
 | `examples/read_response_alloc_microbench.rs:48` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
