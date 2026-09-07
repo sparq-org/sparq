@@ -470,7 +470,11 @@ SSH_RULE_ID="$(aws ec2 authorize-security-group-ingress --profile "${PROFILE}" \
 [[ "${SSH_RULE_ID}" == sgr-* ]] || die "AWS did not return the SSH security-group rule ID"
 CURRENT_SSH_CIDR="${PUBLIC_CIDR}"
 RUSTUP_TOOLCHAIN_ARGS=""
-if [[ "${MODE}" == build || "${MODE}" == native ]]; then RUSTUP_TOOLCHAIN_ARGS="--default-toolchain none"; fi
+EXTRA_BUILD_PACKAGES=""
+if [[ "${MODE}" == build || "${MODE}" == native ]]; then
+  RUSTUP_TOOLCHAIN_ARGS="--default-toolchain none"
+  EXTRA_BUILD_PACKAGES="cmake"
+fi
 
 cat >"${WORK}/user-data.sh" <<USERDATA
 #!/bin/bash
@@ -479,7 +483,7 @@ set -euo pipefail
 systemd-run --unit=sparq-pod-watchdog --on-calendar=@${DEADLINE_EPOCH} /sbin/shutdown -h now || true
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git curl build-essential pkg-config libssl-dev python3 rsync zstd unzip e2fsprogs util-linux
+apt-get install -y -qq git curl build-essential pkg-config libssl-dev python3 rsync zstd unzip e2fsprogs util-linux ${EXTRA_BUILD_PACKAGES}
 sudo -u ubuntu env HOME=/home/ubuntu bash -c \
   "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y ${RUSTUP_TOOLCHAIN_ARGS}"
 touch /var/tmp/SPARQ_POD_BOOTSTRAP_DONE
