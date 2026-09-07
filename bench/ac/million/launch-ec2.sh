@@ -17,6 +17,10 @@ if [[ "${MODE}" == build ]]; then
   DEFAULT_INSTANCE_TYPE=c7g.4xlarge
   DEFAULT_VOLUME_GB=200
 fi
+if [[ "${MODE}" == native ]]; then
+  DEFAULT_INSTANCE_TYPE=r7gd.12xlarge
+  DEFAULT_VOLUME_GB=80
+fi
 INSTANCE_TYPE="${SPARQ_POD_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
 VOLUME_GB="${SPARQ_POD_VOLUME_GB:-${DEFAULT_VOLUME_GB}}"
 CPUSET="${SPARQ_POD_CPUSET:-1}"
@@ -48,8 +52,8 @@ verify_bundle_source() {
 }
 
 case "${MODE}" in
-  pilot|canonical|build) ;;
-  *) die "usage: $0 pilot|canonical|build" ;;
+  pilot|canonical|build|native) ;;
+  *) die "usage: $0 pilot|canonical|build|native" ;;
 esac
 if [[ "${MODE}" == build ]]; then
   [[ "${INSTANCE_TYPE}" == c7g.4xlarge && "${VOLUME_GB}" == 200 ]] \
@@ -57,6 +61,13 @@ if [[ "${MODE}" == build ]]; then
   [[ "${WATCHDOG_SECONDS}" =~ ^[0-9]+$ ]] && (( WATCHDOG_SECONDS <= 14400 )) \
     || die "build watchdog cannot exceed four hours"
   [[ -r "${ROOT}/bench/ac/million/build-jobs.py" ]] || die "build-only runner is absent"
+fi
+if [[ "${MODE}" == native ]]; then
+  [[ "${INSTANCE_TYPE}" == r7gd.12xlarge && "${VOLUME_GB}" == 80 ]] \
+    || die "native mode requires r7gd.12xlarge and 80 GiB gp3 root"
+  for runner in native-host.py native-storage.py native-cost.py; do
+    [[ -r "${ROOT}/bench/ac/million/${runner}" ]] || die "native setup is incomplete"
+  done
 fi
 [[ "${REGION}" == "eu-west-2" ]] || die "the frozen study region is eu-west-2"
 [[ "${INSTANCE_TYPE}" =~ ^[a-z0-9.]+$ ]] || die "invalid instance type"
@@ -211,10 +222,13 @@ trap cleanup EXIT
 stage_pull() {
   # [GPT-6] A nonempty array is safe with Bash 3's nounset handling.
   local rsync_args=(-az --partial) transfer_status=0
+  if [[ "${MODE}" == native ]]; then
+    rsync_args+=(--max-size=512m --exclude='*.native' --exclude='*.spqa' --exclude='*.bundle')
+  fi
   # [GPT-6] Closed request streams arrive as zstd artifacts. Avoid retaining a
   # second, uncompressed copy of every live stream on the smaller client disk.
   # The final pull includes unfinished streams when a run stops early.
-  if [[ "${MODE}" == canonical && "${1:-live}" != final ]]; then
+  if [[ ( "${MODE}" == canonical || "${MODE}" == native ) && "${1:-live}" != final ]]; then
     rsync_args+=(--exclude='*-requests.jsonl' --exclude='*-warmup.jsonl' --exclude='*-audit.jsonl')
   fi
   rsync "${rsync_args[@]}" -e "ssh ${SSH_OPTIONS[*]}" \
@@ -333,7 +347,7 @@ if [[ "${MODE}" == build ]]; then
   ANCILLARY_RESERVE=0
 fi
 PRICE_QUERY_OK=0
-if [[ "${MODE}" != build ]] && aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
+if [[ "${MODE}" != build && "${MODE}" != native ]] && aws pricing get-products --profile "${PROFILE}" --region us-east-1 \
   --service-code AmazonEC2 \
   --filters \
     "Type=TERM_MATCH,Field=location,Value=EU (London)" \
@@ -368,7 +382,10 @@ if (( PRICE_QUERY_OK == 0 )); then
   fi
   printf '%s\n' "${PRICE_DIGEST%% *}" \
     >"${RESULTS_LOCAL}/aws-bulk-pricing.sha256"
-  if [[ "${MODE}" == build ]]; then
+  if [[ "${MODE}" == native ]]; then
+    python3 "${ROOT}/bench/ac/million/native-cost.py" "${WORK}/pricing.csv" "${PRIOR_AWS_USD}" \
+      >"${RESULTS_LOCAL}/cost-estimate.json"
+  elif [[ "${MODE}" == build ]]; then
     python3 "${ROOT}/bench/ac/million/build-cost.py" "${WORK}/pricing.csv" "${PRIOR_AWS_USD}" \
       >"${RESULTS_LOCAL}/cost-estimate.json"
   else
@@ -378,6 +395,23 @@ if (( PRICE_QUERY_OK == 0 )); then
     --hours 12 --ancillary-reserve 5 --prior-spend "${PRIOR_AWS_USD}" \
     >"${RESULTS_LOCAL}/cost-estimate.json"
   fi
+fi
+
+if [[ "${MODE}" == native ]]; then
+  aws ec2 describe-instance-types --profile "${PROFILE}" --region "${REGION}" \
+    --instance-types "${INSTANCE_TYPE}" --output json >"${RESULTS_LOCAL}/instance-type.json"
+  python3 - "${RESULTS_LOCAL}/instance-type.json" <<'PYTYPE'
+import json, sys
+host = json.load(open(sys.argv[1]))['InstanceTypes']
+if len(host) != 1:
+    raise SystemExit('unexpected instance type response')
+host = host[0]
+disks = host.get('InstanceStorageInfo', {}).get('Disks', [])
+if (host.get('InstanceType') != 'r7gd.12xlarge' or host['VCpuInfo']['DefaultVCpus'] != 48
+    or host['MemoryInfo']['SizeInMiB'] != 384 * 1024
+    or disks != [{'SizeInGB': 1425, 'Count': 2, 'Type': 'ssd'}]):
+    raise SystemExit('native instance hardware differs from the reserved topology')
+PYTYPE
 fi
 
 log "creating exact source bundle for ${SOURCE_COMMIT}"
@@ -395,7 +429,7 @@ SSH_OPTIONS=(
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
 )
-if [[ "${MODE}" == build ]]; then
+if [[ "${MODE}" == build || "${MODE}" == native ]]; then
   SSH_OPTIONS=(-i "${KEYFILE}" -o StrictHostKeyChecking=accept-new
     -o "UserKnownHostsFile=${WORK}/known_hosts" -o ConnectTimeout=15
     -o ServerAliveInterval=30 -o ServerAliveCountMax=3)
@@ -430,7 +464,7 @@ SSH_RULE_ID="$(aws ec2 authorize-security-group-ingress --profile "${PROFILE}" \
 [[ "${SSH_RULE_ID}" == sgr-* ]] || die "AWS did not return the SSH security-group rule ID"
 CURRENT_SSH_CIDR="${PUBLIC_CIDR}"
 RUSTUP_TOOLCHAIN_ARGS=""
-if [[ "${MODE}" == build ]]; then RUSTUP_TOOLCHAIN_ARGS="--default-toolchain none"; fi
+if [[ "${MODE}" == build || "${MODE}" == native ]]; then RUSTUP_TOOLCHAIN_ARGS="--default-toolchain none"; fi
 
 cat >"${WORK}/user-data.sh" <<USERDATA
 #!/bin/bash
@@ -439,7 +473,7 @@ set -euo pipefail
 systemd-run --unit=sparq-pod-watchdog --on-calendar=@${DEADLINE_EPOCH} /sbin/shutdown -h now || true
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git curl build-essential pkg-config libssl-dev python3 rsync zstd unzip
+apt-get install -y -qq git curl build-essential pkg-config libssl-dev python3 rsync zstd unzip e2fsprogs util-linux
 sudo -u ubuntu env HOME=/home/ubuntu bash -c \
   "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y ${RUSTUP_TOOLCHAIN_ARGS}"
 touch /var/tmp/SPARQ_POD_BOOTSTRAP_DONE
@@ -465,7 +499,7 @@ printf '%s\n' "${INSTANCE_ID}" >"${RESULTS_LOCAL}/instance-id.txt"
 printf '%s\n' "${SOURCE_COMMIT}" >"${RESULTS_LOCAL}/source-commit.txt"
 printf '%s\n' "${AMI}" >"${RESULTS_LOCAL}/ami-id.txt"
 printf '%s\n' "${RUN_TOKEN}" >"${RESULTS_LOCAL}/study-run-token.txt"
-if [[ "${MODE}" == build ]]; then
+if [[ "${MODE}" == build || "${MODE}" == native ]]; then
   # [GPT-6] Independent local supervisor is started before any SSH/bootstrap wait.
   nohup env AWS_PROFILE="${PROFILE}" AWS_REGION="${REGION}" \
     bash "${ROOT}/bench/ac/million/supervise-instance.sh" "${RESULTS_LOCAL}" \
@@ -501,15 +535,21 @@ ssh_with_ingress_retry \
    && git -C /var/tmp/sparq-source fetch -q origin \
         refs/remotes/origin/main:refs/remotes/origin/main \
    && test \"\$(git -C /var/tmp/sparq-source rev-parse HEAD)\" = '${SOURCE_COMMIT}'"
-if [[ "${MODE}" == build ]]; then
+if [[ "${MODE}" == build || "${MODE}" == native ]]; then
   # [GPT-6] Share paths, never key contents. This private local file expires with cleanup.
-  python3 - "${RESULTS_LOCAL}" "${PUBLIC_IP}" "${KEYFILE}" "${WORK}/known_hosts" "${DEADLINE_EPOCH}" "${SOURCE_COMMIT}" <<'PY'
+  python3 - "${RESULTS_LOCAL}" "${PUBLIC_IP}" "${KEYFILE}" "${WORK}/known_hosts" "${DEADLINE_EPOCH}" "${SOURCE_COMMIT}" "${MODE}" <<'PY'
 import json,os,sys
 from pathlib import Path
-p=Path(sys.argv[1])/'build-host.json'
+p=Path(sys.argv[1])/('native-host.json' if sys.argv[7]=='native' else 'build-host.json')
 p.write_text(json.dumps(dict(ip=sys.argv[2],key_path=sys.argv[3],known_hosts=sys.argv[4],deadline_epoch=int(sys.argv[5]),source_commit=sys.argv[6],results_directory=sys.argv[1]),indent=2))
 os.chmod(p,0o600)
 PY
+fi
+
+if [[ "${MODE}" == native ]]; then
+  log "validating and preparing blank instance-store devices; EBS is excluded"
+  ssh_with_ingress_retry \
+    'sudo python3 /var/tmp/sparq-source/bench/ac/million/native-storage.py --receipt /var/tmp/sparq-pod-study/native-storage.json && sudo chown -R ubuntu:ubuntu /var/tmp/sparq-pod-study'
 fi
 
 REMOTE_UID="$(ssh_with_ingress_retry 'id -u')"
@@ -520,6 +560,8 @@ log "starting ${MODE} as a 70%-memory-capped transient service"
 REMOTE_RUNNER="/bin/bash /var/tmp/sparq-source/bench/ac/million/run-instance.sh ${MODE}"
 if [[ "${MODE}" == build ]]; then
   REMOTE_RUNNER="/usr/bin/python3 /var/tmp/sparq-source/bench/ac/million/build-jobs.py serve --deadline ${DEADLINE_EPOCH}"
+elif [[ "${MODE}" == native ]]; then
+  REMOTE_RUNNER="/usr/bin/python3 /var/tmp/sparq-source/bench/ac/million/native-host.py --deadline ${DEADLINE_EPOCH}"
 fi
 # shellcheck disable=SC2029 # Validated numeric values intentionally expand client-side.
 ssh_with_ingress_retry \

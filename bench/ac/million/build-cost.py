@@ -12,9 +12,7 @@ price = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(price)
 
 
-def reservation(path, prior):
-    with Path(path).open(newline="") as stream:
-        hourly, evidence = price.bulk_csv_hourly_price(stream, "c7g.4xlarge", "EU (London)", "eu-west-2")
+def gp3_price(path):
     with Path(path).open(newline="") as stream:
         rows = csv.reader(stream)
         header = next(row for row in rows if row and row[0] == "SKU")
@@ -25,15 +23,24 @@ def reservation(path, prior):
     if len(matches) != 1:
         raise ValueError("expected exactly one London gp3 storage price")
     storage = Decimal(matches[0]["PricePerUnit"])
-    if not storage.is_finite() or storage <= 0 or not prior.is_finite():
+    if not storage.is_finite() or storage <= 0:
         raise ValueError("nonfinite or nonpositive price input")
+    return storage, matches[0]["SKU"]
+
+
+def reservation(path, prior):
+    with Path(path).open(newline="") as stream:
+        hourly, evidence = price.bulk_csv_hourly_price(stream, "c7g.4xlarge", "EU (London)", "eu-west-2")
+    storage, storage_sku = gp3_price(path)
+    if not prior.is_finite():
+        raise ValueError("nonfinite prior allocation")
     hours = Decimal("4.25")
     # Shortest calendar month gives a conservative bound; no new contingency.
     ancillary = hours * (Decimal(200) * storage / Decimal(672) + Decimal("0.005"))
     result = price.quote_at_hourly_price(hourly, hours, ancillary, prior, Decimal("3.10"), Decimal(100))
     result.update(evidence)
     result.update(scope="build-and-functional-tests-only", invoice_verified=False,
-                  gp3_gib=200, gp3_monthly_usd=str(storage), gp3_price_sku=matches[0]["SKU"],
+                  gp3_gib=200, gp3_monthly_usd=str(storage), gp3_price_sku=storage_sku,
                   storage_month_hours_bound=672, watchdog_seconds=14400,
                   ipv4_hourly_usd="0.005", ipv4_price_source="https://aws.amazon.com/vpc/pricing/",
                   billing_cushion_seconds=900, prior_includes_existing_reserve=True)
