@@ -78,3 +78,8 @@ numeric and temporal columns, while copying extensions and overlays. The applica
 owns durable update acknowledgments, journal replay and authorization invalidation;
 alternatively append the updated graph into a new archive and finish it. Archive
 loading restores data only and grants no access rights by itself.
+
+`apply_delta` does not compact automatically. Explicit `Graph::compact` on an archive
+graph uses the existing in-memory compaction path because no directory WAL is attached;
+it can rebuild changed index bases on the heap. Keep that operation outside a paging
+experiment unless its memory and preparation work are deliberately part of the workload.

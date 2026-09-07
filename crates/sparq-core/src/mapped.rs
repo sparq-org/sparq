@@ -32,7 +32,7 @@ impl MappedBytes {
         })?;
         // Native dictionaries/numeric tables cast to u64/f64, so EVERY region starts
         // at an eight-byte boundary even when its particular codec uses byte reads.
-        if start % 8 != 0 || end > mapping.len() {
+        if !start.is_multiple_of(8) || end > mapping.len() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "mapped region is unaligned or outside archive",

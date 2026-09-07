@@ -846,7 +846,7 @@ impl TripleStore {
         let mut input = crate::archive::Input::new(&bytes);
         let count = input.usize()?;
         // Native predstats records are one u32 ID and three u64 values.
-        if count != input.remaining() / 28 || input.remaining() % 28 != 0 {
+        if count != input.remaining() / 28 || !input.remaining().is_multiple_of(28) {
             return Err(crate::archive::invalid("invalid native predicate statistics length"));
         }
         let mut pred_stats = FxHashMap::default();
