@@ -119,6 +119,8 @@ def validate_campaign(spec, root=ROOT):
     execution = spec['execution']; bounds = spec['stop_rules']
     if spec['host']['instance_type'] != 'r7gd.12xlarge' or spec['host']['physical_memory_gib'] != 384 or spec['host']['physical_vcpus'] != 48:
         raise ValueError('main runner requires the reviewed dedicated physical host')
+    if not 128 < spec['host']['physical_memory_gib'] * spec['host']['overall_memory_fraction']:
+        raise ValueError('outer study bound must leave room for the complete128GiB preparation unit')
     if execution['preparation_memory_gib'] != 128: raise ValueError('this preparation executor uses the reviewed128GiB units')
     for key in ('phase_timeout_seconds', 'inspection_timeout_seconds', 'maximum_cells'):
         positive(execution[key], key)
