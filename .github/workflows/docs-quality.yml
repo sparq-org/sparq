@@ -1085,6 +1085,10 @@ jobs:
       # (installed in the shared setup above).
       - name: Hosted-runner reservation for the miri/kani nightly lanes (issue 6349)
         run: python3 scripts/tests/test_nightly_runner_reservation.py
+      # [GPT-6 Astra] #6436: exercise the actual nightly admission helper and
+      # mutation evidence producer offline, including green skipped follow-ups.
+      - name: Heavy nightly completion freshness (issue 6436)
+        run: python3 scripts/tests/test_ci_nightly_freshness.py
       # [OPUS-5] sq-6vshe.7 phase 4: the HEAVY-set DRIFT alarm
       # (scripts/heavy_set_alarm.py, .github/workflows/heavy-set-alarm.yml). Hermetic
       # (no cargo, no gh, no network) and stdlib-only. Runs the script's own fixture
