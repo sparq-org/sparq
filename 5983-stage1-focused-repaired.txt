@@ -1,0 +1,27 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 5.99s
+     Running tests/topk_orderby_indexed_differential.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby_indexed_differential-b40845b531114b9c)
+
+running 19 tests
+test ascending_order_direction ... ok
+test crosses_block_escalation_boundary ... ok
+test empty_pending_queue ... ok
+test extra_pattern_beyond_star_shape_still_correct ... ok
+test fast_path_actually_engages_not_just_correct ... ok
+test fewer_pending_than_k_returns_all_sorted ... ok
+test indexed_topk_preserves_intermediate_resource_limits ... ok
+test large_already_claimed_prefix_still_correct ... ok
+test large_tie_group_still_correct ... ok
+test multi_peer_isolation ... ok
+test multivalued_probe_uses_fallback_and_preserves_cartesian_rows ... ok
+test non_inline_priority_values_still_correct ... ok
+test randomized_sweep ... ok
+test repeated_seed_variable_full_orderby_is_empty ... ok
+test repeated_seed_variable_limit_is_empty ... ok
+test status_filter_excludes_done_tasks ... ok
+test ties_broken_by_seq_ascending ... ok
+test unique_priorities_pseudo_random_medium ... ok
+test unique_priorities_small ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.96s
+

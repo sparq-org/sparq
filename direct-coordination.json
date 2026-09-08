@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T08:28:11.895609+00:00",
+  "updated_at": "2026-09-08T08:57:25.572812+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -61,20 +61,28 @@
     "model": "GPT-6 Astra",
     "effort": "xhigh",
     "pr": 5983,
-    "head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
-    "branch": "feat/ak-migration-bench-rerun",
+    "head": "803bb795201782551d984221a48b32ed391f7d9c",
+    "branch": "codex/perf-indexed-topk-recovery",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Same Astra xhigh agent authorized for one isolated top-k-only recovery stage. First execute the repeated-variable counterexample against imported candidate and fallback, then repair and prove red-before-green. Focused engine compilation/tests authorized, no heavy benchmarks or full-workspace build. Await existing agent; do not duplicate.",
+    "state": "Same agent is extending the existing candidate with bounded semantic/resource tests. Stage1 is committed and verified; current worktree may advance, so do not edit or restart it. Await direct-5983/semantic report and frozen Opus review packet.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Compare index-ordered top-k, PreparedGraphApplier and inherited historical txn retry work against current main. Identify the smallest useful separable SPARQL performance slice and missing evidence. Existing PR timing/author claims are unverified. No heavy build/bench, EC2, registry dispatch, release or remote mutation. Follow shared contract and relevant Rust/performance skills.",
-    "phase": "T1 regression reproduction and narrow repair",
-    "planned_worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk",
-    "planned_branch": "codex/perf-indexed-topk-recovery",
+    "contract": "Only top-k runtime/tests. Relevant focused default/no-default tests are authorized with task-local target/two jobs; no heavy/full-workspace builds or benchmark sweep. No push, review, PR admission, registry dispatch, release or EC2. Root owns issue/comment and actual Opus review.",
+    "phase": "Bounded semantic/resource extension before independent review",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
-    "source_finding": "Repeated-variable seed likely omits positional equality. Not yet executed; do not publish as a reproduced defect. Budget/fanout and timing evidence remain unproven.",
-    "scope": "Only top-k hunk plus tests; preserve main bind_join and historical Luke Dary/Sonnet5 provenance. Exclude PreparedGraphApplier, txn helpers, dependency/API changes. No pushes/remote mutations or independent model review yet.",
-    "cache": "No verified warm Rust cache. Agent using task-local target and two jobs; never write shared target. Durable local Git checkpoints required."
+    "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
+    "scope": "Keep PreparedGraphApplier, txn helpers, public API and dependency changes out. Preserve main bind_join and historical Luke Dary/Sonnet5 contribution provenance. New Astra repairs remain honestly attributed.",
+    "cache": "No verified warm Rust cache. Agent using task-local target and two jobs; never write shared target. Durable local Git checkpoints required.",
+    "issue": 6465,
+    "source_pr": 5983,
+    "source_head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+    "stage1_head": "803bb795201782551d984221a48b32ed391f7d9c",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk",
+    "stage1_report": "direct-5983/implementation/report.json",
+    "stage1_report_sha256": "376dd157cb77c8ddd19a172dad52f4532577ee704bc9b063087ca07841c1a781",
+    "stage1_validation": "Raw T1 paired tests1pass1fail; exact-main fallback2pass; raw max_rows regression1failure. Repaired focused19pass +existing17pass. Six calibrated controls all killed, no survivors/harness errors. Root verified24-file evidence manifest and clean803 before next stage.",
+    "stage1_limits": "Raw resource test stopped at max_rows; no claim that later raw byte-limit assertions ran. No speed measurement, full gate, conformance or actual independent review yet.",
+    "findings_comment": "https://github.com/sparq-org/sparq/pull/5983#issuecomment-5582162691"
   },
   "prs": {
     "4300": {
@@ -317,7 +325,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T05:32:01.568976+00:00",
+    "observed_at": "2026-09-08T08:57:25.572812+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -328,7 +336,7 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T06:20:14.035146+00:00",
+    "observed_at": "2026-09-08T08:57:25.572812+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
@@ -344,11 +352,11 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci T1 stage report and actual compile/test results for top-k recovery. Do not restart its lane. Require executed red-before-green evidence before recording a confirmed defect; keep source-only suspicions labeled.",
-    "After T1 proof, define narrow resource/correctness tests and reproducible measurement. No benefit claim, full-bundle PR5983 admission or actual Opus review until candidate is concrete. Preserve historical attribution and main bind_join.",
-    "Observe natural nightly34202612161 completion and first rearm-sweeper containing6463. Nightly admission oncf19 is proven, not full heavy completion. Latest sweeper still34192344406 onpre-fix48fefb6. Never manually dispatch/probe.",
-    "Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands, and releases unapproved. Preserve existing6049,6055,registry test-only CI and6435 AWS holds.",
-    "Keep completed evidence and checkpoint in private local Git recovery ref; both6463/6464 are fully merged and closed out."
+    "Collect the existing postmerge_ci semantic-stage report and frozen review packet; do not duplicate or modify its worktree. Stage1 T1/T2 fixes are committed803 and tracked6465; evidence is frozen under implementation/.",
+    "When the semantic candidate is concrete and frozen, obtain actual Claude Opus5 xhigh source review before benchmarking/publication. No speed claim or full-bundle5983 admission. Keep inherited attribution and main bind_join intact.",
+    "Then add a bounded reproducible measurement fixture/registration and compare repaired candidate, its indexed-disabled control and current main. Preserve no-EC2 restriction except separately authorized6435 benchmark still blocked on login.",
+    "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
+    "Keep checkpoint and confirmed evidence in private local Git recovery ref."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -430,7 +438,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T08:28:11.895609+00:00",
+    "observed_at": "2026-09-08T08:57:25.572812+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
@@ -441,6 +449,21 @@
     "actual_reason": "no prior same-head schedule; admit its first heavy attempt",
     "evidence": "direct-6436/followup/nightly34202612161-freshness.log",
     "inventory": "45 created jobs returned in full at observation:29success,7skipped,9in_progress. Coverage nightly running and11 mutation jobs created so far. Do not mistake currently created matrix jobs for eventual full51-leg inventory.",
-    "limits": "First natural admission proven; heavy completion/retry-after-incomplete behavior not yet proven. No manual dispatch or heavy measurement initiated by root."
+    "limits": "First natural admission proven; heavy completion/retry-after-incomplete behavior not yet proven. No manual dispatch or heavy measurement initiated by root.",
+    "latest_run_status": {
+      "conclusion": null,
+      "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
+      "id": 34202612161,
+      "status": "in_progress",
+      "updated_at": "2026-09-08T08:55:49Z"
+    }
+  },
+  "issues": {
+    "6465": {
+      "state": "OPEN",
+      "url": "https://github.com/sparq-org/sparq/issues/6465",
+      "purpose": "Track executed T1/T2 regressions in unmerged PR5983 top-k and bounded recovery. Not a main regression claim.",
+      "dedupe": "No repeated-variable hits; three budget hits inspected and unrelated. Original PR revalidated immediately before recording findings."
+    }
   }
 }

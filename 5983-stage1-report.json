@@ -1,0 +1,142 @@
+{
+  "task": "PR5983 first narrow implementation stage",
+  "model": "OpenAI GPT-6 Astra, xhigh runtime",
+  "status": "Local committed candidate for the next bounded correctness/measurement stage, not independently reviewed or admitted",
+  "head": "803bb795201782551d984221a48b32ed391f7d9c",
+  "branch": "codex/perf-indexed-topk-recovery",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk",
+  "base": "cf19a52c6880c496cefaca24046174902bc30958",
+  "base_verification": "Read-only git ls-remote origin refs/heads/main returned cf19a52c at stage start; object already local. No shared checkout or remote branch moved.",
+  "checkpoints": [
+    {
+      "head": "d3ee2b1b6059008e185ef946357b6cf77c21341a",
+      "purpose": "Exact historical two-file import through git apply --3way --index; Luke Dary / Claude Sonnet5 retained and attributed, Astra mechanical import stated."
+    },
+    {
+      "head": "a90c80fadfb937f9561fefa4f5ebef996096af67",
+      "purpose": "Astra paired regression tests, intentionally red on raw import."
+    },
+    {
+      "head": "803bb795201782551d984221a48b32ed391f7d9c",
+      "purpose": "Repeated-variable and budget admission guards; remove Cartesian fanout, decline multi-valued probes; tests and historical-claim qualification."
+    }
+  ],
+  "scope": {
+    "files": [
+      "crates/sparq-engine/src/exec.rs",
+      "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs"
+    ],
+    "diff_stat": "crates/sparq-engine/src/exec.rs                    | 434 +++++++++++++++++++++\n .../tests/topk_orderby_indexed_differential.rs     | 384 ++++++++++++++++++\n 2 files changed, 818 insertions(+)",
+    "astra_delta_from_import": "crates/sparq-engine/src/exec.rs                    | 60 ++++++++--------------\n .../tests/topk_orderby_indexed_differential.rs     | 51 ++++++++++++++++++\n 2 files changed, 72 insertions(+), 39 deletions(-)",
+    "outside_scope_untouched": [
+      "PreparedGraphApplier",
+      "txn retry helpers",
+      "Cargo/dependency/version metadata",
+      "public APIs",
+      "main bind_join changes",
+      "CI and held approvals",
+      "registry/release/EC2"
+    ]
+  },
+  "proof": {
+    "T1_raw": {
+      "command": "cargo test --locked --offline -p sparq-engine --test topk_orderby_indexed_differential repeated_seed_variable -- --test-threads=1",
+      "exec_source": "d3ee2b1b6059008e185ef946357b6cf77c21341a",
+      "test_source": "a90c80fadfb937f9561fefa4f5ebef996096af67",
+      "passed": 1,
+      "failed": 1,
+      "exit_code": 101,
+      "actual_wrong_result": "?x=urn:s for SELECT ?x WHERE {?x <urn:p> ?x} ORDER BY ?x LIMIT 1 over <urn:s> <urn:p> 1 .",
+      "full_orderby_control": "Correct empty result, PASS",
+      "log": "t1-raw.txt"
+    },
+    "T1_main_fallback": {
+      "method": "Temporarily restored only exec.rs from exact main cf19a52c in the isolated worktree; same Astra tests and same query including LIMIT. Restored import before repair.",
+      "exec_blob": "c25e391ac353d92eb1ca6d9525d83c250cd8d327",
+      "passed": 2,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "t1-main-fallback.txt"
+    },
+    "T1_repaired": {
+      "repair": "Use existing has_intra_triple_repeated_var before bypassing generic build_row equality checks.",
+      "both_controls": "PASS within the19-test repaired suite"
+    },
+    "T2_raw_resource": {
+      "finding": "The raw import returns a successful LIMIT1 result while its materialized intermediate exceeds max_rows2.",
+      "passed": 0,
+      "failed": 1,
+      "exit_code": 101,
+      "log": "resource-raw.txt",
+      "limitation": "The first max_rows assertion failed, so the later max_bytes and generous-budget branches were not reached in this raw run."
+    },
+    "T2_repaired": {
+      "repair": "budget::active() declines before new scanning/allocation and delegates all armed limits to the existing evaluator.",
+      "validation": "Same regression passes for max_rows2, max_bytes16 and a generous max_rows1000 budget; no new quota arithmetic or cancellation schedule introduced."
+    },
+    "fanout": {
+      "repair": "For variable-object probes require exactly one match; decline otherwise. Delete imported Cartesian expansion.",
+      "validation": "Four full-sort Cartesian rows remain correct; LIMIT3 matches the ordered prefix and actual BGP fallback execution is observed. Deleting the probe-count guard kills this test."
+    }
+  },
+  "validation": {
+    "toolchain": "rustc1.97.1 (8bab26f4f 2026-07-14); cargo1.97.1 (c980f4866 2026-06-30), pinned installed toolchain",
+    "cargo_settings": {
+      "locked": true,
+      "offline": true,
+      "CARGO_BUILD_JOBS": 2,
+      "CARGO_PROFILE_DEV_DEBUG": 0,
+      "CARGO_PROFILE_TEST_DEBUG": 0,
+      "test_threads": 1,
+      "target_dir": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "crate_features": "default (parallel, regex, digest)"
+    },
+    "focused_suite": {
+      "passed": 19,
+      "failed": 0,
+      "log": "focused-repaired.txt"
+    },
+    "existing_suites": {
+      "topk_orderby": 14,
+      "orderby_limit_zero": 3,
+      "failed": 0,
+      "log": "existing-orderby-tests.txt"
+    },
+    "unique_final_tests": 36,
+    "mutations": {
+      "baseline_tests": 19,
+      "each_mutant_tests": 19,
+      "restored_tests": 19,
+      "counts": {
+        "KILLED": 6,
+        "SURVIVED": 0,
+        "INVALID_OR_ERROR": 0
+      },
+      "names": [
+        "repeated_deleted",
+        "repeated_inert",
+        "budget_deleted",
+        "budget_inert",
+        "fanout_guard_deleted",
+        "indexed_path_disabled"
+      ],
+      "note": "Deletion and inert controls for both repeated-variable and budget guards; fanout guard deletion; indexed path disabled. Every mutant failed one test; no compile/harness errors. Exact source restored, final baseline19pass."
+    },
+    "preflight": "Only failure: scripts/check-privacy-claims.sh:92 mapfile unavailable under local Bash3.2. G1/G2/G6/guard-untested ran. No gate changed or bypassed.",
+    "diff_check": "PASS",
+    "clean_worktree": true
+  },
+  "limitations": [
+    "No latency/throughput/CPU/peak-memory benchmark was performed. Historical timing notes are explicitly qualified as unverified.",
+    "No full-workspace test/clippy/rustdoc or W3C conformance run in this bounded stage.",
+    "No coverage percentage is claimed. Guard sensitivity is established by executed controls.",
+    "No independent Opus review, remote publication, issue/PR comment, dispatch, release, registry action or EC2/PSS action.",
+    "No broad tuning: full seed inline validation and subject-id vector setup remain linear.",
+    "Known next checks include pure full-key DESC ties/OFFSET, mixed numeric/lexical values, view/overlay/restricted-permutation semantics, cancellation/expired deadlines and supported feature states."
+  ],
+  "next_step": {
+    "correctness_first": "One bounded extension of this same candidate: differential full-sort-prefix tests for full-key DESC ties/OFFSET and supported views/overlays; deterministic budget cancellation/deadline controls proving the armed-budget fallback. Keep unproven shapes declined and preserve generic evaluation. Run relevant conformance/feature checks before review/admission.",
+    "measurement": "After correctness scope is fixed, add a small reproducible benchmark fixture in the existing benchmark-registration system. Compare this exact candidate to the same candidate with indexed admission disabled; include current main baseline. Sweep depth, k, priority tie density, peer/status selectivity and drained prefixes; keep single-valued probes explicit. Report generated raw timing/allocation data with toolchain, features, host, repetitions and controlled runtime threads. No PostgreSQL-gap statement without a separately comparable workload.",
+    "publication_owner": "Root records confirmed T1/T2 findings, chooses further scope and obtains actual Opus review. This branch is not claimed ready for admission."
+  }
+}

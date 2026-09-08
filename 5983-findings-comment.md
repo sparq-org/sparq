@@ -1,0 +1,5 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+I reproduced two regressions in the indexed top-k delta from head `59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a`, imported separately onto current main: a repeated-variable seed returns an invalid row, and an intermediate-row budget is bypassed by LIMIT. [Issue #6465](https://github.com/sparq-org/sparq/issues/6465) records the exact counterexample, paired main-fallback control, raw failures and repaired test evidence.
+
+A narrow recovery is underway on an isolated local branch, preserving the existing contribution's Luke Dary / Sonnet5 attribution. It keeps PreparedGraphApplier and transaction retry helpers separate, and now declines repeated-variable, budgeted and multi-valued cases to the existing evaluator. Additional semantic/resource checks and actual independent Opus review remain ahead of publication; historical performance claims have not been re-established. This is a test-evidence update, not a merge approval.

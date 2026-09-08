@@ -1,0 +1,170 @@
+diff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs
+index 9400b51e9..18d0e11a9 100644
+--- a/crates/sparq-engine/src/exec.rs
++++ b/crates/sparq-engine/src/exec.rs
+@@ -3211,8 +3211,11 @@ fn try_topk_orderby(
+ /// declines (`Ok(None)`) even though continuing would still be CORRECT, because
+ /// past that point this function's per-candidate cost stops being cheaper than
+ /// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
+-/// the function's only failure mode "sometimes it doesn't help," never
+-/// "sometimes it's slower than doing nothing."
++/// the walk bounded, but setup and failed probes still precede a decline.
++///
++/// [GPT-6 Astra] Recovery-stage restriction: budgeted queries, repeated variables
++/// and multi-valued probes use the existing evaluator. The historical timing notes
++/// below are unverified on current main; this candidate establishes no speedup.
+ fn try_topk_orderby_indexed(
+     graph: &Graph,
+     local: &mut LocalVocab,
+@@ -3224,6 +3227,11 @@ fn try_topk_orderby_indexed(
+     if crate::zk::enabled() {
+         return Ok(None);
+     }
++    // [GPT-6 Astra] Preserve the existing evaluator's intermediate row/byte
++    // accounting and cooperative cancellation schedule before doing any new work.
++    if budget::active() {
++        return Ok(None);
++    }
+     if view::default_is_empty() {
+         return Ok(None);
+     }
+@@ -3243,6 +3251,11 @@ fn try_topk_orderby_indexed(
+     if !filters.is_empty() || patterns.is_empty() {
+         return Ok(None);
+     }
++    // [GPT-6 Astra] prepare_pattern records repeated slots but does not enforce
++    // their equality. Reuse the existing fast-path guard before bypassing build_row.
++    if patterns.iter().any(has_intra_triple_repeated_var) {
++        return Ok(None);
++    }
+     // Out of scope for this first cut: blank nodes are treated as synthetic
+     // variables by `prepare_pattern` (`bnode_var`) but not necessarily by
+     // `collect_vars`'s header-construction — decline rather than risk a header
+@@ -3517,16 +3530,9 @@ fn try_topk_orderby_indexed(
+             let spo = scan.to_spo(&rows[logical(i)]);
+             let hub_id = spo[0];
+             let order_id = spo[2];
+-            // FAST PATH: assume single-valued (the realistic schema shape — a
+-            // task has exactly one status/priority/seq), building ONE row with
+-            // no heap allocation beyond the SmallVec's inline capacity. Only a
+-            // genuinely multi-valued predicate (rare) allocates, and only then
+-            // — this is what the earlier `Vec<SmallVec>`-per-candidate
+-            // cartesian machinery paid unconditionally, which (combined with
+-            // the per-candidate `cols` rebuild) was the dominant remaining
+-            // cost for a large tie-group after the binary-search fix alone.
++            // [GPT-6 Astra] Only single-valued probes are admitted in this slice.
++            // General Cartesian expansion remains with the existing evaluator.
+             let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
+-            let mut fanout: Option<Vec<SmallVec<[Id; 8]>>> = None;
+             let mut failed = false;
+             for op in &other_pats {
+                 // Binary-search the PRECOMPUTED, plain-`Id` subject list for
+@@ -3545,27 +3551,10 @@ fn try_topk_orderby_indexed(
+                 };
+                 let op_rows: &[[Id; 3]] = op.scan.rows.as_ref();
+                 let match_count = stop - start;
+-                if let Some(rows_so_far) = fanout.as_mut() {
+-                    let mut next = Vec::with_capacity(rows_so_far.len() * match_count);
+-                    for r in rows_so_far.iter() {
+-                        for row in &op_rows[start..stop] {
+-                            let mut nr = r.clone();
+-                            nr.push(op.scan.to_spo(row)[2]);
+-                            next.push(nr);
+-                        }
+-                    }
+-                    *rows_so_far = next;
+-                } else if match_count == 1 {
+-                    row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
+-                } else {
+-                    let mut next = Vec::with_capacity(match_count);
+-                    for row in &op_rows[start..stop] {
+-                        let mut nr = row_ids.clone();
+-                        nr.push(op.scan.to_spo(row)[2]);
+-                        next.push(nr);
+-                    }
+-                    fanout = Some(next);
++                if match_count != 1 {
++                    return Ok(None);
+                 }
++                row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
+             }
+             if failed {
+                 failed_count += 1;
+@@ -3574,14 +3563,7 @@ fn try_topk_orderby_indexed(
+                 }
+                 continue;
+             }
+-            match &fanout {
+-                None => emit(&row_ids, &mut collected),
+-                Some(rows) => {
+-                    for r in rows {
+-                        emit(r, &mut collected);
+-                    }
+-                }
+-            }
++            emit(&row_ids, &mut collected);
+         }
+         visited_to = end;
+         if collected.len() >= row_budget {
+diff --git a/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs b/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs
+index ba682cbd8..5cf40d4cc 100644
+--- a/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs
++++ b/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs
+@@ -14,6 +14,57 @@ use sparq_engine::query;
+ 
+ const PFX: &str = "PREFIX ak: <http://example.org/ak#>\n";
+ 
++// [GPT-6 Astra] A repeated variable must bind one term in both positions.
++// An IRI subject and an integer object can never satisfy this triple pattern.
++#[test]
++fn repeated_seed_variable_full_orderby_is_empty() {
++    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
++    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x").unwrap();
++    assert!(rows.rows.is_empty(), "full ORDER BY must enforce subject/object equality: {rows:?}");
++}
++
++// [GPT-6 Astra] The LIMIT path must preserve the full evaluator's equality guard.
++#[test]
++fn repeated_seed_variable_limit_is_empty() {
++    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
++    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x LIMIT 1").unwrap();
++    assert!(rows.rows.is_empty(), "LIMIT must enforce subject/object equality: {rows:?}");
++}
++
++// [GPT-6 Astra] LIMIT cannot hide an oversized intermediate working set.
++#[test]
++fn indexed_topk_preserves_intermediate_resource_limits() {
++    let graph = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
++    let query_text = format!("{PFX}{CLAIM_QUERY}1");
++    for (budget, expected) in [
++        (sparq_engine::QueryBudget { max_rows: Some(2), ..Default::default() }, "max-rows"),
++        (sparq_engine::QueryBudget { max_bytes: Some(16), ..Default::default() }, "max-bytes"),
++    ] {
++        let result = sparq_engine::query_with_budget(&graph, &query_text, &budget);
++        assert!(result.as_ref().is_err_and(|error| error.contains(expected)), "{expected}: {result:?}");
++    }
++    let generous = sparq_engine::QueryBudget { max_rows: Some(1000), ..Default::default() };
++    let result = sparq_engine::query_with_budget(&graph, &query_text, &generous).unwrap();
++    assert_eq!(task_seq(result.rows[0][0].as_ref().unwrap()), 39);
++}
++
++// [GPT-6 Astra] Keep the initial shortcut out of Cartesian fanout. Check both
++// the ordered answers and the actual fallback execution, not static plan text.
++#[test]
++fn multivalued_probe_uses_fallback_and_preserves_cartesian_rows() {
++    let graph = Graph::load_str(
++        "<urn:s> <urn:p> 2 ; <urn:b> 10, 11 ; <urn:c> 20, 21 .", "turtle",
++    ).unwrap();
++    let query_text = "SELECT ?s ?b ?c WHERE { ?s <urn:p> ?p ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p) ?b ?c";
++    let full = query(&graph, query_text).unwrap();
++    assert_eq!(full.rows.len(), 4);
++    let limited_query = format!("{query_text} LIMIT 3");
++    let limited = query(&graph, &limited_query).unwrap();
++    assert_eq!(limited.rows, full.rows[..3]);
++    let trace = sparq_engine::explain_analyze(&graph, &limited_query).unwrap();
++    assert!(trace.contains("BGP [binary GOO]"), "multivalued probe must execute the fallback: {trace}");
++}
++
+ /// One synthetic pending task: `(seq, priority)`. `seq` doubles as a stable,
+ /// unique task identifier so results can be checked by task number.
+ fn build_graph(peer: &str, tasks: &[(i64, i64)], extra_ttl: &str) -> Graph {
