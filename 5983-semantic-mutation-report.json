@@ -1,0 +1,99 @@
+{
+  "baseline": {
+    "name": "baseline",
+    "exit_code": 0,
+    "tests": 26,
+    "passed": 26,
+    "failed": 0,
+    "classification": "PASS",
+    "source_sha256": "3e18e292af378a402a7bbc8e72e7ca5b99cc46bbce6f94ef48310e9ea8773b0e"
+  },
+  "mutants": [
+    {
+      "name": "repeated_deleted",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "79bcd27265918886fe68da45e93811a6c46d22eed6c68ab082f86c7a9873d978"
+    },
+    {
+      "name": "repeated_inert",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "dfddb3a280a3a5fc8ae9c7d551efca4fca9ba7000f06156b648cc3eaaa2da36a"
+    },
+    {
+      "name": "budget_deleted",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 23,
+      "failed": 3,
+      "classification": "KILLED",
+      "source_sha256": "30e04f7b2cab042da2210f251e6a781c6efddb4803739356f08eefe391a4763a"
+    },
+    {
+      "name": "budget_inert",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 23,
+      "failed": 3,
+      "classification": "KILLED",
+      "source_sha256": "78d3b54123f93bc7a81df0a41b9bfa77ca194708c564d23a7a9682a50718c14a"
+    },
+    {
+      "name": "fanout_guard_deleted",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "5bae6730db6f6c0c26285cf2ceab1a75e3e5ce5bd71f7eda281dd2bf701b513d"
+    },
+    {
+      "name": "indexed_path_disabled",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "d51291bfe0b66f77f609f85e7a87ca3ed19d38590610708b4d07ed3884c7d27e"
+    },
+    {
+      "name": "inline_guard_deleted",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "406bfb9f9a6acb1b7ea665a99c3cd4a92c30080f479f0a03bb3e0edcf255a5d7"
+    },
+    {
+      "name": "empty_default_guard_deleted",
+      "exit_code": 101,
+      "tests": 26,
+      "passed": 25,
+      "failed": 1,
+      "classification": "KILLED",
+      "source_sha256": "f17369b7768306772c384e65d91b26ad0f52f8b0953879fb1c41e40d2d154a3b"
+    }
+  ],
+  "restored": {
+    "name": "restored",
+    "exit_code": 0,
+    "tests": 26,
+    "passed": 26,
+    "failed": 0,
+    "classification": "PASS",
+    "source_sha256": "3e18e292af378a402a7bbc8e72e7ca5b99cc46bbce6f94ef48310e9ea8773b0e"
+  },
+  "counts": {
+    "KILLED": 8,
+    "SURVIVED": 0,
+    "INVALID_OR_ERROR": 0
+  }
+}

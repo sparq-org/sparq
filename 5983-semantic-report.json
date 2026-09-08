@@ -1,0 +1,288 @@
+{
+  "task": "PR5983 bounded semantic/resource extension; issue6465 tracks stage-one confirmed findings",
+  "status": "Clean local whole-change candidate for independent Opus5 xhigh review, not publication/admission or a measured performance claim",
+  "model": "OpenAI GPT-6 Astra, actual xhigh runtime; no other model sessions or agents",
+  "head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+  "base": "cf19a52c6880c496cefaca24046174902bc30958",
+  "local_origin_main_observed": "cf19a52c6880c496cefaca24046174902bc30958",
+  "stage1_head": "803bb795201782551d984221a48b32ed391f7d9c",
+  "branch": "codex/perf-indexed-topk-recovery",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk",
+  "provenance": {
+    "source_pr5983": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+    "historical_mergebase": "fbbd310326f1f083c33a13deee19f95cb96c55f6",
+    "historical_author": "Luke Dary <ldary@redhat.com>, historical Claude Sonnet5 coauthorship retained in import checkpoint d3ee2b1b6059008e185ef946357b6cf77c21341a",
+    "astra": "Three-way mechanical import, stage-one tests/guards and this semantic extension honestly attributed; original PR timing claims remain unverified",
+    "semantic_commits": [
+      "eae19f2b5c571a3fed83f60ce63a96ef215348e1",
+      "9e8bdfc95c916b62550fb8c3142f804bbbfb2444"
+    ]
+  },
+  "scope": {
+    "whole_change": "crates/sparq-engine/src/exec.rs                    | 434 +++++++++++++++++\n .../tests/topk_orderby_indexed_differential.rs     | 519 +++++++++++++++++++++\n 2 files changed, 953 insertions(+)",
+    "files": [
+      "crates/sparq-engine/src/exec.rs",
+      "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs"
+    ],
+    "semantic_delta": "Seven additional tests, permutation-aware engagement assertion, test-contract prose and a five-line tie-soundness clarification. No executable runtime change from stage1 (verified after excluding full-line comments). No new runtime guard added.",
+    "outside_scope_untouched": [
+      "PreparedGraphApplier",
+      "transaction retry helpers",
+      "dependency/version metadata",
+      "public API",
+      "main bind_join changes",
+      "CI/gate/approval files",
+      "other branches/shared checkout",
+      "registry/release/EC2/PSS"
+    ]
+  },
+  "semantic_evidence": [
+    "Total-order DESC primary/secondary keys: eight OFFSET/LIMIT windows including zero, primary-group boundary, tail and beyond-end; compare full ORDER BY window.",
+    "Exact full-key ties: five windows check valid member ids, distinct multiplicity, key value and permitted count; no assertion of unspecified stable tie order or particular surviving subset.",
+    "Three negative/mixed/typed-lexical fixtures: exact full-order prefix plus actual fallback trace. Inline-guard deletion is killed by admission assertion on first fixture; do not claim that control proved wrong numeric results on all fixtures.",
+    "StoreDefault and Empty default views; visible GRAPH subquery; hidden/absent GRAPH and FROM; plain API after scope release. Empty-default-guard deletion actually leaks one row where zero is required.",
+    "Fork overlay tombstone plus new task insertion; immutable original snapshot; four k windows against independent Rust-sort oracle; compaction preserves answers.",
+    "Armed false cancellation flag and future deadline require actual BGP fallback. Already-set cancellation and already-expired deadline error deterministically; later unlimited query succeeds. No mid-query cancellation-latency guarantee is claimed.",
+    "Restricted compact-index executes all26 tests, explicitly asserts fallback when this star fixture lacks PSO; default/no-default feature builds positively assert indexed engagement."
+  ],
+  "validation": {
+    "focused": {
+      "default": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0,
+        "log": "default.txt"
+      },
+      "no-default": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0,
+        "log": "no-default.txt"
+      },
+      "compact-index": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0,
+        "log": "compact-index.txt"
+      },
+      "final-default": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0,
+        "log": "final-default.txt"
+      }
+    },
+    "existing": [
+      {
+        "name": "dataset-view",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-engine",
+          "--test",
+          "query_features",
+          "dataset_view::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit_code": 0,
+        "results": [
+          "test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 32 filtered out; finished in 1.52s"
+        ]
+      },
+      {
+        "name": "fork-generations",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-engine",
+          "--test",
+          "storage",
+          "fork_generations::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit_code": 0,
+        "results": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.03s"
+        ]
+      },
+      {
+        "name": "existing-orderby",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-engine",
+          "--test",
+          "topk_orderby",
+          "--test",
+          "orderby_limit_zero",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit_code": 0,
+        "results": [
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+        ]
+      }
+    ],
+    "unique_passed_tests": 51,
+    "existing_ignored": "One pre-existing dataset-view microbenchmark bench_view_vs_from_named_copy is ignored; not counted as passed.",
+    "baseline_executions": "26 default +26 no-default +26 compact-index;25 additional existing tests. Final comment-only head reruns26 default. Mutation baselines and mutant executions are reported separately.",
+    "mutations": {
+      "baseline": {
+        "name": "baseline",
+        "exit_code": 0,
+        "tests": 26,
+        "passed": 26,
+        "failed": 0,
+        "classification": "PASS",
+        "source_sha256": "3e18e292af378a402a7bbc8e72e7ca5b99cc46bbce6f94ef48310e9ea8773b0e"
+      },
+      "mutants": [
+        {
+          "name": "repeated_deleted",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "79bcd27265918886fe68da45e93811a6c46d22eed6c68ab082f86c7a9873d978"
+        },
+        {
+          "name": "repeated_inert",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "dfddb3a280a3a5fc8ae9c7d551efca4fca9ba7000f06156b648cc3eaaa2da36a"
+        },
+        {
+          "name": "budget_deleted",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 23,
+          "failed": 3,
+          "classification": "KILLED",
+          "source_sha256": "30e04f7b2cab042da2210f251e6a781c6efddb4803739356f08eefe391a4763a"
+        },
+        {
+          "name": "budget_inert",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 23,
+          "failed": 3,
+          "classification": "KILLED",
+          "source_sha256": "78d3b54123f93bc7a81df0a41b9bfa77ca194708c564d23a7a9682a50718c14a"
+        },
+        {
+          "name": "fanout_guard_deleted",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "5bae6730db6f6c0c26285cf2ceab1a75e3e5ce5bd71f7eda281dd2bf701b513d"
+        },
+        {
+          "name": "indexed_path_disabled",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "d51291bfe0b66f77f609f85e7a87ca3ed19d38590610708b4d07ed3884c7d27e"
+        },
+        {
+          "name": "inline_guard_deleted",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "406bfb9f9a6acb1b7ea665a99c3cd4a92c30080f479f0a03bb3e0edcf255a5d7"
+        },
+        {
+          "name": "empty_default_guard_deleted",
+          "exit_code": 101,
+          "tests": 26,
+          "passed": 25,
+          "failed": 1,
+          "classification": "KILLED",
+          "source_sha256": "f17369b7768306772c384e65d91b26ad0f52f8b0953879fb1c41e40d2d154a3b"
+        }
+      ],
+      "restored": {
+        "name": "restored",
+        "exit_code": 0,
+        "tests": 26,
+        "passed": 26,
+        "failed": 0,
+        "classification": "PASS",
+        "source_sha256": "3e18e292af378a402a7bbc8e72e7ca5b99cc46bbce6f94ef48310e9ea8773b0e"
+      },
+      "counts": {
+        "KILLED": 8,
+        "SURVIVED": 0,
+        "INVALID_OR_ERROR": 0
+      }
+    },
+    "mutant_notes": "Eight controls each executed all26 tests: repeated deleted/inert, budget deleted/inert, multivalue guard deleted, indexed path disabled, inline guard deleted, empty-default guard deleted. No survivor or invalid/compile-only kill. Budget deletion/inert each fail3 tests; all others fail1. Controls ran eae19f2b5; final exec differs only in five documentation lines. Exact source restored before final26-pass run.",
+    "cargo": "Pinned installed rustc1.97.1/cargo1.97.1, --locked --offline, two build jobs, RAYON_NUM_THREADS=2, test-threads=1, debug info0, task-local stage1 target reused. No installations.",
+    "feature_limit": "--no-default-features disables engine parallel/regex/digest defaults, but its existing core dev-dependency still enables core parallel/mmap/dict-spill. This is not a wholly single-threaded-core or wasm build claim.",
+    "preflight": "Final preflight exits1 only on local Bash3.2 missing mapfile in scripts/check-privacy-claims.sh:92. Other applicable checks ran. No hook/gate bypass or script changes.",
+    "diff_check": "PASS",
+    "stage1_integrity": {
+      "head": "803bb795201782551d984221a48b32ed391f7d9c",
+      "verified_files": [
+        "indexed-function.txt",
+        "focused-repaired.txt",
+        "recovery.diff",
+        "report.json",
+        "t1-main-fallback.txt",
+        "mutant-indexed_path_disabled.txt",
+        "mutant-repeated_inert.txt",
+        "mutant-baseline.txt",
+        "astra-repair.diff",
+        "import.txt",
+        "mutant-budget_inert.txt",
+        "mutant-budget_deleted.txt",
+        "mutant-restored.txt",
+        "resource-raw.txt",
+        "mutate.py",
+        "preflight.txt",
+        "current-tests.txt",
+        "historical-topk.patch",
+        "mutations.txt",
+        "existing-orderby-tests.txt",
+        "mutation-report.json",
+        "mutant-fanout_guard_deleted.txt",
+        "t1-raw.txt",
+        "mutant-repeated_deleted.txt"
+      ],
+      "count": 24,
+      "result": "All stage1 manifest entries unchanged; cache target intentionally reused."
+    }
+  },
+  "limits": [
+    "No latency, throughput, CPU, allocation-count or peak-memory measurement. Incidental EXPLAIN timing text is not benchmark evidence. No O(k) or PostgreSQL-gap claim.",
+    "Upfront full seed inline validation and per-probe subject-id vectors remain linear. Overlay/compressed scans may allocate. Selectivity/tie/failure guards can spend work before fallback. These costs require measurement before a performance claim.",
+    "No new resource arithmetic: every armed budget declines to existing accounting/cancellation. The unlimited shortcut still performs unbudgeted setup allocations.",
+    "Full-key tie results can differ from stable fallback input order while remaining valid SPARQL. Callers requiring a deterministic subset must supply a distinguishing ORDER BY key.",
+    "W3C fixture checkout and conformance binary are absent in this isolated checkout/cache. No fetch, conformance run, full-workspace build/clippy/test, wasm, ZK, algebra-rewrite-specific, mmap/compressed-file or release-feature test is claimed.",
+    "The packet includes complete critical executable callers/helpers and raw diff. It does not recursively duplicate the entire unchanged expression evaluator, substrate comparator, parser, storage serialization or optional feature implementation. Those boundaries remain normal whole-project review/conformance responsibilities.",
+    "No independent review, remote branch/issue/comment mutation, admission, dispatch, live CI operation or infrastructure change."
+  ],
+  "next_step": "Root obtains actual independent Opus5 xhigh whole-change review. Resolve concrete blockers before measurement or publication. Then prepare one reproducible local benchmark using the existing registry: compare exact candidate, same candidate with indexed admission disabled, and current main on identical generated single-valued star data. Vary depth/k/tie density/selectivity/drained prefix; report full raw data, features, host, repetitions and controlled threads, including setup/allocation costs. Full conformance/workspace gates remain required before admission."
+}

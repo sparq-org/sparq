@@ -1,0 +1,65 @@
+commit d3ee2b1b6059008e185ef946357b6cf77c21341a
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 09:26:50 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 09:26:50 2026 +0100
+
+    refactor(engine): recover historical PR5983 indexed top-k slice
+    
+    [GPT-6 Astra] Mechanical three-way import of only exec.rs top-k hunks and topk_orderby_indexed_differential.rs from fbbd310326f1f083c33a13deee19f95cb96c55f6..59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a onto current main cf19a52c. Historical implementation and tests were authored by Luke Dary with Claude Sonnet 5. Their markers and code are retained; this checkpoint does not assert correctness or reproduce historical performance claims.
+    
+    Co-Authored-By: Luke Dary <ldary@redhat.com>
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>
+
+commit a90c80fadfb937f9561fefa4f5ebef996096af67
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 09:29:16 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 09:29:16 2026 +0100
+
+    test(engine): reproduce indexed top-k repeated-variable regression
+    
+    [GPT-6 Astra] Raw historical import returns urn:s for {?x <urn:p> ?x} ORDER BY ?x LIMIT 1 over <urn:s> <urn:p> 1. The full ORDER BY control correctly returns no rows. Focused execution: one control passes and one regression fails; preserve this red checkpoint before the admission repair.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>
+
+commit 803bb795201782551d984221a48b32ed391f7d9c
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 09:34:48 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 09:34:48 2026 +0100
+
+    fix(engine): narrow indexed top-k admission to verified shapes
+    
+    [GPT-6 Astra] Reuse the existing repeated-variable guard and decline all budgeted queries before speculative scans. Keep multi-valued probes on the existing evaluator and remove the imported Cartesian fanout path. Retain historical Luke Dary / Sonnet 5 provenance and explicitly qualify unreproduced timing notes.
+    
+    Raw import: full ORDER BY control passed and repeated-variable LIMIT failed. Exact current-main exec.rs passed both. Raw import also failed the intermediate row-budget regression. Repaired candidate:19 focused tests pass; existing ORDER BY suites pass. Author preflight reports only the existing local Bash3 mapfile limitation. No performance measurements or independent review are claimed.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>
+
+commit eae19f2b5c571a3fed83f60ce63a96ef215348e1
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 10:04:40 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 10:04:40 2026 +0100
+
+    test(engine): cover indexed top-k semantic and resource boundaries
+    
+    [GPT-6 Astra] Extend the isolated historical Luke Dary / Claude Sonnet5 import with total-order windows, valid tie assertions, non-inline fallback, view and overlay isolation, and armed cancellation/deadline checks. Pin real fallback when compact-index lacks PSO. Runtime source is unchanged from the guarded stage-one candidate.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>
+
+commit 9e8bdfc95c916b62550fb8c3142f804bbbfb2444
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 10:07:52 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 10:07:52 2026 +0100
+
+    docs(engine): qualify indexed top-k tie equivalence
+    
+    [GPT-6 Astra] State SPARQL-permitted full-key tie semantics instead of promising the fallback input-index stability. Executable behavior is unchanged; the semantic suite checks membership and size for exact ties and exact windows for total-order keys.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

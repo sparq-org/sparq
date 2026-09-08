@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T08:57:25.572812+00:00",
+  "updated_at": "2026-09-08T09:16:50.726933+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -44,8 +44,7 @@
   },
   "live_main": {
     "oid": "cf19a52c6880c496cefaca24046174902bc30958",
-    "pr": 6464,
-    "observed_at": "2026-09-08T08:05:28.127169+00:00"
+    "observed_at": "2026-09-08T09:16:50.726933+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -61,18 +60,18 @@
     "model": "GPT-6 Astra",
     "effort": "xhigh",
     "pr": 5983,
-    "head": "803bb795201782551d984221a48b32ed391f7d9c",
+    "head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
     "branch": "codex/perf-indexed-topk-recovery",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Same agent is extending the existing candidate with bounded semantic/resource tests. Stage1 is committed and verified; current worktree may advance, so do not edit or restart it. Await direct-5983/semantic report and frozen Opus review packet.",
+    "state": "Frozen semantic candidate clean and all39 manifest entries/raw diff verified by root. One actual Opus5 xhigh source review launched; collect existing session/output, never duplicate. Agent idle pending review.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
     "contract": "Only top-k runtime/tests. Relevant focused default/no-default tests are authorized with task-local target/two jobs; no heavy/full-workspace builds or benchmark sweep. No push, review, PR admission, registry dispatch, release or EC2. Root owns issue/comment and actual Opus review.",
-    "phase": "Bounded semantic/resource extension before independent review",
+    "phase": "Independent source review before measurement",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
     "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
     "scope": "Keep PreparedGraphApplier, txn helpers, public API and dependency changes out. Preserve main bind_join and historical Luke Dary/Sonnet5 contribution provenance. New Astra repairs remain honestly attributed.",
-    "cache": "No verified warm Rust cache. Agent using task-local target and two jobs; never write shared target. Durable local Git checkpoints required.",
+    "cache": "Warm task-local implementation/target only, two jobs; shared target writes forbidden.",
     "issue": 6465,
     "source_pr": 5983,
     "source_head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
@@ -82,7 +81,19 @@
     "stage1_report_sha256": "376dd157cb77c8ddd19a172dad52f4532577ee704bc9b063087ca07841c1a781",
     "stage1_validation": "Raw T1 paired tests1pass1fail; exact-main fallback2pass; raw max_rows regression1failure. Repaired focused19pass +existing17pass. Six calibrated controls all killed, no survivors/harness errors. Root verified24-file evidence manifest and clean803 before next stage.",
     "stage1_limits": "Raw resource test stopped at max_rows; no claim that later raw byte-limit assertions ran. No speed measurement, full gate, conformance or actual independent review yet.",
-    "findings_comment": "https://github.com/sparq-org/sparq/pull/5983#issuecomment-5582162691"
+    "findings_comment": "https://github.com/sparq-org/sparq/pull/5983#issuecomment-5582162691",
+    "semantic_report": "direct-5983/semantic/report.json",
+    "semantic_validation": "26 focused tests pass in default/no-default/compact-index;25 additional passes;1 pre-existing ignored microbenchmark. Eight controls all killed with26tests each,0 survivors/errors. Final default26pass after comment-only change. No performance/full conformance/full gate claimed.",
+    "review_runtime": {
+      "session_id": 66012,
+      "kind": "exec_command",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/review-packet.md",
+      "input_sha256": "ef7b0dc4d5bd22642aa673516bdb40a33b83e8049f2447364d617bf96de18458",
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/opus-review-9e8bdfc9.json",
+      "completed": false,
+      "started_at": "2026-09-08T09:16:50.726933+00:00",
+      "acceptance": "Require complete successful JSON, is_error=false and actual modelUsage claude-opus-5. Never launch a duplicate or retry exhausted quota."
+    }
   },
   "prs": {
     "4300": {
@@ -325,7 +336,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T08:57:25.572812+00:00",
+    "observed_at": "2026-09-08T09:16:50.726933+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -352,8 +363,8 @@
     }
   },
   "next_actions": [
-    "Collect the existing postmerge_ci semantic-stage report and frozen review packet; do not duplicate or modify its worktree. Stage1 T1/T2 fixes are committed803 and tracked6465; evidence is frozen under implementation/.",
-    "When the semantic candidate is concrete and frozen, obtain actual Claude Opus5 xhigh source review before benchmarking/publication. No speed claim or full-bundle5983 admission. Keep inherited attribution and main bind_join intact.",
+    "Collect existing actual Opus5 xhigh source review session66012/output for frozen9e8bdfc9. Do not duplicate review or implementation.",
+    "If concrete source blockers, send existing postmerge_ci agent specific findings. If cleared for measurement, authorize bounded reproducible local comparison and benchmark registration. Full CI/conformance and performance evidence still needed before admission.",
     "Then add a bounded reproducible measurement fixture/registration and compare repaired candidate, its indexed-disabled control and current main. Preserve no-EC2 restriction except separately authorized6435 benchmark still blocked on login.",
     "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
@@ -372,9 +383,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4999,
+    "remaining": 4987,
     "resetAt": "2026-09-08T09:24:48Z",
-    "observed_at": "2026-09-08T08:28:11.895609+00:00",
+    "observed_at": "2026-09-08T09:16:50.726933+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -438,7 +449,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T08:57:25.572812+00:00",
+    "observed_at": "2026-09-08T09:16:50.726933+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",

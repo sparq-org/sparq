@@ -1,0 +1,31 @@
+{
+  "head": "803bb795201782551d984221a48b32ed391f7d9c",
+  "verified_files": [
+    "indexed-function.txt",
+    "focused-repaired.txt",
+    "recovery.diff",
+    "report.json",
+    "t1-main-fallback.txt",
+    "mutant-indexed_path_disabled.txt",
+    "mutant-repeated_inert.txt",
+    "mutant-baseline.txt",
+    "astra-repair.diff",
+    "import.txt",
+    "mutant-budget_inert.txt",
+    "mutant-budget_deleted.txt",
+    "mutant-restored.txt",
+    "resource-raw.txt",
+    "mutate.py",
+    "preflight.txt",
+    "current-tests.txt",
+    "historical-topk.patch",
+    "mutations.txt",
+    "existing-orderby-tests.txt",
+    "mutation-report.json",
+    "mutant-fanout_guard_deleted.txt",
+    "t1-raw.txt",
+    "mutant-repeated_deleted.txt"
+  ],
+  "count": 24,
+  "result": "All stage1 manifest entries unchanged; cache target intentionally reused."
+}

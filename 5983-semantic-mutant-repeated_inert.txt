@@ -1,0 +1,47 @@
+
+running 26 tests
+test armed_cancellation_uses_fallback_and_does_not_leak ... ok
+test armed_deadline_uses_fallback_and_expired_deadline_errors ... ok
+test ascending_order_direction ... ok
+test crosses_block_escalation_boundary ... ok
+test empty_pending_queue ... ok
+test exact_desc_ties_preserve_valid_membership_and_window_size ... ok
+test extra_pattern_beyond_star_shape_still_correct ... ok
+test fast_path_actually_engages_not_just_correct ... ok
+test fewer_pending_than_k_returns_all_sorted ... ok
+test forked_overlay_and_compaction_preserve_ordered_answers ... ok
+test indexed_topk_preserves_intermediate_resource_limits ... ok
+test large_already_claimed_prefix_still_correct ... ok
+test large_tie_group_still_correct ... ok
+test multi_peer_isolation ... ok
+test multivalued_probe_uses_fallback_and_preserves_cartesian_rows ... ok
+test negative_mixed_and_typed_lexical_values_use_the_fallback ... ok
+test non_inline_priority_values_still_correct ... ok
+test ordered_subqueries_preserve_default_and_named_view_boundaries ... ok
+test randomized_sweep ... ok
+test repeated_seed_variable_full_orderby_is_empty ... ok
+test repeated_seed_variable_limit_is_empty ... FAILED
+test status_filter_excludes_done_tasks ... ok
+test ties_broken_by_seq_ascending ... ok
+test total_order_desc_offset_windows_match_full_sort ... ok
+test unique_priorities_pseudo_random_medium ... ok
+test unique_priorities_small ... ok
+
+failures:
+
+---- repeated_seed_variable_limit_is_empty stdout ----
+
+thread 'repeated_seed_variable_limit_is_empty' (1161749) panicked at crates/sparq-engine/tests/topk_orderby_indexed_differential.rs:30:5:
+LIMIT must enforce subject/object equality: QueryResult { vars: [Variable { name: "x" }], rows: [[Some(NamedNode(NamedNode { iri: "urn:s" }))]] }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    repeated_seed_variable_limit_is_empty
+
+test result: FAILED. 25 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.64s
+
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 3.77s
+     Running tests/topk_orderby_indexed_differential.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby_indexed_differential-b40845b531114b9c)
+error: test failed, to rerun pass `-p sparq-engine --test topk_orderby_indexed_differential`

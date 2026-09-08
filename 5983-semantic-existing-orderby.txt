@@ -1,0 +1,31 @@
+
+running 3 tests
+test order_by_limit_one_still_works ... ok
+test order_by_limit_zero_is_empty_not_panic ... ok
+test order_by_offset_limit_zero_is_empty ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 14 tests
+test desc_ordering ... ok
+test distinct_keys ... ok
+test duplicate_keys ... ok
+test empty_input ... ok
+test iri_column ... ok
+test k_at_threshold ... ok
+test k_equals_n ... ok
+test k_over_threshold ... ok
+test limit_zero ... ok
+test mixed_types ... ok
+test multi_key_order_by ... ok
+test offset_beyond_size ... ok
+test offset_budget_ge_n ... ok
+test offset_lands_on_boundary ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 1.56s
+     Running tests/orderby_limit_zero.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/orderby_limit_zero-089e5a4c3d6688ce)
+     Running tests/topk_orderby.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby-2b291b31a46d2f2f)

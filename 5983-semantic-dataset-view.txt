@@ -1,0 +1,16 @@
+
+running 8 tests
+test dataset_view::bench_view_vs_from_named_copy ... ignored
+test dataset_view::composes_with_budget_and_functions ... ok
+test dataset_view::dataset_clause_intersects_with_view ... ok
+test dataset_view::default_graph_modes ... ok
+test dataset_view::graph_unit_row_semantics_preserved ... ok
+test dataset_view::graph_var_enumerates_only_visible_graphs ... ok
+test dataset_view::invisible_graph_is_indistinguishable_from_absent ... ok
+test dataset_view::view_holds_under_parallel_evaluation ... ok
+
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 32 filtered out; finished in 1.52s
+
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 8.25s
+     Running tests/query_features.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/query_features-d1b151be4418f3fc)

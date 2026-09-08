@@ -1,0 +1,401 @@
+[
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "eval_select",
+    "start": 2332,
+    "end": 2366,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "eval_modified",
+    "start": 3012,
+    "end": 3108,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "try_topk_orderby",
+    "start": 3119,
+    "end": 3156,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "has_intra_triple_repeated_var",
+    "start": 3845,
+    "end": 3864,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "is_conjunctive",
+    "start": 6286,
+    "end": 6305,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "flatten_conjunction",
+    "start": 6346,
+    "end": 6359,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "collect_vars",
+    "start": 8595,
+    "end": 8605,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "prepare_pattern",
+    "start": 8844,
+    "end": 8873,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "scan_to_bindings",
+    "start": 8875,
+    "end": 9008,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "eval_graph_named",
+    "start": 4991,
+    "end": 4998,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "eval_graph_named_pref",
+    "start": 5049,
+    "end": 5233,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "order_bindings",
+    "start": 11683,
+    "end": 11936,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "budget production portion (unchanged test modules omitted)",
+    "start": 68,
+    "end": 476,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "view",
+    "start": 2021,
+    "end": 2129,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "SortCell",
+    "start": 11312,
+    "end": 11365,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "sort_cell_val",
+    "start": 11374,
+    "end": 11401,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "cmp_sort_cells",
+    "start": 11410,
+    "end": 11550,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "cmp_sort_num",
+    "start": 11563,
+    "end": 11591,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "cmp_exact_lex_f64",
+    "start": 11599,
+    "end": 11610,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "sort_cell_term",
+    "start": 11619,
+    "end": 11621,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "str_id_value",
+    "start": 11630,
+    "end": 11632,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "cmp_strid_val",
+    "start": 11645,
+    "end": 11667,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/exec.rs",
+    "label": "compare_values",
+    "start": 14089,
+    "end": 14091,
+    "source_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "with_view",
+    "start": 761,
+    "end": 764,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "query_view",
+    "start": 768,
+    "end": 770,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "query_view_with_budget",
+    "start": 773,
+    "end": 775,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "active_dataset",
+    "start": 812,
+    "end": 814,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "view_scope",
+    "start": 822,
+    "end": 824,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "query",
+    "start": 1012,
+    "end": 1014,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "query_with_budget",
+    "start": 1017,
+    "end": 1019,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "query_prepared_with_budget",
+    "start": 1027,
+    "end": 1048,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "QueryBudget",
+    "start": 272,
+    "end": 303,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "DatasetView",
+    "start": 723,
+    "end": 730,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "DefaultGraphMode",
+    "start": 737,
+    "end": 743,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "label": "QueryBudget methods",
+    "start": 305,
+    "end": 322,
+    "source_blob": "e6f51e6360599db7a3e298bd378ac92c0eb3f4cf"
+  },
+  {
+    "path": "crates/sparq-engine/src/dataset.rs",
+    "label": "build_active",
+    "start": 72,
+    "end": 96,
+    "source_blob": "13ef5cb15c0d0886d310a7523b7f3bb329186aa7"
+  },
+  {
+    "path": "crates/sparq-engine/src/explain.rs",
+    "label": "explain_analyze",
+    "start": 68,
+    "end": 70,
+    "source_blob": "2f6952ec3bc67f8d2d84e32466ff1d8e421acdd7"
+  },
+  {
+    "path": "crates/sparq-engine/src/explain.rs",
+    "label": "explain_analyze_with_budget",
+    "start": 73,
+    "end": 114,
+    "source_blob": "2f6952ec3bc67f8d2d84e32466ff1d8e421acdd7"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "Perm and BUILT compile-time inventory",
+    "start": 1,
+    "end": 56,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "choose",
+    "start": 977,
+    "end": 994,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "choose_sorted",
+    "start": 1000,
+    "end": 1016,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "scan_sorted",
+    "start": 1027,
+    "end": 1030,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "bounds",
+    "start": 1060,
+    "end": 1070,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "scan_with",
+    "start": 1072,
+    "end": 1097,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "rows_in",
+    "start": 117,
+    "end": 127,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "merge",
+    "start": 229,
+    "end": 253,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "count_correction",
+    "start": 259,
+    "end": 271,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "to_spo",
+    "start": 1127,
+    "end": 1134,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "label": "Scan",
+    "start": 1119,
+    "end": 1122,
+    "source_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  {
+    "path": "crates/sparq-core/src/dict.rs",
+    "label": "Inline integer encoding contract",
+    "start": 1,
+    "end": 86,
+    "source_blob": "658390a3634ed7788e875c42727633f32f1e9c57"
+  },
+  {
+    "path": "crates/sparq-core/src/lib.rs",
+    "label": "fork",
+    "start": 2885,
+    "end": 2903,
+    "source_blob": "ab2cf013677d4d82c778dd64723ec825c214c3b0"
+  },
+  {
+    "path": "crates/sparq-core/src/lib.rs",
+    "label": "pending_delta_len",
+    "start": 2931,
+    "end": 2935,
+    "source_blob": "ab2cf013677d4d82c778dd64723ec825c214c3b0"
+  },
+  {
+    "path": "crates/sparq-core/src/lib.rs",
+    "label": "compact",
+    "start": 3406,
+    "end": 3443,
+    "source_blob": "ab2cf013677d4d82c778dd64723ec825c214c3b0"
+  },
+  {
+    "path": "crates/sparq-engine/Cargo.toml",
+    "label": "engine features",
+    "start": 25,
+    "end": 42,
+    "source_blob": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce"
+  },
+  {
+    "path": "crates/sparq-engine/Cargo.toml",
+    "label": "core regular dependency",
+    "start": 416,
+    "end": 428,
+    "source_blob": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce"
+  },
+  {
+    "path": "crates/sparq-engine/Cargo.toml",
+    "label": "dev dependency feature unification",
+    "start": 465,
+    "end": 487,
+    "source_blob": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce"
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "label": "workspace all-targets test archive caller",
+    "start": 490,
+    "end": 523,
+    "source_blob": "2291a011c578932b6c78cf1eae574bf4ad981002"
+  }
+]

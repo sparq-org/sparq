@@ -90,6 +90,11 @@ FILES = {
     '6464-current-runs.json': ROOT / 'direct-6436/followup/pr6464-runs.json',
 }
 
+# Preserve the frozen semantic evidence; exclude build caches and live review output.
+SEMANTIC = ROOT / 'direct-5983/semantic'
+for evidence_name in [*json.loads((SEMANTIC / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['5983-semantic-' + evidence_name] = SEMANTIC / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

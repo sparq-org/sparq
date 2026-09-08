@@ -1,0 +1,9 @@
+
+running 1 test
+test fork_generations::forked_generations_match_rebuild ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.03s
+
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 3.62s
+     Running tests/storage.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/storage-a34c2e636f4680f4)

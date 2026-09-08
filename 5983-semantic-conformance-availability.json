@@ -1,0 +1,6 @@
+{
+  "w3c_fixture_present": false,
+  "cached_conformance_binary": false,
+  "checked_fixture_path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/tests/w3c/rdf-tests/sparql",
+  "remaining_if_absent": "Fetch the repository-pinned W3C fixture via scripts/fetch-conformance.sh in separately authorized setup; run cargo run --locked -p sparq-conformance --bin sparq-conformance -- --strict. No data download/build/run attempted here."
+}

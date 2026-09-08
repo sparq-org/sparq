@@ -1,0 +1,22 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 8.86s
+     Running tests/topk_orderby_indexed_differential.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby_indexed_differential-b40845b531114b9c)
+
+running 1 test
+test indexed_topk_preserves_intermediate_resource_limits ... FAILED
+
+failures:
+
+---- indexed_topk_preserves_intermediate_resource_limits stdout ----
+
+thread 'indexed_topk_preserves_intermediate_resource_limits' (1117084) panicked at crates/sparq-engine/tests/topk_orderby_indexed_differential.rs:44:9:
+max-rows: Ok(QueryResult { vars: [Variable { name: "t" }], rows: [[Some(NamedNode(NamedNode { iri: "urn:task:X:39" }))]] })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    indexed_topk_preserves_intermediate_resource_limits
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p sparq-engine --test topk_orderby_indexed_differential`

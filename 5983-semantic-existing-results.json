@@ -1,0 +1,64 @@
+[
+  {
+    "name": "dataset-view",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "query_features",
+      "dataset_view::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "results": [
+      "test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 32 filtered out; finished in 1.52s"
+    ]
+  },
+  {
+    "name": "fork-generations",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "storage",
+      "fork_generations::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "results": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.03s"
+    ]
+  },
+  {
+    "name": "existing-orderby",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "topk_orderby",
+      "--test",
+      "orderby_limit_zero",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "results": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+      "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+    ]
+  }
+]
