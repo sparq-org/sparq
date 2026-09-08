@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T10:19:15.933818+00:00",
+  "updated_at": "2026-09-08T10:20:28.715612+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -408,7 +408,7 @@
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "Observe the first natural scheduled execution containing PR6463. Latest scheduled run34192344406 started05:53UTC on48fefb6 before the fix and concluded success. That status alone does not prove recovery writes worked; no log or production claim was used this tick. Never manually dispatch or probe.",
+    "next": "When the active agent is available for a bounded read-only followup, inspect existing scheduled run34213698157 containing6463 for actual policy execution and any writes/errors. Do not dispatch a probe or infer production recovery writes from overall SUCCESS.",
     "issue": 6462,
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate.",
     "latest_scheduled_run": {
@@ -417,13 +417,21 @@
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34213698157,
       "status": "completed"
+    },
+    "first_observed_postfix_run": {
+      "id": 34213698157,
+      "head": "cf19a52c6880c496cefaca24046174902bc30958",
+      "event": "schedule",
+      "created_at": "2026-09-08T10:06:50Z",
+      "conclusion": "success",
+      "limit": "First natural scheduled success containing6463 observed. Recovery mutation/effect details not inspected, so this does not prove actual claim/rerun health."
     }
   },
   "next_actions": [
     "Collect existing postmerge_ci early-tie-rejection fix/test/control and same-matrix comparison; do not duplicate work. Frozen9e8bdfc9 is verified NO-GO, diagnostic report/harness evidence retained and finding recorded6465.",
     "After concrete fix, evaluate measured tie-cost effect and separate drained-prefix design. No candidate admission until both adverse regressions and F3-F5 obligations are addressed with actual Opus followup and required full validation.",
     "Keep exact candidate/disabled/main original diagnostic binaries and rawdata unchanged. Any further measurement must answer a named unresolved question, not broaden/repeat the sweep without a source change.",
-    "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
+    "Observe natural nightly34202612161 completion. First natural sweeper containing6463 now34213698157SUCCESS; actual recovery effect remains unverified. Inspect existing evidence via bounded agent followup when available, no manual probes. Registry remains OFF, ALLGREEN and all holds unchanged; releases unapproved.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
   ],
   "followup_lane": {
