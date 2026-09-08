@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T03:14:36.844985+00:00",
+  "updated_at": "2026-09-08T05:33:28.773438+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "Implementation complete and frozen; actual Opus5 xhigh focused re-review is RUNNING in exec session2546. Do not modify/restart/review twice. Agentpostmerge_ci idle and available for concrete findings. No6436 PR yet.",
+    "state": "Reviewed source0fc2faf6 published as PR6464; awaiting normal LinuxCI and actual automaticCopilot review. No sourcechanges afterOpus approval. Agentidle, no duplicate sessions.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
     "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
     "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
@@ -93,10 +93,14 @@
       "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6436/followup/review-input-0fc2faf6.md",
       "input_sha256": "6b67133cd821ae5ba3c4b0cddacb67e5abc830bb5fbe9e327b8739045ec8566b",
       "input_bytes": 67532,
-      "acceptance": "Require completed valid JSON, subtype success/is_errorfalse and actual claude-opus-5 modelUsage before interpreting verdict. No retries on model quota exhaustion. An empty file is not a completed review."
+      "acceptance": "Require completed valid JSON, subtype success/is_errorfalse and actual claude-opus-5 modelUsage before interpreting verdict. No retries on model quota exhaustion. An empty file is not a completed review.",
+      "completed": true
     },
     "validation": "47 focused+88 wiring+19 reservation tests pass;15 calibrated controls killed with47tests each,0errors;195/196 traced lines;actionlint and clean main48 composition. Preflight only known Bash3 mapfile limitation.",
-    "remediation": "B1 refuted by original real ZIP fixtures and exact source;strict planned-count equality retained. B2 all-job/local-reusable conservative bound101 <=200,85 actualjobs;capacity guard20slots. B3 nine known terminal conclusions and readable zero-job/omitted-step evidence treatedincomplete;attempt omitted bound by endpoint,present contradictions rejected. API/quota/unreadable/unknownfailclosed preserved."
+    "remediation": "B1 refuted by original real ZIP fixtures and exact source;strict planned-count equality retained. B2 all-job/local-reusable conservative bound101 <=200,85 actualjobs;capacity guard20slots. B3 nine known terminal conclusions and readable zero-job/omitted-step evidence treatedincomplete;attempt omitted bound by endpoint,present contradictions rejected. API/quota/unreadable/unknownfailclosed preserved.",
+    "review_verdict": "approve_with_nits, no substantiated blockers",
+    "review_trigger_verification": "docs-quality PR opened/synchronize/reopened/ready_for_review +merge_group +push main; no paths filter; new test command in quick-gates without step condition.",
+    "pr": 6464
   },
   "prs": {
     "4300": {
@@ -218,7 +222,7 @@
       "issue": 6462,
       "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
       "branch": "codex/ci-rerun-bot-query",
-      "state": "OPEN_CI_PENDING",
+      "state": "QUEUED",
       "base": "main",
       "review": "Actual Opus5 xhigh full ed9689d +focused5640 approval_with_nits/no blockers. Both result JSON modelUsage verified. No source change afterfinalreview.",
       "full_review_result": "recovery-20260908/6462-opus-review-ed9689d5.json",
@@ -227,7 +231,7 @@
       "tests": "80tests+finalrearmselftest;2 calibratedoldquery/rawlogin positiveeffect controls each1assertfail0errors/skips",
       "gate": {
         "run": 34182440948,
-        "state": "in_progress"
+        "state": "success"
       },
       "copilot": {
         "run": 34182446466,
@@ -238,13 +242,29 @@
         "area:ci"
       ],
       "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-      "expected_behavior": "Concrete Bot ID field;normalizeonlyalreadyverifiedRESTaccountlogin. Preserve node ID/type,exact authenticatedviewer,durableclaim,currenthead/queue/review/operator6049holds. Noactualclaim/rerunvalidationperformed."
+      "expected_behavior": "Concrete Bot ID field;normalizeonlyalreadyverifiedRESTaccountlogin. Preserve node ID/type,exact authenticatedviewer,durableclaim,currenthead/queue/review/operator6049holds. Noactualclaim/rerunvalidationperformed.",
+      "queue_position": 1,
+      "queue_state": "QUEUED",
+      "queue_admitted_at": "2026-09-08T05:32:01.568976+00:00",
+      "effect_evidence": "Required Linux docs-quality34182440946 executed all80test_arm_capability_wiring tests, including invalid Actor.id, real Bot login forms, missing nodeID and unverifiedREST negatives. Allpassed; selftestpassed. Gate34182440948SUCCESS. No unresolvedreviewthreads, Copilot34182446466SUCCESS."
+    },
+    "6464": {
+      "issue": 6436,
+      "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
+      "branch": "codex/ci-heavy-nightly-freshness",
+      "state": "OPEN_CI_PENDING",
+      "base": "main",
+      "url": "https://github.com/sparq-org/sparq/pull/6464",
+      "review": "Actual Opus5 xhigh whole2f request_changes; focused0fc approve_with_nits, no remaining substantiatedblockers. Valid successfulJSON/modelUsage verified; sourceclean and49filemanifestverified. No redundant review needed unlesscodechanges.",
+      "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
+      "review_packet_sha256": "6b67133cd821ae5ba3c4b0cddacb67e5abc830bb5fbe9e327b8739045ec8566b",
+      "validation": "47 focused+88wiring+19reservation tests;15 calibratedcontrols47tests0errors each;actionlint/diffPASS. LinuxCIeffectevidence stillpending."
     }
   },
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T03:14:36.844985+00:00",
+    "observed_at": "2026-09-08T05:32:01.568976+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -264,10 +284,9 @@
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
   },
   "next_actions": [
-    "Collect existing6436 Opus review session2546/output. Do not launch another review. If approved, validate finalsource and main composition, prepare PRbody from final implementation/evidence and publish throughnormalCI. Ifblocked, reusepostmerge_ci forconcretefindings.",
-    "MonitorPR6463 requiredgate34182440948 and current Copilot threads/head. Source reviewed5640. When fullygreen/resolved/current, normal protected enqueue expectedHeadOid5640 jumpfalse; neverfabricatereviewpass.",
-    "After6463merges, verifyexactsource,close6462,removeowncleanworktreeandobserveeligible natural scheduled sweeper execution. Preserveheld6049.",
-    "Keepcheckpoint+completedreviewartifacts inprivateGitref; collect outputbeforebackingup completedverdict.",
+    "MonitorPR6463 protectedmerge_group at reviewed5640; aftermergedverifyexactsource/close6462/removeowncleanworktree andobserve firsteligible natural scheduledsweeper. Do notmanualprobe/retry.",
+    "MonitorPR6464 normalLinuxCI andactualautomaticCopilotreview. New47nightlytests mustactuallyexecute inrequiredCI. Fix actionablefindings viaexistingpostmerge_ci only; frozen0fc alreadyhasactualOpus5approval. Admit onebranch atatime onlyaftergreen/current/resolvedrevalidation.",
+    "Keepcompletedreviews/checkpoint inprivateGitref; no duplicate reviews or idlemodel sessions.",
     "RegistryActions/dispatchOFF,ALLGREENuntil6049invariantlanded,no releases;retain6055reviewneeds,6049approval,registrytestonlyCI,6435AWSlogin holds."
   ],
   "followup_lane": {
@@ -276,7 +295,7 @@
     "branch": "codex/ci-rerun-bot-query",
     "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-    "state": "PublishedPR6463OPEN at reviewed5640. Actual full+focused Opus5 approvals,80tests+finalselftest pass. Copilot run34182446466 SUCCESS with0reviewthreads at latest snapshot. Requiredgate34182440948 in_progress; no admission beforegreen/currentresolvedrevalidation.",
+    "state": "PR6463 admitted to protected queue at expected5640,position1,jumpfalse. RequiredCI/actualOpus/Copilot complete; observe merge_group.",
     "packet": "recovery-20260908/6462-rereview-5640d06b.md",
     "packet_sha256": "cbbed101eb48afd78a04ed9ae18e72294f9a3010417c7730ced407b7e96edf9f",
     "review_output": "recovery-20260908/6462-opus-rereview-5640d06b.json",

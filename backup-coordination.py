@@ -49,6 +49,9 @@ FILES = {
     '6436-followup-manifest.json': ROOT / 'direct-6436/followup/manifest-complete.json',
     '6436-followup-input-manifest.json': ROOT / 'direct-6436/followup/review-input-manifest.json',
     '6436-real-parse-job.log': ROOT / 'recovery-20260908/nightly-parse-job.log',
+    '6436-opus-review-0fc2faf6.json': ROOT / 'direct-6436/followup/opus-review-0fc2faf6.json',
+    '6464-pr-body.md': ROOT / 'direct-6436/followup/pr-body.md',
+    '6463-pr-docs-quality.log': ROOT / 'recovery-20260908/6463-pr-docs-quality.log',
 }
 
 def git(*args, data=None):
