@@ -1,0 +1,1399 @@
+diff --git a/.github/feature-matrix.d/sparq-serve.yml b/.github/feature-matrix.d/sparq-serve.yml
+index 987d06080..3a3d70174 100644
+--- a/.github/feature-matrix.d/sparq-serve.yml
++++ b/.github/feature-matrix.d/sparq-serve.yml
+@@ -58,3 +58,25 @@
+   crate: "sparq-serve"
+   features: "change-sink"
+   test: true
++
++# [SONNET-5] (sq-artifact-keeper-topk) `PreparedGraphApplier` — an `ApplyUpdates` strategy
++# over `sparq_engine::PreparedUpdate` (parsed once, bound per submission) instead of raw
++# SPARQL Update text, avoiding `GraphApplier`'s per-commit re-parse for a repeatedly
++# resubmitted template. The whole type and its `tests/prepared_applier.rs` integration
++# suite are behind the default-OFF `params` feature (forwarding to sparq-engine's
++# already-dependency-free `params`), so the default-feature workspace test run compiles
++# `prepared_applier.rs` EMPTY and runs ZERO of its tests — the same silent-skip gap the
++# change-stream/change-sink legs above close, for this surface. No new external
++# dependency. The leg runs `clippy --all-targets -D warnings` with the feature ON plus
++# `cargo test`, which drives the real correctness invariants through the ACTUAL sequenced
++# writer (not a mock): a bound `PreparedUpdate` applies through the same structural-fork +
++# delta-overlay + threshold-compaction path `GraphApplier` uses, and repeated submissions
++# of the same parsed-once template drain a queue across many generations with no
++# duplicate/lost claims.
++# Verified locally: `cargo test -p sparq-serve --features params --test prepared_applier`
++# runs both tests; `clippy --all-targets -D warnings` is clean in the default, params, and
++# all-features states.
++- name: "sparq-serve (params — prepared-update applier)"
++  crate: "sparq-serve"
++  features: "params"
++  test: true
+diff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs
+index e8f13ef66..697fbc94f 100644
+--- a/crates/sparq-engine/src/exec.rs
++++ b/crates/sparq-engine/src/exec.rs
+@@ -3131,6 +3131,17 @@ fn try_topk_orderby(
+             try_topk_orderby(graph, local, red_inner, row_budget)
+         }
+         GraphPattern::OrderBy { inner: ord_inner, expression } => {
++            // [SONNET-5] (sq-artifact-keeper-topk) Try the index-ordered seed path
++            // first: for the narrow "star BGP, ORDER BY a variable bound by exactly
++            // one pattern's object" shape, it walks a value-sorted permutation scan
++            // directly instead of materialising every matching row — see
++            // `try_topk_orderby_indexed`'s doc comment for the soundness argument.
++            // Declines (`Ok(None)`) for any shape/datatype it can't prove safe, in
++            // which case the existing materialize-then-select path below runs
++            // unchanged.
++            if let Some(b) = try_topk_orderby_indexed(graph, local, ord_inner, expression, row_budget)? {
++                return Ok(Some(b));
++            }
+             let mut b = eval_modified(graph, local, ord_inner)?;
+             // Use the top-k path only when the budget is strictly less than n;
+             // otherwise the heap adds overhead with no benefit.
+@@ -3144,6 +3155,447 @@ fn try_topk_orderby(
+     }
+ }
+ 
++/// [SONNET-5] (sq-artifact-keeper-topk) Attempts INDEX-ORDERED top-k evaluation for a
++/// `Slice{OrderBy{BGP}}` shape whose primary sort key is bound by exactly one triple
++/// pattern's OBJECT. `try_topk_orderby`'s existing bounded-heap path still calls
++/// `eval_modified` to fully evaluate (and materialise) the WHOLE matching candidate
++/// set before selecting the top `row_budget` rows — `O(n)` in the number of rows
++/// CURRENTLY matching the BGP's equality filters, not in `row_budget`. That is fine
++/// when some pattern is selective, but when every pattern matches nearly the same
++/// rows (e.g. a job-queue "claim the next pending task for peer X, ordered by
++/// priority" query, where `peer` + `status` don't shrink the candidate set at all),
++/// there is no cheaper seed for the cardinality-based planner to pick, and the cost
++/// scales with the size of the whole pending queue on every single claim — profiled
++/// and confirmed via `EXPLAIN ANALYZE` (the BGP operator reports touching every
++/// matching row) in the sparq/artifact-keeper migration's claim-queue throughput
++/// investigation.
++///
++/// SOUNDNESS. Only activates for a narrow, syntactically-verified "star" shape, and
++/// declines (`Ok(None)`) at the first sign of anything it cannot prove safe — the
++/// caller's `eval_modified`-then-select path is always correct, just `O(n)`; this
++/// function's only job is to be a provably-equivalent shortcut, never a new source
++/// of results:
++/// - `ord_inner` is a plain triple-pattern conjunction with NO residual FILTER and
++///   no blank nodes (kept out of scope for this first cut).
++/// - The FIRST order key is a bare `Variable` (secondary tie-break keys, if any,
++///   are resolved by re-using `order_bindings` over the small collected set below —
++///   not reimplemented here).
++/// - Exactly one pattern (the "seed") binds that variable as its OBJECT, with a
++///   CONSTANT predicate and a VARIABLE subject (the join "hub").
++/// - Every OTHER pattern has that same hub variable as its SUBJECT and a CONSTANT
++///   predicate (a star join around the hub); any object variable it introduces must
++///   not appear anywhere else in the BGP. Any other shape (the hub appearing
++///   elsewhere, a variable predicate, a reused object variable) declines.
++/// - Every object id on the seed's sorted scan is an INLINE small integer
++///   (`dict::is_inline`) — the only case where ascending dictionary-id order is
++///   proven to equal ascending SPARQL `value()` order (the same guard
++///   `scan_to_bindings`'s range-pruning already relies on for the same reason).
++///   Checked for the WHOLE scan up front, before any result is built, so a
++///   non-inline id never leaks a partially-computed (and potentially
++///   wrongly-ordered) answer.
++///
++/// Under those conditions, walking the seed's sorted scan in the required
++/// direction, testing each candidate hub value against the OTHER patterns via a
++/// direct bound lookup (index-nested-loop / bind join over a per-pattern
++/// subject-sorted range resolved once, not re-resolved per candidate — see the
++/// `other_pats` construction below), and stopping once a COMPLETE sort-key group
++/// (never split mid-tie) has produced at least `row_budget` confirmed joins
++/// yields EXACTLY the rows `eval_modified` + `order_bindings` would: a candidate
++/// in an unvisited group is, by construction, sort-key-worse than every
++/// already-confirmed one (or sort-key-better but not yet visited, in the
++/// opposite direction — either way strictly ordered relative to what's been
++/// collected), so it can never enter the true top `row_budget`.
++///
++/// PERFORMANCE, not soundness: a single escalation block is also capped at a
++/// fraction of the candidate pool (see `max_group` below) — exceeding it
++/// declines (`Ok(None)`) even though continuing would still be CORRECT, because
++/// past that point this function's per-candidate cost stops being cheaper than
++/// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
++/// the function's only failure mode "sometimes it doesn't help," never
++/// "sometimes it's slower than doing nothing."
++fn try_topk_orderby_indexed(
++    graph: &Graph,
++    local: &mut LocalVocab,
++    ord_inner: &GraphPattern,
++    expression: &[OrderExpression],
++    row_budget: usize,
++) -> Result<Option<Bindings>, String> {
++    #[cfg(feature = "zk")]
++    if crate::zk::enabled() {
++        return Ok(None);
++    }
++    if view::default_is_empty() {
++        return Ok(None);
++    }
++    let Some((desc, order_var)) = expression.first().and_then(|oe| match oe {
++        OrderExpression::Asc(Expression::Variable(v)) => Some((false, v.clone())),
++        OrderExpression::Desc(Expression::Variable(v)) => Some((true, v.clone())),
++        _ => None,
++    }) else {
++        return Ok(None);
++    };
++    if !is_conjunctive(ord_inner) {
++        return Ok(None);
++    }
++    let mut patterns = Vec::new();
++    let mut filters = Vec::new();
++    flatten_conjunction(ord_inner, &mut patterns, &mut filters);
++    if !filters.is_empty() || patterns.is_empty() {
++        return Ok(None);
++    }
++    // Out of scope for this first cut: blank nodes are treated as synthetic
++    // variables by `prepare_pattern` (`bnode_var`) but not necessarily by
++    // `collect_vars`'s header-construction — decline rather than risk a header
++    // mismatch.
++    let has_blank_node = patterns.iter().any(|tp| {
++        matches!(tp.subject, TermPattern::BlankNode(_)) || matches!(tp.object, TermPattern::BlankNode(_))
++    });
++    if has_blank_node {
++        return Ok(None);
++    }
++
++    // Locate the ONE seed pattern binding `order_var` as its object with a
++    // constant predicate and a variable subject.
++    let mut seed_idx = None;
++    for (i, tp) in patterns.iter().enumerate() {
++        if !matches!(&tp.object, TermPattern::Variable(v) if *v == order_var) {
++            continue;
++        }
++        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
++            return Ok(None);
++        }
++        if !matches!(&tp.subject, TermPattern::Variable(_)) {
++            return Ok(None);
++        }
++        if seed_idx.is_some() {
++            return Ok(None); // order_var bound by more than one pattern: not this shape
++        }
++        seed_idx = Some(i);
++    }
++    let Some(seed_idx) = seed_idx else { return Ok(None) };
++    let hub_var = match &patterns[seed_idx].subject {
++        TermPattern::Variable(v) => v.clone(),
++        _ => unreachable!("checked above"),
++    };
++
++    // Every OTHER pattern must be `hub_var <constant predicate> (var|const)` — a
++    // star around the hub — and any variable it introduces must be fresh.
++    let mut other_vars: FxHashSet<Variable> = FxHashSet::default();
++    for (i, tp) in patterns.iter().enumerate() {
++        if i == seed_idx {
++            continue;
++        }
++        if !matches!(&tp.subject, TermPattern::Variable(v) if *v == hub_var) {
++            return Ok(None);
++        }
++        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
++            return Ok(None);
++        }
++        if let TermPattern::Variable(v) = &tp.object {
++            if *v == hub_var || *v == order_var || !other_vars.insert(v.clone()) {
++                return Ok(None);
++            }
++        }
++    }
++
++    let out_vars = collect_vars(&patterns);
++    if row_budget == 0 {
++        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
++    }
++
++    // Resolve + scan the seed pattern sorted by its OBJECT (canonical column 2).
++    let (seed_id_pat, _seed_pos_vars, seed_unsat) = prepare_pattern(graph, &patterns[seed_idx])?;
++    if seed_unsat {
++        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
++    }
++    let scan = graph.store.scan_sorted(&seed_id_pat, 2);
++    let actual_sort = scan.perm.order().into_iter().find(|&c| seed_id_pat[c].is_none());
++    if actual_sort != Some(2) {
++        return Ok(None); // this store build can't give us an object-sorted scan
++    }
++    let rows: &[[Id; 3]] = scan.rows.as_ref();
++    // Guard: EVERY object id on this scan must be an inline integer, or ascending
++    // id order is not proven to be ascending value order.
++    if !rows.iter().all(|r| dict::is_inline(scan.to_spo(r)[2])) {
++        return Ok(None);
++    }
++
++    // Prepare the other patterns ONCE, each as a SUBJECT-sorted scan over its
++    // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
++    // The first cut of this function called `graph.store.scan(&probe_pat)`
++    // fresh for every (candidate, other-pattern) pair, which re-runs
++    // `Store::choose`'s permutation selection + bound computation every single
++    // time even though the choice is IDENTICAL across all candidates for a
++    // given pattern (only the subject varies). That repeated per-call setup —
++    // not the underlying lookup — is what made a large tie-group lose to the
++    // fallback's bulk merge-join (which resolves the permutation ONCE per
++    // pattern, not once per row). Resolving it once here and binary-searching
++    // the resulting sorted slice per candidate removes that repeated cost.
++    struct OtherPat<'g> {
++        scan: sparq_core::store::Scan<'g>,
++        // Precomputed ONCE (not per candidate, not per binary-search
++        // comparison step): the subject id of every row in `scan`, in the
++        // SAME (subject-sorted) order. `partition_point` over this plain
++        // `&[Id]` does a trivial integer compare per step; searching `scan`
++        // directly would call `to_spo` (a permutation-order reconstruction)
++        // on EVERY comparison, i.e. ~log(m) reconstructions per candidate per
++        // pattern — measured as a real remaining cost for a long skip-prefix
++        // (many candidates probed and rejected in a row): reconstructing the
++        // full [S,P,O] triple just to read column 0 is wasted work when the
++        // search only ever needs that one column.
++        subject_ids: Vec<Id>,
++        obj_var: Option<Variable>,
++    }
++    let mut other_pats: Vec<OtherPat> = Vec::with_capacity(patterns.len().saturating_sub(1));
++    for (i, tp) in patterns.iter().enumerate() {
++        if i == seed_idx {
++            continue;
++        }
++        let (id_pat, pos_vars, unsat) = prepare_pattern(graph, tp)?;
++        if unsat {
++            // A constant elsewhere in the BGP absent from the dictionary makes the
++            // WHOLE conjunction empty (a BGP join against an empty relation).
++            return Ok(Some(Bindings::unsorted(out_vars, vec![])));
++        }
++        let probe_id_pat: IdPattern = [None, id_pat[1], id_pat[2]];
++        let sub_scan = graph.store.scan_sorted(&probe_id_pat, 0);
++        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| probe_id_pat[c].is_none());
++        if sub_actual_sort != Some(0) {
++            // This store build can't give a subject-sorted scan for this
++            // pattern (e.g. no PSO permutation under `compact-index`/wasm) —
++            // decline rather than binary-search an unsorted range.
++            return Ok(None);
++        }
++        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
++        other_pats.push(OtherPat { scan: sub_scan, subject_ids, obj_var: pos_vars[2].clone() });
++    }
++
++    // UPFRONT cost check, before touching a single candidate: each `other_pats`
++    // scan's row count is the EXACT (not estimated) global cardinality of that
++    // pattern's own (predicate [+ object]) constraint. If any of them is
++    // already meaningfully smaller than the seed's own scan (`rows.len()`),
++    // the fallback's ordinary smallest-estimate seed selection will pick THAT
++    // pattern as ITS seed and materialize only that small set — beating this
++    // function's priority-ordered walk outright, with no reason to compete.
++    //
++    // This is exactly the realistic "claim strictly in priority order" shape:
++    // as such a queue drains, `ak:status="pending"` becomes highly selective
++    // while THIS function's seed (`ak:priority`, spanning the whole pool
++    // including now-claimed rows) does not shrink at all. Without this check,
++    // the only way to discover that is by actually walking past the
++    // ever-growing already-claimed prefix, probing (and rejecting) each one —
++    // real, wasted, unrecoverable cost. Measured directly: at n=1600 with
++    // 1000 of 1600 already claimed (600 truly pending), that reactive
++    // discovery cost ~237-272us total (wasted probes + the fallback anyway)
++    // vs. this upfront check's ~172-180us (matches a clean fallback-only
++    // cost, because it declines before doing ANY per-candidate work).
++    let seed_card = rows.len();
++    let min_other_card = other_pats.iter().map(|op| op.scan.rows.len()).min().unwrap_or(seed_card);
++    if min_other_card.saturating_mul(2) < seed_card {
++        return Ok(None);
++    }
++
++    // The output column list is FIXED across every candidate (hub, order, then
++    // each other pattern's object variable, in pattern order) — compute it and
++    // the out_vars -> column-position mapping ONCE, not per candidate.
++    let mut cols: Vec<Variable> = Vec::with_capacity(2 + other_pats.len());
++    cols.push(hub_var.clone());
++    cols.push(order_var.clone());
++    for op in &other_pats {
++        if let Some(ov) = &op.obj_var {
++            cols.push(ov.clone());
++        }
++    }
++    let out_to_cols: Vec<Option<usize>> = out_vars.iter().map(|v| cols.iter().position(|c| c == v)).collect();
++    let emit = |ids: &[Id], collected: &mut Vec<Row>| {
++        let mut row = Row::with_capacity(out_to_cols.len());
++        for pos in &out_to_cols {
++            row.push(pos.map(|i| ids[i]).unwrap_or(NO_ID));
++        }
++        collected.push(row);
++    };
++
++    // Walk the sorted scan in the required direction, in escalating blocks aligned
++    // to complete sort-key (object-id) groups, joining each candidate against the
++    // other patterns via a direct bound lookup (index-nested-loop / bind join).
++    //
++    // `rows` is always ASCENDING by object id (the scan's actual sort order). For
++    // DESC, "best first" means walking it back-to-front. Rather than slicing from
++    // the front and reversing per block (which — subtly, and wrongly — visits the
++    // SMALLEST values first regardless of direction, since the slice bounds
++    // themselves were never flipped), define a single LOGICAL index `0..n` where
++    // position 0 is always the best candidate, via `logical`, and do all
++    // block/boundary arithmetic in that space. `logical` and `obj_id_at` are the
++    // only direction-aware code; everything below them is direction-agnostic.
++    let n = rows.len();
++    let logical = |i: usize| -> usize { if desc { n - 1 - i } else { i } };
++    let obj_id_at = |i: usize| -> Id { scan.to_spo(&rows[logical(i)])[2] };
++    // A single escalation block is dominated by ONE large tie-group when the
++    // sort key has low cardinality (e.g. a handful of discrete priority tiers:
++    // "urgent/high/normal/low", not a near-unique value per row). This
++    // function's per-candidate cost is roughly CONSTANT per candidate (a
++    // binary search per other pattern, resolved against a scan fetched once —
++    // see `other_pats` below), while the fallback's bulk merge-join cost is
++    // roughly constant PER `n` regardless of tie structure (it materialises the
++    // whole matching set before it can sort). So the crossover is a FRACTION of
++    // `n`, not an absolute row count: measured at n=1600, a tie-group of 800
++    // (half of n) still beat the fallback (~228us vs. the fallback's ~269us),
++    // but a tie-group of 1600 (all of n) lost (would be ~450-700us vs. the
++    // fallback's own ~269us) — and the same ~0.5-0.75 fraction held at n=8000
++    // (4000 still competitive, 8000 clearly lost). `max_group` below is
++    // therefore `n / 2` (with a floor for small `n`, and never below
++    // `row_budget` itself) — declining past it defers to the fallback, whose
++    // cost at that point is exactly its normal (tie-structure-independent)
++    // cost, not a new regression.
++    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
++    let mut collected: Vec<Row> = Vec::new();
++    let mut visited_to: usize = 0;
++    // Block sizes grow GEOMETRICALLY from a small multiple of `row_budget`, not
++    // from `CAPPED_SEED_BLOCK` (1024): each candidate here costs a real
++    // per-pattern binary search (against the scan `other_pats` already resolved
++    // once, above), unlike the bulk merge-join the fallback path uses, which
++    // amortises its own permutation selection over the WHOLE scan in one pass.
++    // For the common case (small `row_budget`, most candidates
++    // join successfully), starting near `row_budget` means the first block alone
++    // usually satisfies it — starting at 1024 would pay ~1024 point-probes even for
++    // `LIMIT 1`, which is worse than the bulk path it's meant to beat (measured:
++    // this was the actual cause of a regression at moderate `n`, not a win).
++    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
++    // Cumulative count of candidates that failed an OTHER-pattern check, across
++    // ALL blocks in this call — distinct from `max_group`'s per-block width
++    // check. A workload that claims strictly in priority order (the realistic
++    // shape: highest priority first) leaves an ever-growing prefix of
++    // ALREADY-CLAIMED, high-priority-but-no-longer-`pending` rows at the head
++    // of the seed scan — each one still costs a real per-pattern probe before
++    // being rejected. That prefix is made of individually DISTINCT priority
++    // values, so it never forms one oversized tie-group `max_group` would
++    // catch; it spreads across many small geometric-growth blocks instead. The
++    // UPFRONT cost check above (comparing `other_pats`' exact cardinalities to
++    // the seed's) already declines the CLEAR case — an other-pattern that's
++    // globally selective enough for the fallback's own planner to prefer as
++    // ITS seed — before any candidate is even touched. This counter is a
++    // SAFETY NET for what that check can't see: the seed's global cardinality
++    // vs. an other-pattern's global cardinality doesn't capture every
++    // possible skip-prefix shape (e.g. a correlation between scan order and
++    // an other-pattern's matches that isn't visible from cardinality alone).
++    //
++    // The budget here must stay LARGE (matching `max_group`, not a small
++    // constant): every failed probe before declining is pure waste stacked ON
++    // TOP OF the fallback's full cost, but a SMALL budget bails on the far
++    // more common "moderate skip-prefix" case too — one that would have
++    // SUCCEEDED cheaply if allowed to keep going (a candidate ~100-800
++    // positions in costs only tens of us to walk to, vastly cheaper than a
++    // ~100-350us fallback). Measured directly: tightening this to a small
++    // constant (64) made the COMMON moderate case (already-claimed ~100-400)
++    // cost ~225-275us (forced into a fallback the upfront check didn't catch
++    // and completion would have avoided entirely) instead of the ~15-70us it
++    // gets by simply being allowed to finish. A large budget's own worst case
++    // (a skip-prefix near `n/2`, right at the edge) is bounded and modest by
++    // comparison (~30-50% over a clean fallback, not multiples of it) — an
++    // acceptable price for a case the upfront check should catch almost
++    // always in practice anyway.
++    let failure_budget = max_group;
++    let mut failed_count: usize = 0;
++    let mut block_target = row_budget.saturating_mul(4).max(16);
++    loop {
++        if visited_to >= n {
++            break;
++        }
++        let mut end = block_target.clamp(visited_to, n);
++        // Extend to the next object-id group boundary so a tie is never split
++        // across blocks (the early-stop check below requires a COMPLETE group).
++        if end < n && end > 0 {
++            let boundary_obj = obj_id_at(end - 1);
++            while end < n && obj_id_at(end) == boundary_obj {
++                end += 1;
++            }
++        }
++        if end - visited_to > max_group {
++            return Ok(None);
++        }
++        for i in visited_to..end {
++            let spo = scan.to_spo(&rows[logical(i)]);
++            let hub_id = spo[0];
++            let order_id = spo[2];
++            // FAST PATH: assume single-valued (the realistic schema shape — a
++            // task has exactly one status/priority/seq), building ONE row with
++            // no heap allocation beyond the SmallVec's inline capacity. Only a
++            // genuinely multi-valued predicate (rare) allocates, and only then
++            // — this is what the earlier `Vec<SmallVec>`-per-candidate
++            // cartesian machinery paid unconditionally, which (combined with
++            // the per-candidate `cols` rebuild) was the dominant remaining
++            // cost for a large tie-group after the binary-search fix alone.
++            let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
++            let mut fanout: Option<Vec<SmallVec<[Id; 8]>>> = None;
++            let mut failed = false;
++            for op in &other_pats {
++                // Binary-search the PRECOMPUTED, plain-`Id` subject list for
++                // this pattern (built once, above) — a trivial integer
++                // compare per step, no `to_spo` reconstruction during the
++                // search itself (that only happens below, per ACTUAL match,
++                // not per comparison step — see `subject_ids`'s doc comment).
++                let start = op.subject_ids.partition_point(|&id| id < hub_id);
++                let stop = start + op.subject_ids[start..].partition_point(|&id| id == hub_id);
++                if start == stop {
++                    failed = true;
++                    break;
++                }
++                let Some(_) = &op.obj_var else {
++                    continue; // `obj_const` — existence-only, no column added
++                };
++                let op_rows: &[[Id; 3]] = op.scan.rows.as_ref();
++                let match_count = stop - start;
++                if let Some(rows_so_far) = fanout.as_mut() {
++                    let mut next = Vec::with_capacity(rows_so_far.len() * match_count);
++                    for r in rows_so_far.iter() {
++                        for row in &op_rows[start..stop] {
++                            let mut nr = r.clone();
++                            nr.push(op.scan.to_spo(row)[2]);
++                            next.push(nr);
++                        }
++                    }
++                    *rows_so_far = next;
++                } else if match_count == 1 {
++                    row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
++                } else {
++                    let mut next = Vec::with_capacity(match_count);
++                    for row in &op_rows[start..stop] {
++                        let mut nr = row_ids.clone();
++                        nr.push(op.scan.to_spo(row)[2]);
++                        next.push(nr);
++                    }
++                    fanout = Some(next);
++                }
++            }
++            if failed {
++                failed_count += 1;
++                if failed_count > failure_budget {
++                    return Ok(None);
++                }
++                continue;
++            }
++            match &fanout {
++                None => emit(&row_ids, &mut collected),
++                Some(rows) => {
++                    for r in rows {
++                        emit(r, &mut collected);
++                    }
++                }
++            }
++        }
++        visited_to = end;
++        if collected.len() >= row_budget {
++            break; // a COMPLETE group boundary was just finished — safe to stop
++        }
++        block_target = block_target.saturating_mul(4).max(visited_to + 1);
++    }
++
++    let mut result = Bindings { vars: out_vars, rows: collected, sorted_by: None };
++    let use_topk = result.rows.len() > row_budget;
++    order_bindings(graph, local, &mut result, expression, if use_topk { Some(row_budget) } else { None })?;
++    Ok(Some(result))
++}
++
+ /// [OPUS-4.8] (sq-7d3dj.30.4) Attempts the DISTINCT-projection loose skip-scan for the
+ /// pattern under a `Distinct`.
+ ///
+diff --git a/crates/sparq-engine/src/txn.rs b/crates/sparq-engine/src/txn.rs
+index 67b58482a..ebedd7531 100644
+--- a/crates/sparq-engine/src/txn.rs
++++ b/crates/sparq-engine/src/txn.rs
+@@ -481,6 +481,122 @@ impl std::fmt::Display for CommitError {
+ 
+ impl std::error::Error for CommitError {}
+ 
++/// Why [`execute_txn_with_retry`] gave up without committing.
++#[derive(Debug)]
++pub enum RetryError {
++    /// The closure's SPARQL update failed (parse error or a failing operation). This is
++    /// never retried — retry only applies to a commit-time [`CommitError::Conflict`], not
++    /// to a broken update, which would fail identically on every attempt.
++    Update(String),
++    /// Every attempt hit [`CommitError::Conflict`]; `last` is the most recent one.
++    Exhausted { attempts: u32, last: CommitError },
++}
++
++impl std::fmt::Display for RetryError {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            RetryError::Update(e) => write!(f, "transaction update failed: {e}"),
++            RetryError::Exhausted { attempts, last } => {
++                write!(f, "transaction commit did not converge after {attempts} attempt(s): {last}")
++            }
++        }
++    }
++}
++
++impl std::error::Error for RetryError {}
++
++/// Runs `f` against a fresh [`WriteTxn`], retrying on [`CommitError::Conflict`] up to
++/// `max_attempts` total tries with a caller-supplied delay between attempts.
++///
++/// `f` applies statements via [`WriteTxn::update`] and must NOT call `commit`/`rollback`
++/// itself — this function owns the transaction lifecycle: on `Ok(())` from `f` it commits;
++/// on a conflict it discards the attempt's working copy and retries against the new
++/// committed state; on `Err` from `f` it rolls back and returns immediately without
++/// retrying (a broken update fails the same way every time).
++///
++/// `backoff(attempt)` is called before every retry (`attempt` is the 1-indexed number of
++/// the attempt about to run, so it is never called before the first) and its return value
++/// is passed to `std::thread::sleep`. Pass [`decorrelated_jitter_backoff`] for production
++/// use, or `|_| std::time::Duration::ZERO` in tests.
++///
++/// Per the job-queue coordination guidance this helper exists for (claim-style updates
++/// against a single-sequenced-writer store): prefer claiming **one row per transaction**
++/// over a batch — conflict detection is per-triple, so disjoint single-row claims from
++/// different callers never conflict with each other, and randomizing candidate order
++/// across callers further reduces repeat collisions on the same hot row.
++///
++/// # Panics
++/// Panics if `max_attempts` is 0 (there must be at least one attempt).
++pub fn execute_txn_with_retry<F>(
++    manager: &TransactionManager,
++    max_attempts: u32,
++    mut backoff: impl FnMut(u32) -> std::time::Duration,
++    mut f: F,
++) -> Result<u64, RetryError>
++where
++    F: FnMut(&mut WriteTxn<'_>) -> Result<(), String>,
++{
++    assert!(max_attempts >= 1, "execute_txn_with_retry: max_attempts must be at least 1");
++    let mut last_conflict = None;
++    for attempt in 1..=max_attempts {
++        if attempt > 1 {
++            std::thread::sleep(backoff(attempt));
++        }
++        let mut txn = manager.begin_write();
++        if let Err(e) = f(&mut txn) {
++            txn.rollback();
++            return Err(RetryError::Update(e));
++        }
++        match txn.commit() {
++            Ok(version) => return Ok(version),
++            Err(conflict @ CommitError::Conflict { .. }) => {
++                last_conflict = Some(conflict);
++            }
++        }
++    }
++    Err(RetryError::Exhausted {
++        attempts: max_attempts,
++        last: last_conflict.expect("loop runs at least once when max_attempts >= 1"),
++    })
++}
++
++/// A dependency-free decorrelated-jitter backoff generator (AWS Architecture Blog's
++/// "Exponential Backoff and Jitter"), for use with [`execute_txn_with_retry`].
++///
++/// Each call returns `min(cap, random_between(base, previous * 3))`, starting from `base`.
++/// Randomness comes from a splitmix64 step seeded from the wall clock and a per-call atomic
++/// counter — not cryptographic, but sufficient to decorrelate concurrent callers' retry
++/// timing, and it keeps the opt-in `txn` feature dependency-free (no `rand` crate).
++pub fn decorrelated_jitter_backoff(
++    base: std::time::Duration,
++    cap: std::time::Duration,
++) -> impl FnMut(u32) -> std::time::Duration {
++    use std::sync::atomic::{AtomicU64, Ordering};
++    static COUNTER: AtomicU64 = AtomicU64::new(0);
++
++    fn next_u64() -> u64 {
++        let seed = std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .map(|d| d.as_nanos() as u64)
++            .unwrap_or(0)
++            ^ COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E3779B97F4A7C15);
++        // splitmix64 finalizer
++        let mut z = seed.wrapping_add(0x9E3779B97F4A7C15);
++        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
++        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
++        z ^ (z >> 31)
++    }
++
++    let mut previous = base;
++    move |_attempt| {
++        let upper = previous.saturating_mul(3).max(base);
++        let span = upper.saturating_sub(base).as_nanos().max(1) as u64;
++        let jittered = base + std::time::Duration::from_nanos(next_u64() % span);
++        previous = jittered.min(cap);
++        previous
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -522,4 +638,83 @@ mod tests {
+         let r = m.begin_read();
+         assert_eq!(crate::count(&r, "SELECT * WHERE { ?s ?p ?o }").unwrap(), 2);
+     }
++
++    /// Forces a guaranteed write-write conflict against `txn`: `CLEAR DEFAULT` always
++    /// records a slot-level `Default` write key (unlike a duplicate `INSERT DATA`, which
++    /// may resolve to an empty, non-conflicting write set), and a default-graph triple
++    /// insert always conflicts with it (`WriteKey::conflicts`).
++    fn commit_a_conflicting_clear(m: &TransactionManager) {
++        let mut interloper = m.begin_write();
++        interloper.update("CLEAR DEFAULT").unwrap();
++        interloper.commit().unwrap();
++    }
++
++    #[test]
++    fn execute_txn_with_retry_retries_once_then_succeeds() {
++        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
++        let mut attempts = 0;
++        let result = execute_txn_with_retry(&m, 3, |_| std::time::Duration::ZERO, |txn| {
++            attempts += 1;
++            if attempts == 1 {
++                // A concurrent writer commits an overlapping change between this
++                // transaction's begin and its own commit, forcing exactly one conflict.
++                commit_a_conflicting_clear(&m);
++            }
++            txn.update("PREFIX : <http://ex/> INSERT DATA { :x :p :y }")
++        });
++        assert_eq!(attempts, 2, "should retry exactly once after the forced conflict");
++        assert!(result.is_ok(), "should converge on the second attempt: {result:?}");
++    }
++
++    #[test]
++    fn execute_txn_with_retry_exhausts_after_max_attempts() {
++        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
++        let mut attempts = 0;
++        let result = execute_txn_with_retry(&m, 3, |_| std::time::Duration::ZERO, |txn| {
++            attempts += 1;
++            // Every attempt loses the race, so this can never converge.
++            commit_a_conflicting_clear(&m);
++            txn.update("PREFIX : <http://ex/> INSERT DATA { :x :p :y }")
++        });
++        assert_eq!(attempts, 3);
++        match result {
++            Err(RetryError::Exhausted { attempts: 3, .. }) => {}
++            other => panic!("expected Exhausted after 3 attempts, got {other:?}"),
++        }
++    }
++
++    #[test]
++    fn execute_txn_with_retry_does_not_retry_an_update_error() {
++        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
++        let mut attempts = 0;
++        let result = execute_txn_with_retry(&m, 5, |_| std::time::Duration::ZERO, |_txn| {
++            attempts += 1;
++            Err("boom".to_string())
++        });
++        assert_eq!(attempts, 1, "an update error must not be retried");
++        match result {
++            Err(RetryError::Update(msg)) => assert_eq!(msg, "boom"),
++            other => panic!("expected Update(\"boom\"), got {other:?}"),
++        }
++    }
++
++    #[test]
++    #[should_panic(expected = "max_attempts must be at least 1")]
++    fn execute_txn_with_retry_panics_on_zero_attempts() {
++        let m = TransactionManager::new(g("@prefix : <http://ex/> . :a :p :b ."));
++        let _ = execute_txn_with_retry(&m, 0, |_| std::time::Duration::ZERO, |_| Ok(()));
++    }
++
++    #[test]
++    fn decorrelated_jitter_backoff_stays_within_base_and_cap() {
++        use std::time::Duration;
++        let base = Duration::from_millis(10);
++        let cap = Duration::from_millis(200);
++        let mut backoff = decorrelated_jitter_backoff(base, cap);
++        for attempt in 1..=20u32 {
++            let d = backoff(attempt);
++            assert!(d >= base, "{d:?} below base {base:?}");
++            assert!(d <= cap, "{d:?} above cap {cap:?}");
++        }
++    }
+ }
+diff --git a/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs b/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs
+new file mode 100644
+index 000000000..ba682cbd8
+--- /dev/null
++++ b/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs
+@@ -0,0 +1,333 @@
++//! Differential + correctness tests for `try_topk_orderby_indexed` (the
++//! index-ordered top-k seed path added for the artifact-keeper claim-queue
++//! throughput investigation).
++//!
++//! `try_topk_orderby_indexed` is a pure SHORTCUT: it either returns exactly the
++//! same rows the pre-existing `eval_modified`-then-`order_bindings` path would,
++//! or declines (`Ok(None)`) and lets that path run. These tests never assume
++//! which branch fired — they only assert the OBSERVABLE result is correct,
++//! computed independently by fetching the full unordered relation (a query
++//! shape the new path never touches) and sorting it in the test itself.
++
++use sparq_core::Graph;
++use sparq_engine::query;
++
++const PFX: &str = "PREFIX ak: <http://example.org/ak#>\n";
++
++/// One synthetic pending task: `(seq, priority)`. `seq` doubles as a stable,
++/// unique task identifier so results can be checked by task number.
++fn build_graph(peer: &str, tasks: &[(i64, i64)], extra_ttl: &str) -> Graph {
++    let mut ttl = String::from("@prefix ak: <http://example.org/ak#> .\n");
++    for &(seq, priority) in tasks {
++        ttl.push_str(&format!(
++            "<urn:task:{peer}:{seq}> ak:peer <urn:peer:{peer}> ; ak:status \"pending\" ; ak:priority {priority} ; ak:seq {seq} .\n"
++        ));
++    }
++    ttl.push_str(extra_ttl);
++    Graph::load_str(&ttl, "turtle").expect("load turtle")
++}
++
++const CLAIM_QUERY: &str = "
++SELECT ?t WHERE {
++  ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s .
++}
++ORDER BY DESC(?p) ASC(?s)
++LIMIT ";
++
++fn task_seq(t: &oxrdf::Term) -> i64 {
++    match t {
++        oxrdf::Term::NamedNode(n) => n
++            .as_str()
++            .rsplit(':')
++            .next()
++            .unwrap()
++            .parse()
++            .expect("task IRI ends in :<seq>"),
++        other => panic!("expected a task IRI, got {other:?}"),
++    }
++}
++
++/// Ground truth: fetch every pending task's (seq, priority) via a query the new
++/// path never activates on (no ORDER BY/LIMIT at all), sort in test code by the
++/// exact same key (DESC priority, ASC seq), and return the expected task-seq
++/// order for the first `k`.
++fn expected_top_k(graph: &Graph, k: usize) -> Vec<i64> {
++    let r = query(
++        graph,
++        &format!("{PFX} SELECT ?s ?p WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s . }}"),
++    )
++    .unwrap();
++    let mut rows: Vec<(i64, i64)> = r
++        .rows
++        .iter()
++        .map(|row| {
++            let s = as_int(row[0].as_ref().unwrap());
++            let p = as_int(row[1].as_ref().unwrap());
++            (s, p)
++        })
++        .collect();
++    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0))); // DESC priority, ASC seq
++    rows.into_iter().take(k).map(|(s, _)| s).collect()
++}
++
++fn as_int(t: &oxrdf::Term) -> i64 {
++    match t {
++        oxrdf::Term::Literal(l) => l.value().parse().unwrap(),
++        other => panic!("expected an integer literal, got {other:?}"),
++    }
++}
++
++fn actual_top_k(graph: &Graph, k: usize) -> Vec<i64> {
++    let r = query(graph, &format!("{PFX}{CLAIM_QUERY}{k}")).unwrap();
++    r.rows.iter().map(|row| task_seq(row[0].as_ref().unwrap())).collect()
++}
++
++fn check(tasks: &[(i64, i64)], ks: &[usize]) {
++    let graph = build_graph("X", tasks, "");
++    for &k in ks {
++        let expected = expected_top_k(&graph, k);
++        let actual = actual_top_k(&graph, k);
++        assert_eq!(actual, expected, "k={k}, n={}", tasks.len());
++    }
++}
++
++#[test]
++fn unique_priorities_small() {
++    // Deliberately unsorted insertion order.
++    let tasks: Vec<(i64, i64)> = vec![(0, 5), (1, 20), (2, 1), (3, 15), (4, 9), (5, 30), (6, 0)];
++    check(&tasks, &[1, 2, 3, 7, 100]);
++}
++
++#[test]
++fn unique_priorities_pseudo_random_medium() {
++    let n = 300;
++    let tasks: Vec<(i64, i64)> = (0..n)
++        .map(|i| (i as i64, ((i as i64) * 2654435761i64) % (n as i64 * 7)))
++        .collect();
++    check(&tasks, &[1, 5, 50, 299, 300, 400]);
++}
++
++#[test]
++fn ties_broken_by_seq_ascending() {
++    // Three groups of tied priorities; within a group, seq must break the tie
++    // ascending regardless of insertion order.
++    let tasks: Vec<(i64, i64)> = vec![
++        (5, 10), (2, 10), (8, 10), // priority 10: expect order 2,5,8
++        (1, 20), (0, 20),          // priority 20: expect order 0,1
++        (9, 5),                    // priority 5: alone
++    ];
++    check(&tasks, &[1, 2, 3, 4, 5, 6, 100]);
++}
++
++#[test]
++fn crosses_block_escalation_boundary() {
++    // CAPPED_SEED_BLOCK is 1024; exercise a queue depth comfortably on both
++    // sides of that boundary, including k values that force multiple blocks.
++    let n = 2500;
++    let tasks: Vec<(i64, i64)> = (0..n)
++        .map(|i| (i as i64, ((i as i64) * 2654435761i64) % (n as i64 * 3)))
++        .collect();
++    check(&tasks, &[1, 1000, 1023, 1024, 1025, 2000, 2500, 3000]);
++}
++
++#[test]
++fn multi_peer_isolation() {
++    // Peer Y's tasks (higher priorities than any of X's) must never appear in
++    // an X-scoped claim, and must not affect X's ordering.
++    let mut ttl = String::new();
++    for (seq, priority) in [(0i64, 999i64), (1, 998), (2, 997)] {
++        ttl.push_str(&format!(
++            "<urn:task:Y:{seq}> ak:peer <urn:peer:Y> ; ak:status \"pending\" ; ak:priority {priority} ; ak:seq {seq} .\n"
++        ));
++    }
++    let x_tasks: Vec<(i64, i64)> = vec![(10, 1), (11, 5), (12, 3)];
++    let graph = build_graph("X", &x_tasks, &ttl);
++    let expected = expected_top_k(&graph, 10);
++    let actual = actual_top_k(&graph, 10);
++    assert_eq!(actual, expected);
++    assert_eq!(actual.len(), 3, "peer Y's tasks must not leak into an X-scoped claim");
++}
++
++#[test]
++fn status_filter_excludes_done_tasks() {
++    // A `done` task with the highest priority must never be claimed — exercises
++    // the fully-bound (`obj_const`) branch of the other-pattern join.
++    let mut ttl = String::from(
++        "<urn:task:X:999> ak:peer <urn:peer:X> ; ak:status \"done\" ; ak:priority 9999 ; ak:seq 999 .\n",
++    );
++    ttl.push_str("");
++    let tasks: Vec<(i64, i64)> = vec![(0, 1), (1, 2), (2, 3)];
++    let graph = build_graph("X", &tasks, &ttl);
++    let actual = actual_top_k(&graph, 10);
++    assert_eq!(actual, vec![2, 1, 0]); // DESC priority among the PENDING tasks only
++}
++
++#[test]
++fn fewer_pending_than_k_returns_all_sorted() {
++    let tasks: Vec<(i64, i64)> = vec![(0, 5), (1, 1), (2, 3)];
++    check(&tasks, &[3, 4, 100, 1024]);
++}
++
++#[test]
++fn empty_pending_queue() {
++    let graph = build_graph("X", &[], "");
++    let actual = actual_top_k(&graph, 5);
++    assert!(actual.is_empty());
++}
++
++#[test]
++fn ascending_order_direction() {
++    let tasks: Vec<(i64, i64)> = vec![(0, 5), (1, 20), (2, 1), (3, 15)];
++    let graph = build_graph("X", &tasks, "");
++    let r = query(
++        &graph,
++        &format!("{PFX} SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s . }} ORDER BY ASC(?p) LIMIT 2"),
++    )
++    .unwrap();
++    let actual: Vec<i64> = r.rows.iter().map(|row| task_seq(row[0].as_ref().unwrap())).collect();
++    assert_eq!(actual, vec![2, 0]); // priorities 1, 5 ascending
++}
++
++#[test]
++fn non_inline_priority_values_still_correct() {
++    // Priorities far outside the small-inline-integer range must still produce
++    // correct results — this must exercise the DECLINE guard (dict::is_inline)
++    // and fall back to the general path, not silently mis-sort.
++    let tasks: Vec<(i64, i64)> = vec![
++        (0, 9_000_000_000_000_000),
++        (1, 1_000_000_000_000_000),
++        (2, 5_000_000_000_000_000),
++    ];
++    check(&tasks, &[1, 2, 3]);
++}
++
++#[test]
++fn large_tie_group_still_correct() {
++    // Low priority cardinality (a handful of tiers over many tasks) forces a
++    // large tie-group — the MAX_INDEXED_GROUP cap should decline the fast path
++    // here and defer to the fallback. This test only asserts correctness (the
++    // regression this cap fixes was a PERFORMANCE regression, not a correctness
++    // one — verified separately via profiling, not asserted here to avoid a
++    // flaky timing-based test).
++    for tiers in [1usize, 2, 5, 16] {
++        let n = 600;
++        let tasks: Vec<(i64, i64)> = (0..n).map(|i| (i as i64, (i as i64) % tiers as i64)).collect();
++        check(&tasks, &[1, 2, 10, 100, n as usize]);
++    }
++}
++
++#[test]
++fn randomized_sweep() {
++    // A cheap xorshift so this test has no extra dependency and is fully
++    // deterministic (fixed seed) across runs, while still covering a wide
++    // spread of n / tie-density / k combinations in one pass.
++    fn xorshift(state: &mut u64) -> u64 {
++        *state ^= *state << 13;
++        *state ^= *state >> 7;
++        *state ^= *state << 17;
++        *state
++    }
++    let mut state: u64 = 0x9E3779B97F4A7C15;
++    for trial in 0..40 {
++        let n = 1 + (xorshift(&mut state) % 3000) as usize;
++        // Tie density: smaller modulus => more ties among priorities.
++        let priority_modulus = 1 + (xorshift(&mut state) % (n as u64 * 4 + 1));
++        let tasks: Vec<(i64, i64)> = (0..n)
++            .map(|i| (i as i64, (xorshift(&mut state) % priority_modulus) as i64))
++            .collect();
++        let graph = build_graph("X", &tasks, "");
++        let ks = [
++            1,
++            1 + (xorshift(&mut state) % (n as u64 + 3)) as usize,
++            n,
++            n + 5,
++        ];
++        for k in ks {
++            let expected = expected_top_k(&graph, k);
++            let actual = actual_top_k(&graph, k);
++            assert_eq!(actual, expected, "trial={trial} n={n} k={k} priority_modulus={priority_modulus}");
++        }
++    }
++}
++
++#[test]
++fn extra_pattern_beyond_star_shape_still_correct() {
++    // A second, unrelated variable-object pattern on the hub (not just the
++    // seed + status) — still a valid star shape, exercises multi-pattern join.
++    let mut ttl = String::from("@prefix ak: <http://example.org/ak#> .\n");
++    for (seq, priority, region) in [(0i64, 5i64, "us"), (1, 20, "eu"), (2, 1, "us")] {
++        ttl.push_str(&format!(
++            "<urn:task:X:{seq}> ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority {priority} ; ak:seq {seq} ; ak:region \"{region}\" .\n"
++        ));
++    }
++    let graph = Graph::load_str(&ttl, "turtle").unwrap();
++    let r = query(
++        &graph,
++        &format!("{PFX} SELECT ?t ?r WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s ; ak:region ?r . }} ORDER BY DESC(?p) LIMIT 3"),
++    )
++    .unwrap();
++    let actual: Vec<i64> = r.rows.iter().map(|row| task_seq(row[0].as_ref().unwrap())).collect();
++    assert_eq!(actual, vec![1, 0, 2]);
++    // Region for the top result (task 1) must be "eu", proving the extra
++    // pattern's binding survived the join correctly.
++    if let oxrdf::Term::Literal(l) = r.rows[0][1].as_ref().unwrap() {
++        assert_eq!(l.value(), "eu");
++    } else {
++        panic!("expected a literal region");
++    }
++}
++
++#[test]
++fn large_already_claimed_prefix_still_correct() {
++    // A queue drained strictly in priority order leaves a large CONTIGUOUS
++    // prefix of already-claimed (status != "pending") tasks at the head of
++    // the priority-sorted scan -- this must still return correct results
++    // (regardless of the upfront-selectivity / cumulative-failure guards'
++    // exact thresholds) across a range of already-claimed prefix sizes.
++    let n = 1600;
++    for already_claimed in [0usize, 50, 100, 400, 800, 1200, 1599] {
++        let mut ttl = String::from("@prefix ak: <http://example.org/ak#> .\n");
++        for i in 0..n {
++            // priority = i, so "top `already_claimed`" = highest-numbered tasks.
++            let status = if i >= n - already_claimed { "in_progress" } else { "pending" };
++            ttl.push_str(&format!(
++                "<urn:task:{i}> ak:peer <urn:peer:X> ; ak:status \"{status}\" ; ak:priority {i} ; ak:seq {i} .\n"
++            ));
++        }
++        let graph = Graph::load_str(&ttl, "turtle").unwrap();
++        let expected = expected_top_k(&graph, 5);
++        let actual = actual_top_k(&graph, 5);
++        assert_eq!(actual, expected, "already_claimed={already_claimed}");
++    }
++}
++
++#[test]
++fn fast_path_actually_engages_not_just_correct() {
++    // Every other test in this file checks CORRECTNESS, which the fallback
++    // path (eval_modified + order_bindings) also satisfies on its own -- none
++    // of them would fail if try_topk_orderby_indexed were deleted entirely.
++    // This test checks that the fast path actually FIRES for the shape it
++    // exists for, using the engine's own EXPLAIN ANALYZE instrumentation.
++    //
++    // The "Plan:" section is a STATIC description of the general planner's
++    // choice and always names a "BGP [...]" step regardless of which path
++    // actually runs -- checking for its absence would be a vacuous assertion
++    // (confirmed by first writing this test with exactly that check: it
++    // failed even with the fast path correctly firing, because the static
++    // plan text matched). The real signal is the "Execution trace" section,
++    // which only reports a "BGP [binary GOO] (... patterns ...) rows=N" line
++    // when the general BGP evaluator was ACTUALLY EXECUTED (it materializes
++    // and reports the touched row count) -- the indexed fast path bypasses
++    // that evaluator entirely, so this line is present iff the fallback ran.
++    let n = 800;
++    let graph = build_graph("X", &(0..n as i64).map(|i| (i, i)).collect::<Vec<_>>(), "");
++    let explained = sparq_engine::explain_analyze(
++        &graph,
++        &format!("{PFX}{CLAIM_QUERY}1"),
++    )
++    .unwrap();
++    assert!(
++        !explained.contains("BGP [binary GOO]"),
++        "expected the indexed fast path to fire (no BGP execution-trace line), got:\n{explained}"
++    );
++}
+diff --git a/crates/sparq-serve/Cargo.toml b/crates/sparq-serve/Cargo.toml
+index 70110cf24..6fe1238c2 100644
+--- a/crates/sparq-serve/Cargo.toml
++++ b/crates/sparq-serve/Cargo.toml
+@@ -76,6 +76,21 @@ change-sink = ["change-stream"]
+ # (library-first §6.1: the cache stores opaque bytes + a caller-derived visibility-scope
+ # key and never depends on `sparq-solid`). The default build carries zero cache code.
+ result-cache = []
++# [SONNET-5] (sq-artifact-keeper-topk) `params` (default OFF): adds `PreparedGraphApplier`,
++# an `ApplyUpdates` strategy over `sparq_engine::PreparedUpdate` instead of raw SPARQL Update
++# text. `GraphApplier::apply` calls `sparq_engine::update_in_place`, which re-parses the
++# update's FULL text on every single commit — for a recurring update template (the same
++# claim/upsert-shaped query submitted repeatedly with only a bound value changing, e.g. a
++# job-queue claim), that repeated parse is pure waste: measured ~13.5us of a ~21.2us total
++# per-update cost on a representative claim template (~63%), because `PreparedUpdate::bind`
++# (structural placeholder substitution over the already-parsed algebra, not text
++# concatenation) costs under 1us. `PreparedGraphApplier` calls
++# `sparq_engine::update_in_place_prepared` instead, so a caller that parses its update
++# template ONCE (e.g. at startup) and binds a fresh value per submission pays only the bind +
++# eval + apply cost. The serving core (ring + sequenced writer) is fully buildable WITHOUT
++# this feature: `PreparedGraphApplier` is `#[cfg]`-stripped, so a build without it is
++# byte-identical to before. Forwards to `sparq-engine/params` (already dependency-free).
++params = ["sparq-engine/params"]
+ 
+ [dependencies]
+ # Lock-free current-generation pointer (§6.4): readers `load()` without blocking
+diff --git a/crates/sparq-serve/README.md b/crates/sparq-serve/README.md
+index 40dc655bc..85992a7c3 100644
+--- a/crates/sparq-serve/README.md
++++ b/crates/sparq-serve/README.md
+@@ -21,10 +21,8 @@ or async-runtime types (consumers such as `sparq-server` wrap it), and it must
+ never enter `sparq-wasm`'s dependency graph.
+ 
+ > **Mostly library-internal plumbing — with one deliberate public surface** (the
+-> `embed` seam below). It is wrapped by `sparq-server` and otherwise has no
+-> standalone API. It is a *publishable* crate (its `Cargo.toml` does **not** set
+-> `publish = false`) and must stay that way: the published `sparq-server` depends
+-> on it, and a crates.io crate cannot depend on a `publish = false` crate.
++> `embed` seam below); otherwise wrapped by `sparq-server`. Publishable (not
++> `publish = false`) because `sparq-server` depends on it.
+ 
+ ## 🔌 `embed` — in-process embedding seam (#1248)
+ 
+@@ -78,6 +76,8 @@ cargo run -p sparq-server -- --format turtle data.ttl
+   thread), with one std-only `NatsSink` (core NATS, plain TCP, no TLS). Kafka / TLS / SASL: impl
+   the trait over your own client — no broker client or async runtime enters this crate.
+ - **Response-bytes result cache** *(opt-in `result-cache`, OFF by default)* — see below.
++- **Prepared-update applier** *(opt-in `params`, OFF by default)* — `PreparedGraphApplier`
++  applies a parsed-once, bound `PreparedUpdate`, avoiding `GraphApplier`'s per-commit re-parse.
+ 
+ ## 🗃️ Result cache (opt-in, `result-cache` feature)
+ 
+diff --git a/crates/sparq-serve/src/applier.rs b/crates/sparq-serve/src/applier.rs
+index 8daad4548..22e9896e6 100644
+--- a/crates/sparq-serve/src/applier.rs
++++ b/crates/sparq-serve/src/applier.rs
+@@ -129,3 +129,95 @@ impl ApplyUpdates for GraphApplier {
+         Footprint::of_sparql(update)
+     }
+ }
++
++/// [SONNET-5] (sq-artifact-keeper-topk) [`ApplyUpdates`] over
++/// [`sparq_engine::PreparedUpdate`] instead of raw SPARQL Update text — for a caller that
++/// submits the SAME update template repeatedly with only a bound value changing (a
++/// job-queue claim, an upsert, any recurring parameterized write), avoiding the re-parse
++/// [`GraphApplier`] pays on every single commit.
++///
++/// `GraphApplier::apply` calls [`sparq_engine::update_in_place`], which parses the update's
++/// full text FRESH every time — measured ~13.5 µs of a ~21.2 µs total per-update cost
++/// (~63%) on a representative claim template, because [`PreparedUpdate::bind`] (a
++/// structural placeholder substitution over the already-parsed algebra, never string
++/// concatenation) costs under 1 µs by comparison. A caller parses its template ONCE (e.g.
++/// [`PreparedUpdate::parse`] at startup or on first use), binds a fresh value per
++/// submission, and submits the bound [`PreparedUpdate`](sparq_engine::PreparedUpdate) —
++/// this applier then pays only bind + eval + apply, roughly half the raw-text cost.
++///
++/// Same compaction policy as [`GraphApplier`] (module docs): `fork`/`seal` are identical,
++/// only `apply`'s update type and engine entry point differ.
++///
++/// Only with the opt-in `params` feature — the serving core (ring + sequenced writer) is
++/// fully buildable without it; a build without the feature is byte-identical to before.
++#[cfg(feature = "params")]
++#[derive(Debug)]
++pub struct PreparedGraphApplier {
++    compact_threshold: usize,
++}
++
++#[cfg(feature = "params")]
++impl Default for PreparedGraphApplier {
++    fn default() -> Self {
++        PreparedGraphApplier {
++            compact_threshold: DEFAULT_COMPACT_THRESHOLD,
++        }
++    }
++}
++
++#[cfg(feature = "params")]
++impl PreparedGraphApplier {
++    /// An applier with the default compaction threshold.
++    pub fn new() -> Self {
++        Self::default()
++    }
++
++    /// An applier compacting once the pending delta reaches `threshold` entries
++    /// (values below 1 are treated as 1 — compact after every batch).
++    pub fn with_compact_threshold(threshold: usize) -> Self {
++        PreparedGraphApplier {
++            compact_threshold: threshold.max(1),
++        }
++    }
++}
++
++#[cfg(feature = "params")]
++impl ApplyUpdates for PreparedGraphApplier {
++    type Snapshot = Graph;
++    type Working = Graph;
++    type Update = sparq_engine::PreparedUpdate;
++
++    /// O(pending delta): identical to [`GraphApplier::fork`] — see the module docs.
++    fn fork(&mut self, base: &Graph) -> Result<Graph, String> {
++        Ok(base.fork())
++    }
++
++    /// O(batch): the same T17 delta-overlay path as [`GraphApplier::apply`]
++    /// ([`sparq_engine::update_in_place_prepared`]), over an ALREADY-PARSED,
++    /// already-bound update — no text re-parse on the writer thread. Same partial-apply
++    /// hazard on `Err` as [`GraphApplier::apply`]; the writer's re-fork-and-replay
++    /// recovery handles it identically.
++    fn apply(&mut self, working: &mut Graph, update: &sparq_engine::PreparedUpdate) -> Result<(), String> {
++        sparq_engine::update_in_place_prepared(working, update)
++    }
++
++    /// Identical compaction policy to [`GraphApplier::seal`] — see the module docs.
++    fn seal(&mut self, mut working: Graph) -> Result<Graph, String> {
++        if working.pending_delta_len() >= self.compact_threshold {
++            let _ = working.compact();
++        }
++        Ok(working)
++    }
++
++    /// Always [`Footprint::Barrier`] (the trait's own documented safe default): there is
++    /// no parsed-algebra entry point into [`Footprint::of_sparql`] (text-only), and
++    /// re-serialising the already-parsed update back to text just to re-parse it would
++    /// defeat this applier's entire purpose. Under the opt-in
++    /// [`CommitGranularity::CommuteGroup`](crate::CommitGranularity) mode this degrades to
++    /// one generation per update (correct, just not maximally batched) — CommuteGroup is
++    /// orthogonal to this applier's goal (avoiding re-parse under the default `Window`
++    /// granularity, which never calls `footprint`).
++    fn footprint(&self, _update: &sparq_engine::PreparedUpdate) -> Footprint {
++        Footprint::Barrier
++    }
++}
+diff --git a/crates/sparq-serve/src/lib.rs b/crates/sparq-serve/src/lib.rs
+index bf84e8893..78069f926 100644
+--- a/crates/sparq-serve/src/lib.rs
++++ b/crates/sparq-serve/src/lib.rs
+@@ -143,6 +143,8 @@ pub use change_sink::{
+     RecordingSink, SinkConfig, SinkError, DEFAULT_PUMP_MAX_BATCH, DEFAULT_SUBJECT,
+ };
+ pub use applier::{GraphApplier, DEFAULT_COMPACT_THRESHOLD};
++#[cfg(feature = "params")]
++pub use applier::PreparedGraphApplier;
+ pub use epoch::{Epoch, PodEpochs, PodId};
+ pub use footprint::{Footprint, TargetGraph};
+ pub use ring::{Generation, GenerationRing, RingConfig, TimeTravelConfig, DEFAULT_RETAIN};
+diff --git a/crates/sparq-serve/tests/prepared_applier.rs b/crates/sparq-serve/tests/prepared_applier.rs
+new file mode 100644
+index 000000000..01da64a6c
+--- /dev/null
++++ b/crates/sparq-serve/tests/prepared_applier.rs
+@@ -0,0 +1,124 @@
++//! [SONNET-5] (sq-artifact-keeper-topk) `PreparedGraphApplier` over the real sequenced
++//! writer: proves a parsed-once, bound-per-submission `PreparedUpdate` applies correctly
++//! through the SAME structural-fork + delta-overlay + threshold-compaction path
++//! `GraphApplier` uses for raw text, and that repeated submissions of the SAME template
++//! (only the bound value changing) accumulate correctly across many generations.
++//!
++//! Only compiled under the opt-in `params` feature — see `applier.rs`'s module docs.
++#![cfg(feature = "params")]
++
++use std::sync::Arc;
++use std::time::Duration;
++
++use oxrdf::{Literal, Term};
++use sparq_core::Graph;
++use sparq_engine::PreparedUpdate;
++use sparq_serve::{GenerationRing, PodId, PreparedGraphApplier, Writer, WriterConfig};
++
++fn graph_with(n: usize) -> Graph {
++    let mut ttl = String::from("@prefix ak: <http://example.org/ak#> .\n");
++    for i in 0..n {
++        ttl.push_str(&format!(
++            "<urn:task:{i}> ak:status \"pending\" ; ak:seq {i} .\n"
++        ));
++    }
++    Graph::load_str(&ttl, "turtle").expect("load test graph")
++}
++
++fn claim_template() -> PreparedUpdate {
++    PreparedUpdate::parse(
++        "PREFIX ak: <http://example.org/ak#>
++DELETE { ?t ak:status \"pending\" }
++INSERT { ?t ak:status \"in_progress\" ; ak:claimedBy ?worker }
++WHERE {
++  SELECT ?t WHERE { ?t ak:status \"pending\" ; ak:seq ?s }
++  ORDER BY ASC(?s) LIMIT 1
++}",
++    )
++    .expect("parse claim template")
++}
++
++/// A single bound-and-submitted `PreparedUpdate` applies exactly like the
++/// equivalent raw-text update would — one generation, correct delta.
++#[test]
++fn prepared_update_applies_through_the_real_writer() {
++    let ring = Arc::new(GenerationRing::new(graph_with(10)));
++    let writer = Writer::spawn(
++        ring.clone(),
++        PreparedGraphApplier::new(),
++        WriterConfig {
++            window: Duration::from_millis(200),
++            max_batch: 64,
++            ..WriterConfig::default()
++        },
++    );
++
++    let template = claim_template();
++    let bound = template
++        .bind("worker", Term::Literal(Literal::new_simple_literal("worker-0")))
++        .expect("bind worker");
++
++    let generation = writer.submit(bound, [PodId::from("pod:alice")]).unwrap();
++    assert_eq!(generation, 1);
++
++    let current = ring.current();
++    let graph = current.snapshot();
++    let r = sparq_engine::query(
++        graph,
++        "PREFIX ak: <http://example.org/ak#> SELECT ?t ?w WHERE { ?t ak:claimedBy ?w }",
++    )
++    .unwrap();
++    assert_eq!(r.rows.len(), 1, "exactly one task claimed");
++    match r.rows[0][0].as_ref().unwrap() {
++        oxrdf::Term::NamedNode(n) => assert_eq!(n.as_str(), "urn:task:0", "lowest seq claimed first"),
++        other => panic!("expected an IRI, got {other:?}"),
++    }
++    match r.rows[0][1].as_ref().unwrap() {
++        oxrdf::Term::Literal(l) => assert_eq!(l.value(), "worker-0"),
++        other => panic!("expected a literal, got {other:?}"),
++    }
++}
++
++/// Repeated submissions of the SAME parsed-once template, each bound to a
++/// distinct value, drain the whole queue correctly across many generations —
++/// the shape `PreparedGraphApplier` exists to speed up (a job-queue claim
++/// loop), verified for correctness here (the speed claim is measured
++/// separately, not asserted in a test).
++#[test]
++fn repeated_prepared_submissions_drain_the_queue() {
++    let n = 50;
++    let ring = Arc::new(GenerationRing::new(graph_with(n)));
++    let writer = Writer::spawn(
++        ring.clone(),
++        PreparedGraphApplier::new(),
++        WriterConfig {
++            window: Duration::from_millis(50),
++            adaptive_commit: true,
++            ..WriterConfig::default()
++        },
++    );
++
++    let template = claim_template();
++    for i in 0..n {
++        let bound = template
++            .bind("worker", Term::Literal(Literal::new_simple_literal(format!("worker-{i}"))))
++            .expect("bind worker");
++        writer.submit(bound, [PodId::from("pod:alice")]).unwrap();
++    }
++
++    let current = ring.current();
++    let graph = current.snapshot();
++    let remaining = sparq_engine::query(
++        graph,
++        "PREFIX ak: <http://example.org/ak#> SELECT ?t WHERE { ?t ak:status \"pending\" }",
++    )
++    .unwrap();
++    assert_eq!(remaining.rows.len(), 0, "every task claimed exactly once");
++
++    let claimed = sparq_engine::query(
++        graph,
++        "PREFIX ak: <http://example.org/ak#> SELECT ?t WHERE { ?t ak:status \"in_progress\" }",
++    )
++    .unwrap();
++    assert_eq!(claimed.rows.len(), n, "no duplicate/lost claims");
++}
+diff --git a/scripts/tests/feature-matrix-legnames.golden.txt b/scripts/tests/feature-matrix-legnames.golden.txt
+index 63c630c74..75ae3f039 100644
+--- a/scripts/tests/feature-matrix-legnames.golden.txt
++++ b/scripts/tests/feature-matrix-legnames.golden.txt
+@@ -118,6 +118,7 @@ opt-in sparq-rsp (window-aggregate)
+ opt-in sparq-rsp (window-origin)
+ opt-in sparq-serve (change-sink — external-broker CDC sink seam)
+ opt-in sparq-serve (change-stream — durable replayable CDC stream)
++opt-in sparq-serve (params — prepared-update applier)
+ opt-in sparq-server (audit-log, access-audit + server features)
+ opt-in sparq-server (brtpf)
+ opt-in sparq-server (change-stream — GET /streams CDC poll endpoint)
+diff --git a/skills/sparql-query/SKILL.md b/skills/sparql-query/SKILL.md
+index 7269a8c5a..3b90204ad 100644
+--- a/skills/sparql-query/SKILL.md
++++ b/skills/sparql-query/SKILL.md
+@@ -1098,6 +1098,37 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
+   }
+   # Ok::<(), String>(())
+   ```
++
++  `execute_txn_with_retry` (bead `sq-it1x` follow-up) wraps the begin/update/commit loop
++  above with automatic retry on `CommitError::Conflict`: it owns the transaction lifecycle
++  (the closure must not call `commit`/`rollback` itself), retries up to `max_attempts`
++  total tries with a caller-supplied delay between attempts, and returns `RetryError::Update`
++  immediately (no retry) if the closure's own update fails, or `RetryError::Exhausted` if
++  every attempt conflicted. `decorrelated_jitter_backoff` is a dependency-free jitter
++  generator (AWS's "Exponential Backoff and Jitter") for the delay argument — it keeps the
++  `txn` feature's zero-new-dependency contract (no `rand` crate). Recommended for
++  claim-style job-queue updates against a single-sequenced-writer store: claim **one row
++  per transaction** (conflict detection is per-triple, so disjoint single-row claims never
++  conflict with each other) and let each caller's jittered backoff decorrelate retries on a
++  hot row.
++
++  ```rust
++  // Cargo.toml: sparq-engine = { version = "0.1", features = ["txn"] }
++  use sparq_engine::txn::{decorrelated_jitter_backoff, execute_txn_with_retry, TransactionManager};
++  use std::time::Duration;
++
++  let m = TransactionManager::new(graph);
++  let backoff = decorrelated_jitter_backoff(Duration::from_millis(5), Duration::from_millis(200));
++  let version = execute_txn_with_retry(&m, 5, backoff, |txn| {
++      txn.update(
++          "PREFIX ak: <http://example.org/ak#> \
++           DELETE { ?t ak:status \"pending\" } \
++           INSERT { ?t ak:status \"claimed\" } \
++           WHERE  { SELECT ?t WHERE { ?t ak:status \"pending\" } LIMIT 1 }",
++      )
++  });
++  # Ok::<(), String>(())
++  ```
+ - **Default cargo features** (`parallel`, `regex`, `digest`): `regex` powers REGEX/REPLACE; `digest`
+   powers MD5/SHA*; `parallel` enables rayon scan/join/sort/aggregate. The **wasm** crate
+   (`sparq-wasm`) disables defaults, so on `wasm32-unknown-unknown` REGEX/hash builtins and

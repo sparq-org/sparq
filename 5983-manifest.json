@@ -1,0 +1,56 @@
+{
+  "files": {
+    "summary.md": {
+      "bytes": 1935,
+      "sha256": "67150e5745620f68a648ce3c2253697dbb4a7e86f55c974cd86d99a11ff1d194"
+    },
+    "comparison.json": {
+      "bytes": 1112,
+      "sha256": "1b77aefba25bb9e2443edd56fcd04e077a76d60f4ea9164e9d20ae96f435c3b7"
+    },
+    "merge-tree.txt": {
+      "bytes": 41,
+      "sha256": "8d7678943224e18db6b4f45739e9bdb6b62baf88cbf10107d91478659111e5bf"
+    },
+    "feasibility.json": {
+      "bytes": 12635,
+      "sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8"
+    },
+    "pr.diff": {
+      "bytes": 67856,
+      "sha256": "e9c1ccaad0bd96afca598d67abd060d8344e4ddea84f47b3d987e4bf26494b18"
+    },
+    "source/main/crates/sparq-serve/src/applier.rs": {
+      "bytes": 6391,
+      "sha256": "8a5602d5020d33af579b1b7f466f65136ea5286372556ee7a471c3c77b92585a"
+    },
+    "source/main/crates/sparq-engine/src/exec.rs": {
+      "bytes": 1023539,
+      "sha256": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd"
+    },
+    "source/main/crates/sparq-engine/src/txn.rs": {
+      "bytes": 24629,
+      "sha256": "2c25b6d421b0684f12d99f5923b2ce0849ee72f4f428795850d6fd8ad1a235d6"
+    },
+    "source/pr/crates/sparq-serve/tests/prepared_applier.rs": {
+      "bytes": 4504,
+      "sha256": "5f07b1ad77c20cf063349334ec1a983f557492845464b7f6b0c6abbdce5e1e4d"
+    },
+    "source/pr/crates/sparq-serve/src/applier.rs": {
+      "bytes": 10592,
+      "sha256": "6e4bbd1afb3b4cd8c98f1ac91d7caf0cd2411a7bab554acbd09d9254e294232a"
+    },
+    "source/pr/crates/sparq-engine/tests/topk_orderby_indexed_differential.rs": {
+      "bytes": 13627,
+      "sha256": "fb160080ee1bc7a27166d2ee26d1f7543ab7566ed758112936ec77b7225652e6"
+    },
+    "source/pr/crates/sparq-engine/src/exec.rs": {
+      "bytes": 1029821,
+      "sha256": "210551bd876ac74ddbdb5b215ecb3281725f9dbf8cc90166b6d499790cff5ba4"
+    },
+    "source/pr/crates/sparq-engine/src/txn.rs": {
+      "bytes": 33204,
+      "sha256": "5a50b9250e415a8b8d9bceef91468ed9c9c708c80803de8e6eccfea00753166c"
+    }
+  }
+}

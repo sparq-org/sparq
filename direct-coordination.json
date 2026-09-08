@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T08:05:28.127169+00:00",
+  "updated_at": "2026-09-08T08:28:11.895609+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,9 +64,17 @@
     "head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
     "branch": "feat/ak-migration-bench-rerun",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Existing agent dispatched for bounded read-only implementation-feasibility triage. No code changes or additional model reviews/agents authorized yet. Wait for report; do not duplicate.",
+    "state": "Same Astra xhigh agent authorized for one isolated top-k-only recovery stage. First execute the repeated-variable counterexample against imported candidate and fallback, then repair and prove red-before-green. Focused engine compilation/tests authorized, no heavy benchmarks or full-workspace build. Await existing agent; do not duplicate.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Compare index-ordered top-k, PreparedGraphApplier and inherited historical txn retry work against current main. Identify the smallest useful separable SPARQL performance slice and missing evidence. Existing PR timing/author claims are unverified. No heavy build/bench, EC2, registry dispatch, release or remote mutation. Follow shared contract and relevant Rust/performance skills."
+    "contract": "Compare index-ordered top-k, PreparedGraphApplier and inherited historical txn retry work against current main. Identify the smallest useful separable SPARQL performance slice and missing evidence. Existing PR timing/author claims are unverified. No heavy build/bench, EC2, registry dispatch, release or remote mutation. Follow shared contract and relevant Rust/performance skills.",
+    "phase": "T1 regression reproduction and narrow repair",
+    "planned_worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-topk",
+    "planned_branch": "codex/perf-indexed-topk-recovery",
+    "feasibility_report": "direct-5983/feasibility.json",
+    "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
+    "source_finding": "Repeated-variable seed likely omits positional equality. Not yet executed; do not publish as a reproduced defect. Budget/fanout and timing evidence remain unproven.",
+    "scope": "Only top-k hunk plus tests; preserve main bind_join and historical Luke Dary/Sonnet5 provenance. Exclude PreparedGraphApplier, txn helpers, dependency/API changes. No pushes/remote mutations or independent model review yet.",
+    "cache": "No verified warm Rust cache. Agent using task-local target and two jobs; never write shared target. Durable local Git checkpoints required."
   },
   "prs": {
     "4300": {
@@ -336,10 +344,11 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci feasibility report for PR5983 from direct-5983. Do not restart or duplicate the lane. Choose a narrow implementation scope from its evidence; use Astra xhigh and actual Opus review before publication/admission.",
-    "Observe the first natural scheduled rearm-sweeper containing6463 and first natural heavy nightly containing6464. Current latest sweeper is34192344406 on pre-fix48fefb6; no operational recovery or heavy completion claim yet. Never manually dispatch/probe.",
-    "Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands, and releases unapproved. Retain existing6049,6055,registry test-only CI and6435 AWS access holds.",
-    "Preserve checkpoint and completed review/test evidence in private local Git ref. Both6463 and6464 are fully merged and closed out; do not redo their reviews or cleanup."
+    "Collect existing postmerge_ci T1 stage report and actual compile/test results for top-k recovery. Do not restart its lane. Require executed red-before-green evidence before recording a confirmed defect; keep source-only suspicions labeled.",
+    "After T1 proof, define narrow resource/correctness tests and reproducible measurement. No benefit claim, full-bundle PR5983 admission or actual Opus review until candidate is concrete. Preserve historical attribution and main bind_join.",
+    "Observe natural nightly34202612161 completion and first rearm-sweeper containing6463. Nightly admission oncf19 is proven, not full heavy completion. Latest sweeper still34192344406 onpre-fix48fefb6. Never manually dispatch/probe.",
+    "Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands, and releases unapproved. Preserve existing6049,6055,registry test-only CI and6435 AWS holds.",
+    "Keep completed evidence and checkpoint in private local Git recovery ref; both6463/6464 are fully merged and closed out."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -355,9 +364,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4996,
-    "resetAt": "2026-09-08T08:04:05Z",
-    "observed_at": "2026-09-08T08:05:28.127169+00:00",
+    "remaining": 4999,
+    "resetAt": "2026-09-08T09:24:48Z",
+    "observed_at": "2026-09-08T08:28:11.895609+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -419,5 +428,19 @@
     "review_verdict": "approve_with_nits, no substantiated blockers",
     "review_trigger_verification": "docs-quality PR opened/synchronize/reopened/ready_for_review +merge_group +push main; no paths filter; new test command in quick-gates without step condition.",
     "pr": 6464
+  },
+  "nightly_health": {
+    "observed_at": "2026-09-08T08:28:11.895609+00:00",
+    "run": 34202612161,
+    "main": "cf19a52c6880c496cefaca24046174902bc30958",
+    "event": "schedule",
+    "created_at": "2026-09-08T08:05:14Z",
+    "state": "in_progress",
+    "freshness_job": 101984657840,
+    "freshness_conclusion": "success",
+    "actual_reason": "no prior same-head schedule; admit its first heavy attempt",
+    "evidence": "direct-6436/followup/nightly34202612161-freshness.log",
+    "inventory": "45 created jobs returned in full at observation:29success,7skipped,9in_progress. Coverage nightly running and11 mutation jobs created so far. Do not mistake currently created matrix jobs for eventual full51-leg inventory.",
+    "limits": "First natural admission proven; heavy completion/retry-after-incomplete behavior not yet proven. No manual dispatch or heavy measurement initiated by root."
   }
 }

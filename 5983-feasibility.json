@@ -1,0 +1,192 @@
+{
+  "task": "Read-only implementation-feasibility triage of PR5983",
+  "analyst": "OpenAI GPT-6 Astra, xhigh",
+  "scope": "Pinned Git source + provided metadata only; no Rust code authored/modified, checkout switched, build, benchmark, tests, remote mutation or review/admission action. Read-only fetch loaded PR objects without moving a ref or writing FETCH_HEAD. Source snapshots in this artifact directory are exact git-show copies.",
+  "refs": {
+    "pr_head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+    "main": "cf19a52c6880c496cefaca24046174902bc30958",
+    "merge_base": "fbbd310326f1f083c33a13deee19f95cb96c55f6",
+    "merge_tree": "0c33b42db560cde1efe2fade7fb2d0de0fb50670",
+    "merge_exit_code": 0,
+    "pr_commits_since_base": 11,
+    "main_commits_since_base": 23
+  },
+  "provided_metadata": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/recovery-20260908/pr5983-triage.json",
+    "state": "OPEN",
+    "draft": false,
+    "mergeStateStatus": "UNKNOWN",
+    "statusCheckRollup": [],
+    "limit": "This is the supplied snapshot, not a newly obtained live CI/review state. An empty check rollup is no validation evidence."
+  },
+  "main_satisfaction": {
+    "already_on_main": [
+      "try_topk_orderby bounded selection, full-sort fallback, existing topk_orderby and LIMIT0 tests",
+      "PreparedUpdate, bind, update_prepared and update_in_place_prepared engine APIs behind params",
+      "GraphApplier structural fork/compaction and generic ApplyUpdates/Writer",
+      "TransactionManager and opt-in txn feature",
+      "New bind_join verified-run grouping and tests from the merged performance work"
+    ],
+    "absent_on_main": [
+      "try_topk_orderby_indexed and its new differential test file",
+      "sparq-serve PreparedGraphApplier, its params forwarding feature and feature-matrix leg",
+      "execute_txn_with_retry, RetryError and decorrelated_jitter_backoff"
+    ],
+    "composition": "All11files merge cleanly by git merge-tree. exec.rs main delta changes bind_join, disjoint from the top-k insertion. Serve metadata advances dependency versions0.1.0->0.1.1 and repository URLs; preserve these through three-way composition. Clean textual composition does not establish semantics or performance."
+  },
+  "slices": [
+    {
+      "priority": 1,
+      "name": "Index-ordered top-k only",
+      "files": [
+        "crates/sparq-engine/src/exec.rs",
+        "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs"
+      ],
+      "existing_scope": "452production-file added lines (including long commentary),333test lines; no new public API, dependency or params/txn requirement. Runtime/private planner optimization is independently separable.",
+      "recommendation": "Rebuild a narrow, decline-by-default top-k candidate on current main from the historical hunk. First pin repeated-variable rejection, resource-budget preservation, ties/OFFSET, multiplicity and datatype/permutation fallback. If needed for the initial small slice, decline multi-valued probes instead of importing general fanout before it has tests. Retain the existing fallback. Add a reproducible focused measurement fixture and normal benchmark registration; do not port historical tuning as a demonstrated win."
+    },
+    {
+      "priority": 2,
+      "name": "PreparedGraphApplier, separate optional API change",
+      "files": [
+        ".github/feature-matrix.d/sparq-serve.yml",
+        "crates/sparq-serve/Cargo.toml",
+        "crates/sparq-serve/README.md",
+        "crates/sparq-serve/src/applier.rs",
+        "crates/sparq-serve/src/lib.rs",
+        "crates/sparq-serve/tests/prepared_applier.rs",
+        "scripts/tests/feature-matrix-legnames.golden.txt"
+      ],
+      "finding": "All required prepared engine APIs are already on main. New wrapper is mechanically independent of indexed top-k and txn helpers. Existing two tests submit through the real Writer, but do not establish parallel contention, failure/replay, CommuteGroup barrier behavior, or forced compaction equivalence. Public API requires matching skill documentation; absence of a dedicated serve skill is not an automatic maintenance-rule exemption."
+    },
+    {
+      "priority": 3,
+      "name": "Inherited transaction retry helpers, separate API change",
+      "files": [
+        "crates/sparq-engine/src/txn.rs",
+        "skills/sparql-query/SKILL.md"
+      ],
+      "finding": "Independent of top-k and PreparedGraphApplier;5new tests cover successful conflict retry, exhaustion, update-error no retry, zero attempts and ordinary jitter bounds. Needs its own API/error/backoff review and actual feature-enabled validation; not a top-k prerequisite."
+    }
+  ],
+  "blocking_or_required_findings": [
+    {
+      "id": "T1",
+      "confidence": "High source-derived; engine execution not performed",
+      "finding": "Seed allows its subject variable to equal its ORDER BY object variable, but ignores seed positional equality. Generic scan_to_bindings enforces this equality; other existing fast paths explicitly decline repeated variables.",
+      "counterexample": {
+        "data_turtle": "<urn:s> <urn:p> 1 .",
+        "query": "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x LIMIT 1",
+        "expected": "empty result",
+        "predicted_pr_result": "urn:s, because the one scanned inline-object triple is emitted through the hub column without requiring subject==object"
+      },
+      "source_lines": {
+        "seed_selection": 3259,
+        "hub_assignment": 3276,
+        "ignored_seed_positions": 3307,
+        "emit_mapping": 3409,
+        "generic_prepare_pattern": 8862,
+        "generic_scan_to_bindings": 8893
+      },
+      "smallest_repair": "Reuse the existing repeated-variable shape guard before admission (or explicitly require hub!=order), and prove the new regression red on this head before repair."
+    },
+    {
+      "id": "T2",
+      "confidence": "Source-confirmed missing checks; resource-limit impact not executed",
+      "finding": "The new full seed validation, per-pattern subject-id allocation, scan/probe and Cartesian fanout loops have no budget::check/exhausted calls. A LIMIT1 can still materialize a large fanout before final output truncation, so parent final-output checks are not proof of intermediate-row/byte/deadline enforcement.",
+      "source_lines": {
+        "whole_seed_validation": 3319,
+        "subject_id_allocation": 3369,
+        "fanout_allocation": 3549
+      },
+      "next": "Focused deterministic deadline/row/byte-limit controls and multivalued probes; preserve existing query budget behavior or narrow admission."
+    },
+    {
+      "id": "T3",
+      "confidence": "Source-confirmed test/evidence gap",
+      "finding": "15new top-k tests exist, but the multi-valued fanout branch, repeated-variable seed, mixed/negative/typed lexical values, full-key ties in DESC, named/default-dataset views, restricted permutations/overlay stores and resource limits are not established by this suite. Most queries use a unique secondary seq key; the extra-pattern test is still single-valued. Existing tests elsewhere must be run against the recovered candidate, not presumed sufficient.",
+      "next": "Keep the independent result oracle and add direct engagement/decline observation with deletion/inert controls. Existing absence-of-BGP trace assertion should also be calibrated against current main and the candidate."
+    },
+    {
+      "id": "T4",
+      "confidence": "Source-confirmed cost; timing effect unmeasured",
+      "finding": "The whole seed rows.iter().all and each subject_ids Vec collect are O(scan cardinality) work/allocations before early stop, even before the cardinality fallback guard. Therefore early output selection does not make the implemented query O(k), and fallback overhead is not zero. New bind_join work on main also changes the benchmark baseline.",
+      "next": "Measure setup/probe/output allocations separately and compare the same recovered head against the same head with the indexed path disabled. Cover unique/tied priorities, depth/k, selective peers/status, drained prefixes and multi-valued probes. Report raw generated data with host/toolchain/features/repetitions; no Postgres-gap claim without comparable reproducible workloads."
+    }
+  ],
+  "validation_needed": {
+    "before_substantive_tuning": [
+      "Reproduce T1 with the public query API under the pinned head; establish red-before-green guard behavior.",
+      "Run topk_orderby_indexed_differential plus existing topk_orderby/orderby_limit_zero, repeated-variable, proptest/stream/view/overlay and resource-budget tests relevant to admitted shapes.",
+      "Calibrated guard mutants: indexed path disabled/inert, repeated-variable guard disabled, inline/type guard disabled, incomplete tie boundary, direction inversion and budget bypass; report real survivors."
+    ],
+    "candidate_gates": [
+      "Affected sparq-engine tests + supported feature combinations (restricted index/wasm and zk recorder decline behavior as applicable)",
+      "Full W3C SPARQL conformance and applicable operator/performance ratchets",
+      "Author preflight, full-workspace clippy/test and all-feature rustdoc at integration stage; Bash3 mapfile limitation remains a host constraint to report, not a gate exemption."
+    ],
+    "measurement": "No benchmark code or raw measurement outputs appear in this11-file PR diff. Historical PR/commit/source timing, throughput, regression and verification claims were not reproduced. Required generated benchmark fixture/registration files add to the two-file runtime/test slice; exact filenames should follow the existing registry conventions when implementation scope is chosen."
+  },
+  "authorship": {
+    "observed_git_authorship": "Luke Dary authors; all10non-merge commits have Co-Authored-By: Claude Sonnet5, plus one merge commit without that trailer. This is recorded historical metadata, not verified runtime provenance.",
+    "required_preservation": "Keep historical Sonnet markers/attribution on retained code. Mark only newly authored Astra repair/test work as GPT-6 Astra with honest commit provenance. Never re-label imported code as newly authored Astra or actually reviewed Opus."
+  },
+  "files": [
+    {
+      "path": ".github/feature-matrix.d/sparq-serve.yml",
+      "pr_numstat": "22\t0\t.github/feature-matrix.d/sparq-serve.yml",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "pr_numstat": "452\t0\tcrates/sparq-engine/src/exec.rs",
+      "main_numstat_since_base": "393\t4\tcrates/sparq-engine/src/exec.rs"
+    },
+    {
+      "path": "crates/sparq-engine/src/txn.rs",
+      "pr_numstat": "195\t0\tcrates/sparq-engine/src/txn.rs",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs",
+      "pr_numstat": "333\t0\tcrates/sparq-engine/tests/topk_orderby_indexed_differential.rs",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "crates/sparq-serve/Cargo.toml",
+      "pr_numstat": "15\t0\tcrates/sparq-serve/Cargo.toml",
+      "main_numstat_since_base": "2\t2\tcrates/sparq-serve/Cargo.toml"
+    },
+    {
+      "path": "crates/sparq-serve/README.md",
+      "pr_numstat": "4\t4\tcrates/sparq-serve/README.md",
+      "main_numstat_since_base": "1\t1\tcrates/sparq-serve/README.md"
+    },
+    {
+      "path": "crates/sparq-serve/src/applier.rs",
+      "pr_numstat": "92\t0\tcrates/sparq-serve/src/applier.rs",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "crates/sparq-serve/src/lib.rs",
+      "pr_numstat": "2\t0\tcrates/sparq-serve/src/lib.rs",
+      "main_numstat_since_base": "1\t1\tcrates/sparq-serve/src/lib.rs"
+    },
+    {
+      "path": "crates/sparq-serve/tests/prepared_applier.rs",
+      "pr_numstat": "124\t0\tcrates/sparq-serve/tests/prepared_applier.rs",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "scripts/tests/feature-matrix-legnames.golden.txt",
+      "pr_numstat": "1\t0\tscripts/tests/feature-matrix-legnames.golden.txt",
+      "main_numstat_since_base": null
+    },
+    {
+      "path": "skills/sparql-query/SKILL.md",
+      "pr_numstat": "31\t0\tskills/sparql-query/SKILL.md",
+      "main_numstat_since_base": null
+    }
+  ],
+  "recommended_next_action": "Authorize one current-main top-k-only recovery worktree, beginning with T1 repro and bounded correctness/resource tests plus a registered measurement fixture. Keep PreparedGraphApplier/txn code out of that candidate. Hold PR5983 admission pending actual implementation validation and independent Opus review. This triage makes no remote change."
+}

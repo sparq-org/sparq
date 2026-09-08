@@ -1,0 +1,10 @@
+{
+  "head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+  "main": "cf19a52c6880c496cefaca24046174902bc30958",
+  "base": "fbbd310326f1f083c33a13deee19f95cb96c55f6",
+  "head_commits_since_base": 11,
+  "main_commits_since_base": 23,
+  "diff_stat": " .github/feature-matrix.d/sparq-serve.yml           |  22 +\n crates/sparq-engine/src/exec.rs                    | 452 +++++++++++++++++++++\n crates/sparq-engine/src/txn.rs                     | 195 +++++++++\n .../tests/topk_orderby_indexed_differential.rs     | 333 +++++++++++++++\n crates/sparq-serve/Cargo.toml                      |  15 +\n crates/sparq-serve/README.md                       |   8 +-\n crates/sparq-serve/src/applier.rs                  |  92 +++++\n crates/sparq-serve/src/lib.rs                      |   2 +\n crates/sparq-serve/tests/prepared_applier.rs       | 124 ++++++\n scripts/tests/feature-matrix-legnames.golden.txt   |   1 +\n skills/sparql-query/SKILL.md                       |  31 ++\n 11 files changed, 1271 insertions(+), 4 deletions(-)\n",
+  "merge_exit": 0,
+  "merge_output": "0c33b42db560cde1efe2fade7fb2d0de0fb50670\n"
+}
