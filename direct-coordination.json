@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T06:01:30.155185+00:00",
+  "updated_at": "2026-09-08T06:20:14.035146+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -37,13 +37,14 @@
     "backup_first_commit": "72e63b159ae524dd12df1df03acef71c14431d36",
     "worktrees_removed_after_merge": [
       "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069",
-      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6437"
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6437",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462"
     ]
   },
   "live_main": {
-    "oid": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
-    "pr": 6448,
-    "observed_at": "2026-09-08T05:37:04.689961+00:00"
+    "oid": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3",
+    "pr": 6463,
+    "observed_at": "2026-09-08T06:20:14.035146+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -63,7 +64,7 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "PR6464reviewed0fc: actualOpus+Copilotcomplete0threads;47nightlytests passedinLinuxdocs-quality. OnlyonebulkCItestjobrunning onassignedrunner; no failure/no queueincident. Awaitrequiredgateand6463mergebeforeadmission.",
+    "state": "PR6464 at reviewed0fc2faf6 is first in the protected queue, awaiting checks on cf19a52c6880c496cefaca24046174902bc30958. PR CI, actual Opus and Copilot reviews passed, with zero unresolved threads; all47 new tests executed in Linux CI. No duplicate model work.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
     "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
     "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
@@ -222,7 +223,7 @@
       "issue": 6462,
       "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
       "branch": "codex/ci-rerun-bot-query",
-      "state": "QUEUED",
+      "state": "MERGED",
       "base": "main",
       "review": "Actual Opus5 xhigh full ed9689d +focused5640 approval_with_nits/no blockers. Both result JSON modelUsage verified. No source change afterfinalreview.",
       "full_review_result": "recovery-20260908/6462-opus-review-ed9689d5.json",
@@ -241,10 +242,10 @@
       "latest_labels": [
         "area:ci"
       ],
-      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
+      "worktree": "Clean taskownedworktree removedaftermerge; branchandobjects retained.",
       "expected_behavior": "Concrete Bot ID field;normalizeonlyalreadyverifiedRESTaccountlogin. Preserve node ID/type,exact authenticatedviewer,durableclaim,currenthead/queue/review/operator6049holds. Noactualclaim/rerunvalidationperformed.",
-      "queue_position": 1,
-      "queue_state": "AWAITING_CHECKS",
+      "queue_position": null,
+      "queue_state": null,
       "queue_admitted_at": "2026-09-08T05:32:01.568976+00:00",
       "effect_evidence": "Required Linux docs-quality34182440946 executed all80test_arm_capability_wiring tests, including invalid Actor.id, real Bot login forms, missing nodeID and unverifiedREST negatives. Allpassed; selftestpassed. Gate34182440948SUCCESS. No unresolvedreviewthreads, Copilot34182446466SUCCESS.",
       "latest_observation": {
@@ -268,16 +269,23 @@
       "queue_head": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3",
       "queue_gate": {
         "run": 34190927643,
-        "state": "in_progress"
+        "state": "success",
+        "completed_at": "2026-09-08T06:02:26Z"
       },
       "queue_effect_evidence": "Merge-group docs-quality34190927598SUCCESS; all80tests and four new schema/identity cases actuallyexecuted andpassed. Verifiedlog recovery-20260908/6463-queue-docs-quality.log.",
-      "queue_pending": "CompleteCIjobs inventory34:25success,8skipped, only bulk1/3 testjob101951269974in_progress onassignedGitHubhostedrunner since05:46:36UTC. Noqueuedjobs/failures; preserve evidenceandwait."
+      "queue_pending": null,
+      "merged_at": "2026-09-08T06:02:58Z",
+      "merge_commit": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3",
+      "issue_state": "CLOSED2026-09-08T06:02:59Z",
+      "resolution_comment": "https://github.com/sparq-org/sparq/issues/6462#issuecomment-5580219261",
+      "source_verified": "Both reviewedfiles freshlybyte-identical onmain5315; recovery-20260908/6463-main-source-proof.json",
+      "old_head_rollup": "OldPRheadrollupFAILUREaftermerge: all27observedActionsruns success/skipped except cancelledrefresh-start-here34193011319(created06:03:01 aftermerge). Originalrequiredgate34182440948SUCCESS; exactmerge-groupgate34190927643SUCCESS. No cancellation/rerun performed."
     },
     "6464": {
       "issue": 6436,
       "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
       "branch": "codex/ci-heavy-nightly-freshness",
-      "state": "OPEN_CI_PENDING",
+      "state": "QUEUED",
       "base": "main",
       "url": "https://github.com/sparq-org/sparq/pull/6464",
       "review": "Actual Opus5 xhigh whole2f request_changes; focused0fc approve_with_nits, no remaining substantiatedblockers. Valid successfulJSON/modelUsage verified; sourceclean and49filemanifestverified. No redundant review needed unlesscodechanges.",
@@ -285,19 +293,22 @@
       "review_packet_sha256": "6b67133cd821ae5ba3c4b0cddacb67e5abc830bb5fbe9e327b8739045ec8566b",
       "validation": "47 focused+88wiring+19reservation tests;15 calibratedcontrols47tests0errors each;actionlint/diffPASS. LinuxCIeffectevidence stillpending.",
       "latest_observation": {
-        "at": "2026-09-08T06:01:30.155185+00:00",
+        "at": "2026-09-08T06:20:14.035146+00:00",
         "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
         "state": "OPEN",
+        "queue": {
+          "position": 1,
+          "state": "AWAITING_CHECKS",
+          "headCommit": {
+            "oid": "cf19a52c6880c496cefaca24046174902bc30958"
+          }
+        },
         "rollup": "PENDING",
-        "queue": null,
-        "threads": 0,
-        "labels": [
-          "area:ci"
-        ]
+        "threads": 0
       },
       "gate": {
         "run": 34191014553,
-        "state": "in_progress"
+        "state": "success"
       },
       "docs_quality": {
         "run": 34191014508,
@@ -310,7 +321,12 @@
         "threads": 0
       },
       "effect_evidence": "Linuxdocs-quality34191014508SUCCESS: all47 test_ci_nightly_freshness tests actuallyexecuted andpassed; log preserved direct-6436/followup/pr6464-docs-quality.log. AutomaticCopilot34191020387SUCCESS and0reviewthreads. CI34191014662queued; requiredgate34191014553in_progress.",
-      "ci_pending": "CompleteCIjobs inventory38:32success,5skipped, only bulk2/3 testjob101952181676in_progress onassignedGitHubhostedrunner since05:49:48UTC. Noqueuedjobs/failures; preserve evidenceandwait."
+      "ci_pending": null,
+      "queue_position": 1,
+      "queue_state": "AWAITING_CHECKS",
+      "queue_head": "cf19a52c6880c496cefaca24046174902bc30958",
+      "queue_admitted_at": "2026-09-08T06:20:14.035146+00:00",
+      "main_composition": "Cleanmerge-treewith5315 ->f1f2f4502f3cf672bcac88cc250cf368f554aac4; unchangedreviewed0fcsourcehashesverified"
     }
   },
   "registry": {
@@ -327,19 +343,27 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T05:37:04.689961+00:00",
+    "observed_at": "2026-09-08T06:20:14.035146+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "After6463merges, observe a natural scheduled execution on fixedmain. Latesteligible schedule still34175520707 from01:06UTC onold4d. No manualdispatch, claimor rerunprobe. Existingfailureknown6462fix; successoldrun had0writes andstuckarm502warning, notproof of recoveryhealth.",
+    "next": "Observe the first natural scheduled execution containing PR6463. Latest scheduled run34192344406 started05:53UTC on48fefb6 before the fix and concluded success. That status alone does not prove recovery writes worked; no log or production claim was used this tick. Never manually dispatch or probe.",
     "issue": 6462,
-    "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
+    "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate.",
+    "latest_scheduled_run": {
+      "conclusion": "success",
+      "created_at": "2026-09-08T05:53:00Z",
+      "head_sha": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+      "id": 34192344406,
+      "status": "completed"
+    }
   },
   "next_actions": [
-    "MonitorPR6463 protectedmerge_group at reviewed5640; aftermergedverifyexactsource/close6462/removeowncleanworktree andobserve firsteligible natural scheduledsweeper. Do notmanualprobe/retry.",
-    "MonitorPR6464 normalLinuxCI andactualautomaticCopilotreview. New47nightlytests mustactuallyexecute inrequiredCI. Fix actionablefindings viaexistingpostmerge_ci only; frozen0fc alreadyhasactualOpus5approval. Admit onebranch atatime onlyaftergreen/current/resolvedrevalidation.",
-    "Keepcompletedreviews/checkpoint inprivateGitref; no duplicate reviews or idlemodel sessions.",
-    "RegistryActions/dispatchOFF,ALLGREENuntil6049invariantlanded,no releases;retain6055reviewneeds,6049approval,registrytestonlyCI,6435AWSlogin holds."
+    "Monitor PR6464 merge-group cf19a52c at reviewed head0fc2faf6. Reviews and PR CI are complete. On merge, verify reviewed source on main, add a resolving PR comment to issue6436 and remove only the clean task-owned worktree.",
+    "Observe the first natural scheduled rearm-sweeper containing PR6463; latest run34192344406 uses pre-fix48fefb6. Never manually dispatch or probe a claim/rerun.",
+    "After6464 lands, select the highest-impact actionable SPARQL performance or landing blocker from the current frontier. Keep one implementation lane and actual Opus review; PR6435 benchmark remains blocked on AWS login.",
+    "Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands, and releases unapproved. Retain existing6049,6055,registry test-only CI and6435 access holds. Missing registry notification token is expected during the pause, not permission to restore it.",
+    "Preserve checkpoint and completed review/test evidence in the private local Git recovery ref."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -347,7 +371,7 @@
     "branch": "codex/ci-rerun-bot-query",
     "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-    "state": "PR6463 admitted to protected queue at expected5640,position1,jumpfalse. RequiredCI/actualOpus/Copilot complete; observe merge_group.",
+    "state": "PR6463merged5315; bothreviewedfilesverifiedonmain; issue6462closedwithresolutioncomment; owncleanworktree removed. Observefirstnaturalpost-fixsweeper.",
     "packet": "recovery-20260908/6462-rereview-5640d06b.md",
     "packet_sha256": "cbbed101eb48afd78a04ed9ae18e72294f9a3010417c7730ced407b7e96edf9f",
     "review_output": "recovery-20260908/6462-opus-rereview-5640d06b.json",
@@ -355,9 +379,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4998,
+    "remaining": 4983,
     "resetAt": "2026-09-08T06:48:06Z",
-    "observed_at": "2026-09-08T06:01:30.155185+00:00",
+    "observed_at": "2026-09-08T06:20:14.035146+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -365,5 +389,11 @@
     "queued_workflow_runs": 9,
     "in_progress_workflow_runs": 5,
     "limitation": "Counts from separate bounded REST reads; not proof of hosted runner reserve or fleet health."
+  },
+  "postmerge_observations": {
+    "observed_at": "2026-09-08T06:20:14.035146+00:00",
+    "batch_merge": "34193009779pushfailed:ringregistrydispatcher REGISTRY_RING_TOKENnotconfigured. Consistentwithdeliberatelypausedregistry; doNOTrestoretokenortriggerregistrytohealthisexpectedoperationalhold. Existingringtests intentionallymakeunknownmissingcredentialsfatal; noproductioncodebugclaimed.",
+    "release_plz": "34193009813pushfailedinRelease-PR(advisory):cargopackage sparq-introspectcannotfindsparq-engine incrates.io. No releaseauthorized/retryperformed. Relatedexistingpublication/bootstrapblockers3337/1135; exacterrornotfoundinboundedopenissuesearch. Not a6463sourceregression (onlyrearmandtestchanged).",
+    "dedupe": "Ringtoken6openhitsalltestharnessjqproblems;registrypausesearchonlyunrelated5265. No newissuefiledbecauseintentionallypausedmissingtokenisoperationalstate, notconfirmedcodebug. Releasepackagingrecordedpendingreleasehold; no unwarrantedpublishingrequest."
   }
 }

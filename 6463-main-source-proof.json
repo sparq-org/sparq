@@ -1,0 +1,9 @@
+{
+  "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
+  "main": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3",
+  "files": {
+    "scripts/rearm-sweeper.py": "136ecdd68ebd8e35c2547f3e255660677743d35d1fd34fb86089c5cbfb208f33",
+    "scripts/tests/test_arm_capability_wiring.py": "fcf76bc0f1e036cda319fa013aeefa0d7f81a237590e2ff40fa0fe8ec1b43922"
+  },
+  "byte_equal": true
+}

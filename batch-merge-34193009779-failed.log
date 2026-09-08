@@ -1,0 +1,19 @@
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	﻿2026-09-08T06:03:04.1962203Z ##[group]Run set -euo pipefail
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1962826Z [36;1mset -euo pipefail[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1963468Z [36;1mif [ -z "${REGISTRY_RING_TOKEN}" ]; then[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1965229Z [36;1m  echo "::error title=registry ring suppressed::REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted."[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1967255Z [36;1m  {[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1967873Z [36;1m    echo "### registry ring SUPPRESSED — REGISTRY_RING_TOKEN unset"[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1968615Z [36;1m    echo[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1969258Z [36;1m    echo "A merge landed on \`main\` but the pickup ring could not be sent."[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1970165Z [36;1m    echo "Effect: capacity pickup waits for the next ~10-min registry cron."[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1970986Z [36;1m  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1971658Z [36;1m  exit 1[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1972146Z [36;1mfi[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.1972885Z [36;1mGH_TOKEN="${REGISTRY_RING_TOKEN}" gh workflow run dispatch.yml -R jeswr/agent-account-registry[0m
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2568555Z shell: /usr/bin/bash -e {0}
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2569777Z env:
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2570562Z   REGISTRY_RING_TOKEN: 
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2571275Z ##[endgroup]
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2917816Z ##[error]REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted.
+ring registry dispatcher	Ring jeswr/agent-account-registry dispatch	2026-09-08T06:03:04.2931235Z ##[error]Process completed with exit code 1.
