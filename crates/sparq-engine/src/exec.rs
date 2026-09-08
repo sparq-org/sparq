@@ -3333,6 +3333,21 @@ fn try_topk_orderby_indexed(
         return Ok(None);
     }
 
+    // [GPT-6 Astra] The first block must include its entire leading key group.
+    // Reject a group larger than the EXISTING block cap before retaining probe
+    // scans and subject vectors. Sorted object ids make equality at the cap's
+    // zero-based edge equivalent to group_len > max_group, in either direction.
+    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    let n = rows.len();
+    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
+    if n > max_group {
+        let first = if desc { n - 1 } else { 0 };
+        let edge = if desc { first - max_group } else { max_group };
+        if scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
+            return Ok(None);
+        }
+    }
+
     // Prepare the other patterns ONCE, each as a SUBJECT-sorted scan over its
     // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
     // The first cut of this function called `graph.store.scan(&probe_pat)`
@@ -3440,7 +3455,6 @@ fn try_topk_orderby_indexed(
     // position 0 is always the best candidate, via `logical`, and do all
     // block/boundary arithmetic in that space. `logical` and `obj_id_at` are the
     // only direction-aware code; everything below them is direction-agnostic.
-    let n = rows.len();
     let logical = |i: usize| -> usize { if desc { n - 1 - i } else { i } };
     let obj_id_at = |i: usize| -> Id { scan.to_spo(&rows[logical(i)])[2] };
     // A single escalation block is dominated by ONE large tie-group when the
@@ -3455,12 +3469,10 @@ fn try_topk_orderby_indexed(
     // (half of n) still beat the fallback (~228us vs. the fallback's ~269us),
     // but a tie-group of 1600 (all of n) lost (would be ~450-700us vs. the
     // fallback's own ~269us) — and the same ~0.5-0.75 fraction held at n=8000
-    // (4000 still competitive, 8000 clearly lost). `max_group` below is
+    // (4000 still competitive, 8000 clearly lost). `max_group` is
     // therefore `n / 2` (with a floor for small `n`, and never below
-    // `row_budget` itself) — declining past it defers to the fallback, whose
-    // cost at that point is exactly its normal (tie-structure-independent)
-    // cost, not a new regression.
-    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    // `row_budget` itself) — declining past it defers to the fallback, with
+    // any preparation and failed probes already performed adding to its cost.
     let mut collected: Vec<Row> = Vec::new();
     let mut visited_to: usize = 0;
     // Block sizes grow GEOMETRICALLY from a small multiple of `row_budget`, not
@@ -3473,7 +3485,6 @@ fn try_topk_orderby_indexed(
     // usually satisfies it — starting at 1024 would pay ~1024 point-probes even for
     // `LIMIT 1`, which is worse than the bulk path it's meant to beat (measured:
     // this was the actual cause of a regression at moderate `n`, not a win).
-    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
     // Cumulative count of candidates that failed an OTHER-pattern check, across
     // ALL blocks in this call — distinct from `max_group`'s per-block width
     // check. A workload that claims strictly in priority order (the realistic

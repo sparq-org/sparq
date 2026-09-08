@@ -96,6 +96,66 @@ fn exact_desc_ties_preserve_valid_membership_and_window_size() {
     }
 }
 
+// [GPT-6 Astra] Exactly-at-cap groups remain eligible; one more must decline.
+// A distinguishing secondary key makes the OFFSET oracle deterministic.
+#[test]
+fn leading_tie_cap_boundaries_preserve_both_directions_and_offset() {
+    let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+    for (n, cap) in [(400, 256), (600, 300)] {
+        for desc in [false, true] {
+            for group in [cap, cap + 1] {
+                let tasks: Vec<_> = (0..n).map(|i| {
+                    let key = if i < group { if desc { 1000 } else { 0 } } else { i + 1 };
+                    (i, key)
+                }).collect();
+                let graph = build_graph("X", &tasks, "");
+                let direction = if desc { "DESC" } else { "ASC" };
+                let text = format!("{PFX}SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s }} ORDER BY {direction}(?p) DESC(?s)");
+                let full = query(&graph, &text).unwrap();
+                let limited = format!("{text} OFFSET 1 LIMIT 1");
+                assert_eq!(query(&graph, &limited).unwrap().rows, full.rows[1..2]);
+                let trace = sparq_engine::explain_analyze(&graph, &limited).unwrap();
+                assert_eq!(trace.contains("BGP [binary GOO]"), group > cap || !supported,
+                           "n={n} group={group} direction={direction}: {trace}");
+            }
+        }
+    }
+}
+
+// [GPT-6 Astra] The cap still includes twice the requested row budget.
+#[test]
+fn leading_tie_cap_preserves_large_row_budget_admission() {
+    let tasks: Vec<_> = (0..600).map(|i| (i, if i < 400 { 1000 } else { i })).collect();
+    let graph = build_graph("X", &tasks, "");
+    assert_eq!(actual_top_k(&graph, 300), expected_top_k(&graph, 300));
+    let trace = sparq_engine::explain_analyze(&graph, &format!("{PFX}{CLAIM_QUERY}300")).unwrap();
+    let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+    assert_eq!(!trace.contains("BGP [binary GOO]"), supported, "{trace}");
+}
+
+// [GPT-6 Astra] Tombstones alter both the group extent and the existing n/2 cap.
+#[test]
+fn leading_tie_cap_observes_overlay_deletions() {
+    for desc in [false, true] {
+        let key = if desc { 1000 } else { 0 };
+        let tasks: Vec<_> = (0..600).map(|i| (i, if i < 301 { key } else { i + 1 })).collect();
+        let base = build_graph("X", &tasks, "");
+        let mut changed = base.fork();
+        sparq_engine::update_in_place(&mut changed, &format!("{PFX}DELETE DATA {{ <urn:task:X:0> ak:priority {key} . <urn:task:X:1> ak:priority {key} }}")).unwrap();
+        assert_eq!(changed.pending_delta_len(), 2);
+        let direction = if desc { "DESC" } else { "ASC" };
+        let text = format!("{PFX}SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s }} ORDER BY {direction}(?p) DESC(?s)");
+        let limited = format!("{text} OFFSET 1 LIMIT 1");
+        let full = query(&changed, &text).unwrap();
+        assert_eq!(query(&changed, &limited).unwrap().rows, full.rows[1..2]);
+        let before = sparq_engine::explain_analyze(&base, &limited).unwrap();
+        let after = sparq_engine::explain_analyze(&changed, &limited).unwrap();
+        assert!(before.contains("BGP [binary GOO]"), "original 301 > 300: {before}");
+        let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+        assert_eq!(!after.contains("BGP [binary GOO]"), supported, "remaining 299 == 598/2: {after}");
+    }
+}
+
 // [GPT-6 Astra] Each fixture has distinct numeric values, avoiding unspecified ties.
 #[test]
 fn negative_mixed_and_typed_lexical_values_use_the_fallback() {
