@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T02:26:00Z",
+  "updated_at": "2026-09-08T02:29:17.707087+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -33,7 +33,11 @@
     "git_common_dir": "/Users/jesght/Documents/ChatGPT/sparq/upstream/.git",
     "backup_private_local_only": true,
     "do_not_prune": "Missing worktrees retain indexes/metadata; do not blindly prune/reset. Shared upstream checkout is codex/ac-sparql-paper at cf57bc209a26091dbd1de2f465642b6ced932f96; do not switch it.",
-    "usage": "Resumed after get_usage_limits reported available budget; no reset consumed/purchased. Do not retry exhausted model requests."
+    "usage": "Resumed after get_usage_limits reported available budget; no reset consumed/purchased. Do not retry exhausted model requests.",
+    "backup_first_commit": "72e63b159ae524dd12df1df03acef71c14431d36",
+    "worktrees_removed_after_merge": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069"
+    ]
   },
   "live_main": {
     "oid": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
@@ -58,8 +62,9 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "Fresh36 tests/actionlint,88 wiring/19 reservation pass. Agent checking malformed step inventories fail-closed,18 calibrated controls, follow-up commit and whole-change Opus review packet. No PR or remote mutation yet.",
-    "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate."
+    "state": "36 tests and18 calibrated controls pass,0 errors. Agent adding narrow aged-out history availability fix with bounded active-run census and regression coverage; then full packet and independent Opus review. No PR yet.",
+    "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
+    "head": "7c42aae5c65d1139cf5259a69a00de6ec50d54a4"
   },
   "prs": {
     "4300": {
@@ -99,7 +104,9 @@
       "source_verified": "All5 reviewed files byte-identical on current main, freshly verified Sep8.",
       "review_comment": "https://github.com/sparq-org/sparq/pull/6069#issuecomment-5562944741",
       "review": "Actual Opus5 xhigh approve_with_nits,219 focused tests,5 publisher+3 CI binding controls. Historical artifact files lost.",
-      "notes": "Coalesces ordinary PR/main bench runs; labels/manual/nightly isolated, no merge_group trigger. Bounded verified NFF retry only. No measured runner/latency savings claimed."
+      "notes": "Coalesces ordinary PR/main bench runs; labels/manual/nightly isolated, no merge_group trigger. Bounded verified NFF retry only. No measured runner/latency savings claimed.",
+      "issue_state": "CLOSED2026-09-07T06:39:00Z, freshly verified",
+      "worktree": "Clean own worktree removed after merge, branch and objects retained."
     },
     "6238": {
       "state": "REQUIRES_REASSESSMENT",
@@ -140,7 +147,14 @@
         "scripts/ci_summary_gate.py": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
         "scripts/tests/test_ci_summary_gate.py": "40b46720c8379ae9410d8df1b52e5aa19de49b87775eec711b6b427993b93d7a"
       },
-      "notes": "Cached grace permits reobservation only, never cached PASS. Recognized quota errors fatal no retries; no header/numeric quota parser or pagination amplification claim."
+      "notes": "Cached grace permits reobservation only, never cached PASS. Recognized quota errors fatal no retries; no header/numeric quota parser or pagination amplification claim.",
+      "queue_gate": {
+        "id": 34179397177,
+        "state": "in_progress",
+        "head": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+        "observed_at": "2026-09-08T02:27:00Z",
+        "other_checks": "5 success;CI/feature-matrix stillin_progress"
+      }
     }
   },
   "registry": {
@@ -161,13 +175,15 @@
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "Deduplicate/open confirmed GraphQL Actor.id issue; after6436 lane finish fix RERUN_HISTORY_QUERY with concrete Bot fragment preserving authenticated node-id/login binding and no effect on6049 hold."
+    "next": "Fix6462 after6436 implementation lane; concrete Bot fragment, preserve authenticated node ID/login/type binding, receipt identity and6049 hold. Independent review and normal protected CI.",
+    "issue": 6462,
+    "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
   },
   "next_actions": [
     "Finish6436 controls, inspect full change and obtain one actual Opus5 xhigh independent review; no duplicate agent/model sessions.",
     "Watch6448 protected queue and exact merge_group gate; advance/close6437 only on actual merge. Never cancel its evidence.",
-    "Open confirmed sweeper Actor.id schema defect after dedupe; fix next with schema-realistic regression coverage and actual Opus review.",
-    "Confirm issue6080 closed, safely reap own clean merged6069 worktree after preserving checkpoint.",
+    "Solve confirmed sweeper schema issue6462 after6436 lane; no manual recovery mutation.",
+    "Retain current checkpoints and review evidence in dedicated local Git backup; do not publish private operational records.",
     "Retain pending6049,6055,registry test-onlyCI and6435 access holds. No releases."
   ]
 }
