@@ -31,6 +31,40 @@ fn repeated_seed_variable_limit_is_empty() {
     assert!(rows.rows.is_empty(), "LIMIT must enforce subject/object equality: {rows:?}");
 }
 
+// [GPT-6 Astra] LIMIT cannot hide an oversized intermediate working set.
+#[test]
+fn indexed_topk_preserves_intermediate_resource_limits() {
+    let graph = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
+    let query_text = format!("{PFX}{CLAIM_QUERY}1");
+    for (budget, expected) in [
+        (sparq_engine::QueryBudget { max_rows: Some(2), ..Default::default() }, "max-rows"),
+        (sparq_engine::QueryBudget { max_bytes: Some(16), ..Default::default() }, "max-bytes"),
+    ] {
+        let result = sparq_engine::query_with_budget(&graph, &query_text, &budget);
+        assert!(result.as_ref().is_err_and(|error| error.contains(expected)), "{expected}: {result:?}");
+    }
+    let generous = sparq_engine::QueryBudget { max_rows: Some(1000), ..Default::default() };
+    let result = sparq_engine::query_with_budget(&graph, &query_text, &generous).unwrap();
+    assert_eq!(task_seq(result.rows[0][0].as_ref().unwrap()), 39);
+}
+
+// [GPT-6 Astra] Keep the initial shortcut out of Cartesian fanout. Check both
+// the ordered answers and the actual fallback execution, not static plan text.
+#[test]
+fn multivalued_probe_uses_fallback_and_preserves_cartesian_rows() {
+    let graph = Graph::load_str(
+        "<urn:s> <urn:p> 2 ; <urn:b> 10, 11 ; <urn:c> 20, 21 .", "turtle",
+    ).unwrap();
+    let query_text = "SELECT ?s ?b ?c WHERE { ?s <urn:p> ?p ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p) ?b ?c";
+    let full = query(&graph, query_text).unwrap();
+    assert_eq!(full.rows.len(), 4);
+    let limited_query = format!("{query_text} LIMIT 3");
+    let limited = query(&graph, &limited_query).unwrap();
+    assert_eq!(limited.rows, full.rows[..3]);
+    let trace = sparq_engine::explain_analyze(&graph, &limited_query).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "multivalued probe must execute the fallback: {trace}");
+}
+
 /// One synthetic pending task: `(seq, priority)`. `seq` doubles as a stable,
 /// unique task identifier so results can be checked by task number.
 fn build_graph(peer: &str, tasks: &[(i64, i64)], extra_ttl: &str) -> Graph {

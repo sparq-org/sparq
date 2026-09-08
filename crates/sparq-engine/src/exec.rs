@@ -3211,8 +3211,11 @@ fn try_topk_orderby(
 /// declines (`Ok(None)`) even though continuing would still be CORRECT, because
 /// past that point this function's per-candidate cost stops being cheaper than
 /// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
-/// the function's only failure mode "sometimes it doesn't help," never
-/// "sometimes it's slower than doing nothing."
+/// the walk bounded, but setup and failed probes still precede a decline.
+///
+/// [GPT-6 Astra] Recovery-stage restriction: budgeted queries, repeated variables
+/// and multi-valued probes use the existing evaluator. The historical timing notes
+/// below are unverified on current main; this candidate establishes no speedup.
 fn try_topk_orderby_indexed(
     graph: &Graph,
     local: &mut LocalVocab,
@@ -3222,6 +3225,11 @@ fn try_topk_orderby_indexed(
 ) -> Result<Option<Bindings>, String> {
     #[cfg(feature = "zk")]
     if crate::zk::enabled() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] Preserve the existing evaluator's intermediate row/byte
+    // accounting and cooperative cancellation schedule before doing any new work.
+    if budget::active() {
         return Ok(None);
     }
     if view::default_is_empty() {
@@ -3241,6 +3249,11 @@ fn try_topk_orderby_indexed(
     let mut filters = Vec::new();
     flatten_conjunction(ord_inner, &mut patterns, &mut filters);
     if !filters.is_empty() || patterns.is_empty() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] prepare_pattern records repeated slots but does not enforce
+    // their equality. Reuse the existing fast-path guard before bypassing build_row.
+    if patterns.iter().any(has_intra_triple_repeated_var) {
         return Ok(None);
     }
     // Out of scope for this first cut: blank nodes are treated as synthetic
@@ -3517,16 +3530,9 @@ fn try_topk_orderby_indexed(
             let spo = scan.to_spo(&rows[logical(i)]);
             let hub_id = spo[0];
             let order_id = spo[2];
-            // FAST PATH: assume single-valued (the realistic schema shape — a
-            // task has exactly one status/priority/seq), building ONE row with
-            // no heap allocation beyond the SmallVec's inline capacity. Only a
-            // genuinely multi-valued predicate (rare) allocates, and only then
-            // — this is what the earlier `Vec<SmallVec>`-per-candidate
-            // cartesian machinery paid unconditionally, which (combined with
-            // the per-candidate `cols` rebuild) was the dominant remaining
-            // cost for a large tie-group after the binary-search fix alone.
+            // [GPT-6 Astra] Only single-valued probes are admitted in this slice.
+            // General Cartesian expansion remains with the existing evaluator.
             let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
-            let mut fanout: Option<Vec<SmallVec<[Id; 8]>>> = None;
             let mut failed = false;
             for op in &other_pats {
                 // Binary-search the PRECOMPUTED, plain-`Id` subject list for
@@ -3545,27 +3551,10 @@ fn try_topk_orderby_indexed(
                 };
                 let op_rows: &[[Id; 3]] = op.scan.rows.as_ref();
                 let match_count = stop - start;
-                if let Some(rows_so_far) = fanout.as_mut() {
-                    let mut next = Vec::with_capacity(rows_so_far.len() * match_count);
-                    for r in rows_so_far.iter() {
-                        for row in &op_rows[start..stop] {
-                            let mut nr = r.clone();
-                            nr.push(op.scan.to_spo(row)[2]);
-                            next.push(nr);
-                        }
-                    }
-                    *rows_so_far = next;
-                } else if match_count == 1 {
-                    row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
-                } else {
-                    let mut next = Vec::with_capacity(match_count);
-                    for row in &op_rows[start..stop] {
-                        let mut nr = row_ids.clone();
-                        nr.push(op.scan.to_spo(row)[2]);
-                        next.push(nr);
-                    }
-                    fanout = Some(next);
+                if match_count != 1 {
+                    return Ok(None);
                 }
+                row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
             }
             if failed {
                 failed_count += 1;
@@ -3574,14 +3563,7 @@ fn try_topk_orderby_indexed(
                 }
                 continue;
             }
-            match &fanout {
-                None => emit(&row_ids, &mut collected),
-                Some(rows) => {
-                    for r in rows {
-                        emit(r, &mut collected);
-                    }
-                }
-            }
+            emit(&row_ids, &mut collected);
         }
         visited_to = end;
         if collected.len() >= row_budget {
