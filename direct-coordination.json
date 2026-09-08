@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T09:37:33.984701+00:00",
+  "updated_at": "2026-09-08T09:49:11.504804+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -105,6 +105,16 @@
       "F3": "Public tie-order/pagination documentation before admission; no stable tie order guaranteed.",
       "F4": "Explicit execution trace instead of absence-of-BGP inference before admission.",
       "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
+    },
+    "benchmark_status": {
+      "observed_at": "2026-09-08T09:49:11.504804+00:00",
+      "agent_report": "Harness/registration committed on separate bench branch; frozen9e8bdfc9 untouched. Optimized offline build compiling with two jobs under original900sec deadline. Exact repo lockfile dependency versions verified; no installs. Timing/counting binaries separate; Rayon1; eight fixture points including base/overlay/favorable/adverse. Requested-heap query-window peaks and cumulative setup/pre/post RSS reported with limits.",
+      "harness_commit": "3ef21cb57a5bf6db7561a83b27bd6a38875d7b35",
+      "build_start": {
+        "started_unix": 1788860716.937938,
+        "budget_seconds": 900
+      },
+      "evidence_directory": "direct-5983/diagnostic"
     }
   },
   "prs": {
@@ -461,7 +471,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T09:37:33.984701+00:00",
+    "observed_at": "2026-09-08T09:49:11.504804+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
