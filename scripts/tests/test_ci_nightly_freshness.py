@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 import yaml
 
@@ -54,15 +55,22 @@ def skipped_jobs():
 
 
 class FakeAPI:
-    def __init__(self, runs=None, jobs=None, history=None):
+    def __init__(self, runs=None, jobs=None, history=None, active=None):
         self.history = history if history is not None else {
             "total_count": len(runs or []), "workflow_runs": runs or []}
         self.jobs = jobs if jobs is not None else {999: completed_jobs()}
         self.calls = []
+        self.active = active or {}
 
     def __call__(self, endpoint):
         self.calls.append(endpoint)
         if "/workflows/" in endpoint:
+            status = parse_qs(urlsplit(endpoint).query).get("status")
+            if status:
+                result = self.active.get(status[0], {"total_count": 0, "workflow_runs": []})
+                if isinstance(result, Exception):
+                    raise result
+                return copy.deepcopy(result)
             return copy.deepcopy(self.history)
         parts = endpoint.split("/")
         run_id = int(parts[5])
@@ -241,17 +249,68 @@ class Admission(unittest.TestCase):
                 self.blocked(lambda endpoint: ({"total_count": 1, "workflow_runs": [run()]}
                                                if "/workflows/" in endpoint else doc))
 
-    def test_skipped_history_budget_is_bounded(self):
+    def aged_out_api(self, active=None):
         runs = [run(999 - i) for i in range(freshness.HISTORY_LIMIT)]
         jobs = {}
         for item in runs:
             jobs[item["id"]] = skipped_jobs()
             for entry in jobs[item["id"]]:
                 entry["run_id"] = item["id"]
-        api = FakeAPI(runs, jobs)
+        api = FakeAPI(runs, jobs, active=active)
         api.history["total_count"] = 100
-        self.blocked(api, "history budget")
-        self.assertEqual(len(api.calls), 1 + freshness.HISTORY_LIMIT)
+        return api
+
+    def test_aged_out_proof_allows_bounded_periodic_measurement(self):
+        api = self.aged_out_api()
+        self.assertTrue(self.decide(api)[0])
+        self.assertEqual(len(api.calls), 16)
+        statuses = [parse_qs(urlsplit(call).query)["status"][0] for call in api.calls[-5:]]
+        self.assertEqual(statuses, ["queued", "in_progress", "waiting", "requested", "pending"])
+        self.assertTrue(all("per_page=2" in call and "head_sha=" + HEAD in call
+                            and "event=schedule" in call for call in api.calls[-5:]))
+
+    def test_active_run_older_than_window_blocks_every_supported_status(self):
+        for status in ["queued", "in_progress", "waiting", "requested", "pending"]:
+            with self.subTest(status=status):
+                other = run(50, status=status, conclusion=None)
+                api = self.aged_out_api({status: {"total_count": 1, "workflow_runs": [other]}})
+                self.blocked(api, "another same-head schedule is active")
+                self.assertLessEqual(len(api.calls), 16)
+
+    def test_census_api_failure_stops_without_retry(self):
+        api = self.aged_out_api({"queued": freshness.EvidenceError("API rate limit exceeded")})
+        self.blocked(api, "rate limit")
+        self.assertEqual(len(api.calls), 12)
+
+    def test_census_malformed_truncated_unknown_rows_block(self):
+        current = run(CURRENT, status="queued", conclusion=None)
+        for doc in [None, {}, {"total_count": True, "workflow_runs": []},
+                    {"total_count": 3, "workflow_runs": []}, {"total_count": 1, "workflow_runs": []},
+                    {"total_count": 2, "workflow_runs": [current, current]},
+                    {"total_count": 1, "workflow_runs": [run(CURRENT, status="unknown", conclusion=None)]},
+                    {"total_count": 1, "workflow_runs": [dict(current, head_sha="b" * 40)]},
+                    {"total_count": 1, "workflow_runs": [dict(current, conclusion="success")]}]:
+            with self.subTest(doc=doc):
+                api = self.aged_out_api({"queued": doc})
+                self.blocked(api, "census")
+                self.assertEqual(len(api.calls), 12)
+
+    def test_census_excludes_only_current_run(self):
+        current = run(CURRENT, status="queued", conclusion=None)
+        api = self.aged_out_api({"queued": {"total_count": 1, "workflow_runs": [current]}})
+        freshness.ensure_no_active(api, REPO, HEAD, CURRENT)
+        self.assertEqual(len(api.calls), 5)
+        api.calls.clear()
+        self.assertTrue(self.decide(api)[0])
+        self.assertEqual(len(api.calls), 16)
+
+    def test_truncated_incomplete_history_also_checks_older_activity(self):
+        other = run(50, status="queued", conclusion=None)
+        api = self.aged_out_api({"queued": {"total_count": 1, "workflow_runs": [other]}})
+        api.jobs[999] = completed_jobs()
+        api.jobs[999][-1]["steps"] = []
+        self.blocked(api, "another same-head schedule is active")
+        self.assertEqual(len(api.calls), 3)
 
     def test_api_failure_json_and_timeout_each_make_one_read(self):
         failures = [subprocess.CompletedProcess([], 1, "", "API rate limit exceeded"),
@@ -330,6 +389,8 @@ class ProductionWiring(unittest.TestCase):
         self.assertEqual(self.jobs["coverage-nightly"]["timeout-minutes"], 60)
         self.assertEqual((freshness.HISTORY_LIMIT, freshness.JOB_PAGE_SIZE, freshness.JOB_PAGE_LIMIT),
                          (10, 100, 2))
+        self.assertEqual(freshness.ACTIVE_STATUSES,
+                         ("queued", "in_progress", "waiting", "requested", "pending"))
 
     def test_expected_matrix_count_matches_live_expansion(self):
         matrix = self.mutation["strategy"]["matrix"]

@@ -4,8 +4,9 @@
 Only scheduled ci.yml runs on main are evidence. A successful workflow with skipped
 heavy jobs is NOT evidence; follow it back to real work within the fixed read budget.
 Incomplete work remains eligible at the next ordinary schedule; there is no rerun API
-or retry loop. Unreadable evidence and exhausted history block admission. Manual
-dispatch remains an explicit force and makes no history requests.
+or retry loop. Unreadable evidence blocks admission. If proof ages out of the read
+window, a bounded active-run census permits periodic remeasurement. Manual dispatch
+remains an explicit force and makes no history requests.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ COVERAGE = "coverage (nightly, full incl. heavy vectors)"
 COVERAGE_STEP = "Measure + enforce per-crate coverage (FULL tier, max-remeasure gate)"
 MUTATION = "mutation ratchet (cargo-mutants, advisory)"
 MUTATION_STEP = "Nightly mutation work completed"
+# [GPT-6 Astra] All non-completed statuses supported by the workflow-runs API.
+ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 
 
 class EvidenceError(Exception):
@@ -74,6 +77,40 @@ def gh_json(endpoint):
         return json.loads(result.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         raise EvidenceError("GitHub evidence unavailable or unreadable; no retry") from exc
+
+
+def nightly_identity(run, repo, head):
+    return (isinstance(run, dict) and positive_int(run.get("id"))
+            and positive_int(run.get("run_attempt")) and run.get("event") == "schedule"
+            and run.get("head_sha") == head and run.get("head_branch") == "main"
+            and run.get("path") == ".github/workflows/ci.yml"
+            and isinstance(run.get("repository"), dict)
+            and run["repository"].get("full_name") == repo)
+
+
+def ensure_no_active(get, repo, head, current_id):
+    """Five GETs maximum, no pagination/retries. Check beyond the history window.
+
+    Two rows suffice: the current run and any competing run. Larger, malformed,
+    filtered-status-mismatched or incomplete inventories cannot authorize work.
+    """
+    for status in ACTIVE_STATUSES:
+        query = urlencode({"event": "schedule", "head_sha": head,
+                           "status": status, "per_page": 2})
+        doc = get(f"repos/{repo}/actions/workflows/ci.yml/runs?{query}")
+        if (not isinstance(doc, dict) or type(doc.get("total_count")) is not int
+                or not isinstance(doc.get("workflow_runs"), list)
+                or not 0 <= doc["total_count"] <= 2
+                or len(doc["workflow_runs"]) != doc["total_count"]):
+            raise EvidenceError("active-run census malformed or truncated")
+        seen = set()
+        for run in doc["workflow_runs"]:
+            if (not nightly_identity(run, repo, head) or run["id"] in seen
+                    or run.get("status") != status or run.get("conclusion") is not None):
+                raise EvidenceError("active-run census identity or status unreadable")
+            seen.add(run["id"])
+            if run["id"] != current_id:
+                raise EvidenceError("another same-head schedule is active")
 
 
 def read_jobs(get, repo, run):
@@ -158,13 +195,7 @@ def decide(event, repo, head, current_id, get=gh_json):
         raise EvidenceError("truncated scheduled history")
     seen = set()
     for run in runs:
-        if (not isinstance(run, dict) or not positive_int(run.get("id"))
-                or run["id"] in seen or not positive_int(run.get("run_attempt"))
-                or run.get("event") != "schedule" or run.get("head_sha") != head
-                or run.get("head_branch") != "main"
-                or run.get("path") != ".github/workflows/ci.yml"
-                or not isinstance(run.get("repository"), dict)
-                or run.get("repository", {}).get("full_name") != repo):
+        if not nightly_identity(run, repo, head) or run["id"] in seen:
             raise EvidenceError("scheduled history identity mismatch")
         seen.add(run["id"])
     # [GPT-6 Astra] Run IDs order creation, not the update time of an old rerun.
@@ -182,9 +213,12 @@ def decide(event, repo, head, current_id, get=gh_json):
         if state == "complete":
             return False, f"heavy completion verified in run {run['id']} attempt {run['run_attempt']}"
         if state == "incomplete":
+            if doc["total_count"] > HISTORY_LIMIT:
+                ensure_no_active(get, repo, head, current_id)
             return True, f"heavy work incomplete in run {run['id']}; admit this ordinary schedule"
     if doc["total_count"] > HISTORY_LIMIT:
-        raise EvidenceError("no completion proof within the history budget")
+        ensure_no_active(get, repo, head, current_id)
+        return True, "completion proof aged out; admit periodic measurement on this ordinary schedule"
     if prior:
         return True, "only skipped follow-ups exist; this schedule must perform the heavy work"
     return True, "no prior same-head schedule; admit its first heavy attempt"
