@@ -1507,6 +1507,38 @@ class ActionsRerunFixture:
         return self.m.StuckArmSweeper("sparq-org/sparq", "main", gh=self,
             log=self.logs.append, now=lambda: self.clock)
 
+    def history_comments(self, query):
+        # [GPT-6 Astra] #6462: model the field-only Actor/Bot selection used here,
+        # not a general GraphQL parser. These fields were checked by live schema
+        # introspection; fixtures must not return an unrequested authenticated id.
+        actor_fields = {"avatarUrl", "login", "resourcePath", "url", "__typename"}
+        bot_fields = actor_fields | {"createdAt", "databaseId", "id", "updatedAt"}
+        start = query.index("{", query.index("author")) + 1
+        depth, end = 1, start
+        while depth:
+            char = query[end]
+            depth += (char == "{") - (char == "}")
+            end += 1
+        selection = query[start:end - 1]
+        fragment = r"\.\.\.\s+on\s+(\w+)\s*\{([^{}]*)\}"
+        fragments = re.findall(fragment, selection)
+        common = set(re.sub(fragment, "", selection).split())
+        if common - actor_fields:
+            raise self.m.GhError("Field does not exist on type Actor")
+        for kind, fields in fragments:
+            if kind != "Bot" or set(fields.split()) - bot_fields:
+                raise self.m.GhError("Unsupported concrete actor selection")
+        comments = copy.deepcopy(self.comments)
+        for comment in comments:
+            author = comment.get("author")
+            if isinstance(author, dict):
+                selected = common.copy()
+                for kind, fields in fragments:
+                    if author.get("__typename") == kind:
+                        selected.update(fields.split())
+                comment["author"] = {key: value for key, value in author.items() if key in selected}
+        return comments
+
     def __call__(self, argv):
         self.calls.append(list(argv))
         if argv[:2] == ["pr", "list"]:
@@ -1518,7 +1550,8 @@ class ActionsRerunFixture:
             if "viewer{" in query:
                 return json.dumps({"data": {"viewer": self.viewer, "repository": {"pullRequest": {
                     "comments": {"totalCount": len(self.comments) + self.history_extra,
-                        "pageInfo": {"hasPreviousPage": self.history_truncated}, "nodes": self.comments}}}}})
+                        "pageInfo": {"hasPreviousPage": self.history_truncated},
+                        "nodes": self.history_comments(query)}}}}})
             return json.dumps({"data": {"repository": {"pullRequest": self.raw}}})
         if argv[:3] == ["api", "-X", "POST"]:
             if argv[3].endswith("/comments"):
@@ -1586,6 +1619,21 @@ class TestCancelledActionsRecovery(unittest.TestCase):
         claim = self.m.parse_rerun_claim(self.f.comments[0]["body"])
         self.assertEqual((claim["check"], claim["job"], claim["run"], claim["attempt"]), (101, 202, 303, 1))
         self.assertFalse(any("/rerequest" in arg for call in self.f.calls for arg in call))
+
+    def test_actor_id_selection_is_rejected_before_any_mutation(self):
+        # Keep an invalid direct selection realistic even when its field is last.
+        bad = self.m.RERUN_HISTORY_QUERY.replace("... on Bot{id}", "id")
+        self.assertNotEqual(bad, self.m.RERUN_HISTORY_QUERY)
+        with patch.object(self.m, "RERUN_HISTORY_QUERY", bad):
+            self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_unrequested_bot_id_cannot_authenticate_posted_claim(self):
+        missing_id = self.m.RERUN_HISTORY_QUERY.replace("... on Bot{id}", "")
+        self.assertNotEqual(missing_id, self.m.RERUN_HISTORY_QUERY)
+        with patch.object(self.m, "RERUN_HISTORY_QUERY", missing_id):
+            self.denied()
+        self.assertEqual(len(self.f.posts()), 1)  # Claim only; no Actions rerun.
 
     def test_fallback_identity_is_refused_before_any_claim_or_rerun(self):
         # [GPT-6 Astra] Opus B1: valid bot metadata cannot grant the explicitly
