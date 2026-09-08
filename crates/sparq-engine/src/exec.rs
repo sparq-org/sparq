@@ -3348,7 +3348,7 @@ fn try_topk_orderby_indexed(
         }
     }
 
-    // Prepare the other patterns ONCE, each as a SUBJECT-sorted scan over its
+    // Prepare the other patterns ONCE ON DEMAND, each as a SUBJECT-sorted scan over its
     // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
     // The first cut of this function called `graph.store.scan(&probe_pat)`
     // fresh for every (candidate, other-pattern) pair, which re-runs
@@ -3359,7 +3359,7 @@ fn try_topk_orderby_indexed(
     // fallback's bulk merge-join (which resolves the permutation ONCE per
     // pattern, not once per row). Resolving it once here and binary-searching
     // the resulting sorted slice per candidate removes that repeated cost.
-    struct OtherPat<'g> {
+    struct OtherScan<'g> {
         scan: sparq_core::store::Scan<'g>,
         // Precomputed ONCE (not per candidate, not per binary-search
         // comparison step): the subject id of every row in `scan`, in the
@@ -3372,7 +3372,34 @@ fn try_topk_orderby_indexed(
         // full [S,P,O] triple just to read column 0 is wasted work when the
         // search only ever needs that one column.
         subject_ids: Vec<Id>,
+    }
+    // [GPT-6 Astra] Resolve metadata eagerly, but retain a scan/vector only when
+    // a candidate reaches this pattern in the original order. A failed constant
+    // prefix therefore does not prepare later variable probes that it never uses.
+    struct OtherPat<'g> {
+        id_pat: IdPattern,
         obj_var: Option<Variable>,
+        prepared: Option<OtherScan<'g>>,
+    }
+    fn prepare_other<'g>(graph: &'g Graph, op: &mut OtherPat<'g>, seed_card: usize) -> bool {
+        if op.prepared.is_some() {
+            return true;
+        }
+        let sub_scan = graph.store.scan_sorted(&op.id_pat, 0);
+        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| op.id_pat[c].is_none());
+        if sub_actual_sort != Some(0) {
+            return false;
+        }
+        // The original exact-cardinality admission rule still applies to EVERY
+        // probe before it can contribute to a row, including a late selective one.
+        if sub_scan.rows.len().saturating_mul(2) < seed_card {
+            return false;
+        }
+        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
+        #[cfg(test)]
+        indexed_topk_preparation_tests::observe(subject_ids.len());
+        op.prepared = Some(OtherScan { scan: sub_scan, subject_ids });
+        true
     }
     let mut other_pats: Vec<OtherPat> = Vec::with_capacity(patterns.len().saturating_sub(1));
     for (i, tp) in patterns.iter().enumerate() {
@@ -3385,43 +3412,17 @@ fn try_topk_orderby_indexed(
             // WHOLE conjunction empty (a BGP join against an empty relation).
             return Ok(Some(Bindings::unsorted(out_vars, vec![])));
         }
-        let probe_id_pat: IdPattern = [None, id_pat[1], id_pat[2]];
-        let sub_scan = graph.store.scan_sorted(&probe_id_pat, 0);
-        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| probe_id_pat[c].is_none());
-        if sub_actual_sort != Some(0) {
-            // This store build can't give a subject-sorted scan for this
-            // pattern (e.g. no PSO permutation under `compact-index`/wasm) —
-            // decline rather than binary-search an unsorted range.
-            return Ok(None);
-        }
-        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
-        other_pats.push(OtherPat { scan: sub_scan, subject_ids, obj_var: pos_vars[2].clone() });
+        other_pats.push(OtherPat {
+            id_pat: [None, id_pat[1], id_pat[2]],
+            obj_var: pos_vars[2].clone(),
+            prepared: None,
+        });
     }
 
-    // UPFRONT cost check, before touching a single candidate: each `other_pats`
-    // scan's row count is the EXACT (not estimated) global cardinality of that
-    // pattern's own (predicate [+ object]) constraint. If any of them is
-    // already meaningfully smaller than the seed's own scan (`rows.len()`),
-    // the fallback's ordinary smallest-estimate seed selection will pick THAT
-    // pattern as ITS seed and materialize only that small set — beating this
-    // function's priority-ordered walk outright, with no reason to compete.
-    //
-    // This is exactly the realistic "claim strictly in priority order" shape:
-    // as such a queue drains, `ak:status="pending"` becomes highly selective
-    // while THIS function's seed (`ak:priority`, spanning the whole pool
-    // including now-claimed rows) does not shrink at all. Without this check,
-    // the only way to discover that is by actually walking past the
-    // ever-growing already-claimed prefix, probing (and rejecting) each one —
-    // real, wasted, unrecoverable cost. Measured directly: at n=1600 with
-    // 1000 of 1600 already claimed (600 truly pending), that reactive
-    // discovery cost ~237-272us total (wasted probes + the fallback anyway)
-    // vs. this upfront check's ~172-180us (matches a clean fallback-only
-    // cost, because it declines before doing ANY per-candidate work).
-    let seed_card = rows.len();
-    let min_other_card = other_pats.iter().map(|op| op.scan.rows.len()).min().unwrap_or(seed_card);
-    if min_other_card.saturating_mul(2) < seed_card {
-        return Ok(None);
-    }
+    // [GPT-6 Astra] The previous global min-cardinality check is now applied
+    // by prepare_other to each exact scan count before that probe is used. A
+    // successful row must visit every pattern, so it passes the same admission
+    // rule. Unvisited patterns stay unproved and cannot authorize an empty result.
 
     // The output column list is FIXED across every candidate (hub, order, then
     // each other pattern's object variable, in pattern order) — compute it and
@@ -3494,10 +3495,10 @@ fn try_topk_orderby_indexed(
     // being rejected. That prefix is made of individually DISTINCT priority
     // values, so it never forms one oversized tie-group `max_group` would
     // catch; it spreads across many small geometric-growth blocks instead. The
-    // UPFRONT cost check above (comparing `other_pats`' exact cardinalities to
+    // per-pattern cost check (comparing exact scan cardinalities to
     // the seed's) already declines the CLEAR case — an other-pattern that's
     // globally selective enough for the fallback's own planner to prefer as
-    // ITS seed — before any candidate is even touched. This counter is a
+    // ITS seed — before that probe is used. This counter is a
     // SAFETY NET for what that check can't see: the seed's global cardinality
     // vs. an other-pattern's global cardinality doesn't capture every
     // possible skip-prefix shape (e.g. a correlation between scan order and
@@ -3545,14 +3546,18 @@ fn try_topk_orderby_indexed(
             // General Cartesian expansion remains with the existing evaluator.
             let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
             let mut failed = false;
-            for op in &other_pats {
+            for op in &mut other_pats {
+                if !prepare_other(graph, op, rows.len()) {
+                    return Ok(None);
+                }
+                let prepared = op.prepared.as_ref().expect("successful preparation");
                 // Binary-search the PRECOMPUTED, plain-`Id` subject list for
                 // this pattern (built once, above) — a trivial integer
                 // compare per step, no `to_spo` reconstruction during the
                 // search itself (that only happens below, per ACTUAL match,
                 // not per comparison step — see `subject_ids`'s doc comment).
-                let start = op.subject_ids.partition_point(|&id| id < hub_id);
-                let stop = start + op.subject_ids[start..].partition_point(|&id| id == hub_id);
+                let start = prepared.subject_ids.partition_point(|&id| id < hub_id);
+                let stop = start + prepared.subject_ids[start..].partition_point(|&id| id == hub_id);
                 if start == stop {
                     failed = true;
                     break;
@@ -3560,12 +3565,12 @@ fn try_topk_orderby_indexed(
                 let Some(_) = &op.obj_var else {
                     continue; // `obj_const` — existence-only, no column added
                 };
-                let op_rows: &[[Id; 3]] = op.scan.rows.as_ref();
+                let op_rows: &[[Id; 3]] = prepared.scan.rows.as_ref();
                 let match_count = stop - start;
                 if match_count != 1 {
                     return Ok(None);
                 }
-                row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
+                row_ids.push(prepared.scan.to_spo(&op_rows[start])[2]);
             }
             if failed {
                 failed_count += 1;
@@ -3583,10 +3588,81 @@ fn try_topk_orderby_indexed(
         block_target = block_target.saturating_mul(4).max(visited_to + 1);
     }
 
+    // [GPT-6 Astra] An empty walk may never visit later patterns. Preserve their
+    // unproved static-sort/cardinality exclusions through the existing fallback.
+    if other_pats.iter().any(|op| op.prepared.is_none()) {
+        return Ok(None);
+    }
     let mut result = Bindings { vars: out_vars, rows: collected, sorted_by: None };
     let use_topk = result.rows.len() > row_budget;
     order_bindings(graph, local, &mut result, expression, if use_topk { Some(row_budget) } else { None })?;
     Ok(Some(result))
+}
+
+// [GPT-6 Astra] Test-only observations pin retained preparation work, not timing.
+#[cfg(test)]
+mod indexed_topk_preparation_tests {
+    use sparq_core::Graph;
+    use std::cell::Cell;
+    use std::fmt::Write;
+
+    thread_local! { static PREPARED: Cell<(usize, usize)> = const { Cell::new((0, 0)) }; }
+    pub(super) fn observe(rows: usize) {
+        PREPARED.with(|c| { let (scans, ids) = c.get(); c.set((scans + 1, ids + rows)); });
+    }
+    const TEXT: &str = "SELECT ?s WHERE { ?s <urn:peer> <urn:X> ; <urn:status> \"pending\" ; <urn:priority> ?p ; <urn:seq> ?seq ; <urn:a> ?a ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p)";
+
+    fn graph(prefix: usize, overlay: bool, selective_last: bool) -> Graph {
+        let mut ttl = String::new();
+        for i in 0..4096 {
+            let status = if i < 4096 - prefix { "pending" } else { "done" };
+            writeln!(ttl, "<urn:s{i}> <urn:peer> <urn:X> ; <urn:status> \"{status}\" ; <urn:priority> {i} ; <urn:seq> {i} ; <urn:a> {i} ; <urn:b> {i} .").unwrap();
+            if !selective_last || i == 4095 { writeln!(ttl, "<urn:s{i}> <urn:c> {i} .").unwrap(); }
+        }
+        let base = Graph::load_str(&ttl, "turtle").unwrap();
+        if !overlay { return base; }
+        let mut changed = base.fork();
+        let mut deletes = String::from("DELETE DATA {");
+        for i in (0..4096).step_by(5) { writeln!(deletes, "<urn:s{i}> <urn:priority> {i} .").unwrap(); }
+        deletes.push('}');
+        crate::update_in_place(&mut changed, &deletes).unwrap();
+        assert_eq!(changed.pending_delta_len(), 820);
+        changed
+    }
+
+    #[test]
+    fn later_variable_preparation_is_avoided_before_block_decline() {
+        for overlay in [false, true] {
+            let g = graph(2047, overlay, false);
+            let full = crate::query(&g, TEXT).unwrap();
+            PREPARED.with(|c| c.set((0, 0)));
+            let got = crate::query(&g, &format!("{TEXT} LIMIT 1")).unwrap();
+            assert_eq!(got.rows, full.rows[..1]);
+            assert_eq!(PREPARED.with(Cell::get), (2, 4096 + 2049), "later variable scans/vectors must remain unprepared");
+        }
+    }
+
+    #[test]
+    fn successful_rows_prepare_each_probe_once() {
+        let g = graph(0, false, false);
+        for k in [1, 32] {
+            PREPARED.with(|c| c.set((0, 0)));
+            assert_eq!(crate::query(&g, &format!("{TEXT} LIMIT {k}")).unwrap().rows.len(), k);
+            let expected = if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) { (6, 6 * 4096) } else { (2, 2 * 4096) };
+            assert_eq!(PREPARED.with(Cell::get), expected);
+        }
+    }
+
+    #[test]
+    fn late_selective_probe_still_declines_before_emitting() {
+        let g = graph(0, false, true);
+        let full = crate::query(&g, TEXT).unwrap();
+        assert_eq!(full.rows.len(), 1);
+        let limited = format!("{TEXT} LIMIT 1");
+        assert_eq!(crate::query(&g, &limited).unwrap().rows, full.rows);
+        let trace = crate::explain_analyze(&g, &limited).unwrap();
+        assert!(trace.contains("BGP [binary GOO]"), "late cardinality guard must decline: {trace}");
+    }
 }
 
 /// [OPUS-4.8] (sq-7d3dj.30.4) Attempts the DISTINCT-projection loose skip-scan for the

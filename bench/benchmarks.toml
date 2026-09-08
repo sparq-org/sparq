@@ -2006,3 +2006,18 @@ pinning     = "fixture.ttl + select-all.rq + select-group.rq + expected.tsv comm
 records_to  = "stdout JSON or --json-out; loose/in-process scope is machine-labelled"
 status      = "implemented"
 featured    = false
+
+# [GPT-6 Astra] PR5983 / issue6465 local diagnostic, not a canonical score.
+[[benchmark]]
+id          = "indexed-topk-diagnostic"
+name        = "Indexed top-k whole-query resource diagnostic"
+category    = "query"
+measures    = "whole query latency in the uninstrumented build; successful allocation/reallocation operations, requested bytes and peak additional live requested bytes in a separate counting build; cumulative process RSS high-water marks after setup and around queries"
+invoke      = "cd bench/indexed-topk && cargo build --release --locked --offline && ./target/release/indexed-topk-diagnostic measure base 50000 1 2 7 indexed   # build separately with --features count-alloc for allocation windows; see README.md for the three-source protocol"
+source      = "bench/indexed-topk/src/{main.rs,counting.rs}; bench/indexed-topk/README.md"
+dataset     = "deterministic in-process seven-predicate stars; base, 20-percent tombstoned fork, just-under-half drained prefix, oversized primary-key tie group; independent total-order oracle"
+quiet_box_sensitive = true
+pinning     = "exact engine/core/harness source hashes, locked dependencies, identical default runtime features, System allocator, one Rayon thread; release opt3 without LTO; fresh process per case and measurement mode"
+records_to  = "stdout TSV: fixture dimensions, per-sample whole_query_ns or allocation counts/bytes, setup/pre/post max RSS, correctness; retain raw repetitions and variance; never merge into canonical perf baselines"
+featured    = false
+status      = "ok"  # runnable local diagnostic; no canonical score or admission claim

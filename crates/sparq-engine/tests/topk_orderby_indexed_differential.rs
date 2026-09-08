@@ -13,6 +13,52 @@ use sparq_engine::query;
 
 const PFX: &str = "PREFIX ak: <http://example.org/ak#>\n";
 
+// [GPT-6 Astra] Delayed preparation must preserve modest/intermittent misses,
+// original pattern order, complete key groups, and OFFSET in either direction.
+#[test]
+fn lazy_probes_preserve_miss_patterns_and_overlay_windows() {
+    use std::fmt::Write;
+    for desc in [false, true] {
+        for prefix in [128, 800, 0] {
+            let mut ttl = String::new();
+            for i in 0..2048 {
+                let rank = if desc { 2047 - i } else { i };
+                let pending = if prefix == 0 { rank % 8 != 0 } else { rank >= prefix };
+                let status = if pending { "pending" } else { "done" };
+                writeln!(ttl, "<urn:s{i}> <urn:p> {} ; <urn:status> \"{status}\" ; <urn:seq> {i} .", i / 3).unwrap();
+            }
+            let base = Graph::load_str(&ttl, "turtle").unwrap();
+            let mut changed = base.fork();
+            sparq_engine::update_in_place(&mut changed, "DELETE DATA { <urn:s1024> <urn:p> 341 . <urn:s1025> <urn:p> 341 . }; INSERT DATA { <urn:extra> <urn:p> 400 ; <urn:status> \"pending\" ; <urn:seq> 9999 . }").unwrap();
+            for graph in [&base, &changed] {
+                for variable_first in [false, true] {
+                    let other = if variable_first { "?s <urn:seq> ?seq ; <urn:status> \"pending\"" } else { "?s <urn:status> \"pending\" ; <urn:seq> ?seq" };
+                    let direction = if desc { "DESC" } else { "ASC" };
+                    let text = format!("SELECT ?s WHERE {{ ?s <urn:p> ?p . {other} }} ORDER BY {direction}(?p) DESC(?seq)");
+                    let full = query(graph, &text).unwrap();
+                    let limited = format!("{text} OFFSET 2 LIMIT 4");
+                    assert_eq!(query(graph, &limited).unwrap().rows, full.rows[2..6], "prefix={prefix}, desc={desc}, variable_first={variable_first}");
+                }
+            }
+        }
+    }
+}
+
+// [GPT-6 Astra] An all-rejected walk cannot silently waive unvisited exclusions.
+#[test]
+fn unvisited_lazy_probe_keeps_empty_result_on_fallback() {
+    use std::fmt::Write;
+    let mut ttl = String::new();
+    for i in 0..32 {
+        writeln!(ttl, "<urn:s{i}> <urn:p> {i} ; <urn:later> 1, 2 . <urn:foreign{i}> <urn:status> \"pending\" .").unwrap();
+    }
+    let graph = Graph::load_str(&ttl, "turtle").unwrap();
+    let text = "SELECT ?s WHERE { ?s <urn:p> ?p ; <urn:status> \"pending\" ; <urn:later> ?v } ORDER BY DESC(?p) LIMIT 1";
+    assert!(query(&graph, text).unwrap().rows.is_empty());
+    let trace = sparq_engine::explain_analyze(&graph, text).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "unvisited probe must not authorize indexed admission: {trace}");
+}
+
 // [GPT-6 Astra] A repeated variable must bind one term in both positions.
 // An IRI subject and an integer object can never satisfy this triple pattern.
 #[test]
