@@ -93,6 +93,16 @@ but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode.
 
+A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
+or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
+the group document — the group IRI without its fragment — is stored **on this pod**
+and lists the requester as `<group> vcard:hasMember <webid>`. Everything else is
+fail-closed and grants nothing: an anonymous request, a group document that is
+missing, malformed or silent about the requester, and a group IRI on another origin
+(the server resolves membership from its own storage and makes no outbound fetch).
+A group grant is per-requester, so it never appears in the `public=` audience of
+`WAC-Allow`.
+
 ## Serve provider WebIDs off the pod (optional)
 
 `SOLID_SERVER_IDENTITY_ENABLE=1` is **off by default**. When set, the server serves
