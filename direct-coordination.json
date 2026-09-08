@@ -1,0 +1,173 @@
+{
+  "schema_version": 2,
+  "updated_at": "2026-09-08T02:26:00Z",
+  "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
+  "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
+  "automation": {
+    "id": "monitor-sparq-pr-throughput",
+    "cadence_minutes": 10,
+    "active": true,
+    "quiet_when_unchanged": true
+  },
+  "constraints": [
+    "Implementation: actual GPT-6 Astra xhigh, never Sol; independent review/security/soundness: actual Claude Opus 5 xhigh.",
+    "Registry Actions and automatic dispatch stay OFF; no releases. One substantive implementation lane, bounded cheap checks.",
+    "Never bypass protections, force/admin merge, fabricate review:pass, cancel live merge-group/current review:pass evidence, or retry an exhausted GitHub budget.",
+    "Revalidate targets immediately before every mutation. Enqueue only via normal protected path with exact expectedHeadOid, jump=false.",
+    "Keep ALLGREEN until 6049 merged and forced-full merge_group invariant verified on main; then grouping-only full ruleset projection preserving gate integration 15368 and every other field.",
+    "Do not touch shared checkout or production/PSS/EC2. Only temporary6435 benchmark authorized, blocked on AWS sign-in. No instances created.",
+    "Pending approvals stay pending: no repeated requests, alternate-route retries or assuming elapsed time authorizes an action."
+  ],
+  "recovery": {
+    "observed_at": "2026-09-08T01:39:00Z",
+    "summary": "Following Codex usage outage, all three authorized tmp roots were missing; cause unverified. Shared repositories and Git metadata/commits survived.",
+    "restored": [
+      "/private/tmp/sparq-pr6049",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6437",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436"
+    ],
+    "missing": "Old scratch logs, review packet/result files and6435 benchmark bundle are gone; source Git objects and conversation/public review provenance survive. Do not claim lost artifacts exist.",
+    "issue6436": "Previously uncommitted four files reconstructed by original agent from retained apply_patch inputs, not byte-verified recovery. Newly committed9a8351ea41600a363c1fd1bba4bf8c02a3af4d49; fresh tests run.",
+    "git_backup_ref": "refs/heads/codex/coordinator-local-state",
+    "git_common_dir": "/Users/jesght/Documents/ChatGPT/sparq/upstream/.git",
+    "backup_private_local_only": true,
+    "do_not_prune": "Missing worktrees retain indexes/metadata; do not blindly prune/reset. Shared upstream checkout is codex/ac-sparql-paper at cf57bc209a26091dbd1de2f465642b6ced932f96; do not switch it.",
+    "usage": "Resumed after get_usage_limits reported available budget; no reset consumed/purchased. Do not retry exhausted model requests."
+  },
+  "live_main": {
+    "oid": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+    "pr": 6069,
+    "observed_at": "2026-09-08T02:23:00Z"
+  },
+  "rules": {
+    "required_check": "gate",
+    "integration_id": 15368,
+    "approvals": 0,
+    "resolve_all_threads": true,
+    "grouping": "ALLGREEN",
+    "squash": true
+  },
+  "admission_policy": "An independent GitHub account is not an extra direct-admission requirement. OWNER/MEMBER/COLLABORATOR noncontributor verdict restrictions govern automated label promotion. Actual independent Opus source review + green required CI + resolved threads permit direct protected queue admission. review:unreviewed is informational; review:needs is a real hold. Never write a fabricated canonical VERDICT:pass as jeswr.",
+  "active_lane": {
+    "agent": "/root/postmerge_ci",
+    "model": "GPT-6 Astra",
+    "effort": "xhigh",
+    "issue": 6436,
+    "branch": "codex/ci-heavy-nightly-freshness",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
+    "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
+    "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
+    "state": "Fresh36 tests/actionlint,88 wiring/19 reservation pass. Agent checking malformed step inventories fail-closed,18 calibrated controls, follow-up commit and whole-change Opus review packet. No PR or remote mutation yet.",
+    "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate."
+  },
+  "prs": {
+    "4300": {
+      "state": "DRAFT_NO_GO",
+      "notes": "2.6-9.1% slower in prior evidence; leave draft."
+    },
+    "4350": {
+      "state": "MERGED",
+      "merge_commit": "60e3f84c",
+      "merged_at": "2026-09-06T13:42:56Z"
+    },
+    "6049": {
+      "state": "OPEN_APPROVAL_BLOCKED",
+      "head": "93ed3cf1d8137e2237ea2256d7f96e1768894c1e",
+      "branch": "codex/throughput-slo",
+      "local_branch": "codex/pr6049-review-recovery",
+      "hold": "Auto-review rejected Approve&run for verdict-bridge34052150830 (workflow320944109). Explicit user approval pending. Do not retry via other API/UI/CLI, replace head to escape, forgive evidence, or remove RERUN_HELD_PRS6049.",
+      "review": "Actual Opus5 xhigh,212 tests. Required gate34052014105 failed only held verdict bridge.",
+      "review_comment": "https://github.com/sparq-org/sparq/pull/6049#issuecomment-5561339192"
+    },
+    "6055": {
+      "state": "OPEN_HELD",
+      "head": "50607e5f9d6b3fc68400918bfedf419330a91f73",
+      "branch": "codex/label-override-dispatch",
+      "hold": "review:needs manually applied by jeswr. Explicit user clearance pending; do not remove.",
+      "review": "Actual Opus5 xhigh approved_with_nits,408 tests9 controls. Required gate34063637672 passed historically; threads resolved.",
+      "review_comment": "https://github.com/sparq-org/sparq/pull/6055#issuecomment-5562572547",
+      "issue": 6081,
+      "notes": "Addresses, does not close broader zero-job criterion issue."
+    },
+    "6069": {
+      "state": "MERGED",
+      "merged_at": "2026-09-07T06:38:59Z",
+      "merge_commit": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+      "reviewed_head": "4cfa86dabfc0e63b0e402b4ef7615b7be7c2ae95",
+      "issue": 6080,
+      "source_verified": "All5 reviewed files byte-identical on current main, freshly verified Sep8.",
+      "review_comment": "https://github.com/sparq-org/sparq/pull/6069#issuecomment-5562944741",
+      "review": "Actual Opus5 xhigh approve_with_nits,219 focused tests,5 publisher+3 CI binding controls. Historical artifact files lost.",
+      "notes": "Coalesces ordinary PR/main bench runs; labels/manual/nightly isolated, no merge_group trigger. Bounded verified NFF retry only. No measured runner/latency savings claimed."
+    },
+    "6238": {
+      "state": "REQUIRES_REASSESSMENT",
+      "notes": "Legacy Sol routing conflicts with user Astra preference; do not adopt blindly."
+    },
+    "6435": {
+      "state": "DRAFT_BENCH_BLOCKED",
+      "head": "f90aeb799d8c00e7a3555df6aafa722947555d87",
+      "branch": "codex/sparql-bind-join-ranges",
+      "hold": "Temporary remote benchmark authorized but AWS sign-in returned400; no resources created. Benchmark bundle lost in tmp; regenerate from committed code if access resumes.",
+      "notes": "Allocation reduction/WASM shrink verified historically; possible1-2% latency cost, peak live unchanged. No speed/neutrality claim. Opus qualified approval awaits benchmark."
+    },
+    "6439": {
+      "state": "MERGED",
+      "merge_commit": "e44b08c59aea0755cfda1cbf633e25971db787f7",
+      "reviewed_head": "8ca8026bf2b3942759d7615198ffbd5e98c3d875",
+      "issue": 6438,
+      "review": "Actual Opus5 xhigh,76 tests20 controls. issue6438 closed.",
+      "notes": "Verified Actions-job rerun for cancelled gate instead of foreign App Checks. Keep RERUN_HELD_PRS6049."
+    },
+    "6448": {
+      "state": "OPEN_QUEUED",
+      "head": "54dd9e912195658b89658394a3ee31a68c208a77",
+      "branch": "codex/ci-reporter-cap-recovery",
+      "issue": 6437,
+      "queue_position": 1,
+      "queue_state": "AWAITING_CHECKS",
+      "queue_head": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+      "required_gate": {
+        "run": 34084939013,
+        "conclusion": "success"
+      },
+      "review": "Actual Opus5 xhigh full005b8c62627abac9251c206bf46b57a6323ec808 review plus focused final54dd delta; both approve_with_nits, no blockers. Actual modelUsage verified.209 tests pass, bounded negative controls calibrated. Old local packets lost; provenance in conversation and PR body.",
+      "full_packet_sha256": "acfdca334c8c49cee138e0be57e91069857a65ccc9ef331fa0f81a8a5d55e3d7",
+      "delta_packet_sha256": "cf00a1a45def7eb95569364b0c52ca190ba549679c6dfd517505abd9608d209a",
+      "threads": "Both Copilot diagnostic wording threads answered with accepted Opus tradeoff and resolved; no source changes. Replies3953741020/3953741245.",
+      "source_hashes": {
+        "scripts/ci_summary_gate.py": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+        "scripts/tests/test_ci_summary_gate.py": "40b46720c8379ae9410d8df1b52e5aa19de49b87775eec711b6b427993b93d7a"
+      },
+      "notes": "Cached grace permits reobservation only, never cached PASS. Recognized quota errors fatal no retries; no header/numeric quota parser or pagination amplification claim."
+    }
+  },
+  "registry": {
+    "repo": "jeswr/agent-account-registry",
+    "actions_enabled": false,
+    "observed_at": "2026-09-08T02:09:00Z",
+    "dispatch": "OFF",
+    "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
+    "pr2305": {
+      "head": "6cb54981f44c98a78c91904ed9eb6ba493438925",
+      "state": "TEST_ONLY_CI_APPROVAL_PENDING",
+      "review": "Actual Opus,127 tests5 controls",
+      "hold": "Required gate absent while global Actions OFF. User question for gate-only CI pending, no answer. If authorized: globalOFF inventory/disable all nongate incl dynamic Copilot324900308 before enabling only gate315366433. No bypass."
+    }
+  },
+  "sweeper_health": {
+    "observed_at": "2026-09-08T02:24:00Z",
+    "repaired_code_scheduled": true,
+    "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
+    "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
+    "next": "Deduplicate/open confirmed GraphQL Actor.id issue; after6436 lane finish fix RERUN_HISTORY_QUERY with concrete Bot fragment preserving authenticated node-id/login binding and no effect on6049 hold."
+  },
+  "next_actions": [
+    "Finish6436 controls, inspect full change and obtain one actual Opus5 xhigh independent review; no duplicate agent/model sessions.",
+    "Watch6448 protected queue and exact merge_group gate; advance/close6437 only on actual merge. Never cancel its evidence.",
+    "Open confirmed sweeper Actor.id schema defect after dedupe; fix next with schema-realistic regression coverage and actual Opus review.",
+    "Confirm issue6080 closed, safely reap own clean merged6069 worktree after preserving checkpoint.",
+    "Retain pending6049,6055,registry test-onlyCI and6435 access holds. No releases."
+  ]
+}

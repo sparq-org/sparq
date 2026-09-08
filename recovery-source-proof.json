@@ -1,0 +1,26 @@
+{
+  "head6448": "54dd9e912195658b89658394a3ee31a68c208a77",
+  "source_hashes": {
+    "scripts/ci_summary_gate.py": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+    "scripts/tests/test_ci_summary_gate.py": "40b46720c8379ae9410d8df1b52e5aa19de49b87775eec711b6b427993b93d7a"
+  },
+  "main": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+  "base": "543d945983b94cff694583716e2a026c2cc919a9",
+  "intervening_main_files": [
+    ".github/workflows/bench.yml",
+    ".github/workflows/docs-quality.yml",
+    ".github/workflows/rearm-sweeper.yml",
+    "docs/branch-protection.md",
+    "scripts/rearm-sweeper.py",
+    "scripts/tests/test_arm_capability_wiring.py",
+    "scripts/tests/test_bench_dashboard_publish.py",
+    "scripts/tests/test_ci_select_wiring.py"
+  ],
+  "verified6069_files": [
+    ".github/workflows/bench.yml",
+    ".github/workflows/docs-quality.yml",
+    "docs/branch-protection.md",
+    "scripts/tests/test_bench_dashboard_publish.py",
+    "scripts/tests/test_ci_select_wiring.py"
+  ]
+}
