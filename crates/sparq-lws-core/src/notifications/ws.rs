@@ -4,11 +4,15 @@
 //! Route layout (mounted by [`crate::app::build_router`]):
 //! - `POST /.notifications/WebSocketChannel2023/`  — subscribe; returns a channel description with a
 //!   `receiveFrom` `ws(s)://` URL that carries a minted receive token. **Auth-gated** (behind the
-//!   DPoP middleware — fail-closed); the token binds receive to the authenticated subscriber+topic.
+//!   DPoP middleware — fail-closed) **and WAC-gated** (the subscriber must hold `acl:Read` on the
+//!   topic, `acl:Control` for an `.acl`); the token binds receive to the authenticated
+//!   subscriber+topic.
 //! - `GET  /.notifications/WebSocketChannel2023/receive?topic=<iri>&token=<tok>` — upgrade to a
 //!   WebSocket and register the connection under `<iri>`. **Token-gated:** the `token` must be a
 //!   valid, unexpired receive token whose bound topic matches `<iri>`, else the upgrade is rejected
-//!   (401, no socket). The server then pushes AS2.0 notifications on change.
+//!   (401, no socket). **Then WAC-gated again** for the WebID that token names, so a revoked grant
+//!   cannot be replayed within the token's TTL (403, no socket). The server then pushes AS2.0
+//!   notifications on change.
 //! - `GET  /.well-known/solid`                     — a storage-description document advertising the
 //!   subscription service (discovery; unauthenticated, like a storage description).
 //!
@@ -27,15 +31,18 @@ use std::sync::{Arc, LazyLock};
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::auth::VerifiedToken;
+use crate::authz::{is_acl_resource, AccessMode, Decision, WacAuthorizer};
+use crate::ldp::handler::{request_origin, LdpState};
 use crate::notifications::activity::{AS2_CONTEXT, NOTIFICATIONS_CONTEXT};
 use crate::notifications::NotificationHub;
+use crate::store::Store;
 
 /// The WebSocketChannel2023 channel-type IRI (the spec's `type` value).
 pub const WEBSOCKET_CHANNEL_2023_TYPE: &str =
@@ -86,19 +93,94 @@ impl NotificationMetrics {
     }
 }
 
-/// State for the notification routes: the hub + the server's public base URL (for building the
-/// absolute `receiveFrom` / subscription-service URLs in discovery + subscribe responses).
-#[derive(Clone)]
-pub struct NotifyState {
-    pub hub: NotificationHub,
-    pub base_url: String,
+/// The single WAC-denial response for a notification topic, shared by the subscribe and receive
+/// seams so a non-reader sees the SAME `403` on both — and the same one whether or not the topic
+/// exists (the decision never probes the resource). Carries no topic-specific detail.
+fn topic_denied() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        "not authorized to read notifications for this topic",
+    )
+        .into_response()
 }
 
-impl NotifyState {
-    pub fn new(hub: NotificationHub, base_url: impl Into<String>) -> Self {
+/// The response when the ACL chain could NOT be resolved (a store fault). A backend failure must
+/// never read as a grant, so it is a `500` — never an accept.
+fn authorization_unavailable() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "authorization could not be evaluated",
+    )
+        .into_response()
+}
+
+/// State for the notification routes: the hub + the server's public base URL (for building the
+/// absolute `receiveFrom` / subscription-service URLs in discovery + subscribe responses) + the LDP
+/// state the per-resource WAC check runs against.
+///
+/// It holds the SAME [`LdpState`] the LDP routes carry, so the notification surface authorizes a
+/// topic through the SAME store, base URL and parsed-ACL cache as a GET of that resource would —
+/// the two gates cannot drift onto different views of the ACL graph.
+pub struct NotifyState<S: Store> {
+    pub hub: NotificationHub,
+    pub base_url: String,
+    /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
+    ldp: Arc<LdpState<S>>,
+}
+
+impl<S: Store> NotifyState<S> {
+    /// Derive the notification state from the LDP state: the hub and base URL are TAKEN from it
+    /// (single-sourced), so a subscriber registered via `…/receive` is on the same registry the LDP
+    /// emit path fans to and the advertised URLs match the LDP layer's own base.
+    pub fn new(ldp: Arc<LdpState<S>>) -> Self {
         Self {
-            hub,
-            base_url: base_url.into(),
+            hub: ldp.notifications.clone(),
+            base_url: ldp.base_url().to_string(),
+            ldp,
+        }
+    }
+
+    /// The per-resource WAC gate for a notification topic, shared by BOTH the subscribe seam and the
+    /// receive seam so the two cannot drift (the design's lock-step requirement).
+    ///
+    /// A change notification discloses that — and when — the topic changed, so watching a resource is
+    /// a READ of it: the required mode is [`AccessMode::Read`], overridden to
+    /// [`AccessMode::Control`] for an `.acl` topic exactly as the LDP read path overrides it
+    /// (managing access rules is always Control) — i.e. the same mode
+    /// [`mode_for_operation`](crate::authz::mode_for_operation) yields for a `GET` of the topic.
+    /// `origin` is threaded so an `acl:origin`-restricted grant is honoured, identically to a GET.
+    ///
+    /// It uses the SEQUENTIAL [`WacAuthorizer::authorize`] rather than the read path's planned
+    /// variant: subscribe/connect are not the hot path, and the planned walk exists only to collapse
+    /// the per-candidate probes into one round-trip — the two are differentially tested to produce
+    /// identical decisions, so the gate is the same, just without the batching machinery.
+    ///
+    /// Returns the response to send on a DENIAL, or `None` when the WebID is authorized:
+    /// - denied → a uniform `403` (the caller is always an authenticated WebID here, so WAC's
+    ///   anonymous-`401` branch is unreachable; it is mapped to the same `403` rather than left to
+    ///   fall through, so no code path can turn a denial into an accept);
+    /// - a store fault while resolving the ACL chain → `500`, never an accept (fail-closed).
+    ///
+    /// **Existence non-disclosure** (`research/lws-design-records.md` §6): this resolves the ACL
+    /// chain ONLY — it never probes the topic resource — so the `403` is byte-identical whether the
+    /// topic exists or not, and it adds no new existence oracle on the topic IRI.
+    async fn deny_unless_may_read(
+        &self,
+        topic: &str,
+        web_id: &str,
+        origin: Option<&str>,
+    ) -> Option<Response> {
+        let required = if is_acl_resource(topic) {
+            AccessMode::Control
+        } else {
+            AccessMode::Read
+        };
+        let wac = WacAuthorizer::with_cache(&self.ldp.store, &self.base_url, &self.ldp.acl_cache);
+        match wac.authorize(topic, required, Some(web_id), origin).await {
+            Ok(Decision::Allow(_)) => None,
+            Ok(Decision::Forbidden | Decision::Unauthenticated) => Some(topic_denied()),
+            // A backend fault resolving the ACL chain must never read as a grant.
+            Err(_) => Some(authorization_unavailable()),
         }
     }
 
@@ -150,18 +232,25 @@ pub struct SubscriptionRequest {
 /// rejected with 401 — there are NO anonymous subscriptions. (This handler runs behind the DPoP auth
 /// middleware, which injects the [`VerifiedToken`]; `is_public()` ⇒ unauthenticated.)
 ///
+/// **Authorization (per-resource WAC):** the authenticated WebID must additionally hold `acl:Read`
+/// on `topic` (`acl:Control` when the topic is an `.acl`) — a change notification discloses that and
+/// when the resource changed, so watching it is a read of it. The decision comes from the SAME
+/// [`WacAuthorizer`] the LDP read path uses, over the same store + ACL cache — the shared private
+/// `NotifyState::deny_unless_may_read` gate. A non-reader gets a uniform `403` and NO receive token
+/// is minted. This closes the gap where any authenticated WebID could subscribe to any topic IRI.
+///
 /// On success the handler MINTS an unguessable, short-lived **receive token** bound to
 /// `(authenticated WebID, topic, expiry)` and embeds it in the `receiveFrom` URL — this is what gates
-/// the otherwise-headerless WS receive endpoint (see [`receive_handler`]).
+/// the otherwise-headerless WS receive endpoint (see [`receive_handler`], which re-runs the SAME WAC
+/// check at connect time so a revoked grant cannot be replayed within the token's TTL).
 ///
-/// `// M2-next:` per-resource WAC authorization — confirm this WebID has `read` on `topic` — is NOT
-/// yet enforced (gated on `sparq#992`, the SPARQ access-control design; same blocker as LDP read
-/// authorization). KNOWN LIMITATION: a subscriber today must be authenticated (and receive is now
-/// token-gated to that authenticated subscriber+topic) but is not yet ACL-checked per-resource. The
-/// seam is exactly here, right after the authentication check.
-pub async fn subscribe_handler(
-    State(state): State<Arc<NotifyState>>,
+/// Ordering: the request-shape rejections (unknown channel type, missing topic — `400`) precede the
+/// WAC call because it needs the topic, and they depend ONLY on the request body, never on the
+/// resource, so they disclose nothing about it.
+pub async fn subscribe_handler<S: Store>(
+    State(state): State<Arc<NotifyState<S>>>,
     Extension(token): Extension<VerifiedToken>,
+    headers: HeaderMap,
     Json(req): Json<SubscriptionRequest>,
 ) -> Response {
     // Fail-closed: no anonymous subscriptions. After this check `web_id` is `Some`.
@@ -175,9 +264,6 @@ pub async fn subscribe_handler(
                 .into_response();
         }
     };
-
-    // M2-next: WAC check here — `wac::can_read(&web_id, topic)` once sparq#992 lands. Until then an
-    // authenticated caller may subscribe to any topic IRI (documented known limitation).
 
     // Validate the channel type if the client sent one (reject a wrong type rather than silently
     // treating it as WebSocketChannel2023).
@@ -195,6 +281,15 @@ pub async fn subscribe_handler(
         Some(t) if !t.is_empty() => t,
         _ => return (StatusCode::BAD_REQUEST, "missing topic").into_response(),
     };
+
+    // Per-resource WAC: this authenticated WebID must be able to READ the topic. A denial returns
+    // before anything is minted or registered.
+    if let Some(denial) = state
+        .deny_unless_may_read(topic, &web_id, request_origin(&headers))
+        .await
+    {
+        return denial;
+    }
 
     // Mint the receive token: unguessable, short-lived, bound to (this authenticated WebID, topic).
     // Without it the receive endpoint refuses the upgrade — so only this authenticated subscriber of
@@ -240,9 +335,14 @@ pub struct ReceiveQuery {
 /// NO subscriber registered). This closes the previously-open receive bypass (anyone who guessed a
 /// resource IRI could receive its change notifications without subscribing).
 ///
-/// `// M2-next:` the DEEPER per-resource WAC check (is this WebID allowed to READ this resource?)
-/// remains the `sparq#992` seam — the token guarantees only that the connecting party is an
-/// authenticated subscriber of THIS topic, which is the minimum bar that closes the bypass.
+/// ## Authorization — the same per-resource WAC check as subscribe, re-run here
+/// The token identifies WHICH authenticated WebID subscribed
+/// ([`NotificationHub::authorize_receive_token`]); this handler then re-runs
+/// `NotifyState::deny_unless_may_read` — the SAME private gate [`subscribe_handler`] used — for that
+/// WebID. Re-checking rather than trusting the mint keeps the two seams in lock-step and means a
+/// grant REVOKED between subscribe and connect cannot be replayed for the remainder of the token's
+/// TTL. A WebID that no longer holds `acl:Read` gets a `403` and NO socket, NO subscriber registered.
+///
 /// `ws` is taken as a `Result` (not a bare `WebSocketUpgrade`) ON PURPOSE: the token-gate must run
 /// FIRST and UNCONDITIONALLY. If `WebSocketUpgrade` were a plain extractor, its rejection would
 /// short-circuit BEFORE the token check — so a request with bad/missing upgrade headers would 426
@@ -250,9 +350,10 @@ pub struct ReceiveQuery {
 /// to the WS extractor's success. By deferring the `Result`, we reject an absent/invalid/expired/
 /// wrong-topic token with 401 regardless of the upgrade headers, and only surface the WS rejection
 /// after the token has validated.
-pub async fn receive_handler(
-    State(state): State<Arc<NotifyState>>,
+pub async fn receive_handler<S: Store>(
+    State(state): State<Arc<NotifyState<S>>>,
     Query(q): Query<ReceiveQuery>,
+    headers: HeaderMap,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     let topic = match q.topic {
@@ -273,12 +374,20 @@ pub async fn receive_handler(
                 .into_response()
         }
     };
-    if !state.hub.validate_receive_token(&token, &topic).await {
+    let Some(web_id) = state.hub.authorize_receive_token(&token, &topic).await else {
         return (
             StatusCode::UNAUTHORIZED,
             "a valid receive token is required",
         )
             .into_response();
+    };
+    // The token validated and named its subscriber. Re-run the SAME per-resource WAC gate subscribe
+    // ran, so a grant revoked since the mint cannot be replayed for the rest of the token's TTL.
+    if let Some(denial) = state
+        .deny_unless_may_read(&topic, &web_id, request_origin(&headers))
+        .await
+    {
+        return denial;
     }
     // The token validated. Now the request MUST be a genuine WS upgrade; surface the extractor's own
     // rejection (e.g. 426 Upgrade Required) if not.
@@ -352,7 +461,9 @@ async fn stream_notifications(mut socket: WebSocket, hub: NotificationHub, topic
 /// Advertises the notification subscription service + the supported channel type so a client can find
 /// where to subscribe WITHOUT hardcoding the path. Unauthenticated (discovery is public, like a
 /// storage description).
-pub async fn storage_description_handler(State(state): State<Arc<NotifyState>>) -> Response {
+pub async fn storage_description_handler<S: Store>(
+    State(state): State<Arc<NotifyState<S>>>,
+) -> Response {
     let body = json!({
         "@context": [NOTIFICATIONS_CONTEXT, AS2_CONTEXT],
         "notificationChannel": [
@@ -425,11 +536,62 @@ fn hex_digit(n: u8) -> char {
 mod tests {
     use super::*;
 
-    fn state() -> Arc<NotifyState> {
-        Arc::new(NotifyState::new(
-            NotificationHub::new(),
-            "https://pod.example",
+    use crate::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient};
+    use axum::body::Bytes;
+
+    const BASE: &str = "https://pod.example";
+    const ALICE: &str = "https://alice.example/profile#me";
+    const BOB: &str = "https://bob.example/profile#me";
+
+    type TestStore = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+
+    /// Notification state over an EMPTY store — no ACL exists anywhere, so WAC denies every topic
+    /// (fail-closed). Used by the URL-shaping tests and by the request-shape rejections, which are
+    /// all decided before the WAC gate.
+    fn state() -> Arc<NotifyState<TestStore>> {
+        state_over(CompositeStore::new(
+            InMemorySparqClient::new(),
+            InMemoryBlobStore::new(),
         ))
+    }
+
+    fn state_over(store: TestStore) -> Arc<NotifyState<TestStore>> {
+        Arc::new(NotifyState::new(Arc::new(LdpState::new(store, BASE))))
+    }
+
+    /// State whose store carries a root `.acl` granting exactly `owner` Read+Write+Control over the
+    /// whole pod (`acl:default`), so `owner` inherits Read on any topic and every other WebID
+    /// inherits nothing.
+    async fn state_owned_by(owner: &str) -> Arc<NotifyState<TestStore>> {
+        use crate::store::Store;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let body = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization;
+         acl:agent <{owner}>;
+         acl:accessTo <{BASE}/>;
+         acl:default <{BASE}/>;
+         acl:mode acl:Read, acl:Write, acl:Control."#
+        );
+        store
+            .write(&format!("{BASE}/.acl"), Bytes::from(body), "text/turtle")
+            .await
+            .expect("seed root acl");
+        state_over(store)
+    }
+
+    fn web_id_token(web_id: &str) -> VerifiedToken {
+        VerifiedToken {
+            web_id: Some(web_id.to_string()),
+            ..VerifiedToken::default()
+        }
+    }
+
+    fn subscribe_to(topic: &str) -> SubscriptionRequest {
+        SubscriptionRequest {
+            channel_type: Some(WEBSOCKET_CHANNEL_2023_TYPE.to_string()),
+            topic: Some(topic.to_string()),
+        }
     }
 
     #[test]
@@ -451,10 +613,10 @@ mod tests {
 
     #[test]
     fn receive_from_maps_http_to_ws() {
-        let s = Arc::new(NotifyState::new(
-            NotificationHub::new(),
+        let s = Arc::new(NotifyState::new(Arc::new(LdpState::new(
+            CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new()),
             "http://localhost:3000",
-        ));
+        ))));
         let url = s.receive_from_url("http://localhost:3000/a", "tok123");
         assert!(url.starts_with("ws://localhost:3000/"), "{url}");
     }
@@ -493,10 +655,8 @@ mod tests {
         let resp = subscribe_handler(
             State(state()),
             Extension(VerifiedToken::public()),
-            Json(SubscriptionRequest {
-                channel_type: Some(WEBSOCKET_CHANNEL_2023_TYPE.to_string()),
-                topic: Some("https://pod.example/a".to_string()),
-            }),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/a")),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -504,17 +664,11 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_handler_accepts_authenticated_and_returns_receive_from() {
-        let token = VerifiedToken {
-            web_id: Some("https://alice.example/profile#me".to_string()),
-            ..VerifiedToken::default()
-        };
         let resp = subscribe_handler(
-            State(state()),
-            Extension(token),
-            Json(SubscriptionRequest {
-                channel_type: Some(WEBSOCKET_CHANNEL_2023_TYPE.to_string()),
-                topic: Some("https://pod.example/a".to_string()),
-            }),
+            State(state_owned_by(ALICE).await),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/a")),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -527,15 +681,156 @@ mod tests {
         assert!(body.contains(WEBSOCKET_CHANNEL_2023_TYPE), "{body}");
     }
 
+    // --- per-resource WAC on subscribe (the authorization gap this closes) ----------------------
+
+    /// THE headline guard: an AUTHENTICATED WebID who is not granted `acl:Read` on another agent's
+    /// resource cannot subscribe to it — so it never receives that resource's change notifications.
     #[tokio::test]
-    async fn subscribe_handler_rejects_wrong_channel_type() {
-        let token = VerifiedToken {
-            web_id: Some("https://alice.example/profile#me".to_string()),
-            ..VerifiedToken::default()
-        };
+    async fn subscribe_handler_denies_authenticated_non_reader() {
+        // Alice owns the pod; Bob is authenticated but holds nothing.
+        let s = state_owned_by(ALICE).await;
+        let resp = subscribe_handler(
+            State(s.clone()),
+            Extension(web_id_token(BOB)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/alice/secret")),
+        )
+        .await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "an authenticated non-reader must not be able to subscribe to another agent's resource"
+        );
+        // And nothing was handed back that would let Bob connect anyway.
+        let body = body_to_string(resp).await;
+        assert!(
+            !body.contains("receiveFrom"),
+            "a denied subscribe must not hand back a receiveFrom URL: {body}"
+        );
+        // The topic has no channel either — a denied subscribe registers nothing.
+        assert_eq!(
+            s.hub.subscriber_count("https://pod.example/alice/secret").await,
+            0
+        );
+    }
+
+    /// Fail-closed: with NO ACL anywhere, even an authenticated caller is denied (WAC grants nothing
+    /// by default) — the gate is not "allow unless explicitly denied".
+    #[tokio::test]
+    async fn subscribe_handler_denies_when_no_acl_exists() {
         let resp = subscribe_handler(
             State(state()),
-            Extension(token),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/a")),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Existence non-disclosure (`research/lws-design-records.md` §6): the denial is decided from the
+    /// ACL chain alone, so a non-reader gets the SAME response for a topic that EXISTS and one that
+    /// does not — subscribe adds no new existence oracle on the topic IRI.
+    #[tokio::test]
+    async fn subscribe_denial_does_not_disclose_topic_existence() {
+        use crate::store::Store;
+        let s = state_owned_by(ALICE).await;
+        // Create one of the two topics; leave the other absent.
+        s.ldp
+            .store
+            .write(
+                "https://pod.example/alice/exists",
+                Bytes::from("<a> <b> <c> ."),
+                "text/turtle",
+            )
+            .await
+            .expect("seed topic");
+
+        let mut seen = Vec::new();
+        for topic in [
+            "https://pod.example/alice/exists",
+            "https://pod.example/alice/absent",
+        ] {
+            let resp = subscribe_handler(
+                State(s.clone()),
+                Extension(web_id_token(BOB)),
+                HeaderMap::new(),
+                Json(subscribe_to(topic)),
+            )
+            .await;
+            seen.push((resp.status(), body_to_string(resp).await));
+        }
+        assert_eq!(
+            seen[0], seen[1],
+            "the denial for an existing topic must be byte-identical to the denial for a missing one"
+        );
+    }
+
+    /// The receive seam stays in lock-step: a token minted while the subscriber HELD read is refused
+    /// once the grant is revoked, rather than remaining a bearer for the rest of its TTL.
+    #[tokio::test]
+    async fn receive_handler_rejects_token_whose_grant_was_revoked() {
+        use crate::store::Store;
+        let s = state_owned_by(BOB).await;
+        let topic = "https://pod.example/shared";
+        // Bob holds Read via the root ACL, so subscribe succeeds and mints a token.
+        let token = s.hub.mint_receive_token(BOB, topic).await;
+        assert!(s.deny_unless_may_read(topic, BOB, None).await.is_none());
+
+        // The owner rewrites the root ACL, revoking Bob.
+        s.ldp
+            .store
+            .write(
+                &format!("{BASE}/.acl"),
+                Bytes::from(format!(
+                    r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization;
+         acl:agent <{ALICE}>;
+         acl:accessTo <{BASE}/>;
+         acl:default <{BASE}/>;
+         acl:mode acl:Read, acl:Write, acl:Control."#
+                )),
+                "text/turtle",
+            )
+            .await
+            .expect("rewrite root acl");
+
+        // The token itself is still structurally valid...
+        assert!(s.hub.validate_receive_token(&token, topic).await);
+        // ...but the WAC re-check the receive handler runs now denies Bob.
+        let denial = s.deny_unless_may_read(topic, BOB, None).await;
+        assert_eq!(
+            denial.map(|r| r.status()),
+            Some(StatusCode::FORBIDDEN),
+            "a revoked grant must not be replayable through a still-unexpired receive token"
+        );
+    }
+
+    /// The token's WebID binding is what the receive-side WAC check reads — it must come back
+    /// exactly as minted, and only for the bound topic.
+    #[tokio::test]
+    async fn authorize_receive_token_returns_the_bound_web_id() {
+        let hub = NotificationHub::new();
+        let topic = "https://pod.example/a";
+        let token = hub.mint_receive_token(BOB, topic).await;
+        assert_eq!(
+            hub.authorize_receive_token(&token, topic).await.as_deref(),
+            Some(BOB)
+        );
+        assert_eq!(
+            hub.authorize_receive_token(&token, "https://pod.example/b")
+                .await,
+            None,
+            "a token bound to another topic must yield no identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_handler_rejects_wrong_channel_type() {
+        let resp = subscribe_handler(
+            State(state()),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
             Json(SubscriptionRequest {
                 channel_type: Some("http://example/OtherChannel".to_string()),
                 topic: Some("https://pod.example/a".to_string()),
@@ -547,13 +842,10 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_handler_rejects_missing_topic() {
-        let token = VerifiedToken {
-            web_id: Some("https://alice.example/profile#me".to_string()),
-            ..VerifiedToken::default()
-        };
         let resp = subscribe_handler(
             State(state()),
-            Extension(token),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
             Json(SubscriptionRequest {
                 channel_type: None,
                 topic: None,

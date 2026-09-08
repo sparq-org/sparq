@@ -93,6 +93,13 @@ but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode.
 
+This includes notification subscriptions: a `POST` to the
+`WebSocketChannel2023` subscription service needs `acl:Read` on the topic
+(`acl:Control` when the topic is an `.acl`), and the WebSocket receive endpoint
+re-checks that same mode for the subscriber when the socket connects — so a
+revoked grant is not replayable through an already-issued `receiveFrom` URL.
+Lacking the mode returns `403`, whether or not the topic exists.
+
 ## Serve provider WebIDs off the pod (optional)
 
 `SOLID_SERVER_IDENTITY_ENABLE=1` is **off by default**. When set, the server serves

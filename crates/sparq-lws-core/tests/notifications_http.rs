@@ -1,7 +1,8 @@
 // AUTHORED-BY Claude Opus 4.8
 //! End-to-end HTTP tests for the WebSocketChannel2023 notification surface through the assembled
 //! router: discovery (the `/.well-known/solid` storage description + the LDP read `Link` rels), the
-//! auth-gated subscribe handshake (anonymous refused, authenticated returns `receiveFrom`), and a
+//! auth- and WAC-gated subscribe handshake (anonymous refused, an authenticated non-reader refused,
+//! an authorized subscriber returns `receiveFrom`), and a
 //! default-`#[ignore]`d live WebSocket handshake that exercises subscribe → connect → mutate →
 //! receive against a really-bound server.
 //!
@@ -14,7 +15,9 @@ use std::sync::Arc;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use common::{jwks_provider, mint_access_token, mint_dpop_proof, KeyKit, BASE_URL};
+use common::{
+    jwks_provider, mint_access_token, mint_access_token_for, mint_dpop_proof, KeyKit, BASE_URL,
+};
 use solid_oidc_verifier::config::VerifierConfig;
 use solid_oidc_verifier::replay::InMemoryReplayStore;
 use solid_oidc_verifier::verifier::Verifier;
@@ -98,6 +101,35 @@ impl Harness {
             .uri(path)
             .header("authorization", authz)
             .header("dpop", dpop);
+        if let Some(ct) = content_type {
+            builder = builder.header("content-type", ct);
+        }
+        self.app
+            .clone()
+            .oneshot(builder.body(body).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// An authenticated request from a DIFFERENT WebID than [`common::WEBID`] — the pod's root
+    /// `.acl` grants ONLY Alice, so this agent is authenticated but holds no mode anywhere.
+    async fn auth_request_as(
+        &self,
+        web_id: &str,
+        method: &str,
+        path: &str,
+        content_type: Option<&str>,
+        body: Body,
+    ) -> axum::http::Response<Body> {
+        let access =
+            mint_access_token_for(&self.issuer_key, &self.client_key.thumbprint, web_id);
+        let htu = format!("{BASE_URL}{path}");
+        let proof = mint_dpop_proof(&self.client_key, method, &htu, &access);
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", format!("DPoP {access}"))
+            .header("dpop", proof);
         if let Some(ct) = content_type {
             builder = builder.header("content-type", ct);
         }
@@ -226,6 +258,51 @@ async fn subscribe_authenticated_returns_receive_from() {
         "{out}"
     );
     assert!(out.contains(WS_TYPE), "{out}");
+}
+
+/// Per-resource WAC through the ASSEMBLED router: a WebID that authenticates successfully but holds
+/// no `acl:Read` on Alice's resource is refused the subscription — so it never obtains a
+/// `receiveFrom` URL and never receives that resource's change notifications.
+#[tokio::test]
+async fn subscribe_denies_authenticated_non_reader() {
+    const MALLORY: &str = "https://mallory.example/profile/card#me";
+    let h = Harness::new().await;
+    // Alice creates the resource she owns.
+    let put = h
+        .auth_request(
+            "PUT",
+            "/alice/data",
+            Some("text/turtle"),
+            Body::from("<#me> <http://xmlns.com/foaf/0.1/name> \"Alice\" ."),
+        )
+        .await;
+    assert_eq!(put.status(), StatusCode::CREATED);
+
+    let body = serde_json::json!({
+        "@context": "https://www.w3.org/ns/solid/notifications-context/v1",
+        "type": WS_TYPE,
+        "topic": "https://pod.example/alice/data",
+    })
+    .to_string();
+    let resp = h
+        .auth_request_as(
+            MALLORY,
+            "POST",
+            "/.notifications/WebSocketChannel2023/",
+            Some("application/ld+json"),
+            Body::from(body),
+        )
+        .await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "an authenticated non-reader must not be able to subscribe to Alice's resource"
+    );
+    let out = body_string(resp).await;
+    assert!(
+        !out.contains("receiveFrom"),
+        "a denied subscribe must not hand back a receiveFrom URL: {out}"
+    );
 }
 
 // --- Receive endpoint token-gate (the HIGH-finding fix; non-ignored, via oneshot) ---------------
