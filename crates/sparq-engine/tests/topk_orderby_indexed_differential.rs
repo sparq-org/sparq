@@ -14,6 +14,23 @@ use sparq_engine::query;
 
 const PFX: &str = "PREFIX ak: <http://example.org/ak#>\n";
 
+// [GPT-6 Astra] A repeated variable must bind one term in both positions.
+// An IRI subject and an integer object can never satisfy this triple pattern.
+#[test]
+fn repeated_seed_variable_full_orderby_is_empty() {
+    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
+    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x").unwrap();
+    assert!(rows.rows.is_empty(), "full ORDER BY must enforce subject/object equality: {rows:?}");
+}
+
+// [GPT-6 Astra] The LIMIT path must preserve the full evaluator's equality guard.
+#[test]
+fn repeated_seed_variable_limit_is_empty() {
+    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
+    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x LIMIT 1").unwrap();
+    assert!(rows.rows.is_empty(), "LIMIT must enforce subject/object equality: {rows:?}");
+}
+
 /// One synthetic pending task: `(seq, priority)`. `seq` doubles as a stable,
 /// unique task identifier so results can be checked by task number.
 fn build_graph(peer: &str, tasks: &[(i64, i64)], extra_ttl: &str) -> Graph {
