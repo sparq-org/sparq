@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T02:52:42.214970+00:00",
+  "updated_at": "2026-09-08T03:14:36.844985+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -36,13 +36,14 @@
     "usage": "Resumed after get_usage_limits reported available budget; no reset consumed/purchased. Do not retry exhausted model requests.",
     "backup_first_commit": "72e63b159ae524dd12df1df03acef71c14431d36",
     "worktrees_removed_after_merge": [
-      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069"
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6437"
     ]
   },
   "live_main": {
-    "oid": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
-    "pr": 6069,
-    "observed_at": "2026-09-08T02:23:00Z"
+    "oid": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+    "pr": 6448,
+    "observed_at": "2026-09-08T03:14:36.844985+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -62,11 +63,11 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "Actual Opus5 xhigh request_changes on2f3d1773. Agent remediating B2 job-inventory bound and B3 terminal/optional-evidence semantics. B1 baseline/shard suspicion refuted by real existing artifact pairs; add regression fixtures and provenance. Fail-closed API/quota policy is user-authorized and must not be weakened.",
+    "state": "Implementation complete and frozen; actual Opus5 xhigh focused re-review is RUNNING in exec session2546. Do not modify/restart/review twice. Agentpostmerge_ci idle and available for concrete findings. No6436 PR yet.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
-    "head": "2f3d1773bb3cebd36186692025912a8377c85db6",
-    "review_result": "direct-6436/opus-review-2f3d1773.json",
-    "review_packet_sha256": "5fcca5c091120c1be3987e4c0ca185d0f2103a75c9ad09119b7be65a76019843",
+    "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
+    "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
+    "review_packet_sha256": "2ecc56d4daaccb4ef8a2bcb0fc3ec84ef1c47cbb046c3c7613c407b5b3ac9df0",
     "real_inventory": "Scheduled run34099890455 currentmain4d attempt1,85 jobs incl all51 mutation legs. Complete first page. Every row run_attempt1.",
     "real_fixtures": {
       "parse": {
@@ -84,7 +85,18 @@
         "success": 0
       },
       "verification": "Root executed frozen2f helper on both real JSON pairs; both accepted for allowed exits0/2/3. Actual command exit not asserted. Source pinned25.3.1. No new measurement executed."
-    }
+    },
+    "review_runtime": {
+      "session_id": 2546,
+      "kind": "exec_command",
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6436/followup/opus-review-0fc2faf6.json",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6436/followup/review-input-0fc2faf6.md",
+      "input_sha256": "6b67133cd821ae5ba3c4b0cddacb67e5abc830bb5fbe9e327b8739045ec8566b",
+      "input_bytes": 67532,
+      "acceptance": "Require completed valid JSON, subtype success/is_errorfalse and actual claude-opus-5 modelUsage before interpreting verdict. No retries on model quota exhaustion. An empty file is not a completed review."
+    },
+    "validation": "47 focused+88 wiring+19 reservation tests pass;15 calibrated controls killed with47tests each,0errors;195/196 traced lines;actionlint and clean main48 composition. Preflight only known Bash3 mapfile limitation.",
+    "remediation": "B1 refuted by original real ZIP fixtures and exact source;strict planned-count equality retained. B2 all-job/local-reusable conservative bound101 <=200,85 actualjobs;capacity guard20slots. B3 nine known terminal conclusions and readable zero-job/omitted-step evidence treatedincomplete;attempt omitted bound by endpoint,present contradictions rejected. API/quota/unreadable/unknownfailclosed preserved."
   },
   "prs": {
     "4300": {
@@ -103,7 +115,18 @@
       "local_branch": "codex/pr6049-review-recovery",
       "hold": "Auto-review rejected Approve&run for verdict-bridge34052150830 (workflow320944109). Explicit user approval pending. Do not retry via other API/UI/CLI, replace head to escape, forgive evidence, or remove RERUN_HELD_PRS6049.",
       "review": "Actual Opus5 xhigh,212 tests. Required gate34052014105 failed only held verdict bridge.",
-      "review_comment": "https://github.com/sparq-org/sparq/pull/6049#issuecomment-5561339192"
+      "review_comment": "https://github.com/sparq-org/sparq/pull/6049#issuecomment-5561339192",
+      "latest_observation": {
+        "state": "OPEN",
+        "head": "93ed3cf1d8137e2237ea2256d7f96e1768894c1e",
+        "labels": [
+          "area:ci",
+          "area:docs",
+          "trust-surface",
+          "review:unreviewed"
+        ],
+        "at": "2026-09-08T03:14:36.844985+00:00"
+      }
     },
     "6055": {
       "state": "OPEN_HELD",
@@ -113,7 +136,17 @@
       "review": "Actual Opus5 xhigh approved_with_nits,408 tests9 controls. Required gate34063637672 passed historically; threads resolved.",
       "review_comment": "https://github.com/sparq-org/sparq/pull/6055#issuecomment-5562572547",
       "issue": 6081,
-      "notes": "Addresses, does not close broader zero-job criterion issue."
+      "notes": "Addresses, does not close broader zero-job criterion issue.",
+      "latest_observation": {
+        "state": "OPEN",
+        "head": "50607e5f9d6b3fc68400918bfedf419330a91f73",
+        "labels": [
+          "review:needs",
+          "area:ci",
+          "area:docs"
+        ],
+        "at": "2026-09-08T03:14:36.844985+00:00"
+      }
     },
     "6069": {
       "state": "MERGED",
@@ -148,13 +181,13 @@
       "notes": "Verified Actions-job rerun for cancelled gate instead of foreign App Checks. Keep RERUN_HELD_PRS6049."
     },
     "6448": {
-      "state": "OPEN_QUEUED",
+      "state": "MERGED",
       "head": "54dd9e912195658b89658394a3ee31a68c208a77",
       "branch": "codex/ci-reporter-cap-recovery",
       "issue": 6437,
-      "queue_position": 1,
-      "queue_state": "AWAITING_CHECKS",
-      "queue_head": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+      "queue_position": null,
+      "queue_state": null,
+      "queue_head": null,
       "required_gate": {
         "run": 34084939013,
         "conclusion": "success"
@@ -170,18 +203,48 @@
       "notes": "Cached grace permits reobservation only, never cached PASS. Recognized quota errors fatal no retries; no header/numeric quota parser or pagination amplification claim.",
       "queue_gate": {
         "id": 34179397177,
-        "state": "in_progress",
+        "state": "completed",
+        "conclusion": "success",
         "head": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
-        "observed_at": "2026-09-08T02:27:00Z",
-        "other_checks": "5 success;CI/feature-matrix stillin_progress"
+        "completed_at": "2026-09-08T02:47:11Z"
       },
-      "effect_evidence": "Merge-group docs-quality run34179397116 succeeded: all209 test_ci_summary_gate tests ran, including reporter-cap recovery and rate-limit fail-closed cases; self-test also passed. Log preserved in local backup."
+      "effect_evidence": "Merge-group docs-quality run34179397116 succeeded: all209 test_ci_summary_gate tests ran, including reporter-cap recovery and rate-limit fail-closed cases; self-test also passed. Log preserved in local backup.",
+      "merged_at": "2026-09-08T02:47:42Z",
+      "merge_commit": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+      "issue_state": "CLOSED2026-09-08T02:47:44Z",
+      "source_verified": "Both reviewed files freshly byte-verified on main; recovery-20260908/6448-main-source-proof.json."
+    },
+    "6463": {
+      "issue": 6462,
+      "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
+      "branch": "codex/ci-rerun-bot-query",
+      "state": "OPEN_CI_PENDING",
+      "base": "main",
+      "review": "Actual Opus5 xhigh full ed9689d +focused5640 approval_with_nits/no blockers. Both result JSON modelUsage verified. No source change afterfinalreview.",
+      "full_review_result": "recovery-20260908/6462-opus-review-ed9689d5.json",
+      "final_review_result": "recovery-20260908/6462-opus-rereview-5640d06b.json",
+      "final_packet_sha256": "cbbed101eb48afd78a04ed9ae18e72294f9a3010417c7730ced407b7e96edf9f",
+      "tests": "80tests+finalrearmselftest;2 calibratedoldquery/rawlogin positiveeffect controls each1assertfail0errors/skips",
+      "gate": {
+        "run": 34182440948,
+        "state": "in_progress"
+      },
+      "copilot": {
+        "run": 34182446466,
+        "state": "success",
+        "threads": 0
+      },
+      "latest_labels": [
+        "area:ci"
+      ],
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
+      "expected_behavior": "Concrete Bot ID field;normalizeonlyalreadyverifiedRESTaccountlogin. Preserve node ID/type,exact authenticatedviewer,durableclaim,currenthead/queue/review/operator6049holds. Noactualclaim/rerunvalidationperformed."
     }
   },
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T02:09:00Z",
+    "observed_at": "2026-09-08T03:14:36.844985+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -201,21 +264,23 @@
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
   },
   "next_actions": [
-    "Finish6436 controls, inspect full change and obtain one actual Opus5 xhigh independent review; no duplicate agent/model sessions.",
-    "Watch6448 protected queue and exact merge_group gate; advance/close6437 only on actual merge. Never cancel its evidence.",
-    "Solve confirmed sweeper schema issue6462 after6436 lane; no manual recovery mutation.",
-    "Retain current checkpoints and review evidence in dedicated local Git backup; do not publish private operational records.",
-    "Retain pending6049,6055,registry test-onlyCI and6435 access holds. No releases."
+    "Collect existing6436 Opus review session2546/output. Do not launch another review. If approved, validate finalsource and main composition, prepare PRbody from final implementation/evidence and publish throughnormalCI. Ifblocked, reusepostmerge_ci forconcretefindings.",
+    "MonitorPR6463 requiredgate34182440948 and current Copilot threads/head. Source reviewed5640. When fullygreen/resolved/current, normal protected enqueue expectedHeadOid5640 jumpfalse; neverfabricatereviewpass.",
+    "After6463merges, verifyexactsource,close6462,removeowncleanworktreeandobserveeligible natural scheduled sweeper execution. Preserveheld6049.",
+    "Keepcheckpoint+completedreviewartifacts inprivateGitref; collect outputbeforebackingup completedverdict.",
+    "RegistryActions/dispatchOFF,ALLGREENuntil6049invariantlanded,no releases;retain6055reviewneeds,6049approval,registrytestonlyCI,6435AWSlogin holds."
   ],
   "followup_lane": {
     "issue": 6462,
     "agent": "root",
     "branch": "codex/ci-rerun-bot-query",
-    "head": "ed9689d5be5be28ccbc3300c1d90b250319f2c7c",
+    "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-    "state": "Committed locally,78 tests+selftest pass, exact production query accepted by GitHub readonly15 bot ids. One old-query positive-effect control goes from1pass to1assertionfailure,0errors/skips. Preflight only knownBash3 mapfile limitation. Actual Opus5 xhigh review running; no PR/push yet.",
-    "packet": "recovery-20260908/6462-review-ed9689d5.md",
-    "packet_sha256": "ebc73847ffc5c568f78fcda1bcffe3045c69ecb370985ee809753636e00b81c6",
-    "review_output": "recovery-20260908/6462-opus-review-ed9689d5.json"
+    "state": "PublishedPR6463OPEN at reviewed5640. Actual full+focused Opus5 approvals,80tests+finalselftest pass. Copilot run34182446466 SUCCESS with0reviewthreads at latest snapshot. Requiredgate34182440948 in_progress; no admission beforegreen/currentresolvedrevalidation.",
+    "packet": "recovery-20260908/6462-rereview-5640d06b.md",
+    "packet_sha256": "cbbed101eb48afd78a04ed9ae18e72294f9a3010417c7730ced407b7e96edf9f",
+    "review_output": "recovery-20260908/6462-opus-rereview-5640d06b.json",
+    "real_identity_proof": "REST login sparq-orchestrator[bot], GraphQL Bot login sparq-orchestrator, SAME stable node ID. Root verified via public readonly REST+GraphQL; no production claim/rerun/App credentials.",
+    "pr": 6463
   }
 }

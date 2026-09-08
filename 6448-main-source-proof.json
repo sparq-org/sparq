@@ -1,0 +1,8 @@
+{
+  "head": "54dd9e912195658b89658394a3ee31a68c208a77",
+  "main": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
+  "verified_files": {
+    "scripts/ci_summary_gate.py": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+    "scripts/tests/test_ci_summary_gate.py": "40b46720c8379ae9410d8df1b52e5aa19de49b87775eec711b6b427993b93d7a"
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
+  "packet": "review-complete-0fc2faf6d4255e9e27b8a17bc43e8ba848c29368.md",
+  "packet_sha256": "2ecc56d4daaccb4ef8a2bcb0fc3ec84ef1c47cbb046c3c7613c407b5b3ac9df0",
+  "packet_bytes": 66988,
+  "earlier_packet_unchanged_sha256": "746595216222aacde4ba9ef4b7274a9d2d32a510ce119723f62291a86adf8cc0",
+  "files": {
+    "inventory-source-projection.yml": {
+      "sha256": "c47866536fdd3693f8dd4788ce2acdca8acc4713edbd5ec4ff2dd6a3e9425971",
+      "bytes": 7500
+    },
+    "report.json": {
+      "sha256": "ccac15ccc21768035572ee8251dd3bcc8b3c8d174396bdd09b7e2605b18f532a",
+      "bytes": 14406
+    },
+    "whole-change.diff": {
+      "sha256": "4e9a4c29aba8118668490f33c2e2497e6e1780e59bd80bc8f2c544fa3c167a92",
+      "bytes": 57043
+    },
+    "real-fixture-evidence.json": {
+      "sha256": "9dcd866479d439231228a496217edb46a7820f4bec3026b3031e6b2363f25656",
+      "bytes": 1244
+    },
+    "test-review-context.py": {
+      "sha256": "f182299891c20a454da7007f66353f7f0a0188fd22b23826081d0066f89d2693",
+      "bytes": 10770
+    },
+    "review-complete-0fc2faf6d4255e9e27b8a17bc43e8ba848c29368.md": {
+      "sha256": "2ecc56d4daaccb4ef8a2bcb0fc3ec84ef1c47cbb046c3c7613c407b5b3ac9df0",
+      "bytes": 66988
+    },
+    "delta.diff": {
+      "sha256": "a93b5a3b4cfa29c47fba9017b2dd1cd9a4223c8687e89532beae35b0fccd4e46",
+      "bytes": 14960
+    },
+    "manifest.json": {
+      "sha256": "3730fcac030255878f57a3ef631c4d68328799e77b53b598ce16cac8a28b08ec",
+      "bytes": 7500
+    },
+    "composed-docs-quality.yml": {
+      "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594",
+      "bytes": 113148
+    },
+    "review-0fc2faf6d4255e9e27b8a17bc43e8ba848c29368.md": {
+      "sha256": "746595216222aacde4ba9ef4b7274a9d2d32a510ce119723f62291a86adf8cc0",
+      "bytes": 59432
+    },
+    "composition.json": {
+      "sha256": "1cd1a9b7f6f11dc17fee47979dd1b2d6c28d0cfab5bf8c28f0550f5518bf2174",
+      "bytes": 2036
+    },
+    "inventory-evidence.json": {
+      "sha256": "1ac7e19464d4c9c96ba29fd5958323b30c759a4cd2d6f879e89d987a6800b5d9",
+      "bytes": 4468
+    },
+    "validation/coverage-calibration.py": {
+      "sha256": "1c81dcff8df88ff506fec82a4112249fd3b6dd8735744939d8132d3b9f30984a",
+      "bytes": 93
+    },
+    "validation/coverage-runner.py": {
+      "sha256": "c72754ede5e0fbaac6b3620b4b346a28f628746478af44f551a648b743c5583c",
+      "bytes": 1553
+    },
+    "validation/mutations-corrected.txt": {
+      "sha256": "d92768ec726b530fb005be064892f32a3b73d7158b8e021baf0c8bcfd16946af",
+      "bytes": 4109
+    },
+    "validation/actionlint.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "validation/coverage.txt": {
+      "sha256": "9ad951e3e71d1ed7f0cbd9f16d729f6a5470b43371000b65629038b95ed48904",
+      "bytes": 892
+    },
+    "validation/preflight.txt": {
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a",
+      "bytes": 1834
+    },
+    "validation/runner-reservation.txt": {
+      "sha256": "27bfe758d75fd57ab616c19780c681bbb143222a0ae6feabaff044cd6782dcb4",
+      "bytes": 2330
+    },
+    "validation/mutation-runner.py": {
+      "sha256": "8ed234258b570092dff51d928635266b14a7d043b3f817242c92cb3c9e24b623",
+      "bytes": 5173
+    },
+    "validation/mutations.txt": {
+      "sha256": "2de49b2df52609edd93abf8a659707b88a7cbe6570d9fc9dd1597b7036434424",
+      "bytes": 551
+    },
+    "validation/line-coverage.json": {
+      "sha256": "b339d656659bc585ef9f3f3d4426dd4d6f974e0851512910a9f4e5b3ca42a7c9",
+      "bytes": 499
+    },
+    "validation/preflight-staged.txt": {
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a",
+      "bytes": 1834
+    },
+    "validation/selection-wiring.txt": {
+      "sha256": "39ba264d21f60f98a08fd576221c5aeaaef5b0b76b65b1e4ee114727dbfaa248",
+      "bytes": 14911
+    },
+    "validation/mutations/empty_jobs_rejected.txt": {
+      "sha256": "7a15562e0a5e119fb3da1c7a70183828b275a4179a97a53c7f7a262a9a949be6",
+      "bytes": 21385
+    },
+    "validation/mutations/baseline.txt": {
+      "sha256": "acd62c465b6d70c96996e763978a5e43bb25267f9e6d8de2793e155bae846066",
+      "bytes": 426
+    },
+    "validation/mutations/report.json": {
+      "sha256": "286b4a9f36d6c3a418e4c610957bc67333f3b978d1dc8444307c7de1f974934b",
+      "bytes": 5482
+    },
+    "validation/mutations/contradictory_attempt_accepted.txt": {
+      "sha256": "f30950a2d69ba006c140215cbb86f2e5cf57fe9251432f14de783007a65ab4ef",
+      "bytes": 3870
+    },
+    "validation/mutations/planned_equality_inert.txt": {
+      "sha256": "58cc482f545dae7ebf1dd6c412bdc827982c2f801ca88f6b36277eec45f5dd8c",
+      "bytes": 3499
+    },
+    "validation/mutations/capacity_guard_inert.txt": {
+      "sha256": "7618453348794dd500cceeacdab5b492838d2dcb2b40d97d44e99b0d9f73f756",
+      "bytes": 1182
+    },
+    "validation/mutations/quota_error_admits.txt": {
+      "sha256": "2683b281d25bf65512c932be7f1e526321833c58fadf7c39743a03c7d192951b",
+      "bytes": 1853
+    },
+    "validation/mutations/missing_steps_false_proof.txt": {
+      "sha256": "18784a2b2893bc14bd64bf35ded907e31775f193ce591e33264d53636207348a",
+      "bytes": 1858
+    },
+    "validation/mutations/optional_attempt_required.txt": {
+      "sha256": "9a256949a9c86dcaeeb3289dfc2451f0002888b27286a5eba53d9da04e91fd8e",
+      "bytes": 2749
+    },
+    "validation/mutations/missing_steps_rejected.txt": {
+      "sha256": "8b10dbb8ac7bec0aefd5c5010f2de2f75a05f78ea17f3c3c78aeda389879895b",
+      "bytes": 5628
+    },
+    "validation/mutations/known_conclusions_rejected.txt": {
+      "sha256": "48aa9553323611722cfba18bf61b9d1e0a958f71f0f4eab1492f425a392a2c52",
+      "bytes": 10991
+    },
+    "validation/mutations/active_census_guard_deleted.txt": {
+      "sha256": "96c917035826181d83b6943635c3f5781bc9e925ce364dd720f6ce028b48a7fe",
+      "bytes": 7024
+    },
+    "validation/mutations/skipped_is_completion.txt": {
+      "sha256": "32a70e5c099b90165820da133ef7c7b38422592bceea953eeee625d0e52ad80d",
+      "bytes": 20636
+    },
+    "validation/mutations/capacity_guard_deleted.txt": {
+      "sha256": "ee2eaf405f2e3bcbba6c7f5c4ddf4055cbf089b69b441b0b0ea062b0d9466735",
+      "bytes": 1184
+    },
+    "validation/mutations/baseline_wrongly_counted_as_mutant.txt": {
+      "sha256": "50e0e3377f940deab7eb8b4d512b92ae2f32ba14a909d64e90c68723c52090db",
+      "bytes": 8303
+    },
+    "validation/mutations/planned_equality_deleted.txt": {
+      "sha256": "474af25460447b39cbec473f6f953ec33a7340f63cc8eb976489cb9d54fc0e8b",
+      "bytes": 3507
+    },
+    "validation/mutations/completed_advisory_rejected.txt": {
+      "sha256": "fc2410c1ad99013426985c7d5ce5ebfffb6ebe56d65b9ec7e33af00b4718e79f",
+      "bytes": 5118
+    },
+    "source/scripts/ci_nightly_freshness.py": {
+      "sha256": "e3a930f9db39d570440bcabbc564c395917e4db0fc6429794f54c5f22543bd8e",
+      "bytes": 12723
+    },
+    "source/.github/workflows/docs-quality.yml": {
+      "sha256": "7529c54302f8931fc2748802b57d5a03b5f04cad688748095537cbd3316aee28",
+      "bytes": 112927
+    },
+    "source/.github/workflows/ci-select.yml": {
+      "sha256": "d951f53a79370643e6350b585f2f8310e5061a241d4a9db27a0065d243d14bae",
+      "bytes": 12158
+    },
+    "source/.github/workflows/ci.yml": {
+      "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+      "bytes": 316867
+    },
+    "source/scripts/tests/test_ci_nightly_freshness.py": {
+      "sha256": "6872fc30ec6353b9cfa5263f65622981d4b1be65a7b1046307f32676a23a59ca",
+      "bytes": 34371
+    },
+    "source/scripts/tests/fixtures/ci-nightly-freshness/mutants-parse-10010502882.zip": {
+      "sha256": "7d60fdfa6ce36bdf3f5d5105c476ebf7fa61c273a5735f53b15e7b0eeea0aa63",
+      "bytes": 9720
+    },
+    "source/scripts/tests/fixtures/ci-nightly-freshness/provenance.json": {
+      "sha256": "0d1fefad961722e2a99953d5c081167b3651d8a195be165cfa9c9fd10ef82c3b",
+      "bytes": 1265
+    },
+    "source/scripts/tests/fixtures/ci-nightly-freshness/mutants-engine-10036242958.zip": {
+      "sha256": "77bc3dd50465d6c7987141b49eb9d4b656add76129ca0e79ac4734f597673752",
+      "bytes": 29016
+    }
+  }
+}

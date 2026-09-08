@@ -1,0 +1,9 @@
+{
+  "rest_login": "sparq-orchestrator[bot]",
+  "graphql_login": "sparq-orchestrator",
+  "rest_type": "Bot",
+  "graphql_type": "Bot",
+  "ids_equal": true,
+  "login_equal_after_suffix_removal": true,
+  "method": "Public REST Bot node_id resolved through GraphQL node; no production claim, App credentials, or rerun used."
+}

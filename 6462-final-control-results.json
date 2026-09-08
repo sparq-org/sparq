@@ -1,0 +1,23 @@
+{
+  "fixed_query": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": "136ecdd68ebd8e35c2547f3e255660677743d35d1fd34fb86089c5cbfb208f33"
+  },
+  "old_query": {
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": "e54b80b092871d4e944caa3a3d1da5b2dcb0093de3e8c931fbe7b8a2931857c6"
+  },
+  "old_login": {
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": "a8a3bb3dee98d9b9ae6ec7eb815af65ea8fd1797370b7187d8e569e4d6599737"
+  }
+}
