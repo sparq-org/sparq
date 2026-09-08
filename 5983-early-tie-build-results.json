@@ -1,0 +1,64 @@
+{
+  "records": [
+    {
+      "variant": "new-timing",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "target/bench-wrapper/Cargo.toml"
+      ],
+      "exit_code": 0,
+      "seconds": 34.108367919921875,
+      "source_sha256": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+      "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+      "dirty_control": false,
+      "binary_sha256": "503ed539f439356de49b75cf1b60c2b90f411db68814bf0235bb4290d5517cc4"
+    },
+    {
+      "variant": "new-count",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "target/bench-wrapper/Cargo.toml",
+        "--features",
+        "count-alloc"
+      ],
+      "exit_code": 0,
+      "seconds": 1.9016790390014648,
+      "source_sha256": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+      "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+      "dirty_control": false,
+      "binary_sha256": "3f0438b12ae317d472fd410d69c225daa047a57fdc8694159af05418c2657424"
+    },
+    {
+      "variant": "early-disabled-count",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "target/bench-wrapper/Cargo.toml",
+        "--features",
+        "count-alloc"
+      ],
+      "exit_code": 0,
+      "seconds": 19.022477865219116,
+      "source_sha256": "f8d87f57a9f408e74939466e0473c8d9eac3013deaf49f56746c3dd272aee830",
+      "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+      "dirty_control": true,
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654"
+    }
+  ],
+  "seconds": 56.61738991737366,
+  "source_restored": true
+}

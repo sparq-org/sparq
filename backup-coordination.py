@@ -103,6 +103,10 @@ for evidence_name in [*json.loads((DIAGNOSTIC / 'manifest.json').read_text())['f
     FILES['5983-diagnostic-' + evidence_name.replace('/', '--')] = DIAGNOSTIC / evidence_name
 FILES['5983-diagnostic-findings-comment.md'] = ROOT / 'direct-5983/diagnostic-findings-comment.md'
 
+EARLY_TIE = ROOT / 'direct-5983/early-tie'
+for evidence_name in [*json.loads((EARLY_TIE / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['5983-early-tie-' + evidence_name.replace('/', '--')] = EARLY_TIE / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

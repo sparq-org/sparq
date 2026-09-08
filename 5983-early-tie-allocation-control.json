@@ -1,0 +1,448 @@
+{
+  "records": [
+    {
+      "case": "base",
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "verify",
+        "base",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "indexed"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863613.459266,
+      "wall_seconds": 0.2976560592651367,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45531136,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600052,
+          "reallocs": 37,
+          "requested_bytes": 123826099,
+          "peak_live_delta": 47136880,
+          "ending_live": 31549470
+        },
+        {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-base-verify.txt"
+    },
+    {
+      "case": "base",
+      "mode": "measure",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "measure",
+        "base",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "indexed"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863613.757395,
+      "wall_seconds": 0.27556300163269043,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45498368,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600050,
+          "reallocs": 37,
+          "requested_bytes": 123823387,
+          "peak_live_delta": 47134168,
+          "ending_live": 31549471
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1226953,
+          "peak_live_delta": 1209777,
+          "ending_live": 31550755,
+          "pre_query_max_rss": 47054848,
+          "post_query_max_rss": 47087616,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1226953,
+          "peak_live_delta": 1209777,
+          "ending_live": 31550755,
+          "pre_query_max_rss": 47054848,
+          "post_query_max_rss": 47136768,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1226953,
+          "peak_live_delta": 1209777,
+          "ending_live": 31550755,
+          "pre_query_max_rss": 47054848,
+          "post_query_max_rss": 47136768,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-base-measure.txt"
+    },
+    {
+      "case": "ties",
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "verify",
+        "ties",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863614.037677,
+      "wall_seconds": 0.3145411014556885,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600049,
+          "reallocs": 37,
+          "requested_bytes": 123821083,
+          "peak_live_delta": 47131864,
+          "ending_live": 31549471
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-ties-verify.txt"
+    },
+    {
+      "case": "ties",
+      "mode": "measure",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "measure",
+        "ties",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863614.353548,
+      "wall_seconds": 0.3801548480987549,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600049,
+          "reallocs": 37,
+          "requested_bytes": 123821083,
+          "peak_live_delta": 47131864,
+          "ending_live": 31549472
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 150557,
+          "reallocs": 800,
+          "requested_bytes": 87144514,
+          "peak_live_delta": 18597196,
+          "ending_live": 31550756,
+          "pre_query_max_rss": 71778304,
+          "post_query_max_rss": 71794688,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 150557,
+          "reallocs": 800,
+          "requested_bytes": 87144514,
+          "peak_live_delta": 18597196,
+          "ending_live": 31550756,
+          "pre_query_max_rss": 71778304,
+          "post_query_max_rss": 73203712,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 150557,
+          "reallocs": 800,
+          "requested_bytes": 87144514,
+          "peak_live_delta": 18597196,
+          "ending_live": 31550756,
+          "pre_query_max_rss": 71778304,
+          "post_query_max_rss": 73220096,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-ties-measure.txt"
+    },
+    {
+      "case": "ties-overlay",
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "verify",
+        "ties-overlay",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863614.7406561,
+      "wall_seconds": 0.3835599422454834,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 90259456,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 3050095,
+          "reallocs": 20067,
+          "requested_bytes": 189992751,
+          "peak_live_delta": 80567580,
+          "ending_live": 36849469
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-ties-overlay-verify.txt"
+    },
+    {
+      "case": "ties-overlay",
+      "mode": "measure",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/bins/early-disabled-count",
+        "measure",
+        "ties-overlay",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "exit_code": 0,
+      "started_unix": 1788863615.1254232,
+      "wall_seconds": 0.4712667465209961,
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89145344,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 3050097,
+          "reallocs": 20067,
+          "requested_bytes": 189995695,
+          "peak_live_delta": 80570524,
+          "ending_live": 36849470
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 120443,
+          "reallocs": 110,
+          "requested_bytes": 59229890,
+          "peak_live_delta": 14436940,
+          "ending_live": 36850754,
+          "pre_query_max_rss": 108183552,
+          "post_query_max_rss": 108183552,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 120443,
+          "reallocs": 110,
+          "requested_bytes": 59229890,
+          "peak_live_delta": 14436940,
+          "ending_live": 36850754,
+          "pre_query_max_rss": 108183552,
+          "post_query_max_rss": 108183552,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 120443,
+          "reallocs": 110,
+          "requested_bytes": 59229890,
+          "peak_live_delta": 14436940,
+          "ending_live": 36850754,
+          "pre_query_max_rss": 108183552,
+          "post_query_max_rss": 108183552,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/raw/allocation-control-ties-overlay-measure.txt"
+    }
+  ],
+  "checks": [
+    {
+      "case": "base",
+      "positive_control": "identical query allocation metrics",
+      "metrics": {
+        "allocs": 224,
+        "reallocs": 10,
+        "requested_bytes": 1226953,
+        "peak_live_delta": 1209777
+      }
+    },
+    {
+      "case": "ties",
+      "seed_rows": 50000,
+      "minimum_avoided_bytes": 1200000,
+      "avoided_requested_bytes": 1200846,
+      "avoided_allocations": 37,
+      "new": {
+        "allocs": 150520,
+        "reallocs": 800,
+        "requested_bytes": 85943668,
+        "peak_live_delta": 18597196
+      },
+      "early_disabled": {
+        "allocs": 150557,
+        "reallocs": 800,
+        "requested_bytes": 87144514,
+        "peak_live_delta": 18597196
+      },
+      "frozen_old_equal": true,
+      "guard_disabled_mutation": "killed by avoided-work assertion",
+      "peak_live_delta_change": 0
+    },
+    {
+      "case": "ties-overlay",
+      "seed_rows": 40000,
+      "minimum_avoided_bytes": 960000,
+      "avoided_requested_bytes": 4560846,
+      "avoided_allocations": 43,
+      "new": {
+        "allocs": 120400,
+        "reallocs": 110,
+        "requested_bytes": 54669044,
+        "peak_live_delta": 14436940
+      },
+      "early_disabled": {
+        "allocs": 120443,
+        "reallocs": 110,
+        "requested_bytes": 59229890,
+        "peak_live_delta": 14436940
+      },
+      "frozen_old_equal": true,
+      "guard_disabled_mutation": "killed by avoided-work assertion",
+      "peak_live_delta_change": 0
+    }
+  ],
+  "wall_clock_assertions": false
+}

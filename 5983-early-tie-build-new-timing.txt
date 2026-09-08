@@ -1,0 +1,6 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-core)
+   Compiling spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/vendor/spargebra)
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-substrate)
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-engine)
+   Compiling indexed-topk-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/target/bench-wrapper)
+    Finished `release` profile [optimized] target(s) in 34.00s

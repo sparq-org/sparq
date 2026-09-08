@@ -1,0 +1,11 @@
+commit dc23141d8c9e640e599085b0ed1616da35d8fc87
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 11:23:11 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 11:23:11 2026 +0100
+
+    perf(engine): reject oversized leading ties before probe preparation
+    
+    [GPT-6 Astra] Reuse the existing block cap and sorted-object invariant to detect a leading group that the first block must reject. Compare the leading key with the key at the cap edge before retaining any probe scans or subject-id vectors. Preserve the original late guard, fallback and cap formula. Add ASC/DESC cap-edge, OFFSET, row-budget expansion and overlay-deletion regressions; no drained-prefix policy change.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

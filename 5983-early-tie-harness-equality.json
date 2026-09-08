@@ -1,0 +1,22 @@
+{
+  "Cargo.toml": {
+    "sha256": "6bf23b632c2e18b1696220a5a3899a1478058756c3cf988e7514eb39987dc4c7",
+    "bytes": 561
+  },
+  "Cargo.lock": {
+    "sha256": "b953da71182f9233f76753b739fbf8dca4f0f18fe8f769b27f2cc010ec3dcc5f",
+    "bytes": 23151
+  },
+  "README.md": {
+    "sha256": "a9b9127222e909f65d7a06df19206714801a0c6eebeaf289da63e51176cb8f26",
+    "bytes": 3729
+  },
+  "src/counting.rs": {
+    "sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "bytes": 4318
+  },
+  "src/main.rs": {
+    "sha256": "089e21a15520d511f28fc7759b7bdfc39a98ab4790bad77f97a4366564ec5117",
+    "bytes": 8345
+  }
+}

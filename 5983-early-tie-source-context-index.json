@@ -1,0 +1,26 @@
+[
+  {
+    "file": "crates/sparq-engine/src/exec.rs",
+    "start": 3110,
+    "end": 3605,
+    "sha256": "29dc4b96dfc549a8cf4dc39ac9f0ab26fee2ddf6e4b7a29a1ee2b26063cfb9dd"
+  },
+  {
+    "file": "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs",
+    "start": 1,
+    "end": 158,
+    "sha256": "adc3e23d565aae1eff446d0f8e1728314d2098b8a12ec91c8bcaea84c58c3b39"
+  },
+  {
+    "file": "crates/sparq-core/src/store.rs",
+    "start": 1020,
+    "end": 1137,
+    "sha256": "cc19a61e3a78a5ece3af355074b9b4893acd6fceabf5d96b402141fee8d353e6"
+  },
+  {
+    "file": "crates/sparq-core/src/dict.rs",
+    "start": 1,
+    "end": 25,
+    "sha256": "2691a007313bec81d875ddec8899dafb76345b1bdc85272780f25c4232b8a102"
+  }
+]

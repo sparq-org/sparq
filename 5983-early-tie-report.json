@@ -1,0 +1,1815 @@
+{
+  "task": "PR5983 / issue6465 oversized-leading-tie early rejection only",
+  "decision": "Repair has measured allocation benefit; full candidate remains NO_GO for admission",
+  "decision_basis": "The new guard removes six probe preparations from the two known oversized-leading-tie cases without changing positive-path allocations. Drained-prefix fallback regressions remain, with disjoint candidate/disabled timing ranges in both base and overlay cases. Timing noise and baseline drift prohibit treating the tie medians as a precise speedup claim. No independent review or admission was performed in this stage.",
+  "author": "OpenAI GPT-6 Astra, actual xhigh implementation and measurement runtime; no additional agents or model calls",
+  "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+  "base": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+  "branch": "codex/perf-topk-leading-tie-reject",
+  "tracked_scope": {
+    "files": [
+      "crates/sparq-engine/src/exec.rs",
+      "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs"
+    ],
+    "additions": 78,
+    "deletions": 7,
+    "new_tests": 3
+  },
+  "change": "Compute the unchanged max(n/2, 256, 2*row_budget) cap immediately after the seed's sort and all-inline checks. If first and cap-th seed keys are equal in the requested direction, return the existing fallback before preparing other scans or retained subject vectors. Keep the original late block guard, fallback, shape, budget and fanout rules intact. Historical Luke Dary / Claude Sonnet5 authorship remains attributed; this commit carries the actual Astra trailer.",
+  "source_argument": [
+    "The existing actual_sort == Some(2) guard and all-inline proof precede this new check; scan_with preserves permutation order when merging overlays.",
+    "For sorted rows, equality between logical positions 0 and cap means the leading group has at least cap+1 rows. A group exactly cap long remains allowed.",
+    "n > cap establishes n is nonzero, cap < n and (n-1)-cap is representable; both ASC and DESC indices are within the scan.",
+    "No probe scan, subject vector or collected result has been built at the new return. Seed scan materialization and the O(seed_rows) all-inline scan still happen first.",
+    "The same cap is used later, including its floor and saturating 2*row_budget component. A rejected leading group was already guaranteed to exceed the old first-block cap; the change moves rejection, not result semantics or thresholds."
+  ],
+  "validation": {
+    "default": "46 passed: indexed differential 29, existing topk_orderby 14, orderby_limit_zero 3; one test thread, two build jobs, offline/locked task-local target",
+    "compact_index": "29 differential tests passed, including fallback where PSO is absent; conditional trace expectation does not claim indexed engagement on unsupported permutations",
+    "new_test_coverage": "ASC/DESC, OFFSET with total-order oracle, floor cap256 and proportional cap300, exact cap and cap+1, large row-budget cap, overlay tombstone-adjusted n/group",
+    "semantic_control_limit": "The old late placement is semantically correct for these cases; semantic tests alone cannot pin avoided preparation. The allocation contract is the headline performance guard control.",
+    "allocation_control": [
+      {
+        "case": "base",
+        "positive_control": "identical query allocation metrics",
+        "metrics": {
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1226953,
+          "peak_live_delta": 1209777
+        }
+      },
+      {
+        "case": "ties",
+        "seed_rows": 50000,
+        "minimum_avoided_bytes": 1200000,
+        "avoided_requested_bytes": 1200846,
+        "avoided_allocations": 37,
+        "new": {
+          "allocs": 150520,
+          "reallocs": 800,
+          "requested_bytes": 85943668,
+          "peak_live_delta": 18597196
+        },
+        "early_disabled": {
+          "allocs": 150557,
+          "reallocs": 800,
+          "requested_bytes": 87144514,
+          "peak_live_delta": 18597196
+        },
+        "frozen_old_equal": true,
+        "guard_disabled_mutation": "killed by avoided-work assertion",
+        "peak_live_delta_change": 0
+      },
+      {
+        "case": "ties-overlay",
+        "seed_rows": 40000,
+        "minimum_avoided_bytes": 960000,
+        "avoided_requested_bytes": 4560846,
+        "avoided_allocations": 43,
+        "new": {
+          "allocs": 120400,
+          "reallocs": 110,
+          "requested_bytes": 54669044,
+          "peak_live_delta": 14436940
+        },
+        "early_disabled": {
+          "allocs": 120443,
+          "reallocs": 110,
+          "requested_bytes": 59229890,
+          "peak_live_delta": 14436940
+        },
+        "frozen_old_equal": true,
+        "guard_disabled_mutation": "killed by avoided-work assertion",
+        "peak_live_delta_change": 0
+      }
+    ],
+    "mutation_contract": "One real compiled mutation disables only the new early return and retains the late cap. Base positive metrics match; both tied fixtures match old binary metrics exactly. Saved executed-binary data passes allocation contracts for new and causes exit1 AssertionError for mutated bytes on each tied fixture. No wall-clock assertions.",
+    "allocator_calibration": "Both newly compiled counting binaries passed the unchanged harness calibration. Prior standalone counter negative controls remain preserved in the original diagnostic packet.",
+    "preflight": "Not fully green: only privacy-claims failed because macOS Bash3.2 lacks mapfile at scripts/check-privacy-claims.sh:92. G1/G2/G6 and guard-untested ran; no skip, permission change or bypass was introduced. git diff --check passed and source worktree is clean.",
+    "not_run": "No full workspace, new broad conformance, additional no-default variant, clippy, network install or full benchmark sweep in this stage. Earlier semantic evidence is preserved, not recounted as newly executed."
+  },
+  "build": {
+    "results": {
+      "records": [
+        {
+          "variant": "new-timing",
+          "command": [
+            "/Users/jesght/.cargo/bin/cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "target/bench-wrapper/Cargo.toml"
+          ],
+          "exit_code": 0,
+          "seconds": 34.108367919921875,
+          "source_sha256": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+          "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+          "dirty_control": false,
+          "binary_sha256": "503ed539f439356de49b75cf1b60c2b90f411db68814bf0235bb4290d5517cc4"
+        },
+        {
+          "variant": "new-count",
+          "command": [
+            "/Users/jesght/.cargo/bin/cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "target/bench-wrapper/Cargo.toml",
+            "--features",
+            "count-alloc"
+          ],
+          "exit_code": 0,
+          "seconds": 1.9016790390014648,
+          "source_sha256": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+          "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+          "dirty_control": false,
+          "binary_sha256": "3f0438b12ae317d472fd410d69c225daa047a57fdc8694159af05418c2657424"
+        },
+        {
+          "variant": "early-disabled-count",
+          "command": [
+            "/Users/jesght/.cargo/bin/cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "target/bench-wrapper/Cargo.toml",
+            "--features",
+            "count-alloc"
+          ],
+          "exit_code": 0,
+          "seconds": 19.022477865219116,
+          "source_sha256": "f8d87f57a9f408e74939466e0473c8d9eac3013deaf49f56746c3dd272aee830",
+          "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+          "dirty_control": true,
+          "binary_sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654"
+        }
+      ],
+      "seconds": 56.61738991737366,
+      "source_restored": true
+    },
+    "jobs": 2,
+    "warm_target": "Task-local diagnostic/target reused; original stored binaries and evidence unchanged",
+    "profile": "release opt-level3, lto=false, codegen-units16, debug=false",
+    "runtime_threads": 1,
+    "features": "same default engine/core features and exact harness Cargo.lock; count-alloc affects only separate instrumentation binary",
+    "deadline_seconds": 900
+  },
+  "protocol": {
+    "fixture_points": 8,
+    "n": 50000,
+    "k": [
+      1,
+      512
+    ],
+    "probe_predicates": 6,
+    "overlay": "Fork retains original snapshot; delete every fifth seven-triple star: 70,000 tombstones, 40,000 live seed rows",
+    "adverse": "Drained prefix leaves pending*2 >= seed and difference <=4, immediately below the existing upfront selectivity decline. Leading ties exceed max_group by one:25,001/50,000 base and20,001/40,000 overlay.",
+    "matrix": "Eight points \u00d7 new/old/disabled/main \u00d7 verify/timing/count =96 process runs,320 query samples (224 uninstrumented timing +96 allocation)",
+    "additional_control": "Three points \u00d7 verify/count =6 process runs,9 allocation samples. Total102 process runs /329 query samples. No additional timing confirmation or expanded sweep.",
+    "warmup": 2,
+    "timing_repetitions": 7,
+    "allocation_repetitions": 3,
+    "oracle": "Same independent generated Rust sort on priority and unique sequence; all results compared outside measurement. Separate verify processes use the existing BGP trace to infer indexed engagement for favorable new/old cases and fallback elsewhere.",
+    "query_window": "Whole query call includes parsing, evaluation and result construction; checking, formatting and result destruction excluded. Count-allocator timing is not reported.",
+    "source_order": "Round-robin source order by fixture, sequential local process runs. No concurrent local build. No CPU affinity, thermal control or host-wide quietness claim; per-process load averages retained. No outliers removed."
+  },
+  "results": {
+    "paired_matrix": [
+      {
+        "case": "base",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 0.798417,
+              "minimum": 0.580125,
+              "maximum": 1.464041,
+              "mean": 0.8821782857142857,
+              "sample_stddev": 0.3311353152835027,
+              "repetitions": 7,
+              "all_samples": [
+                0.580125,
+                1.464041,
+                0.902833,
+                1.178208,
+                0.653916,
+                0.798417,
+                0.597708
+              ]
+            },
+            "query_allocations": {
+              "allocs": 224,
+              "reallocs": 10,
+              "requested_bytes": 1226953,
+              "peak_live_delta": 1209777
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45547520,
+              "after_warmup_max": 47153152,
+              "final_cumulative_max": 48021504,
+              "cumulative_increase_after_warmup": 868352
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 0.565333,
+              "minimum": 0.546459,
+              "maximum": 0.657375,
+              "mean": 0.5828215714285714,
+              "sample_stddev": 0.039678261621267065,
+              "repetitions": 7,
+              "all_samples": [
+                0.657375,
+                0.612,
+                0.585042,
+                0.561583,
+                0.546459,
+                0.551959,
+                0.565333
+              ]
+            },
+            "query_allocations": {
+              "allocs": 224,
+              "reallocs": 10,
+              "requested_bytes": 1226953,
+              "peak_live_delta": 1209777
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45531136,
+              "after_warmup_max": 47136768,
+              "final_cumulative_max": 47316992,
+              "cumulative_increase_after_warmup": 180224
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 21.640792,
+              "minimum": 18.540625,
+              "maximum": 30.255834,
+              "mean": 22.288779714285713,
+              "sample_stddev": 3.95251430176568,
+              "repetitions": 7,
+              "all_samples": [
+                30.255834,
+                21.640792,
+                20.082791,
+                19.598,
+                24.136208,
+                21.767208,
+                18.540625
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150474,
+              "reallocs": 799,
+              "requested_bytes": 85941830,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45547520,
+              "after_warmup_max": 77840384,
+              "final_cumulative_max": 78774272,
+              "cumulative_increase_after_warmup": 933888
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 17.518125,
+              "minimum": 15.925875,
+              "maximum": 18.603208,
+              "mean": 17.39761885714286,
+              "sample_stddev": 0.9755792796414905,
+              "repetitions": 7,
+              "all_samples": [
+                17.518125,
+                17.681041,
+                18.473583,
+                18.603208,
+                15.925875,
+                17.0165,
+                16.565
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150474,
+              "reallocs": 799,
+              "requested_bytes": 85941830,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45547520,
+              "after_warmup_max": 70467584,
+              "final_cumulative_max": 73908224,
+              "cumulative_increase_after_warmup": 3440640
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 1.4122950544192538,
+          "new_over_disabled": 0.03689407485641006,
+          "new_over_main": 0.04557662421063898,
+          "disabled_over_main": 1.2353372292982268
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "base",
+        "k": 512,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 1.21375,
+              "minimum": 1.205375,
+              "maximum": 1.366667,
+              "mean": 1.242910857142857,
+              "sample_stddev": 0.05759641180498594,
+              "repetitions": 7,
+              "all_samples": [
+                1.21375,
+                1.251792,
+                1.243542,
+                1.2055,
+                1.205375,
+                1.21375,
+                1.366667
+              ]
+            },
+            "query_allocations": {
+              "allocs": 5822,
+              "reallocs": 24,
+              "requested_bytes": 2107014,
+              "peak_live_delta": 1876465
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45563904,
+              "after_warmup_max": 48889856,
+              "final_cumulative_max": 49119232,
+              "cumulative_increase_after_warmup": 229376
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 1.266833,
+              "minimum": 1.196541,
+              "maximum": 1.614916,
+              "mean": 1.3253270000000001,
+              "sample_stddev": 0.14937853666106116,
+              "repetitions": 7,
+              "all_samples": [
+                1.272583,
+                1.233958,
+                1.441125,
+                1.251333,
+                1.266833,
+                1.196541,
+                1.614916
+              ]
+            },
+            "query_allocations": {
+              "allocs": 5822,
+              "reallocs": 24,
+              "requested_bytes": 2107014,
+              "peak_live_delta": 1876465
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45531136,
+              "after_warmup_max": 48201728,
+              "final_cumulative_max": 48529408,
+              "cumulative_increase_after_warmup": 327680
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 18.815042,
+              "minimum": 17.014417,
+              "maximum": 21.928792,
+              "mean": 18.970631,
+              "sample_stddev": 1.9055682418298918,
+              "repetitions": 7,
+              "all_samples": [
+                21.079917,
+                21.928792,
+                17.014417,
+                19.087541,
+                17.39975,
+                17.468958,
+                18.815042
+              ]
+            },
+            "query_allocations": {
+              "allocs": 152008,
+              "reallocs": 799,
+              "requested_bytes": 86057859,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45563904,
+              "after_warmup_max": 73826304,
+              "final_cumulative_max": 74678272,
+              "cumulative_increase_after_warmup": 851968
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 16.623708,
+              "minimum": 16.057667,
+              "maximum": 17.623417,
+              "mean": 16.724053571428573,
+              "sample_stddev": 0.5913594301062759,
+              "repetitions": 7,
+              "all_samples": [
+                16.883416,
+                17.623417,
+                16.623708,
+                16.061125,
+                16.521208,
+                17.297834,
+                16.057667
+              ]
+            },
+            "query_allocations": {
+              "allocs": 152008,
+              "reallocs": 799,
+              "requested_bytes": 86057859,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45580288,
+              "after_warmup_max": 73023488,
+              "final_cumulative_max": 73449472,
+              "cumulative_increase_after_warmup": 425984
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 0.958097870832225,
+          "new_over_disabled": 0.06450955570548289,
+          "new_over_main": 0.0730131929651315,
+          "disabled_over_main": 1.131819808192011
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "overlay",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 6.01775,
+              "minimum": 5.842084,
+              "maximum": 8.899125,
+              "mean": 6.580666857142857,
+              "sample_stddev": 1.170454193890336,
+              "repetitions": 7,
+              "all_samples": [
+                5.8575,
+                5.96625,
+                7.458709,
+                6.02325,
+                8.899125,
+                5.842084,
+                6.01775
+              ]
+            },
+            "query_allocations": {
+              "allocs": 231,
+              "reallocs": 10,
+              "requested_bytes": 5186953,
+              "peak_live_delta": 5169777
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89145344,
+              "after_warmup_max": 92127232,
+              "final_cumulative_max": 92356608,
+              "cumulative_increase_after_warmup": 229376
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 6.734958,
+              "minimum": 6.033667,
+              "maximum": 9.936042,
+              "mean": 7.10953,
+              "sample_stddev": 1.325336628437973,
+              "repetitions": 7,
+              "all_samples": [
+                7.416042,
+                6.793667,
+                6.176709,
+                6.675625,
+                6.734958,
+                6.033667,
+                9.936042
+              ]
+            },
+            "query_allocations": {
+              "allocs": 231,
+              "reallocs": 10,
+              "requested_bytes": 5186953,
+              "peak_live_delta": 5169777
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89210880,
+              "after_warmup_max": 92405760,
+              "final_cumulative_max": 93585408,
+              "cumulative_increase_after_warmup": 1179648
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 21.176792,
+              "minimum": 20.0165,
+              "maximum": 22.650208,
+              "mean": 21.253279714285714,
+              "sample_stddev": 0.8222078848516583,
+              "repetitions": 7,
+              "all_samples": [
+                20.989166,
+                20.766709,
+                22.650208,
+                21.72875,
+                20.0165,
+                21.444833,
+                21.176792
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120353,
+              "reallocs": 109,
+              "requested_bytes": 54067206,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 88784896,
+              "after_warmup_max": 107167744,
+              "final_cumulative_max": 107479040,
+              "cumulative_increase_after_warmup": 311296
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 21.067291,
+              "minimum": 19.874292,
+              "maximum": 22.638125,
+              "mean": 20.995381000000002,
+              "sample_stddev": 0.9239555024195333,
+              "repetitions": 7,
+              "all_samples": [
+                21.446584,
+                21.124042,
+                20.053042,
+                19.874292,
+                20.764291,
+                22.638125,
+                21.067291
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120353,
+              "reallocs": 109,
+              "requested_bytes": 54067206,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 90128384,
+              "after_warmup_max": 107806720,
+              "final_cumulative_max": 107806720,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 0.8935096551455852,
+          "new_over_disabled": 0.2841672147509406,
+          "new_over_main": 0.28564422449948595,
+          "disabled_over_main": 1.0051976782396939
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "overlay",
+        "k": 512,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 7.034833,
+              "minimum": 6.482959,
+              "maximum": 9.138708,
+              "mean": 7.257565571428572,
+              "sample_stddev": 0.927498058244123,
+              "repetitions": 7,
+              "all_samples": [
+                7.034833,
+                6.558125,
+                7.551709,
+                6.482959,
+                9.138708,
+                6.642166,
+                7.394459
+              ]
+            },
+            "query_allocations": {
+              "allocs": 5829,
+              "reallocs": 24,
+              "requested_bytes": 6067014,
+              "peak_live_delta": 5836465
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89178112,
+              "after_warmup_max": 92946432,
+              "final_cumulative_max": 93863936,
+              "cumulative_increase_after_warmup": 917504
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 7.1605,
+              "minimum": 6.458459,
+              "maximum": 8.211625,
+              "mean": 7.161738142857143,
+              "sample_stddev": 0.6188442324563396,
+              "repetitions": 7,
+              "all_samples": [
+                8.211625,
+                6.785792,
+                6.56525,
+                7.1605,
+                7.41525,
+                7.535291,
+                6.458459
+              ]
+            },
+            "query_allocations": {
+              "allocs": 5829,
+              "reallocs": 24,
+              "requested_bytes": 6067014,
+              "peak_live_delta": 5836465
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89194496,
+              "after_warmup_max": 93061120,
+              "final_cumulative_max": 93257728,
+              "cumulative_increase_after_warmup": 196608
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "indexed-inferred",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 21.958459,
+              "minimum": 20.149166,
+              "maximum": 23.48425,
+              "mean": 21.883869142857144,
+              "sample_stddev": 1.2192242710548133,
+              "repetitions": 7,
+              "all_samples": [
+                20.149166,
+                23.48425,
+                21.958459,
+                20.398375,
+                22.719875,
+                21.933542,
+                22.543417
+              ]
+            },
+            "query_allocations": {
+              "allocs": 121887,
+              "reallocs": 109,
+              "requested_bytes": 54183235,
+              "peak_live_delta": 14469644
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89178112,
+              "after_warmup_max": 107069440,
+              "final_cumulative_max": 107364352,
+              "cumulative_increase_after_warmup": 294912
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 22.339792,
+              "minimum": 20.548292,
+              "maximum": 22.713625,
+              "mean": 21.895970428571427,
+              "sample_stddev": 0.8845501380937195,
+              "repetitions": 7,
+              "all_samples": [
+                22.713625,
+                22.339792,
+                20.992792,
+                21.465292,
+                22.565375,
+                20.548292,
+                22.646625
+              ]
+            },
+            "query_allocations": {
+              "allocs": 121887,
+              "reallocs": 109,
+              "requested_bytes": 54183235,
+              "peak_live_delta": 14469644
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89980928,
+              "after_warmup_max": 106430464,
+              "final_cumulative_max": 106430464,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 512,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 0.9824499685776134,
+          "new_over_disabled": 0.320370067863141,
+          "new_over_main": 0.31490145476734965,
+          "disabled_over_main": 0.9829303245079454
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "drained",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 13.763167,
+              "minimum": 11.597667,
+              "maximum": 20.382834,
+              "mean": 14.735673,
+              "sample_stddev": 2.9698506187823095,
+              "repetitions": 7,
+              "all_samples": [
+                13.763167,
+                16.6595,
+                11.597667,
+                14.786917,
+                12.551459,
+                20.382834,
+                13.408167
+              ]
+            },
+            "query_allocations": {
+              "allocs": 75528,
+              "reallocs": 631,
+              "requested_bytes": 58571750,
+              "peak_live_delta": 8500044
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 25001,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 44957696,
+              "after_warmup_max": 61095936,
+              "final_cumulative_max": 62980096,
+              "cumulative_increase_after_warmup": 1884160
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 12.260375,
+              "minimum": 10.84075,
+              "maximum": 13.3845,
+              "mean": 12.091982142857143,
+              "sample_stddev": 0.9947811289614459,
+              "repetitions": 7,
+              "all_samples": [
+                12.260375,
+                13.3845,
+                11.203416,
+                13.132417,
+                11.30475,
+                10.84075,
+                12.517667
+              ]
+            },
+            "query_allocations": {
+              "allocs": 75528,
+              "reallocs": 631,
+              "requested_bytes": 58571750,
+              "peak_live_delta": 8500044
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 25001,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45268992,
+              "after_warmup_max": 60047360,
+              "final_cumulative_max": 60473344,
+              "cumulative_increase_after_warmup": 425984
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 9.897416,
+              "minimum": 9.098833,
+              "maximum": 10.098166,
+              "mean": 9.733047285714285,
+              "sample_stddev": 0.352701933712549,
+              "repetitions": 7,
+              "all_samples": [
+                9.968041,
+                9.9755,
+                9.533084,
+                10.098166,
+                9.560291,
+                9.098833,
+                9.897416
+              ]
+            },
+            "query_allocations": {
+              "allocs": 75445,
+              "reallocs": 630,
+              "requested_bytes": 57469062,
+              "peak_live_delta": 8500044
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 25001,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 44957696,
+              "after_warmup_max": 59179008,
+              "final_cumulative_max": 59621376,
+              "cumulative_increase_after_warmup": 442368
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 9.255375,
+              "minimum": 8.807334,
+              "maximum": 9.667375,
+              "mean": 9.260256142857143,
+              "sample_stddev": 0.3477682713802532,
+              "repetitions": 7,
+              "all_samples": [
+                8.807334,
+                9.613583,
+                9.428167,
+                9.667375,
+                9.255375,
+                9.238292,
+                8.811667
+              ]
+            },
+            "query_allocations": {
+              "allocs": 75445,
+              "reallocs": 630,
+              "requested_bytes": 57469062,
+              "peak_live_delta": 8500044
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 25001,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 44990464,
+              "after_warmup_max": 59195392,
+              "final_cumulative_max": 60243968,
+              "cumulative_increase_after_warmup": 1048576
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 1.1225730860597656,
+          "new_over_disabled": 1.390581844796662,
+          "new_over_main": 1.4870458517348026,
+          "disabled_over_main": 1.069369528517213
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "drained-overlay",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 24.640708,
+              "minimum": 21.98475,
+              "maximum": 26.558125,
+              "mean": 24.29386285714286,
+              "sample_stddev": 1.4442060395316907,
+              "repetitions": 7,
+              "all_samples": [
+                23.257791,
+                21.98475,
+                25.0605,
+                24.640708,
+                26.558125,
+                24.647375,
+                23.907791
+              ]
+            },
+            "query_allocations": {
+              "allocs": 60443,
+              "reallocs": 103,
+              "requested_bytes": 37469850,
+              "peak_live_delta": 7219788
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 20000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 88129536,
+              "after_warmup_max": 97615872,
+              "final_cumulative_max": 98336768,
+              "cumulative_increase_after_warmup": 720896
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 23.92675,
+              "minimum": 22.646291,
+              "maximum": 24.80075,
+              "mean": 23.732749857142856,
+              "sample_stddev": 0.7998127156792036,
+              "repetitions": 7,
+              "all_samples": [
+                24.80075,
+                23.92675,
+                24.467542,
+                22.88825,
+                23.364958,
+                22.646291,
+                24.034708
+              ]
+            },
+            "query_allocations": {
+              "allocs": 60443,
+              "reallocs": 103,
+              "requested_bytes": 37469850,
+              "peak_live_delta": 7219788
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 20000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89620480,
+              "after_warmup_max": 100220928,
+              "final_cumulative_max": 100532224,
+              "cumulative_increase_after_warmup": 311296
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 15.73175,
+              "minimum": 14.595416,
+              "maximum": 16.446959,
+              "mean": 15.59716057142857,
+              "sample_stddev": 0.8291518916388514,
+              "repetitions": 7,
+              "all_samples": [
+                15.73175,
+                14.595416,
+                16.331625,
+                14.991791,
+                16.446959,
+                14.68425,
+                16.398333
+              ]
+            },
+            "query_allocations": {
+              "allocs": 60353,
+              "reallocs": 102,
+              "requested_bytes": 32687154,
+              "peak_live_delta": 7219788
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 20000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 88129536,
+              "after_warmup_max": 99631104,
+              "final_cumulative_max": 99811328,
+              "cumulative_increase_after_warmup": 180224
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 16.027958,
+              "minimum": 15.487333,
+              "maximum": 17.670833,
+              "mean": 16.46567842857143,
+              "sample_stddev": 0.8600392105729551,
+              "repetitions": 7,
+              "all_samples": [
+                17.052958,
+                17.670833,
+                16.027958,
+                15.487333,
+                17.305792,
+                16.0095,
+                15.705375
+              ]
+            },
+            "query_allocations": {
+              "allocs": 60353,
+              "reallocs": 102,
+              "requested_bytes": 32687154,
+              "peak_live_delta": 7219788
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 20000,
+              "tied_rows": 0,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 88096768,
+              "after_warmup_max": 99663872,
+              "final_cumulative_max": 99909632,
+              "cumulative_increase_after_warmup": 245760
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 1.0298393220976523,
+          "new_over_disabled": 1.5663043208797496,
+          "new_over_main": 1.5373579092233707,
+          "disabled_over_main": 0.981519292725873
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": true,
+          "new_vs_main": true
+        }
+      },
+      {
+        "case": "ties",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 19.186584,
+              "minimum": 16.132125,
+              "maximum": 37.258167,
+              "mean": 21.653785714285714,
+              "sample_stddev": 7.452283066936171,
+              "repetitions": 7,
+              "all_samples": [
+                16.132125,
+                16.170666,
+                19.186584,
+                24.7145,
+                37.258167,
+                19.396208,
+                18.71825
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150520,
+              "reallocs": 800,
+              "requested_bytes": 85943668,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 25001,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45547520,
+              "after_warmup_max": 72531968,
+              "final_cumulative_max": 77725696,
+              "cumulative_increase_after_warmup": 5193728
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 22.350167,
+              "minimum": 19.258291,
+              "maximum": 112.173292,
+              "mean": 48.36355342857143,
+              "sample_stddev": 38.56774851835327,
+              "repetitions": 7,
+              "all_samples": [
+                19.258291,
+                112.173292,
+                88.753208,
+                56.429708,
+                22.350167,
+                19.6155,
+                19.964708
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150557,
+              "reallocs": 800,
+              "requested_bytes": 87144514,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 25001,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45531136,
+              "after_warmup_max": 72073216,
+              "final_cumulative_max": 77004800,
+              "cumulative_increase_after_warmup": 4931584
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 20.460125,
+              "minimum": 18.402417,
+              "maximum": 26.463125,
+              "mean": 21.576214285714286,
+              "sample_stddev": 3.4930430987327616,
+              "repetitions": 7,
+              "all_samples": [
+                18.61425,
+                20.460125,
+                18.773583,
+                22.156542,
+                26.163458,
+                26.463125,
+                18.402417
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150474,
+              "reallocs": 799,
+              "requested_bytes": 85941830,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 25001,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45563904,
+              "after_warmup_max": 73269248,
+              "final_cumulative_max": 77578240,
+              "cumulative_increase_after_warmup": 4308992
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 18.475333,
+              "minimum": 15.55275,
+              "maximum": 22.287625,
+              "mean": 18.465011999999998,
+              "sample_stddev": 2.1588500817015213,
+              "repetitions": 7,
+              "all_samples": [
+                18.475333,
+                22.287625,
+                18.5855,
+                19.659167,
+                16.665,
+                18.029709,
+                15.55275
+              ]
+            },
+            "query_allocations": {
+              "allocs": 150474,
+              "reallocs": 799,
+              "requested_bytes": 85941830,
+              "peak_live_delta": 18597196
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 50000,
+              "pending_rows": 50000,
+              "tied_rows": 25001,
+              "probe_predicates": 6,
+              "tombstones": 0
+            },
+            "rss_bytes": {
+              "setup_max": 45563904,
+              "after_warmup_max": 72761344,
+              "final_cumulative_max": 75694080,
+              "cumulative_increase_after_warmup": 2932736
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 0.8584537198312657,
+          "new_over_disabled": 0.9377549746152577,
+          "new_over_main": 1.0384973304676024,
+          "disabled_over_main": 1.1074292950497835
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": false,
+          "new_vs_disabled": false,
+          "new_vs_main": false
+        }
+      },
+      {
+        "case": "ties-overlay",
+        "k": 1,
+        "variants": {
+          "new": {
+            "whole_query_ms": {
+              "median": 22.746167,
+              "minimum": 22.130959,
+              "maximum": 23.706916,
+              "mean": 22.826160714285713,
+              "sample_stddev": 0.5518462595076383,
+              "repetitions": 7,
+              "all_samples": [
+                23.706916,
+                22.656708,
+                22.130959,
+                22.746167,
+                22.252708,
+                23.168334,
+                23.121333
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120400,
+              "reallocs": 110,
+              "requested_bytes": 54669044,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 20001,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89194496,
+              "after_warmup_max": 107954176,
+              "final_cumulative_max": 107954176,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "old": {
+            "whole_query_ms": {
+              "median": 28.456541,
+              "minimum": 27.788916,
+              "maximum": 30.577375,
+              "mean": 28.934273571428573,
+              "sample_stddev": 1.0777859020886071,
+              "repetitions": 7,
+              "all_samples": [
+                27.788916,
+                30.045708,
+                28.456541,
+                30.577375,
+                29.391833,
+                28.033084,
+                28.246458
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120443,
+              "reallocs": 110,
+              "requested_bytes": 59229890,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 20001,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89194496,
+              "after_warmup_max": 107462656,
+              "final_cumulative_max": 107462656,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "disabled": {
+            "whole_query_ms": {
+              "median": 29.755958,
+              "minimum": 25.308333,
+              "maximum": 42.626416,
+              "mean": 31.309243714285714,
+              "sample_stddev": 5.882469701893293,
+              "repetitions": 7,
+              "all_samples": [
+                25.308333,
+                26.421958,
+                28.599167,
+                34.352791,
+                29.755958,
+                32.100083,
+                42.626416
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120353,
+              "reallocs": 109,
+              "requested_bytes": 54067206,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 20001,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 90177536,
+              "after_warmup_max": 107839488,
+              "final_cumulative_max": 107839488,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          },
+          "main": {
+            "whole_query_ms": {
+              "median": 22.545,
+              "minimum": 20.30975,
+              "maximum": 25.985083,
+              "mean": 22.788958571428573,
+              "sample_stddev": 1.7687161323560705,
+              "repetitions": 7,
+              "all_samples": [
+                21.718292,
+                22.545,
+                23.573834,
+                22.161959,
+                25.985083,
+                20.30975,
+                23.228792
+              ]
+            },
+            "query_allocations": {
+              "allocs": 120353,
+              "reallocs": 109,
+              "requested_bytes": 54067206,
+              "peak_live_delta": 14436940
+            },
+            "allocation_repetitions": 3,
+            "fixture": {
+              "n": 50000,
+              "seed_rows": 40000,
+              "pending_rows": 40000,
+              "tied_rows": 20001,
+              "probe_predicates": 6,
+              "tombstones": 70000
+            },
+            "rss_bytes": {
+              "setup_max": 89374720,
+              "after_warmup_max": 109559808,
+              "final_cumulative_max": 109559808,
+              "cumulative_increase_after_warmup": 0
+            },
+            "verification": {
+              "kind": "verify",
+              "path": "fallback",
+              "rows": 1,
+              "oracle": "pass"
+            }
+          }
+        },
+        "median_ratios": {
+          "new_over_old": 0.7993300028981034,
+          "new_over_disabled": 0.7644239516670913,
+          "new_over_main": 1.0089229097360832,
+          "disabled_over_main": 1.319847327567088
+        },
+        "repetition_ranges_disjoint": {
+          "new_vs_old": true,
+          "new_vs_disabled": true,
+          "new_vs_main": false
+        }
+      }
+    ],
+    "all_oracles_and_path_verifications_passed": true,
+    "deterministic_allocations_across_repetitions": true
+  },
+  "memory_limits": [
+    "requested_bytes is allocation traffic, counting successful realloc's full new size; it is not simultaneously live heap. peak_live_delta tracks instrumented requested live bytes above pre-query baseline.",
+    "Tie-case query heap peaks are unchanged: earlier preparation was already freed before fallback reached its high-water mark. The improvement is avoided allocation work/traffic, not a lower measured peak.",
+    "The overlay seed scan remains: new tie-overlay requested bytes exceed disabled by601,838 (base excess1,838). No claim that early rejection is free.",
+    "RSS is macOS getrusage process cumulative high-water, recorded after setup, after warmup and after queries. A flat RSS after warmup does not imply zero query memory. It cannot isolate a query-only RSS peak; use heap delta only within its instrumentation limits.",
+    "Heap instrumentation excludes allocator metadata, stack, mappings and transient allocator-internal realloc peaks; calibration is bounded, not an external profiler or Miri proof."
+  ],
+  "timing_limits": "This run has substantial noise: base-k1 new includes first-fixture warm process/host variability; ties old has a112.173ms sample. Main/disabled medians drift up to about32% despite identical allocation metrics. Preserve all samples and report ratios as local diagnostic observations, not causal precision or canonical speedups. Drained new/disabled ranges remain disjoint despite noise.",
+  "next_smallest_step": "After independent review of this isolated repair, investigate one read-only first-block feasibility check for drained prefixes using borrowed/lazy probe ranges before retaining all subject vectors; if its semantics/cost cannot be bounded, decline those unsupported shapes. Do not select a new heuristic threshold from these eight points or broaden fanout. Re-measure the same controls only after a concrete reviewed candidate; this stage does not implement that design.",
+  "unresolved": [
+    "Drained-prefix construction/probing before fallback (unchanged)",
+    "F1 seed/overlay setup cost and wider resource scaling",
+    "F3 public documentation for unspecified exact-tie ordering",
+    "F4 explicit indexed-path trace",
+    "F5 remaining path-pinned semantic coverage and Reduced/constant-probe/source-context review questions",
+    "Actual independent Opus review of this repair and future admission decision"
+  ],
+  "provenance": "Exact hashes and commit identities in provenance.json; byte-identical harness verification in harness-equality.json; all39 semantic and139 diagnostic manifest files reverified in preserved-evidence.json"
+}

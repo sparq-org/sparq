@@ -1,0 +1,46 @@
+{
+  "default": {
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "topk_orderby_indexed_differential",
+      "--test",
+      "topk_orderby",
+      "--test",
+      "orderby_limit_zero",
+      "--",
+      "--test-threads=1"
+    ],
+    "environment": {
+      "RAYON_NUM_THREADS": "2",
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0"
+    },
+    "passed": 46,
+    "log": "semantic-tests.txt"
+  },
+  "compact": {
+    "additional_feature": "sparq-core/compact-index",
+    "test": "topk_orderby_indexed_differential",
+    "passed": 29,
+    "log": "compact-tests.txt"
+  },
+  "headline_control": {
+    "source_patch": "early-disabled.diff",
+    "build": "build-results.json",
+    "executed_binary_measurements": "allocation-control.json",
+    "positive_and_negative_assertion_exits": "allocation-contract-results.json"
+  },
+  "preflight": {
+    "base": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+    "result": "Bash3 mapfile limitation; not green",
+    "log": "preflight.txt"
+  }
+}

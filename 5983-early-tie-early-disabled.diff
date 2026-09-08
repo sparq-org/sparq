@@ -1,0 +1,13 @@
+diff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs
+index 0d5b126b0..677abe841 100644
+--- a/crates/sparq-engine/src/exec.rs
++++ b/crates/sparq-engine/src/exec.rs
+@@ -3343,7 +3343,7 @@ fn try_topk_orderby_indexed(
+     if n > max_group {
+         let first = if desc { n - 1 } else { 0 };
+         let edge = if desc { first - max_group } else { max_group };
+-        if scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
++        if false && scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
+             return Ok(None);
+         }
+     }

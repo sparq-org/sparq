@@ -1,0 +1,56 @@
+[
+  {
+    "case": "base",
+    "positive_control": "identical query allocation metrics",
+    "metrics": {
+      "allocs": 224,
+      "reallocs": 10,
+      "requested_bytes": 1226953,
+      "peak_live_delta": 1209777
+    }
+  },
+  {
+    "case": "ties",
+    "seed_rows": 50000,
+    "minimum_avoided_bytes": 1200000,
+    "avoided_requested_bytes": 1200846,
+    "avoided_allocations": 37,
+    "new": {
+      "allocs": 150520,
+      "reallocs": 800,
+      "requested_bytes": 85943668,
+      "peak_live_delta": 18597196
+    },
+    "early_disabled": {
+      "allocs": 150557,
+      "reallocs": 800,
+      "requested_bytes": 87144514,
+      "peak_live_delta": 18597196
+    },
+    "frozen_old_equal": true,
+    "guard_disabled_mutation": "killed by avoided-work assertion",
+    "peak_live_delta_change": 0
+  },
+  {
+    "case": "ties-overlay",
+    "seed_rows": 40000,
+    "minimum_avoided_bytes": 960000,
+    "avoided_requested_bytes": 4560846,
+    "avoided_allocations": 43,
+    "new": {
+      "allocs": 120400,
+      "reallocs": 110,
+      "requested_bytes": 54669044,
+      "peak_live_delta": 14436940
+    },
+    "early_disabled": {
+      "allocs": 120443,
+      "reallocs": 110,
+      "requested_bytes": 59229890,
+      "peak_live_delta": 14436940
+    },
+    "frozen_old_equal": true,
+    "guard_disabled_mutation": "killed by avoided-work assertion",
+    "peak_live_delta_change": 0
+  }
+]

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T10:33:10.593547+00:00",
+  "updated_at": "2026-09-08T10:53:28.849474+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,10 +63,10 @@
     "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
     "branch": "codex/perf-topk-leading-tie-reject",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Early-tie source repair durably committed. Agent reports46 focused/default and29 compact-index tests pass, plus full unchanged eight-point matrix320 measured queries across96 processes. Deterministic allocation-saving control and final frozen report/manifest remain pending; do not treat measurements as verified/ready or rerun/duplicate work.",
+    "state": "Early-tie repair frozen dc23141d8 and evidence verified153entries; useful allocation reduction, full candidate remains NO-GO. Same Astra agent now doing read-only drained-prefix design (at most3 concrete options) and one bounded read-only existing sweeper34213698157 evidence check. No further runtime edits or measurement authorized in this step.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Implement only existing oversized-leading-tie admission before probe scan/vector construction, from frozen9e8bdfc9 on own isolated worktree under authorized tmp root. Targeted semantic/work-allocation controls then identical eight-point local matrix; one sequential lane/two build jobs/warm private target. No arbitrary threshold, broad sweep/full workspace/network installs/remote mutations/EC2/independent model call. Commit durably; root owns actual Opus followup before admission. Preserve all original artifacts/binaries.",
-    "phase": "Early-tie paired evidence and allocation control freeze",
+    "contract": "Read-only actual scan/lookup/overlay/tombstone cost design. No arbitrary threshold or assumed cheap scout; preserve favorable and modest/intermittent-miss behavior. Recommend minimal patch/correctness argument and bounded experiment or say no viable option. Also inspect existing scheduled sweeper log after budget check, report actual execution/writes/warnings; no remote mutations/dispatch/retries/model sessions/builds/installs/EC2.",
+    "phase": "Bounded drained-prefix design and post-fix sweeper evidence",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
     "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
@@ -98,7 +98,7 @@
       "actual_model_verified": "claude-opus-5",
       "duration_ms": 492938
     },
-    "review_verdict": "source_clear_for_measurement: no blocking correctness/resource-unsoundness defect found. Not merge approval.",
+    "review_verdict": "Only baseline9e8bdfc9 cleared for measurement by actual Opus5 xhigh. Current dc23141d8 repair is not independently reviewed; no admission approval.",
     "review_findings": {
       "F1": "Measure all retained scans plus global per-probe subject vectors under fork overlays/tombstones: full-query latency, allocation counts/bytes and peak memory. Linear setup/fallback costs may negate gain.",
       "F2": "Measure drained prefix and oversized tie groups causing expensive fallback after attempted work.",
@@ -153,12 +153,21 @@
     },
     "reviewed_baseline_head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
     "early_tie_status": {
-      "observed_at": "2026-09-08T10:33:10.593547+00:00",
+      "observed_at": "2026-09-08T10:53:28.849474+00:00",
       "agent_report": "Runtime2files+78/-7 clean; optimized builds57sec. Old/disabled/main binaries unchanged. No further runtime edits or broad measurement planned. Finishing allocation-saving control and frozen paired report.",
       "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
       "evidence_directory": "direct-5983/early-tie",
-      "final_report_pending": true,
-      "root_manifest_verified": false
+      "final_report_pending": false,
+      "root_manifest_verified": true,
+      "manifest_entries": 153,
+      "report": "direct-5983/early-tie/report.json",
+      "report_sha256": "3a1c55e1078c679b3294c64961a3f06eef73551efee55b36a6077374a350c778",
+      "packet": "direct-5983/early-tie/review-packet.md",
+      "packet_sha256": "0c9c0f99d646ac99051a7d74f3c650e2c2c99ec7cdfb3f892a307dd00a0d7b6a",
+      "decision": "Repair has measured allocation benefit; full candidate remains NO_GO for admission",
+      "effect": "Compiled early-guard-disabled control reproduces old allocations exactly and fails both allocation-saving assertions. Avoids1200846requestedbytes/37allocations base ties and4560846/43overlay. Favorable allocation metrics and peak query heap unchanged. Tie latency noisy; drained overhead remains.",
+      "validation": "46 focused default passes;29 compact-index passes.102processes/329measuredsamples passed correctness checks including allocation controls. Root verified all153 manifest entries and clean dc source.",
+      "limitation": "Local diagnostic only; cumulative RSS and requested-heap limits unchanged. No independent Opus review of dc23141d8 repair yet, no full workspace/conformance gate."
     }
   },
   "prs": {
@@ -437,8 +446,8 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci final early-tie report/control/manifest for dc23141d8..., verify source and paired measurements. Agent reports scoped tests and320 queries complete; allocation control/report freeze pending. Do not duplicate.",
-    "After concrete fix, evaluate measured tie-cost effect and separate drained-prefix design. No candidate admission until both adverse regressions and F3-F5 obligations are addressed with actual Opus followup and required full validation.",
+    "Collect existing postmerge_ci read-only drained-prefix design and existing sweeper34213698157 effect report. No new source edits/measurements until concrete design reviewed by root.",
+    "If viable, authorize one minimal drained-prefix repair/paired experiment, then combine with dc early-tie change and remaining F3-F5 obligations for actual Opus followup and required admission validation. Otherwise retain NO-GO and reprioritize next SPARQL lane.",
     "Keep exact candidate/disabled/main original diagnostic binaries and rawdata unchanged. Any further measurement must answer a named unresolved question, not broaden/repeat the sweep without a source change.",
     "Observe natural nightly34202612161 completion. First natural sweeper containing6463 now34213698157SUCCESS; actual recovery effect remains unverified. Inspect existing evidence via bounded agent followup when available, no manual probes. Registry remains OFF, ALLGREEN and all holds unchanged; releases unapproved.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
@@ -523,7 +532,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T10:33:10.593547+00:00",
+    "observed_at": "2026-09-08T10:53:28.849474+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
@@ -540,7 +549,7 @@
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34202612161,
       "status": "in_progress",
-      "updated_at": "2026-09-08T10:08:24Z"
+      "updated_at": "2026-09-08T10:49:46Z"
     }
   },
   "issues": {

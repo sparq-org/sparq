@@ -1,0 +1,14 @@
+[
+  {
+    "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic",
+    "manifest_sha256": "fbd160cfbc9631e18f35cc3f8626dae78fa7ecbc88341f132823e6e93ec5c012",
+    "entries_verified": 39,
+    "errors": []
+  },
+  {
+    "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic",
+    "manifest_sha256": "1370e03aebb96faaaf657e5cb0e491d09272348a2949d7a59a610986fb4d735e",
+    "entries_verified": 139,
+    "errors": []
+  }
+]

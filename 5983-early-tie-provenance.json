@@ -1,0 +1,99 @@
+{
+  "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+  "branch": "codex/perf-topk-leading-tie-reject",
+  "base": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+  "status_porcelain": "",
+  "diff_stat": " crates/sparq-engine/src/exec.rs                    | 25 ++++++---\n .../tests/topk_orderby_indexed_differential.rs     | 60 ++++++++++++++++++++++\n 2 files changed, 78 insertions(+), 7 deletions(-)\n",
+  "source_sha256": {
+    "crates/sparq-engine/src/exec.rs": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+    "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs": "70954ea0ccd8d0c5a0b0ffae045779ecb945fefe3604484fde31ab27317b4e1c",
+    "crates/sparq-core/src/store.rs": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "crates/sparq-core/src/dict.rs": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+  },
+  "source_blobs": {
+    "crates/sparq-engine/src/exec.rs": "0d5b126b0edda5316d6aa65c152e5af2a8ab9192",
+    "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs": "46d7406572004c7349cd32f7c2acf05ea3f031ab",
+    "crates/sparq-core/src/store.rs": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+    "crates/sparq-core/src/dict.rs": "658390a3634ed7788e875c42727633f32f1e9c57"
+  },
+  "binaries": {
+    "early-disabled-count": {
+      "sha256": "e2600aa6d9d2205ad076f16ab044ee87e1b20dfddbd8bc82c5ade68e748fd654",
+      "bytes": 5420736
+    },
+    "new-count": {
+      "sha256": "3f0438b12ae317d472fd410d69c225daa047a57fdc8694159af05418c2657424",
+      "bytes": 5420736
+    },
+    "new-timing": {
+      "sha256": "503ed539f439356de49b75cf1b60c2b90f411db68814bf0235bb4290d5517cc4",
+      "bytes": 5403824
+    }
+  },
+  "harness_head": "87179e16487e770de4b4c45ed4be008308c47450",
+  "old_sources": {
+    "candidate": {
+      "build_head": "3ef21cb57a5bf6db7561a83b27bd6a38875d7b35",
+      "current_clean_head": "87179e16487e770de4b4c45ed4be008308c47450",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-candidate",
+      "branch": "codex/bench-indexed-topk-diagnostic",
+      "engine_exec_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "exact reviewed 9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+          "sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+          "bytes": 5403840
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+          "sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+          "bytes": 5420752
+        }
+      }
+    },
+    "disabled": {
+      "build_head": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+      "current_clean_head": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-disabled",
+      "branch": "codex/bench-indexed-topk-disabled",
+      "engine_exec_blob": "492865daf2553ae19975f41725225f9d0a0cdb2d",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "reviewed candidate with constant-false admission only",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+          "sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+          "bytes": 5400480
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+          "sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+          "bytes": 5401008
+        }
+      }
+    },
+    "main": {
+      "build_head": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+      "current_clean_head": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-main",
+      "branch": "codex/bench-indexed-topk-main",
+      "engine_exec_blob": "c25e391ac353d92eb1ca6d9525d83c250cd8d327",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "exact main cf19a52c6880c496cefaca24046174902bc30958",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+          "sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+          "bytes": 5400608
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+          "sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+          "bytes": 5401024
+        }
+      }
+    }
+  }
+}

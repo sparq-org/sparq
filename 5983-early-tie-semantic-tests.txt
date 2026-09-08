@@ -1,0 +1,70 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-core)
+   Compiling spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/vendor/spargebra)
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-substrate)
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-engine)
+   Compiling sparq-introspect v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie/crates/sparq-introspect)
+    Finished `test` profile [unoptimized] target(s) in 41.64s
+     Running tests/orderby_limit_zero.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/orderby_limit_zero-089e5a4c3d6688ce)
+
+running 3 tests
+test order_by_limit_one_still_works ... ok
+test order_by_limit_zero_is_empty_not_panic ... ok
+test order_by_offset_limit_zero_is_empty ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/topk_orderby.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby-2b291b31a46d2f2f)
+
+running 14 tests
+test desc_ordering ... ok
+test distinct_keys ... ok
+test duplicate_keys ... ok
+test empty_input ... ok
+test iri_column ... ok
+test k_at_threshold ... ok
+test k_equals_n ... ok
+test k_over_threshold ... ok
+test limit_zero ... ok
+test mixed_types ... ok
+test multi_key_order_by ... ok
+test offset_beyond_size ... ok
+test offset_budget_ge_n ... ok
+test offset_lands_on_boundary ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/topk_orderby_indexed_differential.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby_indexed_differential-b40845b531114b9c)
+
+running 29 tests
+test armed_cancellation_uses_fallback_and_does_not_leak ... ok
+test armed_deadline_uses_fallback_and_expired_deadline_errors ... ok
+test ascending_order_direction ... ok
+test crosses_block_escalation_boundary ... ok
+test empty_pending_queue ... ok
+test exact_desc_ties_preserve_valid_membership_and_window_size ... ok
+test extra_pattern_beyond_star_shape_still_correct ... ok
+test fast_path_actually_engages_not_just_correct ... ok
+test fewer_pending_than_k_returns_all_sorted ... ok
+test forked_overlay_and_compaction_preserve_ordered_answers ... ok
+test indexed_topk_preserves_intermediate_resource_limits ... ok
+test large_already_claimed_prefix_still_correct ... ok
+test large_tie_group_still_correct ... ok
+test leading_tie_cap_boundaries_preserve_both_directions_and_offset ... ok
+test leading_tie_cap_observes_overlay_deletions ... ok
+test leading_tie_cap_preserves_large_row_budget_admission ... ok
+test multi_peer_isolation ... ok
+test multivalued_probe_uses_fallback_and_preserves_cartesian_rows ... ok
+test negative_mixed_and_typed_lexical_values_use_the_fallback ... ok
+test non_inline_priority_values_still_correct ... ok
+test ordered_subqueries_preserve_default_and_named_view_boundaries ... ok
+test randomized_sweep ... ok
+test repeated_seed_variable_full_orderby_is_empty ... ok
+test repeated_seed_variable_limit_is_empty ... ok
+test status_filter_excludes_done_tasks ... ok
+test ties_broken_by_seq_ascending ... ok
+test total_order_desc_offset_windows_match_full_sort ... ok
+test unique_priorities_pseudo_random_medium ... ok
+test unique_priorities_small ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.93s
+

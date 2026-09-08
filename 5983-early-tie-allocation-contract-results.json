@@ -1,0 +1,58 @@
+[
+  {
+    "case": "ties",
+    "variant": "new",
+    "command": [
+      "python3",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/check_allocation_contract.py",
+      "ties",
+      "new"
+    ],
+    "exit_code": 0,
+    "expected_exit": 0,
+    "result": "passed",
+    "raw": "contract-ties-new.txt"
+  },
+  {
+    "case": "ties",
+    "variant": "early-disabled",
+    "command": [
+      "python3",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/check_allocation_contract.py",
+      "ties",
+      "early-disabled"
+    ],
+    "exit_code": 1,
+    "expected_exit": 1,
+    "result": "killed",
+    "raw": "contract-ties-early-disabled.txt"
+  },
+  {
+    "case": "ties-overlay",
+    "variant": "new",
+    "command": [
+      "python3",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/check_allocation_contract.py",
+      "ties-overlay",
+      "new"
+    ],
+    "exit_code": 0,
+    "expected_exit": 0,
+    "result": "passed",
+    "raw": "contract-ties-overlay-new.txt"
+  },
+  {
+    "case": "ties-overlay",
+    "variant": "early-disabled",
+    "command": [
+      "python3",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/check_allocation_contract.py",
+      "ties-overlay",
+      "early-disabled"
+    ],
+    "exit_code": 1,
+    "expected_exit": 1,
+    "result": "killed",
+    "raw": "contract-ties-overlay-early-disabled.txt"
+  }
+]

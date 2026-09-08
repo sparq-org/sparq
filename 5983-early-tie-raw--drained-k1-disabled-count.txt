@@ -1,0 +1,5 @@
+kind=fixture	case=drained	n=50000	k=1	seed_rows=50000	pending_rows=25001	tied_rows=0	probe_predicates=6	tombstones=0	setup_max_rss=45154304	counting=true
+kind=setup_alloc	allocs=2600050	reallocs=36	requested_bytes=122592518	peak_live_delta=46570060	ending_live=30987674
+kind=sample	rep=0	allocs=75445	reallocs=630	requested_bytes=57469062	peak_live_delta=8500044	ending_live=30988958	pre_query_max_rss=57622528	post_query_max_rss=59981824	rows=1	oracle=pass
+kind=sample	rep=1	allocs=75445	reallocs=630	requested_bytes=57469062	peak_live_delta=8500044	ending_live=30988958	pre_query_max_rss=57622528	post_query_max_rss=60014592	rows=1	oracle=pass
+kind=sample	rep=2	allocs=75445	reallocs=630	requested_bytes=57469062	peak_live_delta=8500044	ending_live=30988958	pre_query_max_rss=57622528	post_query_max_rss=60014592	rows=1	oracle=pass

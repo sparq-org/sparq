@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie/check_allocation_contract.py", line 13, in <module>
+    assert late["requested_bytes"] - candidate["requested_bytes"] >= check["minimum_avoided_bytes"], f"{case}: oversized leading group must decline before retaining six subject vectors"
+AssertionError: ties: oversized leading group must decline before retaining six subject vectors
