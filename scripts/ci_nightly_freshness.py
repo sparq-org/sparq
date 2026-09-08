@@ -109,7 +109,7 @@ def read_jobs(get, repo, run):
 def successful_step(job, name):
     steps = job.get("steps")
     if not isinstance(steps, list) or any(not isinstance(s, dict) for s in steps):
-        return False
+        raise EvidenceError("heavy step inventory unreadable")
     matches = [s for s in steps if s.get("name") == name]
     return (len(matches) == 1 and matches[0].get("status") == "completed"
             and matches[0].get("conclusion") == "success")

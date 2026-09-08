@@ -170,12 +170,15 @@ class Admission(unittest.TestCase):
                     freshness.decide("schedule", repo, head, current, api)
                 self.assertEqual(api.calls, [])
 
-    def test_unreadable_step_proof_does_not_skip_heavy_work(self):
+    def test_unreadable_step_inventory_blocks_admission(self):
         for steps in [None, [None], [{"name": freshness.COVERAGE_STEP}]]:
             with self.subTest(steps=steps):
                 jobs = completed_jobs()
                 jobs[0]["steps"] = steps
-                self.assertTrue(self.decide(FakeAPI([run()], {999: jobs}))[0])
+                if steps in (None, [None]):
+                    self.blocked(FakeAPI([run()], {999: jobs}), "inventory unreadable")
+                else:
+                    self.assertTrue(self.decide(FakeAPI([run()], {999: jobs}))[0])
 
     def test_attempt_scoped_job_lookup_and_mismatched_attempt_blocks(self):
         jobs = completed_jobs()

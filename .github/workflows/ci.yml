@@ -3909,7 +3909,7 @@ jobs:
     # while the per-commit `coverage` job still gates the cheaper test-only `floor`. The
     # gate driver reads the summary's `tier` and applies nightly_floor automatically.
     # Triggered by the `schedule:` cron (or manual dispatch), and only when the
-    # nightly-gate admits the first scheduled attempt at this HEAD (or manual force).
+    # nightly-gate finds no verified heavy completion at this HEAD (or manual force).
     name: coverage (nightly, full incl. heavy vectors)
     needs: nightly-gate
     if: needs.nightly-gate.outputs.fresh == 'true'
