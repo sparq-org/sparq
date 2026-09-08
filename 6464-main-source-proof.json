@@ -1,0 +1,15 @@
+{
+  "reviewed_head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
+  "main": "cf19a52c6880c496cefaca24046174902bc30958",
+  "source_byte_equal": true,
+  "docs_quality_composition_equal": true,
+  "files": {
+    ".github/workflows/ci.yml": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    "scripts/ci_nightly_freshness.py": "e3a930f9db39d570440bcabbc564c395917e4db0fc6429794f54c5f22543bd8e",
+    "scripts/tests/test_ci_nightly_freshness.py": "6872fc30ec6353b9cfa5263f65622981d4b1be65a7b1046307f32676a23a59ca",
+    "scripts/tests/fixtures/ci-nightly-freshness/provenance.json": "0d1fefad961722e2a99953d5c081167b3651d8a195be165cfa9c9fd10ef82c3b",
+    "scripts/tests/fixtures/ci-nightly-freshness/mutants-parse-10010502882.zip": "7d60fdfa6ce36bdf3f5d5105c476ebf7fa61c273a5735f53b15e7b0eeea0aa63",
+    "scripts/tests/fixtures/ci-nightly-freshness/mutants-engine-10036242958.zip": "77bc3dd50465d6c7987141b49eb9d4b656add76129ca0e79ac4734f597673752",
+    ".github/workflows/docs-quality.yml": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594"
+  }
+}
