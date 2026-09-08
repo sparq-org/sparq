@@ -52,6 +52,9 @@ FILES = {
     '6436-opus-review-0fc2faf6.json': ROOT / 'direct-6436/followup/opus-review-0fc2faf6.json',
     '6464-pr-body.md': ROOT / 'direct-6436/followup/pr-body.md',
     '6463-pr-docs-quality.log': ROOT / 'recovery-20260908/6463-pr-docs-quality.log',
+    '6463-queue-docs-quality.log': ROOT / 'recovery-20260908/6463-queue-docs-quality.log',
+    '6463-enqueue-result.json': ROOT / 'recovery-20260908/6463-enqueue-result.json',
+    '6464-current-runs.json': ROOT / 'direct-6436/followup/pr6464-runs.json',
 }
 
 def git(*args, data=None):

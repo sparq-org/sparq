@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T05:33:28.773438+00:00",
+  "updated_at": "2026-09-08T05:37:04.689961+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -43,7 +43,7 @@
   "live_main": {
     "oid": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
     "pr": 6448,
-    "observed_at": "2026-09-08T03:14:36.844985+00:00"
+    "observed_at": "2026-09-08T05:37:04.689961+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -63,7 +63,7 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "Reviewed source0fc2faf6 published as PR6464; awaiting normal LinuxCI and actual automaticCopilot review. No sourcechanges afterOpus approval. Agentidle, no duplicate sessions.",
+    "state": "PR6464published at frozenreviewed0fc2faf6. ActualCopilot34191020387 andrequiredgate34191014553 running; docs-quality34191014508in_progress. Awaitcompletedreviewthreads andCIeffectevidence beforeprotectedadmission. Agentidleavailable onlyforfindings; no duplicate review.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
     "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
     "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
@@ -244,9 +244,33 @@
       "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
       "expected_behavior": "Concrete Bot ID field;normalizeonlyalreadyverifiedRESTaccountlogin. Preserve node ID/type,exact authenticatedviewer,durableclaim,currenthead/queue/review/operator6049holds. Noactualclaim/rerunvalidationperformed.",
       "queue_position": 1,
-      "queue_state": "QUEUED",
+      "queue_state": "AWAITING_CHECKS",
       "queue_admitted_at": "2026-09-08T05:32:01.568976+00:00",
-      "effect_evidence": "Required Linux docs-quality34182440946 executed all80test_arm_capability_wiring tests, including invalid Actor.id, real Bot login forms, missing nodeID and unverifiedREST negatives. Allpassed; selftestpassed. Gate34182440948SUCCESS. No unresolvedreviewthreads, Copilot34182446466SUCCESS."
+      "effect_evidence": "Required Linux docs-quality34182440946 executed all80test_arm_capability_wiring tests, including invalid Actor.id, real Bot login forms, missing nodeID and unverifiedREST negatives. Allpassed; selftestpassed. Gate34182440948SUCCESS. No unresolvedreviewthreads, Copilot34182446466SUCCESS.",
+      "latest_observation": {
+        "at": "2026-09-08T05:37:04.689961+00:00",
+        "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
+        "state": "OPEN",
+        "rollup": "SUCCESS",
+        "queue": {
+          "position": 1,
+          "state": "AWAITING_CHECKS",
+          "headCommit": {
+            "oid": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3"
+          }
+        },
+        "threads": 0,
+        "labels": [
+          "area:ci",
+          "review:unreviewed"
+        ]
+      },
+      "queue_head": "5315aed7f0f45d91d91e82fe51d71ab2fe2ad1c3",
+      "queue_gate": {
+        "run": 34190927643,
+        "state": "in_progress"
+      },
+      "queue_effect_evidence": "Merge-group docs-quality34190927598SUCCESS; all80tests and four new schema/identity cases actuallyexecuted andpassed. Verifiedlog recovery-20260908/6463-queue-docs-quality.log."
     },
     "6464": {
       "issue": 6436,
@@ -258,7 +282,32 @@
       "review": "Actual Opus5 xhigh whole2f request_changes; focused0fc approve_with_nits, no remaining substantiatedblockers. Valid successfulJSON/modelUsage verified; sourceclean and49filemanifestverified. No redundant review needed unlesscodechanges.",
       "review_result": "direct-6436/followup/opus-review-0fc2faf6.json",
       "review_packet_sha256": "6b67133cd821ae5ba3c4b0cddacb67e5abc830bb5fbe9e327b8739045ec8566b",
-      "validation": "47 focused+88wiring+19reservation tests;15 calibratedcontrols47tests0errors each;actionlint/diffPASS. LinuxCIeffectevidence stillpending."
+      "validation": "47 focused+88wiring+19reservation tests;15 calibratedcontrols47tests0errors each;actionlint/diffPASS. LinuxCIeffectevidence stillpending.",
+      "latest_observation": {
+        "at": "2026-09-08T05:37:04.689961+00:00",
+        "head": "0fc2faf6d4255e9e27b8a17bc43e8ba848c29368",
+        "state": "OPEN",
+        "rollup": "PENDING",
+        "queue": null,
+        "threads": 0,
+        "labels": [
+          "area:ci"
+        ]
+      },
+      "gate": {
+        "run": 34191014553,
+        "state": "in_progress"
+      },
+      "docs_quality": {
+        "run": 34191014508,
+        "state": "in_progress"
+      },
+      "copilot": {
+        "run": 34191020387,
+        "state": "in_progress",
+        "actual_execution_verified": true,
+        "threads": 0
+      }
     }
   },
   "registry": {
@@ -275,11 +324,11 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T02:24:00Z",
+    "observed_at": "2026-09-08T05:37:04.689961+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "6462 correction implemented and under actual independent review; publish only after review passes. Then normal protected CI and observe a natural scheduled execution.",
+    "next": "After6463merges, observe a natural scheduled execution on fixedmain. Latesteligible schedule still34175520707 from01:06UTC onold4d. No manualdispatch, claimor rerunprobe. Existingfailureknown6462fix; successoldrun had0writes andstuckarm502warning, notproof of recoveryhealth.",
     "issue": 6462,
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
   },
@@ -301,5 +350,17 @@
     "review_output": "recovery-20260908/6462-opus-rereview-5640d06b.json",
     "real_identity_proof": "REST login sparq-orchestrator[bot], GraphQL Bot login sparq-orchestrator, SAME stable node ID. Root verified via public readonly REST+GraphQL; no production claim/rerun/App credentials.",
     "pr": 6463
+  },
+  "budget": {
+    "remaining": 4985,
+    "resetAt": "2026-09-08T05:45:30Z",
+    "observed_at": "2026-09-08T05:37:04.689961+00:00",
+    "exhausted": false
+  },
+  "actions_backlog": {
+    "observed_at": "2026-09-08T05:37:04.689961+00:00",
+    "queued_workflow_runs": 9,
+    "in_progress_workflow_runs": 5,
+    "limitation": "Counts from separate bounded REST reads; not proof of hosted runner reserve or fleet health."
   }
 }
