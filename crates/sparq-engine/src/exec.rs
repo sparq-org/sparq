@@ -3139,7 +3139,9 @@ fn try_topk_orderby(
             // Declines (`Ok(None)`) for any shape/datatype it can't prove safe, in
             // which case the existing materialize-then-select path below runs
             // unchanged.
-            if let Some(b) = try_topk_orderby_indexed(graph, local, ord_inner, expression, row_budget)? {
+            // [GPT-6 Astra] Measurement control only: retain the implementation,
+            // but compile out admission. Never part of the production candidate.
+            if let Some(b) = if false { try_topk_orderby_indexed(graph, local, ord_inner, expression, row_budget)? } else { None } {
                 return Ok(Some(b));
             }
             let mut b = eval_modified(graph, local, ord_inner)?;
