@@ -1877,6 +1877,10 @@ class StuckArmSweeper:
         if (not isinstance(bot, dict) or bot.get("type") != "Bot"
                 or bot.get("login") != viewer["login"] or not bot.get("node_id")):
             raise GhError("rerun refused: authenticated account is not a verified bot")
+        # [GPT-6 Astra] GitHub's REST account includes [bot], while the same
+        # GraphQL Bot node omits it. Normalize only this already-verified account;
+        # the author must still match its stable node id, canonical login and type.
+        actor_login = bot["login"].removesuffix("[bot]")
         found = []
         for comment in comments:
             if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
@@ -1889,7 +1893,7 @@ class StuckArmSweeper:
             parsed = parse_rerun_claim(body)
             author = comment.get("author") or {}
             if (parsed is None or body != self.rerun_claim_body(parsed)
-                    or author.get("id") != bot["node_id"] or author.get("login") != viewer["login"]
+                    or author.get("id") != bot["node_id"] or author.get("login") != actor_login
                     or author.get("__typename") != "Bot"
                     or set(parsed) != set(claim) or parsed.get("v") != RECEIPT_VERSION
                     or parsed.get("program") != PROGRAM or parsed.get("phase") != RERUN_PHASE

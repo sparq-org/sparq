@@ -1477,7 +1477,9 @@ class ActionsRerunFixture:
         self.m = module
         self.clock = module._iso_epoch("2026-09-06T12:00:00Z")
         self.viewer = {"login": "sparq-orchestrator[bot]"}
-        self.actor = dict(id="BOT_4300853", login=self.viewer["login"], __typename="Bot")
+        # [GPT-6 Astra] Verified live: these APIs share a node id, not login spelling.
+        self.actor = dict(id="BOT_4300853", login="sparq-orchestrator", __typename="Bot")
+        self.rest_actor = dict(login=self.viewer["login"], node_id=self.actor["id"], type="Bot")
         self.raw = module.live_pr(6360, labels=("review:pass",), head="a" * 40)
         self.check = dict(module.check_run("gate", "cancelled", ident=101),
             head_sha="a" * 40, app={"slug": "github-actions"},
@@ -1567,7 +1569,7 @@ class ActionsRerunFixture:
             raise AssertionError(f"unexpected mutation: {argv}")
         path = argv[-1]
         if path == f"users/{self.viewer['login']}":
-            return json.dumps(dict(login=self.actor["login"],node_id=self.actor["id"],type="Bot"))
+            return json.dumps(self.rest_actor)
         if "/commits/" in path:
             return json.dumps(self.m.check_pages([self.check]))
         if "/actions/workflows/ci-summary.yml/runs?" in path:
@@ -1627,6 +1629,21 @@ class TestCancelledActionsRecovery(unittest.TestCase):
         with patch.object(self.m, "RERUN_HISTORY_QUERY", bad):
             self.denied()
         self.assertEqual(self.f.posts(), [])
+
+    def test_real_bot_login_forms_bind_to_the_same_authenticated_node(self):
+        self.assertEqual(self.f.viewer["login"], "sparq-orchestrator[bot]")
+        self.assertEqual(self.f.actor["login"], "sparq-orchestrator")
+        self.assertEqual(self.f.rest_actor["node_id"], self.f.actor["id"])
+        self.f.drive()
+        self.assertEqual(len(self.f.reruns()), 1)
+
+    def test_unverified_rest_identity_is_refused_before_claiming(self):
+        for field, value in (("login", "someone[bot]"), ("node_id", ""), ("type", "User")):
+            with self.subTest(field=field):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.rest_actor[field] = value
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
 
     def test_unrequested_bot_id_cannot_authenticate_posted_claim(self):
         missing_id = self.m.RERUN_HISTORY_QUERY.replace("... on Bot{id}", "")
