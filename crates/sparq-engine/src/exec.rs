@@ -3200,11 +3200,11 @@ fn try_topk_orderby(
 /// subject-sorted range resolved once, not re-resolved per candidate — see the
 /// `other_pats` construction below), and stopping once a COMPLETE sort-key group
 /// (never split mid-tie) has produced at least `row_budget` confirmed joins
-/// yields EXACTLY the rows `eval_modified` + `order_bindings` would: a candidate
-/// in an unvisited group is, by construction, sort-key-worse than every
-/// already-confirmed one (or sort-key-better but not yet visited, in the
-/// opposite direction — either way strictly ordered relative to what's been
-/// collected), so it can never enter the true top `row_budget`.
+/// yields valid top rows: an unvisited group is strictly worse in the requested
+/// primary-key direction, so it cannot displace the collected top `row_budget`.
+/// [GPT-6 Astra] If all ORDER BY keys tie, SPARQL permits different surviving
+/// subsets and tie order; equivalence does not require the fallback's input-index
+/// stability. Finishing a primary-key group preserves secondary-key selection.
 ///
 /// PERFORMANCE, not soundness: a single escalation block is also capped at a
 /// fraction of the candidate pool (see `max_group` below) — exceeding it
