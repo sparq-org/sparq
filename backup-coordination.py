@@ -17,6 +17,11 @@ FILES = {
     'registry-pause-snapshot.json': ROOT / 'registry-pause-snapshot.json',
     'recovery-source-proof.json': ROOT / 'recovery-20260908/source-proof.json',
     'recovery-rearm-scheduled-runs.json': ROOT / 'recovery-20260908/rearm-scheduled-runs.json',
+    '6448-queue-docs-quality.log': ROOT / 'recovery-20260908/6448-queue-docs-quality.log',
+    '6462-schema-and-dedupe.json': ROOT / 'recovery-20260908/sweeper-schema-and-dedupe.json',
+    '6462-issue.md': ROOT / 'recovery-20260908/actor-id-issue.md',
+    'sweeper-34168680735-failed.log': ROOT / 'recovery-20260908/rearm-34168680735-failed.log',
+    'sweeper-34175520707.log': ROOT / 'recovery-20260908/rearm-34175520707.log',
 }
 
 def git(*args, data=None):

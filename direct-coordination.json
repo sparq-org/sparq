@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T02:29:17.707087+00:00",
+  "updated_at": "2026-09-08T02:32:02.688647+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -62,9 +62,9 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "36 tests and18 calibrated controls pass,0 errors. Agent adding narrow aged-out history availability fix with bounded active-run census and regression coverage; then full packet and independent Opus review. No PR yet.",
+    "state": "Availability follow-up now committed; awaiting agent final tests/controls and whole-change Opus review packet. Claude auth verified; no review session launched yet.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
-    "head": "7c42aae5c65d1139cf5259a69a00de6ec50d54a4"
+    "head": "2f3d1773bb3cebd36186692025912a8377c85db6"
   },
   "prs": {
     "4300": {
@@ -154,7 +154,8 @@
         "head": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
         "observed_at": "2026-09-08T02:27:00Z",
         "other_checks": "5 success;CI/feature-matrix stillin_progress"
-      }
+      },
+      "effect_evidence": "Merge-group docs-quality run34179397116 succeeded: all209 test_ci_summary_gate tests ran, including reporter-cap recovery and rate-limit fail-closed cases; self-test also passed. Log preserved in local backup."
     }
   },
   "registry": {

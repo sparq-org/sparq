@@ -1,0 +1,358 @@
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	﻿2026-09-08T01:06:16.8912239Z Current runner version: '2.337.0'
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8940488Z ##[group]Runner Image Provisioner
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8942401Z Hosted Compute Agent
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8944053Z Version: 20260828.587
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8945588Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8947418Z Build Date: 2026-08-28T16:44:25Z
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8949158Z Worker ID: {f3776a6e-ceb1-4f8c-a286-c5e708e57c6f}
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8950948Z Azure Region: northcentralus
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8952542Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8954740Z ##[group]Operating System
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8955705Z Ubuntu
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8956607Z 24.04.4
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8957510Z LTS
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8958410Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8959356Z ##[group]Runner Image
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8960626Z Image: ubuntu-24.04
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8961609Z Version: 20260831.293.1
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8963314Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8965367Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8966765Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8968805Z ##[group]GITHUB_TOKEN Permissions
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8971924Z Checks: write
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8972956Z Contents: write
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8973988Z Issues: write
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8974863Z Metadata: read
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8975842Z PullRequests: write
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8976890Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8979262Z Secret source: Actions
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.8981539Z Prepare workflow directory
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.9689154Z Prepare all required actions
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:16.9758937Z Getting action download info
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.1733612Z Download action repository 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' (SHA:bcd2ba49218906704ab6c1aa796996da409d3eb1)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.5914325Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.7256712Z Complete job name: restore dropped arms + sweep stuck arms
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.7971312Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8192062Z ##[group]Run actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8193292Z with:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8194016Z   app-id: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8206392Z   private-key: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8207100Z   skip-token-revoke: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8207864Z   github-api-url: https://api.github.com
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8208837Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8209519Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.8210343Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:17.9014005Z Inputs 'owner' and 'repositories' are not set. Creating token for this repository (sparq-org/sparq).
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3660022Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3661025Z with:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3661663Z   ref: main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3662320Z   persist-credentials: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3663047Z   sparse-checkout: scripts
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3663770Z   repository: sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3667788Z   token: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3668443Z   ssh-strict: true
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3669098Z   ssh-user: git
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3669736Z   clean: true
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3670577Z   sparse-checkout-cone-mode: true
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3671319Z   fetch-depth: 1
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3671964Z   fetch-tags: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3672621Z   show-progress: true
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3673275Z   lfs: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3673907Z   submodules: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3674565Z   set-safe-directory: true
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3675285Z   allow-unsafe-pr-checkout: false
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3676022Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3676716Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.3677412Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4647936Z Syncing repository: sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4651173Z ##[group]Getting Git version info
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4653019Z Working directory is '/home/runner/work/sparq/sparq'
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4655123Z [command]/usr/bin/git version
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4676480Z git version 2.55.0
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4697493Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4707587Z Temporarily overriding HOME='/home/runner/work/_temp/851c0771-1690-4875-b64a-b6c91e2bd5e2' before making global git config changes
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4710443Z Adding repository directory to the temporary git global config as a safe directory
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4712956Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4756392Z Deleting the contents of '/home/runner/work/sparq/sparq'
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.4759173Z ##[group]Determining repository object format
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7050032Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7052579Z ##[group]Initializing the repository
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7062894Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7155909Z hint: Using 'master' as the name for the initial branch. This default branch name
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7159007Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7162032Z hint: to use in all of your new repositories, which will suppress this warning,
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7164362Z hint: call:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7166017Z hint:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7167854Z hint: 	git config --global init.defaultBranch <name>
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7169837Z hint:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7172309Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7175277Z hint: 'development'. The just-created branch can be renamed via this command:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7177875Z hint:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7180181Z hint: 	git branch -m <name>
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7182808Z hint:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7186382Z hint: Disable this message with "git config set advice.defaultBranchName false"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7190945Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7199237Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7239598Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7243488Z ##[group]Disabling automatic garbage collection
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7245658Z [command]/usr/bin/git config --local gc.auto 0
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7286669Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7289819Z ##[group]Setting up auth
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7292100Z Removing SSH command configuration
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7294167Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7338516Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7661792Z Removing HTTP extra header
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7665069Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7708383Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7945898Z Removing includeIf entries pointing to credentials config files
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7950243Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.7989206Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8232936Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8331584Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8371275Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8413744Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8451938Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8488054Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8490655Z ##[group]Fetching the repository
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:18.8521090Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +refs/heads/main*:refs/remotes/origin/main* +refs/tags/main*:refs/tags/main*
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8470838Z From https://github.com/sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8472329Z  * [new branch]      main       -> origin/main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8476278Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8477551Z ##[group]Determining the checkout info
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8482050Z [command]/usr/bin/git branch --list --remote origin/main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8521950Z   origin/main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8526376Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8527627Z ##[group]Setting up sparse checkout
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8529535Z [command]/usr/bin/git sparse-checkout set scripts
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8582625Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8583730Z ##[group]Checking out the ref
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:19.8585655Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8757885Z Updating files:   0% (1/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8781486Z Updating files:   1% (4/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8782425Z Updating files:   2% (8/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8783589Z Updating files:   3% (12/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8787914Z Updating files:   4% (15/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8792247Z Updating files:   5% (19/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8795289Z Updating files:   6% (23/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8816250Z Updating files:   7% (26/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8819506Z Updating files:   8% (30/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8824849Z Updating files:   9% (34/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8828510Z Updating files:  10% (37/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8831977Z Updating files:  11% (41/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8835182Z Updating files:  12% (45/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8840545Z Updating files:  13% (48/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8845794Z Updating files:  14% (52/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8853824Z Updating files:  15% (56/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8862209Z Updating files:  16% (60/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8866478Z Updating files:  17% (63/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8868660Z Updating files:  18% (67/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8870207Z Updating files:  19% (71/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8872826Z Updating files:  20% (74/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8876229Z Updating files:  21% (78/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8878824Z Updating files:  22% (82/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8882876Z Updating files:  23% (85/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8887796Z Updating files:  24% (89/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8893350Z Updating files:  25% (93/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8897282Z Updating files:  26% (96/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8903671Z Updating files:  27% (100/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8906983Z Updating files:  28% (104/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8911355Z Updating files:  29% (108/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8917304Z Updating files:  30% (111/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8920465Z Updating files:  31% (115/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8924366Z Updating files:  32% (119/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8934685Z Updating files:  33% (122/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8938594Z Updating files:  34% (126/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8942034Z Updating files:  35% (130/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8946693Z Updating files:  36% (133/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8952573Z Updating files:  37% (137/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8956358Z Updating files:  38% (141/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8960962Z Updating files:  39% (144/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8964293Z Updating files:  40% (148/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8966575Z Updating files:  41% (152/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8970492Z Updating files:  42% (155/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8976876Z Updating files:  43% (159/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8980681Z Updating files:  44% (163/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8984017Z Updating files:  45% (167/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.8999066Z Updating files:  46% (170/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9006353Z Updating files:  47% (174/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9012533Z Updating files:  48% (178/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9018107Z Updating files:  49% (181/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9023706Z Updating files:  50% (185/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9025772Z Updating files:  51% (189/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9030974Z Updating files:  52% (192/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9033356Z Updating files:  53% (196/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9037230Z Updating files:  54% (200/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9041911Z Updating files:  55% (203/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9048257Z Updating files:  56% (207/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9054195Z Updating files:  57% (211/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9057094Z Updating files:  58% (215/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9063759Z Updating files:  59% (218/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9067834Z Updating files:  60% (222/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9073066Z Updating files:  61% (226/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9079536Z Updating files:  62% (229/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9086269Z Updating files:  63% (233/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9094844Z Updating files:  64% (237/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9106135Z Updating files:  65% (240/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9112392Z Updating files:  66% (244/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9118987Z Updating files:  67% (248/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9124462Z Updating files:  68% (251/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9128552Z Updating files:  69% (255/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9132291Z Updating files:  70% (259/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9134591Z Updating files:  71% (262/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9137537Z Updating files:  72% (266/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9140991Z Updating files:  73% (270/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9142864Z Updating files:  74% (274/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9145392Z Updating files:  75% (277/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9149629Z Updating files:  76% (281/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9151788Z Updating files:  77% (285/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9159048Z Updating files:  78% (288/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9163411Z Updating files:  79% (292/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9166609Z Updating files:  80% (296/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9169690Z Updating files:  81% (299/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9176597Z Updating files:  82% (303/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9192148Z Updating files:  83% (307/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9196808Z Updating files:  84% (310/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9205162Z Updating files:  85% (314/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9213367Z Updating files:  86% (318/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9216164Z Updating files:  87% (322/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9225585Z Updating files:  88% (325/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9233626Z Updating files:  89% (329/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9242292Z Updating files:  90% (333/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9248897Z Updating files:  91% (336/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9255956Z Updating files:  92% (340/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9258873Z Updating files:  93% (344/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9266162Z Updating files:  94% (347/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9274338Z Updating files:  95% (351/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9277285Z Updating files:  96% (355/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9283036Z Updating files:  97% (358/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9289769Z Updating files:  98% (362/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9293562Z Updating files:  99% (366/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9294170Z Updating files: 100% (369/369)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9294756Z Updating files: 100% (369/369), done.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9369096Z Switched to a new branch 'main'
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9374454Z branch 'main' set up to track 'origin/main'.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9382938Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9435477Z [command]/usr/bin/git log -1 --format=%H
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9470249Z 4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9478882Z ##[group]Removing auth
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9479684Z Removing SSH command configuration
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9482928Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9522482Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9776910Z Removing HTTP extra header
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9780699Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:20.9822200Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0077091Z Removing includeIf entries pointing to credentials config files
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0079738Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0114739Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0115549Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0116108Z includeif.gitdir:/github/workspace/.git.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0116577Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0124288Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0159711Z /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0169016Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0209271Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0240441Z /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0250601Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0291648Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0323083Z /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0332486Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0378075Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0409136Z /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0416421Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0456637Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0703055Z Removing credentials config '/home/runner/work/_temp/git-credentials-dc50b885-0046-4229-b315-2adf9ffc79fe.config'
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0711352Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0856137Z ##[group]Run python3 scripts/gh_retry.py --self-test
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0856785Z [36;1mpython3 scripts/gh_retry.py --self-test[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0857355Z [36;1m# [OPUS-5] #1135: the Release-PR exclusion this sweep consults. Its own[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0857985Z [36;1m# self-test runs FIRST so a regression in the shared predicate reds the[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0858508Z [36;1m# cron before any arm is attempted.[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0858965Z [36;1mpython3 scripts/release_pr_guard.py --self-test[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0859666Z [36;1mpython3 scripts/rearm-sweeper.py --self-test[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0904894Z shell: /usr/bin/bash -e {0}
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0905282Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0905847Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.0906212Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1275206Z gh-retry self-test: PASS
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1639663Z   [PASS] live Release PR is blocked
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1640849Z   [PASS] arm_block_reason takes NO label input (relabelling cannot unblock)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1641459Z   [PASS] branch alone blocks (human author, ordinary title)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1642008Z   [PASS] release-plz author alone blocks (ordinary branch + title)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1642584Z   [PASS] release title alone blocks (human author, ordinary branch)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1643163Z   [PASS] login spelling 'release-plz' normalises to a blocked release bot
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1643778Z   [PASS] login spelling 'release-plz[bot]' normalises to a blocked release bot
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1644393Z   [PASS] login spelling 'app/release-plz' normalises to a blocked release bot
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1644933Z   [PASS] release title 'chore: release v0.2.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1645379Z   [PASS] release title 'chore: release' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1645827Z   [PASS] release title 'chore(release): prepare 0.2.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1646307Z   [PASS] release title 'chore(main): release 0.2.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1646832Z   [PASS] release title 'chore!: release v1.0.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1647279Z   [PASS] release title 'Release v0.3.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1647722Z   [PASS] release title 'chore: prepare release 0.2.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1648230Z   [PASS] release title 'chore: prepare for release 0.2.0' blocks
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1648702Z   [PASS] absent head branch blocks (fail-closed)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1649136Z   [PASS] empty head branch blocks (fail-closed)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1649596Z   [PASS] bot author with UNKNOWN title blocks (fail-closed)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1650267Z   [PASS] ordinary worker PR is NOT blocked
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1650805Z   [PASS] ordinary github-actions PR with a NON-release title is NOT blocked
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1651359Z   [PASS] a PR merely MENTIONING release-plz is NOT blocked
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1651820Z   [PASS] dependabot PR is NOT blocked by this guard
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1652101Z 
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.1652266Z release_pr_guard self-test: PASS
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3698390Z rearm-sweeper stuck-arm self-test: PASS
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3699065Z rearm-sweeper self-test: PASS
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3852837Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --probe-arm-capability
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3853832Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --probe-arm-capability[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3894831Z shell: /usr/bin/bash -e {0}
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3895201Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3895638Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3898492Z   GH_TOKEN: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3898841Z   REPO: sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3899197Z   DEFAULT_BRANCH: main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.3899520Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8020406Z [rearm-sweeper] arm-capability probe: can-arm — autoMergeAllowed=true (token=sparq-orchestrator[bot], viewerPermission=None); write scope is confirmed by the first arm
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8162399Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --max-rearms 10
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8163294Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --max-rearms 10[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8207668Z shell: /usr/bin/bash -e {0}
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8208025Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8208464Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8211521Z   GH_TOKEN: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8211855Z   REPO: sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8212188Z   DEFAULT_BRANCH: main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:21.8212507Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.6999216Z [rearm-sweeper] arm-capability probe: can-arm — autoMergeAllowed=true (token=sparq-orchestrator[bot], viewerPermission=None); write scope is confirmed by the first arm
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7001429Z [rearm-sweeper] found 2 open PR(s) returned for label review:pass; re-arm limit=10
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7002459Z [rearm-sweeper] PR #6360: SKIP — live autoMergeRequest
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7003275Z [rearm-sweeper] PR #4354: SKIP — draft
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7004380Z [rearm-sweeper] complete: candidates=2 re-arm-attempts=0 armed=0 arm-failures=0 state-failures=0 transient-exhaustions=0 capability=can-arm
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7139280Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --phase stuck-arm --max-stuck-actions 5
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7140745Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --phase stuck-arm --max-stuck-actions 5[0m
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7180117Z shell: /usr/bin/bash -e {0}
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7180473Z env:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7180890Z   ORCHESTRATOR_APP_ID: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7183749Z   GH_TOKEN: ***
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7184085Z   REPO: sparq-org/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7184430Z   DEFAULT_BRANCH: main
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:23.7184748Z ##[endgroup]
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:34.5634408Z [gh-retry] transient failure (attempt 1/3), retrying in 10s: gh pr list --repo: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:06:55.2904667Z [gh-retry] transient failure (attempt 2/3), retrying in 30s: gh pr list --repo: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.8321077Z ##[warning]gh pr list --repo failed transiently on every attempt (3 attempts): HTTP 502: 502 Bad Gateway (https://api.github.com/graphql) — the next cron run covers this sweep.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.8520284Z Post job cleanup.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9389218Z [command]/usr/bin/git version
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9435079Z git version 2.55.0
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9482865Z Temporarily overriding HOME='/home/runner/work/_temp/384815a0-581b-4eb7-bb80-ba137c7147a3' before making global git config changes
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9484308Z Adding repository directory to the temporary git global config as a safe directory
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9488075Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9528541Z Removing SSH command configuration
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9536549Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9565285Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9827935Z Removing HTTP extra header
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9834654Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:35.9876671Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.0145575Z Removing includeIf entries pointing to credentials config files
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.0153037Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.0191452Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.0806680Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.0849402Z Post job cleanup.
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.3311502Z Token revoked
+restore dropped arms + sweep stuck arms	UNKNOWN STEP	2026-09-08T01:07:36.3741027Z Cleaning up orphan processes
