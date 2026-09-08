@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T02:32:02.688647+00:00",
+  "updated_at": "2026-09-08T02:52:42.214970+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -62,9 +62,29 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
     "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
     "recovery_commit": "9a8351ea41600a363c1fd1bba4bf8c02a3af4d49",
-    "state": "Availability follow-up now committed; awaiting agent final tests/controls and whole-change Opus review packet. Claude auth verified; no review session launched yet.",
+    "state": "Actual Opus5 xhigh request_changes on2f3d1773. Agent remediating B2 job-inventory bound and B3 terminal/optional-evidence semantics. B1 baseline/shard suspicion refuted by real existing artifact pairs; add regression fixtures and provenance. Fail-closed API/quota policy is user-authorized and must not be weakened.",
     "contract": "Heavy nightly freshness requires actual coverage and all51 matrix shard completion, same head/run/attempt evidence. Preserve advisory mutation ratchets: completion statuses0/2/3 allowed only strict counts match planned mutants. Readable incomplete history allows next ordinary scheduled run; unreadable, active or bounded-out history denies. No immediate retry loops; workflow_dispatch explicit force retained. Only agent edits this lane; reuse, do not duplicate.",
-    "head": "2f3d1773bb3cebd36186692025912a8377c85db6"
+    "head": "2f3d1773bb3cebd36186692025912a8377c85db6",
+    "review_result": "direct-6436/opus-review-2f3d1773.json",
+    "review_packet_sha256": "5fcca5c091120c1be3987e4c0ca185d0f2103a75c9ad09119b7be65a76019843",
+    "real_inventory": "Scheduled run34099890455 currentmain4d attempt1,85 jobs incl all51 mutation legs. Complete first page. Every row run_attempt1.",
+    "real_fixtures": {
+      "parse": {
+        "artifact": 10010502882,
+        "zip_sha256": "7d60fdfa6ce36bdf3f5d5105c476ebf7fa61c273a5735f53b15e7b0eeea0aa63",
+        "planned": 102,
+        "total_mutants": 102,
+        "success": 0
+      },
+      "engine23of24": {
+        "artifact": 10036242958,
+        "zip_sha256": "77bc3dd50465d6c7987141b49eb9d4b656add76129ca0e79ac4734f597673752",
+        "planned": 197,
+        "total_mutants": 197,
+        "success": 0
+      },
+      "verification": "Root executed frozen2f helper on both real JSON pairs; both accepted for allowed exits0/2/3. Actual command exit not asserted. Source pinned25.3.1. No new measurement executed."
+    }
   },
   "prs": {
     "4300": {
@@ -176,7 +196,7 @@
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "Fix6462 after6436 implementation lane; concrete Bot fragment, preserve authenticated node ID/login/type binding, receipt identity and6049 hold. Independent review and normal protected CI.",
+    "next": "6462 correction implemented and under actual independent review; publish only after review passes. Then normal protected CI and observe a natural scheduled execution.",
     "issue": 6462,
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate."
   },
@@ -186,5 +206,16 @@
     "Solve confirmed sweeper schema issue6462 after6436 lane; no manual recovery mutation.",
     "Retain current checkpoints and review evidence in dedicated local Git backup; do not publish private operational records.",
     "Retain pending6049,6055,registry test-onlyCI and6435 access holds. No releases."
-  ]
+  ],
+  "followup_lane": {
+    "issue": 6462,
+    "agent": "root",
+    "branch": "codex/ci-rerun-bot-query",
+    "head": "ed9689d5be5be28ccbc3300c1d90b250319f2c7c",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
+    "state": "Committed locally,78 tests+selftest pass, exact production query accepted by GitHub readonly15 bot ids. One old-query positive-effect control goes from1pass to1assertionfailure,0errors/skips. Preflight only knownBash3 mapfile limitation. Actual Opus5 xhigh review running; no PR/push yet.",
+    "packet": "recovery-20260908/6462-review-ed9689d5.md",
+    "packet_sha256": "ebc73847ffc5c568f78fcda1bcffe3045c69ecb370985ee809753636e00b81c6",
+    "review_output": "recovery-20260908/6462-opus-review-ed9689d5.json"
+  }
 }

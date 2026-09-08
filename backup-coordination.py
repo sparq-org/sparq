@@ -22,6 +22,17 @@ FILES = {
     '6462-issue.md': ROOT / 'recovery-20260908/actor-id-issue.md',
     'sweeper-34168680735-failed.log': ROOT / 'recovery-20260908/rearm-34168680735-failed.log',
     'sweeper-34175520707.log': ROOT / 'recovery-20260908/rearm-34175520707.log',
+    '6436-review-packet-2f3d1773.md': ROOT / 'direct-6436/review-2f3d1773bb3cebd36186692025912a8377c85db6.md',
+    '6436-opus-review-2f3d1773.json': ROOT / 'direct-6436/opus-review-2f3d1773.json',
+    '6436-manifest-2f3d1773.json': ROOT / 'direct-6436/manifest.json',
+    '6462-control-results.json': ROOT / 'recovery-20260908/6462-control-results.json',
+    '6462-tests.txt': ROOT / 'recovery-20260908/6462-tests.txt',
+    '6462-old-query-control.py': ROOT / 'recovery-20260908/6462-old-query-control.py',
+    '6462-review-ed9689d5.md': ROOT / 'recovery-20260908/6462-review-ed9689d5.md',
+    '6462-review-manifest.json': ROOT / 'recovery-20260908/6462-review-manifest.json',
+    '6436-nightly-real-jobs.json': ROOT / 'recovery-20260908/nightly-34099890455-jobs-page1.json',
+    '6436-mutants-parse-10010502882.zip': ROOT / 'recovery-20260908/mutants-parse-10010502882.zip',
+    '6436-mutants-engine-10036242958.zip': ROOT / 'recovery-20260908/mutants-engine-10036242958.zip',
 }
 
 def git(*args, data=None):

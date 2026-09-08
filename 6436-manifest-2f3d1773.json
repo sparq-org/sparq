@@ -1,0 +1,122 @@
+{
+  "base": "e44b08c59aea0755cfda1cbf633e25971db787f7",
+  "head": "2f3d1773bb3cebd36186692025912a8377c85db6",
+  "packet": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6436/review-2f3d1773bb3cebd36186692025912a8377c85db6.md",
+  "packet_sha256": "5fcca5c091120c1be3987e4c0ca185d0f2103a75c9ad09119b7be65a76019843",
+  "packet_bytes": 80234,
+  "files": {
+    "build-packet.py": {
+      "sha256": "6dde3e75645e6c3bfb4b446fea05fbb9ddc4e6b6520240f3d34d54096f2f5d88",
+      "bytes": 11653
+    },
+    "composed-docs-quality.yml": {
+      "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594",
+      "bytes": 113148
+    },
+    "composition.json": {
+      "sha256": "f2afefc171d1559f02cb0226186d4f3bf24947e3032ed12bf207c44833756bad",
+      "bytes": 1677
+    },
+    "critical-ci-projection.yml": {
+      "sha256": "dcbcc9f847c00ff5f1cd0dbec5870a3c6d5cd8a3045ea5ecb60c60d95171c443",
+      "bytes": 11393
+    },
+    "policy.json": {
+      "sha256": "fa40f28aafffd8bd1c9ec5f98cd7932563e7de45c4772c6ce835cd06e70a4ce1",
+      "bytes": 2740
+    },
+    "pr-body.md": {
+      "sha256": "0c172d19b3531d4879d765e9829a720bd60c52d31acbf39977f2b5166c06fd00",
+      "bytes": 1172
+    },
+    "report.json": {
+      "sha256": "0e6651818ab8a5973a36760442e998bae7bab7c22e01e059d80abc536650368d",
+      "bytes": 10127
+    },
+    "review-2f3d1773bb3cebd36186692025912a8377c85db6.md": {
+      "sha256": "5fcca5c091120c1be3987e4c0ca185d0f2103a75c9ad09119b7be65a76019843",
+      "bytes": 80234
+    },
+    "source/.github/workflows/ci.yml": {
+      "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+      "bytes": 316867
+    },
+    "source/.github/workflows/docs-quality.yml": {
+      "sha256": "7529c54302f8931fc2748802b57d5a03b5f04cad688748095537cbd3316aee28",
+      "bytes": 112927
+    },
+    "source/scripts/ci_nightly_freshness.py": {
+      "sha256": "0522f5893df4f69899be9ed13b09492bdc9c562601d5abe174e751181bb7ba24",
+      "bytes": 12091
+    },
+    "source/scripts/tests/test_ci_nightly_freshness.py": {
+      "sha256": "5d0435c736373522c5a3d98472e3a8f9fcfc804d7fd7001887bcf99663fbb7aa",
+      "bytes": 28170
+    },
+    "test-ci-wiring-projection.yml": {
+      "sha256": "c0610d7250acd08af3837594bd19249c06b26333dad02388d93d615a8da0becb",
+      "bytes": 751
+    },
+    "validation/actionlint.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "validation/baseline-proof.json": {
+      "sha256": "68520de0844a8fe41b0154f37b53eaab9344f49b229ae04b00d614e340e1944d",
+      "bytes": 1573
+    },
+    "validation/baseline-proof.py": {
+      "sha256": "9a6dc0a531293420d25012506eb49c2946035914b238c813aa7942d1061ee74e",
+      "bytes": 1886
+    },
+    "validation/baseline-proof.txt": {
+      "sha256": "bad96214aa6b6d9e1a9f408d82280cdfb8885834640c142c9c4df0d8dc3bf16e",
+      "bytes": 1439
+    },
+    "validation/coverage-calibration.py": {
+      "sha256": "1c81dcff8df88ff506fec82a4112249fd3b6dd8735744939d8132d3b9f30984a",
+      "bytes": 93
+    },
+    "validation/coverage-runner.py": {
+      "sha256": "c72754ede5e0fbaac6b3620b4b346a28f628746478af44f551a648b743c5583c",
+      "bytes": 1553
+    },
+    "validation/coverage.txt": {
+      "sha256": "bdd2134c8207bc7cc87258dcf1fc7cb6f5f1f4c1e4a1ab0690b769296e1c18d9",
+      "bytes": 886
+    },
+    "validation/line-coverage.json": {
+      "sha256": "94f3af8a102942f98a2a30f80120785aac250a310fa97ca7b0f45d93adaaa2e6",
+      "bytes": 499
+    },
+    "validation/mutation-final-run.txt": {
+      "sha256": "faf88f3216351d98bef52ea9b68866833c3b4e4aa048168960bc1f29049c7b79",
+      "bytes": 5945
+    },
+    "validation/mutation-run.txt": {
+      "sha256": "90bee3f1d788e81802b19b3d76f7da4324f31b0ce600d9454ad2e8c7c779b594",
+      "bytes": 4889
+    },
+    "validation/mutation-runner.py": {
+      "sha256": "28828f50f48cab30bdc72e1daf607e246e18c7bdd94771ea82c981f37a3978bc",
+      "bytes": 5920
+    },
+    "validation/preflight.txt": {
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a",
+      "bytes": 1834
+    },
+    "validation/runner-reservation.txt": {
+      "sha256": "5d0768c9fdc1eaa7021c5def63fc50623cfbc8bf2f1c7ec95e62b9b08d872e00",
+      "bytes": 2330
+    },
+    "validation/select-wiring.txt": {
+      "sha256": "2e37d6c519b4b482a768bad5ea19a11d413b1ea17cafb7b73c0e1fabc9c6584c",
+      "bytes": 14911
+    },
+    "whole-change.diff": {
+      "sha256": "e54b45e7d892907736dd84728e97b0d2bbc6e8b626a708983d057db60874cb4a",
+      "bytes": 47867
+    }
+  },
+  "mutation_summary_sha256": "914bdf7586abe6037718a36bceb46c37cd5b5bd9f1bcbed02250e641b9368b9c"
+}

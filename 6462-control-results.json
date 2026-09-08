@@ -1,0 +1,16 @@
+{
+  "fixed_query": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": "482c371aa5b1e668ade6cbe008fd067992c83763c3cc322420892d9fc9973221"
+  },
+  "old_query": {
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "source_sha256": "7ebead03ad482abca86407ba0dc2439522d190d27de5e5d99dcd0d5bf80af8dd"
+  }
+}

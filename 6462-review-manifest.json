@@ -1,0 +1,46 @@
+{
+  "head": "ed9689d5be5be28ccbc3300c1d90b250319f2c7c",
+  "base": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+  "packet": "/private/tmp/sparq-pr6049/.throughput-monitor/recovery-20260908/6462-review-ed9689d5.md",
+  "packet_bytes": 23315,
+  "packet_sha256": "ebc73847ffc5c568f78fcda1bcffe3045c69ecb370985ee809753636e00b81c6",
+  "report": {
+    "issue": 6462,
+    "base": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+    "head": "ed9689d5be5be28ccbc3300c1d90b250319f2c7c",
+    "implementation": "GPT-6 Astra xhigh",
+    "tests": 78,
+    "selftest": "PASS",
+    "diff_check": "PASS",
+    "old_query_control": {
+      "fixed_query": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "source_sha256": "482c371aa5b1e668ade6cbe008fd067992c83763c3cc322420892d9fc9973221"
+      },
+      "old_query": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0,
+        "source_sha256": "7ebead03ad482abca86407ba0dc2439522d190d27de5e5d99dcd0d5bf80af8dd"
+      }
+    },
+    "live_query": {
+      "sha256": "25e6cc4250f474be3e434ef815b3703bf4b637f30513ef6690f209ef2c992f0c",
+      "validated": true,
+      "pr": 6360,
+      "returned_comments": 15,
+      "bot_authors": 15,
+      "all_bot_ids_present": true,
+      "mutation_performed": false
+    },
+    "preflight": "G1/G2/G6/guard-untested passed; existing macOS Bash3 mapfile failure in privacy-claims remains. Linux CI still required.",
+    "files": {
+      "scripts/rearm-sweeper.py": "482c371aa5b1e668ade6cbe008fd067992c83763c3cc322420892d9fc9973221",
+      "scripts/tests/test_arm_capability_wiring.py": "09dd752653cb7368a3716013675c9aaea76dfcbd2f38c39813b1e19cb77a5c34"
+    }
+  }
+}
