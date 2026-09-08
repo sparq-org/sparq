@@ -2020,4 +2020,4 @@ quiet_box_sensitive = true
 pinning     = "exact engine/core/harness source hashes, locked dependencies, identical default runtime features, System allocator, one Rayon thread; release opt3 without LTO; fresh process per case and measurement mode"
 records_to  = "stdout TSV: fixture dimensions, per-sample whole_query_ns or allocation counts/bytes, setup/pre/post max RSS, correctness; retain raw repetitions and variance; never merge into canonical perf baselines"
 featured    = false
-status      = "diagnostic"
+status      = "ok"  # runnable local diagnostic; no canonical score or admission claim
