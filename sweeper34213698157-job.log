@@ -1,0 +1,358 @@
+﻿2026-09-08T10:06:55.0984454Z Current runner version: '2.337.0'
+2026-09-08T10:06:55.1012868Z ##[group]Runner Image Provisioner
+2026-09-08T10:06:55.1014398Z Hosted Compute Agent
+2026-09-08T10:06:55.1015500Z Version: 20260828.587
+2026-09-08T10:06:55.1016537Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-08T10:06:55.1017685Z Build Date: 2026-08-28T16:44:25Z
+2026-09-08T10:06:55.1018827Z Worker ID: {3e404296-3efa-415a-9eae-75e2a1182ddf}
+2026-09-08T10:06:55.1020689Z Azure Region: westus
+2026-09-08T10:06:55.1021737Z ##[endgroup]
+2026-09-08T10:06:55.1023919Z ##[group]Operating System
+2026-09-08T10:06:55.1024952Z Ubuntu
+2026-09-08T10:06:55.1025841Z 24.04.4
+2026-09-08T10:06:55.1026734Z LTS
+2026-09-08T10:06:55.1027610Z ##[endgroup]
+2026-09-08T10:06:55.1028574Z ##[group]Runner Image
+2026-09-08T10:06:55.1029772Z Image: ubuntu-24.04
+2026-09-08T10:06:55.1030733Z Version: 20260831.293.1
+2026-09-08T10:06:55.1032489Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-08T10:06:55.1034620Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-08T10:06:55.1035992Z ##[endgroup]
+2026-09-08T10:06:55.1037989Z ##[group]GITHUB_TOKEN Permissions
+2026-09-08T10:06:55.1041108Z Checks: write
+2026-09-08T10:06:55.1042122Z Contents: write
+2026-09-08T10:06:55.1043114Z Issues: write
+2026-09-08T10:06:55.1043977Z Metadata: read
+2026-09-08T10:06:55.1045135Z PullRequests: write
+2026-09-08T10:06:55.1046149Z ##[endgroup]
+2026-09-08T10:06:55.1048764Z Secret source: Actions
+2026-09-08T10:06:55.1050806Z Prepare workflow directory
+2026-09-08T10:06:55.1608831Z Prepare all required actions
+2026-09-08T10:06:55.1658861Z Getting action download info
+2026-09-08T10:06:55.5402842Z Download action repository 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' (SHA:bcd2ba49218906704ab6c1aa796996da409d3eb1)
+2026-09-08T10:06:56.0155376Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-08T10:06:56.1665726Z Complete job name: restore dropped arms + sweep stuck arms
+2026-09-08T10:06:56.2438750Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-08T10:06:56.2678021Z ##[group]Run actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+2026-09-08T10:06:56.2679311Z with:
+2026-09-08T10:06:56.2680280Z   app-id: ***
+2026-09-08T10:06:56.2692594Z   private-key: ***
+2026-09-08T10:06:56.2693264Z   skip-token-revoke: false
+2026-09-08T10:06:56.2693993Z   github-api-url: https://api.github.com
+2026-09-08T10:06:56.2695059Z env:
+2026-09-08T10:06:56.2695708Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:06:56.2696388Z ##[endgroup]
+2026-09-08T10:06:56.3533098Z Inputs 'owner' and 'repositories' are not set. Creating token for this repository (sparq-org/sparq).
+2026-09-08T10:06:56.8958036Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-08T10:06:56.8959180Z with:
+2026-09-08T10:06:56.8960124Z   ref: main
+2026-09-08T10:06:56.8960872Z   persist-credentials: false
+2026-09-08T10:06:56.8961669Z   sparse-checkout: scripts
+2026-09-08T10:06:56.8962452Z   repository: sparq-org/sparq
+2026-09-08T10:06:56.8966818Z   token: ***
+2026-09-08T10:06:56.8967520Z   ssh-strict: true
+2026-09-08T10:06:56.8968231Z   ssh-user: git
+2026-09-08T10:06:56.8968914Z   clean: true
+2026-09-08T10:06:56.8969770Z   sparse-checkout-cone-mode: true
+2026-09-08T10:06:56.8970585Z   fetch-depth: 1
+2026-09-08T10:06:56.8971282Z   fetch-tags: false
+2026-09-08T10:06:56.8971995Z   show-progress: true
+2026-09-08T10:06:56.8972723Z   lfs: false
+2026-09-08T10:06:56.8973420Z   submodules: false
+2026-09-08T10:06:56.8974145Z   set-safe-directory: true
+2026-09-08T10:06:56.8974936Z   allow-unsafe-pr-checkout: false
+2026-09-08T10:06:56.8975739Z env:
+2026-09-08T10:06:56.8976546Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:06:56.8977312Z ##[endgroup]
+2026-09-08T10:06:56.9965357Z Syncing repository: sparq-org/sparq
+2026-09-08T10:06:56.9969267Z ##[group]Getting Git version info
+2026-09-08T10:06:56.9971218Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-08T10:06:56.9973772Z [command]/usr/bin/git version
+2026-09-08T10:06:57.0058696Z git version 2.55.0
+2026-09-08T10:06:57.0104901Z ##[endgroup]
+2026-09-08T10:06:57.0138479Z Temporarily overriding HOME='/home/runner/work/_temp/89deef97-6264-49cc-96d3-cd79d5b0eb5e' before making global git config changes
+2026-09-08T10:06:57.0142079Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-08T10:06:57.0145236Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-08T10:06:57.0198726Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-08T10:06:57.0204967Z ##[group]Determining repository object format
+2026-09-08T10:06:57.3777015Z ##[endgroup]
+2026-09-08T10:06:57.3780277Z ##[group]Initializing the repository
+2026-09-08T10:06:57.3789659Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-08T10:06:57.3945454Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-08T10:06:57.3948786Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-08T10:06:57.3952208Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-08T10:06:57.3955053Z hint: call:
+2026-09-08T10:06:57.3957715Z hint:
+2026-09-08T10:06:57.3959336Z hint: 	git config --global init.defaultBranch <name>
+2026-09-08T10:06:57.3961504Z hint:
+2026-09-08T10:06:57.3963251Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-08T10:06:57.3966018Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-08T10:06:57.3968318Z hint:
+2026-09-08T10:06:57.3969911Z hint: 	git branch -m <name>
+2026-09-08T10:06:57.3971424Z hint:
+2026-09-08T10:06:57.3973398Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-08T10:06:57.3976558Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-08T10:06:57.3982251Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-08T10:06:57.4049870Z ##[endgroup]
+2026-09-08T10:06:57.4052529Z ##[group]Disabling automatic garbage collection
+2026-09-08T10:06:57.4054755Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-08T10:06:57.4141912Z ##[endgroup]
+2026-09-08T10:06:57.4144391Z ##[group]Setting up auth
+2026-09-08T10:06:57.4146092Z Removing SSH command configuration
+2026-09-08T10:06:57.4148731Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-08T10:06:57.4178703Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-08T10:06:57.4538008Z Removing HTTP extra header
+2026-09-08T10:06:57.4545441Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-08T10:06:57.4596682Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-08T10:06:57.4830222Z Removing includeIf entries pointing to credentials config files
+2026-09-08T10:06:57.4835228Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-08T10:06:57.4876943Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-08T10:06:57.5138948Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-08T10:06:57.5184597Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:06:57.5222839Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:06:57.5264401Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:06:57.5305985Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:06:57.5340744Z ##[endgroup]
+2026-09-08T10:06:57.5342100Z ##[group]Fetching the repository
+2026-09-08T10:06:57.5348934Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +refs/heads/main*:refs/remotes/origin/main* +refs/tags/main*:refs/tags/main*
+2026-09-08T10:06:58.6235246Z From https://github.com/sparq-org/sparq
+2026-09-08T10:06:58.6236043Z  * [new branch]      main       -> origin/main
+2026-09-08T10:06:58.6240333Z ##[endgroup]
+2026-09-08T10:06:58.6241410Z ##[group]Determining the checkout info
+2026-09-08T10:06:58.6247839Z [command]/usr/bin/git branch --list --remote origin/main
+2026-09-08T10:06:58.6285748Z   origin/main
+2026-09-08T10:06:58.6290251Z ##[endgroup]
+2026-09-08T10:06:58.6291571Z ##[group]Setting up sparse checkout
+2026-09-08T10:06:58.6296134Z [command]/usr/bin/git sparse-checkout set scripts
+2026-09-08T10:06:58.6353012Z ##[endgroup]
+2026-09-08T10:06:58.6353826Z ##[group]Checking out the ref
+2026-09-08T10:06:58.6357510Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-08T10:06:59.9158917Z Updating files:   0% (1/374)
+2026-09-08T10:06:59.9160364Z Updating files:   1% (4/374)
+2026-09-08T10:06:59.9174014Z Updating files:   2% (8/374)
+2026-09-08T10:06:59.9177948Z Updating files:   3% (12/374)
+2026-09-08T10:06:59.9190332Z Updating files:   4% (15/374)
+2026-09-08T10:06:59.9193873Z Updating files:   5% (19/374)
+2026-09-08T10:06:59.9198838Z Updating files:   6% (23/374)
+2026-09-08T10:06:59.9218869Z Updating files:   7% (27/374)
+2026-09-08T10:06:59.9222428Z Updating files:   8% (30/374)
+2026-09-08T10:06:59.9228750Z Updating files:   9% (34/374)
+2026-09-08T10:06:59.9233418Z Updating files:  10% (38/374)
+2026-09-08T10:06:59.9235873Z Updating files:  11% (42/374)
+2026-09-08T10:06:59.9240377Z Updating files:  12% (45/374)
+2026-09-08T10:06:59.9245502Z Updating files:  13% (49/374)
+2026-09-08T10:06:59.9251968Z Updating files:  14% (53/374)
+2026-09-08T10:06:59.9257810Z Updating files:  15% (57/374)
+2026-09-08T10:06:59.9266791Z Updating files:  16% (60/374)
+2026-09-08T10:06:59.9270966Z Updating files:  17% (64/374)
+2026-09-08T10:06:59.9273741Z Updating files:  18% (68/374)
+2026-09-08T10:06:59.9281160Z Updating files:  19% (72/374)
+2026-09-08T10:06:59.9282764Z Updating files:  20% (75/374)
+2026-09-08T10:06:59.9283771Z Updating files:  21% (79/374)
+2026-09-08T10:06:59.9287542Z Updating files:  22% (83/374)
+2026-09-08T10:06:59.9290231Z Updating files:  23% (87/374)
+2026-09-08T10:06:59.9296432Z Updating files:  24% (90/374)
+2026-09-08T10:06:59.9300925Z Updating files:  25% (94/374)
+2026-09-08T10:06:59.9304737Z Updating files:  26% (98/374)
+2026-09-08T10:06:59.9310773Z Updating files:  27% (101/374)
+2026-09-08T10:06:59.9314649Z Updating files:  28% (105/374)
+2026-09-08T10:06:59.9320694Z Updating files:  29% (109/374)
+2026-09-08T10:06:59.9324228Z Updating files:  30% (113/374)
+2026-09-08T10:06:59.9328288Z Updating files:  31% (116/374)
+2026-09-08T10:06:59.9334485Z Updating files:  32% (120/374)
+2026-09-08T10:06:59.9343151Z Updating files:  33% (124/374)
+2026-09-08T10:06:59.9346645Z Updating files:  34% (128/374)
+2026-09-08T10:06:59.9352064Z Updating files:  35% (131/374)
+2026-09-08T10:06:59.9356992Z Updating files:  36% (135/374)
+2026-09-08T10:06:59.9362904Z Updating files:  37% (139/374)
+2026-09-08T10:06:59.9367030Z Updating files:  38% (143/374)
+2026-09-08T10:06:59.9371227Z Updating files:  39% (146/374)
+2026-09-08T10:06:59.9374597Z Updating files:  40% (150/374)
+2026-09-08T10:06:59.9378508Z Updating files:  41% (154/374)
+2026-09-08T10:06:59.9382621Z Updating files:  42% (158/374)
+2026-09-08T10:06:59.9392494Z Updating files:  43% (161/374)
+2026-09-08T10:06:59.9396978Z Updating files:  44% (165/374)
+2026-09-08T10:06:59.9406638Z Updating files:  45% (169/374)
+2026-09-08T10:06:59.9417030Z Updating files:  46% (173/374)
+2026-09-08T10:06:59.9424915Z Updating files:  47% (176/374)
+2026-09-08T10:06:59.9431750Z Updating files:  48% (180/374)
+2026-09-08T10:06:59.9435107Z Updating files:  49% (184/374)
+2026-09-08T10:06:59.9441375Z Updating files:  50% (187/374)
+2026-09-08T10:06:59.9446571Z Updating files:  51% (191/374)
+2026-09-08T10:06:59.9449563Z Updating files:  52% (195/374)
+2026-09-08T10:06:59.9452217Z Updating files:  53% (199/374)
+2026-09-08T10:06:59.9457351Z Updating files:  54% (202/374)
+2026-09-08T10:06:59.9463111Z Updating files:  55% (206/374)
+2026-09-08T10:06:59.9469172Z Updating files:  56% (210/374)
+2026-09-08T10:06:59.9474152Z Updating files:  57% (214/374)
+2026-09-08T10:06:59.9477964Z Updating files:  58% (217/374)
+2026-09-08T10:06:59.9485480Z Updating files:  59% (221/374)
+2026-09-08T10:06:59.9491001Z Updating files:  60% (225/374)
+2026-09-08T10:06:59.9493765Z Updating files:  61% (229/374)
+2026-09-08T10:06:59.9502966Z Updating files:  62% (232/374)
+2026-09-08T10:06:59.9508203Z Updating files:  63% (236/374)
+2026-09-08T10:06:59.9523098Z Updating files:  64% (240/374)
+2026-09-08T10:06:59.9527210Z Updating files:  65% (244/374)
+2026-09-08T10:06:59.9534648Z Updating files:  66% (247/374)
+2026-09-08T10:06:59.9540747Z Updating files:  67% (251/374)
+2026-09-08T10:06:59.9545416Z Updating files:  68% (255/374)
+2026-09-08T10:06:59.9549075Z Updating files:  69% (259/374)
+2026-09-08T10:06:59.9552612Z Updating files:  70% (262/374)
+2026-09-08T10:06:59.9555923Z Updating files:  71% (266/374)
+2026-09-08T10:06:59.9560180Z Updating files:  72% (270/374)
+2026-09-08T10:06:59.9563462Z Updating files:  73% (274/374)
+2026-09-08T10:06:59.9566643Z Updating files:  74% (277/374)
+2026-09-08T10:06:59.9569481Z Updating files:  75% (281/374)
+2026-09-08T10:06:59.9573835Z Updating files:  76% (285/374)
+2026-09-08T10:06:59.9577061Z Updating files:  77% (288/374)
+2026-09-08T10:06:59.9584756Z Updating files:  78% (292/374)
+2026-09-08T10:06:59.9589395Z Updating files:  79% (296/374)
+2026-09-08T10:06:59.9592132Z Updating files:  80% (300/374)
+2026-09-08T10:06:59.9595285Z Updating files:  81% (303/374)
+2026-09-08T10:06:59.9600785Z Updating files:  82% (307/374)
+2026-09-08T10:06:59.9617542Z Updating files:  83% (311/374)
+2026-09-08T10:06:59.9621805Z Updating files:  84% (315/374)
+2026-09-08T10:06:59.9625709Z Updating files:  85% (318/374)
+2026-09-08T10:06:59.9634774Z Updating files:  86% (322/374)
+2026-09-08T10:06:59.9639139Z Updating files:  87% (326/374)
+2026-09-08T10:06:59.9647493Z Updating files:  88% (330/374)
+2026-09-08T10:06:59.9653159Z Updating files:  89% (333/374)
+2026-09-08T10:06:59.9663509Z Updating files:  90% (337/374)
+2026-09-08T10:06:59.9669647Z Updating files:  91% (341/374)
+2026-09-08T10:06:59.9675220Z Updating files:  92% (345/374)
+2026-09-08T10:06:59.9679090Z Updating files:  93% (348/374)
+2026-09-08T10:06:59.9685958Z Updating files:  94% (352/374)
+2026-09-08T10:06:59.9693741Z Updating files:  95% (356/374)
+2026-09-08T10:06:59.9696729Z Updating files:  96% (360/374)
+2026-09-08T10:06:59.9702188Z Updating files:  97% (363/374)
+2026-09-08T10:06:59.9708552Z Updating files:  98% (367/374)
+2026-09-08T10:06:59.9712702Z Updating files:  99% (371/374)
+2026-09-08T10:06:59.9713436Z Updating files: 100% (374/374)
+2026-09-08T10:06:59.9714103Z Updating files: 100% (374/374), done.
+2026-09-08T10:06:59.9786283Z Switched to a new branch 'main'
+2026-09-08T10:06:59.9791906Z branch 'main' set up to track 'origin/main'.
+2026-09-08T10:06:59.9800138Z ##[endgroup]
+2026-09-08T10:06:59.9854896Z [command]/usr/bin/git log -1 --format=%H
+2026-09-08T10:06:59.9888894Z cf19a52c6880c496cefaca24046174902bc30958
+2026-09-08T10:06:59.9898731Z ##[group]Removing auth
+2026-09-08T10:06:59.9899553Z Removing SSH command configuration
+2026-09-08T10:06:59.9903612Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-08T10:06:59.9945448Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-08T10:07:00.0236008Z Removing HTTP extra header
+2026-09-08T10:07:00.0237083Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-08T10:07:00.0293836Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-08T10:07:00.0551430Z Removing includeIf entries pointing to credentials config files
+2026-09-08T10:07:00.0555307Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-08T10:07:00.0593623Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-08T10:07:00.0594317Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-08T10:07:00.0594879Z includeif.gitdir:/github/workspace/.git.path
+2026-09-08T10:07:00.0595384Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-08T10:07:00.0604189Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-08T10:07:00.0636362Z /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0646142Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0690571Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-08T10:07:00.0721934Z /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0731633Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0772032Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-08T10:07:00.0802223Z /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0811987Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0856010Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-08T10:07:00.0887600Z /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0896617Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config
+2026-09-08T10:07:00.0941294Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-08T10:07:00.1195535Z Removing credentials config '/home/runner/work/_temp/git-credentials-2110856f-718e-4217-9e28-0dc507c57fa6.config'
+2026-09-08T10:07:00.1196983Z ##[endgroup]
+2026-09-08T10:07:00.1345539Z ##[group]Run python3 scripts/gh_retry.py --self-test
+2026-09-08T10:07:00.1346205Z [36;1mpython3 scripts/gh_retry.py --self-test[0m
+2026-09-08T10:07:00.1346784Z [36;1m# [OPUS-5] #1135: the Release-PR exclusion this sweep consults. Its own[0m
+2026-09-08T10:07:00.1347431Z [36;1m# self-test runs FIRST so a regression in the shared predicate reds the[0m
+2026-09-08T10:07:00.1347972Z [36;1m# cron before any arm is attempted.[0m
+2026-09-08T10:07:00.1348438Z [36;1mpython3 scripts/release_pr_guard.py --self-test[0m
+2026-09-08T10:07:00.1348927Z [36;1mpython3 scripts/rearm-sweeper.py --self-test[0m
+2026-09-08T10:07:00.1392188Z shell: /usr/bin/bash -e {0}
+2026-09-08T10:07:00.1392598Z env:
+2026-09-08T10:07:00.1393294Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:07:00.1393656Z ##[endgroup]
+2026-09-08T10:07:00.1772250Z gh-retry self-test: PASS
+2026-09-08T10:07:00.2150836Z   [PASS] live Release PR is blocked
+2026-09-08T10:07:00.2151961Z   [PASS] arm_block_reason takes NO label input (relabelling cannot unblock)
+2026-09-08T10:07:00.2152886Z   [PASS] branch alone blocks (human author, ordinary title)
+2026-09-08T10:07:00.2153707Z   [PASS] release-plz author alone blocks (ordinary branch + title)
+2026-09-08T10:07:00.2154571Z   [PASS] release title alone blocks (human author, ordinary branch)
+2026-09-08T10:07:00.2155458Z   [PASS] login spelling 'release-plz' normalises to a blocked release bot
+2026-09-08T10:07:00.2156406Z   [PASS] login spelling 'release-plz[bot]' normalises to a blocked release bot
+2026-09-08T10:07:00.2157397Z   [PASS] login spelling 'app/release-plz' normalises to a blocked release bot
+2026-09-08T10:07:00.2158317Z   [PASS] release title 'chore: release v0.2.0' blocks
+2026-09-08T10:07:00.2159089Z   [PASS] release title 'chore: release' blocks
+2026-09-08T10:07:00.2160089Z   [PASS] release title 'chore(release): prepare 0.2.0' blocks
+2026-09-08T10:07:00.2160950Z   [PASS] release title 'chore(main): release 0.2.0' blocks
+2026-09-08T10:07:00.2161820Z   [PASS] release title 'chore!: release v1.0.0' blocks
+2026-09-08T10:07:00.2162592Z   [PASS] release title 'Release v0.3.0' blocks
+2026-09-08T10:07:00.2163373Z   [PASS] release title 'chore: prepare release 0.2.0' blocks
+2026-09-08T10:07:00.2164272Z   [PASS] release title 'chore: prepare for release 0.2.0' blocks
+2026-09-08T10:07:00.2165072Z   [PASS] absent head branch blocks (fail-closed)
+2026-09-08T10:07:00.2165706Z   [PASS] empty head branch blocks (fail-closed)
+2026-09-08T10:07:00.2166488Z   [PASS] bot author with UNKNOWN title blocks (fail-closed)
+2026-09-08T10:07:00.2167234Z   [PASS] ordinary worker PR is NOT blocked
+2026-09-08T10:07:00.2168161Z   [PASS] ordinary github-actions PR with a NON-release title is NOT blocked
+2026-09-08T10:07:00.2169165Z   [PASS] a PR merely MENTIONING release-plz is NOT blocked
+2026-09-08T10:07:00.2170211Z   [PASS] dependabot PR is NOT blocked by this guard
+2026-09-08T10:07:00.2170716Z 
+2026-09-08T10:07:00.2170983Z release_pr_guard self-test: PASS
+2026-09-08T10:07:00.4327759Z rearm-sweeper stuck-arm self-test: PASS
+2026-09-08T10:07:00.4328479Z rearm-sweeper self-test: PASS
+2026-09-08T10:07:00.4493464Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --probe-arm-capability
+2026-09-08T10:07:00.4494510Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --probe-arm-capability[0m
+2026-09-08T10:07:00.4531996Z shell: /usr/bin/bash -e {0}
+2026-09-08T10:07:00.4532354Z env:
+2026-09-08T10:07:00.4532783Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:07:00.4535358Z   GH_TOKEN: ***
+2026-09-08T10:07:00.4535704Z   REPO: sparq-org/sparq
+2026-09-08T10:07:00.4536037Z   DEFAULT_BRANCH: main
+2026-09-08T10:07:00.4536355Z ##[endgroup]
+2026-09-08T10:07:01.0289808Z [rearm-sweeper] arm-capability probe: can-arm — autoMergeAllowed=true (token=sparq-orchestrator[bot], viewerPermission=None); write scope is confirmed by the first arm
+2026-09-08T10:07:01.0433090Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --max-rearms 10
+2026-09-08T10:07:01.0434050Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --max-rearms 10[0m
+2026-09-08T10:07:01.0473298Z shell: /usr/bin/bash -e {0}
+2026-09-08T10:07:01.0473665Z env:
+2026-09-08T10:07:01.0474144Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:07:01.0476732Z   GH_TOKEN: ***
+2026-09-08T10:07:01.0477056Z   REPO: sparq-org/sparq
+2026-09-08T10:07:01.0477392Z   DEFAULT_BRANCH: main
+2026-09-08T10:07:01.0477702Z ##[endgroup]
+2026-09-08T10:07:02.7256743Z [rearm-sweeper] arm-capability probe: can-arm — autoMergeAllowed=true (token=sparq-orchestrator[bot], viewerPermission=None); write scope is confirmed by the first arm
+2026-09-08T10:07:02.7258884Z [rearm-sweeper] found 2 open PR(s) returned for label review:pass; re-arm limit=10
+2026-09-08T10:07:02.7260203Z [rearm-sweeper] PR #6360: SKIP — live autoMergeRequest
+2026-09-08T10:07:02.7261052Z [rearm-sweeper] PR #4354: SKIP — draft
+2026-09-08T10:07:02.7262205Z [rearm-sweeper] complete: candidates=2 re-arm-attempts=0 armed=0 arm-failures=0 state-failures=0 transient-exhaustions=0 capability=can-arm
+2026-09-08T10:07:02.7396715Z ##[group]Run python3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --phase stuck-arm --max-stuck-actions 5
+2026-09-08T10:07:02.7397865Z [36;1mpython3 scripts/rearm-sweeper.py --repo "$REPO" --default-branch "$DEFAULT_BRANCH" --phase stuck-arm --max-stuck-actions 5[0m
+2026-09-08T10:07:02.7435607Z shell: /usr/bin/bash -e {0}
+2026-09-08T10:07:02.7435991Z env:
+2026-09-08T10:07:02.7436444Z   ORCHESTRATOR_APP_ID: ***
+2026-09-08T10:07:02.7439034Z   GH_TOKEN: ***
+2026-09-08T10:07:02.7439688Z   REPO: sparq-org/sparq
+2026-09-08T10:07:02.7440059Z   DEFAULT_BRANCH: main
+2026-09-08T10:07:02.7440400Z ##[endgroup]
+2026-09-08T10:07:13.5183159Z [gh-retry] transient failure (attempt 1/3), retrying in 10s: gh pr list --repo: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)
+2026-09-08T10:07:34.1102133Z [gh-retry] transient failure (attempt 2/3), retrying in 30s: gh pr list --repo: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)
+2026-09-08T10:08:14.6020248Z ##[warning]gh pr list --repo failed transiently on every attempt (3 attempts): HTTP 502: 502 Bad Gateway (https://api.github.com/graphql) — the next cron run covers this sweep.
+2026-09-08T10:08:14.6221391Z Post job cleanup.
+2026-09-08T10:08:14.7067840Z [command]/usr/bin/git version
+2026-09-08T10:08:14.7112067Z git version 2.55.0
+2026-09-08T10:08:14.7158324Z Temporarily overriding HOME='/home/runner/work/_temp/146b68c1-0d7c-482b-bd3d-fc3188c3f4df' before making global git config changes
+2026-09-08T10:08:14.7160101Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-08T10:08:14.7170936Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-08T10:08:14.7200150Z Removing SSH command configuration
+2026-09-08T10:08:14.7207293Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-08T10:08:14.7244829Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-08T10:08:14.7497020Z Removing HTTP extra header
+2026-09-08T10:08:14.7503424Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-08T10:08:14.7548314Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-08T10:08:14.7806258Z Removing includeIf entries pointing to credentials config files
+2026-09-08T10:08:14.7812641Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-08T10:08:14.7851128Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-08T10:08:14.8401770Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-08T10:08:14.8445785Z Post job cleanup.
+2026-09-08T10:08:15.1430867Z Token revoked
+2026-09-08T10:08:15.1856277Z Cleaning up orphan processes

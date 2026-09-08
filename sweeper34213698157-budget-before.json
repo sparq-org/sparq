@@ -1,0 +1,15 @@
+{
+  "observed_utc": "2026-09-08T10:53:23.388366+00:00",
+  "core": {
+    "limit": 5000,
+    "remaining": 4974,
+    "reset": 1788864804,
+    "used": 26
+  },
+  "graphql": {
+    "limit": 5000,
+    "remaining": 5000,
+    "reset": 1788868376,
+    "used": 0
+  }
+}

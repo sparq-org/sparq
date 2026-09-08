@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T10:53:28.849474+00:00",
+  "updated_at": "2026-09-08T19:25:17.637992+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -44,7 +44,7 @@
   },
   "live_main": {
     "oid": "cf19a52c6880c496cefaca24046174902bc30958",
-    "observed_at": "2026-09-08T09:36:56.406177+00:00"
+    "observed_at": "2026-09-08T19:25:17.637992+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -63,10 +63,10 @@
     "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
     "branch": "codex/perf-topk-leading-tie-reject",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Early-tie repair frozen dc23141d8 and evidence verified153entries; useful allocation reduction, full candidate remains NO-GO. Same Astra agent now doing read-only drained-prefix design (at most3 concrete options) and one bounded read-only existing sweeper34213698157 evidence check. No further runtime edits or measurement authorized in this step.",
+    "state": "Read-only option-C design and scheduled-sweeper effect evidence collected and root manifest verified. Same Astra xhigh agent now authorized ONE lazy per-pattern preparation experiment from dc23141d8 on new isolated branch. Focused semantic/work controls first, then original8 plus predeclared6 modest/intermittent points. Stop top-k admission work if material regressions remain; no further iteration without root evaluation.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Read-only actual scan/lookup/overlay/tombstone cost design. No arbitrary threshold or assumed cheap scout; preserve favorable and modest/intermittent-miss behavior. Recommend minimal patch/correctness argument and bounded experiment or say no viable option. Also inspect existing scheduled sweeper log after budget check, report actual execution/writes/warnings; no remote mutations/dispatch/retries/model sessions/builds/installs/EC2.",
-    "phase": "Bounded drained-prefix design and post-fix sweeper evidence",
+    "contract": "Prepare each probe once on first demand inside existing indexed walk. Preserve pattern order, all eligibility checks, cap/block/failure state and complete ties; conservative fallback for unproved cases. No thresholds, new storage API or join framework. Meaningful eager-preparation negative control, then identical extended harness across comparison sources;14predeclaredpoints, one sequential measurement lane/two build jobs/Rayon1/15minoptimizedbuildcap. No sweep/noisehunting/networkinstall/fullworkspace/EC2/newmodel/remote mutations. Commit/freeze combined review evidence; stop and report NO-GO if drained/favorable/modest/intermittent costs remain material.",
+    "phase": "One bounded lazy-preparation experiment",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
     "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
@@ -168,6 +168,13 @@
       "effect": "Compiled early-guard-disabled control reproduces old allocations exactly and fails both allocation-saving assertions. Avoids1200846requestedbytes/37allocations base ties and4560846/43overlay. Favorable allocation metrics and peak query heap unchanged. Tie latency noisy; drained overhead remains.",
       "validation": "46 focused default passes;29 compact-index passes.102processes/329measuredsamples passed correctness checks including allocation controls. Root verified all153 manifest entries and clean dc source.",
       "limitation": "Local diagnostic only; cumulative RSS and requested-heap limits unchanged. No independent Opus review of dc23141d8 repair yet, no full workspace/conformance gate."
+    },
+    "drained_design": {
+      "report": "direct-5983/drained-design/report.json",
+      "report_sha256": "e5d6a94d2b094f240910a909ec5affd537c0cd4990add4eb56ce06dae95dbe79",
+      "manifest_entries_verified": 4,
+      "selected_option": "C: lazy per-pattern preparation",
+      "limits": "Source-supported allocation-timing experiment, not proven solution. Near-half fixture does16384constant-probe checks before block-width rejection. Generic scans repeat all-tombstone correction; exact contains compressed lookups decode/allocate. No new cutoff or storage API justified."
     }
   },
   "prs": {
@@ -411,7 +418,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T10:19:15.933818+00:00",
+    "observed_at": "2026-09-08T19:25:17.637992+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -422,18 +429,18 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T10:19:15.933818+00:00",
+    "observed_at": "2026-09-08T19:25:17.637992+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
-    "next": "When the active agent is available for a bounded read-only followup, inspect existing scheduled run34213698157 containing6463 for actual policy execution and any writes/errors. Do not dispatch a probe or infer production recovery writes from overall SUCCESS.",
+    "next": "Observe later natural scheduled execution that actually completes stuck-arm enumeration/per-PRreads; only an organically eligible incident can validate guarded claim/rerun. No fabricated incident/manual probe.",
     "issue": 6462,
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate.",
     "latest_scheduled_run": {
       "conclusion": "success",
-      "created_at": "2026-09-08T10:06:50Z",
+      "created_at": "2026-09-08T17:59:12Z",
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
-      "id": 34213698157,
+      "id": 34260338721,
       "status": "completed"
     },
     "first_observed_postfix_run": {
@@ -443,13 +450,22 @@
       "created_at": "2026-09-08T10:06:50Z",
       "conclusion": "success",
       "limit": "First natural scheduled success containing6463 observed. Recovery mutation/effect details not inspected, so this does not prove actual claim/rerun health."
+    },
+    "verified_postfix_effect": {
+      "run": 34213698157,
+      "report": "recovery-20260908/sweeper-34213698157/report.json",
+      "manifest_entries_verified": 9,
+      "selftests": "Embedded tests passed; not full external suite.",
+      "rearm": "2candidates,6360livearm/4354draft skipped;0attempts/arms/errors.",
+      "stuck_arm": "Initial enumeration failed3built-inHTTP502attempts, scheduled warning+exit0. No per-PRclassification, claims, receipt query or rerun.",
+      "conclusion": "No live recovery effect proven; source fix present but production query not exercised. No observer retry/mutation."
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci read-only drained-prefix design and existing sweeper34213698157 effect report. No new source edits/measurements until concrete design reviewed by root.",
-    "If viable, authorize one minimal drained-prefix repair/paired experiment, then combine with dc early-tie change and remaining F3-F5 obligations for actual Opus followup and required admission validation. Otherwise retain NO-GO and reprioritize next SPARQL lane.",
+    "Collect existing postmerge_ci single option-C lazy-preparation experiment (source/tests/eager control +14predeclaredpoint evidence). No duplicate lane. If it fails the stated practical viability conditions, stop top-k admission and reprioritize.",
+    "If viable, address remaining F3-F5 and obtain actual Opus review of combined candidate/harness before required full validation/admission. Current baseline/early-tie candidates remain NO-GO; no review approval carries to new source.",
     "Keep exact candidate/disabled/main original diagnostic binaries and rawdata unchanged. Any further measurement must answer a named unresolved question, not broaden/repeat the sweep without a source change.",
-    "Observe natural nightly34202612161 completion. First natural sweeper containing6463 now34213698157SUCCESS; actual recovery effect remains unverified. Inspect existing evidence via bounded agent followup when available, no manual probes. Registry remains OFF, ALLGREEN and all holds unchanged; releases unapproved.",
+    "Observe natural nightly final outcome and later sweeper evidence. First post-fix sweeper34213698157 actually skipped rearm and missed stuck-arm cycle on3built-in502 attempts;0claims/reruns, no production receipt query. Do not infer recovery health from green. Registry OFF/ALLGREEN/all holds/releases unchanged.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
   ],
   "followup_lane": {
@@ -466,9 +482,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4998,
-    "resetAt": "2026-09-08T10:36:55Z",
-    "observed_at": "2026-09-08T10:01:53.574160+00:00",
+    "remaining": 4997,
+    "resetAt": "2026-09-08T20:20:21Z",
+    "observed_at": "2026-09-08T19:25:17.637992+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -532,7 +548,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T10:53:28.849474+00:00",
+    "observed_at": "2026-09-08T19:25:17.637992+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
@@ -549,7 +565,7 @@
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34202612161,
       "status": "in_progress",
-      "updated_at": "2026-09-08T10:49:46Z"
+      "updated_at": "2026-09-08T19:03:05Z"
     }
   },
   "issues": {
@@ -560,5 +576,12 @@
       "dedupe": "No repeated-variable hits; three budget hits inspected and unrelated. Original PR revalidated immediately before recording findings.",
       "performance_finding": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275"
     }
+  },
+  "usage_observation": {
+    "observed_at": "2026-09-08T19:25:17.637992+00:00",
+    "codex_weekly_used_percent": 11,
+    "spend_control_reached": false,
+    "reset_credit_used": false,
+    "limit_caveat": "Other missing windows are unavailable, not zero usage. No reset/purchase performed."
   }
 }

@@ -1,0 +1,13 @@
+Read-only drained-prefix design — GPT-6 Astra xhigh
+
+Recommendation: only consider option C, lazy per-pattern preparation in the existing loop, as the next minimal experiment. It is an allocation-placement change with no new admission threshold. None of the three options presently proves this candidate ready for admission.
+
+A generic bound-subject scan scout is a poor fit: each scan performs count_correction over the entire tombstone set. Exact contains avoids that traversal, but still performs full SPO searches and allocates/decompresses on compressed storage. It cannot be called universally cheap.
+
+Lazy preparation keeps current constant-filter views and lookup code. Later variable views are initialized only when a candidate reaches them. This preserves modest/intermittent-miss behavior more naturally than a small-prefix bailout, avoids unused preparation, and needs no core API. It does not remove the long sequence of constant checks. In the known fixtures the original geometric block cap rejects after16,384 candidates, before the first surviving subject; the failed-count cap is not the cause.
+
+Boundary: nested OtherPat metadata/prepared state, exact existing sort/cardinality checks at first preparation, unchanged loop/group/failure state, focused tests and allocation control. No threshold, fanout, storage API or budget-policy change. Every successful row must still visit every probe and trigger every original check.
+
+Next evidence: unchanged eight-point allocation/operation control first, then six fixed modest/intermittent-miss points (prefix128 and800, every-eighth miss; each base/overlay), identical protocol. If residual drained cost remains material or favorable/modest cases regress, stop this top-k admission lane. A separate ordinary SPARQL scan/bind-join tombstone-counting investigation is the more general next target, subject to root dedupe. Full source cost paths, qualifications and bounded plan are in report.json.
+
+Operational followup: sweeper34213698157 on cf19a52c completed its self-tests, then re-arm saw only an already-armed PR and a draft. Stuck-arm enumeration exhausted three built-in HTTP502 read attempts and emitted warning+exit0 before per-PR policy or any claim/rerun. This is not a recovery success. Existing source/log evidence is saved separately; no observer retry, probe or mutation occurred.

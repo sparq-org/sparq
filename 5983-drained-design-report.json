@@ -1,0 +1,135 @@
+{
+  "author": "OpenAI GPT-6 Astra, actual xhigh; bounded read-only source design; no builds, benchmarks, model sessions or runtime edits",
+  "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+  "recommendation": "Of three options, C (on-demand per-pattern preparation in the existing loop) is the smallest defensible implementation experiment. It changes allocation timing, not admission thresholds. It is NOT established to cure the drained-prefix regression: no option currently warrants admission or an unconditional implementation/performance claim.",
+  "current_decline_proof": {
+    "base": {
+      "seed": 50000,
+      "pending": 25001,
+      "leading_misses": 24999,
+      "cap": 25000
+    },
+    "overlay": {
+      "seed": 40000,
+      "pending": 20000,
+      "leading_misses": 20000,
+      "cap": 20000
+    },
+    "k": 1,
+    "block_ends_before_failure": [
+      16,
+      64,
+      256,
+      1024,
+      4096,
+      16384
+    ],
+    "next_target": 65536,
+    "failed_next_widths": {
+      "base": 33616,
+      "overlay": 23616
+    },
+    "cause": "For these distinct-priority fixtures, the next block width exceeds max_group before its first matching subject is reached. Both do16384 candidate probes. This is a block-width decline, not exhaustion of failed_count > failure_budget. Derived from the actual loop and existing fixture dimensions; no new measurement."
+  },
+  "cost_facts": [
+    {
+      "source": "exec.rs:3319-3334,3351-3428",
+      "fact": "Seed scan_sorted resolves once, may own a merged/decoded extent, then every seed object is checked inline. All six other probe scans and all six subject-id vectors are currently retained before the exact-cardinality check or any candidate. Early-tie repair avoids them only for an oversized leading key group."
+    },
+    {
+      "source": "store.rs:117-142,1073-1097",
+      "fact": "Raw Owned/Mapped rows_in borrows after two binary searches. Compressed rows_in decodes an owned Vec. With overlay, scan_with invokes count_correction even for an untouched narrow range; if affected, merge allocates capacity base.len+added.len, hashes each base row against deletions, and interleaves additions."
+    },
+    {
+      "source": "store.rs:193-221,259-271",
+      "fact": "count_correction counts additions via cached permutation projection and two bounds searches, but scans the ENTIRE unordered deleted set for every call. A cold added_sorted for a non-SPO permutation allocates/projects/sorts all additions once. Per-subject scan/estimate on a70k-tombstone overlay is therefore not O(log n) overall."
+    },
+    {
+      "source": "store.rs:875-891",
+      "fact": "Exact contains([s,p,o]) avoids count_correction and merge: one expected-O(1) deletion lookup, then canonical-added binary search, then base SPO count_in if needed. In raw storage count_in performs TWO full-triple bounds searches; this is not literally one cheap search despite base_contains prose."
+    },
+    {
+      "source": "compress.rs:861-880",
+      "fact": "Compressed contains reaches count_range, which allocates a BLOCK-sized Vec and decodes a boundary block for an exact point. Its per-point cost is not allocation-free. No public cheap raw/fast-point capability predicate was found in the inspected Graph/TripleStore surface."
+    },
+    {
+      "source": "store.rs:1103-1114",
+      "fact": "estimate is exact for the chosen fully bound-prefix pattern, including overlay correction, but also scans all tombstones and may initialize added projections. Moving the unchanged cardinality test ahead of scans could save selective cases; it cannot detect the near-half correlation and adds duplicate D traversals on admitted cases unless carefully reused."
+    },
+    {
+      "source": "exec.rs:3560-3587,9159-9254",
+      "fact": "Existing indexed candidate probes binary-search plain subject-id arrays; generic bind_join scans each distinct bound subject. Reusing generic bind_join for a scout imports per-subject overlay counting, it does not make that cost disappear."
+    }
+  ],
+  "options": [
+    {
+      "id": "A",
+      "name": "Generic per-subject scan scout before global preparation",
+      "boundary": "Reuse scan([Some(subject),predicate,object]) / bind_join to inspect first blocks, then retain current materialized path.",
+      "cost": "O(S*M*(D+log N)) correction work for S visited subjects and M probes with D tombstones, plus affected-range allocations and compressed decoding. A16,384-subject prefix and70k deletions can induce more than a billion tombstone tests for just one scan per subject.",
+      "correctness": "Complete tie groups and current guards can preserve results, but bailing after an arbitrary small scout block would sacrifice valid modest/intermittent-miss wins.",
+      "verdict": "Reject: source establishes an overlay cost hazard; no run needed."
+    },
+    {
+      "id": "B",
+      "name": "Exact leading-constant-filter contains prefix before preparation",
+      "boundary": "Resolve metadata once, check only the original leading constant-object pattern prefix using contains; delay global preparation until the first subject passes. Reuse the same block/failure state and do not restart at zero. No variable-object point scan or constant reordering.",
+      "cost": "Avoids D scans and global allocations for constant checks on raw base/overlay, but replaces small-range Id-array probes with full SPO tuple searches and overlay membership checks. Large prefix still requires all prefix lookups. Compressed point reads allocate/decode per lookup; blind use is unsafe for performance.",
+      "correctness": "A missing exact constant triple proves that subject cannot join; leading-prefix order avoids skipping an earlier unsupported multivalued-variable probe. Same tie boundaries, block checks, failure counts and fallback remain necessary. Carrying block state without shrinking original widths is required; otherwise a scout handoff silently changes the cap.",
+      "verdict": "Promising only with actual primitive-cost evidence and a sound storage eligibility contract. It is not presently the smallest universal repair; do not add a broad new storage API or infer rawness from seed Cow::Borrowed (overlay also owns a raw seed)."
+    },
+    {
+      "id": "C",
+      "name": "Prepare each probe on first demand within the existing walk",
+      "boundary": "Split inexpensive resolved pattern metadata from Option<prepared Scan + subject_ids>. Keep original pattern order. Before each lookup initialize that one probe once if needed; run the unchanged exact-cardinality and actual-sort checks at that initialization. Reuse the prepared entry thereafter. Keep row emission, all guards and geometric block state.",
+      "cost": "During a prefix rejected by peer/status, later variable probes are never reached and remain unbuilt. No extra per-subject scan, estimate, lookup algorithm or tombstone pass. Favorable first survivor causes all needed probes to be prepared once as today, with a new initialized-state branch. Existing constant vectors and prefix searches remain.",
+      "expected_avoided_work_not_measured": {
+        "base": "For the current six-probe fixture, defer four variable scans/vectors:800,000 Id-vector requested bytes plus small preparation overhead. Base ranges are borrowed.",
+        "overlay": "Defer four variable vectors (~640,000 requested bytes), four merge buffers with base-capacity (~2,400,000 bytes), and four full tombstone corrections (280,000 predicate-range deletion tests for D=70,000), plus merge filtering. These are source-derived fixture estimates, not claimed counters or timings."
+      },
+      "correctness": "A successful row must visit every probe, so every nonempty accepted result has passed all original static-sort/cardinality checks. Full tie groups and failure/block caps remain unchanged; no partial row is emitted. Missing probes are pure conjunction failures. Metadata unsatisfiability and all shape/budget/view/fanout guards stay. For the all-rejected/no-preparation case, conservatively return existing fallback if preserving all admission exclusions is simpler than proving every unvisited shape.",
+      "modest_intermittent": "A modest leading prefix uses the same prepared constant views and searches, then prepares remaining probes at the first compatible subject without repeating prior failures. With intermittent misses and an immediate survivor, nearly all preparation happens immediately, so benefit can be zero; overhead must be measured.",
+      "verdict": "Recommended minimal experiment, not an admission policy. It saves setup while leaving16,384 constant-probe checks in the known adverse cases; likely only a partial repair, and must stop if the remaining regression is material."
+    }
+  ],
+  "minimal_patch_boundary": {
+    "production": [
+      "crates/sparq-engine/src/exec.rs::try_topk_orderby_indexed, nested OtherPat and its one-time preparation seam only"
+    ],
+    "tests": [
+      "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs plus bounded test-only preparation observations if necessary"
+    ],
+    "excluded": [
+      "No TripleStore/compression/overlay API changes",
+      "No new cardinality/selectivity threshold or first-block-no-result bailout",
+      "No fanout expansion, repeated-variable or armed-budget bypass",
+      "No new whole-query planner or generic bind_join reuse",
+      "No changes to frozen artifacts/binaries or public workflow state"
+    ],
+    "clarity": "If optionC requires a sprawling new abstraction, stop and report rather than turn it into a join framework."
+  },
+  "evidence_to_require": [
+    "Compare exact results against fallback for ASC/DESC, OFFSET, ties including groups with only rejected rows and an intermittent survivor, missing constants, variable-first pattern order, multivalued probes, restricted permutations, supported views, overlay inserts/deletes, and armed budget fallback.",
+    "Pin execution work: constant-only failed prefixes must not initialize later variable probe scans/vectors; favorable/no-miss cases initialize each required probe once. Control eager-initialization must restore preparation and fail these assertions. No wall-clock unit assertions.",
+    "Pin unchanged cap and failure state: original visited_to/end widths, complete groups and failure counts must survive the delayed preparation. A prefix cannot be rescanned or make a too-wide block appear smaller.",
+    "Every observed successful row visits all checks. Add a later highly-selective probe to prove delaying its initialization cannot admit a nonempty result that the old min-card guard declined. Conservatively fallback on any unproved storage/shape path.",
+    "Allocation traffic, heap peak and operation counts for base/raw overlay including many tombstones and cold added projections; measure compressed separately because its existing scan costs differ. Never conflate flat cumulative RSS with zero query cost."
+  ],
+  "bounded_experiment_plan": [
+    "No execution in this design step. If root choosesC, implement only the above seam and run focused semantic/control tests before any optimized measurement. Stop on a correctness or cap-protocol failure.",
+    "First reproduce current eight points with operation/allocation counters using identical fixture/harness; compare to immutable dc23141d and existing disabled binaries. Demand avoided variable preparation without increased favorable allocation. No new baseline/control rebuild unless the harness actually changes.",
+    "Only then add six predeclared points at the existing n/k:128-leading-miss and800-leading-miss patterns, and intermittent every-eighth miss, each base/overlay. Their purpose is to reject a policy that only wins the near-half fixture. Preserve all k1/k512 favorable and oversized-tie controls.",
+    "Use the same sequential lane, two build jobs, one query thread, optimized-build cap, warmup2, seven timing repetitions and three allocation repetitions; raw samples/variance, source/binary hashes and oracle/path checks remain mandatory. No adaptive threshold search, parameter sweep or repeated noisy-run hunting.",
+    "If delayed preparation does not remove the material drained penalty without harming no-miss/modest/intermittent cases, retain NO-GO and stop top-k admission work. An independent Opus review must precede any admission; F3-F5 remain."
+  ],
+  "alternate_lane_if_not_worthwhile": "Separate SPARQL baseline scan/bind-join overlay cost: each narrow lookup currently rescans all tombstones in count_correction. Investigate a narrowly scoped exact deletion-range count/index or point lookup path under ordinary evaluator workloads, after root dedupes existing work. This is a source-supported investigation candidate, not an already measured optimization or authorization for a broad overlay rewrite.",
+  "operational_followup": "See recovery-20260908/sweeper-34213698157/report.json: re-arm idle; stuck-arm list enumeration exhausted3 built-in HTTP502 attempts and returned scheduled warning+0. No claim/rerun; receipt-schema production path not exercised.",
+  "no_changes": {
+    "runtime": true,
+    "benchmarks": true,
+    "builds": true,
+    "independent_models": true,
+    "remote_mutations": true,
+    "observer_github_retries": true
+  }
+}

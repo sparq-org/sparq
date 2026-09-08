@@ -1,0 +1,92 @@
+{
+  "run_id": 34213698157,
+  "job_id": 102020358395,
+  "url": "https://github.com/sparq-org/sparq/actions/runs/34213698157",
+  "event": "schedule",
+  "branch": "main",
+  "workflow_head": "cf19a52c6880c496cefaca24046174902bc30958",
+  "actual_checkout_head": "cf19a52c6880c496cefaca24046174902bc30958",
+  "attempt": 1,
+  "aggregate_conclusion": "success",
+  "observed_outcome": "Re-arm idle success; stuck-arm missed cycle after transient enumeration exhaustion, NOT proven recovery",
+  "self_tests": {
+    "gh_retry": "PASS log276",
+    "release_pr_guard": "PASS log301",
+    "rearm_stuck_arm": "PASS log302",
+    "rearm": "PASS log303",
+    "scope_limit": "Embedded self-test commands only; this step does not execute the separate full external unittest suite."
+  },
+  "rearm": {
+    "candidates": 2,
+    "skips": {
+      "6360": "live autoMergeRequest",
+      "4354": "draft"
+    },
+    "attempts": 0,
+    "armed": 0,
+    "arm_failures": 0,
+    "state_failures": 0,
+    "transient_exhaustions": 0,
+    "evidence_lines": [
+      323,
+      327
+    ]
+  },
+  "stuck_arm": {
+    "phase_started": true,
+    "enumeration_completed": false,
+    "per_pr_live_state_or_policy_executed": false,
+    "classifications": 0,
+    "actions": 0,
+    "claims": 0,
+    "rerun_posts": 0,
+    "reason": "First gh pr list read failed with HTTP502 on all3 built-in attempts; no armed population was returned. run calls list_armed before any live_pull, classification or apply.",
+    "source_ranges": [
+      "scripts/rearm-sweeper.py:1634-1662",
+      "scripts/rearm-sweeper.py:2017-2084",
+      "scripts/rearm-sweeper.py:3734-3775"
+    ],
+    "builtin_read_backoff_seconds": [
+      10,
+      30
+    ],
+    "warning_lines": [
+      337,
+      339
+    ],
+    "green_reason": "stuck_arm_exit retains existing scheduled-transient policy: no recorded per-PR error plus GhTransientExhausted -> warning + exit0; event mode would fail. The phase is not continue-on-error."
+  },
+  "writes": {
+    "rearm_enable_attempts": 0,
+    "policy_claim_comment_posts": 0,
+    "actions_job_rerun_posts": 0,
+    "other_policy_mutations": 0,
+    "basis": "Zero re-arm summary plus initial stuck-arm enumeration exception before mutation-capable code. This does not audit token mint/revocation, runner checkout or unrelated workflows."
+  },
+  "capability": {
+    "actor_in_probe": "sparq-orchestrator[bot]",
+    "autoMergeAllowed": true,
+    "viewerPermission": null,
+    "limitation": "Read-only can-arm output explicitly leaves effective write scope to first actual arm. No arm or rerun occurred here, so neither grant nor live cancelled-gate recovery is proven by this run."
+  },
+  "warnings": [
+    "HTTP502 transient exhaustion in stuck-arm enumeration, intentionally warning/exit0 under existing scheduled policy",
+    "actions/create-github-app-token app-id input deprecation at log35 and355; use client-id recommendation is upstream output, not changed here",
+    "Git default initial branch hint during checkout; non-policy informational warning"
+  ],
+  "schema_fix_6463": {
+    "present": "RERUN_HISTORY_QUERY uses author{login __typename ... on Bot{id}} at source1072",
+    "live_exercised": false,
+    "reason": "Enumeration failed before any receipt-history request; embedded self-test success does not prove production recovery execution."
+  },
+  "followup": "A later naturally scheduled run must complete stuck-arm enumeration and per-PR reads. An eligible cancelled-gate incident would be needed to observe guarded claim/rerun recovery; do not fabricate one or manually probe. Root owns future observation.",
+  "api_reads_this_task": [
+    "rate_limit",
+    "actions/runs/34213698157",
+    "actions/runs/34213698157/jobs?per_page=100",
+    "actions/jobs/102020358395/logs"
+  ],
+  "observer_retries": 0,
+  "observer_mutations": 0,
+  "budget_before": "core4974/5000, GraphQL5000/5000; no observer exhaustion/error encountered"
+}
