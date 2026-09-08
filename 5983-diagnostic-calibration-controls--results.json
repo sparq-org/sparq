@@ -1,0 +1,23 @@
+[
+  {
+    "name": "baseline",
+    "compile_exit": 0,
+    "run_exit": 0,
+    "source_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "classification": "PASS"
+  },
+  {
+    "name": "peak_disabled",
+    "compile_exit": 0,
+    "run_exit": 101,
+    "source_sha256": "37d9beccfbc5492b96fa3a722aceffa4d39fa9c56746fbb3896e45876e648bbb",
+    "classification": "KILLED"
+  },
+  {
+    "name": "byte_count_disabled",
+    "compile_exit": 0,
+    "run_exit": 101,
+    "source_sha256": "8d529fb4d5070d33deebb24d2dabfd080394283742d919e77b75013db395a6ef",
+    "classification": "KILLED"
+  }
+]

@@ -1,0 +1,778 @@
+[
+  {
+    "name": "drained-candidate-confirmation",
+    "case": "drained",
+    "variant": "candidate",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861348.810836,
+    "wall_seconds": 0.3735389709472656,
+    "exit_code": 0,
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 11126500,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59244544,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 11668000,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59326464,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 11286750,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59359232,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 10980667,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59392000,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 10937250,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59408384,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 10997125,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59441152,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 10980958,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59523072,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "drained-disabled-confirmation",
+    "case": "drained",
+    "variant": "disabled",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861349.188381,
+    "wall_seconds": 0.32549595832824707,
+    "exit_code": 0,
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44957696,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 8243208,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59162624,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 8278125,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59244544,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 8249750,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59260928,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 8231083,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59310080,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 8282500,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59359232,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 8240125,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59375616,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 8276000,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59408384,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "drained-overlay-disabled-confirmation",
+    "case": "drained-overlay",
+    "variant": "disabled",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861349.518038,
+    "wall_seconds": 0.3973870277404785,
+    "exit_code": 0,
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88178688,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 13580875,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96796672,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 13558791,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96862208,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 13506417,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96894976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 13544708,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96927744,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 13602042,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96944128,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 13512792,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 96993280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 13550625,
+        "pre_query_max_rss": 96731136,
+        "post_query_max_rss": 97042432,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "drained-overlay-candidate-confirmation",
+    "case": "drained-overlay",
+    "variant": "candidate",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861349.918889,
+    "wall_seconds": 0.4504868984222412,
+    "exit_code": 0,
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88178688,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 20080417,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98582528,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 19880750,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98631680,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 20027750,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98664448,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 20054083,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98664448,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 20055959,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98697216,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 20070834,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98713600,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 20115250,
+        "pre_query_max_rss": 98549760,
+        "post_query_max_rss": 98811904,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "ties-disabled-confirmation",
+    "case": "ties",
+    "variant": "disabled",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861350.372833,
+    "wall_seconds": 0.3679370880126953,
+    "exit_code": 0,
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 14060000,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70270976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 14177459,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70336512,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 14092459,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70402048,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 14068375,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70451200,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 14074375,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 14172000,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 14346042,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70500352,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "ties-candidate-confirmation",
+    "case": "ties",
+    "variant": "candidate",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861350.744282,
+    "wall_seconds": 0.3960590362548828,
+    "exit_code": 0,
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 17353291,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70303744,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17315125,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70402048,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17316208,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70434816,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17297875,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17355625,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70483968,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17298833,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70516736,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 17529209,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70549504,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "ties-overlay-candidate-confirmation",
+    "case": "ties-overlay",
+    "variant": "candidate",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861351.1439319,
+    "wall_seconds": 0.5067911148071289,
+    "exit_code": 0,
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89194496,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 25696750,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 25724500,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 25739500,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 25859083,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 25766875,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 25782042,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 25811917,
+        "pre_query_max_rss": 106954752,
+        "post_query_max_rss": 106954752,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  },
+  {
+    "name": "ties-overlay-disabled-confirmation",
+    "case": "ties-overlay",
+    "variant": "disabled",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "started_unix": 1788861351.65434,
+    "wall_seconds": 0.44685912132263184,
+    "exit_code": 0,
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 19317916,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 18892667,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 19098708,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 18389916,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 18217666,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 18352166,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 18492375,
+        "pre_query_max_rss": 106577920,
+        "post_query_max_rss": 106577920,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ]
+  }
+]

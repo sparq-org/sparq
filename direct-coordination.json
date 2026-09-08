@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T10:01:53.574160+00:00",
+  "updated_at": "2026-09-08T10:19:15.933818+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,10 +63,10 @@
     "head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
     "branch": "codex/perf-indexed-topk-recovery",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Bounded measurement completed initial and confirmation data; agent is freezing final report/manifest. Root observed favorable gains but repeatable adverse slowdowns; do not publish numerical claims or admit current candidate before final provenance/evidence verification.",
+    "state": "Original9e8bdfc9 performance candidate is NO-GO for admission. Root verified139-file diagnostic manifest/provenance and posted finding on6465. Same Astra xhigh agent now assigned narrowly scoped early rejection of oversized leading tie groups, preserving the existing cap/fallback. New isolated branch/worktree, no changes to frozen originals. Drained-prefix cost remains separate unresolved blocker.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "One sequential scoped optimized build/measurement lane; own isolated worktrees and targets under authorized tmp root, two build jobs, ~15min optimized-build cap. No full workspace/canonical sweep/network install/EC2/remote mutation. Preserve frozen reviewed runtime. Commit only benchmark harness/registration with honest provenance; report exact source/binary/harness and measurement limitations.",
-    "phase": "Bounded local performance/resource measurement",
+    "contract": "Implement only existing oversized-leading-tie admission before probe scan/vector construction, from frozen9e8bdfc9 on own isolated worktree under authorized tmp root. Targeted semantic/work-allocation controls then identical eight-point local matrix; one sequential lane/two build jobs/warm private target. No arbitrary threshold, broad sweep/full workspace/network installs/remote mutations/EC2/independent model call. Commit durably; root owns actual Opus followup before admission. Preserve all original artifacts/binaries.",
+    "phase": "Focused early tie-rejection repair and same-matrix comparison",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
     "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
@@ -107,15 +107,15 @@
       "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
     },
     "benchmark_status": {
-      "observed_at": "2026-09-08T10:01:53.574160+00:00",
+      "observed_at": "2026-09-08T10:19:15.933818+00:00",
       "agent_report": "Harness/registration committed on separate bench branch; frozen9e8bdfc9 untouched. Optimized offline build compiling with two jobs under original900sec deadline. Exact repo lockfile dependency versions verified; no installs. Timing/counting binaries separate; Rayon1; eight fixture points including base/overlay/favorable/adverse. Requested-heap query-window peaks and cumulative setup/pre/post RSS reported with limits.",
-      "harness_commit": "3ef21cb57a5bf6db7561a83b27bd6a38875d7b35",
+      "harness_commit": "87179e16487e770de4b4c45ed4be008308c47450",
       "build_start": {
         "started_unix": 1788860716.937938,
         "budget_seconds": 900
       },
       "evidence_directory": "direct-5983/diagnostic",
-      "pending": "Final report/manifest and full source/binary/harness provenance; agent asked to freeze without wider measurements or runtime edits.",
+      "pending": null,
       "provisional_confirmation": [
         {
           "case": "drained",
@@ -139,7 +139,17 @@
         }
       ],
       "summary_sha256_observed": "a4819e42cb13d45d7edda75cb53af31da85bf7fa46b876802181f4250d5ef1f2",
-      "limitations": "Data not yet frozen by author or manifest verified by root. Main/disabled baseline drift and cumulative RSS vs query requested-heap must remain explicit."
+      "limitations": "Data not yet frozen by author or manifest verified by root. Main/disabled baseline drift and cumulative RSS vs query requested-heap must remain explicit.",
+      "verified": true,
+      "manifest_entries": 139,
+      "root_verification": "direct-5983/diagnostic/root-verification.json",
+      "report": "direct-5983/diagnostic/report.json",
+      "report_sha256": "3435d2c1d8e005bfb5cd449703d3c7ccecfc84038c04cf3e9170a62b53f9800c",
+      "decision": "NO_GO for admission of the current candidate; GO only for one focused decline-cost repair followed by this same matrix",
+      "total_measured_queries": 296,
+      "oracle": "All measured subject vectors matched generated total-order oracle; separate path checks passed.",
+      "limits": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer. getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
+      "finding_comment": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275"
     }
   },
   "prs": {
@@ -383,7 +393,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T09:16:50.726933+00:00",
+    "observed_at": "2026-09-08T10:19:15.933818+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -394,7 +404,7 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T09:37:33.984701+00:00",
+    "observed_at": "2026-09-08T10:19:15.933818+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
@@ -403,16 +413,16 @@
     "live_schema": "Read-only introspection Sep8 confirms Actor has no id, concrete Bot has id. Open rearm issue search complete20 results, no duplicate.",
     "latest_scheduled_run": {
       "conclusion": "success",
-      "created_at": "2026-09-08T05:53:00Z",
-      "head_sha": "48fefb6c3f025cc3bf5a104cfb5e93e61ecd3045",
-      "id": 34192344406,
+      "created_at": "2026-09-08T10:06:50Z",
+      "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
+      "id": 34213698157,
       "status": "completed"
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci final frozen diagnostic report/manifest, then verify hashes/provenance and decision. Preliminary adverse controls regress despite favorable gains; no wider sweep or source edit authorized yet.",
-    "After verification, record confirmed no-go/next-step findings on existing recovery issue6465 and link from5983; revalidate both immediately before posting. Do not duplicate issue. Then authorize smallest evidence-supported correction if worthwhile, preserving raw original measurement and reviewed runtime.",
-    "Then add a bounded reproducible measurement fixture/registration and compare repaired candidate, its indexed-disabled control and current main. Preserve no-EC2 restriction except separately authorized6435 benchmark still blocked on login.",
+    "Collect existing postmerge_ci early-tie-rejection fix/test/control and same-matrix comparison; do not duplicate work. Frozen9e8bdfc9 is verified NO-GO, diagnostic report/harness evidence retained and finding recorded6465.",
+    "After concrete fix, evaluate measured tie-cost effect and separate drained-prefix design. No candidate admission until both adverse regressions and F3-F5 obligations are addressed with actual Opus followup and required full validation.",
+    "Keep exact candidate/disabled/main original diagnostic binaries and rawdata unchanged. Any further measurement must answer a named unresolved question, not broaden/repeat the sweep without a source change.",
     "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
   ],
@@ -496,7 +506,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T09:49:11.504804+00:00",
+    "observed_at": "2026-09-08T10:19:15.933818+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
@@ -513,7 +523,7 @@
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34202612161,
       "status": "in_progress",
-      "updated_at": "2026-09-08T09:32:52Z"
+      "updated_at": "2026-09-08T10:08:24Z"
     }
   },
   "issues": {
@@ -521,7 +531,8 @@
       "state": "OPEN",
       "url": "https://github.com/sparq-org/sparq/issues/6465",
       "purpose": "Track executed T1/T2 regressions in unmerged PR5983 top-k and bounded recovery. Not a main regression claim.",
-      "dedupe": "No repeated-variable hits; three budget hits inspected and unrelated. Original PR revalidated immediately before recording findings."
+      "dedupe": "No repeated-variable hits; three budget hits inspected and unrelated. Original PR revalidated immediately before recording findings.",
+      "performance_finding": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275"
     }
   }
 }

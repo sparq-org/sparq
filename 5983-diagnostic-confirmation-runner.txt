@@ -1,0 +1,8 @@
+{"name": "drained-candidate-confirmation", "exit_code": 0, "wall_seconds": 0.3735389709472656}
+{"name": "drained-disabled-confirmation", "exit_code": 0, "wall_seconds": 0.32549595832824707}
+{"name": "drained-overlay-disabled-confirmation", "exit_code": 0, "wall_seconds": 0.3973870277404785}
+{"name": "drained-overlay-candidate-confirmation", "exit_code": 0, "wall_seconds": 0.4504868984222412}
+{"name": "ties-disabled-confirmation", "exit_code": 0, "wall_seconds": 0.3679370880126953}
+{"name": "ties-candidate-confirmation", "exit_code": 0, "wall_seconds": 0.3960590362548828}
+{"name": "ties-overlay-candidate-confirmation", "exit_code": 0, "wall_seconds": 0.5067911148071289}
+{"name": "ties-overlay-disabled-confirmation", "exit_code": 0, "wall_seconds": 0.44685912132263184}

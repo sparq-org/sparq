@@ -1,0 +1,7 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.9.6",
+  "cpu_count": 8,
+  "build_elapsed_seconds": 279.1293249130249
+}

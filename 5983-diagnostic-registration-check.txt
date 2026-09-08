@@ -1,0 +1,1 @@
+G3 new-bench->registry+dashboard: PASS — no new bench suite missing artifacts.

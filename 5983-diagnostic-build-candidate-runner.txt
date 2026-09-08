@@ -1,0 +1,1 @@
+{"command": ["/Users/jesght/.cargo/bin/cargo", "build", "--release", "--locked", "--offline", "--manifest-path", "bench/indexed-topk/Cargo.toml"], "exit_code": 101, "seconds": 0.5720269680023193}

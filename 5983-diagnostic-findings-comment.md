@@ -1,0 +1,11 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The narrow recovery is **not ready for admission**. Actual Claude Opus 5 with extra-high reasoning reviewed runtime `9e8bdfc95c916b62550fb8c3142f804bbbfb2444` and cleared it for measurement, with remaining tracing, path-coverage and documentation obligations. That was source clearance for a benchmark, not merge approval.
+
+The optimized local diagnostic now confirms an additional performance problem: both a drained matching prefix and an oversized leading ORDER BY tie group pay for the attempted indexed path before falling back. Each regressed against the same candidate with indexed admission disabled, including forked graphs with tombstones. Fresh-process, reversed-order confirmation retained disjoint timing ranges. Favorable cases were faster and used less measured query heap, so a favorable-only summary would conceal the admission problem. These are local diagnostic findings, not canonical production performance claims.
+
+Every measured result passed the generated total-order oracle. Timing and allocation counting used separate binaries. Requested-heap peaks exclude allocator overhead; RSS is cumulative process peak and cannot isolate query memory after setup/warmup. Main was also measured, but main/control timing drift means the disabled candidate is the primary causal comparison.
+
+The next focused repair moves the existing oversized-leading-tie rejection ahead of probe-scan/vector construction, then repeats the same favorable and adverse cases. Drained-prefix overhead remains unresolved separately. The candidate and original PR remain unmerged; no protection, review label, registry dispatch or release state is being changed.
+
+Reproducibility: diagnostic harness is durably committed locally at `87179e16487e770de4b4c45ed4be008308c47450`; the generated report, raw samples, allocator calibration controls and source/binary manifest are retained. Report SHA256: `3435d2c1d8e005bfb5cd449703d3c7ccecfc84038c04cf3e9170a62b53f9800c`. Historical Luke Dary / Sonnet 5 contribution attribution remains intact.

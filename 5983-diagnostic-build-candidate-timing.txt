@@ -1,0 +1,13 @@
+error: failed to download `hybrid-array v0.4.13`
+
+Caused by:
+  unable to get packages from source
+
+Caused by:
+  failed to unpack package `hybrid-array v0.4.13`
+
+Caused by:
+  failed to create directory `/Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hybrid-array-0.4.13`
+
+Caused by:
+  Operation not permitted (os error 1)

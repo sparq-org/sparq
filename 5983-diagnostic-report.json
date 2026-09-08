@@ -1,0 +1,612 @@
+{
+  "task": "PR5983 / issue6465 bounded local diagnostic after actual Opus5 xhigh source_clear_for_measurement",
+  "decision": "NO_GO for admission of the current candidate; GO only for one focused decline-cost repair followed by this same matrix",
+  "decision_basis": "All four adverse cases are slower than the admission-disabled control with disjoint within-process repetition ranges; a second fresh-process reversed-source-order pass confirms all four. Favorable gains and lower measured query heap do not cancel these confirmed adverse regressions. This is an engineering admission recommendation, not a new CI ratchet or security verdict.",
+  "author": "OpenAI GPT-6 Astra, actual xhigh implementation/measurement runtime; no additional models or agents",
+  "harness_head": "87179e16487e770de4b4c45ed4be008308c47450",
+  "reviewed_runtime_head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+  "main_control_runtime_head": "cf19a52c6880c496cefaca24046174902bc30958",
+  "source_provenance": {
+    "candidate": {
+      "build_head": "3ef21cb57a5bf6db7561a83b27bd6a38875d7b35",
+      "current_clean_head": "87179e16487e770de4b4c45ed4be008308c47450",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-candidate",
+      "branch": "codex/bench-indexed-topk-diagnostic",
+      "engine_exec_blob": "c0f63fb14243bc403092fb9146674f8dbb669c35",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "exact reviewed 9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+          "sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+          "bytes": 5403840
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+          "sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+          "bytes": 5420752
+        }
+      }
+    },
+    "disabled": {
+      "build_head": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+      "current_clean_head": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-disabled",
+      "branch": "codex/bench-indexed-topk-disabled",
+      "engine_exec_blob": "492865daf2553ae19975f41725225f9d0a0cdb2d",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "reviewed candidate with constant-false admission only",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+          "sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+          "bytes": 5400480
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+          "sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+          "bytes": 5401008
+        }
+      }
+    },
+    "main": {
+      "build_head": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+      "current_clean_head": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-main",
+      "branch": "codex/bench-indexed-topk-main",
+      "engine_exec_blob": "c25e391ac353d92eb1ca6d9525d83c250cd8d327",
+      "core_store_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c",
+      "runtime_source": "exact main cf19a52c6880c496cefaca24046174902bc30958",
+      "binaries": {
+        "timing": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+          "sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+          "bytes": 5400608
+        },
+        "count": {
+          "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+          "sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+          "bytes": 5401024
+        }
+      }
+    }
+  },
+  "byte_identical_harness_files": {
+    "bench/indexed-topk/Cargo.toml": {
+      "sha256": "6bf23b632c2e18b1696220a5a3899a1478058756c3cf988e7514eb39987dc4c7",
+      "bytes": 561
+    },
+    "bench/indexed-topk/Cargo.lock": {
+      "sha256": "b953da71182f9233f76753b739fbf8dca4f0f18fe8f769b27f2cc010ec3dcc5f",
+      "bytes": 23151
+    },
+    "bench/indexed-topk/README.md": {
+      "sha256": "a9b9127222e909f65d7a06df19206714801a0c6eebeaf289da63e51176cb8f26",
+      "bytes": 3729
+    },
+    "bench/indexed-topk/src/main.rs": {
+      "sha256": "089e21a15520d511f28fc7759b7bdfc39a98ab4790bad77f97a4366564ec5117",
+      "bytes": 8345
+    },
+    "bench/indexed-topk/src/counting.rs": {
+      "sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+      "bytes": 4318
+    }
+  },
+  "runtime_features": {
+    "indexed-topk-diagnostic": [],
+    "rayon": [],
+    "sparq-core": [
+      "default",
+      "parallel"
+    ],
+    "sparq-engine": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ]
+  },
+  "source_note": "Final harness head differs from the measured candidate build head only in the registry status vocabulary. All harness, Cargo manifest/lockfile and runtime bytes equal those used for the stored binaries. Main/disabled registration copies are not production candidates. Historical Luke Dary / Claude Sonnet5 attribution remains intact on the unmodified reviewed branch.",
+  "build": {
+    "host": {
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "machine": "arm64",
+      "python": "3.9.6",
+      "cpu_count": 8,
+      "build_elapsed_seconds": 279.1293249130249,
+      "cpu_model": "Apple M1",
+      "physical_memory_bytes": 17179869184,
+      "logical_cpus": 8,
+      "host_metadata_source": "read-only sysctl hw.memsize hw.ncpu machdep.cpu.brand_string",
+      "load_average": [
+        2.1669921875,
+        2.83154296875,
+        3.29541015625
+      ],
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)"
+    },
+    "profile": "standalone release opt-level3, lto=false, codegen-units16, debug=false",
+    "jobs": 2,
+    "runtime_rayon_threads": 1,
+    "commands": "--release --locked --offline; count variant adds only benchmark feature count-alloc",
+    "private_target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/target",
+    "build_deadline_seconds": 900,
+    "last_optimized_build_completed_seconds_from_initial_attempt": 386.95209646224976,
+    "result": "All six binaries built within the original deadline. Initial standalone latest-compatible resolution attempted to unpack newer local archives into the read-only user cache; two failures occurred before compilation. Reusing the full repository lock resolution offline fixed this without installation, network access or a deadline reset. All diagnostic dependency name/version pairs then matched the repository baseline.",
+    "logs": [
+      "build-candidate-timing.txt",
+      "build-candidate-aligned.txt",
+      "build-candidate-baseline.txt",
+      "build-results.json"
+    ]
+  },
+  "protocol": {
+    "fixture_points": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 46448640,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88178688,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      }
+    ],
+    "initial_process_runs": 72,
+    "confirmation_process_runs": 8,
+    "matrix": "Eight fixture points \u00d7 three runtime sources \u00d7 verify/timing/count; reverse-order timing confirmation covers all four adverse cases \u00d7 candidate/disabled",
+    "warmup_per_measured_process": 2,
+    "timing_repetitions": 7,
+    "allocation_repetitions": 3,
+    "initial_query_samples": 240,
+    "confirmation_query_samples": 56,
+    "total_measured_query_samples": 296,
+    "oracle": "Generated Rust sort on (priority, unique sequence), descending, after exact status filtering and overlay deletion; every returned subject vector compared outside measured sections",
+    "engagement": "Separate verification processes use existing EXPLAIN ANALYZE BGP trace; candidate favorable points infer indexed engagement by absence, adverse/main/disabled points show fallback. This does not replace pending explicit tracing (F4).",
+    "scope": "Whole query call includes parsing, evaluation and result construction. Result validation/formatting/destruction are outside the window. Counting and timing are separate binaries; instrumented latency is deliberately suppressed.",
+    "process_order": "Round-robin source order by fixture; reverse-order adverse confirmation in new processes. No concurrent local build during measurements. Host-wide quietness/CPU-frequency/thermal isolation was not established; load averages are saved."
+  },
+  "results": {
+    "initial_summary": [
+      {
+        "case": "base",
+        "k": 1,
+        "candidate_us": 536.708,
+        "disabled_us": 13847.709,
+        "main_us": 14946.375,
+        "candidate_over_disabled": 0.03875789128728803,
+        "disabled_over_main": 0.9264928118021929,
+        "candidate_timing_range_us": [
+          531.334,
+          563.042
+        ],
+        "disabled_timing_range_us": [
+          13781.084,
+          14106.625
+        ],
+        "candidate_peak_bytes": 1209777,
+        "disabled_peak_bytes": 18597196,
+        "requested_bytes_ratio": 0.014276551942168324
+      },
+      {
+        "case": "base",
+        "k": 512,
+        "candidate_us": 1162.875,
+        "disabled_us": 14181.5,
+        "main_us": 15272.833,
+        "candidate_over_disabled": 0.08199943588477947,
+        "disabled_over_main": 0.9285441672805562,
+        "candidate_timing_range_us": [
+          1156.5,
+          1197.792
+        ],
+        "disabled_timing_range_us": [
+          14097.875,
+          14351.541
+        ],
+        "candidate_peak_bytes": 1876465,
+        "disabled_peak_bytes": 18597196,
+        "requested_bytes_ratio": 0.02448369067606016
+      },
+      {
+        "case": "overlay",
+        "k": 1,
+        "candidate_us": 5657.583,
+        "disabled_us": 17911.958,
+        "main_us": 18383.625,
+        "candidate_over_disabled": 0.3158550840728858,
+        "disabled_over_main": 0.9743430906581264,
+        "candidate_timing_range_us": [
+          5623.042,
+          5830.667
+        ],
+        "disabled_timing_range_us": [
+          17876.459,
+          18258.417
+        ],
+        "candidate_peak_bytes": 5169777,
+        "disabled_peak_bytes": 14436940,
+        "requested_bytes_ratio": 0.09593528838904677
+      },
+      {
+        "case": "overlay",
+        "k": 512,
+        "candidate_us": 6252.083,
+        "disabled_us": 17767.875,
+        "main_us": 18662.208,
+        "candidate_over_disabled": 0.35187567449680957,
+        "disabled_over_main": 0.952077857025278,
+        "candidate_timing_range_us": [
+          6203.209,
+          6280.583
+        ],
+        "disabled_timing_range_us": [
+          17745.959,
+          17797.709
+        ],
+        "candidate_peak_bytes": 5836465,
+        "disabled_peak_bytes": 14469644,
+        "requested_bytes_ratio": 0.11197216260712377
+      },
+      {
+        "case": "drained",
+        "k": 1,
+        "candidate_us": 10659.625,
+        "disabled_us": 8324.667,
+        "main_us": 8765.875,
+        "candidate_over_disabled": 1.2804866549016316,
+        "disabled_over_main": 0.9496675460236428,
+        "candidate_timing_range_us": [
+          10611.416,
+          10949.917
+        ],
+        "disabled_timing_range_us": [
+          8244.5,
+          8416.208
+        ],
+        "candidate_peak_bytes": 8500044,
+        "disabled_peak_bytes": 8500044,
+        "requested_bytes_ratio": 1.0191875064882736
+      },
+      {
+        "case": "drained-overlay",
+        "k": 1,
+        "candidate_us": 19898.958,
+        "disabled_us": 13786.875,
+        "main_us": 13745.75,
+        "candidate_over_disabled": 1.443326206990344,
+        "disabled_over_main": 1.0029918338395505,
+        "candidate_timing_range_us": [
+          19752.625,
+          20227.042
+        ],
+        "disabled_timing_range_us": [
+          13682.209,
+          13842.458
+        ],
+        "candidate_peak_bytes": 7219788,
+        "disabled_peak_bytes": 7219788,
+        "requested_bytes_ratio": 1.1463172963911143
+      },
+      {
+        "case": "ties",
+        "k": 1,
+        "candidate_us": 17314.5,
+        "disabled_us": 14168.292,
+        "main_us": 15176.083,
+        "candidate_over_disabled": 1.222059793798716,
+        "disabled_over_main": 0.9335934707262737,
+        "candidate_timing_range_us": [
+          17257.542,
+          17417.667
+        ],
+        "disabled_timing_range_us": [
+          14087.875,
+          14489.583
+        ],
+        "candidate_peak_bytes": 18597196,
+        "disabled_peak_bytes": 18597196,
+        "requested_bytes_ratio": 1.0139941632613594
+      },
+      {
+        "case": "ties-overlay",
+        "k": 1,
+        "candidate_us": 25725.542,
+        "disabled_us": 17940.375,
+        "main_us": 17871.666,
+        "candidate_over_disabled": 1.4339467263086754,
+        "disabled_over_main": 1.0038445772207247,
+        "candidate_timing_range_us": [
+          25642.5,
+          26000.541
+        ],
+        "disabled_timing_range_us": [
+          17791.625,
+          18006.25
+        ],
+        "candidate_peak_bytes": 14436940,
+        "disabled_peak_bytes": 14436940,
+        "requested_bytes_ratio": 1.095486421103395
+      }
+    ],
+    "confirmation_summary": [
+      {
+        "case": "drained",
+        "candidate_over_disabled": 1.3330252431891876,
+        "candidate_range_us": [
+          10937.25,
+          11668.0
+        ],
+        "disabled_range_us": [
+          8231.083,
+          8282.5
+        ],
+        "ranges_disjoint": true
+      },
+      {
+        "case": "drained-overlay",
+        "candidate_over_disabled": 1.4800763064434297,
+        "candidate_range_us": [
+          19880.75,
+          20115.25
+        ],
+        "disabled_range_us": [
+          13506.417,
+          13602.042
+        ],
+        "ranges_disjoint": true
+      },
+      {
+        "case": "ties",
+        "candidate_over_disabled": 1.228757025299843,
+        "candidate_range_us": [
+          17297.875,
+          17529.209
+        ],
+        "disabled_range_us": [
+          14060.0,
+          14346.042
+        ],
+        "ranges_disjoint": true
+      },
+      {
+        "case": "ties-overlay",
+        "candidate_over_disabled": 1.3933783518882783,
+        "candidate_range_us": [
+          25696.75,
+          25859.083
+        ],
+        "disabled_range_us": [
+          18217.666,
+          19317.916
+        ],
+        "ranges_disjoint": true
+      }
+    ],
+    "allocation_repeatability": [
+      {
+        "name": "base-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "base-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "base-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "base-k512-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "base-k512-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "base-k512-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k512-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k512-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "overlay-k512-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-overlay-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-overlay-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "drained-overlay-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-overlay-k1-disabled-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-overlay-k1-main-count",
+        "metrics_identical_across_three_samples": true
+      },
+      {
+        "name": "ties-overlay-k1-candidate-count",
+        "metrics_identical_across_three_samples": true
+      }
+    ],
+    "all_results_correct": true,
+    "all_path_expectations_met": true
+  },
+  "F1_assessment": "No query-heap regression against the fallback controls in these favorable base/overlay fixtures. Overlay raises the candidate's own temporary requested-heap footprint as predicted, but it remains below fallback here. This single extent/probe/deletion density establishes no global peak-memory bound or scalability guarantee.",
+  "F2_assessment": "Confirmed cost regression from attempting then declining: both near-half drained-prefix and over-cap tie fixtures regress, particularly with tombstone overlays. Preserve these fixtures as regression controls; do not publish a favorable-only performance summary.",
+  "memory_limits": [
+    "Counting wrapper tracks successful alloc/alloc_zeroed calls, successful reallocations and full requested new bytes. Peak live delta is requested layout bytes above the window baseline, not RSS or allocator actual usable size; it excludes allocator metadata, stack, mappings and transient realloc internals.",
+    "getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
+    "Allocator calibration passes in all three counting binaries. Isolated exact-module calibration passes; disabling either peak updating or requested-byte accounting produces the expected assertion failure (two killed controls). No Miri or external heap profiler was run.",
+    "Counters are process-global, and the runtime pool is fixed to one thread; repeatability is reported rather than assumed. Timing binaries use System directly and omit the wrapper."
+  ],
+  "baseline_drift_caveat": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer.",
+  "smallest_next_repair": {
+    "first": "Reject an already oversized leading primary-key tie group before constructing the other-pattern scans and subject-id vectors, preserving the existing cap and fallback semantics. This targets the observed avoidable preparation cost without inventing a new threshold. Add a negative control for the moved admission decision and rerun this exact matrix.",
+    "remaining": "The near-half drained prefix also needs an economical early rejection/scout or a cheaper probe representation. The current measurements do not justify an arbitrary cardinality cutoff or tighter failure budget; keep it a separate focused design decision. Current admission remains NO_GO until the adverse cost is addressed.",
+    "not_done": "No optimizer repair, new runtime guard, admission/trace change or broader benchmark sweep was made in this spike."
+  },
+  "remaining_pre_admission": [
+    "F3: public-facing documentation of SPARQL-permitted tie/pagination variability across execution paths.",
+    "F4: explicit indexed execution trace/counter and positive path assertions.",
+    "F5: pin paths in tie/offset/view/fork semantic tests; assess Reduced and constant-object probe coverage rather than assuming all reviewer-suggested branches are reachable.",
+    "Review source-context requests: term_pattern_to_term, tp_var for quoted triples, and modifier dispatch. TOP_K_ORDER_BY_THRESHOLD is1024 at this source; both measured limits are within it.",
+    "Full workspace/conformance/feature admission gates and independent review of any repair/harness remain outside this local spike."
+  ],
+  "validation_limits": {
+    "registration_G3": "PASS",
+    "diff_check": "PASS",
+    "author_preflight": "Only failure remains local Bash3.2 missing mapfile in check-privacy-claims.sh:92; no gate or hook changed.",
+    "semantic_manifest_entries_unchanged": 39,
+    "remote_actions": "None; no push/issue/PR/comment/review/admission/dispatch/release/registry/EC2/PSS action. Read-only host sysctl metadata obtained with authorized escalation."
+  }
+}

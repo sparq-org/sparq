@@ -1,0 +1,5882 @@
+[
+  {
+    "name": "base-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "base",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 1.1541249752044678,
+    "started_unix": 1788861194.734005,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 46448640,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "indexed-inferred",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-candidate-verify.txt"
+  },
+  {
+    "name": "base-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.2467188835144043,
+    "started_unix": 1788861195.8884811,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 563042,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47169536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 537959,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47202304,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 536708,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47218688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 534834,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47267840,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 531334,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47284224,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 533250,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47300608,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 539959,
+        "pre_query_max_rss": 47153152,
+        "post_query_max_rss": 47316992,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-candidate-timing.txt"
+  },
+  {
+    "name": "base-k1-candidate-count",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "indexed"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.2521970272064209,
+    "started_unix": 1788861196.141922,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45498368,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549467
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 224,
+        "reallocs": 10,
+        "requested_bytes": 1226953,
+        "peak_live_delta": 1209777,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 47087616,
+        "post_query_max_rss": 47120384,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 224,
+        "reallocs": 10,
+        "requested_bytes": 1226953,
+        "peak_live_delta": 1209777,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 47087616,
+        "post_query_max_rss": 47169536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 224,
+        "reallocs": 10,
+        "requested_bytes": 1226953,
+        "peak_live_delta": 1209777,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 47087616,
+        "post_query_max_rss": 47169536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-candidate-count.txt"
+  },
+  {
+    "name": "base-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "base",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.7211127281188965,
+    "started_unix": 1788861196.395075,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 46481408,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-disabled-verify.txt"
+  },
+  {
+    "name": "base-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3725581169128418,
+    "started_unix": 1788861197.125932,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 14051250,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70303744,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 14106625,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70352896,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 13828708,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70402048,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 13781084,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70451200,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 14087416,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 13823375,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 13847709,
+        "pre_query_max_rss": 70221824,
+        "post_query_max_rss": 70533120,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-disabled-timing.txt"
+  },
+  {
+    "name": "base-k1-disabled-count",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.32907700538635254,
+    "started_unix": 1788861197.500282,
+    "load_average": [
+      1.53759765625,
+      2.56103515625,
+      3.16748046875
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45498368,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549467
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70172672,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70205440,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70205440,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-disabled-count.txt"
+  },
+  {
+    "name": "base-k1-main-verify",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "base",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.7094740867614746,
+    "started_unix": 1788861197.839357,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 47267840,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-main-verify.txt"
+  },
+  {
+    "name": "base-k1-main-timing",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3844161033630371,
+    "started_unix": 1788861198.5501099,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 14971709,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70205440,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 15009417,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70254592,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 14876959,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70270976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 14862042,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70303744,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 14877125,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70369280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 14946375,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70369280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 15138417,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70385664,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-main-timing.txt"
+  },
+  {
+    "name": "base-k1-main-count",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "base",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.32091712951660156,
+    "started_unix": 1788861198.944567,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45514752,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549463
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70156288,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70172672,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70172672,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k1-main-count.txt"
+  },
+  {
+    "name": "base-k512-disabled-verify",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "base",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.2774991989135742,
+    "started_unix": 1788861199.266793,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45563904,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-disabled-verify.txt"
+  },
+  {
+    "name": "base-k512-disabled-timing",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.37618470191955566,
+    "started_unix": 1788861199.5538151,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 14181500,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70467584,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 14097875,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70516736,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 14115708,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70549504,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 14187166,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70598656,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 14351541,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70615040,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 14327875,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70615040,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 14142000,
+        "pre_query_max_rss": 70385664,
+        "post_query_max_rss": 70664192,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-disabled-timing.txt"
+  },
+  {
+    "name": "base-k512-disabled-count",
+    "variant": "disabled",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.32647705078125,
+    "started_unix": 1788861199.931356,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45514752,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549469
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 70352896,
+        "post_query_max_rss": 70369280,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 70352896,
+        "post_query_max_rss": 70402048,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 70352896,
+        "post_query_max_rss": 70402048,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-disabled-count.txt"
+  },
+  {
+    "name": "base-k512-main-verify",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "base",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.28171491622924805,
+    "started_unix": 1788861200.2672472,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-main-verify.txt"
+  },
+  {
+    "name": "base-k512-main-timing",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.38391995429992676,
+    "started_unix": 1788861200.550466,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 15290792,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70451200,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 15297334,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70500352,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 15370541,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70533120,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 15182000,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70582272,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 15272833,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70598656,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 15180625,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70615040,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 15176208,
+        "pre_query_max_rss": 70402048,
+        "post_query_max_rss": 70664192,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-main-timing.txt"
+  },
+  {
+    "name": "base-k512-main-count",
+    "variant": "main",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.31984400749206543,
+    "started_unix": 1788861200.943733,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45498368,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600050,
+        "reallocs": 37,
+        "requested_bytes": 123823387,
+        "peak_live_delta": 47134168,
+        "ending_live": 31549465
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601338,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70303744,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601338,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70320128,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 152008,
+        "reallocs": 799,
+        "requested_bytes": 86057859,
+        "peak_live_delta": 18597196,
+        "ending_live": 31601338,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70336512,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-main-count.txt"
+  },
+  {
+    "name": "base-k512-candidate-verify",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "base",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.24267077445983887,
+    "started_unix": 1788861201.2651362,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "indexed-inferred",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-candidate-verify.txt"
+  },
+  {
+    "name": "base-k512-candidate-timing",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.2558269500732422,
+    "started_unix": 1788861201.517118,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 1162875,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48136192,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 1197792,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48152576,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 1163834,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48201728,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 1163250,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48234496,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 1156500,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48267264,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 1161541,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48283648,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 1158500,
+        "pre_query_max_rss": 48103424,
+        "post_query_max_rss": 48283648,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-candidate-timing.txt"
+  },
+  {
+    "name": "base-k512-candidate-count",
+    "variant": "candidate",
+    "case": "base",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "base",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "indexed"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.25518798828125,
+    "started_unix": 1788861201.774592,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "base",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45514752,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549469
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 5822,
+        "reallocs": 24,
+        "requested_bytes": 2107014,
+        "peak_live_delta": 1876465,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 48087040,
+        "post_query_max_rss": 48103424,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 5822,
+        "reallocs": 24,
+        "requested_bytes": 2107014,
+        "peak_live_delta": 1876465,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 48087040,
+        "post_query_max_rss": 48168960,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 5822,
+        "reallocs": 24,
+        "requested_bytes": 2107014,
+        "peak_live_delta": 1876465,
+        "ending_live": 31601342,
+        "pre_query_max_rss": 48087040,
+        "post_query_max_rss": 48168960,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/base-k512-candidate-count.txt"
+  },
+  {
+    "name": "overlay-k1-main-verify",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3266019821166992,
+    "started_unix": 1788861202.039854,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-main-verify.txt"
+  },
+  {
+    "name": "overlay-k1-main-timing",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.4468259811401367,
+    "started_unix": 1788861202.36819,
+    "load_average": [
+      1.654296875,
+      2.56787109375,
+      3.166015625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89145344,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 18413666,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 18313167,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 18348167,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 18413625,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 18383625,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 18533333,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 18320333,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-main-timing.txt"
+  },
+  {
+    "name": "overlay-k1-main-count",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.3728199005126953,
+    "started_unix": 1788861202.824477,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849456
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850740,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850740,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850740,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-main-count.txt"
+  },
+  {
+    "name": "overlay-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.29161596298217773,
+    "started_unix": 1788861203.199139,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "indexed-inferred",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-candidate-verify.txt"
+  },
+  {
+    "name": "overlay-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.32937097549438477,
+    "started_unix": 1788861203.500272,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 5830667,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92274688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 5650541,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92291072,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 5669375,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92323840,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 5725791,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92356608,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 5623042,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92372992,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 5652208,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92422144,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 5657583,
+        "pre_query_max_rss": 92209152,
+        "post_query_max_rss": 92438528,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-candidate-timing.txt"
+  },
+  {
+    "name": "overlay-k1-candidate-count",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "indexed"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.3081238269805908,
+    "started_unix": 1788861203.83152,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89194496,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849460
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 231,
+        "reallocs": 10,
+        "requested_bytes": 5186953,
+        "peak_live_delta": 5169777,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 92192768,
+        "post_query_max_rss": 92225536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 231,
+        "reallocs": 10,
+        "requested_bytes": 5186953,
+        "peak_live_delta": 5169777,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 92192768,
+        "post_query_max_rss": 92307456,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 231,
+        "reallocs": 10,
+        "requested_bytes": 5186953,
+        "peak_live_delta": 5169777,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 92192768,
+        "post_query_max_rss": 92307456,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-candidate-count.txt"
+  },
+  {
+    "name": "overlay-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.322983980178833,
+    "started_unix": 1788861204.148837,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-disabled-verify.txt"
+  },
+  {
+    "name": "overlay-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.44176793098449707,
+    "started_unix": 1788861204.4736729,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 18258417,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17908500,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17876459,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17907500,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17911958,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17938209,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 18058334,
+        "pre_query_max_rss": 106610688,
+        "post_query_max_rss": 106610688,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-disabled-timing.txt"
+  },
+  {
+    "name": "overlay-k1-disabled-count",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.38198232650756836,
+    "started_unix": 1788861204.9254038,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849460
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 104988672,
+        "post_query_max_rss": 105005056,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 104988672,
+        "post_query_max_rss": 105021440,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850744,
+        "pre_query_max_rss": 104988672,
+        "post_query_max_rss": 105021440,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k1-disabled-count.txt"
+  },
+  {
+    "name": "overlay-k512-candidate-verify",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.29204797744750977,
+    "started_unix": 1788861205.309417,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "indexed-inferred",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-candidate-verify.txt"
+  },
+  {
+    "name": "overlay-k512-candidate-timing",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "indexed"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.33600497245788574,
+    "started_unix": 1788861205.611407,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 6239209,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93159424,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 6259875,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93208576,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 6252083,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93208576,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 6263250,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93257728,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 6280583,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93290496,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 6203209,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93306880,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 6231333,
+        "pre_query_max_rss": 93126656,
+        "post_query_max_rss": 93339648,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-candidate-timing.txt"
+  },
+  {
+    "name": "overlay-k512-candidate-count",
+    "variant": "candidate",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "indexed"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.3133549690246582,
+    "started_unix": 1788861205.949484,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89145344,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849462
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 5829,
+        "reallocs": 24,
+        "requested_bytes": 6067014,
+        "peak_live_delta": 5836465,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 92913664,
+        "post_query_max_rss": 92962816,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 5829,
+        "reallocs": 24,
+        "requested_bytes": 6067014,
+        "peak_live_delta": 5836465,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 92913664,
+        "post_query_max_rss": 93011968,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 5829,
+        "reallocs": 24,
+        "requested_bytes": 6067014,
+        "peak_live_delta": 5836465,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 92913664,
+        "post_query_max_rss": 93011968,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-candidate-count.txt"
+  },
+  {
+    "name": "overlay-k512-disabled-verify",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3219151496887207,
+    "started_unix": 1788861206.272894,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89194496,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-disabled-verify.txt"
+  },
+  {
+    "name": "overlay-k512-disabled-timing",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.4386429786682129,
+    "started_unix": 1788861206.596969,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 17766583,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105250816,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17756250,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105316352,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17781167,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105381888,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17797709,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105414656,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17769125,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105414656,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17745959,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105447424,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 17767875,
+        "pre_query_max_rss": 105185280,
+        "post_query_max_rss": 105480192,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-disabled-timing.txt"
+  },
+  {
+    "name": "overlay-k512-disabled-count",
+    "variant": "disabled",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.3831350803375244,
+    "started_unix": 1788861207.045794,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849462
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 105152512,
+        "post_query_max_rss": 105168896,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 105152512,
+        "post_query_max_rss": 105185280,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901335,
+        "pre_query_max_rss": 105152512,
+        "post_query_max_rss": 105185280,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-disabled-count.txt"
+  },
+  {
+    "name": "overlay-k512-main-verify",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "overlay",
+      "50000",
+      "512",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3242180347442627,
+    "started_unix": 1788861207.431212,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-main-verify.txt"
+  },
+  {
+    "name": "overlay-k512-main-timing",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.45076990127563477,
+    "started_unix": 1788861207.765826,
+    "load_average": [
+      1.6015625,
+      2.54150390625,
+      3.1533203125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 18726917,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 18594042,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 18449750,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 18516250,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 18667041,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 18662208,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 18663375,
+        "pre_query_max_rss": 106692608,
+        "post_query_max_rss": 106692608,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-main-timing.txt"
+  },
+  {
+    "name": "overlay-k512-main-count",
+    "variant": "main",
+    "case": "overlay",
+    "n": 50000,
+    "k": 512,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "overlay",
+      "50000",
+      "512",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.3696858882904053,
+    "started_unix": 1788861208.2189782,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "overlay",
+        "n": 50000,
+        "k": 512,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89194496,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849458
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901331,
+        "pre_query_max_rss": 106627072,
+        "post_query_max_rss": 106627072,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901331,
+        "pre_query_max_rss": 106627072,
+        "post_query_max_rss": 106627072,
+        "rows": 512,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 121887,
+        "reallocs": 109,
+        "requested_bytes": 54183235,
+        "peak_live_delta": 14469644,
+        "ending_live": 36901331,
+        "pre_query_max_rss": 106627072,
+        "post_query_max_rss": 106627072,
+        "rows": 512,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/overlay-k512-main-count.txt"
+  },
+  {
+    "name": "drained-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "drained",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.2635018825531006,
+    "started_unix": 1788861208.5988731,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-disabled-verify.txt"
+  },
+  {
+    "name": "drained-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3180277347564697,
+    "started_unix": 1788861208.8648372,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44957696,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 8416208,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59195392,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 8244500,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59293696,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 8271084,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59342848,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 8324667,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59375616,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 8342875,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59392000,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 8253958,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59424768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 8379750,
+        "pre_query_max_rss": 59162624,
+        "post_query_max_rss": 59457536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-disabled-timing.txt"
+  },
+  {
+    "name": "drained-k1-disabled-count",
+    "variant": "disabled",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.2940249443054199,
+    "started_unix": 1788861209.193123,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44924928,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600050,
+        "reallocs": 36,
+        "requested_bytes": 122592518,
+        "peak_live_delta": 46570060,
+        "ending_live": 30987674
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988958,
+        "pre_query_max_rss": 59097088,
+        "post_query_max_rss": 59129856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988958,
+        "pre_query_max_rss": 59097088,
+        "post_query_max_rss": 59146240,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988958,
+        "pre_query_max_rss": 59097088,
+        "post_query_max_rss": 59146240,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-disabled-count.txt"
+  },
+  {
+    "name": "drained-k1-main-verify",
+    "variant": "main",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "drained",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.2660501003265381,
+    "started_unix": 1788861209.48992,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-main-verify.txt"
+  },
+  {
+    "name": "drained-k1-main-timing",
+    "variant": "main",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3318479061126709,
+    "started_unix": 1788861209.7669241,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44957696,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 8813042,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59162624,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 8698625,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59211776,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 8758583,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59228160,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 8710875,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59277312,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 8765875,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59326464,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 8825416,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59326464,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 8908042,
+        "pre_query_max_rss": 59129856,
+        "post_query_max_rss": 59342848,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-main-timing.txt"
+  },
+  {
+    "name": "drained-k1-main-count",
+    "variant": "main",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.2867579460144043,
+    "started_unix": 1788861210.101377,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44924928,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600050,
+        "reallocs": 36,
+        "requested_bytes": 122592518,
+        "peak_live_delta": 46570060,
+        "ending_live": 30987670
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988954,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59129856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988954,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59162624,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 75445,
+        "reallocs": 630,
+        "requested_bytes": 57469062,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988954,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59195392,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-main-count.txt"
+  },
+  {
+    "name": "drained-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "drained",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.26119279861450195,
+    "started_unix": 1788861210.398133,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-candidate-verify.txt"
+  },
+  {
+    "name": "drained-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.3393430709838867,
+    "started_unix": 1788861210.662001,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44941312,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 10682709,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59260928,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 10653500,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59359232,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 10611416,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59392000,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 10680333,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59408384,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 10625167,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59424768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 10659625,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59457536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 10949917,
+        "pre_query_max_rss": 59228160,
+        "post_query_max_rss": 59457536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-candidate-timing.txt"
+  },
+  {
+    "name": "drained-k1-candidate-count",
+    "variant": "candidate",
+    "case": "drained",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "drained",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.3047618865966797,
+    "started_unix": 1788861211.012326,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 25001,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 44924928,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600050,
+        "reallocs": 36,
+        "requested_bytes": 122592518,
+        "peak_live_delta": 46570060,
+        "ending_live": 30987675
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 75528,
+        "reallocs": 631,
+        "requested_bytes": 58571750,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988959,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59129856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 75528,
+        "reallocs": 631,
+        "requested_bytes": 58571750,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988959,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59162624,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 75528,
+        "reallocs": 631,
+        "requested_bytes": 58571750,
+        "peak_live_delta": 8500044,
+        "ending_live": 30988959,
+        "pre_query_max_rss": 59113472,
+        "post_query_max_rss": 59179008,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-k1-candidate-count.txt"
+  },
+  {
+    "name": "drained-overlay-k1-main-verify",
+    "variant": "main",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "drained-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.30579710006713867,
+    "started_unix": 1788861211.319872,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88129536,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-main-verify.txt"
+  },
+  {
+    "name": "drained-overlay-k1-main-timing",
+    "variant": "main",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.40665602684020996,
+    "started_unix": 1788861211.636535,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88129536,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 13706000,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98074624,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 13763583,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98156544,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 13792125,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98172928,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 13737750,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98172928,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 13796042,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98205696,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 13745750,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98238464,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 13723166,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98271232,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-main-timing.txt"
+  },
+  {
+    "name": "drained-overlay-k1-main-count",
+    "variant": "main",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.35425710678100586,
+    "started_unix": 1788861212.046001,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88162304,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050097,
+        "reallocs": 20066,
+        "requested_bytes": 188749241,
+        "peak_live_delta": 79990839,
+        "ending_live": 36287720
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289004,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98041856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289004,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98058240,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289004,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98058240,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-main-count.txt"
+  },
+  {
+    "name": "drained-overlay-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "drained-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.3251831531524658,
+    "started_unix": 1788861212.410348,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88178688,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-candidate-verify.txt"
+  },
+  {
+    "name": "drained-overlay-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.458359956741333,
+    "started_unix": 1788861212.738919,
+    "load_average": [
+      1.63330078125,
+      2.5322265625,
+      3.146484375
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88145920,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 20227042,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98516992,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 20098833,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98582528,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 20004916,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98631680,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 19898958,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98648064,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 19752625,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98680832,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 19792250,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98697216,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 19803792,
+        "pre_query_max_rss": 98467840,
+        "post_query_max_rss": 98746368,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-candidate-timing.txt"
+  },
+  {
+    "name": "drained-overlay-k1-candidate-count",
+    "variant": "candidate",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.38773107528686523,
+    "started_unix": 1788861213.2084448,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88096768,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050097,
+        "reallocs": 20066,
+        "requested_bytes": 188749241,
+        "peak_live_delta": 79990839,
+        "ending_live": 36287725
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 60443,
+        "reallocs": 103,
+        "requested_bytes": 37469850,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289009,
+        "pre_query_max_rss": 97075200,
+        "post_query_max_rss": 97107968,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 60443,
+        "reallocs": 103,
+        "requested_bytes": 37469850,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289009,
+        "pre_query_max_rss": 97075200,
+        "post_query_max_rss": 97140736,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 60443,
+        "reallocs": 103,
+        "requested_bytes": 37469850,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289009,
+        "pre_query_max_rss": 97075200,
+        "post_query_max_rss": 97157120,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-candidate-count.txt"
+  },
+  {
+    "name": "drained-overlay-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "drained-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3071448802947998,
+    "started_unix": 1788861213.599193,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88145920,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-disabled-verify.txt"
+  },
+  {
+    "name": "drained-overlay-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.40167999267578125,
+    "started_unix": 1788861213.917556,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88162304,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 13824000,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98058240,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 13795917,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98140160,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 13682209,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98189312,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 13769125,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98238464,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 13723083,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98254848,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 13842458,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98271232,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 13786875,
+        "pre_query_max_rss": 97992704,
+        "post_query_max_rss": 98304000,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-disabled-timing.txt"
+  },
+  {
+    "name": "drained-overlay-k1-disabled-count",
+    "variant": "disabled",
+    "case": "drained-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "drained-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.3570680618286133,
+    "started_unix": 1788861214.322346,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "drained-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 20000,
+        "tied_rows": 0,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 88145920,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050097,
+        "reallocs": 20066,
+        "requested_bytes": 188749241,
+        "peak_live_delta": 79990839,
+        "ending_live": 36287724
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289008,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98041856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289008,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98041856,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 60353,
+        "reallocs": 102,
+        "requested_bytes": 32687154,
+        "peak_live_delta": 7219788,
+        "ending_live": 36289008,
+        "pre_query_max_rss": 98009088,
+        "post_query_max_rss": 98041856,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/drained-overlay-k1-disabled-count.txt"
+  },
+  {
+    "name": "ties-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "ties",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.28134799003601074,
+    "started_unix": 1788861214.690655,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-candidate-verify.txt"
+  },
+  {
+    "name": "ties-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.40065979957580566,
+    "started_unix": 1788861214.975222,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 17417667,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70336512,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17295667,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70369280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17314500,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70418432,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17314333,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70451200,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17323625,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70483968,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17327334,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70533120,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 17257542,
+        "pre_query_max_rss": 70287360,
+        "post_query_max_rss": 70598656,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-candidate-timing.txt"
+  },
+  {
+    "name": "ties-k1-candidate-count",
+    "variant": "candidate",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.3381381034851074,
+    "started_unix": 1788861215.387249,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45514752,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549468
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 150557,
+        "reallocs": 800,
+        "requested_bytes": 87144514,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550752,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70205440,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 150557,
+        "reallocs": 800,
+        "requested_bytes": 87144514,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550752,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70238208,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 150557,
+        "reallocs": 800,
+        "requested_bytes": 87144514,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550752,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70254592,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-candidate-count.txt"
+  },
+  {
+    "name": "ties-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "ties",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.2739999294281006,
+    "started_unix": 1788861215.728692,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-disabled-verify.txt"
+  },
+  {
+    "name": "ties-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3753979206085205,
+    "started_unix": 1788861216.013807,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 14150542,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70270976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 14489583,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70336512,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 14334375,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70402048,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 14217875,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70451200,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 14102584,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 14168292,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70467584,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 14087875,
+        "pre_query_max_rss": 70205440,
+        "post_query_max_rss": 70500352,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-disabled-timing.txt"
+  },
+  {
+    "name": "ties-k1-disabled-count",
+    "variant": "disabled",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.3259241580963135,
+    "started_unix": 1788861216.39311,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45498368,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549467
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70156288,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70189056,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550751,
+        "pre_query_max_rss": 70139904,
+        "post_query_max_rss": 70189056,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-disabled-count.txt"
+  },
+  {
+    "name": "ties-k1-main-verify",
+    "variant": "main",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "ties",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.2847309112548828,
+    "started_unix": 1788861216.730338,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45547520,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-main-verify.txt"
+  },
+  {
+    "name": "ties-k1-main-timing",
+    "variant": "main",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3841519355773926,
+    "started_unix": 1788861217.018666,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45531136,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 15176083,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70238208,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 15339750,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70270976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 15197250,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70303744,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 15255667,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70369280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 15153375,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70402048,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 15050250,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70418432,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 15147125,
+        "pre_query_max_rss": 70189056,
+        "post_query_max_rss": 70418432,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-main-timing.txt"
+  },
+  {
+    "name": "ties-k1-main-count",
+    "variant": "main",
+    "case": "ties",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "ties",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.31868529319763184,
+    "started_unix": 1788861217.414173,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 50000,
+        "pending_rows": 50000,
+        "tied_rows": 25001,
+        "probe_predicates": 6,
+        "tombstones": 0,
+        "setup_max_rss": 45514752,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 2600049,
+        "reallocs": 37,
+        "requested_bytes": 123821083,
+        "peak_live_delta": 47131864,
+        "ending_live": 31549463
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70172672,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70189056,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 150474,
+        "reallocs": 799,
+        "requested_bytes": 85941830,
+        "peak_live_delta": 18597196,
+        "ending_live": 31550747,
+        "pre_query_max_rss": 70156288,
+        "post_query_max_rss": 70205440,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-k1-main-count.txt"
+  },
+  {
+    "name": "ties-overlay-k1-disabled-verify",
+    "variant": "disabled",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "verify",
+      "ties-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.3187136650085449,
+    "started_unix": 1788861217.7366872,
+    "load_average": [
+      1.58251953125,
+      2.50634765625,
+      3.1337890625
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-disabled-verify.txt"
+  },
+  {
+    "name": "ties-overlay-k1-disabled-timing",
+    "variant": "disabled",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-timing",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748",
+    "exit_code": 0,
+    "wall_seconds": 0.44288086891174316,
+    "started_unix": 1788861218.067382,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 18006250,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105086976,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17945417,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105136128,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17791625,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105152512,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17940292,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105168896,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17954833,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105185280,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17901209,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105201664,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 17940375,
+        "pre_query_max_rss": 105070592,
+        "post_query_max_rss": 105250816,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-disabled-timing.txt"
+  },
+  {
+    "name": "ties-overlay-k1-disabled-count",
+    "variant": "disabled",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/disabled-count",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476",
+    "exit_code": 0,
+    "wall_seconds": 0.3808939456939697,
+    "started_unix": 1788861218.514173,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050096,
+        "reallocs": 20067,
+        "requested_bytes": 189995055,
+        "peak_live_delta": 80570524,
+        "ending_live": 36849465
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850749,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850749,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850749,
+        "pre_query_max_rss": 106528768,
+        "post_query_max_rss": 106528768,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-disabled-count.txt"
+  },
+  {
+    "name": "ties-overlay-k1-main-verify",
+    "variant": "main",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "verify",
+      "ties-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.3291330337524414,
+    "started_unix": 1788861218.907422,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89128960,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-main-verify.txt"
+  },
+  {
+    "name": "ties-overlay-k1-main-timing",
+    "variant": "main",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-timing",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514",
+    "exit_code": 0,
+    "wall_seconds": 0.4395320415496826,
+    "started_unix": 1788861219.240374,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89178112,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 17865542,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 17844959,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 17835291,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 17960333,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 17975291,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 17932166,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 17871666,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-main-timing.txt"
+  },
+  {
+    "name": "ties-overlay-k1-main-count",
+    "variant": "main",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/main-count",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54",
+    "exit_code": 0,
+    "wall_seconds": 0.3770439624786377,
+    "started_unix": 1788861219.6919081,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849461
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850745,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850745,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 120353,
+        "reallocs": 109,
+        "requested_bytes": 54067206,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850745,
+        "pre_query_max_rss": 106561536,
+        "post_query_max_rss": 106561536,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-main-count.txt"
+  },
+  {
+    "name": "ties-overlay-k1-candidate-verify",
+    "variant": "candidate",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "verify",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "verify",
+      "ties-overlay",
+      "50000",
+      "1",
+      "0",
+      "1",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.3332242965698242,
+    "started_unix": 1788861220.0729768,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "verify",
+        "path": "fallback",
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-candidate-verify.txt"
+  },
+  {
+    "name": "ties-overlay-k1-candidate-timing",
+    "variant": "candidate",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "timing",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-timing",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "7",
+      "fallback"
+    ],
+    "binary_sha256": "6c93db9713d7b45cb00a7ebe76b38a9585b36d5f66ecdcf5d36807b82578ed96",
+    "exit_code": 0,
+    "wall_seconds": 0.5159199237823486,
+    "started_unix": 1788861220.419012,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89210880,
+        "counting": "false"
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "whole_query_ns": 25695166,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "whole_query_ns": 25756208,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "whole_query_ns": 25786375,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 3,
+        "whole_query_ns": 25662666,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 4,
+        "whole_query_ns": 26000541,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 5,
+        "whole_query_ns": 25725542,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 6,
+        "whole_query_ns": 25642500,
+        "pre_query_max_rss": 106987520,
+        "post_query_max_rss": 106987520,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-candidate-timing.txt"
+  },
+  {
+    "name": "ties-overlay-k1-candidate-count",
+    "variant": "candidate",
+    "case": "ties-overlay",
+    "n": 50000,
+    "k": 1,
+    "mode": "count",
+    "command": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/bins/candidate-count",
+      "measure",
+      "ties-overlay",
+      "50000",
+      "1",
+      "2",
+      "3",
+      "fallback"
+    ],
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98",
+    "exit_code": 0,
+    "wall_seconds": 0.41089677810668945,
+    "started_unix": 1788861220.9390862,
+    "load_average": [
+      1.69580078125,
+      2.51416015625,
+      3.1328125
+    ],
+    "rows": [
+      {
+        "kind": "fixture",
+        "case": "ties-overlay",
+        "n": 50000,
+        "k": 1,
+        "seed_rows": 40000,
+        "pending_rows": 40000,
+        "tied_rows": 20001,
+        "probe_predicates": 6,
+        "tombstones": 70000,
+        "setup_max_rss": 89161728,
+        "counting": "true"
+      },
+      {
+        "kind": "setup_alloc",
+        "allocs": 3050095,
+        "reallocs": 20067,
+        "requested_bytes": 189992751,
+        "peak_live_delta": 80567580,
+        "ending_live": 36849466
+      },
+      {
+        "kind": "sample",
+        "rep": 0,
+        "allocs": 120443,
+        "reallocs": 110,
+        "requested_bytes": 59229890,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850750,
+        "pre_query_max_rss": 105316352,
+        "post_query_max_rss": 105332736,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 1,
+        "allocs": 120443,
+        "reallocs": 110,
+        "requested_bytes": 59229890,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850750,
+        "pre_query_max_rss": 105316352,
+        "post_query_max_rss": 105365504,
+        "rows": 1,
+        "oracle": "pass"
+      },
+      {
+        "kind": "sample",
+        "rep": 2,
+        "allocs": 120443,
+        "reallocs": 110,
+        "requested_bytes": 59229890,
+        "peak_live_delta": 14436940,
+        "ending_live": 36850750,
+        "pre_query_max_rss": 105316352,
+        "post_query_max_rss": 105381888,
+        "rows": 1,
+        "oracle": "pass"
+      }
+    ],
+    "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/raw/ties-overlay-k1-candidate-count.txt"
+  }
+]

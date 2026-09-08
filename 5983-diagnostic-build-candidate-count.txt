@@ -1,0 +1,2 @@
+   Compiling indexed-topk-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-bench-candidate/bench/indexed-topk)
+    Finished `release` profile [optimized] target(s) in 5.63s

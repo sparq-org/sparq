@@ -1,0 +1,10 @@
+{
+  "verified_at": "2026-09-08T10:15:44.863847+00:00",
+  "manifest_entries": 139,
+  "harness_head": "87179e16487e770de4b4c45ed4be008308c47450",
+  "runtime_head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+  "three_clean_source_worktrees": true,
+  "harness_source_and_binary_hashes_verified": true,
+  "packet_sha256": "9aba74e161159a4fbfd98401cc1a4ceeab9cafd402a7df87883df9c388053af5",
+  "decision": "NO_GO for admission of the current candidate; GO only for one focused decline-cost repair followed by this same matrix"
+}

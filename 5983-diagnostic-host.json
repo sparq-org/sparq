@@ -1,0 +1,18 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.9.6",
+  "cpu_count": 8,
+  "build_elapsed_seconds": 279.1293249130249,
+  "cpu_model": "Apple M1",
+  "physical_memory_bytes": 17179869184,
+  "logical_cpus": 8,
+  "host_metadata_source": "read-only sysctl hw.memsize hw.ncpu machdep.cpu.brand_string",
+  "load_average": [
+    2.1669921875,
+    2.83154296875,
+    3.29541015625
+  ],
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)"
+}

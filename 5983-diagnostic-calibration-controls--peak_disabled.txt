@@ -1,0 +1,6 @@
+
+thread 'main' (1229112) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/calibration-controls/peak_disabled.rs:118:5:
+assertion `left == right` failed
+  left: (2, 1, 448, 0, 612)
+ right: (2, 1, 448, 320, 612)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

@@ -1,0 +1,54 @@
+[
+  {
+    "case": "drained",
+    "candidate_over_disabled": 1.3330252431891876,
+    "candidate_range_us": [
+      10937.25,
+      11668.0
+    ],
+    "disabled_range_us": [
+      8231.083,
+      8282.5
+    ],
+    "ranges_disjoint": true
+  },
+  {
+    "case": "drained-overlay",
+    "candidate_over_disabled": 1.4800763064434297,
+    "candidate_range_us": [
+      19880.75,
+      20115.25
+    ],
+    "disabled_range_us": [
+      13506.417,
+      13602.042
+    ],
+    "ranges_disjoint": true
+  },
+  {
+    "case": "ties",
+    "candidate_over_disabled": 1.228757025299843,
+    "candidate_range_us": [
+      17297.875,
+      17529.209
+    ],
+    "disabled_range_us": [
+      14060.0,
+      14346.042
+    ],
+    "ranges_disjoint": true
+  },
+  {
+    "case": "ties-overlay",
+    "candidate_over_disabled": 1.3933783518882783,
+    "candidate_range_us": [
+      25696.75,
+      25859.083
+    ],
+    "disabled_range_us": [
+      18217.666,
+      19317.916
+    ],
+    "ranges_disjoint": true
+  }
+]

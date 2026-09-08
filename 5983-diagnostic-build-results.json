@@ -1,0 +1,88 @@
+[
+  {
+    "variant": "candidate",
+    "mode": "count",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/indexed-topk/Cargo.toml",
+      "--features",
+      "count-alloc"
+    ],
+    "exit_code": 0,
+    "seconds": 5.737555980682373,
+    "binary_sha256": "bd7cdfcd32de5656b7eff8c14970acd64befd5f20271b721a2d28ed381557e98"
+  },
+  {
+    "variant": "disabled",
+    "mode": "timing",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/indexed-topk/Cargo.toml"
+    ],
+    "exit_code": 0,
+    "seconds": 26.1916561126709,
+    "binary_sha256": "02ddcf7fb2a9601ff8d78e6834fb52c697cebd9709dd8f2148d5de6989e9d748"
+  },
+  {
+    "variant": "disabled",
+    "mode": "count",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/indexed-topk/Cargo.toml",
+      "--features",
+      "count-alloc"
+    ],
+    "exit_code": 0,
+    "seconds": 1.881864309310913,
+    "binary_sha256": "7462a1b51e89f23b95858b54c4e118161d4f8ef77e8a6d556215729945cd0476"
+  },
+  {
+    "variant": "main",
+    "mode": "timing",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/indexed-topk/Cargo.toml"
+    ],
+    "exit_code": 0,
+    "seconds": 26.135809183120728,
+    "binary_sha256": "70a6cfe40e558ff5692135e4bcad3bfea860e7c105cec4d8dc6d4a343bb04514"
+  },
+  {
+    "variant": "main",
+    "mode": "count",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/indexed-topk/Cargo.toml",
+      "--features",
+      "count-alloc"
+    ],
+    "exit_code": 0,
+    "seconds": 1.8265841007232666,
+    "binary_sha256": "0cfb0509655e70257547d3f35e180fb07d09b8528791f79dec0c10a3f340df54"
+  }
+]

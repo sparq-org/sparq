@@ -97,6 +97,12 @@ for evidence_name in [*json.loads((SEMANTIC / 'manifest.json').read_text())['fil
 
 FILES['5983-opus-review-9e8bdfc9.json'] = ROOT / 'direct-5983/semantic/opus-review-9e8bdfc9.json'
 
+# Frozen bounded diagnostic evidence only; build target/cache excluded by manifest.
+DIAGNOSTIC = ROOT / 'direct-5983/diagnostic'
+for evidence_name in [*json.loads((DIAGNOSTIC / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['5983-diagnostic-' + evidence_name.replace('/', '--')] = DIAGNOSTIC / evidence_name
+FILES['5983-diagnostic-findings-comment.md'] = ROOT / 'direct-5983/diagnostic-findings-comment.md'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

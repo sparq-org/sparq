@@ -1,0 +1,2050 @@
+[
+  {
+    "case": "base",
+    "k": 1,
+    "candidate_us": 536.708,
+    "disabled_us": 13847.709,
+    "main_us": 14946.375,
+    "candidate_over_disabled": 0.03875789128728803,
+    "disabled_over_main": 0.9264928118021929,
+    "candidate_timing_range_us": [
+      531.334,
+      563.042
+    ],
+    "disabled_timing_range_us": [
+      13781.084,
+      14106.625
+    ],
+    "candidate_peak_bytes": 1209777,
+    "disabled_peak_bytes": 18597196,
+    "requested_bytes_ratio": 0.014276551942168324,
+    "metrics": {
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 531334,
+            "max": 563042,
+            "median": 536708,
+            "mean": 539583.7142857143,
+            "stdev": 10739.917329202086,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 47153152,
+            "max": 47153152,
+            "median": 47153152,
+            "mean": 47153152,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 47169536,
+            "max": 47316992,
+            "median": 47267840,
+            "mean": 47251456,
+            "stdev": 55156.76297004143,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 224,
+            "max": 224,
+            "median": 224,
+            "mean": 224,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 10,
+            "max": 10,
+            "median": 10,
+            "mean": 10,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 1226953,
+            "max": 1226953,
+            "median": 1226953,
+            "mean": 1226953,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 1209777,
+            "max": 1209777,
+            "median": 1209777,
+            "mean": 1209777,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 47087616,
+            "max": 47087616,
+            "median": 47087616,
+            "mean": 47087616,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 47120384,
+            "max": 47169536,
+            "median": 47169536,
+            "mean": 47153152,
+            "stdev": 28377.920431208484,
+            "samples": 3
+          }
+        }
+      },
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 13781084,
+            "max": 14106625,
+            "median": 13847709,
+            "mean": 13932309.57142857,
+            "stdev": 142136.7621727482,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70221824,
+            "max": 70221824,
+            "median": 70221824,
+            "mean": 70221824,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70303744,
+            "max": 70533120,
+            "median": 70451200,
+            "mean": 70425453.71428572,
+            "stdev": 77921.46278083313,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 150474,
+            "max": 150474,
+            "median": 150474,
+            "mean": 150474,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 85941830,
+            "max": 85941830,
+            "median": 85941830,
+            "mean": 85941830,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70156288,
+            "max": 70156288,
+            "median": 70156288,
+            "mean": 70156288,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70172672,
+            "max": 70205440,
+            "median": 70205440,
+            "mean": 70194517.33333333,
+            "stdev": 18918.613620805656,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 14862042,
+            "max": 15138417,
+            "median": 14946375,
+            "mean": 14954577.714285715,
+            "stdev": 98108.30909206806,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70189056,
+            "max": 70189056,
+            "median": 70189056,
+            "mean": 70189056,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70205440,
+            "max": 70385664,
+            "median": 70303744,
+            "mean": 70308425.14285715,
+            "stdev": 68678.9228303914,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 150474,
+            "max": 150474,
+            "median": 150474,
+            "mean": 150474,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 85941830,
+            "max": 85941830,
+            "median": 85941830,
+            "mean": 85941830,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70139904,
+            "max": 70139904,
+            "median": 70139904,
+            "mean": 70139904,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70156288,
+            "max": 70172672,
+            "median": 70172672,
+            "mean": 70167210.66666667,
+            "stdev": 9459.306810402828,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "base",
+    "k": 512,
+    "candidate_us": 1162.875,
+    "disabled_us": 14181.5,
+    "main_us": 15272.833,
+    "candidate_over_disabled": 0.08199943588477947,
+    "disabled_over_main": 0.9285441672805562,
+    "candidate_timing_range_us": [
+      1156.5,
+      1197.792
+    ],
+    "disabled_timing_range_us": [
+      14097.875,
+      14351.541
+    ],
+    "candidate_peak_bytes": 1876465,
+    "disabled_peak_bytes": 18597196,
+    "requested_bytes_ratio": 0.02448369067606016,
+    "metrics": {
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 14097875,
+            "max": 14351541,
+            "median": 14181500,
+            "mean": 14200523.57142857,
+            "stdev": 100598.53367197944,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70385664,
+            "max": 70385664,
+            "median": 70385664,
+            "mean": 70385664,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70467584,
+            "max": 70664192,
+            "median": 70598656,
+            "mean": 70575250.28571428,
+            "stdev": 67458.28422987125,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 152008,
+            "max": 152008,
+            "median": 152008,
+            "mean": 152008,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 86057859,
+            "max": 86057859,
+            "median": 86057859,
+            "mean": 86057859,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70352896,
+            "max": 70352896,
+            "median": 70352896,
+            "mean": 70352896,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70369280,
+            "max": 70402048,
+            "median": 70402048,
+            "mean": 70391125.33333333,
+            "stdev": 18918.613620805656,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 15176208,
+            "max": 15370541,
+            "median": 15272833,
+            "mean": 15252904.714285715,
+            "stdev": 75032.28385549402,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70402048,
+            "max": 70402048,
+            "median": 70402048,
+            "mean": 70402048,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70451200,
+            "max": 70664192,
+            "median": 70582272,
+            "mean": 70563547.42857143,
+            "stdev": 72921.7289767075,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 152008,
+            "max": 152008,
+            "median": 152008,
+            "mean": 152008,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 86057859,
+            "max": 86057859,
+            "median": 86057859,
+            "mean": 86057859,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70287360,
+            "max": 70287360,
+            "median": 70287360,
+            "mean": 70287360,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70303744,
+            "max": 70336512,
+            "median": 70320128,
+            "mean": 70320128,
+            "stdev": 16384.0,
+            "samples": 3
+          }
+        }
+      },
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 1156500,
+            "max": 1197792,
+            "median": 1162875,
+            "mean": 1166327.4285714286,
+            "stdev": 14132.605089616267,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 48103424,
+            "max": 48103424,
+            "median": 48103424,
+            "mean": 48103424,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 48136192,
+            "max": 48283648,
+            "median": 48234496,
+            "mean": 48222793.14285714,
+            "stdev": 61094.44412118168,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 5822,
+            "max": 5822,
+            "median": 5822,
+            "mean": 5822,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 24,
+            "max": 24,
+            "median": 24,
+            "mean": 24,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 2107014,
+            "max": 2107014,
+            "median": 2107014,
+            "mean": 2107014,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 1876465,
+            "max": 1876465,
+            "median": 1876465,
+            "mean": 1876465,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 48087040,
+            "max": 48087040,
+            "median": 48087040,
+            "mean": 48087040,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 48103424,
+            "max": 48168960,
+            "median": 48168960,
+            "mean": 48147114.666666664,
+            "stdev": 37837.22724161131,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "overlay",
+    "k": 1,
+    "candidate_us": 5657.583,
+    "disabled_us": 17911.958,
+    "main_us": 18383.625,
+    "candidate_over_disabled": 0.3158550840728858,
+    "disabled_over_main": 0.9743430906581264,
+    "candidate_timing_range_us": [
+      5623.042,
+      5830.667
+    ],
+    "disabled_timing_range_us": [
+      17876.459,
+      18258.417
+    ],
+    "candidate_peak_bytes": 5169777,
+    "disabled_peak_bytes": 14436940,
+    "requested_bytes_ratio": 0.09593528838904677,
+    "metrics": {
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 18313167,
+            "max": 18533333,
+            "median": 18383625,
+            "mean": 18389416.57142857,
+            "stdev": 75506.76309633272,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 120353,
+            "max": 120353,
+            "median": 120353,
+            "mean": 120353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54067206,
+            "max": 54067206,
+            "median": 54067206,
+            "mean": 54067206,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14436940,
+            "max": 14436940,
+            "median": 14436940,
+            "mean": 14436940,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 106528768,
+            "max": 106528768,
+            "median": 106528768,
+            "mean": 106528768,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 106528768,
+            "max": 106528768,
+            "median": 106528768,
+            "mean": 106528768,
+            "stdev": 0.0,
+            "samples": 3
+          }
+        }
+      },
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 5623042,
+            "max": 5830667,
+            "median": 5657583,
+            "mean": 5687029.571428572,
+            "stdev": 70653.2738940835,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 92209152,
+            "max": 92209152,
+            "median": 92209152,
+            "mean": 92209152,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 92274688,
+            "max": 92438528,
+            "median": 92356608,
+            "mean": 92354267.42857143,
+            "stdev": 62337.1702246665,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 231,
+            "max": 231,
+            "median": 231,
+            "mean": 231,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 10,
+            "max": 10,
+            "median": 10,
+            "mean": 10,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 5186953,
+            "max": 5186953,
+            "median": 5186953,
+            "mean": 5186953,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 5169777,
+            "max": 5169777,
+            "median": 5169777,
+            "mean": 5169777,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 92192768,
+            "max": 92192768,
+            "median": 92192768,
+            "mean": 92192768,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 92225536,
+            "max": 92307456,
+            "median": 92307456,
+            "mean": 92280149.33333333,
+            "stdev": 47296.53405201414,
+            "samples": 3
+          }
+        }
+      },
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 17876459,
+            "max": 18258417,
+            "median": 17911958,
+            "mean": 17979911,
+            "stdev": 136086.75304378453,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 106610688,
+            "max": 106610688,
+            "median": 106610688,
+            "mean": 106610688,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 106610688,
+            "max": 106610688,
+            "median": 106610688,
+            "mean": 106610688,
+            "stdev": 0.0,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 120353,
+            "max": 120353,
+            "median": 120353,
+            "mean": 120353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54067206,
+            "max": 54067206,
+            "median": 54067206,
+            "mean": 54067206,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14436940,
+            "max": 14436940,
+            "median": 14436940,
+            "mean": 14436940,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 104988672,
+            "max": 104988672,
+            "median": 104988672,
+            "mean": 104988672,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 105005056,
+            "max": 105021440,
+            "median": 105021440,
+            "mean": 105015978.66666667,
+            "stdev": 9459.306810402828,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "overlay",
+    "k": 512,
+    "candidate_us": 6252.083,
+    "disabled_us": 17767.875,
+    "main_us": 18662.208,
+    "candidate_over_disabled": 0.35187567449680957,
+    "disabled_over_main": 0.952077857025278,
+    "candidate_timing_range_us": [
+      6203.209,
+      6280.583
+    ],
+    "disabled_timing_range_us": [
+      17745.959,
+      17797.709
+    ],
+    "candidate_peak_bytes": 5836465,
+    "disabled_peak_bytes": 14469644,
+    "requested_bytes_ratio": 0.11197216260712377,
+    "metrics": {
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 6203209,
+            "max": 6280583,
+            "median": 6252083,
+            "mean": 6247077.428571428,
+            "stdev": 25190.10118980035,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 93126656,
+            "max": 93126656,
+            "median": 93126656,
+            "mean": 93126656,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 93159424,
+            "max": 93339648,
+            "median": 93257728,
+            "mean": 93253046.85714285,
+            "stdev": 63956.58718075507,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 5829,
+            "max": 5829,
+            "median": 5829,
+            "mean": 5829,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 24,
+            "max": 24,
+            "median": 24,
+            "mean": 24,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 6067014,
+            "max": 6067014,
+            "median": 6067014,
+            "mean": 6067014,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 5836465,
+            "max": 5836465,
+            "median": 5836465,
+            "mean": 5836465,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 92913664,
+            "max": 92913664,
+            "median": 92913664,
+            "mean": 92913664,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 92962816,
+            "max": 93011968,
+            "median": 93011968,
+            "mean": 92995584,
+            "stdev": 28377.920431208484,
+            "samples": 3
+          }
+        }
+      },
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 17745959,
+            "max": 17797709,
+            "median": 17767875,
+            "mean": 17769238.285714287,
+            "stdev": 16695.400711116876,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 105185280,
+            "max": 105185280,
+            "median": 105185280,
+            "mean": 105185280,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 105250816,
+            "max": 105480192,
+            "median": 105414656,
+            "mean": 105386569.14285715,
+            "stdev": 78980.55894844962,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 121887,
+            "max": 121887,
+            "median": 121887,
+            "mean": 121887,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54183235,
+            "max": 54183235,
+            "median": 54183235,
+            "mean": 54183235,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14469644,
+            "max": 14469644,
+            "median": 14469644,
+            "mean": 14469644,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 105152512,
+            "max": 105152512,
+            "median": 105152512,
+            "mean": 105152512,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 105168896,
+            "max": 105185280,
+            "median": 105185280,
+            "mean": 105179818.66666667,
+            "stdev": 9459.306810402828,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 18449750,
+            "max": 18726917,
+            "median": 18662208,
+            "mean": 18611369,
+            "stdev": 97646.0360144401,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 106692608,
+            "max": 106692608,
+            "median": 106692608,
+            "mean": 106692608,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 106692608,
+            "max": 106692608,
+            "median": 106692608,
+            "mean": 106692608,
+            "stdev": 0.0,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 121887,
+            "max": 121887,
+            "median": 121887,
+            "mean": 121887,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54183235,
+            "max": 54183235,
+            "median": 54183235,
+            "mean": 54183235,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14469644,
+            "max": 14469644,
+            "median": 14469644,
+            "mean": 14469644,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 106627072,
+            "max": 106627072,
+            "median": 106627072,
+            "mean": 106627072,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 106627072,
+            "max": 106627072,
+            "median": 106627072,
+            "mean": 106627072,
+            "stdev": 0.0,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "drained",
+    "k": 1,
+    "candidate_us": 10659.625,
+    "disabled_us": 8324.667,
+    "main_us": 8765.875,
+    "candidate_over_disabled": 1.2804866549016316,
+    "disabled_over_main": 0.9496675460236428,
+    "candidate_timing_range_us": [
+      10611.416,
+      10949.917
+    ],
+    "disabled_timing_range_us": [
+      8244.5,
+      8416.208
+    ],
+    "candidate_peak_bytes": 8500044,
+    "disabled_peak_bytes": 8500044,
+    "requested_bytes_ratio": 1.0191875064882736,
+    "metrics": {
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 8244500,
+            "max": 8416208,
+            "median": 8324667,
+            "mean": 8319006,
+            "stdev": 65598.19972885435,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 59162624,
+            "max": 59162624,
+            "median": 59162624,
+            "mean": 59162624,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 59195392,
+            "max": 59457536,
+            "median": 59375616,
+            "mean": 59354550.85714286,
+            "stdev": 88085.54332281882,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 75445,
+            "max": 75445,
+            "median": 75445,
+            "mean": 75445,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 630,
+            "max": 630,
+            "median": 630,
+            "mean": 630,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 57469062,
+            "max": 57469062,
+            "median": 57469062,
+            "mean": 57469062,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 8500044,
+            "max": 8500044,
+            "median": 8500044,
+            "mean": 8500044,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 59097088,
+            "max": 59097088,
+            "median": 59097088,
+            "mean": 59097088,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 59129856,
+            "max": 59146240,
+            "median": 59146240,
+            "mean": 59140778.666666664,
+            "stdev": 9459.306810402828,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 8698625,
+            "max": 8908042,
+            "median": 8765875,
+            "mean": 8782922.57142857,
+            "stdev": 72511.73512119065,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 59129856,
+            "max": 59129856,
+            "median": 59129856,
+            "mean": 59129856,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 59162624,
+            "max": 59342848,
+            "median": 59277312,
+            "mean": 59267949.71428572,
+            "stdev": 68771.920737353,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 75445,
+            "max": 75445,
+            "median": 75445,
+            "mean": 75445,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 630,
+            "max": 630,
+            "median": 630,
+            "mean": 630,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 57469062,
+            "max": 57469062,
+            "median": 57469062,
+            "mean": 57469062,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 8500044,
+            "max": 8500044,
+            "median": 8500044,
+            "mean": 8500044,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 59113472,
+            "max": 59113472,
+            "median": 59113472,
+            "mean": 59113472,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 59129856,
+            "max": 59195392,
+            "median": 59162624,
+            "mean": 59162624,
+            "stdev": 32768.0,
+            "samples": 3
+          }
+        }
+      },
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 10611416,
+            "max": 10949917,
+            "median": 10659625,
+            "mean": 10694666.714285715,
+            "stdev": 115603.24568210919,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 59228160,
+            "max": 59228160,
+            "median": 59228160,
+            "mean": 59228160,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 59260928,
+            "max": 59457536,
+            "median": 59408384,
+            "mean": 59394340.571428575,
+            "stdev": 68492.54820503503,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 75528,
+            "max": 75528,
+            "median": 75528,
+            "mean": 75528,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 631,
+            "max": 631,
+            "median": 631,
+            "mean": 631,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 58571750,
+            "max": 58571750,
+            "median": 58571750,
+            "mean": 58571750,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 8500044,
+            "max": 8500044,
+            "median": 8500044,
+            "mean": 8500044,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 59113472,
+            "max": 59113472,
+            "median": 59113472,
+            "mean": 59113472,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 59129856,
+            "max": 59179008,
+            "median": 59162624,
+            "mean": 59157162.666666664,
+            "stdev": 25026.973395385492,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "drained-overlay",
+    "k": 1,
+    "candidate_us": 19898.958,
+    "disabled_us": 13786.875,
+    "main_us": 13745.75,
+    "candidate_over_disabled": 1.443326206990344,
+    "disabled_over_main": 1.0029918338395505,
+    "candidate_timing_range_us": [
+      19752.625,
+      20227.042
+    ],
+    "disabled_timing_range_us": [
+      13682.209,
+      13842.458
+    ],
+    "candidate_peak_bytes": 7219788,
+    "disabled_peak_bytes": 7219788,
+    "requested_bytes_ratio": 1.1463172963911143,
+    "metrics": {
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 13706000,
+            "max": 13796042,
+            "median": 13745750,
+            "mean": 13752059.42857143,
+            "stdev": 33846.169432975934,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 98009088,
+            "max": 98009088,
+            "median": 98009088,
+            "mean": 98009088,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 98074624,
+            "max": 98271232,
+            "median": 98172928,
+            "mean": 98184630.85714285,
+            "stdev": 63253.19405750345,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 60353,
+            "max": 60353,
+            "median": 60353,
+            "mean": 60353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 102,
+            "max": 102,
+            "median": 102,
+            "mean": 102,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 32687154,
+            "max": 32687154,
+            "median": 32687154,
+            "mean": 32687154,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 7219788,
+            "max": 7219788,
+            "median": 7219788,
+            "mean": 7219788,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 98009088,
+            "max": 98009088,
+            "median": 98009088,
+            "mean": 98009088,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 98041856,
+            "max": 98058240,
+            "median": 98058240,
+            "mean": 98052778.66666667,
+            "stdev": 9459.306810402828,
+            "samples": 3
+          }
+        }
+      },
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 19752625,
+            "max": 20227042,
+            "median": 19898958,
+            "mean": 19939773.714285713,
+            "stdev": 177487.68897467628,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 98467840,
+            "max": 98467840,
+            "median": 98467840,
+            "mean": 98467840,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 98516992,
+            "max": 98746368,
+            "median": 98648064,
+            "mean": 98643382.85714285,
+            "stdev": 76095.57322960946,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 60443,
+            "max": 60443,
+            "median": 60443,
+            "mean": 60443,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 103,
+            "max": 103,
+            "median": 103,
+            "mean": 103,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 37469850,
+            "max": 37469850,
+            "median": 37469850,
+            "mean": 37469850,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 7219788,
+            "max": 7219788,
+            "median": 7219788,
+            "mean": 7219788,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 97075200,
+            "max": 97075200,
+            "median": 97075200,
+            "mean": 97075200,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 97107968,
+            "max": 97157120,
+            "median": 97140736,
+            "mean": 97135274.66666667,
+            "stdev": 25026.973395385496,
+            "samples": 3
+          }
+        }
+      },
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 13682209,
+            "max": 13842458,
+            "median": 13786875,
+            "mean": 13774809.57142857,
+            "stdev": 56080.1875765323,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 97992704,
+            "max": 97992704,
+            "median": 97992704,
+            "mean": 97992704,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 98058240,
+            "max": 98304000,
+            "median": 98238464,
+            "mean": 98208036.57142857,
+            "stdev": 85358.68575772307,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 60353,
+            "max": 60353,
+            "median": 60353,
+            "mean": 60353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 102,
+            "max": 102,
+            "median": 102,
+            "mean": 102,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 32687154,
+            "max": 32687154,
+            "median": 32687154,
+            "mean": 32687154,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 7219788,
+            "max": 7219788,
+            "median": 7219788,
+            "mean": 7219788,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 98009088,
+            "max": 98009088,
+            "median": 98009088,
+            "mean": 98009088,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 98041856,
+            "max": 98041856,
+            "median": 98041856,
+            "mean": 98041856,
+            "stdev": 0.0,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "ties",
+    "k": 1,
+    "candidate_us": 17314.5,
+    "disabled_us": 14168.292,
+    "main_us": 15176.083,
+    "candidate_over_disabled": 1.222059793798716,
+    "disabled_over_main": 0.9335934707262737,
+    "candidate_timing_range_us": [
+      17257.542,
+      17417.667
+    ],
+    "disabled_timing_range_us": [
+      14087.875,
+      14489.583
+    ],
+    "candidate_peak_bytes": 18597196,
+    "disabled_peak_bytes": 18597196,
+    "requested_bytes_ratio": 1.0139941632613594,
+    "metrics": {
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 17257542,
+            "max": 17417667,
+            "median": 17314500,
+            "mean": 17321524,
+            "stdev": 48554.04991690532,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70287360,
+            "max": 70287360,
+            "median": 70287360,
+            "mean": 70287360,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70336512,
+            "max": 70598656,
+            "median": 70451200,
+            "mean": 70455881.14285715,
+            "stdev": 91571.89710718853,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 150557,
+            "max": 150557,
+            "median": 150557,
+            "mean": 150557,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 800,
+            "max": 800,
+            "median": 800,
+            "mean": 800,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 87144514,
+            "max": 87144514,
+            "median": 87144514,
+            "mean": 87144514,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70189056,
+            "max": 70189056,
+            "median": 70189056,
+            "mean": 70189056,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70205440,
+            "max": 70254592,
+            "median": 70238208,
+            "mean": 70232746.66666667,
+            "stdev": 25026.973395385496,
+            "samples": 3
+          }
+        }
+      },
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 14087875,
+            "max": 14489583,
+            "median": 14168292,
+            "mean": 14221589.42857143,
+            "stdev": 144040.00015372713,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70205440,
+            "max": 70205440,
+            "median": 70205440,
+            "mean": 70205440,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70270976,
+            "max": 70500352,
+            "median": 70451200,
+            "mean": 70413750.85714285,
+            "stdev": 82850.93897562573,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 150474,
+            "max": 150474,
+            "median": 150474,
+            "mean": 150474,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 85941830,
+            "max": 85941830,
+            "median": 85941830,
+            "mean": 85941830,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70139904,
+            "max": 70139904,
+            "median": 70139904,
+            "mean": 70139904,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70156288,
+            "max": 70189056,
+            "median": 70189056,
+            "mean": 70178133.33333333,
+            "stdev": 18918.613620805656,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 15050250,
+            "max": 15339750,
+            "median": 15176083,
+            "mean": 15188500,
+            "stdev": 90992.1530755995,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 70189056,
+            "max": 70189056,
+            "median": 70189056,
+            "mean": 70189056,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 70238208,
+            "max": 70418432,
+            "median": 70369280,
+            "mean": 70345874.28571428,
+            "stdev": 74396.79730945925,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 150474,
+            "max": 150474,
+            "median": 150474,
+            "mean": 150474,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 799,
+            "max": 799,
+            "median": 799,
+            "mean": 799,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 85941830,
+            "max": 85941830,
+            "median": 85941830,
+            "mean": 85941830,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 18597196,
+            "max": 18597196,
+            "median": 18597196,
+            "mean": 18597196,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 70156288,
+            "max": 70156288,
+            "median": 70156288,
+            "mean": 70156288,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 70172672,
+            "max": 70205440,
+            "median": 70189056,
+            "mean": 70189056,
+            "stdev": 16384.0,
+            "samples": 3
+          }
+        }
+      }
+    }
+  },
+  {
+    "case": "ties-overlay",
+    "k": 1,
+    "candidate_us": 25725.542,
+    "disabled_us": 17940.375,
+    "main_us": 17871.666,
+    "candidate_over_disabled": 1.4339467263086754,
+    "disabled_over_main": 1.0038445772207247,
+    "candidate_timing_range_us": [
+      25642.5,
+      26000.541
+    ],
+    "disabled_timing_range_us": [
+      17791.625,
+      18006.25
+    ],
+    "candidate_peak_bytes": 14436940,
+    "disabled_peak_bytes": 14436940,
+    "requested_bytes_ratio": 1.095486421103395,
+    "metrics": {
+      "disabled": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 17791625,
+            "max": 18006250,
+            "median": 17940375,
+            "mean": 17925714.42857143,
+            "stdev": 66745.77341888934,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 105070592,
+            "max": 105070592,
+            "median": 105070592,
+            "mean": 105070592,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 105086976,
+            "max": 105250816,
+            "median": 105168896,
+            "mean": 105168896,
+            "stdev": 51810.75718419873,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 120353,
+            "max": 120353,
+            "median": 120353,
+            "mean": 120353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54067206,
+            "max": 54067206,
+            "median": 54067206,
+            "mean": 54067206,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14436940,
+            "max": 14436940,
+            "median": 14436940,
+            "mean": 14436940,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 106528768,
+            "max": 106528768,
+            "median": 106528768,
+            "mean": 106528768,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 106528768,
+            "max": 106528768,
+            "median": 106528768,
+            "mean": 106528768,
+            "stdev": 0.0,
+            "samples": 3
+          }
+        }
+      },
+      "main": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 17835291,
+            "max": 17975291,
+            "median": 17871666,
+            "mean": 17897892.57142857,
+            "stdev": 57036.9821865812,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 120353,
+            "max": 120353,
+            "median": 120353,
+            "mean": 120353,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 109,
+            "max": 109,
+            "median": 109,
+            "mean": 109,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 54067206,
+            "max": 54067206,
+            "median": 54067206,
+            "mean": 54067206,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14436940,
+            "max": 14436940,
+            "median": 14436940,
+            "mean": 14436940,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 106561536,
+            "max": 106561536,
+            "median": 106561536,
+            "mean": 106561536,
+            "stdev": 0.0,
+            "samples": 3
+          }
+        }
+      },
+      "candidate": {
+        "timing": {
+          "whole_query_ns": {
+            "min": 25642500,
+            "max": 26000541,
+            "median": 25725542,
+            "mean": 25752714,
+            "stdev": 120325.49665663826,
+            "samples": 7
+          },
+          "pre_query_max_rss": {
+            "min": 106987520,
+            "max": 106987520,
+            "median": 106987520,
+            "mean": 106987520,
+            "stdev": 0.0,
+            "samples": 7
+          },
+          "post_query_max_rss": {
+            "min": 106987520,
+            "max": 106987520,
+            "median": 106987520,
+            "mean": 106987520,
+            "stdev": 0.0,
+            "samples": 7
+          }
+        },
+        "count": {
+          "allocs": {
+            "min": 120443,
+            "max": 120443,
+            "median": 120443,
+            "mean": 120443,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "reallocs": {
+            "min": 110,
+            "max": 110,
+            "median": 110,
+            "mean": 110,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "requested_bytes": {
+            "min": 59229890,
+            "max": 59229890,
+            "median": 59229890,
+            "mean": 59229890,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "peak_live_delta": {
+            "min": 14436940,
+            "max": 14436940,
+            "median": 14436940,
+            "mean": 14436940,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "pre_query_max_rss": {
+            "min": 105316352,
+            "max": 105316352,
+            "median": 105316352,
+            "mean": 105316352,
+            "stdev": 0.0,
+            "samples": 3
+          },
+          "post_query_max_rss": {
+            "min": 105332736,
+            "max": 105381888,
+            "median": 105365504,
+            "mean": 105360042.66666667,
+            "stdev": 25026.973395385496,
+            "samples": 3
+          }
+        }
+      }
+    }
+  }
+]
