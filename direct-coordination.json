@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T09:16:50.726933+00:00",
+  "updated_at": "2026-09-08T09:37:33.984701+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -44,7 +44,7 @@
   },
   "live_main": {
     "oid": "cf19a52c6880c496cefaca24046174902bc30958",
-    "observed_at": "2026-09-08T09:16:50.726933+00:00"
+    "observed_at": "2026-09-08T09:36:56.406177+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -63,10 +63,10 @@
     "head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
     "branch": "codex/perf-indexed-topk-recovery",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Frozen semantic candidate clean and all39 manifest entries/raw diff verified by root. One actual Opus5 xhigh source review launched; collect existing session/output, never duplicate. Agent idle pending review.",
+    "state": "Existing Astra xhigh agent executing one bounded local diagnostic benchmark spike; compare exact candidate, indexed-disabled control and main with identical harness. No runtime repairs yet: determine if setup/adverse-case costs justify continuing before F3-F5 work.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Only top-k runtime/tests. Relevant focused default/no-default tests are authorized with task-local target/two jobs; no heavy/full-workspace builds or benchmark sweep. No push, review, PR admission, registry dispatch, release or EC2. Root owns issue/comment and actual Opus review.",
-    "phase": "Independent source review before measurement",
+    "contract": "One sequential scoped optimized build/measurement lane; own isolated worktrees and targets under authorized tmp root, two build jobs, ~15min optimized-build cap. No full workspace/canonical sweep/network install/EC2/remote mutation. Preserve frozen reviewed runtime. Commit only benchmark harness/registration with honest provenance; report exact source/binary/harness and measurement limitations.",
+    "phase": "Bounded local performance/resource measurement",
     "feasibility_report": "direct-5983/feasibility.json",
     "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
     "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
@@ -90,9 +90,21 @@
       "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/review-packet.md",
       "input_sha256": "ef7b0dc4d5bd22642aa673516bdb40a33b83e8049f2447364d617bf96de18458",
       "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/opus-review-9e8bdfc9.json",
-      "completed": false,
+      "completed": true,
       "started_at": "2026-09-08T09:16:50.726933+00:00",
-      "acceptance": "Require complete successful JSON, is_error=false and actual modelUsage claude-opus-5. Never launch a duplicate or retry exhausted quota."
+      "acceptance": "Require complete successful JSON, is_error=false and actual modelUsage claude-opus-5. Never launch a duplicate or retry exhausted quota.",
+      "collected_at": "2026-09-08T09:36:56.406177+00:00",
+      "output_sha256": "29e8a23b693282065d40afaece8f9cd14cc2188639e286c198a1db88561975cb",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 492938
+    },
+    "review_verdict": "source_clear_for_measurement: no blocking correctness/resource-unsoundness defect found. Not merge approval.",
+    "review_findings": {
+      "F1": "Measure all retained scans plus global per-probe subject vectors under fork overlays/tombstones: full-query latency, allocation counts/bytes and peak memory. Linear setup/fallback costs may negate gain.",
+      "F2": "Measure drained prefix and oversized tie groups causing expensive fallback after attempted work.",
+      "F3": "Public tie-order/pagination documentation before admission; no stable tie order guaranteed.",
+      "F4": "Explicit execution trace instead of absence-of-BGP inference before admission.",
+      "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
     }
   },
   "prs": {
@@ -347,7 +359,7 @@
     }
   },
   "sweeper_health": {
-    "observed_at": "2026-09-08T08:57:25.572812+00:00",
+    "observed_at": "2026-09-08T09:37:33.984701+00:00",
     "repaired_code_scheduled": true,
     "run34175520707": "SUCCESS Sep8T01:06:12 main4d880d6; self-tests and rearm enumeration ran;0 writes. stuck-arm list failed3x502 and warning deferred. Does NOT prove recovery mutation health.",
     "run34168680735": "FAILURE Sep7T23:02:29 main4d880d6; after2 transient502 retries enumeration succeeded; cancelled-gate PR6360 recovery failed before POST: Field 'id' doesn't exist on type 'Actor'.",
@@ -363,8 +375,8 @@
     }
   },
   "next_actions": [
-    "Collect existing actual Opus5 xhigh source review session66012/output for frozen9e8bdfc9. Do not duplicate review or implementation.",
-    "If concrete source blockers, send existing postmerge_ci agent specific findings. If cleared for measurement, authorize bounded reproducible local comparison and benchmark registration. Full CI/conformance and performance evidence still needed before admission.",
+    "Collect existing postmerge_ci bounded diagnostic benchmark results; do not duplicate measurements or review. Actual Opus source9e8bdfc9 cleared for measurement, full review artifact preserved.",
+    "Use measured F1/F2 favorable and adverse costs to decide smallest worthwhile next step. If performance/resource NO-GO, keep unmerged and record evidence. If viable, repair F3-F5 pre-admission docs/trace/coverage, resolve specific source context, then focused Opus followup and full required validation.",
     "Then add a bounded reproducible measurement fixture/registration and compare repaired candidate, its indexed-disabled control and current main. Preserve no-EC2 restriction except separately authorized6435 benchmark still blocked on login.",
     "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
@@ -383,9 +395,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4987,
-    "resetAt": "2026-09-08T09:24:48Z",
-    "observed_at": "2026-09-08T09:16:50.726933+00:00",
+    "remaining": 4999,
+    "resetAt": "2026-09-08T10:36:55Z",
+    "observed_at": "2026-09-08T09:36:56.406177+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -449,7 +461,7 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T09:16:50.726933+00:00",
+    "observed_at": "2026-09-08T09:37:33.984701+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
@@ -466,7 +478,7 @@
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34202612161,
       "status": "in_progress",
-      "updated_at": "2026-09-08T08:55:49Z"
+      "updated_at": "2026-09-08T09:32:52Z"
     }
   },
   "issues": {
