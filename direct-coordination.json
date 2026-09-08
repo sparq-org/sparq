@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T09:49:11.504804+00:00",
+  "updated_at": "2026-09-08T10:01:53.574160+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
     "branch": "codex/perf-indexed-topk-recovery",
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Existing Astra xhigh agent executing one bounded local diagnostic benchmark spike; compare exact candidate, indexed-disabled control and main with identical harness. No runtime repairs yet: determine if setup/adverse-case costs justify continuing before F3-F5 work.",
+    "state": "Bounded measurement completed initial and confirmation data; agent is freezing final report/manifest. Root observed favorable gains but repeatable adverse slowdowns; do not publish numerical claims or admit current candidate before final provenance/evidence verification.",
     "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
     "contract": "One sequential scoped optimized build/measurement lane; own isolated worktrees and targets under authorized tmp root, two build jobs, ~15min optimized-build cap. No full workspace/canonical sweep/network install/EC2/remote mutation. Preserve frozen reviewed runtime. Commit only benchmark harness/registration with honest provenance; report exact source/binary/harness and measurement limitations.",
     "phase": "Bounded local performance/resource measurement",
@@ -107,14 +107,39 @@
       "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
     },
     "benchmark_status": {
-      "observed_at": "2026-09-08T09:49:11.504804+00:00",
+      "observed_at": "2026-09-08T10:01:53.574160+00:00",
       "agent_report": "Harness/registration committed on separate bench branch; frozen9e8bdfc9 untouched. Optimized offline build compiling with two jobs under original900sec deadline. Exact repo lockfile dependency versions verified; no installs. Timing/counting binaries separate; Rayon1; eight fixture points including base/overlay/favorable/adverse. Requested-heap query-window peaks and cumulative setup/pre/post RSS reported with limits.",
       "harness_commit": "3ef21cb57a5bf6db7561a83b27bd6a38875d7b35",
       "build_start": {
         "started_unix": 1788860716.937938,
         "budget_seconds": 900
       },
-      "evidence_directory": "direct-5983/diagnostic"
+      "evidence_directory": "direct-5983/diagnostic",
+      "pending": "Final report/manifest and full source/binary/harness provenance; agent asked to freeze without wider measurements or runtime edits.",
+      "provisional_confirmation": [
+        {
+          "case": "drained",
+          "candidate_over_disabled": 1.3330252431891876,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "drained-overlay",
+          "candidate_over_disabled": 1.4800763064434297,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "ties",
+          "candidate_over_disabled": 1.228757025299843,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "ties-overlay",
+          "candidate_over_disabled": 1.3933783518882783,
+          "ranges_disjoint": true
+        }
+      ],
+      "summary_sha256_observed": "a4819e42cb13d45d7edda75cb53af31da85bf7fa46b876802181f4250d5ef1f2",
+      "limitations": "Data not yet frozen by author or manifest verified by root. Main/disabled baseline drift and cumulative RSS vs query requested-heap must remain explicit."
     }
   },
   "prs": {
@@ -385,8 +410,8 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci bounded diagnostic benchmark results; do not duplicate measurements or review. Actual Opus source9e8bdfc9 cleared for measurement, full review artifact preserved.",
-    "Use measured F1/F2 favorable and adverse costs to decide smallest worthwhile next step. If performance/resource NO-GO, keep unmerged and record evidence. If viable, repair F3-F5 pre-admission docs/trace/coverage, resolve specific source context, then focused Opus followup and full required validation.",
+    "Collect existing postmerge_ci final frozen diagnostic report/manifest, then verify hashes/provenance and decision. Preliminary adverse controls regress despite favorable gains; no wider sweep or source edit authorized yet.",
+    "After verification, record confirmed no-go/next-step findings on existing recovery issue6465 and link from5983; revalidate both immediately before posting. Do not duplicate issue. Then authorize smallest evidence-supported correction if worthwhile, preserving raw original measurement and reviewed runtime.",
     "Then add a bounded reproducible measurement fixture/registration and compare repaired candidate, its indexed-disabled control and current main. Preserve no-EC2 restriction except separately authorized6435 benchmark still blocked on login.",
     "Observe natural nightly34202612161 completion and first sweeper containing6463; do not manually dispatch/probe. Keep registry Actions/dispatch disabled, ALLGREEN until6049 invariant lands and releases unapproved; preserve outstanding holds.",
     "Keep checkpoint and confirmed evidence in private local Git recovery ref."
@@ -405,9 +430,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4999,
+    "remaining": 4998,
     "resetAt": "2026-09-08T10:36:55Z",
-    "observed_at": "2026-09-08T09:36:56.406177+00:00",
+    "observed_at": "2026-09-08T10:01:53.574160+00:00",
     "exhausted": false
   },
   "actions_backlog": {
