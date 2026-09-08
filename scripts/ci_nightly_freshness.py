@@ -29,6 +29,8 @@ MUTATION = "mutation ratchet (cargo-mutants, advisory)"
 MUTATION_STEP = "Nightly mutation work completed"
 # [GPT-6 Astra] All non-completed statuses supported by the workflow-runs API.
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
+COMPLETED_CONCLUSIONS = ("success", "failure", "cancelled", "timed_out", "startup_failure",
+                         "stale", "neutral", "action_required", "skipped")
 
 
 class EvidenceError(Exception):
@@ -122,7 +124,7 @@ def read_jobs(get, repo, run):
         if not isinstance(doc, dict) or type(doc.get("total_count")) is not int:
             raise EvidenceError("missing job inventory")
         total, batch = doc["total_count"], doc.get("jobs")
-        if (total <= 0 or total > JOB_PAGE_SIZE * JOB_PAGE_LIMIT
+        if (total < 0 or total > JOB_PAGE_SIZE * JOB_PAGE_LIMIT
                 or not isinstance(batch, list) or len(batch) > JOB_PAGE_SIZE
                 or (expected is not None and total != expected)):
             raise EvidenceError("unbounded or inconsistent job inventory")
@@ -136,7 +138,10 @@ def read_jobs(get, repo, run):
     for job in jobs:
         if (not isinstance(job, dict) or not positive_int(job.get("id"))
                 or job["id"] in ids or job.get("run_id") != run["id"]
-                or job.get("run_attempt") != run["run_attempt"]
+                # [GPT-6 Astra] The attempt-scoped endpoint supplies the binding
+                # when this optional field is absent. A contradictory value does not.
+                or ("run_attempt" in job and (not positive_int(job["run_attempt"])
+                                              or job["run_attempt"] != run["run_attempt"]))
                 or job.get("head_sha") != run["head_sha"]):
             raise EvidenceError("job identity mismatch")
         ids.add(job["id"])
@@ -144,6 +149,10 @@ def read_jobs(get, repo, run):
 
 
 def successful_step(job, name):
+    # [GPT-6 Astra] The API may omit optional steps: readable absence is no proof.
+    # Null/non-array/malformed values are still unreadable evidence, not admission.
+    if "steps" not in job:
+        return False
     steps = job.get("steps")
     if not isinstance(steps, list) or any(not isinstance(s, dict) for s in steps):
         raise EvidenceError("heavy step inventory unreadable")
@@ -207,7 +216,7 @@ def decide(event, repo, head, current_id, get=gh_json):
     if any(r.get("status") != "completed" for r in prior):
         raise EvidenceError("same-head schedule still active or status unreadable")
     for run in prior:
-        if run.get("conclusion") not in ("success", "failure", "cancelled", "timed_out"):
+        if run.get("conclusion") not in COMPLETED_CONCLUSIONS:
             raise EvidenceError("scheduled conclusion unreadable or unsupported")
         state = heavy_state(read_jobs(get, repo, run))
         if state == "complete":

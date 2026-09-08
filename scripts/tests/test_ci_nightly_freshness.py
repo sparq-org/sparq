@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -24,6 +27,38 @@ SPEC.loader.exec_module(freshness)
 REPO = "sparq-org/sparq"
 HEAD = "a" * 40
 CURRENT = 1000
+
+
+def workflow_job_bound(workflow, seen=()):
+    """[GPT-6 Astra] Conservative full inventory, including local reusable jobs.
+
+    Ignore job conditions/excludes; count each include as an extra even when it
+    merely enriches an existing leg. This overcounts rather than understating
+    API inventory. Unknown dynamic/remote expansion requires an explicit review.
+    """
+    total = 0
+    for item in workflow["jobs"].values():
+        matrix = item.get("strategy", {}).get("matrix", {})
+        assert isinstance(matrix, dict), "dynamic matrix needs a reviewed inventory bound"
+        axes = [value for key, value in matrix.items() if key not in ("include", "exclude")]
+        assert all(isinstance(axis, list) and axis for axis in axes), "unbounded matrix axis"
+        includes = matrix.get("include", [])
+        assert isinstance(includes, list) and all(isinstance(x, dict) for x in includes)
+        count = (math.prod(map(len, axes)) if axes else int(not includes)) + len(includes)
+        if "uses" in item:
+            path = item["uses"]
+            assert path.startswith("./.github/workflows/") and path not in seen, path
+            child = yaml.safe_load((ROOT / path).read_text())
+            count *= workflow_job_bound(child, (*seen, path))
+        total += count
+    return total
+
+
+def assert_job_capacity(workflow):
+    bound = workflow_job_bound(workflow)
+    capacity = freshness.JOB_PAGE_SIZE * freshness.JOB_PAGE_LIMIT
+    assert bound + 20 <= capacity, f"full workflow bound {bound} needs 20 spare slots within {capacity}"
+    return bound
 
 
 def run(run_id=999, **changes):
@@ -92,6 +127,12 @@ class Admission(unittest.TestCase):
         with self.assertRaisesRegex(freshness.EvidenceError, pattern or "."):
             self.decide(api)
 
+    def readable_decision(self, api):
+        try:
+            return self.decide(api)
+        except freshness.EvidenceError as exc:
+            self.fail(f"readable fixture rejected: {exc}")
+
     def test_first_schedule_at_new_head_runs_once(self):
         for history in [[], [run(CURRENT, status="in_progress", conclusion=None)]]:
             with self.subTest(history=history):
@@ -114,6 +155,17 @@ class Admission(unittest.TestCase):
                 api = FakeAPI([run(conclusion=conclusion)], {999: jobs})
                 self.assertTrue(self.decide(api)[0])
                 self.assertEqual(len(api.calls), 2)
+
+    def test_known_terminal_conclusions_with_zero_jobs_are_readable_incomplete(self):
+        for conclusion in ["success", "failure", "cancelled", "timed_out", "startup_failure",
+                           "stale", "neutral", "action_required", "skipped"]:
+            with self.subTest(conclusion=conclusion):
+                api = FakeAPI([run(conclusion=conclusion)], {999: []})
+                self.assertTrue(self.readable_decision(api)[0])
+                self.assertEqual(len(api.calls), 2)
+        api = FakeAPI([run(conclusion="future_unknown")], {999: []})
+        self.blocked(api, "conclusion")
+        self.assertEqual(len(api.calls), 1)
 
     def test_active_or_unreadable_same_head_never_admits(self):
         for status, conclusion in [("in_progress", None), ("queued", None), ("completed", None)]:
@@ -188,15 +240,36 @@ class Admission(unittest.TestCase):
                 else:
                     self.assertTrue(self.decide(FakeAPI([run()], {999: jobs}))[0])
 
+    def test_omitted_optional_steps_are_incomplete_not_completion(self):
+        for index in [0, 1]:
+            with self.subTest(index=index):
+                jobs = completed_jobs()
+                del jobs[index]["steps"]
+                api = FakeAPI([run()], {999: jobs})
+                self.assertTrue(self.readable_decision(api)[0])
+                self.assertEqual(len(api.calls), 2)
+
     def test_attempt_scoped_job_lookup_and_mismatched_attempt_blocks(self):
         jobs = completed_jobs()
         for item in jobs:
             item["run_attempt"] = 2
         api = FakeAPI([run(run_attempt=2)], {999: jobs})
-        self.assertFalse(self.decide(api)[0])
+        self.assertFalse(self.readable_decision(api)[0])
         self.assertIn("/attempts/2/jobs?", api.calls[-1])
         jobs[0]["run_attempt"] = 1
         self.blocked(FakeAPI([run(run_attempt=2)], {999: jobs}), "identity")
+
+    def test_attempt_endpoint_binds_omitted_optional_field_but_rejects_contradictions(self):
+        jobs = completed_jobs()
+        for item in jobs:
+            del item["run_attempt"]
+        api = FakeAPI([run(run_attempt=2)], {999: jobs})
+        self.assertFalse(self.readable_decision(api)[0])
+        self.assertIn("/attempts/2/jobs?", api.calls[-1])
+        for attempt in [None, True, 0, 1, 3]:
+            with self.subTest(attempt=attempt):
+                jobs[0]["run_attempt"] = attempt
+                self.blocked(FakeAPI([run(run_attempt=2)], {999: jobs}), "identity")
 
     def test_each_heavy_leg_and_marker_is_required(self):
         for index in range(len(completed_jobs())):
@@ -412,6 +485,19 @@ class ProductionWiring(unittest.TestCase):
         self.assertEqual(coverage["name"], freshness.COVERAGE)
         self.assertEqual(sum(s.get("name") == freshness.COVERAGE_STEP for s in coverage["steps"]), 1)
 
+    def test_full_workflow_inventory_fits_bounded_job_reads_with_headroom(self):
+        # Unlike the 51-heavy-leg assertion, includes every job and every matrix.
+        assert_job_capacity(self.workflow)
+
+    def test_inventory_guard_catches_growth_outside_the_heavy_matrix(self):
+        workflow = copy.deepcopy(self.workflow)
+        workflow["jobs"]["test"]["strategy"]["matrix"] = {"shard": list(range(201))}
+        with self.assertRaisesRegex(AssertionError, "spare slots"):
+            assert_job_capacity(workflow)
+        workflow["jobs"]["test"]["strategy"]["matrix"] = "${{ fromJSON(needs.dynamic.outputs.matrix) }}"
+        with self.assertRaisesRegex(AssertionError, "dynamic matrix"):
+            assert_job_capacity(workflow)
+
     def test_marker_requires_unmasked_success_and_ci_runs_suite(self):
         marker = next(s for s in self.mutation["steps"] if s.get("name") == freshness.MUTATION_STEP)
         self.assertEqual(marker["if"], "${{ !cancelled() && steps.run_mutants.outputs.measurement_completed == 'true' }}")
@@ -505,6 +591,33 @@ class MutationCompletion(unittest.TestCase):
         for exit_code in [1, 4, 5, 6, 70, 124, 137]:
             with self.subTest(exit_code=exit_code):
                 self.assertFalse(self.check(doc, [{}] * 10, exit_code))
+
+    def test_real_pinned_unsharded_and_sharded_artifacts_prove_completion(self):
+        fixtures = ROOT / "scripts/tests/fixtures/ci-nightly-freshness"
+        provenance = json.loads((fixtures / "provenance.json").read_text())
+        for fixture in provenance["fixtures"]:
+            with self.subTest(artifact=fixture["artifact_id"]), tempfile.TemporaryDirectory() as directory:
+                archive = fixtures / fixture["file"]
+                self.assertLess(archive.stat().st_size, 50000)
+                self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), fixture["sha256"])
+                with zipfile.ZipFile(archive) as bundle:
+                    self.assertEqual(sorted(bundle.namelist()), ["mutants.json", "outcomes.json"])
+                    for name in ["mutants.json", "outcomes.json"]:
+                        self.assertLess(bundle.getinfo(name).file_size, 400000)
+                        # Fixed member names only; never extract archive paths.
+                        (Path(directory) / name).write_bytes(bundle.read(name))
+                doc = json.loads((Path(directory) / "outcomes.json").read_text())
+                planned = json.loads((Path(directory) / "mutants.json").read_text())
+                count = fixture["planned_and_completed"]
+                self.assertEqual((len(planned), doc["total_mutants"]), (count, count))
+                self.assertEqual(len(doc["outcomes"]), count + 1)
+                self.assertEqual(doc["outcomes"][0]["scenario"], "Baseline")
+                self.assertEqual(doc["outcomes"][0]["summary"], "Success")
+                self.assertEqual(doc["success"], 0)  # Baseline is NOT a mutant counter.
+                # Accepted exit 3 is a test input, not a claim about the captured process exit.
+                self.assertTrue(freshness.mutation_complete(3, directory))
+                self.assertFalse(self.check(doc, planned + [{}], 3))
+                self.assertFalse(self.check(dict(doc, success=1), planned, 3))
 
     def test_mutation_cli_records_false_without_changing_advisory_exit(self):
         with tempfile.TemporaryDirectory() as directory:
