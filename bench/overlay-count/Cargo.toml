@@ -1,0 +1,27 @@
+# [GPT-6 Astra] Local diagnostic only; no production feature or dependency changes.
+[package]
+name = "overlay-count-diagnostic"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[patch.crates-io]
+spargebra = { path = "../../vendor/spargebra" }
+
+[features]
+count-alloc = []
+
+[dependencies]
+sparq-core = { path = "../../crates/sparq-core" }
+sparq-engine = { path = "../../crates/sparq-engine" }
+rayon = "1"
+oxrdf = { version = "0.3", features = ["rdf-12"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = false
+codegen-units = 16
