@@ -131,11 +131,25 @@ def main():
     json.loads(FILES['direct-coordination.json'].read_text())
     refs = git('for-each-ref', '--format=%(refname) %(objectname)', REF).decode().splitlines()
     old = next((line.split()[1] for line in refs if line.split()[0] == REF), None)
+    object_format = git('rev-parse', '--show-object-format').decode().strip()
+    old_entries = {}
+    if old:
+        for record in git('ls-tree', '-z', old).split(b'\0'):
+            if record:
+                metadata, name = record.split(b'\t', 1)
+                old_entries[name.decode()] = metadata.decode().split()[2]
     entries = []
     digests = {}
     for name, path in sorted(FILES.items()):
         content = path.read_bytes()
-        oid = git('hash-object', '-w', '--stdin', data=content).decode().strip()
+        blob = hashlib.new(object_format)
+        blob.update(f'blob {len(content)}\0'.encode())
+        blob.update(content)
+        oid = blob.hexdigest()
+        # An identical blob in the prior committed tree already exists locally.
+        if old_entries.get(name) != oid:
+            written = git('hash-object', '-w', '--stdin', data=content).decode().strip()
+            assert written == oid, name
         entries.append(f'100644 blob {oid}\t{name}\n')
         digests[name] = hashlib.sha256(content).hexdigest()
     tree = git('mktree', data=''.join(entries).encode()).decode().strip()
