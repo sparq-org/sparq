@@ -1,0 +1,1 @@
+{"query": "mutation($subject:ID!,$labels:[ID!]!){addLabelsToLabelable(input:{labelableId:$subject,labelIds:$labels}){labelable{labels(first:100){nodes{name}}}}}", "variables": {"subject": "I_kwDOSz3qKM8AAAABQdHKdg", "labels": ["LA_kwDOSz3qKM8AAAACsMIk8g"]}}

@@ -1,0 +1,133 @@
+{
+  "source_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "files": {
+    "budget-check.json": {
+      "sha256": "8478bf00550070e0d4a936fb933fac72904088c27f222f5b759cb267952aaac8",
+      "bytes": 224
+    },
+    "current-main.json": {
+      "sha256": "57d47bcf91e5b0dd9bc2745b97a4530072ec6c5fb87c6804499fe98ce15dc366",
+      "bytes": 53449
+    },
+    "current-main.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue2658.json": {
+      "sha256": "ae198aac19a84fdc62bd1d1803113f4f12eb54a089b905666236dc2e8de645c5",
+      "bytes": 4001
+    },
+    "issue2658.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue5016.json": {
+      "sha256": "54401c80be90699a5d8b870c2d5bf5a0f486605958c1efcafca0bc4cfbdd9f8b",
+      "bytes": 4363
+    },
+    "issue5016.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue6468.json": {
+      "sha256": "ff0f916f4b66b38305386391ef54580729630bff11e70f9b275bd5f5cb48f0ef",
+      "bytes": 5198
+    },
+    "issue6468.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "label-ci.json": {
+      "sha256": "8980a11aaed89369795d8c08ab9493e74b6141be28b4948a9e954c0e4fb7f45f",
+      "bytes": 209
+    },
+    "label-ci.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "label-wrapper.json": {
+      "sha256": "f6678c7ad85ee5ccc1abe5f1a072dc2f105f89ad20268a6a78d5f0f5cc02e192",
+      "bytes": 231
+    },
+    "label-wrapper.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "original-run-metadata.json": {
+      "sha256": "5df709da38272685fcf33ad36b71f940b31baf5bc95b5d13da7fe76f69caff4e",
+      "bytes": 281
+    },
+    "red-expected-ci.log": {
+      "sha256": "997591c537518d0e3ccf90e3235035bd8967d1f77f5061e5b680f101e16a0bf9",
+      "bytes": 2669
+    },
+    "red-result.json": {
+      "sha256": "6b222c35e48cbdf97c907d2a181f25e29bee860e3ed9676e225c0339efccdc92",
+      "bytes": 470
+    },
+    "red_expected_ci.py": {
+      "sha256": "146e6847fc20077cafc8fcd12c98ec4131a2241cbc0a46b05fd55419bee501cb",
+      "bytes": 283
+    },
+    "report.json": {
+      "sha256": "26aae96b9970f88260c1a30e7a5bab079099a1c1ea28d3600a9ad057804b3679",
+      "bytes": 6791
+    },
+    "report.md": {
+      "sha256": "eacebe2c52726a45fe2425b917d0e5736aee530d1d2c7d31cb94f9a0bb1452bf",
+      "bytes": 1310
+    },
+    "reproduce.py": {
+      "sha256": "82118387536ec0aa306b3685dfcb47c48b437ae21612ae87088c2c1aac89d0e5",
+      "bytes": 2027
+    },
+    "reproduction.json": {
+      "sha256": "dd433f16d794c993a36b7bdb4166ae9016ca6c6dae930ae75d5bb1821810c298",
+      "bytes": 2020
+    },
+    "source/.github/workflows/triage-area.yml": {
+      "sha256": "232d0366e034537e9ab46ed18059c3605b8e52b2239c4d66e4e2ce97e9fd5635",
+      "bytes": 9388
+    },
+    "source/ci/area-labels.toml": {
+      "sha256": "84053c14c6087acdee35ef88780323130f71b2584fd0193ba153bf5df379b234",
+      "bytes": 21595
+    },
+    "source/crates/sparq-wrapper-gen/Cargo.toml": {
+      "sha256": "45b5525327558b75ded02e32ebf03694ed30ecd5e2193852d8de20f4eb60c7a1",
+      "bytes": 263
+    },
+    "source/crates/sparq-wrapper-gen/src/lib.rs": {
+      "sha256": "f4af32f19c2955f3935c7db4ccecf0c4349d8827555f42d19f53d5ae83a26125",
+      "bytes": 136
+    },
+    "source/scripts/bd-to-issues.py": {
+      "sha256": "5fd80a2772d34c3725854713bc79bc87f5751ce86a4a32bbe915ca2e90d509f5",
+      "bytes": 96580
+    },
+    "source/scripts/pr-area-labels.py": {
+      "sha256": "979338f00ab2d4003849e5f4a6202a18fe29b866d610f40069212798700b59e8",
+      "bytes": 39831
+    },
+    "source/scripts/ready-issues.py": {
+      "sha256": "49dbb72cdf3fd3acff1618ff7ddd8349543e9fe4c848cbe77407b55e5a070c55",
+      "bytes": 106385
+    },
+    "source/scripts/tests/test_triage_area.py": {
+      "sha256": "9dc4b4ab610c8d7e553e9923c2aee71cbc8e9f5c9a52503f35904dfbbe80bb3f",
+      "bytes": 43659
+    },
+    "source/scripts/triage-area.py": {
+      "sha256": "4e908ea922cb116f9102a1b95e963a0fdbc05f3ed436da0fd8df46fe208ddffc",
+      "bytes": 43379
+    },
+    "wrapper-gen-search.json": {
+      "sha256": "86ee28302b836bbc927a29c481a558fb0b10ff71ab2a0141adf9dfb3191b5026",
+      "bytes": 53655
+    },
+    "wrapper-gen-search.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

@@ -128,6 +128,13 @@ FILES['4246-opus-review-acfa31cf.json'] = ROOT / 'direct-4246/opus-review-acfa31
 OVERLAY_4246_REVISION = ROOT / 'direct-4246/revision'
 for evidence_name in [*json.loads((OVERLAY_4246_REVISION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-revision-' + evidence_name.replace('/', '--')] = OVERLAY_4246_REVISION / evidence_name
+FILES['4246-opus-review-cb638a42.json'] = OVERLAY_4246_REVISION / 'opus-review-cb638a42.json'
+
+TRIAGE_6468 = ROOT / 'direct-6468'
+for evidence_name in [*json.loads((TRIAGE_6468 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['6468-diagnosis-' + evidence_name.replace('/', '--')] = TRIAGE_6468 / evidence_name
+for evidence_name in ['6468-area-precheck.json', '6468-area-mutation.json', '6468-area-mutation-result.json']:
+    FILES[evidence_name] = ROOT / 'recovery-20260909' / evidence_name
 
 OPERATIONAL_TRIAGE = ROOT / 'recovery-20260909/operational-triage'
 for evidence_name in [*json.loads((OPERATIONAL_TRIAGE / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:

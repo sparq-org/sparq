@@ -1,0 +1,7 @@
+{
+  "observed_utc": "2026-09-09T12:44:23.495423+00:00",
+  "source": "gh api rate_limit; successful initial read",
+  "core_remaining": 4997,
+  "search_remaining": 30,
+  "policy": "bounded reads; no retries on errors/quota"
+}

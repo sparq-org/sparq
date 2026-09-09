@@ -1,0 +1,10 @@
+{
+  "id": 34299934012,
+  "head_sha": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "event": "schedule",
+  "status": "completed",
+  "conclusion": "failure",
+  "created_at": "2026-09-09T01:37:14Z",
+  "updated_at": "2026-09-09T01:38:22Z",
+  "run_started_at": "2026-09-09T01:37:14Z"
+}

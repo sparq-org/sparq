@@ -1,0 +1,86 @@
+{
+  "source_ref": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "rows": [
+    {
+      "number": 5016,
+      "title": "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)",
+      "labels": [
+        "from:agent",
+        "role:impl",
+        "self-improvement",
+        "status:untriaged"
+      ],
+      "raw_classify": [
+        [
+          "sparq-wrapper-gen"
+        ],
+        "T2 bd-to-issues.derive_areas (title scope/crate token)"
+      ],
+      "planned_areas": [
+        "area:sparq-wrapper-gen"
+      ],
+      "plan_evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"
+    },
+    {
+      "number": 6468,
+      "title": "triage-area aborts the classification pass on missing area:sparq-wrapper-gen label",
+      "labels": [
+        "role:impl",
+        "self-improvement",
+        "status:untriaged"
+      ],
+      "raw_classify": [
+        [
+          "sparq-wrapper-gen"
+        ],
+        "T2 bd-to-issues.derive_areas (title scope/crate token)"
+      ],
+      "planned_areas": [
+        "area:sparq-wrapper-gen"
+      ],
+      "plan_evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"
+    },
+    {
+      "number": 2658,
+      "title": "sq-1rg2q.13: Expose SHACL-to-wrapper generation through a deterministic CLI",
+      "labels": [
+        "area:wrapper",
+        "bd-migration",
+        "priority:P2",
+        "role:impl",
+        "status:ready"
+      ],
+      "raw_classify": [
+        [],
+        ""
+      ],
+      "planned_areas": [],
+      "plan_evidence": "SKIP already carries an area: label"
+    }
+  ],
+  "partition_paths": {
+    "wrapper": [
+      "wrapper"
+    ],
+    "sparq-wrapper": [
+      "sparq-wrapper"
+    ],
+    "sparq-wrapper-gen": [
+      "sparq-wrapper-gen"
+    ]
+  },
+  "proposed_aliases_conflict_with_actual_gen": {
+    "wrapper": false,
+    "sparq-wrapper": false
+  },
+  "unknown_against_fixture_known_labels": [
+    "area:sparq-wrapper-gen"
+  ],
+  "network_or_subprocess_calls": [],
+  "main_not_called": true
+}
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/red_expected_ci.py", line 6, in <module>
+    assert row['planned_areas']==['area:ci'], row
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'number': 6468, 'title': 'triage-area aborts the classification pass on missing area:sparq-wrapper-gen label', 'labels': ['role:impl', 'self-improvement', 'status:untriaged'], 'raw_classify': (['sparq-wrapper-gen'], 'T2 bd-to-issues.derive_areas (title scope/crate token)'), 'planned_areas': ['area:sparq-wrapper-gen'], 'plan_evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)'}

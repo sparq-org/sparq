@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T12:45:31.907288+00:00",
+  "updated_at": "2026-09-09T12:53:37.457699+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Frozen revision and95manifestfiles verified by root; one actual focused Opus followup is running in exec session48546. Collect this exact session/output, never launch duplicate.",
-    "phase": "Focused actual Opus5 xhigh review of verified revision",
+    "state": "Actual Opus followup completed and verified. Same Astra worker assigned bounded default-off Cargo feature revision, cfg/default proof and one fixed R sweep; no remote publication/admission. Preserve frozen cb638 evidence.",
+    "phase": "Implement default-off experimental feature and fixed measured crossover",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -123,9 +123,27 @@
       "input_bytes": 238995,
       "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/opus-review-cb638a42.json",
       "started_at": "2026-09-09T12:45:31.907288+00:00",
-      "completed": false,
-      "acceptance": "SuccessfulJSON,is_errorfalse,actual modelUsageclaude-opus-5,exactcb638reviewedhead; no duplicate/exhaustedquota retry."
-    }
+      "completed": true,
+      "acceptance": "SuccessfulJSON,is_errorfalse,actual modelUsageclaude-opus-5,exactcb638reviewedhead; no duplicate/exhaustedquota retry.",
+      "collected_at": "2026-09-09T12:53:37.457699+00:00",
+      "output_sha256": "996af7a8fc251793b7e4a53ab3c8ebb5f8805408f4b466e3ba54ba7617e57cc0",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 322874
+    },
+    "focused_review_verdict": "defer_performance_admission: source repair sound, B1/B3 resolved, no correctness changes requested; default-on admission withheld for cold/retained-memory/unbounded-D costs.",
+    "focused_review_findings": {
+      "A1": "Ordinary fork/tombstone/read, cold multi-pattern and concurrentcold paths slower with disjoint ranges.",
+      "A2": "Derived cloning copies initialized projections per retained generation, with no cap. B1 retention extends memory lifetime.",
+      "A3": "Durable clear/default delete-all can make D scale with base graph; direction supported by source, not measured here.",
+      "recommendation": "Gate scope; avoid arbitrary threshold or Clone reset. Owner decision default-on/opt-in/drop, and only if continue one fixed R={1,2,4,8,16} read-per-generation measurement."
+    },
+    "coordinator_scope_decision": {
+      "at": "2026-09-09T12:53:37.457699+00:00",
+      "choice": "default-off experimental Cargo opt-in only",
+      "reason": "Correct source with strong measured warm gains, but unsupported general admission. Preserve default linear path and compile out added deletion-cache metadata/bookkeeping; explicit opt-in documents costs. Routine bounded implementation decision within authorized task, no protection/approval bypass.",
+      "measurement_limit": "Only fixed five-point reads-per-generation experiment allowed by reviewer; no threshold/Clone/Arc/permutation redesign."
+    },
+    "feature_revision_contract": "One repo-consistent default-OFF core Cargo feature gates all new deletion-cache fields, accounting, initialization/invalidation and counting. Ordinary build retains main linear path and no added metadata/allocations. Existing added projections unchanged. Required matching docs/skill,feature-off/on tests/scopedclippy,compiledcontrols/default bypass control; only R1,2,4,8,16 fork-tombstone paired data. Twojobs/privatetarget/15minbuildcap; nofullworkspaceyet/installs/remotemutation/newagents/EC2."
   },
   "prs": {
     "4300": {
@@ -413,9 +431,9 @@
     }
   },
   "next_actions": [
-    "Collect running actual Opus focusedreview session48546 and verify exactcb638head/model/success. Do not repeat either completedacfa or runningcb638 review. Read-only6468 diagnosis may be collected independently.",
-    "Resolve remaining4246 findings and run required full validation, actual Copilot and protected exact-head admission only after sound review. Preserve baseline/candidate evidence and cold/memory tradeoffs.",
-    "After4246 lane reaches its next terminal state, assess narrow actionable6468 classification repair; identify actual originating row and supported owner area. Keep unknown-label guard, do not create labels or replay live work for diagnosis.",
+    "Collect same Astra default-off4246 feature revision and fixed five-point R measurement. Verify source,feature defaults/representation,test/control/manifests; then one focused actual Opus followup. Both previous reviews completed; do not rerun.",
+    "Fullworkspace/conformance/wasm/canonical ratchets and Linux-capable preflight remain required before normal protected exact-head admission. Default-on caching is rejected; no publication until focusedopt-in review clears and validations are concrete.",
+    "After active4246 terminal state, act on6468 narrow classifier/diagnostic proposal and separatelyreview generatorlabel/partition policy. No guessedexistingalias or labelcreation; preserve zero-write unknown-label guard.",
     "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
     "Observe ordinary eligible nightly/sweeper runs when relevant; no manualprobes, exhausted-budget retries or inference of successful writes from green aggregate. RegistryOFF, ALLGREEN, approval holds and release pause remain.",
     "Preserve checkpoint and frozen evidence in the private local Git recovery ref. Reuse agents/worktrees and stay quiet when unchanged."
@@ -548,7 +566,12 @@
       "source_head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
       "observed_at": "2026-09-09T12:15:56.335100+00:00",
       "issue_body_verified": true,
-      "implementation": "Queued after active4246 lane; no routing mutation or second implementation agent."
+      "implementation": "Queued after active4246 lane; no routing mutation or second implementation agent.",
+      "diagnosis": "direct-6468/report.json",
+      "owner_label": "area:ci",
+      "label_action_verified": true,
+      "label_evidence": "recovery-20260909/6468-area-mutation-result.json",
+      "label_action_limit": "Correctly classified ownCIreport only; globalfailure notresolved because5016 emits absentgenarea. No labelcreation or generatoralias mutation."
     }
   },
   "usage_observation": {
@@ -734,8 +757,12 @@
   },
   "pending_6468_diagnosis": {
     "agent": "/root/postmerge_ci",
-    "state": "Bounded read-only followup assigned during actualOpus review",
+    "state": "COMPLETED; root verified32manifestfiles",
     "scope": "At most2focusedsearches andfewexactreads afterbudgetcheck; identify currentoffendinginput/classifierpath/existingownermapping. Offlinepure-functionreproduction only; nofullboardenumeration,replay,implementation,remote mutation,dispatch orbuild. Distinguish originalrun fromcurrentnew6468reportinput.",
-    "evidence_directory": "direct-6468"
+    "evidence_directory": "direct-6468",
+    "report": "direct-6468/report.json",
+    "root_verification": "direct-6468/root-verification.json",
+    "finding": "Current5016 and report6468 emit missingarea viaT2. Originalrowunlogged;5016predatesrun,6468doesnot. Existingwrapper labels do not conflict withactualgen partition, so no safealias established.",
+    "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   }
 }

@@ -1,0 +1,119 @@
+{
+  "issue": 6468,
+  "source_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "read_only": true,
+  "requests": "Fresh budget check; exact main+6468; one focused search (7 results, complete index response); two exact candidate issues (5016,2658); two exact existing labels (sparq-wrapper,ci). No second search, pagination or observer retry.",
+  "findings": [
+    {
+      "input": 5016,
+      "classification": "T2: derive_areas conventional title scope sparq-wrapper-gen -> real directory name -> area:sparq-wrapper-gen",
+      "state": "Exact current REST row is open, no area, updated July29. It predates the failed run and reproduces its missing-label output under the identical main source.",
+      "original_attribution": "Strong original candidate, not proof of the original fetched row: that run did not log issue numbers/evidence and no historical input snapshot was captured."
+    },
+    {
+      "input": 6468,
+      "classification": "T2: derive_areas title crate-token match for the diagnostic mention of area:sparq-wrapper-gen",
+      "state": "Exact current REST row is open, no area; its creation postdates the failed run. It is another current emitter, not the cause of that original occurrence.",
+      "defensible_owner": "area:ci exists; ci/area-labels.toml maps scripts/** and .github/workflows/** to ci, precisely the classifier/test/workflow change scope. Current T1 ci regex does not recognize triage-area title or scripts/triage-area.py."
+    }
+  ],
+  "owner_mapping": {
+    "generator_scope": "Actual work names the distinct crates/sparq-wrapper-gen directory; Cargo.toml declares it a workspace member/reserved code-generation seam, publish=false.",
+    "historical_intent": "2658 names exactly that generator main/test scope but carries existing area:wrapper. This is a historical owner-intent clue, not a proven scheduler alias.",
+    "existing_candidates": "area:sparq-wrapper verified by exact GET; area:wrapper observed on exact2658. Both partition paths differ from sparq-wrapper-gen, and keys_conflict returns false.",
+    "conclusion": "No defensible existing owner-area replacement for genuine generator code was established. Do not silently use wrapper, sparq-wrapper, ci or a prefix-stripping fallback to make it green; those would not reserve the actual crate partition.",
+    "cross_consumer": "PR path attribution also derives the crate directory name and treats a missing area as unresolved. The new-manifest creation exception does not apply to this already-existing crate."
+  },
+  "reproduction": {
+    "path": "reproduce.py",
+    "rows": [
+      {
+        "number": 5016,
+        "title": "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)",
+        "labels": [
+          "from:agent",
+          "role:impl",
+          "self-improvement",
+          "status:untriaged"
+        ],
+        "raw_classify": [
+          [
+            "sparq-wrapper-gen"
+          ],
+          "T2 bd-to-issues.derive_areas (title scope/crate token)"
+        ],
+        "planned_areas": [
+          "area:sparq-wrapper-gen"
+        ],
+        "plan_evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"
+      },
+      {
+        "number": 6468,
+        "title": "triage-area aborts the classification pass on missing area:sparq-wrapper-gen label",
+        "labels": [
+          "role:impl",
+          "self-improvement",
+          "status:untriaged"
+        ],
+        "raw_classify": [
+          [
+            "sparq-wrapper-gen"
+          ],
+          "T2 bd-to-issues.derive_areas (title scope/crate token)"
+        ],
+        "planned_areas": [
+          "area:sparq-wrapper-gen"
+        ],
+        "plan_evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"
+      },
+      {
+        "number": 2658,
+        "title": "sq-1rg2q.13: Expose SHACL-to-wrapper generation through a deterministic CLI",
+        "labels": [
+          "area:wrapper",
+          "bd-migration",
+          "priority:P2",
+          "role:impl",
+          "status:ready"
+        ],
+        "raw_classify": [
+          [],
+          ""
+        ],
+        "planned_areas": [],
+        "plan_evidence": "SKIP already carries an area: label"
+      }
+    ],
+    "network_subprocess_calls": [],
+    "partition_proof": {
+      "wrapper": false,
+      "sparq-wrapper": false
+    },
+    "red": "red_expected_ci.py executes current pure functions; expected ci fails, exit1. No main/live classifier/replay was called."
+  },
+  "smallest_testable_proposal": [
+    "Add a narrow title-scoped triage-area -> ci rule, preserving T0 explicit declarations and existing tier precedence; pin captured6468 and a negative neighboring-issue body mention. This correctly classifies the diagnostic but alone cannot unblock the whole sweep because5016 still emits an absent label.",
+    "Improve the prewrite unknown-label diagnostic to include offending issue number, emitted label and tier evidence; retain the global zero-write failure and add an unsupported-label negative fixture.",
+    "Resolve genuine generator routing through an explicitly reviewed label/partition policy consistent with both issue and PR consumers. Existing alias substitutions are not established safe; no such policy/label mutation was attempted."
+  ],
+  "guard_preserved": "Existing main738\u2013746 global unknown-label guard returns2 before any writable/apply_row loop. This proof computes the same unknown set but intentionally does not run main; the prior operational report remains authoritative for actual zero writes.",
+  "test_gap": "TestRuleTableHygiene only enumerates static RULES and allows real crate names; it neither proves a live label exists for each directory nor covers dynamic T2 scope/title emitters. Thus17/37 prior self-tests could pass before the live guard rejected this input.",
+  "limitations": [
+    "Search index can lag; only exact5016/2658/6468 metadata are treated as current. No entire-board enumeration or historical timeline reconstruction.",
+    "The other four search hits were not individually fetched/classified; no claim that only two emitters exist.",
+    "No new read of original job logs, no live classifier replay, no GitHub writes, no code edits/builds/models.",
+    "Original missing-label404 and original run failure are reused from prior authoritative evidence rather than reprobed.",
+    "4246 worktree and frozen artifacts remain unchanged."
+  ],
+  "original_run": {
+    "id": 34299934012,
+    "head_sha": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+    "event": "schedule",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-09-09T01:37:14Z",
+    "updated_at": "2026-09-09T01:38:22Z",
+    "run_started_at": "2026-09-09T01:37:14Z"
+  },
+  "observed_at": "2026-09-09T12:49:23.941487+00:00"
+}

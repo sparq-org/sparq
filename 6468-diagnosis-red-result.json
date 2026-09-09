@@ -1,0 +1,9 @@
+{
+  "exit": 1,
+  "cause": "Executed current pure classify/plan emits area:sparq-wrapper-gen for captured6468, contrary to supported scripts/** owner area:ci",
+  "command": [
+    "/opt/homebrew/Cellar/awscli/2.34.53/libexec/bin/python",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/red_expected_ci.py"
+  ],
+  "initial_harness_limit": "System python3 lacked tomllib; existing Python3.14 runtime succeeded without installing anything; no source change"
+}
