@@ -45,3 +45,6 @@ across fixed released rows, minimizing authentication count and then shared
 membership count within explicit resource and credential-capacity bounds. Its
 report separates established structural optimality from budget exhaustion. This
 does not change the baseline selection policy or assert a measured runtime gain.
+
+[GPT-6] Both planner paths reject oversized credential slices before traversal,
+including empty or ineligible graphs, via `MAX_DISCLOSURE_CREDENTIALS`.

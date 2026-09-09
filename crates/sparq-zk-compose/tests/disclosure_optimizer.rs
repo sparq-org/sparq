@@ -464,6 +464,71 @@ fn empty_select_and_true_ask_keep_their_exact_contracts() {
     ));
 }
 
+#[test]
+fn empty_credential_prefixes_have_an_input_cap_independent_of_candidate_fuel() {
+    use sparq_zk_compose::planner::{plan_disclosure_admitted, MAX_DISCLOSURE_CREDENTIALS};
+    let q = DisclosureQuery::parse(
+        "PREFIX ex: <http://example.org/> SELECT DISTINCT ?s WHERE { ?s ex:ok 1 }",
+    )
+    .unwrap();
+    let empty = graph(&[], 1);
+    let mut graphs = vec![empty.clone(); MAX_DISCLOSURE_CREDENTIALS - 1];
+    graphs.push(graph(&[approved("alice")], 2));
+    let rows = &released()[..1];
+    let planner_limits = PlannerLimits {
+        max_search_steps: 1,
+        ..Default::default()
+    };
+    let optimization_limits = OptimizationLimits {
+        planner: planner_limits,
+        ..Default::default()
+    };
+    let baseline = plan_disclosure(&q, &graphs, rows, planner_limits).unwrap();
+    assert_eq!(
+        baseline.authentication,
+        vec![MAX_DISCLOSURE_CREDENTIALS - 1]
+    );
+    let optimized = optimize_disclosure(&q, &graphs, rows, optimization_limits).unwrap();
+    assert_eq!(optimized.completion, OptimizationCompletion::Optimal);
+    assert_eq!(optimized.stats.candidate_steps, 1);
+    assert_eq!(
+        optimized.stats.input_credentials,
+        MAX_DISCLOSURE_CREDENTIALS
+    );
+    assert_eq!(optimized.stats.input_triples, 1);
+
+    graphs.insert(0, empty);
+    let no_search = PlannerLimits {
+        max_search_steps: 0,
+        ..Default::default()
+    };
+    let expected = PlanError::LimitExceeded("input credentials");
+    assert_eq!(
+        plan_disclosure_admitted(&q, &graphs, rows, no_search, |_, _, _| panic!(
+            "input cap must precede admission"
+        )),
+        Err(expected.clone())
+    );
+    assert_eq!(
+        optimize_disclosure_admitted(
+            &q,
+            &graphs,
+            rows,
+            OptimizationLimits {
+                planner: no_search,
+                ..Default::default()
+            },
+            |_, _, _| panic!("input cap must precede admission")
+        ),
+        Err(expected.clone())
+    );
+    // Even an empty release cannot bypass the optimizer statistics prepass cap.
+    assert_eq!(
+        optimize_disclosure(&q, &graphs, &[], OptimizationLimits::default()),
+        Err(expected)
+    );
+}
+
 // Independent exhaustive oracle for the fixed two-pattern fixture query. It
 // enumerates every tuple of canonical triples and only then evaluates the full
 // row relation; it shares no planner matching, pruning, or assembly helpers.

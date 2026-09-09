@@ -45,6 +45,11 @@ pub const MAX_DISCLOSURE_QUERY_PUNCTUATION: usize = 256;
 pub const MAX_DISCLOSURE_PATTERNS: usize = 64;
 /// Maximum normalized FILTER comparisons evaluated per candidate binding.
 pub const MAX_DISCLOSURE_FILTERS: usize = 32;
+/// Maximum supplied credentials, including empty graphs and ineligible candidates.
+///
+/// Checked using slice length before validation, statistics, or search. This
+/// bounds empty-graph traversal, which does not consume candidate-triple fuel.
+pub const MAX_DISCLOSURE_CREDENTIALS: usize = 256;
 // Bound local AST walks after the preparse fuel check; not a circuit capacity.
 const MAX_DISCLOSURE_AST_NODES: usize = 512;
 
@@ -573,6 +578,9 @@ pub fn plan_disclosure_admitted<A>(
 where
     A: Fn(usize, MembershipRef, &Triple) -> bool,
 {
+    if credentials.len() > MAX_DISCLOSURE_CREDENTIALS {
+        return Err(PlanError::LimitExceeded("input credentials"));
+    }
     if query.patterns.len() > limits.max_patterns {
         return Err(PlanError::LimitExceeded("patterns"));
     }

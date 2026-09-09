@@ -289,3 +289,7 @@ released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
 admission and credential-capacity limits remain enforced. This is structural host
 selection, not a calibrated speed claim or cryptographic assurance; see
 [disclosure planning](references/disclosure-planner.md).
+
+[GPT-6] Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
+supplied slice before traversing credentials; empty and ineligible graphs count.
+This input bound is independent of candidate-triple search fuel.

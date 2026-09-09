@@ -3,6 +3,7 @@
 use super::{
     assemble_plan, extend_bindings, released_bindings, validate_released, DisclosurePlan,
     DisclosureQuery, MembershipRef, PlanError, PlannerLimits, QueryKind, ScopedTerm,
+    MAX_DISCLOSURE_CREDENTIALS,
 };
 use oxrdf::{Term, Triple};
 use sparq_zk::commit::GraphCommitment;
@@ -153,6 +154,9 @@ where
     A: Fn(usize, MembershipRef, &Triple) -> bool,
 {
     // Cheap bounds precede validation of caller-constructed public query shapes.
+    if credentials.len() > MAX_DISCLOSURE_CREDENTIALS {
+        return Err(PlanError::LimitExceeded("input credentials"));
+    }
     if query.patterns.len() > limits.planner.max_patterns {
         return Err(PlanError::LimitExceeded("patterns"));
     }
