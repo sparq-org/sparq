@@ -489,7 +489,7 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         required_links(),
     );
     checks.reject(
-        "different_authenticated_subjects",
+        "different_subject_identifiers",
         verify_attempt(rng, &setup.key.vk, &different_subject, result),
     )?;
 

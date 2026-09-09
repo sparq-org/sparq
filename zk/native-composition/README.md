@@ -112,7 +112,7 @@ audit and provides no revocation, validity-period or complete-query statement.
 
 The real proof run accepts a two-issuer composition and the exact arithmetic
 boundary. It rejects changed threshold/disclosure/context/challenge, wrong issuer,
-swapped signature, two authenticated but different subjects, spliced income or
+swapped signature, different signed subject identifiers, spliced income or
 rent, a negative residual, an out-of-domain signed amount, truncated/trailing
 proof bytes, and unsupported backend selection. It also constructs an otherwise
 valid composite proof **without witness-equality links under the same nonce**,
