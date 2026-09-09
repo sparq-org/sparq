@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T20:31:47.350163+00:00",
+  "updated_at": "2026-09-09T20:43:41.326445+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -296,14 +296,15 @@
       "feature_matrix": 34399858565,
       "validation": "direct-6468/followup-admission/queue-validation-proof.json",
       "latest_observation": {
-        "at": "2026-09-09T20:31:47.350163+00:00",
+        "at": "2026-09-09T20:43:41.326445+00:00",
         "state": "AWAITING_CHECKS",
         "position": 1,
         "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-        "evidence": "direct-6468/followup-admission/queue-progress-2031.json",
-        "matrix": "39success1skip9running8queued,57total,0failures",
-        "CI": "21success8skip2running3queued,34total,0failures",
-        "runner_health": "All11activejobs have assignedGitHubrunners; newstarts20:30 showprogress. Queuedworkflow does notindicatestall. No capacityintervention warranted.",
+        "evidence": "direct-6468/followup-admission/queue-runs-2043.json",
+        "matrix": "SUCCESS",
+        "CI": "in_progress",
+        "aggregate": "in_progress",
+        "failures": 0,
         "mutation": "none"
       }
     }
@@ -582,14 +583,15 @@
         "feature_matrix": 34399858565,
         "validation": "direct-6468/followup-admission/queue-validation-proof.json",
         "latest_observation": {
-          "at": "2026-09-09T20:31:47.350163+00:00",
+          "at": "2026-09-09T20:43:41.326445+00:00",
           "state": "AWAITING_CHECKS",
           "position": 1,
           "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-          "evidence": "direct-6468/followup-admission/queue-progress-2031.json",
-          "matrix": "39success1skip9running8queued,57total,0failures",
-          "CI": "21success8skip2running3queued,34total,0failures",
-          "runner_health": "All11activejobs have assignedGitHubrunners; newstarts20:30 showprogress. Queuedworkflow does notindicatestall. No capacityintervention warranted.",
+          "evidence": "direct-6468/followup-admission/queue-runs-2043.json",
+          "matrix": "SUCCESS",
+          "CI": "in_progress",
+          "aggregate": "in_progress",
+          "failures": 0,
           "mutation": "none"
         }
       }
@@ -653,7 +655,7 @@
     }
   },
   "next_actions": [
-    "Observe PR6473 position1 merge-group e53464c73f31f7aca800f3867ac054c36408e346: gate34399858325; CI34399858588/matrix34399858565 pending, docs-quality34399858346SUCCESS. Preserve allcurrentruns; no reenqueue or extra old-head reruns.",
+    "Observe PR6473 position1 merge-group e53464c73f31f7aca800f3867ac054c36408e346: feature-matrix34399858565 nowSUCCESS; only CI34399858588 and aggregate34399858325 remain inprogress. No failure or capacityincident. Preserve allcurrentruns; no reenqueue or old-head reruns.",
     "After6473merge, verify two reviewed files onmain, actualmerge-group tests, postmergeCI, then linkresolvingPRonissue6468 and closeonlywhencriteria met. Continue ordinaryschedulednewlabel5016andnewsourceobservation; no manualclassifierreplay.",
     "Next existing6095: boundedread nowidentified actualoldfailure(auto-arm33926979672cancelledattempt2), no humanholdonsource4567, botgate-greenholdstillactive. Afterstable6473main compose existinghistoricalOpusbranchwithcurrentmain, narrowAstraimplementation/testingifneeded, onefreshactualOpusreview; preservebotreview:needs untilalladmissionrequirements. No restartregistry/replayautoarm/clonePRorholdescape.",
     "PR6469mainCI/matrix/aggregate alreadyverifiedSUCCESS. RegistryOFF, ALLGREEN and pending6049/6055/2305holds and releasepause unchanged.",

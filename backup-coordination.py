@@ -275,6 +275,10 @@ for evidence_name in ['assessment-query.json', 'assessment-report.json', 'assess
 for evidence_name in ['state-2030.json', 'queue-runs-2030.json', 'queue-matrix-jobs-2031.json', 'queue-ci-jobs-2031.json', 'queue-progress-2031.json']:
     FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
 
+# PR6473 bounded2043queue observation.
+for evidence_name in ["state-2043.json", "queue-runs-2043.json"]:
+    FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
