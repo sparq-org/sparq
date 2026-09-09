@@ -1,0 +1,352 @@
+[
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:34:24Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539115/job/102557363415",
+    "name": "gate",
+    "startedAt": "2026-09-09T16:43:51Z",
+    "status": "COMPLETED",
+    "workflowName": "ci-summary"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:45:55Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539072/job/102557362642",
+    "name": "docs-quality quick-gates",
+    "startedAt": "2026-09-09T16:43:50Z",
+    "status": "COMPLETED",
+    "workflowName": "docs-quality"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:44:32Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539142/job/102557363699",
+    "name": "flow-on-gates quick-gates (G1 + G2 + G6)",
+    "startedAt": "2026-09-09T16:44:13Z",
+    "status": "COMPLETED",
+    "workflowName": "flow-on-gates"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:45:25Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539083/job/102557363398",
+    "name": "supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)",
+    "startedAt": "2026-09-09T16:44:31Z",
+    "status": "COMPLETED",
+    "workflowName": "supply-chain"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:44:16Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539075/job/102557362971",
+    "name": "vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)",
+    "startedAt": "2026-09-09T16:43:50Z",
+    "status": "COMPLETED",
+    "workflowName": "vectorized-feature-off"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:45:08Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539142/job/102557364072",
+    "name": "new-bench-registry-dashboard (G3, advisory)",
+    "startedAt": "2026-09-09T16:44:56Z",
+    "status": "COMPLETED",
+    "workflowName": "flow-on-gates"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:46:03Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539075/job/102557363407",
+    "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+    "startedAt": "2026-09-09T16:44:36Z",
+    "status": "COMPLETED",
+    "workflowName": "vectorized-feature-off"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:43:48Z",
+    "conclusion": "SKIPPED",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557366836",
+    "name": "nightly-gate",
+    "startedAt": "2026-09-09T16:43:48Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:50:37Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539462/job/102557740293",
+    "name": "run + track benchmarks",
+    "startedAt": "2026-09-09T16:47:28Z",
+    "status": "COMPLETED",
+    "workflowName": "Benchmarks"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:47:17Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539457/job/102557650018",
+    "name": "pre-merge C1 (feature-gated test execution)",
+    "startedAt": "2026-09-09T16:46:59Z",
+    "status": "COMPLETED",
+    "workflowName": "feature-matrix"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:44:09Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557364481",
+    "name": "unsafe-register (count ratchet)",
+    "startedAt": "2026-09-09T16:43:57Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:50:23Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602976",
+    "name": "clippy (gate) + fmt (non-blocking)",
+    "startedAt": "2026-09-09T16:46:25Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:46:57Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602858",
+    "name": "MSRV check (Rust 1.88, declared floor)",
+    "startedAt": "2026-09-09T16:45:58Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:50:46Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557603020",
+    "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+    "startedAt": "2026-09-09T16:50:36Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:52:58Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602928",
+    "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+    "startedAt": "2026-09-09T16:46:28Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:47:45Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602768",
+    "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+    "startedAt": "2026-09-09T16:45:11Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:49:23Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602852",
+    "name": "W3C SHACL conformance (ratchet \u2014 core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+    "startedAt": "2026-09-09T16:48:42Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:49:08Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602825",
+    "name": "W3C/OGC GeoSPARQL conformance (ratchet \u2014 topology >= 119, query-rewrite >= 38)",
+    "startedAt": "2026-09-09T16:47:48Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:50:21Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557603003",
+    "name": "Solid WAC/ACP conformance (ratchet \u2014 wac >= 13, acp >= 13)",
+    "startedAt": "2026-09-09T16:49:26Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:45:51Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602812",
+    "name": "SolidLab ODRL conformance (ratchet \u2014 pass >= 59)",
+    "startedAt": "2026-09-09T16:44:46Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:49:34Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602910",
+    "name": "sparq-text BM25 differential oracle (extension ratchet \u2014 assertions >= 18750)",
+    "startedAt": "2026-09-09T16:48:24Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:51:46Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557603137",
+    "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet \u2014 assertions >= 149)",
+    "startedAt": "2026-09-09T16:50:40Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:52:04Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557603041",
+    "name": "W3C JSON-LD 1.1 conformance (ratchet \u2014 toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+    "startedAt": "2026-09-09T16:50:49Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:53:53Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557602967",
+    "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+    "startedAt": "2026-09-09T16:49:37Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:43:48Z",
+    "conclusion": "SKIPPED",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102557366787",
+    "name": "mutation ratchet (cargo-mutants, advisory)",
+    "startedAt": "2026-09-09T16:43:48Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:00:29Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102559773100",
+    "name": "coverage ratchet (shard 1/3)",
+    "startedAt": "2026-09-09T16:52:21Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:03:54Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102559773103",
+    "name": "coverage ratchet (shard 2/3)",
+    "startedAt": "2026-09-09T16:52:14Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T16:59:25Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102559773057",
+    "name": "coverage ratchet (shard 3/3)",
+    "startedAt": "2026-09-09T16:52:20Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:10:19Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102562200970",
+    "name": "coverage engine merge + ratchet (per-crate)",
+    "startedAt": "2026-09-09T17:07:01Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:11:18Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34378539442/job/102566423991",
+    "name": "coverage ratchet + test-presence gate (per-crate)",
+    "startedAt": "2026-09-09T17:11:15Z",
+    "status": "COMPLETED",
+    "workflowName": "CI"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:33:01Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/runs/102574137225",
+    "name": "opt-in sparq-kb (literature + validate \u2014 fixtures pipeline + SHACL gate)",
+    "startedAt": "2026-09-09T17:33:01Z",
+    "status": "COMPLETED",
+    "workflowName": "formal-verification"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:32:29Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/runs/102573958119",
+    "name": "opt-in sparq-lws-core (wasm)",
+    "startedAt": "2026-09-09T17:32:29Z",
+    "status": "COMPLETED",
+    "workflowName": "formal-verification"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:32:33Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/runs/102573981308",
+    "name": "opt-in sparq-lws-wasm (sparql-endpoint)",
+    "startedAt": "2026-09-09T17:32:33Z",
+    "status": "COMPLETED",
+    "workflowName": "formal-verification"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:33:23Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/runs/102574269665",
+    "name": "opt-in sparq-reason-ql (experimental \u2014 OWL 2 QL PerfectRef rewriter + DL-Lite oracle)",
+    "startedAt": "2026-09-09T17:33:23Z",
+    "status": "COMPLETED",
+    "workflowName": "formal-verification"
+  },
+  {
+    "__typename": "CheckRun",
+    "completedAt": "2026-09-09T17:33:19Z",
+    "conclusion": "SUCCESS",
+    "detailsUrl": "https://github.com/sparq-org/sparq/runs/102574248153",
+    "name": "opt-in sparq-rsp (window-aggregate)",
+    "startedAt": "2026-09-09T17:33:19Z",
+    "status": "COMPLETED",
+    "workflowName": "formal-verification"
+  }
+]

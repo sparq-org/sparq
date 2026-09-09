@@ -1,0 +1,64 @@
+{
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "verified_at": "2026-09-09T17:47:49.472288+00:00",
+  "gate": {
+    "id": 102557363415,
+    "app": 15368,
+    "run": 34378539115,
+    "conclusion": "success"
+  },
+  "selected_leg": {
+    "name": "sparq-core (overlay-deleted-projections)",
+    "crate": "sparq-core",
+    "features": "overlay-deleted-projections",
+    "test": true
+  },
+  "matrix_run": 34378539457,
+  "group_job": 102560439383,
+  "new_feature_check": 102573765069,
+  "report_check": 102574384557,
+  "report_external_id": "34378539457",
+  "selected_legs": 187,
+  "new_feature_tests_passed": [
+    "store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication",
+    "store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild",
+    "store::overlay_deleted_tests::deleted_cache_concurrent_first_reads_share_initialized_projection",
+    "store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent",
+    "store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation",
+    "store::overlay_deleted_tests::deleted_cache_inclusive_bounds_and_empty_ranges",
+    "store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted",
+    "store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas",
+    "store::overlay_deleted_tests::deleted_cache_survives_insert_only_and_noop_deltas"
+  ],
+  "build_test_all_targets_clippy_executed": true,
+  "result_artifact_failed_step": null,
+  "linux_privacy_step": [
+    {
+      "job": 102557362642,
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "step": "privacy-claims (ZK/MPC honesty gate) \u2014 no unqualified claims",
+      "conclusion": "success"
+    },
+    {
+      "job": 102557362642,
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "step": "Self-test the privacy-claims gate (both directions)",
+      "conclusion": "success"
+    },
+    {
+      "job": 102557362642,
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "step": "Self-test the .typ honesty-gate coverage (perf + privacy, both directions)",
+      "conclusion": "success"
+    }
+  ],
+  "all_checks_rollup": {
+    "success": 300,
+    "skipped": 8,
+    "neutral": 1
+  },
+  "no_pending_failed_checks_at_snapshot": true,
+  "matrix_log_sha256": "752011499e9b72a5d138862619509e0d18359034f93fca1830eaa1b2f13c8855",
+  "review_threads_resolved": true,
+  "copilot_latest": "No new specific finding/thread; generic human-review recommendation to address with maintainer-authorized independent Opus review and final CI."
+}

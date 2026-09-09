@@ -1,0 +1,68 @@
+{
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "packet_bytes": 172000,
+  "packet_sha256": "317a7195d17ba0875d8db83d3f1a5c2cbaac3a309e1ea8104082b9f3e48747d2",
+  "inputs": [
+    {
+      "label": "Repository performance-review role (contract)",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/.claude/agents/sparq-perf-reviewer.md",
+      "bytes": 10583,
+      "sha256": "3dc1039c92554406cec46d826647dfd50d857e3f84ef9f3f43ec35aba6cdbc60"
+    },
+    {
+      "label": "Full PR diff excluding generated Cargo.lock only",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/perf-admission/head-without-generated-lock.diff",
+      "bytes": 68903,
+      "sha256": "b8a27476d4890b3e77a829e06a48c9843824c914be53e4c6a0d8e4c9deab10f8"
+    },
+    {
+      "label": "Current public PR body; final-validation pending text will be updated after this verdict",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-admission/pr-body.md",
+      "bytes": 6693,
+      "sha256": "fde30069da0b304ee2b62cadfa482d65f6a994a66cc0ae20c626ab9049eb06be"
+    },
+    {
+      "label": "Root verification of exact final-head protected CI and actual opt-in feature execution",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-admission/full-validation-verification.json",
+      "bytes": 2595,
+      "sha256": "19e1012221a00b3be8b5c09decbfcb95963a69648f4e699ecec8bd224caa3011"
+    },
+    {
+      "label": "Completed performance/default-artifact-related checks and URLs",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/perf-admission/performance-checks.json",
+      "bytes": 13024,
+      "sha256": "4258180c0ac2f02948b13c74f9897d88afe5fbc8aab60591c7325deffcfb4318"
+    },
+    {
+      "label": "Experimental feature report and measurement limitations",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/report.json",
+      "bytes": 13598,
+      "sha256": "dc7cbc10d95f43ff10b2f9429526d2cbb6e5979303a1ab764e2c9cf68d595747"
+    },
+    {
+      "label": "Generated fixed reads-per-generation summary (not canonical)",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/paired/lineage-summary.json",
+      "bytes": 20329,
+      "sha256": "86acfe3e30afa45a6fa12e228733aebf56f0e6b1d97acf72ebb3a182c6c90bcb"
+    },
+    {
+      "label": "Actual prior Opus default-off review explicit result",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/opus-review-b86b5d5a.json",
+      "bytes": 11858,
+      "sha256": "0e885a397124caddbfd827e998d8c32d14f169f2f26ad070a0c7a6c48d276527"
+    },
+    {
+      "label": "Actual prior Opus source-preservation/compiler-neutrality review explicit result",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/opus-review-result.json",
+      "bytes": 10428,
+      "sha256": "2c9392cc1149dafa80d0dfc1c63bd12811d99a5199c8b3001aa37152b373ca68"
+    },
+    {
+      "label": "Actual prior Opus final counter repair review explicit result",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-admission/opus-review-result.json",
+      "bytes": 11673,
+      "sha256": "fe753ca39e9975c629537c6e26b895b66357f62a2e8cb8ab76b4947a48dcfdfc"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T16:47:23.906187+00:00",
+  "updated_at": "2026-09-09T17:53:44.241670+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "PR6469 open/non-draft atccded. ActualOpus5xhighapprovedexactcounterrepair; rootverified47files/exactcompiledsource/control, normalfastforwardpush andpublicreviewresponse verified. Allinline threadsresolved,review:unreviewedinformational only,noreview:needs hold. Currentheadwasmfeature-offworkflow passed; fullCI/bench/featurematrix/aggregateandnewautomaticCopilotreviewpending; nofailednewheadcheck observed. No mergeadmission yet.",
-    "phase": "Reviewed counter repair published; normal full CI and fresh Copilot review progressing",
+    "state": "PR6469 exactccded full protected CI green:300success8skipped1neutral. Actualnewfeaturetests/build/alltargetclippyran; gate15368success; allreviewthreadsresolved. Final specialized Opus performance admission review prepared, not yet enqueued.",
+    "phase": "Final narrow Opus performance admission with completed CI evidence",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -497,7 +497,38 @@
       "body": "direct-4246/counting-admission/pr-body.md",
       "response": "direct-4246/counting-admission/review-comment.md"
     },
-    "current_review_status": "ActualOpusreviewchain: runtime6334approvedforvalidation, Linuxneutralitydeclarationfa reviewedreasonedits/mechanicallyverified, layoutcomment5757exactwordingapproved, counterrepairccdedexactheadapproved. No sourceblockers. FinalcurrentheadCI/reviews/holds remain required before ordinary protectedadmission. NeverfabricatecanonicalVERDICT orreview:pass."
+    "current_review_status": "ActualOpusreviewchain: runtime6334approvedforvalidation, Linuxneutralitydeclarationfa reviewedreasonedits/mechanicallyverified, layoutcomment5757exactwordingapproved, counterrepairccdedexactheadapproved. No sourceblockers. FinalcurrentheadCI/reviews/holds remain required before ordinary protectedadmission. NeverfabricatecanonicalVERDICT orreview:pass.",
+    "final_validation": {
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "evidence": "direct-4246/counting-admission/full-validation-verification.json",
+      "verified_at": "2026-09-09T17:47:49.472288+00:00",
+      "ci": "300success8skipped1neutral; no failed/pending",
+      "new_feature_executed": true,
+      "linux_privacy_gate": "Actual check-privacy-claims.sh and both-direction self-tests succeeded; local Bash3 limitation remains, no nonexistent ci-preflight wrapper claim."
+    },
+    "final_perf_review": {
+      "state": "running",
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "input": "direct-4246/perf-admission/opus-input.md",
+      "input_sha256": "317a7195d17ba0875d8db83d3f1a5c2cbaac3a309e1ea8104082b9f3e48747d2",
+      "input_bytes": 172000,
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "completed": false,
+      "session_id": 13152,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T17:53:44.241670+00:00",
+      "output": "direct-4246/perf-admission/opus-review-ccded-final-perf.json",
+      "acceptance": "Require successful outer JSON, is_errorfalse, actual modelUsage claude-opus-5 and exact ccded head. No duplicate invocation or exhausted-budget retry."
+    },
+    "copilot_final": {
+      "id": "PRR_kwDOSz3qKM8AAAABM2bPag",
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "concrete_findings": 0,
+      "threads_resolved": true,
+      "generic_human_recommendation": "No required approval or user hold; direct admission uses actual independent Opus review under standing user instruction. Do not claim human approval."
+    },
+    "review_process_note": "Legacy roborev CLI absent (command -v empty). Actual independent Opus review follows user model instruction over stale Codex review routing. No roborev pass claimed."
   },
   "prs": {
     "4300": {

@@ -199,6 +199,11 @@ for evidence_name in [*json.loads((OPERATIONAL_TRIAGE / 'manifest.json').read_te
 for evidence_name in ['operational-triage-root-query.json', 'operational-triage-root-read.json', 'registry-pause-revalidated.json', 'triage-missing-area-issue.md', 'triage-missing-area-created.txt', 'triage-missing-area-issue-verified.json']:
     FILES[evidence_name] = ROOT / 'recovery-20260909' / evidence_name
 
+for evidence_name in ['checks-1740.json', 'review-1740.json', 'matrix-jobs-final.json', 'matrix-artifacts-final.json', 'gate-final.json', 'effective-main-rules.json', 'matrix-g02-final.log', 'matrix-selected-final.zip', 'matrix-results-1-final.zip', 'matrix-report-final.json', 'new-feature-check-final.json', 'matrix-feature-execution.log', 'docs-jobs-final.json', 'full-validation-verification.json']:
+    FILES["4246-counting-admission-" + evidence_name] = ROOT / "direct-4246/counting-admission" / evidence_name
+for evidence_name in ["opus-input.md", "input-manifest.json", "head-without-generated-lock.diff", "performance-checks.json"]:
+    FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

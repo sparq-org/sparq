@@ -1,0 +1,1589 @@
+diff --git a/.github/feature-matrix.d/sparq-core.yml b/.github/feature-matrix.d/sparq-core.yml
+index bb0bb9011..fb8381eea 100644
+--- a/.github/feature-matrix.d/sparq-core.yml
++++ b/.github/feature-matrix.d/sparq-core.yml
+@@ -70,3 +70,10 @@
+   crate: "sparq-core"
+   features: "spqcprm2,mmap"
+   test: true
++
++# [GPT-6 Astra] #4246: explicitly exercise the experimental deletion cache;
++# ordinary/core defaults remain feature-off. Includes ownership/invalidation tests.
++- name: "sparq-core (overlay-deleted-projections)"
++  crate: "sparq-core"
++  features: "overlay-deleted-projections"
++  test: true
+diff --git a/bench/benchmarks.toml b/bench/benchmarks.toml
+index f45e7f95c..248534e5e 100644
+--- a/bench/benchmarks.toml
++++ b/bench/benchmarks.toml
+@@ -1992,6 +1992,21 @@ status      = "ok"
+ # (competitor CSV-import comparisons belong to the sq-hmd7l comparative program).
+ featured    = false
+ 
++# [GPT-6 Astra] Bounded local diagnostic for deletion projection caching (#4246).
++[[benchmark]]
++id = "overlay-count-diagnostic"
++name = "Overlay bound-range counting, cold and warm"
++category = "query"
++measures = "whole SELECT and bound scan latency, requested allocations, store heap, cumulative process RSS"
++invoke = "cargo run --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml"
++source = "bench/overlay-count/; crates/sparq-core/src/store.rs"
++dataset = "deterministic generated subjects with four predicates; fixed deletion curve and insert-only control"
++quiet_box_sensitive = true
++pinning = "exact source/harness/binary hashes; fixed dimensions and sampling in README"
++records_to = "stdout JSON lines"
++status = "diagnostic"
++featured = false
++
+ # [GPT-5.6] sq-vwnzh — correctness-gated Arrow/tabular export interop panel.
+ [[benchmark]]
+ id          = "arrow-interop"
+diff --git a/bench/feature-off-declarations/6469.json b/bench/feature-off-declarations/6469.json
+new file mode 100644
+index 000000000..9434388f6
+--- /dev/null
++++ b/bench/feature-off-declarations/6469.json
+@@ -0,0 +1,46 @@
++{
++  "pr": 6469,
++  "date": "2026-09-09",
++  "reason": "[GPT-6 Astra] #6469: DERIVED declaration (scripts/feature_off_autodeclare.py). The feature-OFF bundle moved 12 of 1560241 bytes at a size delta of +0, and the drift was proved to carry no compiled code. Specifically: rebuilding the head tree with all 1123 added non-blank line(s) blanked produced a BYTE-IDENTICAL bundle, and rebuilding the base tree with all 10 deleted non-blank line(s) blanked left the base bundle unchanged. Both directions were covered. What moved is line-position metadata (core::panic::Location line numbers shift when lines above them move); no always-compiled code entered or left the default build. Bundle SIZE remains governed separately by the wasm_bundle_bytes ratchet. Derived by Linux CI run 34365605984, job 102513392880, for source commit 6334b338587fe5c635c69a09e134917ec35eaaca against a42a9e89dec485f6a319c47cb3635c59cb5a2270 using the pinned Rust 1.97.1 wasm32-unknown-unknown build; these counts refer to that source commit before this declaration file was added.",
++  "derived": true,
++  "evidence": {
++    "base_bundle_bytes": 1560241,
++    "head_bundle_bytes": 1560241,
++    "size_delta_bytes": 0,
++    "differing_bytes": 12,
++    "closure_files_changed": [
++      ".github/feature-matrix.d/sparq-core.yml",
++      "bench/benchmarks.toml",
++      "bench/overlay-count/README.md",
++      "bench/overlay-count/src/counting.rs",
++      "bench/overlay-count/src/lifecycle.rs",
++      "bench/overlay-count/src/main.rs",
++      "crates/sparq-core/README.md",
++      "crates/sparq-core/src/store.rs",
++      "crates/sparq-core/src/store/overlay_deleted_tests.rs",
++      "scripts/tests/feature-matrix-legnames.golden.txt",
++      "skills/sparql-query/SKILL.md"
++    ],
++    "manifest_files_changed": [
++      "bench/overlay-count/Cargo.lock",
++      "bench/overlay-count/Cargo.toml",
++      "crates/sparq-core/Cargo.toml"
++    ],
++    "files_in_compiled_closure": [
++      "crates/sparq-core/Cargo.toml",
++      "crates/sparq-core/README.md",
++      "crates/sparq-core/src/store.rs",
++      "crates/sparq-core/src/store/overlay_deleted_tests.rs"
++    ],
++    "closure_dirs": [
++      "crates/sparq-core/",
++      "crates/sparq-engine/",
++      "crates/sparq-substrate/",
++      "crates/sparq-wasm/",
++      "vendor/spargebra/"
++    ],
++    "deleted_nonblank_lines": 10,
++    "added_nonblank_lines_blanked": 1123,
++    "neutral_tree_files_mutated": 14
++  }
++}
+diff --git a/bench/overlay-count/Cargo.toml b/bench/overlay-count/Cargo.toml
+new file mode 100644
+index 000000000..d4648a62a
+--- /dev/null
++++ b/bench/overlay-count/Cargo.toml
+@@ -0,0 +1,27 @@
++# [GPT-6 Astra] Local diagnostic only; no production feature or dependency changes.
++[package]
++name = "overlay-count-diagnostic"
++version = "0.0.0"
++edition = "2021"
++publish = false
++
++[workspace]
++
++[patch.crates-io]
++spargebra = { path = "../../vendor/spargebra" }
++
++[features]
++count-alloc = []
++
++[dependencies]
++sparq-core = { path = "../../crates/sparq-core" }
++sparq-engine = { path = "../../crates/sparq-engine" }
++rayon = "1"
++oxrdf = { version = "0.3", features = ["rdf-12"] }
++libc = "0.2"
++
++[profile.release]
++opt-level = 3
++debug = false
++lto = false
++codegen-units = 16
+diff --git a/bench/overlay-count/README.md b/bench/overlay-count/README.md
+new file mode 100644
+index 000000000..0ba589ae9
+--- /dev/null
++++ b/bench/overlay-count/README.md
+@@ -0,0 +1,103 @@
++# Overlay range-count diagnostic
++
++[GPT-6 Astra] Local diagnostic for issue #4246; results are noncanonical. The
++standalone crate follows `bench/alloc-track` and reuses the calibrated System
++allocator wrapper from the earlier indexed-topk diagnostic; no top-k runtime is
++included. Build timing and `count-alloc` binaries separately with the same source,
++lockfile, release profile, two build jobs, and one Rayon runtime thread.
++
++```sh
++CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features sparq-core/overlay-deleted-projections
++CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features count-alloc,sparq-core/overlay-deleted-projections
++```
++
++Save each binary before the next build. Each invocation emits the entire fixed
++matrix as JSON lines: 50,000 subjects with four predicates; deletion counts 0, 16,
++1,024, 8,192, and 32,768; an additional insert-only 8,192-triple control; bound
++store scan and ordinary single-pattern SELECT; cold and warm cache states. The
++selected subject is outside every mutation range. Cold means one operation on a
++fresh fork after its delta. Warm means one priming operation, then 10,000 scans or
++100 whole queries. Each case has two unrecorded warmup samples followed by seven
++timing samples or three allocation samples. Every sample has an independent fork;
++oracle verification uses a separate fork so it cannot warm measured caches.
++
++Setup, delta construction/application, and correctness checks are outside measured
++windows. Query execution includes parsing, evaluation, result materialization and
++drop. Scan execution also includes two dictionary lookups before the loop. Results
++must match the generated single-row oracle. No wall-clock assertions are used.
++
++`requested_bytes` includes successful allocation and full new realloc sizes;
++`peak_live_delta_bytes` is requested live heap above the window's baseline, not
++allocator metadata, stack, mapped memory, or realloc's internal transient peak.
++Store heap accounting is reported cold, before, and after each window, separately
++from process high-water RSS. RSS is cumulative and cannot identify query heap.
++Counting calibration runs before setup. Compare only byte-identical harnesses,
++identical dimensions/features, and record exact source and binary hashes with raw
++JSON. Preserve all samples; do not seek a quiet subset or publish a speedup claim
++from these local diagnostics.
++
++The `lifecycle` argument selects the fixed review follow-up: a delete-only overlay
++with 32,768 tombstones, four retained generations, and one or all six projections
++warmed before read-only snapshots, fork/insert/read, or fork/delete/read. A
++six-projection in-place insert/read control separates deep cloning from invalidation.
++Three additional points execute a three-pattern query cold and warm, and two
++concurrent cold readers synchronized immediately before their ordinary queries.
++No dimension is selected from observed timings. This protocol retains the same
++two warmup samples and seven timing / three allocation repetitions.
++
++Lifecycle windows include clone (where applicable), one delta, whole query, and
++retaining the resulting graph or snapshot in a preallocated local vector. This is
++local ownership publication, not server or durable-store publication. Each of four
++generation windows is measured separately while earlier generations remain alive.
++`phase_ns` records clone/delta/read; for concurrent readers its first two values
++are the individual reader durations and the whole window includes thread launch
++and join. Those few samples do not establish tail percentiles.
++
++Retained store heap subtracts the shared immutable base once per reference, then
++sums the overlay heap of the initial graph and retained generations. Existing
++`heap_bytes` omits fixed boxed-overlay metadata and estimates hash-table capacity;
++allocator counters separately report live requested bytes. Cold-query cases do not
++prime measured forks. A separate oracle records the multi-pattern query's actual
++projection heap growth and verifies the complete four-row result.
++
++The core experiment is OFF by default. Omit `sparq-core/overlay-deleted-projections`
++for the ordinary linear control; the benchmark does not forward or enable it
++implicitly. Timing and allocator comparisons use the same harness, with the core
++feature state recorded separately in build provenance.
++
++The `reads-per-generation` argument runs only the fixed fork/tombstone/read case:
++32,768 initial tombstones, six initially warmed permutations, four retained child
++generations, and reads per generation in `{1, 2, 4, 8, 16}`. Each child adds one
++tombstone, executes the same ordinary single-pattern SELECT that many times, then
++is retained locally. Earlier generations and the initial graph stay alive. The
++existing two warmups, seven timing and three allocation repetitions apply. This
++measures the declared read counts, not a recommended crossover or tuning threshold.
++
++### Allocator window regression
++
++<!-- [GPT-6 Astra] Test the actual allocator module without building the benchmark. -->
++From the repository root, with its pinned Rust toolchain already installed:
++
++```sh
++test_dir=$(mktemp -d)
++rustc --edition=2021 --test bench/overlay-count/src/counting.rs \
++  -o "$test_dir/counting-window-tests"
++"$test_dir/counting-window-tests" --exact tests::window_ownership_and_calibration \
++  --test-threads=1 --nocapture
++```
++
++This depends only on the standard library. The detached benchmark is not reached
++by ordinary workspace tests; do not treat that CI as execution of this command.
++One serial test checks repeated clean calibrations and nested/competing admission
++against the real module. Panic handling and thread machinery can allocate, so the
++denied-admission checks measure a known request after that machinery has finished,
++rather than asserting exact totals for an invalid window. Libtest itself can
++allocate globally; unexpected calibration counts are a failure to investigate,
++not a reason to adjust the oracle or repeat until green.
++
++Window ownership covers counter reset and readout. The successful coordinator must
++balance `begin` with `end`, with workers quiescent at both boundaries. The guard
++does not make arbitrary concurrent allocator activity into an atomic snapshot or
++authorize another caller to end the owner's window. The regression synchronizes
++a competing attempt after the owner has begun; it does not claim to execute every
++possible reset/readout interleaving.
+diff --git a/bench/overlay-count/src/counting.rs b/bench/overlay-count/src/counting.rs
+new file mode 100644
+index 000000000..aec4fdebf
+--- /dev/null
++++ b/bench/overlay-count/src/counting.rs
+@@ -0,0 +1,212 @@
++//! [GPT-6 Astra] Bench-only System wrapper, following bench/alloc-track.
++//! Requested live bytes exclude allocator metadata and transient realloc internals.
++
++use std::alloc::{GlobalAlloc, Layout, System};
++use std::sync::atomic::{
++    AtomicBool, AtomicU64,
++    Ordering::{Acquire, Relaxed, Release},
++};
++
++struct Counting;
++static ACTIVE: AtomicBool = AtomicBool::new(false);
++// [GPT-6 Astra] Reserve reset/readout as well as the active counting interval.
++static WINDOW_OPEN: AtomicBool = AtomicBool::new(false);
++static LIVE: AtomicU64 = AtomicU64::new(0);
++static PEAK: AtomicU64 = AtomicU64::new(0);
++static ALLOCS: AtomicU64 = AtomicU64::new(0);
++static REALLOCS: AtomicU64 = AtomicU64::new(0);
++static BYTES: AtomicU64 = AtomicU64::new(0);
++
++fn added(bytes: usize) {
++    let live = LIVE.fetch_add(bytes as u64, Relaxed) + bytes as u64;
++    if ACTIVE.load(Relaxed) {
++        PEAK.fetch_max(live, Relaxed);
++    }
++}
++
++// SAFETY: All pointer/layout operations are forwarded unchanged to System.
++// Atomics allocate nothing, never dereference pointers and never unwind.
++unsafe impl GlobalAlloc for Counting {
++    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
++        // SAFETY: The GlobalAlloc caller supplies a valid layout.
++        let ptr = unsafe { System.alloc(layout) };
++        if !ptr.is_null() {
++            added(layout.size());
++            if ACTIVE.load(Relaxed) {
++                ALLOCS.fetch_add(1, Relaxed);
++                BYTES.fetch_add(layout.size() as u64, Relaxed);
++            }
++        }
++        ptr
++    }
++
++    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
++        // SAFETY: The GlobalAlloc caller supplies a valid layout.
++        let ptr = unsafe { System.alloc_zeroed(layout) };
++        if !ptr.is_null() {
++            added(layout.size());
++            if ACTIVE.load(Relaxed) {
++                ALLOCS.fetch_add(1, Relaxed);
++                BYTES.fetch_add(layout.size() as u64, Relaxed);
++            }
++        }
++        ptr
++    }
++
++    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
++        // SAFETY: The caller supplies this allocation's original pointer/layout.
++        unsafe { System.dealloc(ptr, layout) };
++        LIVE.fetch_sub(layout.size() as u64, Relaxed);
++    }
++
++    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
++        // SAFETY: The caller supplies a live allocation and valid nonzero new size.
++        let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
++        if !new_ptr.is_null() {
++            if new_size >= layout.size() {
++                added(new_size - layout.size());
++            } else {
++                LIVE.fetch_sub((layout.size() - new_size) as u64, Relaxed);
++            }
++            if ACTIVE.load(Relaxed) {
++                REALLOCS.fetch_add(1, Relaxed);
++                // Full new request size, not merely the growth in live bytes.
++                BYTES.fetch_add(new_size as u64, Relaxed);
++            }
++        }
++        new_ptr
++    }
++}
++
++#[global_allocator]
++static ALLOCATOR: Counting = Counting;
++
++/// Begin a window while the benchmark and its initialized Rayon pool are idle.
++/// The successful coordinator must balance this with `end` after its workers finish.
++pub fn begin() -> u64 {
++    assert!(WINDOW_OPEN
++        .compare_exchange(false, true, Acquire, Relaxed)
++        .is_ok());
++    let baseline = LIVE.load(Relaxed);
++    PEAK.store(baseline, Relaxed);
++    ALLOCS.store(0, Relaxed);
++    REALLOCS.store(0, Relaxed);
++    BYTES.store(0, Relaxed);
++    ACTIVE.store(true, Relaxed);
++    baseline
++}
++
++/// Stop the window before formatting output or checking returned query results.
++/// The admitted coordinator calls this with all measured workers quiescent.
++pub fn end(baseline: u64) -> (u64, u64, u64, u64, u64) {
++    ACTIVE.store(false, Relaxed);
++    let result = (
++        ALLOCS.load(Relaxed),
++        REALLOCS.load(Relaxed),
++        BYTES.load(Relaxed),
++        PEAK.load(Relaxed).saturating_sub(baseline),
++        LIVE.load(Relaxed),
++    );
++    WINDOW_OPEN.store(false, Release);
++    result
++}
++
++pub fn calibrate() {
++    let baseline = begin();
++    // SAFETY: Each successful allocation is used only with its matching layout;
++    // realloc transfers ownership on success. No allocated byte is dereferenced.
++    unsafe {
++        let old = Layout::from_size_align(128, 8).unwrap();
++        let zero = Layout::from_size_align(64, 8).unwrap();
++        let p = ALLOCATOR.alloc(old);
++        let q = ALLOCATOR.alloc_zeroed(zero);
++        assert!(!p.is_null() && !q.is_null());
++        let p = ALLOCATOR.realloc(p, old, 256);
++        assert!(!p.is_null());
++        ALLOCATOR.dealloc(p, Layout::from_size_align(256, 8).unwrap());
++        ALLOCATOR.dealloc(q, zero);
++    }
++    assert_eq!(end(baseline), (2, 1, 448, 320, baseline));
++}
++
++// [GPT-6 Astra] Compile this actual std-only module directly with rustc --test.
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::sync::{Arc, Barrier};
++
++    fn allocation_after_denial() -> (bool, (u64, u64, u64)) {
++        let layout = Layout::from_size_align(128, 8).unwrap();
++        let active = ACTIVE.load(Relaxed);
++        // Panic payloads have already been dropped. Measure only this known request,
++        // not the invalid window's totals, which can include panic/thread machinery.
++        let before = (
++            ALLOCS.load(Relaxed),
++            REALLOCS.load(Relaxed),
++            BYTES.load(Relaxed),
++        );
++        // SAFETY: The nonzero layout is valid, and a successful System allocation is
++        // released once with that same layout. No allocated byte is dereferenced.
++        unsafe {
++            let ptr = ALLOCATOR.alloc(layout);
++            if ptr.is_null() {
++                std::alloc::handle_alloc_error(layout);
++            }
++            ALLOCATOR.dealloc(ptr, layout);
++        }
++        (
++            active,
++            (
++                ALLOCS.load(Relaxed) - before.0,
++                REALLOCS.load(Relaxed) - before.1,
++                BYTES.load(Relaxed) - before.2,
++            ),
++        )
++    }
++
++    #[test]
++    fn window_ownership_and_calibration() {
++        // One serial test owns the process-global allocator and panic hook. Hook
++        // changes/output/assertions stay outside clean calibration windows.
++        calibrate();
++        calibrate();
++        let old_hook = std::panic::take_hook();
++        std::panic::set_hook(Box::new(|_| {}));
++
++        let baseline = begin();
++        let nested_denied = std::panic::catch_unwind(begin).is_err();
++        let nested_probe = allocation_after_denial();
++        let _ = end(baseline);
++
++        // Prepare the caller before the window; admit its attempt only after the
++        // owner's begin returns. No timing threshold or probabilistic stress loop.
++        let barrier = Arc::new(Barrier::new(2));
++        let worker_barrier = Arc::clone(&barrier);
++        let worker = std::thread::spawn(move || {
++            worker_barrier.wait();
++            worker_barrier.wait();
++            std::panic::catch_unwind(begin).is_err()
++        });
++        barrier.wait();
++        let baseline = begin();
++        barrier.wait();
++        let competing_denied = worker.join().unwrap();
++        let competing_probe = allocation_after_denial();
++        let _ = end(baseline);
++        drop(barrier);
++
++        std::panic::set_hook(old_hook);
++        calibrate();
++        calibrate();
++        println!(
++            "calibration_windows=4 nested={:?} competing={:?}",
++            (nested_denied, nested_probe),
++            (competing_denied, competing_probe)
++        );
++        assert_eq!((nested_denied, nested_probe), (true, (true, (1, 0, 128))));
++        assert_eq!(
++            (competing_denied, competing_probe),
++            (true, (true, (1, 0, 128)))
++        );
++    }
++}
+diff --git a/bench/overlay-count/src/lifecycle.rs b/bench/overlay-count/src/lifecycle.rs
+new file mode 100644
+index 000000000..beb1bfdbd
+--- /dev/null
++++ b/bench/overlay-count/src/lifecycle.rs
+@@ -0,0 +1,312 @@
++//! [GPT-6 Astra] Fixed lifecycle/admission cases requested by the #4246 review.
++
++use super::*;
++use sparq_core::{store::Perm, GraphSnapshot};
++use std::sync::Barrier;
++
++const D: usize = 32_768;
++const GENERATIONS: usize = 4;
++const MULTI: &str = "SELECT ?o ?s ?p WHERE { <urn:s:49999> <urn:p:0> ?o . ?s <urn:p:1> <urn:o:49999> . ?s ?p <urn:o:49999> }";
++
++#[derive(Clone, Copy, Default)]
++struct Sample {
++    elapsed: u128,
++    phases: [u128; 3],
++    counts: (u64, u64, u64, u64, u64),
++    live_before: u64,
++    rss_before: u64,
++    rss_after: u64,
++    retained_heap: usize,
++    initial_heap: usize,
++}
++
++fn measure(f: impl FnOnce() -> [u128; 3]) -> Sample {
++    let rss_before = rss();
++    #[cfg(feature = "count-alloc")]
++    let live_before = counting::begin();
++    #[cfg(not(feature = "count-alloc"))]
++    let live_before = 0;
++    let start = Instant::now();
++    let phases = f();
++    let elapsed = start.elapsed().as_nanos();
++    #[cfg(feature = "count-alloc")]
++    let counts = counting::end(live_before);
++    #[cfg(not(feature = "count-alloc"))]
++    let counts = (0, 0, 0, 0, 0);
++    Sample {
++        elapsed,
++        phases,
++        counts,
++        live_before,
++        rss_before,
++        rss_after: rss(),
++        ..Sample::default()
++    }
++}
++
++fn emit(case: &str, warm_perms: usize, rep: usize, generation: usize, row: Sample) {
++    println!("{{\"kind\":\"lifecycle\",\"case\":\"{case}\",\"warm_perms\":{warm_perms},\"rep\":{rep},\"generation\":{generation},\"elapsed_ns\":{},\"phase_ns\":{:?},\"allocs\":{},\"reallocs\":{},\"requested_bytes\":{},\"peak_live_delta_bytes\":{},\"live_before\":{},\"live_after\":{},\"rss_before\":{},\"rss_after\":{},\"retained_overlay_reported_heap\":{},\"initial_overlay_reported_heap\":{}}}", row.elapsed,row.phases,row.counts.0,row.counts.1,row.counts.2,row.counts.3,row.live_before,row.counts.4,row.rss_before,row.rss_after,row.retained_heap,row.initial_heap);
++}
++
++fn prime(graph: &Graph, permutations: usize) {
++    let pattern = [
++        Some(graph.dict.lookup(&iri("urn:s:49999"))),
++        Some(graph.dict.lookup(&iri("urn:p:0"))),
++        Some(graph.dict.lookup(&iri("urn:o:49999"))),
++    ];
++    for &perm in &Perm::ALL[..permutations] {
++        assert_eq!(graph.store.scan_perm(&pattern, perm).unwrap().rows.len(), 1);
++    }
++}
++
++fn multi(graph: &Graph) -> usize {
++    let result = query(black_box(graph), black_box(MULTI)).unwrap();
++    black_box(result.rows.len())
++}
++
++fn check_multi(graph: &Graph) {
++    let result = query(graph, MULTI).unwrap();
++    assert_eq!(result.rows.len(), 4);
++    let mut actual: Vec<_> = result
++        .rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r[0], Some(iri("urn:o:49999")));
++            assert_eq!(r[1], Some(iri("urn:s:49999")));
++            r[2].as_ref().unwrap().to_string()
++        })
++        .collect();
++    actual.sort_unstable();
++    let expected: Vec<_> = (0..4)
++        .map(|p| iri(&format!("urn:p:{p}")).to_string())
++        .collect();
++    assert_eq!(actual, expected);
++}
++
++pub(super) fn run_all() {
++    let pristine = base();
++    let base_heap = pristine.store.heap_bytes();
++    let deletions = delta(D, false);
++    let inserts: Vec<_> = (0..GENERATIONS)
++        .map(|i| {
++            [
++                iri(&format!("urn:new:{i}")),
++                iri("urn:p:0"),
++                iri("urn:new-object"),
++            ]
++        })
++        .collect();
++    let tombstones: Vec<_> = (0..GENERATIONS)
++        .map(|i| {
++            [
++                iri(&format!("urn:s:{}", 20_000 + i)),
++                iri("urn:p:0"),
++                iri(&format!("urn:o:{}", 20_000 + i)),
++            ]
++        })
++        .collect();
++    let oracle = fork(&pristine, &deletions, false);
++    let before = oracle.store.heap_bytes();
++    check_multi(&oracle);
++    // This records actual multi-query projection engagement outside measured forks.
++    println!("{{\"kind\":\"lifecycle_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"multi_query_heap_delta\":{},\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}", oracle.store.heap_bytes()-before,cfg!(feature="count-alloc"),rss());
++    drop(oracle);
++    let cases = [
++        ("snapshot", 1),
++        ("snapshot", 6),
++        ("fork-insert", 1),
++        ("fork-insert", 6),
++        ("fork-tombstone", 1),
++        ("fork-tombstone", 6),
++        ("inplace-insert", 6),
++        ("multi-cold", 0),
++        ("multi-warm", 3),
++        ("concurrent-cold", 0),
++    ];
++    for (case, warm_perms) in cases {
++        let reps = if cfg!(feature = "count-alloc") { 3 } else { 7 };
++        for rep in 0..reps + 2 {
++            let mut initial = fork(&pristine, &deletions, false);
++            if case == "multi-warm" {
++                check_multi(&initial); // SPO, POS, OSP via three actual BGP estimates
++            } else if warm_perms > 0 {
++                prime(&initial, warm_perms);
++            }
++            let initial_heap = initial.store.heap_bytes() - base_heap;
++            let mut records = [Sample::default(); GENERATIONS];
++            let count = if matches!(case, "multi-cold" | "multi-warm" | "concurrent-cold") {
++                1
++            } else {
++                GENERATIONS
++            };
++            let mut generations: Vec<Graph> = Vec::with_capacity(GENERATIONS);
++            let mut snapshots: Vec<GraphSnapshot> = Vec::with_capacity(GENERATIONS);
++            for generation in 0..count {
++                let mut sample = measure(|| {
++                    if case.starts_with("multi-") {
++                        assert_eq!(multi(&initial), 4);
++                        return [0; 3];
++                    }
++                    if case == "concurrent-cold" {
++                        let barrier = Barrier::new(2);
++                        // Includes thread launch/join overhead; reader durations are
++                        // individual observations, not tail-percentile estimates.
++                        return std::thread::scope(|scope| {
++                            let read = || {
++                                barrier.wait();
++                                let start = Instant::now();
++                                assert_eq!(run(&initial, "query", 1), 1);
++                                start.elapsed().as_nanos()
++                            };
++                            let a = scope.spawn(read);
++                            let b = scope.spawn(read);
++                            [a.join().unwrap(), b.join().unwrap(), 0]
++                        });
++                    }
++                    let start = Instant::now();
++                    if case == "snapshot" {
++                        let snapshot = initial.snapshot();
++                        let cloned = start.elapsed().as_nanos();
++                        let read = Instant::now();
++                        assert_eq!(run(&snapshot, "query", 1), 1);
++                        let read = read.elapsed().as_nanos();
++                        snapshots.push(snapshot); // retain publication target
++                        return [cloned, 0, read];
++                    }
++                    if case == "inplace-insert" {
++                        initial
++                            .apply_delta(std::slice::from_ref(&inserts[generation]), &[])
++                            .unwrap();
++                        let delta = start.elapsed().as_nanos();
++                        let read = Instant::now();
++                        assert_eq!(run(&initial, "query", 1), 1);
++                        return [0, delta, read.elapsed().as_nanos()];
++                    }
++                    let parent = generations.last().unwrap_or(&initial);
++                    let mut next = parent.fork();
++                    let cloned = start.elapsed().as_nanos();
++                    let delta = Instant::now();
++                    if case == "fork-insert" {
++                        next.apply_delta(std::slice::from_ref(&inserts[generation]), &[])
++                            .unwrap();
++                    } else {
++                        next.apply_delta(&[], std::slice::from_ref(&tombstones[generation]))
++                            .unwrap();
++                    }
++                    let delta = delta.elapsed().as_nanos();
++                    let read = Instant::now();
++                    assert_eq!(run(&next, "query", 1), 1);
++                    let read = read.elapsed().as_nanos();
++                    generations.push(next); // local ownership publication, no service I/O
++                    [cloned, delta, read]
++                });
++                sample.initial_heap = initial_heap;
++                sample.retained_heap = initial.store.heap_bytes() - base_heap
++                    + generations
++                        .iter()
++                        .map(|g| g.store.heap_bytes() - base_heap)
++                        .sum::<usize>()
++                    + snapshots
++                        .iter()
++                        .map(|g| g.store.heap_bytes() - base_heap)
++                        .sum::<usize>();
++                records[generation] = sample;
++            }
++            // Verify the retained generation contents outside every measured window.
++            for (i, graph) in generations.iter().enumerate() {
++                check_query(graph);
++                assert_eq!(
++                    graph.store.len(),
++                    SUBJECTS * PREDICATES - D + if case == "fork-insert" { i + 1 } else { 0 }
++                        - if case == "fork-tombstone" { i + 1 } else { 0 }
++                );
++            }
++            for graph in &snapshots {
++                check_query(graph);
++                assert_eq!(graph.store.len(), SUBJECTS * PREDICATES - D);
++            }
++            if rep >= 2 {
++                for (generation, &record) in records[..count].iter().enumerate() {
++                    emit(case, warm_perms, rep - 2, generation + 1, record);
++                }
++            }
++        }
++    }
++}
++
++/// [GPT-6 Astra] The sole additional measurement authorized after the opt-in
++/// decision: fixed deletion lineage, varying only reads per retained generation.
++pub(super) fn run_reads() {
++    let pristine = base();
++    let base_heap = pristine.store.heap_bytes();
++    let deletions = delta(D, false);
++    let tombstones: Vec<_> = (0..GENERATIONS)
++        .map(|i| {
++            [
++                iri(&format!("urn:s:{}", 20_000 + i)),
++                iri("urn:p:0"),
++                iri(&format!("urn:o:{}", 20_000 + i)),
++            ]
++        })
++        .collect();
++    check_query(&pristine);
++    println!("{{\"kind\":\"reads_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"initial_warm_perms\":6,\"rayon_threads\":1,\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}",cfg!(feature="count-alloc"),rss());
++    for (reads, name) in [
++        (1, "fork-tombstone-R1"),
++        (2, "fork-tombstone-R2"),
++        (4, "fork-tombstone-R4"),
++        (8, "fork-tombstone-R8"),
++        (16, "fork-tombstone-R16"),
++    ] {
++        let reps = if cfg!(feature = "count-alloc") { 3 } else { 7 };
++        for rep in 0..reps + 2 {
++            let initial = fork(&pristine, &deletions, false);
++            prime(&initial, 6);
++            let initial_heap = initial.store.heap_bytes() - base_heap;
++            let mut generations: Vec<Graph> = Vec::with_capacity(GENERATIONS);
++            let mut records = [Sample::default(); GENERATIONS];
++            for generation in 0..GENERATIONS {
++                let mut sample = measure(|| {
++                    let start = Instant::now();
++                    let mut next = generations.last().unwrap_or(&initial).fork();
++                    let cloned = start.elapsed().as_nanos();
++                    let delta = Instant::now();
++                    next.apply_delta(&[], std::slice::from_ref(&tombstones[generation]))
++                        .unwrap();
++                    let delta = delta.elapsed().as_nanos();
++                    let read = Instant::now();
++                    assert_eq!(run(&next, "query", reads), reads);
++                    let read = read.elapsed().as_nanos();
++                    generations.push(next);
++                    [cloned, delta, read]
++                });
++                sample.initial_heap = initial_heap;
++                sample.retained_heap = initial_heap
++                    + generations
++                        .iter()
++                        .map(|g| g.store.heap_bytes() - base_heap)
++                        .sum::<usize>();
++                records[generation] = sample;
++            }
++            for (generation, graph) in generations.iter().enumerate() {
++                check_query(graph);
++                assert_eq!(
++                    graph.store.len(),
++                    SUBJECTS * PREDICATES - D - generation - 1
++                );
++                for (i, tombstone) in tombstones.iter().enumerate() {
++                    let pattern = tombstone.clone().map(|t| Some(graph.dict.lookup(&t)));
++                    assert_eq!(
++                        graph.store.scan(&pattern).rows.len(),
++                        usize::from(i > generation)
++                    );
++                }
++            }
++            if rep >= 2 {
++                for (generation, &sample) in records.iter().enumerate() {
++                    emit(name, 6, rep - 2, generation + 1, sample);
++                }
++            }
++        }
++    }
++}
+diff --git a/bench/overlay-count/src/main.rs b/bench/overlay-count/src/main.rs
+new file mode 100644
+index 000000000..0857ef8f7
+--- /dev/null
++++ b/bench/overlay-count/src/main.rs
+@@ -0,0 +1,164 @@
++//! [GPT-6 Astra] Local overlay-count diagnostic; no canonical performance claim.
++
++#[cfg(feature = "count-alloc")]
++mod counting;
++mod lifecycle;
++
++use oxrdf::{NamedNode, Term};
++use sparq_core::Graph;
++use sparq_engine::query;
++use std::{fmt::Write, hint::black_box, time::Instant};
++
++const SUBJECTS: usize = 50_000;
++const PREDICATES: usize = 4;
++const DELETIONS: [usize; 5] = [0, 16, 1024, 8192, 32768];
++const QUERY: &str = "SELECT ?o WHERE { <urn:s:49999> <urn:p:0> ?o }";
++
++fn iri(value: &str) -> Term {
++    NamedNode::new(value).unwrap().into()
++}
++
++fn base() -> Graph {
++    let mut ttl = String::new();
++    for s in 0..SUBJECTS {
++        for p in 0..PREDICATES {
++            writeln!(ttl, "<urn:s:{s}> <urn:p:{p}> <urn:o:{s}> .").unwrap();
++        }
++    }
++    let graph = Graph::load_str(&ttl, "turtle").unwrap();
++    assert_eq!(graph.store.len(), SUBJECTS * PREDICATES);
++    // Freeze the dictionary outside every measured window, including no-delta cases.
++    drop(graph.fork());
++    graph
++}
++
++fn delta(n: usize, added: bool) -> Vec<[Term; 3]> {
++    (0..n)
++        .map(|i| {
++            let s = i / PREDICATES + if added { SUBJECTS } else { 0 };
++            [
++                iri(&format!("urn:s:{s}")),
++                iri(&format!("urn:p:{}", i % PREDICATES)),
++                iri(&format!("urn:o:{s}")),
++            ]
++        })
++        .collect()
++}
++
++fn fork(base: &Graph, delta: &[[Term; 3]], added: bool) -> Graph {
++    let mut graph = base.fork();
++    if added {
++        graph.apply_delta(delta, &[]).unwrap();
++    } else {
++        graph.apply_delta(&[], delta).unwrap();
++    }
++    assert_eq!(graph.store.overlay_len(), delta.len());
++    graph
++}
++
++fn check_query(graph: &Graph) {
++    let b = query(graph, QUERY).unwrap();
++    assert_eq!(b.rows.len(), 1);
++    assert_eq!(b.rows[0][0], Some(iri("urn:o:49999")));
++}
++
++fn run(graph: &Graph, workload: &str, iterations: usize) -> usize {
++    let pattern = [
++        Some(graph.dict.lookup(&iri("urn:s:49999"))),
++        Some(graph.dict.lookup(&iri("urn:p:0"))),
++        None,
++    ];
++    let mut count = 0;
++    for _ in 0..iterations {
++        if workload == "scan" {
++            count += black_box(graph.store.scan(black_box(&pattern)).rows.len());
++        } else {
++            let result = query(black_box(graph), black_box(QUERY)).unwrap();
++            let b = black_box(result);
++            count += b.rows.len();
++        }
++    }
++    black_box(count)
++}
++
++fn rss() -> u64 {
++    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
++    // SAFETY: getrusage initializes the valid, writable output on success.
++    assert_eq!(
++        unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) },
++        0
++    );
++    // SAFETY: the successful call above initialized the complete structure.
++    let bytes = unsafe { usage.assume_init() }.ru_maxrss as u64;
++    if cfg!(target_os = "macos") {
++        bytes
++    } else {
++        bytes * 1024
++    }
++}
++
++fn main() {
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(1)
++        .build_global()
++        .unwrap();
++    #[cfg(feature = "count-alloc")]
++    counting::calibrate();
++    if std::env::args().nth(1).as_deref() == Some("reads-per-generation") {
++        lifecycle::run_reads();
++        return;
++    }
++    if std::env::args().nth(1).as_deref() == Some("lifecycle") {
++        lifecycle::run_all();
++        return;
++    }
++    let graph = base();
++    println!("{{\"kind\":\"fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"base_triples\":{},\"setup_process_peak_rss_bytes\":{},\"rayon_threads\":1,\"counting\":{}}}", graph.store.len(), rss(), cfg!(feature = "count-alloc"));
++    for (n, added) in DELETIONS
++        .into_iter()
++        .map(|n| (n, false))
++        .chain([(8192, true)])
++    {
++        let changes = delta(n, added);
++        // Independent oracle fork: verification cannot initialize a sample's caches.
++        let oracle = fork(&graph, &changes, added);
++        check_query(&oracle);
++        assert_eq!(run(&oracle, "scan", 1), 1);
++        drop(oracle);
++        for workload in ["scan", "query"] {
++            for phase in ["cold", "warm"] {
++                let iterations = if phase == "cold" {
++                    1
++                } else if workload == "scan" {
++                    10_000
++                } else {
++                    100
++                };
++                let reps = if cfg!(feature = "count-alloc") { 3 } else { 7 };
++                // Two unrecorded samples warm code/pages, each on an independent fork.
++                for rep in 0..reps + 2 {
++                    let sample = fork(&graph, &changes, added);
++                    let heap_cold = sample.store.heap_bytes();
++                    if phase == "warm" {
++                        assert_eq!(run(&sample, workload, 1), 1);
++                    }
++                    let heap_before = sample.store.heap_bytes();
++                    let rss_before = rss();
++                    #[cfg(feature = "count-alloc")]
++                    let baseline = counting::begin();
++                    let start = Instant::now();
++                    let rows = run(&sample, workload, iterations);
++                    let elapsed = start.elapsed().as_nanos();
++                    #[cfg(feature = "count-alloc")]
++                    let counts = counting::end(baseline);
++                    #[cfg(not(feature = "count-alloc"))]
++                    let counts = (0_u64, 0_u64, 0_u64, 0_u64, 0_u64);
++                    assert_eq!(rows, iterations);
++                    if rep >= 2 {
++                        println!("{{\"kind\":\"sample\",\"delta\":{n},\"added\":{added},\"workload\":\"{workload}\",\"phase\":\"{phase}\",\"rep\":{},\"iterations\":{iterations},\"elapsed_ns\":{elapsed},\"allocs\":{},\"reallocs\":{},\"requested_bytes\":{},\"peak_live_delta_bytes\":{},\"store_heap_cold\":{heap_cold},\"store_heap_before\":{heap_before},\"store_heap_after\":{},\"process_peak_rss_before\":{rss_before},\"process_peak_rss_after\":{}}}", rep - 2, counts.0, counts.1, counts.2, counts.3, sample.store.heap_bytes(), rss());
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/crates/sparq-core/Cargo.toml b/crates/sparq-core/Cargo.toml
+index dc26565f6..860b41edf 100644
+--- a/crates/sparq-core/Cargo.toml
++++ b/crates/sparq-core/Cargo.toml
+@@ -30,6 +30,9 @@ parallel = ["dep:rayon", "dep:memchr"]
+ # pattern is still answered by one of them, but some merge joins fall back to hashing.
+ # ~halves index memory (36 vs 72 B/triple) — for the memory-constrained browser target.
+ compact-index = []
++# [GPT-6 Astra] Experimental lazy tombstone projections. OFF by default: cold
++# reads sort and allocate; forks copy retained projections. See the crate README.
++overlay-deleted-projections = []
+ # Out-of-core querying: persist the indexes and memory-map them (native only).
+ mmap = ["dep:memmap2"]
+ # [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
+diff --git a/crates/sparq-core/README.md b/crates/sparq-core/README.md
+index 104180743..4a63f6c2c 100644
+--- a/crates/sparq-core/README.md
++++ b/crates/sparq-core/README.md
+@@ -50,6 +50,19 @@ assert_eq!(count, 1);
+ - **Incremental updates** — start from `Graph::new()` / `Graph::default()` (an empty graph) and
+   `insert_triple(s, p, o)` / `remove_triple(s, p, o)` a single triple from `oxrdf` terms, or apply
+   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
++- **Experimental deletion projections** — [GPT-6 Astra] enable the default-off
++  `overlay-deleted-projections` Cargo feature on `sparq-core` to cache sorted
++  tombstone projections for repeated range counts. The default uses the original
++  linear deletion scan and carries no deletion projection slots. Each requested
++  permutation first sorts the full tombstone set; an actual tombstone change
++  invalidates those projections, and concurrent first readers wait for the same
++  initializer. Each initialized vector retains twelve bytes per deleted triple
++  plus capacity slack, alongside the deletion hash set; up to all built
++  permutations may be retained. Forks and snapshots deep-copy initialized vectors,
++  so memory grows with each retained generation. There is no deletion-count cap
++  or eviction policy. This experiment can regress cold reads and update/read
++  cycles; opt-in is not a general performance recommendation. Reproduce local
++  lifecycle measurements with `bench/overlay-count`; results are noncanonical.
+ - **Out-of-core store** — query datasets larger than RAM from a memory-mapped on-disk store,
+   with optional block compression and near-zero resident heap. The opt-in `block-bloom` feature
+   adds per-block Bloom filters on high-NDV columns to skip the block decode on equality-bound
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index e4b19e441..f965d738c 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -173,6 +173,14 @@ struct Overlay {
+     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`
+     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].
+     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
++    /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the
++    /// hash set above for merge membership; even SPO needs its own sorted projection.
++    /// Full use retains up to `BUILT.len()` vectors, each with `deleted.len()`
++    /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
++    /// production in-place mutator is `TripleStore::apply_delta`, which invalidates
++    /// these projections when a tombstone is inserted or removed.
++    #[cfg(feature = "overlay-deleted-projections")]
++    deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
+ }
+ 
+ impl Overlay {
+@@ -188,7 +196,7 @@ impl Overlay {
+     /// canonical-SPO sorted, so that permutation ALIASES it and costs nothing.
+     ///
+     /// `OnceLock` (not `RefCell`) because scans take `&self` and `TripleStore` must stay
+-    /// `Sync`; a race just recomputes the same value and discards the loser.
++    /// `Sync`; concurrent readers share the synchronized initialization.
+     fn added_sorted(&self, perm: Perm) -> &[[Id; 3]] {
+         let order = perm.order();
+         if order == [0, 1, 2] {
+@@ -202,14 +210,45 @@ impl Overlay {
+         })
+     }
+ 
+-    /// Drops every cached projection — called whenever `added` is about to change, so a
+-    /// cache can never outlive the `added` it was derived from.
++    /// Drops added projections before any nonempty delta, preserving prior behavior.
+     fn invalidate_added(&mut self) {
+         for slot in &mut self.added_by_perm {
+             slot.take();
+         }
+     }
+ 
++    /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
++    #[cfg(feature = "overlay-deleted-projections")]
++    fn invalidate_deleted(&mut self) {
++        for slot in &mut self.deleted_by_perm {
++            slot.take();
++        }
++    }
++
++    /// [GPT-6 Astra] Counts deletions using a lazily sorted projection (#4246).
++    /// The first request costs O(d log d) and one additional vector; later requests
++    /// use two binary searches. Clone copies initialized vectors by value, and
++    /// apply_delta invalidates only the mutated overlay under exclusive access.
++    /// Concurrent first readers of the same permutation wait for its one sorting
++    /// initializer; the cold sort is serialized for that permutation.
++    #[cfg(feature = "overlay-deleted-projections")]
++    fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
++        if self.deleted.is_empty() {
++            return 0;
++        }
++        let rows = self.deleted_by_perm[perm as usize].get_or_init(|| {
++            let order = perm.order();
++            let mut rows: Vec<[Id; 3]> = self
++                .deleted
++                .iter()
++                .map(|t| [t[order[0]], t[order[1]], t[order[2]]])
++                .collect();
++            rows.sort_unstable();
++            rows
++        });
++        rows.partition_point(|r| *r <= hi) - rows.partition_point(|r| *r < lo)
++    }
++
+     /// The `added` triples matching the inclusive `[lo, hi]` key range, as rows in
+     /// `perm` column order, SORTED in that order. A BORROWED sub-slice of the cached
+     /// perm-sorted projection located by two binary searches — O(log k + m) on k
+@@ -254,8 +293,9 @@ impl Overlay {
+ 
+     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
+     /// correction to a base range count. The `added` side rides the cached perm-sorted
+-    /// projection (O(log k), two binary searches); the `deleted` side is an unordered
+-    /// hash set and stays O(|deleted|).
++    /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
++    /// default; the experimental feature opts into lazy sorted projections.
++    #[cfg(not(feature = "overlay-deleted-projections"))]
+     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+         let order = perm.order();
+         let add = self.added_rows(perm, lo, hi).len();
+@@ -270,19 +310,32 @@ impl Overlay {
+         (add, del)
+     }
+ 
++    /// [GPT-6 Astra] Experimental range correction using cached deletion projections.
++    #[cfg(feature = "overlay-deleted-projections")]
++    fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
++        let add = self.added_rows(perm, lo, hi).len();
++        let del = self.deleted_count(perm, lo, hi);
++        (add, del)
++    }
++
+     fn is_empty(&self) -> bool {
+         self.added.is_empty() && self.deleted.is_empty()
+     }
+ 
+     fn heap_bytes(&self) -> usize {
+         // The cached perm-sorted projections are part of the overlay's footprint; SPO
+-        // aliases `added` and so never occupies a slot.
++        // aliases `added`; [GPT-6 Astra] deleted projections own all requested perms.
+         let cached: usize = self
+             .added_by_perm
+             .iter()
+             .filter_map(|slot| slot.get())
+             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
+             .sum();
++        #[cfg(feature = "overlay-deleted-projections")]
++        let cached = cached + self.deleted_by_perm.iter()
++            .filter_map(|slot| slot.get())
++            .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
++            .sum::<usize>();
+         self.added.capacity() * std::mem::size_of::<[Id; 3]>()
+             + self.deleted.capacity() * 13
+             + cached
+@@ -900,20 +953,26 @@ impl TripleStore {
+             return;
+         }
+         let mut ov = self.overlay.take().unwrap_or_default();
+-        // `added` is about to change, so every cached perm-sorted projection of it is
+-        // stale from here on. Dropping them up front (O(1) per permutation) keeps the
+-        // write path O(batch) — the projections are rebuilt lazily by the next scan
+-        // that needs them, and only for the permutations it actually scans.
++        // [GPT-6 Astra] Added projections retain the existing conservative reset.
++        // Preserve deletion projections across inserts/no-ops: only actual tombstone
++        // changes require another sort. No overlay read occurs before publication.
+         ov.invalidate_added();
++        #[cfg(feature = "overlay-deleted-projections")]
++        let mut deleted_changed = false;
+         for t in deletes {
+             if let Ok(i) = ov.added.binary_search(t) {
+                 ov.added.remove(i); // retract a pending insertion
+             } else if self.base_contains(*t) {
++                #[cfg(feature = "overlay-deleted-projections")]
++                { deleted_changed |= ov.deleted.insert(*t); }
++                #[cfg(not(feature = "overlay-deleted-projections"))]
+                 ov.deleted.insert(*t);
+             }
+         }
+         for t in inserts {
+             if ov.deleted.remove(t) {
++                #[cfg(feature = "overlay-deleted-projections")]
++                { deleted_changed = true; }
+                 continue; // re-insert of a deleted base triple: just undelete
+             }
+             if self.base_contains(*t) {
+@@ -923,6 +982,10 @@ impl TripleStore {
+                 ov.added.insert(i, *t);
+             }
+         }
++        #[cfg(feature = "overlay-deleted-projections")]
++        if deleted_changed {
++            ov.invalidate_deleted();
++        }
+         self.overlay = if ov.is_empty() { None } else { Some(ov) };
+     }
+ 
+@@ -1145,6 +1208,10 @@ fn upper_bound(rows: &[[Id; 3]], key: &[Id; 3]) -> usize {
+     rows.partition_point(|row| row <= key)
+ }
+ 
++#[cfg(test)]
++#[path = "store/overlay_deleted_tests.rs"]
++mod overlay_deleted_tests;
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/sparq-core/src/store/overlay_deleted_tests.rs b/crates/sparq-core/src/store/overlay_deleted_tests.rs
+new file mode 100644
+index 000000000..ee8171ffa
+--- /dev/null
++++ b/crates/sparq-core/src/store/overlay_deleted_tests.rs
+@@ -0,0 +1,388 @@
++//! [GPT-6 Astra] Deletion projection behavior, ownership, and invalidation (#4246).
++
++use super::{Id, Overlay, Perm, TripleStore, BUILT};
++use std::borrow::Cow;
++
++fn triples() -> Vec<[Id; 3]> {
++    (1..=12)
++        .flat_map(|s| (1..=4).map(move |p| [s, p, s + p]))
++        .collect()
++}
++
++fn sweep(store: &TripleStore, reference: &[[Id; 3]]) {
++    let rebuilt = TripleStore::from_triples(reference.to_vec());
++    // Every built permutation, every leading-prefix length, present/absent keys.
++    for &perm in BUILT {
++        for triple in reference.iter().copied().chain([[0; 3], [Id::MAX; 3]]) {
++            for lead in 0..=3 {
++                let mut pattern = [None; 3];
++                for &col in &perm.order()[..lead] {
++                    pattern[col] = Some(triple[col]);
++                }
++                let actual = store.scan_perm(&pattern, perm).unwrap();
++                let expected = rebuilt.scan_perm(&pattern, perm).unwrap();
++                assert_eq!(actual.rows, expected.rows, "{perm:?} {pattern:?}");
++                assert_eq!(store.estimate(&pattern), rebuilt.estimate(&pattern));
++            }
++        }
++    }
++    for perm in Perm::ALL {
++        if !BUILT.contains(&perm) {
++            assert!(store.scan_perm(&[None; 3], perm).is_none());
++            #[cfg(feature = "overlay-deleted-projections")]
++            if let Some(ov) = &store.overlay {
++                assert!(ov.deleted_by_perm[perm as usize].get().is_none());
++            }
++        }
++    }
++    assert_eq!(store.len(), reference.len());
++    for &t in reference {
++        assert!(store.contains(t));
++    }
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_is_lazy_reused_and_accounted() {
++    let mut store = TripleStore::from_triples(triples());
++    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4], [3, 3, 6]]);
++    let ov = store.overlay.as_ref().unwrap();
++    assert!(ov.deleted_by_perm.iter().all(|s| s.get().is_none()));
++    let cold_heap = ov.heap_bytes();
++    let mut expected_heap = cold_heap;
++    for &perm in BUILT {
++        // An untouched exact range still needs its correction before borrowing base.
++        let pattern = [Some(12), Some(4), Some(16)];
++        let scan = store.scan_perm(&pattern, perm).unwrap();
++        assert_eq!(scan.rows.len(), 1);
++        assert!(matches!(scan.rows, Cow::Borrowed(_)));
++        let rows = ov.deleted_by_perm[perm as usize]
++            .get()
++            .expect("scan uses cached deletion count");
++        assert_eq!(rows.len(), 3);
++        assert!(rows.windows(2).all(|w| w[0] < w[1]));
++        let pointer = rows.as_ptr();
++        // The requested slot is stable across subsequent counts and scans.
++        for _ in 0..5 {
++            assert_eq!(ov.count_correction(perm, [0; 3], [Id::MAX; 3]), (0, 3));
++            assert_eq!(
++                ov.deleted_by_perm[perm as usize].get().unwrap().as_ptr(),
++                pointer
++            );
++        }
++        expected_heap += rows.capacity() * std::mem::size_of::<[Id; 3]>();
++        assert_eq!(ov.heap_bytes(), expected_heap);
++        for other in Perm::ALL {
++            if other as usize > perm as usize {
++                assert!(ov.deleted_by_perm[other as usize].get().is_none());
++            }
++        }
++    }
++    let empty = Overlay::default();
++    assert_eq!(empty.deleted_count(Perm::Spo, [0; 3], [Id::MAX; 3]), 0);
++    assert!(empty.deleted_by_perm.iter().all(|s| s.get().is_none()));
++}
++
++#[test]
++fn deleted_cache_matches_rebuild_after_mixed_deltas() {
++    let mut reference = triples();
++    let mut store = TripleStore::from_triples(reference.clone());
++    sweep(&store, &reference);
++    // Growing deletions, undeleting base, retracting additions, duplicate/no-op
++    // updates and delete-then-insert of the same row all traverse warmed caches.
++    let batches = [
++        (vec![[20, 2, 22]], vec![[1, 1, 2], [2, 2, 4]]),
++        (vec![[1, 1, 2]], vec![[3, 3, 6], [20, 2, 22]]),
++        (vec![[4, 4, 8], [4, 4, 8]], vec![[4, 4, 8], [99; 3]]),
++        (vec![[2, 2, 4], [3, 3, 6]], vec![]),
++    ];
++    for (inserts, deletes) in batches {
++        store.apply_delta(&inserts, &deletes);
++        reference.retain(|t| !deletes.contains(t));
++        reference.extend(inserts);
++        reference.sort_unstable();
++        reference.dedup();
++        // Correct rows/counts, not merely empty-slot observations, pin invalidation.
++        sweep(&store, &reference);
++    }
++    assert!(!store.has_overlay());
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_survives_insert_only_and_noop_deltas() {
++    let mut reference = triples();
++    let mut store = TripleStore::from_triples(reference.clone());
++    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4]]);
++    reference.retain(|t| *t != [1, 1, 2] && *t != [2, 2, 4]);
++    sweep(&store, &reference);
++    let pointers: Vec<_> = BUILT
++        .iter()
++        .map(|&p| {
++            store.overlay.as_ref().unwrap().deleted_by_perm[p as usize]
++                .get()
++                .unwrap()
++                .as_ptr()
++        })
++        .collect();
++    for (inserts, deletes) in [
++        (vec![[20, 2, 22]], vec![]), // actual added-set change with tombstones present
++        (vec![[20, 2, 22], [3, 3, 6]], vec![[1, 1, 2], [99; 3]]), // all no-ops
++        (vec![], vec![[20, 2, 22]]), // retract an addition, not a base deletion
++        (vec![], vec![]),
++    ] {
++        store.apply_delta(&inserts, &deletes);
++        for (&perm, &pointer) in BUILT.iter().zip(&pointers) {
++            assert_eq!(
++                store.overlay.as_ref().unwrap().deleted_by_perm[perm as usize]
++                    .get()
++                    .expect("unchanged tombstones retain their projection")
++                    .as_ptr(),
++                pointer,
++            );
++        }
++        reference.retain(|t| !deletes.contains(t));
++        reference.extend(inserts);
++        reference.sort_unstable();
++        reference.dedup();
++        sweep(&store, &reference); // also pins the independent added-cache invalidation
++    }
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
++    let mut reference = triples();
++    let mut store = TripleStore::from_triples(reference.clone());
++    store.apply_delta(&[], &[[1, 1, 2]]);
++    reference.retain(|t| *t != [1, 1, 2]);
++    for (inserts, deletes) in [
++        (vec![], vec![[2, 2, 4]]),          // grow the deleted set
++        (vec![[1, 1, 2]], vec![]),          // undelete an existing tombstone
++        (vec![[3, 3, 6]], vec![[3, 3, 6]]), // changes during batch, even if net unchanged
++    ] {
++        sweep(&store, &reference);
++        store.apply_delta(&inserts, &deletes);
++        assert!(store
++            .overlay
++            .as_ref()
++            .unwrap()
++            .deleted_by_perm
++            .iter()
++            .all(|s| s.get().is_none()));
++        reference.retain(|t| !deletes.contains(t));
++        reference.extend(inserts);
++        reference.sort_unstable();
++        reference.dedup();
++        sweep(&store, &reference);
++    }
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_inclusive_bounds_and_empty_ranges() {
++    let mut ov = Overlay::default();
++    ov.deleted.extend([[0, 1, 2], [2, 3, 4], [Id::MAX; 3]]);
++    for perm in Perm::ALL {
++        let order = perm.order();
++        for &t in &ov.deleted {
++            let row = [t[order[0]], t[order[1]], t[order[2]]];
++            assert_eq!(ov.deleted_count(perm, row, row), 1);
++        }
++        assert_eq!(ov.deleted_count(perm, [0; 3], [Id::MAX; 3]), 3);
++        assert_eq!(ov.deleted_count(perm, [42; 3], [42; 3]), 0);
++    }
++}
++
++#[test]
++fn deleted_cache_compressed_base_matches_rebuild() {
++    let mut reference = triples();
++    let mut store = TripleStore::from_triples_compressed(reference.clone());
++    store.apply_delta(&[[20, 2, 22]], &[[1, 1, 2], [2, 2, 4]]);
++    reference.retain(|t| *t != [1, 1, 2] && *t != [2, 2, 4]);
++    reference.push([20, 2, 22]);
++    sweep(&store, &reference);
++    store.apply_delta(&[[1, 1, 2]], &[[3, 3, 6]]);
++    reference.push([1, 1, 2]);
++    reference.retain(|t| *t != [3, 3, 6]);
++    sweep(&store, &reference);
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_fork_and_clone_are_independent() {
++    let mut original = TripleStore::from_triples(triples());
++    original.apply_delta(&[], &[[1, 1, 2]]);
++    let cold_fork = original.fork();
++    for &perm in BUILT {
++        original.scan_perm(&[None; 3], perm).unwrap();
++    }
++    assert!(cold_fork
++        .overlay
++        .as_ref()
++        .unwrap()
++        .deleted_by_perm
++        .iter()
++        .all(|s| s.get().is_none()));
++    let warm_fork = original.fork();
++    let cloned_overlay = original.overlay.clone().unwrap();
++    for &perm in BUILT {
++        let slot = perm as usize;
++        let original_rows = original.overlay.as_ref().unwrap().deleted_by_perm[slot]
++            .get()
++            .unwrap();
++        let fork_rows = warm_fork.overlay.as_ref().unwrap().deleted_by_perm[slot]
++            .get()
++            .unwrap();
++        let clone_rows = cloned_overlay.deleted_by_perm[slot].get().unwrap();
++        assert_eq!(original_rows, fork_rows);
++        assert_ne!(original_rows.as_ptr(), fork_rows.as_ptr());
++        assert_ne!(original_rows.as_ptr(), clone_rows.as_ptr());
++    }
++    original.apply_delta(&[[1, 1, 2]], &[[2, 2, 4]]);
++    for &perm in BUILT {
++        for frozen in [&cold_fork, &warm_fork] {
++            assert_eq!(
++                frozen
++                    .scan_perm(&[Some(1), Some(1), Some(2)], perm)
++                    .unwrap()
++                    .rows
++                    .len(),
++                0
++            );
++            assert_eq!(
++                frozen
++                    .scan_perm(&[Some(2), Some(2), Some(4)], perm)
++                    .unwrap()
++                    .rows
++                    .len(),
++                1
++            );
++        }
++        assert_eq!(
++            original
++                .scan_perm(&[Some(1), Some(1), Some(2)], perm)
++                .unwrap()
++                .rows
++                .len(),
++            1
++        );
++        assert_eq!(
++            original
++                .scan_perm(&[Some(2), Some(2), Some(4)], perm)
++                .unwrap()
++                .rows
++                .len(),
++            0
++        );
++    }
++}
++
++#[cfg(feature = "overlay-deleted-projections")]
++#[test]
++fn deleted_cache_concurrent_first_reads_share_initialized_projection() {
++    let mut store = TripleStore::from_triples(triples());
++    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4]]);
++    let barrier = std::sync::Barrier::new(2);
++    std::thread::scope(|scope| {
++        let handles: Vec<_> = (0..2)
++            .map(|_| {
++                scope.spawn(|| {
++                    barrier.wait();
++                    BUILT
++                        .iter()
++                        .map(|&perm| {
++                            assert_eq!(store.scan_perm(&[None; 3], perm).unwrap().rows.len(), 46);
++                            let rows = store.overlay.as_ref().unwrap().deleted_by_perm
++                                [perm as usize]
++                                .get()
++                                .unwrap();
++                            (rows.as_ptr() as usize, rows.clone())
++                        })
++                        .collect::<Vec<_>>()
++                })
++            })
++            .collect();
++        let mut results = handles.into_iter().map(|h| h.join().unwrap());
++        assert_eq!(results.next().unwrap(), results.next().unwrap());
++    });
++}
++
++#[test]
++fn deleted_cache_graph_snapshot_retains_warm_generation() {
++    use crate::Graph;
++    use oxrdf::{NamedNode, Term};
++    let term = |s| Term::from(NamedNode::new(s).unwrap());
++    let a = [term("urn:a"), term("urn:p"), term("urn:o")];
++    let b = [term("urn:b"), term("urn:p"), term("urn:o")];
++    let mut graph = Graph::load_str(
++        "<urn:a> <urn:p> <urn:o> . <urn:b> <urn:p> <urn:o> .",
++        "turtle",
++    )
++    .unwrap();
++    graph.apply_delta(&[], std::slice::from_ref(&a)).unwrap();
++    for &perm in BUILT {
++        assert_eq!(
++            graph.store.scan_perm(&[None; 3], perm).unwrap().rows.len(),
++            1
++        );
++    }
++    let snapshot = graph.snapshot();
++    graph
++        .apply_delta(std::slice::from_ref(&a), std::slice::from_ref(&b))
++        .unwrap();
++    for (terms, snapshot_len, current_len) in [(a, 0, 1), (b, 1, 0)] {
++        let pattern = terms.map(|t| Some(graph.dict.lookup(&t)));
++        assert_eq!(snapshot.store.estimate(&pattern), snapshot_len);
++        assert_eq!(graph.store.estimate(&pattern), current_len);
++        for &perm in BUILT {
++            assert_eq!(
++                snapshot.store.scan_perm(&pattern, perm).unwrap().rows.len(),
++                snapshot_len
++            );
++            assert_eq!(
++                graph.store.scan_perm(&pattern, perm).unwrap().rows.len(),
++                current_len
++            );
++        }
++    }
++}
++
++// [GPT-6 Astra] Default-off must preserve main's representation and linear-count
++// behavior, not merely return the same rows after allocating a hidden projection.
++#[cfg(not(feature = "overlay-deleted-projections"))]
++#[test]
++fn deleted_projection_feature_off_preserves_main_layout_and_heap() {
++    let mut store = TripleStore::from_triples(triples());
++    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4], [3, 3, 6]]);
++    let before = store.heap_bytes();
++    for &perm in BUILT {
++        for _ in 0..3 {
++            let scan = store
++                .scan_perm(&[Some(12), Some(4), Some(16)], perm)
++                .unwrap();
++            assert_eq!(scan.rows.len(), 1);
++            assert!(matches!(scan.rows, Cow::Borrowed(_)));
++            assert_eq!(store.estimate(&[Some(1), Some(1), Some(2)]), 0);
++            assert_eq!(
++                store.heap_bytes(),
++                before,
++                "default reads retain no deletion projection"
++            );
++        }
++    }
++    let frozen = store.fork();
++    assert_eq!(frozen.heap_bytes(), before);
++    // These are the three fields of main's Overlay. This is an empirical default-off
++    // footprint budget for the supported configurations, not a repr(Rust) layout
++    // guarantee. It also detects retained cache metadata whose slots own no heap
++    // memory. Compiler or target layout changes require reassessing this budget.
++    let main_fields = std::mem::size_of::<Vec<[Id; 3]>>()
++        + std::mem::size_of::<rustc_hash::FxHashSet<[Id; 3]>>()
++        + std::mem::size_of::<[std::sync::OnceLock<Vec<[Id; 3]>>; 6]>();
++    assert_eq!(std::mem::size_of::<Overlay>(), main_fields);
++    assert_eq!(
++        std::mem::align_of::<Overlay>(),
++        std::mem::align_of::<usize>()
++    );
++}
+diff --git a/scripts/tests/feature-matrix-legnames.golden.txt b/scripts/tests/feature-matrix-legnames.golden.txt
+index 63c630c74..2fb05b12d 100644
+--- a/scripts/tests/feature-matrix-legnames.golden.txt
++++ b/scripts/tests/feature-matrix-legnames.golden.txt
+@@ -19,6 +19,7 @@ opt-in sparq-core (iri-fast)
+ opt-in sparq-core (jsonld)
+ opt-in sparq-core (mmap, dict-spill)
+ opt-in sparq-core (native-ttl)
++opt-in sparq-core (overlay-deleted-projections)
+ opt-in sparq-core (spqcprm2, mmap)
+ opt-in sparq-engine (algebra-rewrite)
+ opt-in sparq-engine (antijoin-static-decline)
+diff --git a/skills/sparql-query/SKILL.md b/skills/sparql-query/SKILL.md
+index 7269a8c5a..e83775d3d 100644
+--- a/skills/sparql-query/SKILL.md
++++ b/skills/sparql-query/SKILL.md
+@@ -1049,6 +1049,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
+   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
+   # Ok::<(), String>(())
+   ```
++- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
++  direct core dependency:
++
++  ```toml
++  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
++  ```
++
++  Cargo unifies this feature for engine queries using that same core package.
++  No engine, CLI or runtime flag is required or added. It is off in default builds,
++  which keep linear deletion counting and no deletion-cache state. The experiment
++  sorts all tombstones on first use of each permutation; actual tombstone changes
++  invalidate projections, and concurrent first readers share a blocking initializer.
++  Each requested vector retains twelve bytes per tombstone plus capacity slack,
++  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
++  retained generations multiply this cost. No cap or eviction is provided. Cold
++  reads and update/read cycles can regress; measure the intended workload using
++  `bench/overlay-count` before choosing this opt-in. No universal crossover or
++  canonical speedup is claimed.
+ - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
+   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
+   it can be shared across the async handlers of an axum/actix/tower server directly with
