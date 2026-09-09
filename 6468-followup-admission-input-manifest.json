@@ -1,0 +1,8 @@
+{
+  "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+  "bytes": 62257,
+  "sha256": "05ab0997f531de5caa9622cad9e37c010bb71a70da43a516448ad9b38bacb2c1",
+  "scope": "Public repository task-authored two-file source/test delta, prior explicit review result and generated test/CI-wiring evidence; no credential/config/session files or agent transcripts.",
+  "credential_pattern_matches": 0,
+  "scan_limit": "Specific credential patterns only, not proof of universal absence."
+}

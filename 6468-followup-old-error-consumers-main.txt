@@ -1,0 +1,2 @@
+origin/main:scripts/triage-area.py:744:        print(f"ERROR: rule table produced labels that do not exist: {unknown}", file=sys.stderr)
+origin/main:scripts/triage-area.py:745:        print("Fix the rule table — do NOT create the label.", file=sys.stderr)

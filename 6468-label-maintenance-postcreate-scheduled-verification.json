@@ -1,0 +1,34 @@
+{
+  "observed_at": "2026-09-09T19:50:57.176167+00:00",
+  "run": 34395557649,
+  "event": "schedule",
+  "created_at": "2026-09-09T19:31:23Z",
+  "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "conclusion": "success",
+  "first_observed_postcreate": true,
+  "old_main_not_unmerged_fix": true,
+  "selftest_log_records": [
+    "  GH_TOKEN: ***",
+    "SELF-TEST PASSED",
+    "Ran 37 tests in 0.128s",
+    "OK"
+  ],
+  "classified": 1248,
+  "applied": 150,
+  "deferred": 1098,
+  "unattributed": 415,
+  "scanned": 1663,
+  "new_label_plan": [
+    {
+      "number": 5016,
+      "label": "area:sparq-wrapper-gen",
+      "title": "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)",
+      "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)",
+      "disposition": "DEFERRED by150/run write budget"
+    }
+  ],
+  "new_label_actual_recipients": [],
+  "recipient_enumeration": "GETissues?state=all&labels=area:sparq-wrapper-gen&per_page=100 returned empty complete page",
+  "registry_actions_enabled": false,
+  "limitations": "This proves the missing-label global abort cleared and150writes completed in the ordinary lane; does not prove deferred5016application or new source deployment. Continue observing eventual new-label applications. Unknown-label enumeration issue6335 remains separate."
+}

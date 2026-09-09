@@ -1,0 +1,11 @@
+commit afa9c6489db0351855acd9297a6aa2c845434106
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 20:28:02 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 20:28:02 2026 +0100
+
+    fix(ci): clarify fetched-label diagnostics and pin rule ordering
+    
+    Keep unknown labels fail-closed while requiring exact lookup before reviewed provisioning. Cover title collisions, dry-run failures, escaped workflow lines and full-suite anchor metadata controls.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

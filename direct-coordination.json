@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T19:25:35.231099+00:00",
+  "updated_at": "2026-09-09T19:50:57.176167+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Focused Astra followup for nonblocking review test/diagnostic gaps; original5f758sourceapprovedforvalidation",
+    "phase": "Actual Opus focused final delta review running",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
     "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
@@ -98,7 +98,7 @@
       "result": "direct-6468/label-maintenance/opus-review-result.json",
       "verdict": "approve for exact one label create only after all15preconditions; key newpreconditionP7completeopenPRchangedpathcheckrequired beforemutation"
     },
-    "agent_state": "Completed/idle, cleancommittedhead; no commandsrunning",
+    "agent_state": "Completed/idle; no pending agent commands",
     "maintenance": {
       "state": "exact_one_label_created_verified",
       "evidence": "direct-6468/label-maintenance/maintenance-verified.json",
@@ -111,13 +111,16 @@
       "next_scheduled": "Firstordinaryscheduledtriage-areaafter18:48create:cron25,55hourly;18:55nominalslotmaybedelayed. Observeactualrun,eventandcreatedtime; no manualtrigger.",
       "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5607067328",
       "latest_schedule_observation": {
-        "at": "2026-09-09T19:24:49.903354+00:00",
-        "evidence": "direct-6468/label-maintenance/scheduled-runs-1920.json",
-        "latest_run": 34378724521,
-        "created_at": "2026-09-09T16:45:31Z",
-        "conclusion": "failure",
-        "before_create": true,
-        "postcreate_run_observed": false
+        "at": "2026-09-09T19:50:57.176167+00:00",
+        "run": 34395557649,
+        "created_at": "2026-09-09T19:31:23Z",
+        "conclusion": "success",
+        "before_create": false,
+        "postcreate_run_observed": true,
+        "evidence": "direct-6468/label-maintenance/postcreate-scheduled-verification.json",
+        "applied": 150,
+        "new_label_recipients": 0,
+        "new_label_5016": "correct T2 classification, deferred by write budget; eventual application still to observe"
       }
     },
     "conflict_assessment": {
@@ -150,11 +153,11 @@
     },
     "model": "GPT-6 Astra",
     "pr": null,
-    "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+    "head": "afa9c6489db0351855acd9297a6aa2c845434106",
     "branch": "codex/triage-area-unknown-diagnostics",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
     "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "state": "ActualOpus5xhighapprove_for_validation,no blockers,perf_affectingfalse. Authorizingoneboundedtwofilefollowup: ruleorderingfixture/control, explicitno-create-from-error/fetchedset caveat, fullscopectrlcalibration, escapingbehaviorassertionbeforeroundtrip,anddryrununknownpath. Alloriginal54fileevidence/reviewfrozen; no publication yet.",
+    "state": "Final followup frozen and root verified; awaiting focused actual Opus review before push/publication.",
     "documentation_followup": {
       "issue": 5412,
       "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
@@ -162,11 +165,8 @@
       "verified": "direct-6468/label-maintenance/docs-drift-comment-verified.json"
     },
     "latest_agent_report": {
-      "state": "Uncommitted candidate tests reported; agent committing/freezing, exact head and manifest stillpendingrootverification",
-      "reported_diff": "+135/-3, twoauthorizedfiles",
-      "reported_checks": "44classifier tests;classifier/migration selftests;8compiled/executednegativecontrolskilled;frozen6095gitapply--checkclean;T0/propertyloopsbyte-identical;authorpreflightonlyknownBash3privacyfailure;no commandrunningatprogressmessage",
-      "review_not_started": true,
-      "root_preface": "direct-6468/source-admission/review-preface-draft.md"
+      "state": "Completed frozen source and70files root verified",
+      "report": "direct-6468/followup/report.json"
     },
     "source_review": {
       "state": "completed",
@@ -202,7 +202,7 @@
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
-      "state": "running",
+      "state": "completed_frozen_root_verified",
       "parent": "5f758d2afed6524cf191820463934c2213ddcfda",
       "directory": "direct-6468/followup",
       "address": [
@@ -218,7 +218,25 @@
         "NB8realcratefixturecoupling",
         "NB9localPythonversionandactualCIexecutiontobeverified"
       ],
-      "additional_evidence": "Olderror-stringconsumersgitgrep;docs-qualityonblock;scheduledselftestsbeforeapply;bdactualoutput;frozen6095mechanicalcomposition."
+      "additional_evidence": "Olderror-stringconsumersgitgrep;docs-qualityonblock;scheduledselftestsbeforeapply;bdactualoutput;frozen6095mechanicalcomposition.",
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "manifest_files": 70,
+      "root_verification": "direct-6468/followup-admission/root-verification.json"
+    },
+    "followup_review": {
+      "state": "running",
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "input": "direct-6468/followup-admission/opus-input.md",
+      "input_sha256": "05ab0997f531de5caa9622cad9e37c010bb71a70da43a516448ad9b38bacb2c1",
+      "input_bytes": 62257,
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "output": "direct-6468/followup-admission/opus-review-afa9c648.json",
+      "session_id": 37673,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T19:49:28.992457+00:00",
+      "completed": false,
+      "acceptance": "One actual Opus5xhigh invocation. Require successful outer JSON, actual modelUsage and exact afa9 head; no duplicate or exhausted-budget retry."
     }
   },
   "prs": {
@@ -472,7 +490,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-09T12:12:27.819056+00:00",
+    "observed_at": "2026-09-09T19:50:57.176167+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -481,7 +499,7 @@
       "review": "Actual Opus,127 tests5 controls",
       "hold": "Required gate absent while global Actions OFF. User question for gate-only CI pending, no answer. If authorized: globalOFF inventory/disable all nongate incl dynamic Copilot324900308 before enabling only gate315366433. No bypass."
     },
-    "evidence": "recovery-20260909/registry-pause-revalidated.json"
+    "evidence": "direct-6468/label-maintenance/registry-pause-1945.json"
   },
   "sweeper_health": {
     "observed_at": "2026-09-08T19:25:17.637992+00:00",
@@ -517,12 +535,11 @@
     }
   },
   "next_actions": [
-    "Collect sameagent focused default-text correction, scopedtest/control evidence and actual existing compilerproof or exacttool/disk/time limit. Both neutral/head and deletion-neutral/base equality required beforemetadata-only declaration. No blindgateexception/ratchetchange. ActualfocusedOpusreview ofnewsource+proof beforepush.",
-    "PR6469stilldraftb86; do notready/rerun whileknownwasmfailureunresolved. Afterreviewedrepairandanyseparatelyproveddeclaration, pushnormallyandobservefreshheadCI, thennormalready_for_review toexerciseheavyLinuxgates. Preservelivechecks, budgetfailclosed, Copilot/review/gates beforeprotectedmerge.",
-    "After active4246 terminal state, act on6468 narrow classifier/diagnostic proposal and separatelyreview generatorlabel/partition policy. No guessedexistingalias or labelcreation; preserve zero-write unknown-label guard.",
-    "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
-    "Observe ordinary eligible nightly/sweeper runs when relevant; no manualprobes, exhausted-budget retries or inference of successful writes from green aggregate. RegistryOFF, ALLGREEN, approval holds and release pause remain.",
-    "Preserve checkpoint and frozen evidence in the private local Git recovery ref. Reuse agents/worktrees and stay quiet when unchanged."
+    "Collect focused actual Opus review of afa9c648, then publish narrow6468PR and observe actual Linux validation; do not waive Bash3 privacy check.",
+    "Verify first post-label-repair ordinary scheduled34395557649: issue effects/evidence and registryOFF; keep6468open until source landed and recovery criteria proven.",
+    "Monitor maincea4414 feature-matrix and aggregate; CI nowSUCCESS. Preserve release/registry holds.",
+    "After6468terminal, reassess existing6095 failed gate and source-issue holds without rearming or starting duplicate work.",
+    "Preserve frozen evidence/checkpoint in private local Git ref; one substantive lane; no busy model sessions."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -1557,210 +1574,25 @@
     }
   },
   "postmerge_watch": {
-    "pr": 6469,
-    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "observed_at": "2026-09-09T19:24:49.903354+00:00",
-    "evidence": "direct-4246/perf-admission/main-runs-1920.json",
-    "push_runs": [
-      {
-        "id": 34390025043,
-        "name": "Benchmarks",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022861,
-        "name": "release-plz",
-        "status": "completed",
-        "conclusion": "failure"
-      },
-      {
-        "id": 34390022676,
-        "name": "scorecard",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022725,
-        "name": "vectorized-feature-off",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022799,
-        "name": "container-scan",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022757,
-        "name": "pkg-ingest",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022915,
-        "name": "supply-chain",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022590,
-        "name": "docs-quality",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390023351,
-        "name": "CI",
-        "status": "queued",
-        "conclusion": null
-      },
-      {
-        "id": 34390022720,
-        "name": "batch-merge",
-        "status": "completed",
-        "conclusion": "failure"
-      },
-      {
-        "id": 34390022724,
-        "name": "Python bindings",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022784,
-        "name": "pages",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390023582,
-        "name": "fuzz",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390023354,
-        "name": "feature-matrix",
-        "status": "queued",
-        "conclusion": null
-      },
-      {
-        "id": 34390022549,
-        "name": "routing-self-tests",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022530,
-        "name": "ci-summary",
-        "status": "in_progress",
-        "conclusion": null
-      },
-      {
-        "id": 34390022517,
-        "name": "js",
-        "status": "completed",
-        "conclusion": "success"
-      },
-      {
-        "id": 34390022510,
-        "name": "formal-verification",
-        "status": "completed",
-        "conclusion": "success"
-      }
+    "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "observed_at": "2026-09-09T19:50:57.176167+00:00",
+    "evidence": "direct-4246/perf-admission/main-runs-1942.json",
+    "CI": {
+      "id": 34390023351,
+      "conclusion": "success"
+    },
+    "feature_matrix": {
+      "id": 34390023354,
+      "state": "queued; previous jobs actively progressed"
+    },
+    "aggregate": {
+      "id": 34390022530,
+      "state": "in_progress"
+    },
+    "unresolved_noncore_failures": [
+      34390022720,
+      34390022861
     ],
-    "status": "Benchmark,formal,wasmfeature-off,docs,JS,Python,supplychain,container,fuzz,pages,routingsucceeded;CIandmatrixworkflowstatesqueued,aggregateprogressing. Actualjobprogressprobeinflight. Historicalbatchmerge/releaseplzremainfailed;notdiagnosedorchanged,norelease.",
-    "merged_worktree": "Keepissue4246untilagentfinishedreadingitandcleanupapprovedbyexactclean/inactive/sourcebackupevidence; donotreapwhileused.",
-    "actual_jobs": {
-      "main-ci-jobs-1924.json": {
-        "total": 36,
-        "states": {
-          "success": 24,
-          "skipped": 4,
-          "in_progress": 5,
-          "queued": 3
-        },
-        "active": [
-          {
-            "id": 102596805730,
-            "name": "coverage ratchet (shard 2/3)",
-            "started_at": "2026-09-09T19:14:17Z",
-            "runner": "GitHub Actions 1000075688",
-            "current_step": [
-              "Measure + enforce per-crate coverage (shard 2, max-remeasure gate)"
-            ]
-          },
-          {
-            "id": 102596805767,
-            "name": "coverage ratchet (shard 1/3)",
-            "started_at": "2026-09-09T19:18:33Z",
-            "runner": "GitHub Actions 1000075708",
-            "current_step": [
-              "Measure + enforce per-crate coverage (shard 1, max-remeasure gate)"
-            ]
-          },
-          {
-            "id": 102609618311,
-            "name": "test (load-aware shard bulk 2/3)",
-            "started_at": "2026-09-09T19:23:36Z",
-            "runner": "GitHub Actions 1000075730",
-            "current_step": [
-              "Rust (preinstalled stable)"
-            ]
-          },
-          {
-            "id": 102609618342,
-            "name": "test (load-aware shard heavy-hnsw)",
-            "started_at": "2026-09-09T19:23:36Z",
-            "runner": "GitHub Actions 1000075729",
-            "current_step": [
-              "Download nextest archive"
-            ]
-          },
-          {
-            "id": 102609618468,
-            "name": "test (load-aware shard bulk 3/3)",
-            "started_at": "2026-09-09T19:24:22Z",
-            "runner": "GitHub Actions 1000075733",
-            "current_step": [
-              "Free runner disk before download + test"
-            ]
-          }
-        ],
-        "failures": []
-      },
-      "main-matrix-jobs-1924.json": {
-        "total": 57,
-        "states": {
-          "success": 16,
-          "skipped": 1,
-          "queued": 38,
-          "in_progress": 2
-        },
-        "active": [
-          {
-            "id": 102607373747,
-            "name": "opt-in group (g12 sparq-server)",
-            "started_at": "2026-09-09T19:18:38Z",
-            "runner": "GitHub Actions 1000075709",
-            "current_step": [
-              "Run the group's legs (build -> test -> clippy; results to artifact)"
-            ]
-          },
-          {
-            "id": 102607373917,
-            "name": "opt-in group (g23 sparq-lws-core)",
-            "started_at": "2026-09-09T19:24:25Z",
-            "runner": "GitHub Actions 1000075734",
-            "current_step": [
-              "Fetch dependencies (retry transient crates.io fetch)"
-            ]
-          }
-        ],
-        "failures": []
-      }
-    }
+    "release_authorized": false
   }
 }

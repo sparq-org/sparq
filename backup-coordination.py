@@ -245,6 +245,19 @@ FILES["4246-perf-admission-main-runs-1920.json"] = ROOT / "direct-4246/perf-admi
 for evidence_name in ["main-ci-jobs-1924.json", "main-matrix-jobs-1924.json"]:
     FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
 
+# Frozen6468followup and root admission evidence. Never capture a live model output.
+for evidence_name in ['bd-self-test.log', 'changed-files.txt', 'ci-wiring.txt', 'classifier-self-test.log', 'classifier-tests.log', 'commands.json', 'commit.txt', 'composition-check.log', 'control-runner.delta', 'controls/cross-associate-labels/mutation.diff', 'controls/cross-associate-labels/test.log', 'controls/cross-associate-labels/tests.py', 'controls/cross-associate-labels/triage-area.py', 'controls/delete-rule/mutation.diff', 'controls/delete-rule/test.log', 'controls/delete-rule/tests.py', 'controls/delete-rule/triage-area.py', 'controls/disable-global-guard/mutation.diff', 'controls/disable-global-guard/test.log', 'controls/disable-global-guard/tests.py', 'controls/disable-global-guard/triage-area.py', 'controls/drop-tier-evidence/mutation.diff', 'controls/drop-tier-evidence/test.log', 'controls/drop-tier-evidence/tests.py', 'controls/drop-tier-evidence/triage-area.py', 'controls/drop-title-anchor/mutation.diff', 'controls/drop-title-anchor/test.log', 'controls/drop-title-anchor/tests.py', 'controls/drop-title-anchor/triage-area.py', 'controls/guard-only-writable-prefix/mutation.diff', 'controls/guard-only-writable-prefix/test.log', 'controls/guard-only-writable-prefix/tests.py', 'controls/guard-only-writable-prefix/triage-area.py', 'controls/move-rule-late/mutation.diff', 'controls/move-rule-late/test.log', 'controls/move-rule-late/tests.py', 'controls/move-rule-late/triage-area.py', 'controls/remove-anchor-metadata/mutation.diff', 'controls/remove-anchor-metadata/test-metadata.diff', 'controls/remove-anchor-metadata/test.log', 'controls/remove-anchor-metadata/tests.py', 'controls/remove-anchor-metadata/triage-area.py', 'controls/unescape-record-newlines/mutation.diff', 'controls/unescape-record-newlines/test.log', 'controls/unescape-record-newlines/tests.py', 'controls/unescape-record-newlines/triage-area.py', 'controls/wrong-row-number/mutation.diff', 'controls/wrong-row-number/test.log', 'controls/wrong-row-number/tests.py', 'controls/wrong-row-number/triage-area.py', 'controls-run.log', 'controls.json', 'delta.diff', 'diff-check.log', 'freeze.py', 'full.diff', 'key-control-evidence.txt', 'old-error-consumers-head.txt', 'old-error-consumers-main.txt', 'preflight.log', 'prior-opus-review.json', 'python-version.txt', 'report.json', 'report.md', 'review-packet.md', 'run-controls.py', 'source/.github/workflows/docs-quality.yml', 'source/.github/workflows/triage-area.yml', 'source/scripts/tests/test_triage_area.py', 'source/scripts/triage-area.py', 'manifest.json', 'freeze.json']:
+    FILES["6468-followup-" + evidence_name.replace("/", "--")] = ROOT / "direct-6468/followup" / evidence_name
+
+for evidence_name in ['root-verification.json', 'opus-input.md', 'input-manifest.json']:
+    FILES['6468-followup-admission-' + evidence_name] = ROOT / 'direct-6468/followup-admission' / evidence_name
+
+for evidence_name in ['scheduled-runs-1942.json', 'scheduled-34395557649.log', 'scheduled-34395557649-effects.json', 'registry-pause-1945.json', 'new-label-issues-1950.json', 'postcreate-scheduled-verification.json']:
+    FILES['6468-label-maintenance-' + evidence_name] = ROOT / 'direct-6468/label-maintenance' / evidence_name
+
+for evidence_name in ['main-runs-1942.json']:
+    FILES['4246-perf-admission-' + evidence_name] = ROOT / 'direct-4246/perf-admission' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

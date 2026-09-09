@@ -1,0 +1,40 @@
+{
+  "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+  "base": "5f758d2afed6524cf191820463934c2213ddcfda",
+  "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "clean": true,
+  "actual_model": "OpenAI GPT-6 Astra xhigh; no new independent model call.",
+  "delta": "+27/-9 in the same two Python files; runtime change is operator wording only.",
+  "addressed": {
+    "NB1_NB3": "Fetched area-label set count and possible incomplete enumeration are explicit. Do not create from this failure; exact repository-label GET first, then separately reviewed maintenance for verified existing-crate provisioning. No creation/write behavior changed.",
+    "NB2": "Real benchmark and website collision titles both assert ci and T1 triage-area. Moving the rule to the end fails the collision test.",
+    "NB5": "Drop-title-anchor executes all45 tests, failing scope equality and the title negative. Separate test-metadata control removes only triage-area from ANCHORED_ONLY and fails exactly the unchanged equality property.",
+    "NB6": "No-forged-workflow-line and one UNKNOWN_AREA-prefix assertions precede decoding. Exact newline-unescape mutant now fails assertFalse(any line starts ::), failures1/errors0; prefix count alone would not detect its extra unprefixed lines.",
+    "NB7": "Actual unknown-label CLI case includes apply=False. Default helper path remains --apply and preserves previous fixtures.",
+    "NB4": "Record cap deliberately declined: retain the complete finite offending-record set under the existing fetched-plan bounds; no new truncation policy.",
+    "NB8": "Fixtures use real CRATES discovery and couple to sparq-wrapper-gen/sparq-wrapper existence. A crate rename requires updating these fixtures with the actual ownership contract, not blindly treating failures as routing regressions.",
+    "NB9": "Local Python3.14.5 captured. docs-quality quick-gates explicitly setup-python3.12, sufficient for removeprefix; actual Linux run still required. Scheduled lane uses its ubuntu-latest Python, not a locally measured CI interpreter."
+  },
+  "validation": {
+    "suite_tests": 45,
+    "new_class_tests": 8,
+    "classifier_assertions": 17,
+    "bd_assertions": 114,
+    "controls": 10,
+    "control_test_executions": 154,
+    "survivors": 0,
+    "compile_failures": 0,
+    "test_errors": 0
+  },
+  "preflight": "Only failure remains Bash3 mapfile in privacy checker. Other applicable checks pass; no suppressions/installs. Full and delta committed diffs are byte-identical to captured inputs.",
+  "consumer_audit": "git grep over tracked HEAD5f758 and origin/maincea441 for both old error strings found no consumers. HEAD had no matches; main had exactly the two old producer print lines. No log/transcript scan or remote read.",
+  "ci_audit": "Complete docs-quality on block has no paths/paths-ignore; pull_request types include opened/synchronize/reopened/ready_for_review, plus merge_group and push/main. quick-gates invokes both classifier suites. Scheduled triage-area runs both suites before --apply with set -euo pipefail.",
+  "composition": "Read-only6095 full patch check passes again. T0 region, RULES and legacy property-loop bodies unchanged from5f758. No old PR imports, census/workflow/budget changes or remote actions.",
+  "original_evidence": {
+    "packet_sha256": "f95203ff45b00bdb4e7bb81216cf531dc31ece29e96631f7da0bd6ddf4ebaf9b",
+    "manifest_verified_files": 54,
+    "unchanged": true,
+    "review_sha256": "aa9063e12e200452b77c68c8e9760e2d81e42d9df3a88eeab0b2a60dd08c1f5f"
+  },
+  "limits": "No live board replay, label creation, registry action, builds, network installs or model calls. Known500-label fetch limitation remains separate. Linux privacy gate and focused independent delta review remain outstanding."
+}

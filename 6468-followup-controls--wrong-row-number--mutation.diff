@@ -1,0 +1,11 @@
+--- candidate/triage-area.py
++++ wrong-row-number/triage-area.py
+@@ -753,7 +753,7 @@
+         for it, add, why in rows:
+             for label in sorted(set(add).intersection(unknown)):
+                 print("UNKNOWN_AREA " + json.dumps(
+-                    {"number": it["number"], "label": label, "evidence": why},
++                    {"number": 0, "label": label, "evidence": why},
+                     sort_keys=True), file=sys.stderr)
+         print("Do not create a label based on this failure. First verify each name with "
+               "GET /repos/{owner}/{repo}/labels/{url-encoded-name}. Review incomplete "

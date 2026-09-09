@@ -1,0 +1,87 @@
+docs-quality.yml (exact source lines):
+142: name: docs-quality
+143: 
+144: on:
+145:   pull_request:
+146:     # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
+147:     # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+148:     types: [opened, synchronize, reopened, ready_for_review]
+149:   # [OPUS-4.8] Merge queue: docs-quality surfaces checks on PRs (some gating, some
+150:   # advisory/informational which ci-summary excludes), so it must also run on the
+151:   # queue's merge_group ref or the required ci-summary would wait for siblings that
+152:   # never appear there. The concurrency group below uses
+153:   # `github.event.pull_request.number || github.ref`, which falls back to the unique
+154:   # merge_group ref — no cross-event collision.
+155:   merge_group:
+156:   push:
+157:     branches: [main]
+158: 
+175:   quick-gates:
+176:     name: docs-quality quick-gates
+177:     runs-on: ubuntu-latest
+178:     steps:
+179:       # ---- shared setup ----
+180:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+181:         with:
+182:           persist-credentials: false
+183:       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+184:         with:
+185:           node-version: 22
+186:       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+187:         with:
+188:           python-version: "3.12"
+625:       - name: Self-test triage-area.py (needs:area classifier — fail-closed + no-drift)
+626:         run: |
+627:           python3 scripts/triage-area.py --self-test
+628:           python3 scripts/tests/test_triage_area.py
+
+triage-area.yml (exact source lines):
+74: on:
+75:   # Five minutes ahead of retriage.yml's `*/30` — see ORDER IS LOAD-BEARING above.
+76:   schedule:
+77:     - cron: '25,55 * * * *'
+78:   workflow_dispatch:
+79: 
+80: # Least privilege. `issues: write` is what `gh issue edit --add-label/--remove-label`
+81: # consumes and the ONLY write scope here; `contents: read` is for actions/checkout.
+82: # Without issues:write every label write 403s one issue at a time.
+83: permissions:
+84:   issues: write
+85:   contents: read
+86: 
+87: concurrency:
+88:   group: triage-area
+89:   cancel-in-progress: false
+90: 
+91: jobs:
+92:   classify:
+93:     name: clear the needs:area park
+94:     runs-on: ubuntu-latest
+95:     # The first sweep over a large parked backlog is one `gh issue edit` per classified
+96:     # issue. A timeout mid-sweep is not a corruption: the tool is idempotent, so the next
+97:     # tick resumes where this one stopped — but the run reds, which is the honest signal.
+98:     timeout-minutes: 20
+99:     env:
+100:       GH_TOKEN: ${{ github.token }}
+101:       # scripts/triage-area.py defaults REPO to the hard-coded upstream name; pin it to the
+102:       # repository this run belongs to so a fork or a rename can never write to the wrong board.
+103:       SPARQ_REPO: ${{ github.repository }}
+104:     steps:
+105:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+106:         with:
+107:           persist-credentials: false
+108: 
+109:       # Both suites are hermetic (stdlib only, no gh, no network) and run BEFORE any write:
+110:       # the script's own rule fixtures, plus the independent safety suite (fail-closed / no
+111:       # unpark-without-an-area / no invented label / scope discipline). A rule-table
+112:       # regression must stop this run before it mislabels a live issue, not after.
+113:       - name: Self-test the classifier before it writes
+114:         run: |
+115:           set -euo pipefail
+116:           python3 scripts/triage-area.py --self-test
+117:           python3 scripts/tests/test_triage_area.py
+118: 
+119:       - name: Classify the needs:area backlog
+120:         run: |
+121:           set -euo pipefail
+122:           python3 scripts/triage-area.py --apply | tee "$RUNNER_TEMP/triage-area.log"

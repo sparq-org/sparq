@@ -1,0 +1,87 @@
+{"name": "move-rule-late", "metadata_control": false, "tests": 8, "failures": 1, "errors": 0}
+======================================================================
+FAIL: test_rule_precedes_benchmark_and_website_collisions (triage_area_control_tests.TestTriageAreaDiagnostics.test_rule_precedes_benchmark_and_website_collisions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 234, in test_rule_precedes_benchmark_and_website_collisions
+    self.assertEqual(got, ["ci"], title)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['bench'] != ['ci']
+
+First differing element 0:
+'bench'
+'ci'
+
+- ['bench']
++ ['ci'] : triage-area: benchmark the classification pass
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.041s
+
+FAILED (failures=1)
+
+{"name": "drop-title-anchor", "metadata_control": false, "tests": 45, "failures": 2, "errors": 0}
+======================================================================
+FAIL: test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones (triage_area_control_tests.TestScopeDiscipline.test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones)
+Keeps the exemption above honest: a rule is exempt only because every
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 941, in test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones
+    self.assertEqual(anchored, self.ANCHORED_ONLY)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the second set but not the first:
+'triage-area'
+
+======================================================================
+FAIL: test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 226, in test_title_scope_and_t0_priority
+    self.assertEqual(TA.classify(title, body, CRATES), ([], ""))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (['ci'], 'T1 triage-area: scripts/triage-area.py and its workflow') != ([], '')
+
+First differing element 0:
+['ci']
+[]
+
+- (['ci'], 'T1 triage-area: scripts/triage-area.py and its workflow')
++ ([], '')
+
+----------------------------------------------------------------------
+Ran 45 tests in 0.221s
+
+FAILED (failures=2)
+
+{"name": "remove-anchor-metadata", "metadata_control": true, "tests": 45, "failures": 1, "errors": 0}
+======================================================================
+FAIL: test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones (triage_area_control_tests.TestScopeDiscipline.test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones)
+Keeps the exemption above honest: a rule is exempt only because every
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 941, in test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones
+    self.assertEqual(anchored, self.ANCHORED_ONLY)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'triage-area'
+
+----------------------------------------------------------------------
+Ran 45 tests in 0.190s
+
+FAILED (failures=1)
+
+{"name": "unescape-record-newlines", "metadata_control": false, "tests": 8, "failures": 1, "errors": 0}
+======================================================================
+FAIL: test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 280, in test_diagnostic_escapes_records_without_dumping_issue_body
+    self.assertFalse(any(line.startswith("::") for line in err.splitlines()))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.029s
+
+FAILED (failures=1)
+

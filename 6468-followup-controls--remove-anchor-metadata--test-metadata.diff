@@ -1,0 +1,11 @@
+--- candidate/tests.py
++++ control/tests.py
+@@ -876,7 +876,7 @@
+     #: dropping a `^` moves a rule OUT of this set, which reds this test and
+     #: simultaneously brings the rule under the per-rule assertion below.
+     ANCHORED_ONLY = {"difftest-normaliser", "difftest-harness", "kani-harness",
+-                     "site-page", "deploy-demo", "triage-area"}
++                     "site-page", "deploy-demo"}
+ 
+     def setUp(self):
+         # Anti-tautology: the carrier title must itself classify to nothing, or

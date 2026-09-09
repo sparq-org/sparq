@@ -1,0 +1,120 @@
+test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area) ... FAIL
+test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body) ... ok
+test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order) ... FAIL
+test_rule_precedes_benchmark_and_website_collisions (triage_area_control_tests.TestTriageAreaDiagnostics.test_rule_precedes_benchmark_and_website_collisions) ... FAIL
+test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path) ... FAIL
+test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority) ... ok
+test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget) ... FAIL
+test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning) ... ok
+
+======================================================================
+FAIL: test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 213, in test_captured_titles_and_existing_area
+    self.assertEqual(areas(self.DIAGNOSTIC), ["ci"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['sparq-wrapper-gen'] != ['ci']
+
+First differing element 0:
+'sparq-wrapper-gen'
+'ci'
+
+- ['sparq-wrapper-gen']
++ ['ci']
+
+======================================================================
+FAIL: test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 260, in test_offenders_keep_row_label_tier_association_and_order
+    self.assertEqual(self.records(result[3]), [
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"number": 19, "label": "area:sparq-core",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        {"number": 5016, "label": "area:sparq-wrapper-gen",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T0 author-declared crate_or_s[415 chars]468}] != [{'number': 19, 'label': 'area:sparq-core', [292 chars]n)'}]
+
+First list contains 1 additional elements.
+First extra element 3:
+{'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)', 'label': 'area:sparq-wrapper-gen', 'number': 6468}
+
+  [{'evidence': 'T0 author-declared crate_or_surface/crates field',
+    'label': 'area:sparq-core',
+    'number': 19},
+   {'evidence': 'T0 author-declared crate_or_surface/crates field',
+    'label': 'area:sparq-engine',
+    'number': 19},
+   {'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+    'label': 'area:sparq-wrapper-gen',
+-   'number': 5016},
+?                  ^
+
++   'number': 5016}]
+?                  ^
+
+-  {'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+-   'label': 'area:sparq-wrapper-gen',
+-   'number': 6468}]
+
+======================================================================
+FAIL: test_rule_precedes_benchmark_and_website_collisions (triage_area_control_tests.TestTriageAreaDiagnostics.test_rule_precedes_benchmark_and_website_collisions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 234, in test_rule_precedes_benchmark_and_website_collisions
+    self.assertEqual(got, ["ci"], title)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['bench'] != ['ci']
+
+First differing element 0:
+'bench'
+'ci'
+
+- ['bench']
++ ['ci'] : triage-area: benchmark the classification pass
+
+======================================================================
+FAIL: test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 294, in test_supported_label_uses_normal_add_and_unpark_path
+    self.assertIn("area:ci", calls[0])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'area:ci' not found in ['issue', 'edit', '1', '--repo', 'sparq-org/sparq', '--add-label', 'area:sparq-wrapper-gen']
+
+======================================================================
+FAIL: test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 244, in test_unknown_later_row_blocks_all_writes_even_outside_budget
+    self.assertEqual(self.records(err), [{
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+        "number": 5016, "label": "area:sparq-wrapper-gen",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T2 bd-to-issues.derive_areas [194 chars]016}] != [{'number': 5016, 'label': 'area:sparq-wrapp[74 chars]n)'}]
+
+First differing element 0:
+{'evidence': 'T2 bd-to-issues.derive_areas [70 chars]': 1}
+{'number': 5016, 'label': 'area:sparq-wrapp[73 chars]en)'}
+
+First list contains 1 additional elements.
+First extra element 1:
+{'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)', 'label': 'area:sparq-wrapper-gen', 'number': 5016}
+
+  [{'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+    'label': 'area:sparq-wrapper-gen',
+-   'number': 1},
+-  {'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+-   'label': 'area:sparq-wrapper-gen',
+    'number': 5016}]
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.075s
+
+FAILED (failures=5)

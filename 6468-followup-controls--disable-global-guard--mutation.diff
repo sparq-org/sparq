@@ -1,0 +1,11 @@
+--- candidate/triage-area.py
++++ disable-global-guard/triage-area.py
+@@ -743,7 +743,7 @@
+     rows = plan(candidate_issues(), crates)
+ 
+     unknown = sorted({lb for _, add, _ in rows for lb in add} - known)
+-    if unknown:
++    if False and unknown:
+         print(f"ERROR: classification produced labels absent from the fetched area-label set "
+               f"({len(known)} area labels; the fetch may be incomplete): {unknown}",
+               file=sys.stderr)

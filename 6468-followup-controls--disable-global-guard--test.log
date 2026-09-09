@@ -1,0 +1,118 @@
+test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area) ... ok
+test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body) ... FAIL
+test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order) ... FAIL
+test_rule_precedes_benchmark_and_website_collisions (triage_area_control_tests.TestTriageAreaDiagnostics.test_rule_precedes_benchmark_and_website_collisions) ... ok
+test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path) ... ok
+test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority) ... ok
+test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget) ... FAIL
+test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning) ... FAIL
+
+======================================================================
+FAIL: test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 277, in test_diagnostic_escapes_records_without_dumping_issue_body
+    self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (0, [['issue', 'edit', '7', '--repo', 'spa[369 chars]', 0) != (2, [], '', 0)
+
+First differing element 0:
+0
+2
+
++ (2, [], '', 0)
+- (0,
+-  [['issue',
+-    'edit',
+-    '7',
+-    '--repo',
+-    'sparq-org/sparq',
+-    '--add-label',
+-    'area:missing\nsecond-line']],
+-  '#7     missing\n'
+-  'second-line                      T2 evidence\n'
+-  '::error::forged\r'
+-  '\t"quoted"\n'
+-  '       unprinted title\n'
+-  '\n'
+-  '-- 1 classified (1 writable this run, 0 deferred to the next tick by the '
+-  '150/run write budget), 0 left unattributed (no confident evidence), 1 '
+-  'scanned\n'
+-  'applied #7 area:missing\n'
+-  'second-line\n',
+-  0)
+
+======================================================================
+FAIL: test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 259, in test_offenders_keep_row_label_tier_association_and_order
+    self.assertEqual((result[0], result[1], result[4]), (2, [], 0))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (0, [['issue', 'edit', '19', '--repo', 'sp[264 chars]], 2) != (2, [], 0)
+
+First differing element 0:
+0
+2
+
++ (2, [], 0)
+- (0,
+-  [['issue',
+-    'edit',
+-    '19',
+-    '--repo',
+-    'sparq-org/sparq',
+-    '--add-label',
+-    'area:sparq-core',
+-    '--add-label',
+-    'area:sparq-engine'],
+-   ['issue',
+-    'edit',
+-    '5016',
+-    '--repo',
+-    'sparq-org/sparq',
+-    '--add-label',
+-    'area:sparq-wrapper-gen'],
+-   ['issue',
+-    'edit',
+-    '6468',
+-    '--repo',
+-    'sparq-org/sparq',
+-    '--add-label',
+-    'area:ci']],
+-  2)
+
+======================================================================
+FAIL: test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 243, in test_unknown_later_row_blocks_all_writes_even_outside_budget
+    self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (0, [['issue', 'edit', '1', '--repo', 'spa[842 chars]', 1) != (2, [], '', 0)
+
+First differing element 0:
+0
+2
+
+Diff is 1080 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 303, in test_unrelated_unknown_still_blocks_after_generator_provisioning
+    self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (0, [['issue', 'edit', '1', '--repo', 'spa[721 chars]', 1) != (2, [], '', 0)
+
+First differing element 0:
+0
+2
+
+Diff is 933 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.017s
+
+FAILED (failures=4)

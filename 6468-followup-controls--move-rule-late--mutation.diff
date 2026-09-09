@@ -1,0 +1,20 @@
+--- candidate/triage-area.py
++++ move-rule-late/triage-area.py
+@@ -151,8 +151,6 @@
+     # -- workflow lanes that merely *mention* another surface ---------------------
+     # These must precede the surface rules they name, else the named surface wins.
+     # [GPT-6 Astra] #6468: a classifier diagnostic can name the crate it misroutes.
+-    ("triage-area", "title", r"^triage-area(?:\.py)?(?:\s|:|$)",
+-     ["ci"], "scripts/triage-area.py and its workflow"),
+     ("zk-toolchain-lane", "title", r"into the zk-toolchain\.yml lane",
+      ["ci"], "adds a step to .github/workflows/zk-toolchain.yml"),
+ 
+@@ -389,6 +387,8 @@
+ 
+     ("website", "title", r"\bwebsite\b",
+      ["site"], "the marketing/docs website"),
++    ("triage-area", "title", r"^triage-area(?:\.py)?(?:\s|:|$)",
++     ["ci"], "scripts/triage-area.py and its workflow"),
+ ]
+ 
+ 

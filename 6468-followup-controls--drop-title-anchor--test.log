@@ -1,0 +1,101 @@
+test_a_body_name_drop_is_not_evidence (triage_area_control_tests.TestFailClosed.test_a_body_name_drop_is_not_evidence) ... ok
+test_declaration_naming_no_real_crate_stays_parked (triage_area_control_tests.TestFailClosed.test_declaration_naming_no_real_crate_stays_parked) ... ok
+test_no_evidence_stays_parked (triage_area_control_tests.TestFailClosed.test_no_evidence_stays_parked) ... ok
+test_a_never_parked_area_less_issue_reaches_the_queue (triage_area_control_tests.TestFetchReach.test_a_never_parked_area_less_issue_reaches_the_queue)
+THE REACH GUARD. A `--label needs:area` fetch cannot return an issue that ... ok
+test_a_runaway_snapshot_fails_closed (triage_area_control_tests.TestFetchReach.test_a_runaway_snapshot_fails_closed)
+The ceiling is the other half of dropping the limit: pagination to ... ok
+test_an_already_attributed_issue_is_not_re_fetched (triage_area_control_tests.TestFetchReach.test_an_already_attributed_issue_is_not_re_fetched)
+Widening the reach must not re-open settled work: an issue that already ... ok
+test_pull_requests_are_not_candidates (triage_area_control_tests.TestFetchReach.test_pull_requests_are_not_candidates)
+The issues endpoint returns PRs; a PR has no dispatch partition, so ... ok
+test_the_fetch_does_not_silently_truncate (triage_area_control_tests.TestFetchReach.test_the_fetch_does_not_silently_truncate)
+THE TRUNCATION GUARD. `--limit 1000` keeps the newest 1000 and reports ... ok
+test_the_fetch_uses_cursor_pagination (triage_area_control_tests.TestFetchReach.test_the_fetch_uses_cursor_pagination) ... ok
+test_already_classified_issue_is_a_no_op (triage_area_control_tests.TestNoDrift.test_already_classified_issue_is_a_no_op) ... ok
+test_main_never_applies_an_unclassified_row (triage_area_control_tests.TestNoDrift.test_main_never_applies_an_unclassified_row)
+End-to-end over `main() --apply`: the filter that decides WHICH rows are ... ok
+test_plan_emits_labels_only_for_classifiable_issues (triage_area_control_tests.TestNoDrift.test_plan_emits_labels_only_for_classifiable_issues) ... ok
+test_the_unpark_and_the_areas_travel_in_one_call (triage_area_control_tests.TestNoDrift.test_the_unpark_and_the_areas_travel_in_one_call) ... ok
+test_unpark_is_never_emitted_without_an_area (triage_area_control_tests.TestNoDrift.test_unpark_is_never_emitted_without_an_area)
+The named case: apply_row called with NO areas must not reach `gh` at ... ok
+test_cross_cutting_issues_keep_every_area (triage_area_control_tests.TestRuleTableHygiene.test_cross_cutting_issues_keep_every_area)
+The partitioner maps multi-area to __global__ deliberately. Collapsing a ... ok
+test_declaration_span_stops_at_the_sentence_break (triage_area_control_tests.TestRuleTableHygiene.test_declaration_span_stops_at_the_sentence_break)
+sq-p4zci's field is followed by prose containing 'docs/SKILL examples'; ... ok
+test_every_emitted_area_is_a_real_crate_or_a_known_surface (triage_area_control_tests.TestRuleTableHygiene.test_every_emitted_area_is_a_real_crate_or_a_known_surface)
+Never invent a label. An `area:` the repo does not have is invisible to ... ok
+test_only_the_pinned_rules_are_allowed_to_read_the_body (triage_area_control_tests.TestRuleTableHygiene.test_only_the_pinned_rules_are_allowed_to_read_the_body)
+The scope of a rule is a POLICY decision, and widening one from `title` ... ok
+test_rule_order_survives_the_known_name_drop_collisions (triage_area_control_tests.TestRuleTableHygiene.test_rule_order_survives_the_known_name_drop_collisions)
+Three orderings were each MEASURED wrong on the live backlog. Pin them: ... ok
+test_scope_is_declared_and_only_ever_title_or_text (triage_area_control_tests.TestRuleTableHygiene.test_scope_is_declared_and_only_ever_title_or_text)
+`scope` is a two-valued dispatch in classify(); a typo'd third value ... ok
+test_a_text_scoped_rule_does_fire_from_the_body (triage_area_control_tests.TestScopeDiscipline.test_a_text_scoped_rule_does_fire_from_the_body)
+The other direction of the same dispatch. The `text`-scoped rules exist ... ok
+test_a_title_scoped_rule_never_fires_from_the_body_alone (triage_area_control_tests.TestScopeDiscipline.test_a_title_scoped_rule_never_fires_from_the_body_alone)
+THE property. Each title rule's own witness, moved into the body of an ... ok
+test_every_rule_has_a_witness_that_actually_matches (triage_area_control_tests.TestScopeDiscipline.test_every_rule_has_a_witness_that_actually_matches)
+The generated fixtures are the substrate of both properties below; if one ... ok
+test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones (triage_area_control_tests.TestScopeDiscipline.test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones)
+Keeps the exemption above honest: a rule is exempt only because every ... FAIL
+test_zk_ieee754_scope_is_pinned_not_only_its_order (triage_area_control_tests.TestScopeDiscipline.test_zk_ieee754_scope_is_pinned_not_only_its_order)
+The rule's own comment gives TWO reasons it is safe — "TITLE-scoped and ... ok
+test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area) ... ok
+test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body) ... ok
+test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order) ... ok
+test_rule_precedes_benchmark_and_website_collisions (triage_area_control_tests.TestTriageAreaDiagnostics.test_rule_precedes_benchmark_and_website_collisions) ... ok
+test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path) ... ok
+test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority) ... FAIL
+test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget) ... ok
+test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning) ... ok
+test_a_never_parked_issue_is_not_unparked (triage_area_control_tests.TestUnparkDiscipline.test_a_never_parked_issue_is_not_unparked) ... ok
+test_a_parked_issue_still_travels_with_its_unpark (triage_area_control_tests.TestUnparkDiscipline.test_a_parked_issue_still_travels_with_its_unpark) ... ok
+test_main_decides_the_unpark_per_issue (triage_area_control_tests.TestUnparkDiscipline.test_main_decides_the_unpark_per_issue)
+End-to-end through `main() --apply`: the decision is read from each ... ok
+test_the_empty_add_guard_holds_in_both_modes (triage_area_control_tests.TestUnparkDiscipline.test_the_empty_add_guard_holds_in_both_modes)
+A bare unpark is refused with `unpark=True`; with `unpark=False` there is ... ok
+test_a_dry_run_shows_the_deferral_the_next_apply_tick_will_make (triage_area_control_tests.TestWriteBudget.test_a_dry_run_shows_the_deferral_the_next_apply_tick_will_make) ... ok
+test_the_budget_bounds_the_writes_a_single_run_can_spend (triage_area_control_tests.TestWriteBudget.test_the_budget_bounds_the_writes_a_single_run_can_spend) ... ok
+test_the_defaults_stay_under_the_documented_secondary_limits (triage_area_control_tests.TestWriteBudget.test_the_defaults_stay_under_the_documented_secondary_limits)
+The two constants are only defensible as arithmetic on the published limits, ... ok
+test_the_deferred_tail_is_reported_not_silently_dropped (triage_area_control_tests.TestWriteBudget.test_the_deferred_tail_is_reported_not_silently_dropped)
+The headline property. A cap the report does not name is indistinguishable ... ok
+test_the_deferred_tail_is_written_by_the_next_tick (triage_area_control_tests.TestWriteBudget.test_the_deferred_tail_is_written_by_the_next_tick)
+CONVERGENCE. The budget defers, it does not drop. Simulate the next tick: ... ok
+test_there_is_no_unlimited_write_mode (triage_area_control_tests.TestWriteBudget.test_there_is_no_unlimited_write_mode) ... ok
+test_ticks_per_hour_matches_the_cron_that_actually_drives_the_lane (triage_area_control_tests.TestWriteBudget.test_ticks_per_hour_matches_the_cron_that_actually_drives_the_lane)
+The budget is the hourly allowance divided across the ticks in an hour, so ... ok
+test_writes_are_paced_between_each_other_and_not_before_the_first (triage_area_control_tests.TestWriteBudget.test_writes_are_paced_between_each_other_and_not_before_the_first) ... ok
+
+======================================================================
+FAIL: test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones (triage_area_control_tests.TestScopeDiscipline.test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones)
+Keeps the exemption above honest: a rule is exempt only because every
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 941, in test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones
+    self.assertEqual(anchored, self.ANCHORED_ONLY)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the second set but not the first:
+'triage-area'
+
+======================================================================
+FAIL: test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 226, in test_title_scope_and_t0_priority
+    self.assertEqual(TA.classify(title, body, CRATES), ([], ""))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (['ci'], 'T1 triage-area: scripts/triage-area.py and its workflow') != ([], '')
+
+First differing element 0:
+['ci']
+[]
+
+- (['ci'], 'T1 triage-area: scripts/triage-area.py and its workflow')
++ ([], '')
+
+----------------------------------------------------------------------
+Ran 45 tests in 0.221s
+
+FAILED (failures=2)
