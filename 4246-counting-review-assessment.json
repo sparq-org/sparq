@@ -1,0 +1,107 @@
+{
+  "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "assessment": "Confirmed bench-only window ownership defect. Minimal separate ownership guard is warranted; no evidence that the existing single-coordinator measurement paths trigger it. Read-only assessment only: no source edit, compile, test, benchmark, remote action or model call.",
+  "mechanism": [
+    "begin ACTIVE.swap(false) first changes state, then asserts on the old value. A nested/competing begin against an active window clears counting before panic. The failed attempt need not have touched counters directly to invalidate subsequent recording.",
+    "Two callers can both observe false while either resets counters before ACTIVE.store(true). A mere ACTIVE compare_exchange(false,true) closes duplicate admission but activates counting before resets, changing the measured boundary.",
+    "end currently clears ACTIVE before loading counters. Treating that as the admission lock lets a new begin reset counters during the preceding readout. Ownership must extend through the local snapshot of all five returned values."
+  ],
+  "caller_inventory": [
+    {
+      "where": "main.rs:101\u2013106 -> counting.rs:103\u2013118",
+      "path": "main creates the global one-thread Rayon pool, then calls calibrate once before fixture/argument dispatch. calibrate has one balanced begin/end and direct128/64/256byte System-wrapper calibration; it is not called by worker closures."
+    },
+    {
+      "where": "main.rs:118\u2013165, especially148\u2013153",
+      "path": "The baseline count curve nests ordinary sequential loops over delta/workload/phase/repetition. Each sample creates/prewarms its graph and obtains heap/RSS before one begin, calls synchronous run, then end before result assertion/output. No nested begin and no thread calls to begin/end."
+    },
+    {
+      "where": "lifecycle.rs:23\u201345; actual measure calls at145,269",
+      "path": "measure is the only lifecycle window wrapper: begin -> synchronous FnOnce -> elapsed -> end -> RSS/record construction. Its two call sites are run_all and run_reads; no nested measure."
+    },
+    {
+      "where": "lifecycle.rs:130\u2013210",
+      "path": "run_all invokes measure serially for snapshot/fork-insert/fork-tombstone/inplace-insert/multi-cold/multi-warm/concurrent-cold. Ordinary cases synchronously apply/read/retain; emitting and retained-content verification happen outside every window."
+    },
+    {
+      "where": "lifecycle.rs:150\u2013164",
+      "path": "concurrent-cold creates two readers within one measure closure. Barrier(2) aligns their query starts; neither reader calls begin/end. Both JoinHandles are joined and scoped threads complete before the closure returns to end. Thread launch/join overhead is intentionally inside that one window."
+    },
+    {
+      "where": "lifecycle.rs:229\u2013315",
+      "path": "run_reads loops R={1,2,4,8,16}, repetitions and four retained generations serially; one measure per generation. It has no worker launch or window calls in run/query helpers."
+    }
+  ],
+  "frozen_measurement_impact": {
+    "conclusion": "The confirmed bad admission/readout interleavings require overlapping window coordinators or a nested begin. No such path is present in these callers, including concurrent-cold. Preserve all frozen results as exact-old-head diagnostic evidence; do not retroactively relabel them as measured with the repaired guard or claim the protocol was concurrency-safe.",
+    "limits": "Source call-graph evidence is not a trace of every historical allocation or background scheduling event. The process-global wrapper can count unrelated in-process allocations; worker quiescence, successful calibration and no unexpected panic remain measurement preconditions. No raw matrix re-audit, rebuild or remeasurement was performed. This finding does not justify blanket invalidation or renewed timing sweeps.",
+    "source_versions": {
+      "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe": {
+        "counting_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+        "same_as_current": true
+      },
+      "cb638a42a54fc7c9e11e9101587910e668a5f92a": {
+        "counting_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+        "same_as_current": true
+      },
+      "b86b5d5ad84bce900762defa094630eb358317a6": {
+        "counting_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+        "same_as_current": true
+      },
+      "5757e70be09ed95bcbc2831cec7850fa29fdf620": {
+        "counting_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+        "same_as_current": true
+      }
+    }
+  },
+  "minimal_fix_proposal": {
+    "scope": "counting.rs ownership transition and one actual-module regression; optionally README command documentation. No production core change, new storage API, allocator hot-path change, Cargo dependency or gate adjustment.",
+    "begin": "Introduce a separate static ownership AtomicBool, initiallyfalse. First compare_exchange(false,true,Acquire,Relaxed); failed acquisition panics outside the allocator without mutating ACTIVE/counters. Only after acquisition perform existing baseline/reset operations, then the existing ACTIVE.store(true,Relaxed). Remove ACTIVE.swap(false) from admission.",
+    "end": "Keep ACTIVE.store(false,Relaxed) at the current boundary. Load the entire result tuple into a local value while ownership remains held, then ownership.store(false,Release), then return that local tuple. The acquire/release pair orders readout-before-next-reset ownership handoff; active allocation counters stay atomic and existing hot-path loads unchanged.",
+    "preconditions": "Single successful coordinator, balanced begin/end by that coordinator, no worker allocation in reset/readout phases; work/threads must finish before end. This is not an owner-token API or a stop-the-world snapshot. An erroneous non-owner end or arbitrary allocator calls racing the boundary are not made sound by the flag. No lock or panic added inside GlobalAlloc methods.",
+    "denied_begin_caveat": "Even with side-effect-free failed acquisition, assert/catch_unwind and panic payload handling may allocate while the legitimate window is active. Thus preserve logical ACTIVE/ownership state, not exact totals through an invalid begin; the invalid-call scenario is not a valid measurement."
+  },
+  "one_focused_regression_proposal": {
+    "actual_module": "Embed a cfg(test) serial regression using the actual counting.rs implementation, then compile that exact file as a standalone std-only crate with pinned rustc --edition=2021 --test. It needs no sparq, Rayon, libc, Cargo resolution or optimized build. Alternatively a #[path] module import preserves its inner module docs and global allocator; avoid a copied state-machine implementation.",
+    "command_template": "<installed-pinned-rustc> --edition=2021 --test bench/overlay-count/src/counting.rs -o <task-private>/counting-window-tests; <binary> --exact <single_test_name> --test-threads=1 --nocapture",
+    "scenarios": [
+      "Call existing calibrate for clean sequential windows, twice, with no diagnostic formatting inside the windows. Its exact expectation remains(2,1,448,320,baseline); do not replace it with a tolerance or implementation-mirroring count assertion.",
+      "Set a no-allocation panic hook outside a window. Begin a legitimate window, catch a duplicate begin, record ACTIVE without formatting/asserting, then end and assert the recorded flag remained true. Drop panic payloads/restore hooks outside clean calibration. Do not compare the contaminated window totals.",
+      "For competing admission, precreate a worker and synchronization before opening the owner window; release it only after the owner begin has returned. Worker attempts begin and catches rejection, then joins before end. Record ACTIVE and whether the worker was denied, close the owner window, assert outside it. This deterministically exercises competing ACTIVE-window admission; it is not a deterministic reset/readout interleaving test.",
+      "Finish with another clean calibration to verify recovery and successive reset behavior. One serial test avoids parallel tests sharing the process-global counters/hook."
+    ],
+    "old_source_control": "Apply the identical test suffix to the exact old counting.rs source at5757 in a task-private copy. Tests must reference existing begin/end/calibrate/ACTIVE, not the new ownership variable, so this control compiles. The old source must fail the denied-begin ACTIVE preservation assertion; a compile failure or zero tests is not a killed control. Preserve exact old/fixed source, rustc argv/binary hashes, logs and exit/test counts.",
+    "coverage_limits": "This minimal serial/active-contention control does not deterministically schedule a competing begin during initialization or readout. The owner flag spanning both regions must be explicitly reviewed from source. Avoid claiming those two interleavings were executed; test hooks or a wider concurrency harness would be separate scope.",
+    "allocator_noise": "rustc --test uses libtest, whose own threads/capture can allocate globally; --test-threads=1 and --nocapture reduce interference but do not prove absence of harness allocations. All setup/barriers/thread creation/panic-hook changes/output/assertion failures must be outside clean exact calibration windows. If exact calibration is contaminated, report it rather than retrying until green or subtracting guessed overhead. A tiny std-only harnessless executable including the exact module is the cleaner alternative for strict allocation counts, but should be separately scoped if needed.",
+    "ci_wiring": "Detached bench/overlay-count has its own [workspace] and is not automatically exercised by root cargo test --workspace. No existing dedicated bench.yml command was established to run these new tests. Document the exact standalone command; do not claim full CI reaches it or silently expand CI."
+  },
+  "references": [
+    {
+      "url": "https://doc.rust-lang.org/nomicon/atomics.html",
+      "provenance": "Root supplied current primary-source verification: atomic RMW is indivisible even atRelaxed; acquire/release is needed for ownership handoff ordering."
+    }
+  ],
+  "source_inventory": {
+    "bench/overlay-count/src/counting.rs": {
+      "sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+      "bytes": 4318
+    },
+    "bench/overlay-count/src/main.rs": {
+      "sha256": "946188525809298d068450911e93b3d0c3bed2e9a7c6cbcd91b713a71e6c5e48",
+      "bytes": 6085
+    },
+    "bench/overlay-count/src/lifecycle.rs": {
+      "sha256": "d02c77e89674cf79f351f419540f1a69d192adae16bdbbc23a8fbce97c587e2b",
+      "bytes": 13346
+    },
+    "bench/overlay-count/Cargo.toml": {
+      "sha256": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040",
+      "bytes": 562
+    },
+    "bench/overlay-count/README.md": {
+      "sha256": "73d93c0b757e2186a094768f82cdff9006209598e3442e070f831ebb83c90f4d",
+      "bytes": 5014
+    }
+  },
+  "status": "proposal_ready_for_root_review; source5757 remains clean; build hold preserved"
+}

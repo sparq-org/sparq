@@ -1,0 +1,18 @@
+bench/overlay-count/src/counting.rs:80:pub fn begin() -> u64 {
+bench/overlay-count/src/counting.rs:92:pub fn end(baseline: u64) -> (u64, u64, u64, u64, u64) {
+bench/overlay-count/src/counting.rs:103:pub fn calibrate() {
+bench/overlay-count/src/counting.rs:104:    let baseline = begin();
+bench/overlay-count/src/counting.rs:118:    assert_eq!(end(baseline), (2, 1, 448, 320, baseline));
+bench/overlay-count/src/lifecycle.rs:23:fn measure(f: impl FnOnce() -> [u128; 3]) -> Sample {
+bench/overlay-count/src/lifecycle.rs:26:    let live_before = counting::begin();
+bench/overlay-count/src/lifecycle.rs:33:    let counts = counting::end(live_before);
+bench/overlay-count/src/lifecycle.rs:145:                let mut sample = measure(|| {
+bench/overlay-count/src/lifecycle.rs:161:                            let a = scope.spawn(read);
+bench/overlay-count/src/lifecycle.rs:162:                            let b = scope.spawn(read);
+bench/overlay-count/src/lifecycle.rs:163:                            [a.join().unwrap(), b.join().unwrap(), 0]
+bench/overlay-count/src/lifecycle.rs:269:                let mut sample = measure(|| {
+bench/overlay-count/src/main.rs:102:        .num_threads(1)
+bench/overlay-count/src/main.rs:103:        .build_global()
+bench/overlay-count/src/main.rs:106:    counting::calibrate();
+bench/overlay-count/src/main.rs:148:                    let baseline = counting::begin();
+bench/overlay-count/src/main.rs:153:                    let counts = counting::end(baseline);

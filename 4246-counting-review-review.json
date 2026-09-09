@@ -1,0 +1,15 @@
+{
+  "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "review": {
+    "id": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
+    "state": "COMMENTED",
+    "body": "### \ud83d\udd35 Needs a closer look\n\nA newly added bench-only allocator window (`bench/overlay-count/src/counting.rs`) has an incorrect `ACTIVE` state transition that can allow overlapping measurement windows.\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**Previously missed (1)** \u2014 in code that hasn't changed since the last review.\n\n**bench/overlay-count/src/counting.rs:89**\n* `begin()` uses `ACTIVE.swap(false, \u2026)` which (a) clears the active flag before checking it (side effect on failure) and (b) doesn\u2019t actually prevent a second concurrent `begin()` from entering between the swap and the later `ACTIVE.store(true, \u2026)`. Even though this is a bench-only harness, it makes the allocator-window state machine incorrect and can undercount/overlap measurement windows.\n\n- **Files reviewed:** 14/15 changed files\n- **Comments generated:** 0 new\n- **Review effort level:** Lite\n</details>",
+    "submittedAt": "2026-09-09T15:48:34Z",
+    "commit": {
+      "oid": "5757e70be09ed95bcbc2831cec7850fa29fdf620"
+    },
+    "author": {
+      "login": "copilot-pull-request-reviewer"
+    }
+  }
+}

@@ -166,6 +166,9 @@ for evidence_name in [*json.loads((LAYOUT_COMMENT / 'manifest.json').read_text()
     FILES['4246-layout-comment-' + evidence_name.replace('/', '--')] = LAYOUT_COMMENT / evidence_name
 for evidence_name in ['checks-1558.json', 'review-1558.json']:
     FILES['4246-layout-comment-' + evidence_name] = LAYOUT_COMMENT / evidence_name
+COUNTING_REVIEW = ROOT / 'direct-4246/counting-review'
+for evidence_name in [*json.loads((COUNTING_REVIEW / 'manifest.json').read_text())['files'], 'manifest.json', 'freeze.json', 'root-verification.json']:
+    FILES['4246-counting-review-' + evidence_name.replace('/', '--')] = COUNTING_REVIEW / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name

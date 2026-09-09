@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T16:00:28.425186+00:00",
+  "updated_at": "2026-09-09T16:09:42.620379+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Exact5757 nofailedCIchecks; current oldthreadresolved, butnewCopilotreviewbody flags ACTIVE.swap(false) inbench-onlycounting.rs. This is a substantive review item even though no new inline thread was emitted. SameAstraagent doingread-onlycaller/evidenceassessment; no newsource/test/reviewyet.",
-    "phase": "Assess new Copilot allocator-window finding while5757 full CI progresses",
+    "state": "SameAstraagentauthorizedminimaldiagnosticguardrepairandtinyregression. Rootsourceinventoryshowsonewindowcoordinatorincludingconcurrentreaders. CurrentPRheadremains5757,allrequiredCIstillpending,nofailureobserved. No mergeadmission untilnewreviewfindingresolved.",
+    "phase": "Astra repairing benchmark window ownership with tiny isolated regression;5757 fullCIpending",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -575,7 +575,16 @@
       "finding": "begin clears ACTIVE before asserting, leaves counter-reset interval open to competing begin; potential overlap/measurement corruption on invalid usage.",
       "evidence": "direct-4246/layout-comment/review-1558.json",
       "scope": "SameAstraagent read-only assessment of all begin/end callers, historical measurement validity, minimal correction and actual-module regression/control design; no source/build/remote changes authorized yet.",
-      "root_source_observation": "Current harness appears single coordinator: main sequential loop and lifecycle::measure; concurrent-cold starts/joinstwo workers inside one measuredclosure,workersdo notbegin/end. Need fullinventory/evidencescope before concluding prior data unaffected."
+      "root_source_observation": "Current harness appears single coordinator: main sequential loop and lifecycle::measure; concurrent-cold starts/joinstwo workers inside one measuredclosure,workersdo notbegin/end. Need fullinventory/evidencescope before concluding prior data unaffected.",
+      "implementation_authorized": {
+        "design": "Separate WINDOW_OPEN AtomicBool ownership before counter reset, held through end counter snapshot; acquire/release handoff. Existing ACTIVE boundaries/hot allocator path preserved. No core/declaration/workload changes.",
+        "validation": "One actual-module serial regression/calibration and compiled old-source control; competing caller only deterministic/bounded and no panic-noise exact-count claim. Exact directrustc command documented; detachedmodule not claimed reached by workspaceCI.",
+        "resource_exception": "Only dependency-free rustc test/smoke binaries, task-privateoutput<=128MiB, <=120seconds total, >=8GiBfreebefore/after. NoCargo/deps/fullworkspace/optimizedbenchmark builds. Broadbuildholdstays.",
+        "publication": "Localcommitted/frozenevidenceonly. Root verification and actual independent Opus review required before push.",
+        "historical_evidence": "All prior benchmark data stays unchanged and attributed to measured oldheads; assess single-coordinator caller equivalence without fullremeasurement."
+      },
+      "assessment": "Root verified frozen10filecounting-review assessment. Allcurrentbegin/end calls fromsinglecoordinator; concurrentreadersjoinedwithinonewindow. No observed triggerinvalidatespriorfrozenmeasurements. Separateowner guardthroughreadout needed; narrowrepairalready authorized.",
+      "assessment_file": "direct-4246/counting-review/assessment.json"
     }
   },
   "prs": {
