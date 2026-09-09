@@ -466,6 +466,29 @@ pub fn plan_disclosure(
     released: &[BTreeMap<String, Term>],
     limits: PlannerLimits,
 ) -> Result<DisclosurePlan, PlanError> {
+    plan_disclosure_admitted(query, credentials, released, limits, |_, _, _| true)
+}
+
+/// Selects witnesses after a backend restricts eligible candidate triples.
+///
+/// [GPT-6] `admit` receives the pattern index, original credential/leaf reference
+/// and candidate triple. Returning false only removes a candidate; it cannot
+/// waive query matching, FILTER, join, projection or resource checks. This is
+/// prover-local eligibility, never a verifier trust or authentication decision.
+///
+/// # Errors
+/// Returns the same validation and resource errors as [`plan_disclosure`], or
+/// `NoWitness` when the admitted candidates cannot support a released answer.
+pub fn plan_disclosure_admitted<A>(
+    query: &DisclosureQuery,
+    credentials: &[GraphCommitment],
+    released: &[BTreeMap<String, Term>],
+    limits: PlannerLimits,
+    admit: A,
+) -> Result<DisclosurePlan, PlanError>
+where
+    A: Fn(usize, MembershipRef, &Triple) -> bool,
+{
     query.validate()?;
     if query.patterns.len() > limits.max_patterns {
         return Err(PlanError::LimitExceeded("patterns"));
@@ -510,6 +533,7 @@ pub fn plan_disclosure(
             &mut witnesses,
             &mut search_steps,
             limits.max_search_steps,
+            &admit,
         )? {
             return Err(PlanError::NoWitness { row: row_index });
         }
@@ -591,7 +615,7 @@ fn triple_terms(triple: &Triple) -> [Term; 3] {
     ]
 }
 
-fn find_witness(
+fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
     query: &DisclosureQuery,
     credentials: &[GraphCommitment],
     pattern_index: usize,
@@ -599,6 +623,7 @@ fn find_witness(
     witnesses: &mut Vec<MembershipRef>,
     search_steps: &mut usize,
     max_search_steps: usize,
+    admit: &A,
 ) -> Result<bool, PlanError> {
     if pattern_index == query.patterns.len() {
         return Ok(query.filters.iter().all(|filter| {
@@ -614,6 +639,9 @@ fn find_witness(
                 return Err(PlanError::LimitExceeded("candidate triple attempts"));
             }
             *search_steps += 1;
+            if !admit(pattern_index, MembershipRef { credential, leaf }, triple) {
+                continue;
+            }
             let mut next = bindings.clone();
             let terms = triple_terms(triple);
             let mut matches = true;
@@ -657,6 +685,7 @@ fn find_witness(
                     witnesses,
                     search_steps,
                     max_search_steps,
+                    admit,
                 )? {
                     return Ok(true);
                 }

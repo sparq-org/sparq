@@ -76,3 +76,8 @@ CLI identifies this as the ZK target; `noir-recursive-no-zk` is a different targ
 
 Use a durable `SeenNonces` implementation. Authentication of external status
 snapshots and selecting acceptable issuers remain the relying party's job.
+
+[GPT-6] Backend builders can use `planner::plan_disclosure_admitted` to restrict
+candidate eligibility without changing committed graphs or query semantics. The
+callback receives the pattern index, original wallet/leaf reference and triple;
+a rejection only removes that candidate, and all ordinary planner checks remain.

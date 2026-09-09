@@ -292,3 +292,8 @@ circuitry. Roots/salts/status indices and intermediate encodings are private;
 issuer slots/capacities/result size remain public. See the crate README's
 “Successful-result contract” section for exact scope. Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
+
+[GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate
+`Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
+backend candidates while retaining all query checks. It preserves original
+wallet/leaf indices and is private preparation, never a verifier trust decision.
