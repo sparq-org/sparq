@@ -373,8 +373,10 @@ fn deleted_projection_feature_off_preserves_main_layout_and_heap() {
     }
     let frozen = store.fork();
     assert_eq!(frozen.heap_bytes(), before);
-    // These are the three fields of main's Overlay. All have pointer alignment
-    // and sizes divisible by that alignment; there is no inter-field padding.
+    // These are the three fields of main's Overlay. This is an empirical default-off
+    // footprint budget for the supported configurations, not a repr(Rust) layout
+    // guarantee. It also detects retained cache metadata whose slots own no heap
+    // memory. Compiler or target layout changes require reassessing this budget.
     let main_fields = std::mem::size_of::<Vec<[Id; 3]>>()
         + std::mem::size_of::<rustc_hash::FxHashSet<[Id; 3]>>()
         + std::mem::size_of::<[std::sync::OnceLock<Vec<[Id; 3]>>; 6]>();
