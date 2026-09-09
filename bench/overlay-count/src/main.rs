@@ -2,6 +2,7 @@
 
 #[cfg(feature = "count-alloc")]
 mod counting;
+mod lifecycle;
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
@@ -103,6 +104,10 @@ fn main() {
         .unwrap();
     #[cfg(feature = "count-alloc")]
     counting::calibrate();
+    if std::env::args().nth(1).as_deref() == Some("lifecycle") {
+        lifecycle::run_all();
+        return;
+    }
     let graph = base();
     println!("{{\"kind\":\"fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"base_triples\":{},\"setup_process_peak_rss_bytes\":{},\"rayon_threads\":1,\"counting\":{}}}", graph.store.len(), rss(), cfg!(feature = "count-alloc"));
     for (n, added) in DELETIONS

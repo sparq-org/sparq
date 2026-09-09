@@ -35,3 +35,27 @@ Counting calibration runs before setup. Compare only byte-identical harnesses,
 identical dimensions/features, and record exact source and binary hashes with raw
 JSON. Preserve all samples; do not seek a quiet subset or publish a speedup claim
 from these local diagnostics.
+
+The `lifecycle` argument selects the fixed review follow-up: a delete-only overlay
+with 32,768 tombstones, four retained generations, and one or all six projections
+warmed before read-only snapshots, fork/insert/read, or fork/delete/read. A
+six-projection in-place insert/read control separates deep cloning from invalidation.
+Three additional points execute a three-pattern query cold and warm, and two
+concurrent cold readers synchronized immediately before their ordinary queries.
+No dimension is selected from observed timings. This protocol retains the same
+two warmup samples and seven timing / three allocation repetitions.
+
+Lifecycle windows include clone (where applicable), one delta, whole query, and
+retaining the resulting graph or snapshot in a preallocated local vector. This is
+local ownership publication, not server or durable-store publication. Each of four
+generation windows is measured separately while earlier generations remain alive.
+`phase_ns` records clone/delta/read; for concurrent readers its first two values
+are the individual reader durations and the whole window includes thread launch
+and join. Those few samples do not establish tail percentiles.
+
+Retained store heap subtracts the shared immutable base once per reference, then
+sums the overlay heap of the initial graph and retained generations. Existing
+`heap_bytes` omits fixed boxed-overlay metadata and estimates hash-table capacity;
+allocator counters separately report live requested bytes. Cold-query cases do not
+prime measured forks. A separate oracle records the multi-pattern query's actual
+projection heap growth and verifies the complete four-row result.
