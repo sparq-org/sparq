@@ -1,0 +1,93 @@
+{
+  "input_bytes": 42793,
+  "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
+  "base_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "action": {
+    "name": "area:sparq-wrapper-gen",
+    "color": "c5def5",
+    "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+  },
+  "inputs": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/label-maintenance/create-input.json",
+      "bytes": 163,
+      "sha256": "99f1a0b041a67738bd6dfb916d8601ab48b2889a4f1bc1cca6cc9022b5c2073e"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/label-maintenance/label-before-review.json",
+      "bytes": 115,
+      "sha256": "a50b906402401411a1a47e9c2f49c5e2c74c4f816fee633e116f94751d2eba60"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/label-maintenance/issue5016-before-review.json",
+      "bytes": 1539,
+      "sha256": "b5d04559bea4ffbe77d2048e2e2947192dc746a17ddb480cd2a5e8a683c08dfa"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/current-1802.json",
+      "bytes": 2952,
+      "sha256": "797b3a14f181ff722ba0d2997edf8f697f5e733f3e97638cdd045a5357ae0b5d"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/label-maintenance/source-verification.json",
+      "bytes": 2100,
+      "sha256": "c135d4debaa5de7cdf9e3cbffd237065072a89fd732cd477e2a1217bfd4524c0"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/next-design/report.json",
+      "bytes": 12952,
+      "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7"
+    }
+  ],
+  "source_excerpt_ranges": {
+    "ci/area-labels.toml": [
+      [
+        49,
+        121
+      ]
+    ],
+    "scripts/pr-area-labels.py": [
+      [
+        204,
+        260
+      ],
+      [
+        475,
+        510
+      ],
+      [
+        630,
+        643
+      ]
+    ],
+    "scripts/ready-issues.py": [
+      [
+        253,
+        274
+      ],
+      [
+        355,
+        385
+      ]
+    ],
+    "scripts/triage-area.py": [
+      [
+        738,
+        776
+      ]
+    ],
+    ".github/workflows/triage-area.yml": [
+      [
+        1,
+        35
+      ]
+    ],
+    "AGENTS.md": [
+      [
+        660,
+        677
+      ]
+    ]
+  },
+  "scope_note": "Bounded snippets of exact verified main source; prior design report includes only maintenance-relevant sections. Complete source hashes preserved."
+}

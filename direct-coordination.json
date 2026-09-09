@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T18:04:50.851819+00:00",
+  "updated_at": "2026-09-09T18:22:35.446630+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -651,6 +651,36 @@
         }
       ],
       "failures": []
+    },
+    "latest_queue_observation": {
+      "at": "2026-09-09T18:22:35.446630+00:00",
+      "queue": "position1AWAITING_CHECKS",
+      "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+      "source_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+      "job_snapshots": {
+        "queue-matrix-jobs-1818.json": {
+          "jobs": 57,
+          "states": {
+            "success": 25,
+            "skipped": 1,
+            "in_progress": 6,
+            "queued": 25
+          },
+          "assigned_active_runners": 6
+        },
+        "queue-ci-jobs-1818.json": {
+          "jobs": 34,
+          "states": {
+            "success": 22,
+            "skipped": 8,
+            "in_progress": 4
+          },
+          "assigned_active_runners": 4
+        }
+      },
+      "failures": [],
+      "assessment": "ActualjobsprogressingonassignedGitHubhostedrunners;25matrixgroupsqueued, no failure/starvation proof. Preservecurrentmerge-group evidence."
     }
   },
   "prs": {
@@ -1377,9 +1407,35 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "read-only policy/design preparation while6469 reservesarea:ci",
+    "phase": "Source design complete; exact existing-crate label maintenance prepared for independent Opus review; source edits still deferred",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
-    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review."
+    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
+    "design": {
+      "path": "direct-6468/next-design/report.json",
+      "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7",
+      "manifest_verified": true,
+      "source_verified": true
+    },
+    "maintenance_review": {
+      "state": "running",
+      "input": "direct-6468/label-maintenance/opus-input.md",
+      "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
+      "input_bytes": 42793,
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "completed": false,
+      "scope": {
+        "name": "area:sparq-wrapper-gen",
+        "color": "c5def5",
+        "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+      },
+      "session_id": 54894,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T18:22:35.446630+00:00",
+      "output": "direct-6468/label-maintenance/opus-review.json",
+      "acceptance": "One actual Opus5xhigh invocation; require outer successfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5 and exact action. No duplicate or exhausted-budget retry."
+    },
+    "agent_state": "Preparation completed; idle, no source edits or builds pending."
   }
 }

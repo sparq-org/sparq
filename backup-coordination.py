@@ -210,6 +210,13 @@ for evidence_name in ['benchmark-jobs.json', 'body-edit-result.txt', 'body-prech
 FILES["4246-perf-admission-queue-initial-runs.json"] = ROOT / "direct-4246/perf-admission/queue-initial-runs.json"
 FILES["6468-current-1802.json"] = ROOT / "direct-6468/current-1802.json"
 
+for evidence_name in ["queue-1818.json", "queue-runs-1818.json", "queue-matrix-jobs-1818.json", "queue-ci-jobs-1818.json"]:
+    FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
+for evidence_name in ["report.json", "manifest.json"]:
+    FILES["6468-next-design-" + evidence_name] = ROOT / "direct-6468/next-design" / evidence_name
+for evidence_name in ["label-before-review.json", "issue5016-before-review.json", "source-verification.json", "create-input.json", "opus-input.md", "input-manifest.json"]:
+    FILES["6468-label-maintenance-" + evidence_name] = ROOT / "direct-6468/label-maintenance" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

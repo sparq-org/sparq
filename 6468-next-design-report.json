@@ -1,0 +1,159 @@
+{
+  "issue": 6468,
+  "mode": "read-only design; no tests/builds/replay/network calls or source edits",
+  "generated_at": "2026-09-09T18:07:08.027806+00:00",
+  "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "read_source_worktree_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "source_verification": [
+    {
+      "path": "scripts/triage-area.py",
+      "sha256": "4e908ea922cb116f9102a1b95e963a0fdbc05f3ed436da0fd8df46fe208ddffc",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/tests/test_triage_area.py",
+      "sha256": "9dc4b4ab610c8d7e553e9923c2aee71cbc8e9f5c9a52503f35904dfbbe80bb3f",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/pr-area-labels.py",
+      "sha256": "979338f00ab2d4003849e5f4a6202a18fe29b866d610f40069212798700b59e8",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/bd-to-issues.py",
+      "sha256": "5fd80a2772d34c3725854713bc79bc87f5751ce86a4a32bbe915ca2e90d509f5",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/ready-issues.py",
+      "sha256": "49dbb72cdf3fd3acff1618ff7ddd8349543e9fe4c848cbe77407b55e5a070c55",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "ci/area-labels.toml",
+      "sha256": "84053c14c6087acdee35ef88780323130f71b2584fd0193ba153bf5df379b234",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "crates/sparq-wrapper-gen/Cargo.toml",
+      "sha256": "45b5525327558b75ded02e32ebf03694ed30ecd5e2193852d8de20f4eb60c7a1",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "323dd6196eb23f8b7ade9adf333b76d948850630d7a1f1f450504b4bd3536508",
+      "identical_to_current_main": true
+    },
+    {
+      "path": ".github/workflows/triage-area.yml",
+      "sha256": "232d0366e034537e9ab46ed18059c3605b8e52b2239c4d66e4e2ce97e9fd5635",
+      "identical_to_current_main": true
+    },
+    {
+      "path": ".github/workflows/triage-issue.yml",
+      "sha256": "b50924665e47dade7e2cde6ad3caac0f8b062b916fd49946c7f8e71f048c217d",
+      "identical_to_current_main": true
+    }
+  ],
+  "cached_inputs": {
+    "frozen_diagnosis": "../report.json",
+    "root_verification": "../root-verification.json",
+    "fresh_issue": "../current-1802.json",
+    "current_issue_state": "OPEN, area:ci, priority:P3, role:impl, status:ready; already classified and therefore skipped by current plan().",
+    "original_row_limit": "5016 remains the strongest captured original candidate; no new claim to identify the historical fetched row. Its saved metadata is older than current-1802.",
+    "reservation": "Root has reserved area:ci while PR6469 is in the merge queue; this task does not change or infer admission from scheduler state.",
+    "report.json_sha256": "26aae96b9970f88260c1a30e7a5bab079099a1c1ea28d3600a9ad057804b3679",
+    "root-verification.json_sha256": "51d4d3ae46b6d4ba88f9813bdecd2317ae448760e9c88f95dc7666aed5f13216",
+    "current-1802.json_sha256": "797b3a14f181ff722ba0d2997edf8f697f5e733f3e97638cdd045a5357ae0b5d"
+  },
+  "recommendation": {
+    "primary": "For the genuine existing generator crate, a separately reviewed exact-label maintenance action is defensible; do not remap it to wrapper, sparq-wrapper or ci. Keep automatic creation forbidden in triage-area and keep the whole-plan unknown-label guard.",
+    "why": "The root workspace explicitly contains crates/sparq-wrapper-gen, whose manifest names sparq-wrapper-gen and is publish=false (a real reserved seam, not an invented title token). Issue derivation, PR path attribution and scheduler roots already agree on this exact name. No new map row or alias is needed for that identity.",
+    "policy_limit": "Existing source provides no automatic backfill/provisioning route for an already-existing crate. The only PR-deriver automatic exception requires this PR to add a root Cargo.toml; changing the old manifest or invoking ensure_area_label directly without that witness is not the normal route. A maintenance create would be an explicit reviewed repository action, not permission for the classifier to create labels.",
+    "no_claim": "Cached evidence cannot prove that provisioning this one label would make the next full sweep succeed: other missing labels or stale/live-list truncation remain possible. No full-board enumeration or replay was performed."
+  },
+  "policy_evidence": [
+    {
+      "source": "ci/area-labels.toml:49-61,81-91,108-121",
+      "finding": "Missing live area makes PR unresolved; implicit crate-directory mapping already exists. ONLY the new-root-manifest witness permits automatic creation in this pipeline."
+    },
+    {
+      "source": "scripts/pr-area-labels.py:204-216,220-260,475-510,635-643",
+      "finding": "attribute returns crate directory; creatable_areas requires new_crates evidence; ensure_area_label explicitly creates only those witnessed labels. End-of-run warning enumerates missing declared lanes/workspace members rather than creating them."
+    },
+    {
+      "source": "scripts/bd-to-issues.py:448-461,682-683",
+      "finding": "A distinct migration provisioning phase precreates its complete derived label set before issue creation, with no --force; proves label provisioning exists as a deliberate separate operation, not authority to run migration for this case."
+    },
+    {
+      "source": ".github/workflows/triage-issue.yml:84-110",
+      "finding": "Its unrelated static triage auto-creation allowlist is only role:/status:/needs:, explicitly excludes area."
+    },
+    {
+      "source": "scripts/triage-area.py:38-41,491-496,738-746; .github/workflows/triage-area.yml:29-32",
+      "finding": "Classifier never creates labels and must return2 before any write if any emitted area is absent. Error advice currently says fix rule table/do not create label even for a real existing crate; this message is too categorical to distinguish typo from reviewed provisioning."
+    },
+    {
+      "source": "AGENTS.md:670-674",
+      "finding": "Summary still says PR deriver never creates a label, whereas the detailed normative policy and implementation now contain #4582 exception. Treat this as a documentation inconsistency; it neither authorizes broader auto-creation nor proves an explicit maintenance operation forbidden. No AGENTS edit proposed here."
+    },
+    {
+      "source": "scripts/ready-issues.py:253-274,355-385; crates/sparq-wrapper-gen/Cargo.toml:1-8; Cargo.toml:3",
+      "finding": "Filesystem-backed longest existing root defines the crate partition. Existing aliases wrapper and sparq-wrapper do not conflict with the real sparq-wrapper-gen root (already proved in frozen diagnosis). publish=false does not remove workspace membership or partition identity."
+    }
+  ],
+  "concrete_maintenance_option_for_root_review": {
+    "change": "Exactly one label: name area:sparq-wrapper-gen, color c5def5, description Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance).",
+    "read_before_write": [
+      "Fresh budget check; stop on exhausted/unreadable response.",
+      "GET /repos/sparq-org/sparq/labels/area%3Asparq-wrapper-gen once. If present, no create; do not force-update existing metadata. A404 is the only expected absent result.",
+      "Reconfirm default-branch crate manifest/name and workspace membership if main changes before action."
+    ],
+    "write_if_separately_authorized": "POST /repos/sparq-org/sparq/labels with exactly those three fields; no issue labels, aliases, grant changes, workflow dispatch or bulk provisioning.",
+    "observation": "Read exact label once to verify returned name/id and wait for an ordinary scheduled classifier run. No automatic retry on rejected/uncertain create. Creating the label enables ordinary later classification of matching area-less issues, so review that effect; it is not just cosmetic metadata.",
+    "excluded": "Do not pass a fabricated new_crates witness, edit an existing manifest merely to trigger creation, run the migration/backfill, replay the live classifier, or relabel5016 as a shortcut."
+  },
+  "small_source_patch_boundary": {
+    "files": [
+      "scripts/triage-area.py",
+      "scripts/tests/test_triage_area.py"
+    ],
+    "rule": "Add one early T1 RULES entry with scope=title, name triage-area, regex ^triage-area(?:\\.py)?(?:\\s|:|$), area ci, evidence naming scripts/triage-area.py and its workflow. Put alongside early workflow-lane rules (around150), before other topic matches; retain T0 declaration precedence. The current6468 title matches, while arbitrary mid-title/body mentions and triage-area-other do not.",
+    "rule_tests_note": "The existing per-rule witness generator supports these regex constructs. Add triage-area to ANCHORED_ONLY because every branch is start anchored; keep TEXT_SCOPED_RULES unchanged.",
+    "diagnostic": "At the existing global unknown-label guard (738-746), derive row-aware entries from the already-complete plan: issue number, sorted missing labels for that row, and tier/rule evidence. Emit escaped structured records to stderr in existing issue-number order; no raw issue body needed. Retain return2 BEFORE classified/writable budget selection, --json return or any apply/unpark path.",
+    "wording": "Replace the blanket remedy with a distinction: unknown labels require reviewing classifier/routing evidence; this classifier never creates labels, and a verified existing crate may require separately reviewed provisioning. Do not convert this message into auto-provision policy.",
+    "untouched": [
+      "bd-to-issues derivation",
+      "PR-area new-crate exception",
+      "partition-key algebra",
+      "write budgets/pacing",
+      "fetch/live-label bounds (#6335 separate)",
+      "workflow permissions/triggers",
+      "existing area label preservation"
+    ]
+  },
+  "fixture_and_control_plan": [
+    "Captured6468 no-area row -> ci, T1 triage-area. Current6468 row with area:ci -> SKIP and zero additions. Actual5016 -> sparq-wrapper-gen unchanged. A real wrapper issue remains wrapper-owned.",
+    "Explicit T0 crate declaration beats triage-area title; neutral-title body-only mention does not fire new rule; mid-title mention and triage-area-other are negative controls. Removing rule must fail captured6468; widening scope trips existing strict TEXT_SCOPED_RULES check; removing anchor should fail explicit mid-title negative.",
+    "Exercise actual main --apply under a fully mocked fetch/label/subprocess boundary, never live replay. Known valid row sorts first, missing-label5016 later; expect exit2 and ZERO issue edits or unpark calls for all rows. Run same fixture with --max-writes1 so an unsupported row beyond writable prefix still blocks globally.",
+    "Pin stderr issue5016, area:sparq-wrapper-gen and T2 evidence. Use two different offending rows to prove row/label association and deterministic order. Keep unsupported static/T0/T2 emitters distinguishable as appropriate without inventing labels.",
+    "Repeat offline main fixture with exact supported generator label in mocked known set: supported rows apply normally with existing atomic add/unpark discipline; unrelated unsupported area still causes globalzero writes. Deleting/late-moving guard must fail the zero-write control; dropping row identity/evidence must fail diagnostic assertions.",
+    "Existing pr-area fixtures can pin the same genuine generator path unresolved when absent from known, resolved when present, and never creatable when root manifest status=modified. No storage/source mapping rewrite needed.",
+    "Run existing classifier self-test and test_triage_area suite in the future implementation lane; this preparation executed neither."
+  ],
+  "unresolved_before_action": [
+    "Root must choose/review one exact maintenance create; no blanket provisioning policy or new automatic action is authorized by this report.",
+    "Fresh exact label presence is necessary immediately before any create; cached404 is not a current mutation precondition. Root holds the next live budget/read/write decisions.",
+    "Original5016 current status/owner intent can be re-read exactly if root intends to apply an issue label directly; this recommendation does not do so.",
+    "Area:ci stays reserved by root until the active PR6469 finishes. Source patch can wait; no current source mutation.",
+    "Full next scheduled classification success is an observation still needed after reviewed repair/provisioning, not established by static reasoning."
+  ],
+  "network_reads_needed_now": "None for this design. All source and saved metadata used locally; concrete future exact requests listed above.",
+  "preservation": "All previous direct-6468 and 4246 evidence/source unchanged. This directory contains only this report and its manifest."
+}

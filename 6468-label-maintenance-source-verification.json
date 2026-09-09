@@ -1,0 +1,61 @@
+{
+  "verified_at": "2026-09-09T18:20:49.014945+00:00",
+  "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "sources": [
+    {
+      "path": "scripts/triage-area.py",
+      "sha256": "4e908ea922cb116f9102a1b95e963a0fdbc05f3ed436da0fd8df46fe208ddffc",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/tests/test_triage_area.py",
+      "sha256": "9dc4b4ab610c8d7e553e9923c2aee71cbc8e9f5c9a52503f35904dfbbe80bb3f",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/pr-area-labels.py",
+      "sha256": "979338f00ab2d4003849e5f4a6202a18fe29b866d610f40069212798700b59e8",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/bd-to-issues.py",
+      "sha256": "5fd80a2772d34c3725854713bc79bc87f5751ce86a4a32bbe915ca2e90d509f5",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "scripts/ready-issues.py",
+      "sha256": "49dbb72cdf3fd3acff1618ff7ddd8349543e9fe4c848cbe77407b55e5a070c55",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "ci/area-labels.toml",
+      "sha256": "84053c14c6087acdee35ef88780323130f71b2584fd0193ba153bf5df379b234",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "crates/sparq-wrapper-gen/Cargo.toml",
+      "sha256": "45b5525327558b75ded02e32ebf03694ed30ecd5e2193852d8de20f4eb60c7a1",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "identical_to_current_main": true
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "323dd6196eb23f8b7ade9adf333b76d948850630d7a1f1f450504b4bd3536508",
+      "identical_to_current_main": true
+    },
+    {
+      "path": ".github/workflows/triage-area.yml",
+      "sha256": "232d0366e034537e9ab46ed18059c3605b8e52b2239c4d66e4e2ce97e9fd5635",
+      "identical_to_current_main": true
+    },
+    {
+      "path": ".github/workflows/triage-issue.yml",
+      "sha256": "b50924665e47dade7e2cde6ad3caac0f8b062b916fd49946c7f8e71f048c217d",
+      "identical_to_current_main": true
+    }
+  ]
+}
