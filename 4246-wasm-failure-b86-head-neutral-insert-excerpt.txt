@@ -1,0 +1,29 @@
+949:         }
+950:         let mut ov = self.overlay.take().unwrap_or_default();
+951: 
+952: 
+953: 
+954:         ov.invalidate_added();
+955: 
+956: 
+957:         for t in deletes {
+958:             if let Ok(i) = ov.added.binary_search(t) {
+959:                 ov.added.remove(i); // retract a pending insertion
+960:             } else if self.base_contains(*t) {
+961: 
+962: 
+963: 
+964: 
+965:             }
+966:         }
+967:         for t in inserts {
+968:             if ov.deleted.remove(t) {
+969: 
+970: 
+971:                 continue; // re-insert of a deleted base triple: just undelete
+972:             }
+973:             if self.base_contains(*t) {
+974:                 continue; // already present in the base
+975:             }
+976:             if let Err(i) = ov.added.binary_search(t) {
+977:                 ov.added.insert(i, *t);

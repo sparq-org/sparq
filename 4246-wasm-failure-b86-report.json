@@ -1,0 +1,114 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "base_and_merge_base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "pr": 6469,
+  "run": 34358709438,
+  "job": 102489885037,
+  "captured_at": "2026-09-09T13:53:51.673657+00:00",
+  "decision": "Keep draft/hold. Confirmed source-shape incompatibility with neutral proof; propose one small default-text-preserving correction for root scope/review. No declaration, baseline update, gate exception or implementation performed.",
+  "observed_ci": {
+    "source_identity": "Saved exact job log1850-1875 names basea42/headb86/PR6469; Git merge-base independently equalsa42. Both real base/head release-wasm builds succeeded.",
+    "leg2_failure": {
+      "log_lines": "1850-1856",
+      "base_bytes": 1560241,
+      "head_bytes": 1560241,
+      "differing_bytes_from_autoderive": 12,
+      "size_delta": 0,
+      "reason": "Byte-for-byte inequality with no new per-PR declaration and unchanged legacy token1726. Equal size does not pass this gate."
+    },
+    "auto_derivation": {
+      "log_lines": "1914-1967",
+      "outcome": "neutral-build-failed",
+      "exit": 2,
+      "compiler_error": "E0425 cannot find value del at crates/sparq-core/src/store.rs:313:15; expression (add, del).",
+      "reason": "Blanking added lines broke the first neutral build. No neutral/head equality was measured; deletion-neutral/base obligation was not reached. Refusal is expected for this source rewrite, not a failed head build.",
+      "deleted_nonblank_lines": 20,
+      "deleted_comment_lines": 10,
+      "deleted_compiled_lines": 10,
+      "added_nonblank_lines_blanked": 1129,
+      "neutral_tree_files_mutated": 14
+    },
+    "aggregate": "Saved aggregate34358709393 log fail-fast names only artifact-exact-equality failure with29 siblings still running. It does not establish final results of those siblings."
+  },
+  "mechanism": [
+    {
+      "source": "scripts/feature_off_autodeclare.py:201-263,423-503",
+      "finding": "Committed parser identifies added/removed line numbers from exact git diff --unified=0. First neutral is head with every added non-manifest line blanked (line counts retained), and changed manifests restored from base. It is not a semantic diff/reformatter equivalence checker."
+    },
+    {
+      "source": "crates/sparq-core/src/store.rs:298-314 versus base259-271; static-reproduction.json and head-neutral-excerpt.txt",
+      "finding": "The base let order and let del/filter/count statements were deleted. Both replacement cfg-on/cfg-off bindings are added lines. Blanking additions leaves original let add and final (add,del), without del. Exact in-memory neutral reproduces the reported source failure without invoking Rust or any builder."
+    },
+    {
+      "source": "crates/sparq-core/src/store.rs:958-969 versus base912; deletion-neutral-excerpt.txt",
+      "finding": "Original tombstone insert statement was also replaced by cfg blocks. If the addition obligation were repaired alone, base-side deleted-line blanking would still remove required count binding and the insert statement. Preserve all original compiled statements to make both obligations meaningful."
+    },
+    {
+      "source": "scripts/feature_off_autodeclare.py:505-545",
+      "finding": "Deletion-neutral proof is independently required for nonblank removals. Restoring only compile ability or tolerating12 bytes would not discharge byte equality in either direction."
+    }
+  ],
+  "attribution": {
+    "default_algorithm_leak": "No cache activation or new default algorithm found: off branch still filters the deletion hash set over the same inclusive perm range, feature-only fields/helpers/invalidation state are cfg-excluded, and prior real default semantics/layout/heap fixture passed against exact main. The source changes reorder pure perm.order evaluation and re-express bindings/statement scopes; these are real compiled-text edits even when behavior is preserved.",
+    "names": "invalidate_added and count_correction are already named identically in base/head. No new always-compiled helper rename is present to blame or undo.",
+    "metadata_hypothesis": "Line positions of existing call sites change; repo proof docs describe panic Location line-number bytes persisting under release-wasm strip=symbols. Twelve differing bytes at equal size is consistent with that class, but does not locate sections or prove it. Could not distinguish instruction/data/location bytes without raw bundles or successful mechanical proof.",
+    "compiler_environment": "Log shows real base/head success at equal size and neutral failure specifically in sparq-core source. This is not missing tooling, rate exhaustion, cold-cache timeout or an external build outage. No compiler bug or location-only attribution established.",
+    "artifacts": "Exact workflow has no upload-artifact step for head/neutral bundles or derivation JSON. Only base-wasm Actions cache exists; it is not a paired raw run artifact. No network budget/API request or cache download was spent; actual server artifact inventory was not queried. No raw paired wasm available locally in this evidence, so differing offsets/sections remain unknown."
+  },
+  "one_bounded_repair_proposal": {
+    "scope": "crates/sparq-core/src/store.rs only, plus focused tests/guard controls only if the resulting code requires adaptation; no runtime policy/algorithm change, declaration or gate edit in this first correction.",
+    "changes": [
+      "Restore the base count_correction function body byte-for-byte, including original order/add/del statements, indentation and identifier names. Add #[cfg(not(feature=\"overlay-deleted-projections\"))] to this original function.",
+      "Put the already-reviewed opt-in count implementation in a separate, mutually exclusive same-name #[cfg(feature=\"overlay-deleted-projections\")] function. Its entire added body blanks away for neutral proof; no new API or general helper abstraction.",
+      "Restore the original ov.deleted.insert(*t); line verbatim and gate that statement with an added cfg(not(feature)) attribute; keep the feature-on insert-result bookkeeping in a separately cfg-on added block. Preserve all other original compiled lines.",
+      "Keep accurate synchronization/docs corrections; deleted comments may remain and must pass the base-neutral obligation. Do not restore a known inaccurate race description merely to eliminate deletion counts."
+    ],
+    "why_sound_boundary": "With unchanged default compiled text retained, blanking only added guards/functions/bookkeeping restores base behavior at head line positions. This addresses the exact missing-binding failure and the independent deleted-insert obligation. Feature-on behavior remains the reviewed cache, default state remains original linear scan; no threshold or declaration shortcut.",
+    "required_evidence_before_declaration": [
+      "Root authorizes focused correction; verify original compiled statement spans retained by diff and run off/on semantic/layout tests plus feature-on invalidation/use controls and all-targets clippy.",
+      "Run existing actual compiler-backed report-only derivation on corrected exact head with separate per-tree targets: neutral must build and equal head; deletion-neutral (if comments removed) must build and equal base. Static token retention predicts feasibility only, not success.",
+      "If derivation proves metadata-only drift, its exact measured output can support a separately reviewed declaration under existing process; do not manufacture or pre-write one. If either equality fails, retain gate failure and inspect real paired bytes before proposing anything else."
+    ],
+    "unknown": "No corrected source created, no in-memory proposed replacement compiled, no wasm build or declaration generation performed. Success of the proposed neutral proof remains unverified."
+  },
+  "source_hashes": {
+    "scripts/feature_off_autodeclare.py": {
+      "sha256": "3dddd713b18754cf9d53b9f0ba8375e24e3d3a4eebf4d52a6816160b91c39456",
+      "bytes": 38921
+    },
+    "scripts/check-vectorized-feature-off.py": {
+      "sha256": "6d5139e305a1b9fe27c095043849febc5ae9ee9e362b8b55990e47da7408a892",
+      "bytes": 30838
+    },
+    ".github/workflows/vectorized-feature-off.yml": {
+      "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+      "bytes": 28349
+    },
+    "bench/feature-off-declarations/README.md": {
+      "sha256": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e",
+      "bytes": 9460
+    },
+    "crates/sparq-core/src/store.rs": {
+      "sha256": "f1fb1b676cb31948879246e6a0d91958da62f6b7491a430aec7918cf65a0209e",
+      "bytes": 112109
+    },
+    "crates/sparq-core/Cargo.toml": {
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "bytes": 11422
+    },
+    "Cargo.toml": {
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "bytes": 9813
+    }
+  },
+  "existing_correctness_evidence": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/source/default-and-control-proof.json",
+    "sha256": "4b7d3867b469ff43e67e3733cb9fe12d861f5240ad6168179d5524238b6e1afc",
+    "scope": "Prior observed CPU feature-off semantic/layout/heap tests, not wasm byte-equality proof."
+  },
+  "preservation": {
+    "source_clean": true,
+    "frozen88files_unchanged": true
+  },
+  "remote_or_mutating_actions": "None; only saved named CI logs, committed source, pure line-blanking functions and local evidence writes."
+}

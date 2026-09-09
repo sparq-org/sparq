@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T13:49:56.470777+00:00",
+  "updated_at": "2026-09-09T14:08:29.853537+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "b86 actualreview approvesvalidation and localall-targetsclippy passed. Normalreadytransition was considered but NOT EXECUTED: freshprecheckfound wasmexact-equalityfailure and dependentdraftaggregatefailure. PR6469stilldraft. Sameagentassignedboundedreadonly cause/proofdiagnosis; no retries, declarations, baseline/gate changes or source edits authorized yet.",
-    "phase": "Diagnose exact feature-off wasm equality failure on draft PR6469",
+    "state": "Root verified14-file failurediagnosis. Same Astra agent authorized to preserve exactoriginalcompiled defaultfunction/insertstatement undercfg-not withseparatecfg-on implementation, keepingaccuratedocs. No gateedit/declaration/push yet. One bounded offline compiler-backed report-only proof allowed onlywith installedtooling/cacheddeps, twojobs/privatepertreetargets/15mincap/disk>=10GiB. KeepPR6469draft and allb86evidence.",
+    "phase": "Focused default-text preservation repair and bounded compiler proof",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -198,7 +198,23 @@
         "direct-4246/pr6469-wasm-feature-off-failed.log",
         "direct-4246/pr6469-draft-gate-failed.log"
       ],
-      "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation."
+      "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation.",
+      "diagnosis_report": "direct-4246/wasm-failure-b86/report.json",
+      "diagnosis_manifest_verified": 14,
+      "concrete_cause": "Neutral line-blanking removes newlyadded replacementdelbinding becauseoriginalcompiledbinding wasdeleted; E0425delundefined atstore313. All20nonblankdeletedlinesin store,10compiled+10comments. Auto proof never reached neutral/headcomparison or deletion-neutral/base obligation.",
+      "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof."
+    },
+    "wasm_repair_contract": "Restoreexactoriginaldefaultcount_correction underaddedcfg-not; addmutuallyexclusivecfg-on fn; retaindefaultov.deleted.insert statementverbatim and separatefeaturebookkeeping. Keepaccuratecommentchanges. Targetedoff/onlayout/semantic/controltests andoff/onalltargetclippy. Singleexistingreport-onlyproofattempt ifinstalledrawcargotooling/caches suffice,offline/locked/noinstalls,privatepertreetargets,allwasmoptimizedbuilds15mincap anddisk10GiBstop. No substitution/retry, declaration, gateorbaselinechange, remoteaction, newmodels orEC2. Ifproofsuccess, keepgeneratedproposaloutsidecodeforreview; requirebothcomparisons.",
+    "latest_check_snapshot": {
+      "file": "direct-4246/pr6469-checks-1405.json",
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "draft": true,
+      "contexts_returned": 115,
+      "success": 70,
+      "queued_or_running": 28,
+      "skipped": 14,
+      "neutral": 1,
+      "failures": "Onlyknownwasmequalityanddependentdraftaggregate. Pointin-timecheckrollup,notfullgate/fleetproof."
     }
   },
   "prs": {
@@ -515,8 +531,8 @@
     }
   },
   "next_actions": [
-    "Collect sameagent exactwasm feature-OFF equality/proofdiagnosis. KeepPR6469draft andb86frozen; no blinddeclaration, baselinechange, gateweakening, retry orreadytransition. Choose smallest evidenced repair and actualfocusedOpusreview beforepushingchangedhead.",
-    "After concretefailure repair/review, revalidate PR6469 and use normalready_for_review forfullLinuxgates. Inspect executed opt-inleg/groupartifact/perlegreport, fullworkspace/conformance/wasm/perf/preflight andactualCopilotreview. DraftBenchmarks success is onlydashboard/selector, actualbenchskipped.",
+    "Collect sameagent focused default-text correction, scopedtest/control evidence and actual existing compilerproof or exacttool/disk/time limit. Both neutral/head and deletion-neutral/base equality required beforemetadata-only declaration. No blindgateexception/ratchetchange. ActualfocusedOpusreview ofnewsource+proof beforepush.",
+    "PR6469stilldraftb86; do notready/rerun whileknownwasmfailureunresolved. Afterreviewedrepairandanyseparatelyproveddeclaration, pushnormallyandobservefreshheadCI, thennormalready_for_review toexerciseheavyLinuxgates. Preservelivechecks, budgetfailclosed, Copilot/review/gates beforeprotectedmerge.",
     "After active4246 terminal state, act on6468 narrow classifier/diagnostic proposal and separatelyreview generatorlabel/partition policy. No guessedexistingalias or labelcreation; preserve zero-write unknown-label guard.",
     "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
     "Observe ordinary eligible nightly/sweeper runs when relevant; no manualprobes, exhausted-budget retries or inference of successful writes from green aggregate. RegistryOFF, ALLGREEN, approval holds and release pause remain.",

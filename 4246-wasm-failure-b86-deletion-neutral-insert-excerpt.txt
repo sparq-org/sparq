@@ -1,0 +1,26 @@
+898:     pub fn apply_delta(&mut self, inserts: &[[Id; 3]], deletes: &[[Id; 3]]) {
+899:         if inserts.is_empty() && deletes.is_empty() {
+900:             return;
+901:         }
+902:         let mut ov = self.overlay.take().unwrap_or_default();
+903: 
+904: 
+905: 
+906: 
+907:         ov.invalidate_added();
+908:         for t in deletes {
+909:             if let Ok(i) = ov.added.binary_search(t) {
+910:                 ov.added.remove(i); // retract a pending insertion
+911:             } else if self.base_contains(*t) {
+912: 
+913:             }
+914:         }
+915:         for t in inserts {
+916:             if ov.deleted.remove(t) {
+917:                 continue; // re-insert of a deleted base triple: just undelete
+918:             }
+919:             if self.base_contains(*t) {
+920:                 continue; // already present in the base
+921:             }
+922:             if let Err(i) = ov.added.binary_search(t) {
+923:                 ov.added.insert(i, *t);

@@ -1,0 +1,102 @@
+[
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 191,
+    "text": "    /// `Sync`; a race just recomputes the same value and discards the loser."
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 205,
+    "text": "    /// Drops every cached projection \u2014 called whenever `added` is about to change, so a"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 206,
+    "text": "    /// cache can never outlive the `added` it was derived from."
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 257,
+    "text": "    /// projection (O(log k), two binary searches); the `deleted` side is an unordered"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 258,
+    "text": "    /// hash set and stays O(|deleted|)."
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 260,
+    "text": "        let order = perm.order();"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 262,
+    "text": "        let del = self"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 263,
+    "text": "            .deleted"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 264,
+    "text": "            .iter()"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 265,
+    "text": "            .filter(|t| {"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 266,
+    "text": "                let r = [t[order[0]], t[order[1]], t[order[2]]];"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 267,
+    "text": "                r >= lo && r <= hi"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 268,
+    "text": "            })"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 269,
+    "text": "            .count();"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 279,
+    "text": "        // aliases `added` and so never occupies a slot."
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 903,
+    "text": "        // `added` is about to change, so every cached perm-sorted projection of it is"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 904,
+    "text": "        // stale from here on. Dropping them up front (O(1) per permutation) keeps the"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 905,
+    "text": "        // write path O(batch) \u2014 the projections are rebuilt lazily by the next scan"
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 906,
+    "text": "        // that needs them, and only for the permutations it actually scans."
+  },
+  {
+    "path": "crates/sparq-core/src/store.rs",
+    "line": 912,
+    "text": "                ov.deleted.insert(*t);"
+  }
+]

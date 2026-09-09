@@ -1,0 +1,21 @@
+{
+  "method": "Exact committed parse_unified_diff/blank_lines/nonblank_count functions extracted by AST and applied to git diff --unified=0. No compiler, builder, metadata resolution or mocked byte proof invoked. Materialized excerpts are .txt evidence only.",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "autodeclare_source_sha256": "3dddd713b18754cf9d53b9f0ba8375e24e3d3a4eebf4d52a6816160b91c39456",
+  "removed_nonblank_count": 20,
+  "store_removed_nonblank_count": 20,
+  "log_inputs": {
+    "pr6469-wasm-feature-off-failed.log": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/pr6469-wasm-feature-off-failed.log",
+      "sha256": "354ea9855f3253ed90eb76745d39b832acef58963f2d648a209dfc9d37beca19",
+      "bytes": 215099
+    },
+    "pr6469-draft-gate-failed.log": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/pr6469-draft-gate-failed.log",
+      "sha256": "6b846e4d124d8b0c2ba890df5be15ecbc2e3c8c4962afbe9507e8592187e0d74",
+      "bytes": 19278
+    }
+  },
+  "neutral_static_finding": "The added-line neutral count_correction keeps fn/add/(add, del) but no del binding, matching exact CI E0425 at313. The deletion-neutral original also loses order/del binding and tombstone insert line; its compiler obligation was not reached in CI."
+}

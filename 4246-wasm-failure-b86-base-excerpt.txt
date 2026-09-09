@@ -1,0 +1,23 @@
+252:         out
+253:     }
+254: 
+255:     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
+256:     /// correction to a base range count. The `added` side rides the cached perm-sorted
+257:     /// projection (O(log k), two binary searches); the `deleted` side is an unordered
+258:     /// hash set and stays O(|deleted|).
+259:     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+260:         let order = perm.order();
+261:         let add = self.added_rows(perm, lo, hi).len();
+262:         let del = self
+263:             .deleted
+264:             .iter()
+265:             .filter(|t| {
+266:                 let r = [t[order[0]], t[order[1]], t[order[2]]];
+267:                 r >= lo && r <= hi
+268:             })
+269:             .count();
+270:         (add, del)
+271:     }
+272: 
+273:     fn is_empty(&self) -> bool {
+274:         self.added.is_empty() && self.deleted.is_empty()

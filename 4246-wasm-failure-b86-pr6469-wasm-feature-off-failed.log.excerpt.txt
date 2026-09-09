@@ -1,0 +1,119 @@
+1823: 2026-09-09T13:43:50.1827313Z [36;1mif [ -z "a42a9e89dec485f6a319c47cb3635c59cb5a2270" ]; then[0m
+1824: 2026-09-09T13:43:50.1827850Z [36;1m  echo "[leg2] SKIP — no base SHA resolvable for event pull_request; nothing to compare." \[0m
+1825: 2026-09-09T13:43:50.1828341Z [36;1m    | tee -a "$GITHUB_STEP_SUMMARY"[0m
+1826: 2026-09-09T13:43:50.1828624Z [36;1m  exit 0[0m
+1827: 2026-09-09T13:43:50.1828827Z [36;1mfi[0m
+1828: 2026-09-09T13:43:50.1829194Z [36;1m# base-declarations may be absent on a cache-hit whose base was built before V2 -[0m
+1829: 2026-09-09T13:43:50.1829769Z [36;1m# create an empty dir so the path always resolves (script treats it as no decls).[0m
+1830: 2026-09-09T13:43:50.1830188Z [36;1mmkdir -p base-wasm/base-declarations[0m
+1831: 2026-09-09T13:43:50.1830560Z [36;1mpython3 scripts/check-vectorized-feature-off.py \[0m
+1832: 2026-09-09T13:43:50.1830943Z [36;1m  --leg2-dynamic base-wasm/base.wasm head.wasm \[0m
+1833: 2026-09-09T13:43:50.1831380Z [36;1m  base-wasm/base-decl.json bench/feature-off-declaration.json \[0m
+1834: 2026-09-09T13:43:50.1831915Z [36;1m  --declarations-dirs base-wasm/base-declarations bench/feature-off-declarations \[0m
+1835: 2026-09-09T13:43:50.1832430Z [36;1m  2>&1 | tee -a "$GITHUB_STEP_SUMMARY"; exit "${PIPESTATUS[0]}"[0m
+1836: 2026-09-09T13:43:50.1871621Z shell: /usr/bin/bash -e {0}
+1837: 2026-09-09T13:43:50.1871874Z env:
+1838: 2026-09-09T13:43:50.1872078Z   CARGO_TERM_COLOR: always
+1839: 2026-09-09T13:43:50.1872312Z   RUST_BACKTRACE: 1
+1840: 2026-09-09T13:43:50.1872591Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+1841: 2026-09-09T13:43:50.1873032Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+1842: 2026-09-09T13:43:50.1873456Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1843: 2026-09-09T13:43:50.1873874Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1844: 2026-09-09T13:43:50.1874249Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1845: 2026-09-09T13:43:50.1874630Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+1846: 2026-09-09T13:43:50.1874961Z   CARGO_HOME: /home/runner/.cargo
+1847: 2026-09-09T13:43:50.1875214Z   CARGO_INCREMENTAL: 0
+1848: 2026-09-09T13:43:50.1875433Z   CACHE_ON_FAILURE: false
+1849: 2026-09-09T13:43:50.1875658Z ##[endgroup]
+1850: 2026-09-09T13:43:50.2612100Z [leg2] feature-OFF wasm DIFFERS from the base tree: base=1560241 head=1560241 bytes, size delta=+0 (+0.000%). Comparison is byte-for-byte, so same-length content changes are also detected.
+1851: 2026-09-09T13:43:50.2614327Z [leg2] VIOLATION: the feature-OFF wasm bundle changed vs the base tree (size delta +0 bytes, +0.000%) but the change is NOT declared (no new bench/feature-off-declarations/<PR>.json file added, and the legacy scalar change_token is unchanged at 1726).
+1852: 2026-09-09T13:43:50.2617010Z   - If this is ACCIDENTAL vectorized / default-path code leaking into the feature-OFF build, REMOVE it or gate it behind #[cfg(feature = "vectorized")].
+1853: 2026-09-09T13:43:50.2619461Z   - If this is an INTENTIONAL change to always-compiled engine/core code, DECLARE it (mechanism V2): add bench/feature-off-declarations/<PR-number>.json with {pr, date, reason}. If the SIZE moves > +/-2%, ALSO raise metrics.wasm_bundle_bytes.floor in bench/perf-baseline.json (the bench.yml ratchet).
+1854: 2026-09-09T13:43:50.2621010Z 
+1855: 2026-09-09T13:43:50.2621703Z [leg2] FAIL — undeclared feature-OFF bundle change. Declare it or remove it.
+1856: 2026-09-09T13:43:50.2679984Z ##[error]Process completed with exit code 1.
+1857: 2026-09-09T13:43:50.2758213Z ##[group]Run set -uo pipefail
+1858: 2026-09-09T13:43:50.2758537Z [36;1mset -uo pipefail[0m
+1859: 2026-09-09T13:43:50.2758833Z [36;1mpython3 scripts/feature_off_autodeclare.py \[0m
+1860: 2026-09-09T13:43:50.2759301Z [36;1m  --repo . --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr "$PR_NUMBER" \[0m
+1861: 2026-09-09T13:43:50.2759842Z [36;1m  --base-wasm base-wasm/base.wasm --head-wasm head.wasm --report-only[0m
+1862: 2026-09-09T13:43:50.2798730Z shell: /usr/bin/bash -e {0}
+1863: 2026-09-09T13:43:50.2798987Z env:
+1864: 2026-09-09T13:43:50.2799190Z   CARGO_TERM_COLOR: always
+1865: 2026-09-09T13:43:50.2799429Z   RUST_BACKTRACE: 1
+1866: 2026-09-09T13:43:50.2799705Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+1867: 2026-09-09T13:43:50.2800132Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+1868: 2026-09-09T13:43:50.2800545Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1869: 2026-09-09T13:43:50.2800915Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1870: 2026-09-09T13:43:50.2801321Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+1871: 2026-09-09T13:43:50.2801697Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+1872: 2026-09-09T13:43:50.2802040Z   CARGO_HOME: /home/runner/.cargo
+1873: 2026-09-09T13:43:50.2802287Z   CARGO_INCREMENTAL: 0
+1874: 2026-09-09T13:43:50.2802507Z   CACHE_ON_FAILURE: false
+1875: 2026-09-09T13:43:50.2802772Z   BASE_SHA: a42a9e89dec485f6a319c47cb3635c59cb5a2270
+1876: 2026-09-09T13:43:50.2803093Z   HEAD_SHA: b86b5d5ad84bce900762defa094630eb358317a6
+1877: 2026-09-09T13:43:50.2803375Z   PR_NUMBER: 6469
+1878: 2026-09-09T13:43:50.2803582Z ##[endgroup]
+1879: 2026-09-09T13:44:05.6667982Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+1880: 2026-09-09T13:44:05.6668599Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+1910: 2026-09-09T13:44:05.6683673Z [1m[92m   Compiling[0m rand v0.9.4
+1911: 2026-09-09T13:44:05.6684142Z [1m[92m   Compiling[0m oxrdf v0.3.3
+1912: 2026-09-09T13:44:05.6684618Z [1m[92m   Compiling[0m oxttl v0.2.3
+1913: 2026-09-09T13:44:05.6685656Z [1m[92m   Compiling[0m spargebra v0.4.6 (/tmp/featoff-neutral-r3sibdnm/tree/vendor/spargebra)
+1914: 2026-09-09T13:44:05.6686954Z [1m[92m   Compiling[0m sparq-core v0.1.1 (/tmp/featoff-neutral-r3sibdnm/tree/crates/sparq-core)
+1915: 2026-09-09T13:44:05.6687917Z [1m[91merror[E0425][0m[1m: cannot find value `del` in this scope[0m
+1916: 2026-09-09T13:44:05.6688615Z    [1m[94m--> [0mcrates/sparq-core/src/store.rs:313:15
+1917: 2026-09-09T13:44:05.6689134Z     [1m[94m|[0m
+1918: 2026-09-09T13:44:05.6689539Z [1m[94m313[0m [1m[94m|[0m         (add, del)
+1919: 2026-09-09T13:44:05.6690117Z     [1m[94m|[0m               [1m[91m^^^[0m [1m[91mnot found in this scope[0m
+1920: 2026-09-09T13:44:05.6690501Z 
+1921: 2026-09-09T13:44:05.6690889Z [1mFor more information about this error, try `rustc --explain E0425`.[0m
+1922: 2026-09-09T13:44:05.6691752Z [1m[91merror[0m: could not compile `sparq-core` (lib) due to 1 previous error
+1923: 2026-09-09T13:44:05.6692630Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+1924: 2026-09-09T13:44:05.6694220Z FEATURE-OFF-CENSUS pr=6469 outcome=neutral-build-failed size_delta=0 differing_bytes=12 reason='blanking the added lines broke the build, so they are compiled code, not comments or compiled-out cfg-gated tokens'
+1925: 2026-09-09T13:44:05.6695645Z [autodeclare] outcome: neutral-build-failed
+1926: 2026-09-09T13:44:05.6696709Z [autodeclare] blanking the added lines broke the build, so they are compiled code, not comments or compiled-out cfg-gated tokens
+1927: 2026-09-09T13:44:05.6697611Z [autodeclare] evidence: {
+1928: 2026-09-09T13:44:05.6697993Z   "base_bundle_bytes": 1560241,
+1929: 2026-09-09T13:44:05.6698375Z   "head_bundle_bytes": 1560241,
+1930: 2026-09-09T13:44:05.6698716Z   "size_delta_bytes": 0,
+1931: 2026-09-09T13:44:05.6699063Z   "differing_bytes": 12,
+1932: 2026-09-09T13:44:05.6699383Z   "closure_files_changed": [
+1933: 2026-09-09T13:44:05.6699767Z     ".github/feature-matrix.d/sparq-core.yml",
+1934: 2026-09-09T13:44:05.6700242Z     "bench/benchmarks.toml",
+1935: 2026-09-09T13:44:05.6700626Z     "bench/overlay-count/README.md",
+1936: 2026-09-09T13:44:05.6701083Z     "bench/overlay-count/src/counting.rs",
+1937: 2026-09-09T13:44:05.6701551Z     "bench/overlay-count/src/lifecycle.rs",
+1938: 2026-09-09T13:44:05.6702005Z     "bench/overlay-count/src/main.rs",
+1939: 2026-09-09T13:44:05.6702395Z     "crates/sparq-core/README.md",
+1940: 2026-09-09T13:44:05.6702797Z     "crates/sparq-core/src/store.rs",
+1941: 2026-09-09T13:44:05.6703270Z     "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+1942: 2026-09-09T13:44:05.6703836Z     "scripts/tests/feature-matrix-legnames.golden.txt",
+1943: 2026-09-09T13:44:05.6704328Z     "skills/sparql-query/SKILL.md"
+1944: 2026-09-09T13:44:05.6704690Z   ],
+1945: 2026-09-09T13:44:05.6704967Z   "manifest_files_changed": [
+1946: 2026-09-09T13:44:05.6705352Z     "bench/overlay-count/Cargo.lock",
+1947: 2026-09-09T13:44:05.6705897Z     "bench/overlay-count/Cargo.toml",
+1948: 2026-09-09T13:44:05.6706294Z     "crates/sparq-core/Cargo.toml"
+1949: 2026-09-09T13:44:05.6706645Z   ],
+1950: 2026-09-09T13:44:05.6706920Z   "files_in_compiled_closure": [
+1951: 2026-09-09T13:44:05.6707321Z     "crates/sparq-core/Cargo.toml",
+1952: 2026-09-09T13:44:05.6707711Z     "crates/sparq-core/README.md",
+1953: 2026-09-09T13:44:05.6708109Z     "crates/sparq-core/src/store.rs",
+1954: 2026-09-09T13:44:05.6708577Z     "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+1955: 2026-09-09T13:44:05.6709238Z   ],
+1956: 2026-09-09T13:44:05.6709504Z   "closure_dirs": [
+1957: 2026-09-09T13:44:05.6709829Z     "crates/sparq-core/",
+1958: 2026-09-09T13:44:05.6710179Z     "crates/sparq-engine/",
+1959: 2026-09-09T13:44:05.6710533Z     "crates/sparq-substrate/",
+1960: 2026-09-09T13:44:05.6710892Z     "crates/sparq-wasm/",
+1961: 2026-09-09T13:44:05.6711248Z     "vendor/spargebra/"
+1962: 2026-09-09T13:44:05.6711583Z   ],
+1963: 2026-09-09T13:44:05.6711876Z   "deleted_nonblank_lines": 20,
+1964: 2026-09-09T13:44:05.6712263Z   "added_nonblank_lines_blanked": 1129,
+1965: 2026-09-09T13:44:05.6712696Z   "neutral_tree_files_mutated": 14
+1966: 2026-09-09T13:44:05.6713064Z }
+1967: 2026-09-09T13:44:05.6746663Z ##[error]Process completed with exit code 2.
+1968: 2026-09-09T13:44:05.6794190Z ##[group]Run python3 scripts/tests/test_feature_off_autodeclare.py --mutate
+1969: 2026-09-09T13:44:05.6794718Z [36;1mpython3 scripts/tests/test_feature_off_autodeclare.py --mutate[0m
+1970: 2026-09-09T13:44:05.6835200Z shell: /usr/bin/bash -e {0}

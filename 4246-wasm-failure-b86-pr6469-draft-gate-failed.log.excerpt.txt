@@ -1,0 +1,3 @@
+195: 2026-09-09T13:44:30.3854933Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+198: 2026-09-09T13:44:30.3859777Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 29 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+199: 2026-09-09T13:44:30.3878892Z - ✗ artifact-exact-equality (wasm bundle feature-OFF): failure

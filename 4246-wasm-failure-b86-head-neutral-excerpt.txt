@@ -1,0 +1,27 @@
+290:         out.extend_from_slice(&add[ai..]);
+291:         out
+292:     }
+293: 
+294:     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
+295:     /// correction to a base range count. The `added` side rides the cached perm-sorted
+296: 
+297: 
+298:     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+299:         let add = self.added_rows(perm, lo, hi).len();
+300: 
+301: 
+302: 
+303: 
+304: 
+305: 
+306: 
+307: 
+308: 
+309: 
+310: 
+311: 
+312: 
+313:         (add, del)
+314:     }
+315: 
+316:     fn is_empty(&self) -> bool {

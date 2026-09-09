@@ -1,0 +1,3 @@
+The failed gate is a real undeclared byte difference, not a failed head build. Both bundles are1,560,241bytes;12bytes differ. The advisory derivation refuses with neutral-build-failed because blanking added lines deletes the replacement del binding but retains (add,del). The exact source-only reconstruction matches CI E0425.
+
+Default cache activation/algorithm leakage is not found, but metadata-only drift remains unproved. Preserve the base default function/insert statements verbatim under cfg-not and add separate cfg-on implementations, then require the existing real neutral/head and deletion-neutral/base byte proofs. No declaration, baseline edit, source change or extra build was performed.
