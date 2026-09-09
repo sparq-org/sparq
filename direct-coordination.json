@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T17:53:44.241670+00:00",
+  "updated_at": "2026-09-09T18:01:43.409510+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T16:47:23.906187+00:00",
-    "evidence": "direct-4246/counting-admission/publication-verified.json"
+    "observed_at": "2026-09-09T17:56:01.893981+00:00",
+    "evidence": "direct-4246/perf-admission/review-current.json"
   },
   "rules": {
     "required_check": "gate",
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "PR6469 exactccded full protected CI green:300success8skipped1neutral. Actualnewfeaturetests/build/alltargetclippyran; gate15368success; allreviewthreadsresolved. Final specialized Opus performance admission review prepared, not yet enqueued.",
-    "phase": "Final narrow Opus performance admission with completed CI evidence",
+    "state": "PR6469 enqueued normally atposition1 after actualOpus final perf allow and301success8skip1neutral currentheadchecks. ALLGREEN/gate15368unchanged. Monitor merge_group checks; no merge claim, no cancellations/retries.",
+    "phase": "Protected queue admitted; exact merge-group validation pending",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -507,19 +507,48 @@
       "linux_privacy_gate": "Actual check-privacy-claims.sh and both-direction self-tests succeeded; local Bash3 limitation remains, no nonexistent ci-preflight wrapper claim."
     },
     "final_perf_review": {
-      "state": "running",
+      "state": "completed",
       "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
       "input": "direct-4246/perf-admission/opus-input.md",
       "input_sha256": "317a7195d17ba0875d8db83d3f1a5c2cbaac3a309e1ea8104082b9f3e48747d2",
       "input_bytes": 172000,
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
-      "completed": false,
+      "completed": true,
       "session_id": 13152,
       "kind": "exec_command",
       "started_at": "2026-09-09T17:53:44.241670+00:00",
       "output": "direct-4246/perf-admission/opus-review-ccded-final-perf.json",
-      "acceptance": "Require successful outer JSON, is_errorfalse, actual modelUsage claude-opus-5 and exact ccded head. No duplicate invocation or exhausted-budget retry."
+      "acceptance": "Require successful outer JSON, is_errorfalse, actual modelUsage claude-opus-5 and exact ccded head. No duplicate invocation or exhausted-budget retry.",
+      "collected_at": "2026-09-09T17:57:35.954446+00:00",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 223484,
+      "output_sha256": "81938a5e85793a8343d36723b429fcb48423dc40faf320bb361db97b635c871d",
+      "verdict": {
+        "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+        "pr": 6469,
+        "perf_affecting": true,
+        "perf_ok": true,
+        "canonical_number_change": false,
+        "evidence": "perf_affecting=true via four triggers: hot-path/benchmarked-crate edit (crates/sparq-core/src/store.rs overlay count_correction), bench harness addition (bench/overlay-count/**), catalog edit (bench/benchmarks.toml new 'overlay-count-diagnostic', status=diagnostic, featured=false), and perf-adjacent prose (crates/sparq-core/README.md:53-65, skills/sparql-query/SKILL.md:1052-1069). Regression risk: default build unchanged \u2014 every added element in store.rs is cfg-gated (deleted_by_perm field, invalidate_deleted, deleted_count, the experimental count_correction arm, the heap_bytes addend, and the three apply_delta deleted_changed sites); the #[cfg(not(overlay-deleted-projections))] count_correction retains main's linear filter body verbatim and the default 'ov.deleted.insert(*t);' statement is preserved unbraced; residual non-gated edits are doc comments plus a #[cfg(test)] mod registration. Corroborated by bench/feature-off-declarations/6469.json (addition-blanked==head, deletion-blanked==base, size_delta_bytes=0, 12 metadata bytes, Linux CI run 34365605984 job 102513392880 for 6334b33 vs a42a9e8, Rust 1.97.1) and, decisively for this head, by SUCCESS of the protected 'artifact-exact-equality (wasm bundle feature-OFF)' and 'vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)' checks at ccded1b. deleted_projection_feature_off_preserves_main_layout_and_heap pins Overlay size/alignment, Cow::Borrowed and zero retained heap across scans and a fork, and the force_cache_in_feature_off compiled control kills it, so it is non-vacuous. Floors: bench/perf-baseline.json is NOT in the changed-file stat \u2014 no raise, no ratchet-down, no silent loosening; wasm_bundle_bytes unaffected (declared delta 0, and the declaration defers size to that ratchet). Deterministic/timing surfaces green on the exact head: ci-summary gate SUCCESS (rollup 300 success / 8 skipped / 1 neutral, none pending or failed), 'run + track benchmarks' SUCCESS, wasm build/bundle SUCCESS, coverage and all conformance ratchets SUCCESS; parse path (nt.rs/turtle) untouched. Claim evidence: NO positive perf claim exists in the diff \u2014 no MB/s, x-faster, latency, recall or crossover figure in any markdown (rule 2 clean). The only prose numerics ('twelve bytes per deleted triple plus capacity slack') are structural, derivable from size_of::<[Id;3]>() as used in Overlay::heap_bytes. bench/overlay-count/README.md states protocol dimensions only, marks results noncanonical, and explicitly forbids publishing a speedup claim or selecting a quiet subset. README/SKILL state the adverse direction (cold-read and update/read regression, per-retained-generation memory growth, no cap or eviction, 'no universal crossover or canonical speedup is claimed'). Committed measured numbers exist only in the JSON declaration and cite a real Linux CI run/job, source commit, base and pinned toolchain (rules 1 and 3 satisfied); the noncanonical macOS lifecycle data is not in the tree. Opt-in architecture: overlay-deleted-projections=[] is empty, absent from default=['parallel'], enabled by no other feature or dep:, with no engine/CLI/wasm forwarding; new deps (libc, rayon, oxrdf) are confined to the detached bench/overlay-count crate with its own [workspace] and its own Cargo.lock, so the root lock and default build gain nothing. CI wiring verified: dedicated test:true leg in .github/feature-matrix.d/sparq-core.yml with regenerated golden line, executed on this head with build + tests + --all-targets clippy (9 overlay_deleted_tests passed, 187 legs selected). canonical_number_change=false: no perf-baseline floor and no published-results artifact moved; bench/feature-off-declarations/6469.json is a per-PR generated compiler-neutrality artifact under the existing protocol whose own content asserts a zero-byte size delta \u2014 recorded here for maintainer visibility, but it is not a canonical-number edit.",
+        "concerns": "",
+        "residual_nonblocking": [
+          "Not confirmed from this packet that no gating leg builds sparq-core with --all-features (carried over from the earlier review). Non-blocking: floors untouched, ratchet/benchmark jobs green on this head, and no policy deterministic metric (store_bytes_per_triple{,_small}, dict_bytes_per_term, wasm_bundle_bytes, fts_bytes_per_doc, vectors_*_recall_at10, geo_compliance_deficit) constructs a tombstone overlay, so the experiment cannot move one even if compiled in.",
+          "bench/feature-off-declarations/6469.json byte counts are for source commit 6334b33, self-disclosed in its reason string; post-6334b33 commits touch only that JSON, a comment inside a #[cfg(test)] module, and the detached bench crate, and the exact-head protected equality gate passed independently.",
+          "derived:true coexists with a hand-edited reason string (attribution + CI/toolchain scope); numbers unedited and the edit is disclosed in the PR body. Provenance-honesty lane, not a perf blocker.",
+          "bench/overlay-count/src/counting.rs allocator-window regression executes only via the documented direct rustc --test command and is not covered by workspace CI; retained lifecycle measurements remain frozen old-head noncanonical data. Acceptable because no gate consumes them and no claim in the diff rests on them."
+        ],
+        "not_granted": [
+          "default-on enablement",
+          "any crossover, threshold or canonical speedup claim",
+          "any deterministic floor change",
+          "any waiver of gate integration 15368, ALLGREEN merge-group checks, or current holds",
+          "correctness/scope re-review and any new measurement campaign"
+        ],
+        "permissionDecision": "allow",
+        "permissionDecisionReason": "\ud83e\udd16 SPARQ perf-reviewer: perf-affecting (sparq-core store overlay path, bench harness + catalog, perf-adjacent prose) but perf-clean. The feature is default-OFF with the default code path preserved verbatim under cfg, proved by the addition/deletion-blanked neutrality declaration and by the protected artifact-exact-equality (wasm bundle feature-OFF) and feature-resolution checks passing on exact head ccded1b4898cf5b317a6591f6ff6108ced23123c. bench/perf-baseline.json is untouched \u2014 no floor raise, ratchet-down or silent loosening \u2014 and the deterministic ratchets, benchmark and wasm jobs are green (rollup 300 success / 8 skipped / 1 neutral, none pending or failed). No positive performance claim appears anywhere in the diff; the only committed measured numbers cite a real Linux CI run/job, and the local lifecycle data stays out of the tree and is labelled noncanonical. Residual non-blocking notes recorded (unconfirmed --all-features gating-leg audit; declaration derived at 6334b33; hand-edited reason under derived:true; allocator regression not covered by workspace CI). Arming allowed for normal protected queue admission; gate integration 15368, ALLGREEN merge-group checks and all current holds still apply, and no default-on or canonical performance admission is granted."
+      }
     },
     "copilot_final": {
       "id": "PRR_kwDOSz3qKM8AAAABM2bPag",
@@ -528,7 +557,31 @@
       "threads_resolved": true,
       "generic_human_recommendation": "No required approval or user hold; direct admission uses actual independent Opus review under standing user instruction. Do not claim human approval."
     },
-    "review_process_note": "Legacy roborev CLI absent (command -v empty). Actual independent Opus review follows user model instruction over stale Codex review routing. No roborev pass claimed."
+    "review_process_note": "Legacy roborev CLI absent (command -v empty). Actual independent Opus review follows user model instruction over stale Codex review routing. No roborev pass claimed.",
+    "queue_admission": {
+      "at": "2026-09-09T18:01:43.409510+00:00",
+      "entry": {
+        "id": "MQE_lQDOSz3qKM8AAAABC1yJ3c4AA2w6zgLJKtM",
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "enqueuedAt": "2026-09-09T18:00:39Z",
+        "headCommit": {
+          "oid": "cea4414b39225b1240f36d968ba1549e700cd32f"
+        },
+        "baseCommit": {
+          "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+        },
+        "pullRequest": {
+          "number": 6469,
+          "headRefOid": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+          "state": "OPEN"
+        }
+      },
+      "pr_reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "comment": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5606416908",
+      "evidence": "direct-4246/perf-admission/queue-verified.json",
+      "verification": "direct-4246/perf-admission/enqueue-root-verification.json"
+    }
   },
   "prs": {
     "4300": {
@@ -1231,7 +1284,22 @@
   },
   "registry_pause": {
     "enabled": false,
-    "verified_at": "2026-09-09T16:47:23.906187+00:00",
-    "evidence": "recovery-20260909/registry-pause-1645.json"
+    "observed_at": "2026-09-09T17:56:01.893981+00:00",
+    "evidence": "direct-4246/perf-admission/registry-pause.json"
+  },
+  "actions_snapshot": {
+    "observed_at": "2026-09-09T17:56:01.893981+00:00",
+    "queued": 1,
+    "in_progress": 2,
+    "queued_run": 32217747734,
+    "queue_note": "One historical scheduled batch-merge run from Aug19 remains queued; neither live merge_group nor current review:pass evidence canceled. No capacity intervention warranted by this low workflow-run backlog. Job/runner saturation not inferred from run counts.",
+    "in_progress_runs": [
+      34335830135,
+      34327540479
+    ],
+    "evidence": [
+      "direct-4246/perf-admission/queued-runs.json",
+      "direct-4246/perf-admission/in-progress-runs.json"
+    ]
   }
 }

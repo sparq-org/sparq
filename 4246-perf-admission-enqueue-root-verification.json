@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-09T18:00:32.692408+00:00",
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "comments_verified": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5606416908",
+  "rollup": {
+    "SUCCESS": 301,
+    "SKIPPED": 8,
+    "NEUTRAL": 1
+  },
+  "rules_unchanged": true,
+  "all_threads_resolved": true,
+  "queue_action": "normal enqueue exact expectedHeadOid, jump=false"
+}
