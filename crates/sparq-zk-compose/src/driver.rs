@@ -19,8 +19,14 @@ use std::process::Command;
 /// Driver / proving error.
 #[derive(Debug)]
 pub enum DriverError {
-    Spawn { tool: String, source: std::io::Error },
-    Tool { tool: String, stderr: String },
+    Spawn {
+        tool: String,
+        source: std::io::Error,
+    },
+    Tool {
+        tool: String,
+        stderr: String,
+    },
     Io(std::io::Error),
 }
 
@@ -52,6 +58,55 @@ pub struct ProofArtifacts {
     pub proof: Vec<u8>,
     pub public_inputs: Vec<u8>,
     pub vk: Vec<u8>,
+}
+
+// [GPT-6] Atomic directory allocation prevents shared-root calls from mixing
+// verification tuples. The counter is only a name hint: create_dir arbitrates.
+static SCRATCH_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+struct ScratchDir(PathBuf);
+impl ScratchDir {
+    fn new(root: &Path, label: &str) -> Result<Self, DriverError> {
+        std::fs::create_dir_all(root)?;
+        for _ in 0..1024 {
+            let id = SCRATCH_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = root.join(format!("sparq_{label}_{}_{}", std::process::id(), id));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(DriverError::Io(e)),
+            }
+        }
+        Err(DriverError::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "unable to allocate isolated proof workspace",
+        )))
+    }
+}
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+// [GPT-6] The witness is born under 0700, before nargo creates it. Neither this
+// owner nor its credential-input path is serializable or printable with Debug.
+#[cfg(feature = "successful-results")]
+pub(crate) struct PrivateWitness {
+    pub(crate) path: PathBuf,
+    input_path: PathBuf,
+    _scratch: ScratchDir,
+}
+#[cfg(feature = "successful-results")]
+impl Drop for PrivateWitness {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.input_path);
+    }
 }
 
 /// Drives nargo/bb against the `zk/compose/` Noir workspace.
@@ -99,7 +154,7 @@ impl CircuitProver {
             Command::new("nargo")
                 .arg("compile")
                 .arg("--package")
-                .arg(&pkg)
+                .arg(pkg)
                 .current_dir(&self.compose_dir),
         )?;
         let acir = self.target_dir().join(format!("{pkg}.json"));
@@ -143,7 +198,10 @@ impl CircuitProver {
 
     // [GPT-6] Callers supply a fixed, internally selected member name.
     pub(crate) fn gen_package_witness(
-        &self, pkg: &str, prover_toml: &str, tag: &str,
+        &self,
+        pkg: &str,
+        prover_toml: &str,
+        tag: &str,
     ) -> Result<PathBuf, DriverError> {
         // Empty tag => legacy shared names; non-empty => per-call-unique names.
         let (prover_name, witness_name) = if tag.is_empty() {
@@ -151,15 +209,34 @@ impl CircuitProver {
         } else {
             (format!("Prover_{tag}"), format!("{pkg}_w_{tag}"))
         };
-        let toml_path = self.compose_dir.join(pkg).join(format!("{prover_name}.toml"));
+        self.gen_named_witness(pkg, prover_toml, &prover_name, &witness_name)
+    }
+
+    fn gen_named_witness(
+        &self,
+        pkg: &str,
+        prover_toml: &str,
+        prover_name: &str,
+        witness_name: &str,
+    ) -> Result<PathBuf, DriverError> {
+        let toml_path = self
+            .compose_dir
+            .join(pkg)
+            .join(format!("{prover_name}.toml"));
         // [GPT-6] Input files contain credential secrets: restrict before writing.
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
-        { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
         let mut input = options.open(&toml_path)?;
         #[cfg(unix)]
-        { use std::os::unix::fs::PermissionsExt; input.set_permissions(std::fs::Permissions::from_mode(0o600))?; }
+        {
+            use std::os::unix::fs::PermissionsExt;
+            input.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
         std::io::Write::write_all(&mut input, prover_toml.as_bytes())?;
         let witness_path = self.target_dir().join(format!("{witness_name}.gz"));
         // nargo execute exits 0 even on a failed assertion / bad input — it
@@ -169,14 +246,17 @@ impl CircuitProver {
         let _ = std::fs::remove_file(&witness_path);
         let out = Command::new("nargo")
             .arg("execute")
-            .arg(&witness_name)
+            .arg(witness_name)
             .arg("--package")
-            .arg(&pkg)
+            .arg(pkg)
             .arg("--prover-name")
-            .arg(&prover_name)
+            .arg(prover_name)
             .current_dir(&self.compose_dir)
             .output()
-            .map_err(|source| DriverError::Spawn { tool: "nargo".into(), source })?;
+            .map_err(|source| DriverError::Spawn {
+                tool: "nargo".into(),
+                source,
+            })?;
         if !witness_path.exists() {
             return Err(DriverError::Tool {
                 tool: "nargo execute".into(),
@@ -188,6 +268,55 @@ impl CircuitProver {
             });
         }
         Ok(witness_path)
+    }
+
+    // [GPT-6] A caller tag is descriptive; the actual input/witness names are
+    // allocated internally so even identical caller tags cannot collide.
+    #[cfg(feature = "successful-results")]
+    pub(crate) fn private_package_witness(
+        &self,
+        pkg: &str,
+        prover_toml: &str,
+        tag: &str,
+    ) -> Result<PrivateWitness, DriverError> {
+        let scratch = ScratchDir::new(&self.target_dir(), "witness")?;
+        let directory = scratch
+            .0
+            .file_name()
+            .expect("allocated directory name")
+            .to_string_lossy()
+            .into_owned();
+        let prover_name = format!("Prover_{tag}_{directory}");
+        let witness_name = format!("{directory}/witness");
+        let private = PrivateWitness {
+            path: scratch.0.join("witness.gz"),
+            input_path: self
+                .compose_dir
+                .join(pkg)
+                .join(format!("{prover_name}.toml")),
+            _scratch: scratch,
+        };
+        self.gen_named_witness(pkg, prover_toml, &prover_name, &witness_name)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&private.path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(private)
+    }
+
+    #[cfg(feature = "successful-results")]
+    pub(crate) fn prove_private_package(
+        &self,
+        pkg: &str,
+        prover_toml: &str,
+        out_dir: &Path,
+        tag: &str,
+    ) -> Result<ProofArtifacts, DriverError> {
+        let acir = self.compile_package(pkg)?;
+        let witness = self.private_package_witness(pkg, prover_toml, tag)?;
+        let scratch = ScratchDir::new(out_dir, "prove")?;
+        self.prove_witness(&acir, &witness.path, &scratch.0)
     }
 
     /// Full prove: compile -> witness -> bb prove + write_vk. `out_dir` is a
@@ -222,10 +351,23 @@ impl CircuitProver {
 
     // [GPT-6] Shares the explicit noir-recursive (ZK) backend with legacy members.
     pub(crate) fn prove_package(
-        &self, pkg: &str, prover_toml: &str, out_dir: &Path, tag: &str,
+        &self,
+        pkg: &str,
+        prover_toml: &str,
+        out_dir: &Path,
+        tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
         let acir = self.compile_package(pkg)?;
         let witness = self.gen_package_witness(pkg, prover_toml, tag)?;
+        self.prove_witness(&acir, &witness, out_dir)
+    }
+
+    fn prove_witness(
+        &self,
+        acir: &Path,
+        witness: &Path,
+        out_dir: &Path,
+    ) -> Result<ProofArtifacts, DriverError> {
         std::fs::create_dir_all(out_dir)?;
 
         // `--write_vk` emits proof, public_inputs, AND vk in one pass (bb
@@ -235,9 +377,9 @@ impl CircuitProver {
             Command::new("bb")
                 .arg("prove")
                 .arg("-b")
-                .arg(&acir)
+                .arg(acir)
                 .arg("-w")
-                .arg(&witness)
+                .arg(witness)
                 .arg("-o")
                 .arg(out_dir)
                 .arg("--write_vk")
@@ -248,23 +390,11 @@ impl CircuitProver {
         let proof = std::fs::read(out_dir.join("proof"))?;
         let public_inputs = std::fs::read(out_dir.join("public_inputs"))?;
         let vk = std::fs::read(out_dir.join("vk"))?;
-        Ok(ProofArtifacts { proof, public_inputs, vk })
-    }
-
-    // [GPT-6] The private-result API removes credential/witness files on success or error.
-    #[cfg(feature = "successful-results")]
-    pub(crate) fn cleanup_package_witness(&self, pkg: &str, tag: &str) -> Result<(), DriverError> {
-        for path in [
-            self.compose_dir.join(pkg).join(format!("Prover_{tag}.toml")),
-            self.target_dir().join(format!("{pkg}_w_{tag}.gz")),
-        ] {
-            match std::fs::remove_file(path) {
-                Ok(()) => {},
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                Err(e) => return Err(DriverError::Io(e)),
-            }
-        }
-        Ok(())
+        Ok(ProofArtifacts {
+            proof,
+            public_inputs,
+            vk,
+        })
     }
 
     /// Recompute the CANONICAL verification key for a circuit-family member,
@@ -279,15 +409,20 @@ impl CircuitProver {
     }
 
     // [GPT-6] Rebuilds a member key locally; never consumes an untrusted bundled VK.
-    pub(crate) fn canonical_package_vk(&self, pkg: &str, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
+    pub(crate) fn canonical_package_vk(
+        &self,
+        pkg: &str,
+        work_dir: &Path,
+    ) -> Result<Vec<u8>, DriverError> {
         let acir = self.compile_package(pkg)?;
-        std::fs::create_dir_all(work_dir)?;
+        let scratch = ScratchDir::new(work_dir, "vk")?;
+        let work_dir = &scratch.0;
         run(
             "bb",
             Command::new("bb")
                 .arg("write_vk")
                 .arg("-b")
-                .arg(&acir)
+                .arg(acir)
                 .arg("-o")
                 .arg(work_dir)
                 .arg("-t")
@@ -309,7 +444,8 @@ impl CircuitProver {
         vk: &[u8],
         work_dir: &Path,
     ) -> Result<bool, DriverError> {
-        std::fs::create_dir_all(work_dir)?;
+        let scratch = ScratchDir::new(work_dir, "verify")?;
+        let work_dir = &scratch.0;
         let proof_p = work_dir.join("proof");
         let pi_p = work_dir.join("public_inputs");
         let vk_p = work_dir.join("vk");
@@ -328,7 +464,10 @@ impl CircuitProver {
             .arg("-t")
             .arg(&self.target)
             .output()
-            .map_err(|source| DriverError::Spawn { tool: "bb".into(), source })?;
+            .map_err(|source| DriverError::Spawn {
+                tool: "bb".into(),
+                source,
+            })?;
         Ok(out.status.success())
     }
 
@@ -345,9 +484,10 @@ impl CircuitProver {
 }
 
 fn run(tool: &str, cmd: &mut Command) -> Result<(), DriverError> {
-    let out = cmd
-        .output()
-        .map_err(|source| DriverError::Spawn { tool: tool.into(), source })?;
+    let out = cmd.output().map_err(|source| DriverError::Spawn {
+        tool: tool.into(),
+        source,
+    })?;
     if !out.status.success() {
         return Err(DriverError::Tool {
             tool: tool.into(),
@@ -366,6 +506,49 @@ fn run(tool: &str, cmd: &mut Command) -> Result<(), DriverError> {
 #[cfg(test)]
 mod driver_glue_tests {
     use super::*;
+
+    #[test]
+    fn concurrent_verification_workspaces_never_share_artifact_paths() {
+        let root =
+            std::env::temp_dir().join(format!("sparq_workspace_race_{}", std::process::id()));
+        let barrier = std::sync::Barrier::new(8);
+        let paths = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0u8..8)
+                .map(|id| {
+                    let root = &root;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        let scratch = ScratchDir::new(root, "verify").unwrap();
+                        let path = scratch.0.join("proof");
+                        std::fs::write(&path, [id]).unwrap();
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            assert_eq!(
+                                std::fs::metadata(&scratch.0).unwrap().permissions().mode() & 0o777,
+                                0o700
+                            );
+                        }
+                        barrier.wait();
+                        assert_eq!(std::fs::read(&path).unwrap(), vec![id]);
+                        path
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|j| j.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            paths
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            8
+        );
+        assert!(paths.iter().all(|p| !p.exists()));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// A name no executable on a sane PATH resolves to — drives the `Spawn` arm
     /// (`std::io::Error` from a failed `fork`/`exec`) deterministically, with or
@@ -436,8 +619,14 @@ mod driver_glue_tests {
         let s_msg = spawn.to_string();
         let t_msg = tool.to_string();
         let io_msg = io.to_string();
-        assert!(s_msg.contains("spawn") && s_msg.contains("nargo"), "Spawn names the tool");
-        assert!(t_msg.contains("bb") && t_msg.contains("boom"), "Tool carries name + stderr");
+        assert!(
+            s_msg.contains("spawn") && s_msg.contains("nargo"),
+            "Spawn names the tool"
+        );
+        assert!(
+            t_msg.contains("bb") && t_msg.contains("boom"),
+            "Tool carries name + stderr"
+        );
         assert!(io_msg.contains("io error") && io_msg.contains("disk full"));
         // The three renderings are mutually distinct (no two variants collide).
         assert_ne!(s_msg, t_msg);
@@ -450,9 +639,12 @@ mod driver_glue_tests {
     /// rely on this conversion).
     #[test]
     fn io_error_converts_into_io_variant() {
-        let e: DriverError = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope").into();
+        let e: DriverError =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope").into();
         match e {
-            DriverError::Io(inner) => assert_eq!(inner.kind(), std::io::ErrorKind::PermissionDenied),
+            DriverError::Io(inner) => {
+                assert_eq!(inner.kind(), std::io::ErrorKind::PermissionDenied)
+            }
             other => panic!("io::Error must convert to DriverError::Io, got {:?}", other),
         }
     }
@@ -484,7 +676,10 @@ mod driver_glue_tests {
         // written first, which is the isolation behaviour we assert.
         let r_a = prover.gen_witness_tagged(&id, "challenge = \"0x1\"\n", "taga");
         let r_b = prover.gen_witness_tagged(&id, "challenge = \"0x2\"\n", "tagb");
-        assert!(r_a.is_err() && r_b.is_err(), "no real witness without the toolchain");
+        assert!(
+            r_a.is_err() && r_b.is_err(),
+            "no real witness without the toolchain"
+        );
 
         let toml_a = tmp.join(&pkg).join("Prover_taga.toml");
         let toml_b = tmp.join(&pkg).join("Prover_tagb.toml");
@@ -493,15 +688,27 @@ mod driver_glue_tests {
         assert_ne!(toml_a, toml_b, "the two tags use distinct toml paths");
         // The two inputs coexist with their original, non-clobbered contents — the
         // collision the tag isolation prevents.
-        assert_eq!(std::fs::read_to_string(&toml_a).unwrap(), "challenge = \"0x1\"\n");
-        assert_eq!(std::fs::read_to_string(&toml_b).unwrap(), "challenge = \"0x2\"\n");
+        assert_eq!(
+            std::fs::read_to_string(&toml_a).unwrap(),
+            "challenge = \"0x1\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&toml_b).unwrap(),
+            "challenge = \"0x2\"\n"
+        );
 
         // The empty tag uses the LEGACY shared `Prover.toml` name (distinct from any
         // tagged name), so a tagged call never overwrites the untagged one.
         let _ = prover.gen_witness_tagged(&id, "challenge = \"0x3\"\n", "");
         let toml_shared = tmp.join(&pkg).join("Prover.toml");
-        assert!(toml_shared.exists(), "empty tag uses the shared Prover.toml name");
-        assert_ne!(toml_shared, toml_a, "shared name differs from a tagged name");
+        assert!(
+            toml_shared.exists(),
+            "empty tag uses the shared Prover.toml name"
+        );
+        assert_ne!(
+            toml_shared, toml_a,
+            "shared name differs from a tagged name"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

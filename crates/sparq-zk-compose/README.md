@@ -81,3 +81,15 @@ snapshots and selecting acceptable issuers remain the relying party's job.
 candidate eligibility without changing committed graphs or query semantics. The
 callback receives the pattern index, original wallet/leaf reference and triple;
 a rejection only removes that candidate, and all ordinary planner checks remain.
+
+[GPT-6] `prepare_result` excludes untrusted, unauthenticated, revoked, stale or
+over-capacity credentials before witness selection. Backend-ineligible selected
+terms are skipped through candidate admission, so an early unsupported candidate
+does not hide a later usable witness. Public query checks remain independent.
+
+Successful-result input names are unique internally even when a caller repeats a
+tag. Witnesses are created inside per-call owner-only directories, have owner-only
+file permissions on Unix, and are cleaned by their scope owner. Both canonical-key
+generation and verification now allocate independent subdirectories under the
+caller's scratch root, so concurrent calls cannot exchange proof/input/key files.
+Cleanup after abnormal process termination remains best effort.

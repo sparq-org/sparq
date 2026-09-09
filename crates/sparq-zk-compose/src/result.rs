@@ -8,7 +8,7 @@
 //! two issuer key slots and the verifier's accepted status-policy root. Graph
 //! roots, sizes, salts, status references and selected witness attributions are
 //! private circuit inputs. Issuer identities, fixed capacities and result size
-//! remain visible. Selected blank nodes and RDF-star terms are rejected.
+//! remain visible. Selected blank nodes and triple terms are rejected.
 //!
 //! Private integer predicates retain lexical-to-value binding and accept only
 //! canonical nonnegative `xsd:integer` values through [`MAX_PRIVATE_INTEGER`].
@@ -17,15 +17,21 @@
 
 use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
-use crate::planner::{plan_disclosure, DisclosureQuery, PlannerLimits, QueryKind, QuerySlot};
-use crate::revocation::{accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry};
+use crate::planner::{
+    plan_disclosure_admitted, DisclosureQuery, PlannerLimits, QueryKind, QuerySlot,
+};
+use crate::revocation::{
+    accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry,
+};
 use crate::verifier::{SeenNonces, VerifierNonce};
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sparq_zk::commit::GraphCommitment;
 use sparq_zk::encode::encode_term;
-use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr};
+use sparq_zk::field::{
+    field_from_hash_bytes, field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr,
+};
 use sparq_zk::sig::{self, PublicKey, Signature};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -141,53 +147,98 @@ pub enum ResultError {
 
 impl std::fmt::Display for ResultError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { Self::Rejected(s) => write!(f, "successful-result rejected: {s}"), Self::Driver(e) => e.fmt(f) }
+        match self {
+            Self::Rejected(s) => write!(f, "successful-result rejected: {s}"),
+            Self::Driver(e) => e.fmt(f),
+        }
     }
 }
 impl std::error::Error for ResultError {}
-impl From<DriverError> for ResultError { fn from(e: DriverError) -> Self { Self::Driver(e) } }
-fn reject(message: impl Into<String>) -> ResultError { ResultError::Rejected(message.into()) }
+impl From<DriverError> for ResultError {
+    fn from(e: DriverError) -> Self {
+        Self::Driver(e)
+    }
+}
+fn reject(message: impl Into<String>) -> ResultError {
+    ResultError::Rejected(message.into())
+}
 
 impl ResultPolicy {
     fn entries(&self) -> Result<Vec<AcceptedStatusEntry>, ResultError> {
-        if self.min_version > self.max_version { return Err(reject("inverted status freshness interval")); }
-        if self.trusted_issuers.is_empty() || self.trusted_issuers.iter().any(|k| !k.is_prime_order()) {
+        if self.min_version > self.max_version {
+            return Err(reject("inverted status freshness interval"));
+        }
+        if self.trusted_issuers.is_empty()
+            || self.trusted_issuers.iter().any(|k| !k.is_prime_order())
+        {
             return Err(reject("empty or invalid issuer trust set"));
         }
         let mut unique = BTreeMap::new();
         for snapshot in &self.snapshots {
-            if snapshot.version < self.min_version || snapshot.version > self.max_version { continue; }
-            oxrdf::NamedNode::new(&snapshot.status_list).map_err(|_| reject("invalid status-list IRI"))?;
+            if snapshot.version < self.min_version || snapshot.version > self.max_version {
+                continue;
+            }
+            oxrdf::NamedNode::new(&snapshot.status_list)
+                .map_err(|_| reject("invalid status-list IRI"))?;
             let key = (snapshot.status_list.clone(), snapshot.version);
             if let Some(previous) = unique.insert(key, snapshot) {
-                if previous != snapshot { return Err(reject("conflicting authoritative status snapshots")); }
+                if previous != snapshot {
+                    return Err(reject("conflicting authoritative status snapshots"));
+                }
             }
         }
-        if unique.is_empty() || unique.len() > (1 << POLICY_DEPTH) { return Err(reject("accepted status-policy capacity")); }
-        unique.into_values().map(|s| Ok(AcceptedStatusEntry {
-            status_list: s.status_list.clone(), version: s.version,
-            status_list_root: merkle_root(s, STATUS_DEPTH).ok_or_else(|| reject("status root unavailable"))?,
-        })).collect()
+        if unique.is_empty() || unique.len() > (1 << POLICY_DEPTH) {
+            return Err(reject("accepted status-policy capacity"));
+        }
+        unique
+            .into_values()
+            .map(|s| {
+                Ok(AcceptedStatusEntry {
+                    status_list: s.status_list.clone(),
+                    version: s.version,
+                    status_list_root: merkle_root(s, STATUS_DEPTH)
+                        .ok_or_else(|| reject("status root unavailable"))?,
+                })
+            })
+            .collect()
     }
 }
 
 fn package(hidden_filters: usize) -> &'static str {
-    if hidden_filters == 0 { "result_v1_k2_n16_p3_r4_f0" } else { "result_v1_k2_n16_p3_r4_f2" }
+    if hidden_filters == 0 {
+        "result_v1_k2_n16_p3_r4_f0"
+    } else {
+        "result_v1_k2_n16_p3_r4_f2"
+    }
 }
 
 fn variables(query: &DisclosureQuery) -> Vec<String> {
-    query.patterns.iter().flatten().filter_map(|s| match s {
-        QuerySlot::Variable(v) => Some(v.clone()), QuerySlot::Constant(_) => None,
-    }).collect::<BTreeSet<_>>().into_iter().collect()
+    query
+        .patterns
+        .iter()
+        .flatten()
+        .filter_map(|s| match s {
+            QuerySlot::Variable(v) => Some(v.clone()),
+            QuerySlot::Constant(_) => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn disclosed(term: &Term) -> Result<DisclosedTerm, ResultError> {
     match term {
-        Term::NamedNode(n) => Ok(DisclosedTerm::Iri { value: n.as_str().into() }),
-        Term::Literal(l) => Ok(DisclosedTerm::Literal {
-            value: l.value().into(), datatype: Some(l.datatype().as_str().into()), language: l.language().map(str::to_owned),
+        Term::NamedNode(n) => Ok(DisclosedTerm::Iri {
+            value: n.as_str().into(),
         }),
-        _ => Err(reject("blank nodes and RDF-star terms are outside the result contract")),
+        Term::Literal(l) => Ok(DisclosedTerm::Literal {
+            value: l.value().into(),
+            datatype: Some(l.datatype().as_str().into()),
+            language: l.language().map(str::to_owned),
+        }),
+        _ => Err(reject(
+            "blank nodes and triple terms are outside the result contract",
+        )),
     }
 }
 
@@ -201,14 +252,22 @@ fn term_parts(triple: &Triple) -> [Term; 3] {
         NamedOrBlankNode::NamedNode(n) => Term::NamedNode(n.clone()),
         NamedOrBlankNode::BlankNode(n) => Term::BlankNode(n.clone()),
     };
-    [subject, Term::NamedNode(triple.predicate.clone()), triple.object.clone()]
+    [
+        subject,
+        Term::NamedNode(triple.predicate.clone()),
+        triple.object.clone(),
+    ]
 }
 
 fn type_opening(term: &Term) -> Result<(u32, Fr), ResultError> {
     let (ty, bytes) = match term {
         Term::NamedNode(n) => (1, n.as_str().as_bytes().to_vec()),
         Term::Literal(l) => (2, l.to_string().into_bytes()),
-        _ => return Err(reject("selected blank nodes and RDF-star terms are unsupported")),
+        _ => {
+            return Err(reject(
+                "selected blank nodes and triple terms are unsupported",
+            ))
+        }
     };
     Ok((ty, field_from_hash_bytes(blake3::hash(&bytes).as_bytes())))
 }
@@ -223,32 +282,76 @@ struct PublicStatement {
     fields: Vec<(&'static str, Value)>,
 }
 
-fn public_statement(p: &ResultPresentation, policy: &ResultPolicy, nonce: &VerifierNonce) -> Result<PublicStatement, ResultError> {
-    if p.version != VERSION || p.challenge != nonce.as_field_hex() { return Err(reject("version or challenge mismatch")); }
+fn public_statement(
+    p: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+) -> Result<PublicStatement, ResultError> {
+    if p.version != VERSION || p.challenge != nonce.as_field_hex() {
+        return Err(reject("version or challenge mismatch"));
+    }
     let query = DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?;
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
-    if query.kind != QueryKind::SelectDistinct { return Err(reject("only SELECT DISTINCT is supported")); }
+    if query.kind != QueryKind::SelectDistinct {
+        return Err(reject("only SELECT DISTINCT is supported"));
+    }
     let vars = variables(&query);
-    if vars.len() > V || query.patterns.is_empty() || query.patterns.len() > P || p.rows.is_empty() || p.rows.len() > R {
+    if vars.len() > V
+        || query.patterns.is_empty()
+        || query.patterns.len() > P
+        || p.rows.is_empty()
+        || p.rows.len() > R
+    {
         return Err(reject("successful-result query or row capacity"));
     }
     let expected: BTreeSet<_> = query.projection.iter().cloned().collect();
-    if expected.is_empty() || !expected.iter().all(|v| vars.contains(v)) { return Err(reject("unbound projection")); }
+    if expected.is_empty() || !expected.iter().all(|v| vars.contains(v)) {
+        return Err(reject("unbound projection"));
+    }
     let mut rows = Vec::new();
     let mut distinct = BTreeSet::new();
     for row in &p.rows {
-        if row.keys().cloned().collect::<BTreeSet<_>>() != expected { return Err(reject("released row does not match projection")); }
-        let row: BTreeMap<String, Term> = row.iter().map(|(v,t)| Ok((v.clone(), t.to_term().ok_or_else(|| reject("malformed released RDF term"))?))).collect::<Result<_,ResultError>>()?;
-        if !distinct.insert(row.iter().map(|(v,t)| (v.clone(), t.to_string())).collect::<Vec<_>>()) { return Err(reject("duplicate released DISTINCT row")); }
+        if row.keys().cloned().collect::<BTreeSet<_>>() != expected {
+            return Err(reject("released row does not match projection"));
+        }
+        let row: BTreeMap<String, Term> = row
+            .iter()
+            .map(|(v, t)| {
+                Ok((
+                    v.clone(),
+                    t.to_term()
+                        .ok_or_else(|| reject("malformed released RDF term"))?,
+                ))
+            })
+            .collect::<Result<_, ResultError>>()?;
+        if !distinct.insert(
+            row.iter()
+                .map(|(v, t)| (v.clone(), t.to_string()))
+                .collect::<Vec<_>>(),
+        ) {
+            return Err(reject("duplicate released DISTINCT row"));
+        }
         rows.push(row);
     }
-    let hidden_filters: Vec<_> = query.filters.iter().enumerate().filter_map(|(i,f)| (!expected.contains(&f.variable)).then_some(i)).collect();
-    if hidden_filters.len() > F { return Err(reject("private filter capacity")); }
+    let hidden_filters: Vec<_> = query
+        .filters
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| (!expected.contains(&f.variable)).then_some(i))
+        .collect();
+    if hidden_filters.len() > F {
+        return Err(reject("private filter capacity"));
+    }
     for filter in &query.filters {
-        if !vars.contains(&filter.variable) { return Err(reject("unbound FILTER variable")); }
+        if !vars.contains(&filter.variable) {
+            return Err(reject("unbound FILTER variable"));
+        }
         if expected.contains(&filter.variable) {
             for row in &rows {
-                let value = crate::planner::canonical_integer(&row[&filter.variable]).ok_or_else(|| reject("public FILTER operand is not a canonical nonnegative integer"))?;
+                let value =
+                    crate::planner::canonical_integer(&row[&filter.variable]).ok_or_else(|| {
+                        reject("public FILTER operand is not a canonical nonnegative integer")
+                    })?;
                 if !crate::planner::integer_comparison(value, filter.op, filter.bound) {
                     return Err(reject("public FILTER is false"));
                 }
@@ -256,65 +359,115 @@ fn public_statement(p: &ResultPresentation, policy: &ResultPolicy, nonce: &Verif
         }
     }
     let entries = policy.entries()?;
-    let root = accepted_set_root(&entries, POLICY_DEPTH).ok_or_else(|| reject("status policy root unavailable"))?;
+    let root = accepted_set_root(&entries, POLICY_DEPTH)
+        .ok_or_else(|| reject("status policy root unavailable"))?;
     let mut keys = Vec::new();
     for text in &p.issuer_slots {
         let key = sig::public_key_from_hex(text).ok_or_else(|| reject("malformed issuer key"))?;
-        if sig::public_key_to_hex(&key) != *text || !policy.trusted_issuers.contains(&key) { return Err(reject("untrusted or noncanonical issuer key")); }
-        let (x,y) = key.coords().ok_or_else(|| reject("identity issuer key"))?;
+        if sig::public_key_to_hex(&key) != *text || !policy.trusted_issuers.contains(&key) {
+            return Err(reject("untrusted or noncanonical issuer key"));
+        }
+        let (x, y) = key.coords().ok_or_else(|| reject("identity issuer key"))?;
         keys.push([field_to_hex(&x), field_to_hex(&y)]);
     }
-    if p.issuer_slots[0] > p.issuer_slots[1] { return Err(reject("noncanonical issuer slot order")); }
-    let mut pattern_vars = [[0u32;3];P];
+    if p.issuer_slots[0] > p.issuer_slots[1] {
+        return Err(reject("noncanonical issuer slot order"));
+    }
+    let mut pattern_vars = [[0u32; 3]; P];
     let zero = field_to_hex(&Fr::from(0u64));
-    let mut pattern_constants = vec![vec![zero.clone();3];P];
+    let mut pattern_constants = vec![vec![zero.clone(); 3]; P];
     for (i, pattern) in query.patterns.iter().enumerate() {
         for (s, slot) in pattern.iter().enumerate() {
             match slot {
-                QuerySlot::Variable(v) => pattern_vars[i][s] = (vars.iter().position(|x| x == v).ok_or_else(|| reject("unbound pattern variable"))? + 1) as u32,
+                QuerySlot::Variable(v) => {
+                    pattern_vars[i][s] = (vars
+                        .iter()
+                        .position(|x| x == v)
+                        .ok_or_else(|| reject("unbound pattern variable"))?
+                        + 1) as u32
+                }
                 QuerySlot::Constant(t) => pattern_constants[i][s] = field_to_hex(&field(t)?),
             }
         }
     }
-    let mut projection = [false;V];
-    let mut result_enc = vec![vec![zero;V];R];
-    for (i,v) in vars.iter().enumerate() {
+    let mut projection = [false; V];
+    let mut result_enc = vec![vec![zero; V]; R];
+    for (i, v) in vars.iter().enumerate() {
         projection[i] = expected.contains(v);
-        if projection[i] { for (r,row) in rows.iter().enumerate() { result_enc[r][i] = field_to_hex(&field(&row[v])?); } }
+        if projection[i] {
+            for (r, row) in rows.iter().enumerate() {
+                result_enc[r][i] = field_to_hex(&field(&row[v])?);
+            }
+        }
     }
     let mut fields = vec![
-        ("challenge", json!(p.challenge.0)), ("version", json!(VERSION)),
-        ("accepted_root", json!(field_to_hex(&root))), ("issuer_keys", json!(keys)),
-        ("pattern_count", json!(query.patterns.len())), ("pattern_vars", json!(pattern_vars)),
-        ("pattern_constants", json!(pattern_constants)), ("projection", json!(projection)),
-        ("result_count", json!(rows.len())), ("results", json!(result_enc)),
+        ("challenge", json!(p.challenge.0)),
+        ("version", json!(VERSION)),
+        ("accepted_root", json!(field_to_hex(&root))),
+        ("issuer_keys", json!(keys)),
+        ("pattern_count", json!(query.patterns.len())),
+        ("pattern_vars", json!(pattern_vars)),
+        ("pattern_constants", json!(pattern_constants)),
+        ("projection", json!(projection)),
+        ("result_count", json!(rows.len())),
+        ("results", json!(result_enc)),
         ("filter_count", json!(hidden_filters.len())),
     ];
     if !hidden_filters.is_empty() {
-        let mut fvars = [1u32;F]; let mut ops = [0u32;F]; let mut bounds = [0u64;F];
-        for (f,&index) in hidden_filters.iter().enumerate() {
+        let mut fvars = [1u32; F];
+        let mut ops = [0u32; F];
+        let mut bounds = [0u64; F];
+        for (f, &index) in hidden_filters.iter().enumerate() {
             let filter = &query.filters[index];
-            fvars[f] = (vars.iter().position(|v| v == &filter.variable).ok_or_else(|| reject("unbound FILTER"))? + 1) as u32;
-            ops[f] = filter.op.code(); bounds[f] = filter.bound;
+            fvars[f] = (vars
+                .iter()
+                .position(|v| v == &filter.variable)
+                .ok_or_else(|| reject("unbound FILTER"))?
+                + 1) as u32;
+            ops[f] = filter.op.code();
+            bounds[f] = filter.bound;
         }
-        fields.extend([("filter_vars",json!(fvars)),("filter_ops",json!(ops)),("filter_bounds",json!(bounds))]);
+        fields.extend([
+            ("filter_vars", json!(fvars)),
+            ("filter_ops", json!(ops)),
+            ("filter_bounds", json!(bounds)),
+        ]);
     }
-    Ok(PublicStatement { query, vars, rows, hidden_filters, entries, fields })
+    Ok(PublicStatement {
+        query,
+        vars,
+        rows,
+        hidden_filters,
+        entries,
+        fields,
+    })
 }
 
 fn public_bytes(fields: &[(&str, Value)]) -> Result<Vec<u8>, ResultError> {
-    fn append(value: &Value, out: &mut Vec<u8>) -> Result<(),ResultError> {
+    fn append(value: &Value, out: &mut Vec<u8>) -> Result<(), ResultError> {
         let f = match value {
-            Value::Array(v) => { for x in v { append(x,out)?; } return Ok(()); },
+            Value::Array(v) => {
+                for x in v {
+                    append(x, out)?;
+                }
+                return Ok(());
+            }
             Value::Bool(b) => Fr::from(u64::from(*b)),
-            Value::Number(n) => Fr::from(n.as_u64().ok_or_else(|| reject("invalid public integer"))?),
-            Value::String(s) => field_from_hex_str(s).ok_or_else(|| reject("invalid public field"))?,
+            Value::Number(n) => {
+                Fr::from(n.as_u64().ok_or_else(|| reject("invalid public integer"))?)
+            }
+            Value::String(s) => {
+                field_from_hex_str(s).ok_or_else(|| reject("invalid public field"))?
+            }
             _ => return Err(reject("invalid public-input shape")),
         };
-        out.extend_from_slice(&field_to_be_bytes_32(&f)); Ok(())
+        out.extend_from_slice(&field_to_be_bytes_32(&f));
+        Ok(())
     }
     let mut out = Vec::new();
-    for (_,value) in fields { append(value,&mut out)?; }
+    for (_, value) in fields {
+        append(value, &mut out)?;
+    }
     Ok(out)
 }
 
@@ -324,110 +477,301 @@ fn public_bytes(fields: &[(&str, Value)]) -> Result<Vec<u8>, ResultError> {
 /// Rejects unsupported syntax, unsubstantiated results, failed authentication or
 /// status, selected blank nodes, and inputs outside the fixed circuit capacity.
 pub fn prepare_result(
-    query: &str, credentials: &[ResultCredential], rows: &[BTreeMap<String, Term>],
-    policy: &ResultPolicy, nonce: &VerifierNonce,
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
 ) -> Result<PreparedResult, ResultError> {
     let parsed = DisclosureQuery::parse(query).map_err(|e| reject(e.to_string()))?;
+    let entries = policy.entries()?;
+    let eligible: Vec<bool> = credentials
+        .iter()
+        .map(|c| {
+            if c.graph.canonical.triples.is_empty()
+                || c.graph.canonical.triples.len() > N
+                || !policy.trusted_issuers.contains(&c.issuer)
+                || !entries
+                    .iter()
+                    .any(|e| e.status_list == c.status_list && e.version == c.status_version)
+            {
+                return false;
+            }
+            let Some(snapshot) = policy
+                .snapshots
+                .iter()
+                .find(|s| s.status_list == c.status_list && s.version == c.status_version)
+            else {
+                return false;
+            };
+            if snapshot.bit(c.status_index) || c.status_index >= (1 << STATUS_DEPTH) {
+                return false;
+            }
+            let leaves = c
+                .graph
+                .canonical
+                .triples
+                .iter()
+                .map(|t| sparq_zk::encode::encode_triple(t, &c.graph.salt))
+                .collect::<Option<Vec<_>>>();
+            if !leaves
+                .is_some_and(|leaves| sparq_zk::poseidon2::hash(&leaves) == c.graph.commitment)
+            {
+                return false;
+            }
+            let reference = sig::status_ref_digest(
+                &sig::status_list_id_to_field(&c.status_list),
+                c.status_index,
+                c.status_version,
+            );
+            let message =
+                sig::commitment_message_with_status(&c.graph.commitment, &c.graph.salt, &reference);
+            sig::verify(&c.issuer, &message, &c.signature)
+        })
+        .collect();
     let graphs: Vec<_> = credentials.iter().map(|c| c.graph.clone()).collect();
-    let plan = plan_disclosure(&parsed, &graphs, rows, PlannerLimits::default()).map_err(|e| reject(e.to_string()))?;
-    let mut used: Vec<usize> = plan.rows.iter().flat_map(|r| r.witnesses.iter().map(|w|w.credential)).collect::<BTreeSet<_>>().into_iter().collect();
-    if used.is_empty() || used.len() > K { return Err(reject("selected credential capacity")); }
+    let plan = plan_disclosure_admitted(
+        &parsed,
+        &graphs,
+        rows,
+        PlannerLimits::default(),
+        |pattern, witness, triple| {
+            if !eligible[witness.credential] {
+                return false;
+            }
+            term_parts(triple).iter().enumerate().all(|(slot, term)| {
+                if !matches!(term, Term::NamedNode(_) | Term::Literal(_)) {
+                    return false;
+                }
+                if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
+                    if !parsed.projection.contains(v)
+                        && parsed.filters.iter().any(|f| &f.variable == v)
+                    {
+                        return crate::planner::canonical_integer(term)
+                            .is_some_and(|n| n <= MAX_PRIVATE_INTEGER);
+                    }
+                }
+                true
+            })
+        },
+    )
+    .map_err(|e| reject(e.to_string()))?;
+    let mut used: Vec<usize> = plan
+        .rows
+        .iter()
+        .flat_map(|r| r.witnesses.iter().map(|w| w.credential))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if used.is_empty() || used.len() > K {
+        return Err(reject("selected credential capacity"));
+    }
     used.sort_by_key(|&i| sig::public_key_to_hex(&credentials[i].issuer));
     let selected_credentials = used.len();
-    while used.len() < K { used.push(used[0]); }
+    while used.len() < K {
+        used.push(used[0]);
+    }
     let presentation = ResultPresentation {
-        version: VERSION, query: query.into(), challenge: nonce.as_field_hex(),
-        rows: rows.iter().map(|row| row.iter().map(|(v,t)| Ok((v.clone(),disclosed(t)?))).collect()).collect::<Result<_,ResultError>>()?,
-        issuer_slots: std::array::from_fn(|i| sig::public_key_to_hex(&credentials[used[i]].issuer)), proof: Vec::new(),
+        version: VERSION,
+        query: query.into(),
+        challenge: nonce.as_field_hex(),
+        rows: rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|(v, t)| Ok((v.clone(), disclosed(t)?)))
+                    .collect()
+            })
+            .collect::<Result<_, ResultError>>()?,
+        issuer_slots: std::array::from_fn(|i| sig::public_key_to_hex(&credentials[used[i]].issuer)),
+        proof: Vec::new(),
     };
-    let statement = public_statement(&presentation,policy,nonce)?;
+    let statement = public_statement(&presentation, policy, nonce)?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
-    let mut counts = [0usize;K]; let mut salts = Vec::new(); let mut enc = vec![vec![vec![zero.clone();3];N];K];
-    let mut status_lists = Vec::new(); let mut status_versions = Vec::new(); let mut status_indices = Vec::new();
-    let mut status_roots = Vec::new(); let mut status_siblings = Vec::new(); let mut policy_indices = Vec::new();
-    let mut policy_siblings = Vec::new(); let mut signatures = Vec::new();
-    for (slot,&original) in used.iter().enumerate() {
+    let mut counts = [0usize; K];
+    let mut salts = Vec::new();
+    let mut enc = vec![vec![vec![zero.clone(); 3]; N]; K];
+    let mut status_lists = Vec::new();
+    let mut status_versions = Vec::new();
+    let mut status_indices = Vec::new();
+    let mut status_roots = Vec::new();
+    let mut status_siblings = Vec::new();
+    let mut policy_indices = Vec::new();
+    let mut policy_siblings = Vec::new();
+    let mut signatures = Vec::new();
+    for (slot, &original) in used.iter().enumerate() {
         let c = &credentials[original];
         counts[slot] = c.graph.canonical.triples.len();
-        if counts[slot] == 0 || counts[slot] > N { return Err(reject("selected graph capacity")); }
-        for (i,t) in c.graph.canonical.triples.iter().enumerate() {
-            for (s,term) in term_parts(t).iter().enumerate() {
-                enc[slot][i][s] = field_to_hex(&encode_term(term,&c.graph.salt).ok_or_else(|| reject("unsupported graph term"))?);
+        if counts[slot] == 0 || counts[slot] > N {
+            return Err(reject("selected graph capacity"));
+        }
+        for (i, t) in c.graph.canonical.triples.iter().enumerate() {
+            for (s, term) in term_parts(t).iter().enumerate() {
+                enc[slot][i][s] = field_to_hex(
+                    &encode_term(term, &c.graph.salt)
+                        .ok_or_else(|| reject("unsupported graph term"))?,
+                );
             }
         }
-        let policy_index = statement.entries.iter().position(|e| e.status_list == c.status_list && e.version == c.status_version).ok_or_else(|| reject("credential status reference outside verifier policy"))?;
-        let snapshot = policy.snapshots.iter().find(|s| s.status_list == c.status_list && s.version == c.status_version).ok_or_else(|| reject("authoritative snapshot missing"))?;
-        if snapshot.bit(c.status_index) { return Err(reject("credential revoked or status index unavailable")); }
+        let policy_index = statement
+            .entries
+            .iter()
+            .position(|e| e.status_list == c.status_list && e.version == c.status_version)
+            .ok_or_else(|| reject("credential status reference outside verifier policy"))?;
+        let snapshot = policy
+            .snapshots
+            .iter()
+            .find(|s| s.status_list == c.status_list && s.version == c.status_version)
+            .ok_or_else(|| reject("authoritative snapshot missing"))?;
+        if snapshot.bit(c.status_index) {
+            return Err(reject("credential revoked or status index unavailable"));
+        }
         let list = sig::status_list_id_to_field(&c.status_list);
-        let reference = sig::status_ref_digest(&list,c.status_index,c.status_version);
-        let message = sig::commitment_message_with_status(&c.graph.commitment,&c.graph.salt,&reference);
-        if !sig::verify(&c.issuer,&message,&c.signature) { return Err(reject("credential issuer signature invalid")); }
-        let w = sig::in_circuit_witness(&c.issuer,&message,&c.signature).ok_or_else(|| reject("issuer witness unavailable"))?;
-        signatures.push([w.r_x,w.r_y,w.s,w.e,w.e_k].map(|f|field_to_hex(&f)));
-        salts.push(field_to_hex(&c.graph.salt)); status_lists.push(field_to_hex(&list));
-        status_versions.push(c.status_version); status_indices.push(field_to_hex(&Fr::from(c.status_index)));
-        status_roots.push(field_to_hex(&statement.entries[policy_index].status_list_root));
-        status_siblings.push(merkle_witness(snapshot,STATUS_DEPTH,c.status_index).ok_or_else(|| reject("status witness unavailable"))?.siblings.iter().map(field_to_hex).collect::<Vec<_>>());
+        let reference = sig::status_ref_digest(&list, c.status_index, c.status_version);
+        let message =
+            sig::commitment_message_with_status(&c.graph.commitment, &c.graph.salt, &reference);
+        if !sig::verify(&c.issuer, &message, &c.signature) {
+            return Err(reject("credential issuer signature invalid"));
+        }
+        let w = sig::in_circuit_witness(&c.issuer, &message, &c.signature)
+            .ok_or_else(|| reject("issuer witness unavailable"))?;
+        signatures.push([w.r_x, w.r_y, w.s, w.e, w.e_k].map(|f| field_to_hex(&f)));
+        salts.push(field_to_hex(&c.graph.salt));
+        status_lists.push(field_to_hex(&list));
+        status_versions.push(c.status_version);
+        status_indices.push(field_to_hex(&Fr::from(c.status_index)));
+        status_roots.push(field_to_hex(
+            &statement.entries[policy_index].status_list_root,
+        ));
+        status_siblings.push(
+            merkle_witness(snapshot, STATUS_DEPTH, c.status_index)
+                .ok_or_else(|| reject("status witness unavailable"))?
+                .siblings
+                .iter()
+                .map(field_to_hex)
+                .collect::<Vec<_>>(),
+        );
         policy_indices.push(field_to_hex(&Fr::from(policy_index as u64)));
-        policy_siblings.push(accepted_set_witness(&statement.entries,POLICY_DEPTH,policy_index as u64).ok_or_else(|| reject("policy witness unavailable"))?.iter().map(field_to_hex).collect::<Vec<_>>());
+        policy_siblings.push(
+            accepted_set_witness(&statement.entries, POLICY_DEPTH, policy_index as u64)
+                .ok_or_else(|| reject("policy witness unavailable"))?
+                .iter()
+                .map(field_to_hex)
+                .collect::<Vec<_>>(),
+        );
     }
-    let mut selected_graphs = [[0usize;P];R]; let mut selected_leaves = [[0usize;P];R];
-    let mut values = vec![vec![zero.clone();V];R]; let mut selected_types = [[[0u32;3];P];R];
-    let mut selected_hashes = vec![vec![vec![zero;3];P];R]; let mut filter_values = [[0u8;F];R];
+    let mut selected_graphs = [[0usize; P]; R];
+    let mut selected_leaves = [[0usize; P]; R];
+    let mut values = vec![vec![zero.clone(); V]; R];
+    let mut selected_types = [[[0u32; 3]; P]; R];
+    let mut selected_hashes = vec![vec![vec![zero; 3]; P]; R];
+    let mut filter_values = [[0u8; F]; R];
     let mut memberships = BTreeSet::new();
-    for (r,row) in plan.rows.iter().enumerate() {
+    for (r, row) in plan.rows.iter().enumerate() {
         let mut bindings = BTreeMap::new();
-        for (p,witness) in row.witnesses.iter().enumerate() {
-            let g = used.iter().position(|&i| i == witness.credential).ok_or_else(|| reject("unselected credential reference"))?;
-            selected_graphs[r][p] = g; selected_leaves[r][p] = witness.leaf; memberships.insert((witness.credential,witness.leaf));
+        for (p, witness) in row.witnesses.iter().enumerate() {
+            let g = used
+                .iter()
+                .position(|&i| i == witness.credential)
+                .ok_or_else(|| reject("unselected credential reference"))?;
+            selected_graphs[r][p] = g;
+            selected_leaves[r][p] = witness.leaf;
+            memberships.insert((witness.credential, witness.leaf));
             let triple = &credentials[witness.credential].graph.canonical.triples[witness.leaf];
-            for (s,term) in term_parts(triple).into_iter().enumerate() {
-                let (ty,hs) = type_opening(&term)?;
-                selected_types[r][p][s] = ty; selected_hashes[r][p][s] = field_to_hex(&hs);
+            for (s, term) in term_parts(triple).into_iter().enumerate() {
+                let (ty, hs) = type_opening(&term)?;
+                selected_types[r][p][s] = ty;
+                selected_hashes[r][p][s] = field_to_hex(&hs);
                 if let QuerySlot::Variable(v) = &statement.query.patterns[p][s] {
-                    if let Some(old) = bindings.insert(v.clone(),term.clone()) { if old != term { return Err(reject("selected witnesses disagree on joined variable")); } }
+                    if let Some(old) = bindings.insert(v.clone(), term.clone()) {
+                        if old != term {
+                            return Err(reject("selected witnesses disagree on joined variable"));
+                        }
+                    }
                 }
             }
         }
-        for (v,name) in statement.vars.iter().enumerate() { values[r][v] = field_to_hex(&field(bindings.get(name).ok_or_else(|| reject("selected variable unbound"))?)?); }
-        for (f,&index) in statement.hidden_filters.iter().enumerate() {
+        for (v, name) in statement.vars.iter().enumerate() {
+            values[r][v] = field_to_hex(&field(
+                bindings
+                    .get(name)
+                    .ok_or_else(|| reject("selected variable unbound"))?,
+            )?);
+        }
+        for (f, &index) in statement.hidden_filters.iter().enumerate() {
             let filter = &statement.query.filters[index];
             let term = &bindings[&filter.variable];
-            let value = crate::planner::canonical_integer(term).ok_or_else(|| reject("private FILTER operand is not a canonical nonnegative integer"))?;
-            if value > MAX_PRIVATE_INTEGER { return Err(reject("private FILTER exceeds bounded integer lane")); }
+            let value = crate::planner::canonical_integer(term).ok_or_else(|| {
+                reject("private FILTER operand is not a canonical nonnegative integer")
+            })?;
+            if value > MAX_PRIVATE_INTEGER {
+                return Err(reject("private FILTER exceeds bounded integer lane"));
+            }
             filter_values[r][f] = value as u8;
         }
     }
     fields.extend([
-        ("counts",json!(counts)),("salts",json!(salts)),("enc",json!(enc)),
-        ("status_lists",json!(status_lists)),("status_versions",json!(status_versions)),("status_indices",json!(status_indices)),
-        ("status_roots",json!(status_roots)),("status_siblings",json!(status_siblings)),("policy_indices",json!(policy_indices)),
-        ("policy_siblings",json!(policy_siblings)),("signatures",json!(signatures)),("selected_graphs",json!(selected_graphs)),
-        ("selected_leaves",json!(selected_leaves)),("values",json!(values)),("selected_types",json!(selected_types)),("selected_hashes",json!(selected_hashes)),
+        ("counts", json!(counts)),
+        ("salts", json!(salts)),
+        ("enc", json!(enc)),
+        ("status_lists", json!(status_lists)),
+        ("status_versions", json!(status_versions)),
+        ("status_indices", json!(status_indices)),
+        ("status_roots", json!(status_roots)),
+        ("status_siblings", json!(status_siblings)),
+        ("policy_indices", json!(policy_indices)),
+        ("policy_siblings", json!(policy_siblings)),
+        ("signatures", json!(signatures)),
+        ("selected_graphs", json!(selected_graphs)),
+        ("selected_leaves", json!(selected_leaves)),
+        ("values", json!(values)),
+        ("selected_types", json!(selected_types)),
+        ("selected_hashes", json!(selected_hashes)),
     ]);
-    if !statement.hidden_filters.is_empty() { fields.push(("filter_values",json!(filter_values))); }
-    let toml = fields.iter().map(|(name,value)| format!("{name} = {value}\n")).collect();
+    if !statement.hidden_filters.is_empty() {
+        fields.push(("filter_values", json!(filter_values)));
+    }
+    let toml = fields
+        .iter()
+        .map(|(name, value)| format!("{name} = {value}\n"))
+        .collect();
     let work = ResultWork {
-        selected_credentials, shared_memberships: memberships.len(), witness_uses: rows.len()*parsed.patterns.len(),
-        public_predicates: rows.len()*(parsed.filters.len()-statement.hidden_filters.len()),
-        private_predicates: rows.len()*statement.hidden_filters.len(), signature_checks: K,
+        selected_credentials,
+        shared_memberships: memberships.len(),
+        witness_uses: rows.len() * parsed.patterns.len(),
+        public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()),
+        private_predicates: rows.len() * statement.hidden_filters.len(),
+        signature_checks: K,
     };
-    Ok(PreparedResult { presentation, package: package(statement.hidden_filters.len()), toml, public_inputs, work })
+    Ok(PreparedResult {
+        presentation,
+        package: package(statement.hidden_filters.len()),
+        toml,
+        public_inputs,
+        work,
+    })
 }
 
-fn pinned_toolchain() -> Result<(),ResultError> {
-    for (tool,version) in [("nargo","1.0.0-beta.21"),("bb","5.0.0-nightly.20260324")] {
-        let out = Command::new(tool).arg("--version").output().map_err(|e| reject(format!("{tool}: {e}")))?;
-        if !out.status.success() || !String::from_utf8_lossy(&out.stdout).contains(version) { return Err(reject(format!("{tool} must use pinned version {version}"))); }
+fn pinned_toolchain() -> Result<(), ResultError> {
+    for (tool, version) in [("nargo", "1.0.0-beta.21"), ("bb", "5.0.0-nightly.20260324")] {
+        let out = Command::new(tool)
+            .arg("--version")
+            .output()
+            .map_err(|e| reject(format!("{tool}: {e}")))?;
+        if !out.status.success() || !String::from_utf8_lossy(&out.stdout).contains(version) {
+            return Err(reject(format!("{tool} must use pinned version {version}")));
+        }
     }
     Ok(())
 }
 
 impl PreparedResult {
     /// Returns prover-local work counts without any hidden term values.
-    pub fn work(&self) -> &ResultWork { &self.work }
+    pub fn work(&self) -> &ResultWork {
+        &self.work
+    }
 
     /// Proves this statement with the pinned ZK backend.
     ///
@@ -437,14 +781,25 @@ impl PreparedResult {
     /// # Errors
     /// Rejects mismatched toolchain versions, invalid tags, unsatisfiable
     /// witnesses, backend failures, and public-input serialization drift.
-    pub fn prove(&self, prover: &CircuitProver, out_dir: &Path, tag: &str) -> Result<ResultPresentation,ResultError> {
-        if tag.is_empty() || !tag.bytes().all(|b|b.is_ascii_alphanumeric() || b == b'_') { return Err(reject("proof tag must be nonempty alphanumeric/underscore")); }
+    pub fn prove(
+        &self,
+        prover: &CircuitProver,
+        out_dir: &Path,
+        tag: &str,
+    ) -> Result<ResultPresentation, ResultError> {
+        if tag.is_empty() || !tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return Err(reject("proof tag must be nonempty alphanumeric/underscore"));
+        }
         pinned_toolchain()?;
-        let result = prover.prove_package(self.package,&self.toml,out_dir,tag);
-        prover.cleanup_package_witness(self.package,tag)?;
-        let artifact = result?;
-        if artifact.public_inputs != self.public_inputs { return Err(reject("public-input serialization differs from pinned circuit ABI")); }
-        let mut presentation = self.presentation.clone(); presentation.proof = artifact.proof; Ok(presentation)
+        let artifact = prover.prove_private_package(self.package, &self.toml, out_dir, tag)?;
+        if artifact.public_inputs != self.public_inputs {
+            return Err(reject(
+                "public-input serialization differs from pinned circuit ABI",
+            ));
+        }
+        let mut presentation = self.presentation.clone();
+        presentation.proof = artifact.proof;
+        Ok(presentation)
     }
 }
 
@@ -467,18 +822,37 @@ pub struct VerifiedResult {
 /// # Errors
 /// Rejects any statement, policy, nonce, proof or pinned-toolchain mismatch.
 pub fn verify_result(
-    expected_query: &str, presentation: &ResultPresentation, policy: &ResultPolicy,
-    nonce: &VerifierNonce, seen: &dyn SeenNonces, prover: &CircuitProver, work_dir: &Path,
-) -> Result<VerifiedResult,ResultError> {
-    if presentation.query != expected_query { return Err(reject("query differs from relying-party request")); }
-    let statement = public_statement(presentation,policy,nonce)?;
-    if presentation.proof.is_empty() { return Err(reject("missing proof")); }
+    expected_query: &str,
+    presentation: &ResultPresentation,
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    seen: &dyn SeenNonces,
+    prover: &CircuitProver,
+    work_dir: &Path,
+) -> Result<VerifiedResult, ResultError> {
+    if presentation.query != expected_query {
+        return Err(reject("query differs from relying-party request"));
+    }
+    let statement = public_statement(presentation, policy, nonce)?;
+    if presentation.proof.is_empty() {
+        return Err(reject("missing proof"));
+    }
     pinned_toolchain()?;
-    if !seen.record_fresh(nonce) { return Err(reject("challenge already consumed")); }
+    if !seen.record_fresh(nonce) {
+        return Err(reject("challenge already consumed"));
+    }
     let inputs = public_bytes(&statement.fields)?;
-    let vk = prover.canonical_package_vk(package(statement.hidden_filters.len()),&work_dir.join("canonical"))?;
-    if !prover.verify_with(&presentation.proof,&inputs,&vk,&work_dir.join("verify"))? { return Err(reject("cryptographic proof rejected")); }
-    Ok(VerifiedResult { query: expected_query.to_owned(), rows: statement.rows })
+    let vk = prover.canonical_package_vk(
+        package(statement.hidden_filters.len()),
+        &work_dir.join("canonical"),
+    )?;
+    if !prover.verify_with(&presentation.proof, &inputs, &vk, &work_dir.join("verify"))? {
+        return Err(reject("cryptographic proof rejected"));
+    }
+    Ok(VerifiedResult {
+        query: expected_query.to_owned(),
+        rows: statement.rows,
+    })
 }
 
 #[cfg(test)]
@@ -490,139 +864,288 @@ mod tests {
     use sparq_zk::sig::SecretKey;
 
     const QUERY: &str = "SELECT DISTINCT ?name WHERE { ?person <urn:name> ?name . ?person <urn:age> ?age . ?person <urn:licensed> <urn:yes> . FILTER(?age >= 18) }";
-    const PUBLIC_QUERY: &str = "SELECT DISTINCT ?age WHERE { ?person <urn:age> ?age . FILTER(?age >= 18) }";
+    const PUBLIC_QUERY: &str =
+        "SELECT DISTINCT ?age WHERE { ?person <urn:age> ?age . FILTER(?age >= 18) }";
 
-    fn iri(s: &str) -> NamedNode { NamedNode::new(s).unwrap() }
-    fn integer(n: u64) -> Term { Term::Literal(Literal::new_typed_literal(n.to_string(),iri("http://www.w3.org/2001/XMLSchema#integer"))) }
-    fn triple(s: &str,p: &str,o: Term) -> Triple { Triple::new(iri(s),iri(p),o) }
-    fn credential(triples: Vec<Triple>, seed: u64, index: u64, list: &str) -> ResultCredential {
-        let graph = commit_triples(&triples,Fr::from(seed+100)).unwrap();
-        let sk = SecretKey::from_seed(seed);
-        let status = sig::status_ref_digest(&sig::status_list_id_to_field(list),index,7);
-        let message = sig::commitment_message_with_status(&graph.commitment,&graph.salt,&status);
-        ResultCredential { graph, issuer: sk.public_key(), signature: sig::sign_deterministic(&sk,&message), status_list:list.into(),status_version:7,status_index:index }
+    fn iri(s: &str) -> NamedNode {
+        NamedNode::new(s).unwrap()
     }
-    fn fixture() -> (Vec<ResultCredential>,ResultPolicy,VerifierNonce,Vec<BTreeMap<String,Term>>) {
+    fn integer(n: u64) -> Term {
+        Term::Literal(Literal::new_typed_literal(
+            n.to_string(),
+            iri("http://www.w3.org/2001/XMLSchema#integer"),
+        ))
+    }
+    fn triple(s: &str, p: &str, o: Term) -> Triple {
+        Triple::new(iri(s), iri(p), o)
+    }
+    fn credential(triples: Vec<Triple>, seed: u64, index: u64, list: &str) -> ResultCredential {
+        let graph = commit_triples(&triples, Fr::from(seed + 100)).unwrap();
+        let sk = SecretKey::from_seed(seed);
+        let status = sig::status_ref_digest(&sig::status_list_id_to_field(list), index, 7);
+        let message = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &status);
+        ResultCredential {
+            graph,
+            issuer: sk.public_key(),
+            signature: sig::sign_deterministic(&sk, &message),
+            status_list: list.into(),
+            status_version: 7,
+            status_index: index,
+        }
+    }
+    fn fixture() -> (
+        Vec<ResultCredential>,
+        ResultPolicy,
+        VerifierNonce,
+        Vec<BTreeMap<String, Term>>,
+    ) {
         let credentials = vec![
-            credential(vec![
-                triple("urn:alice","urn:name",Term::Literal(Literal::new_simple_literal("Alice"))),
-                triple("urn:alice","urn:age",integer(42)),
-                triple("urn:bob","urn:name",Term::Literal(Literal::new_simple_literal("Bob"))),
-                triple("urn:bob","urn:age",integer(12)),
-            ],1,3,"urn:status:people"),
-            credential(vec![
-                triple("urn:alice","urn:licensed",Term::NamedNode(iri("urn:yes"))),
-                triple("urn:bob","urn:licensed",Term::NamedNode(iri("urn:yes"))),
-            ],2,9,"urn:status:licenses"),
+            credential(
+                vec![
+                    triple(
+                        "urn:alice",
+                        "urn:name",
+                        Term::Literal(Literal::new_simple_literal("Alice")),
+                    ),
+                    triple("urn:alice", "urn:age", integer(42)),
+                    triple(
+                        "urn:bob",
+                        "urn:name",
+                        Term::Literal(Literal::new_simple_literal("Bob")),
+                    ),
+                    triple("urn:bob", "urn:age", integer(12)),
+                ],
+                1,
+                3,
+                "urn:status:people",
+            ),
+            credential(
+                vec![
+                    triple("urn:alice", "urn:licensed", Term::NamedNode(iri("urn:yes"))),
+                    triple("urn:bob", "urn:licensed", Term::NamedNode(iri("urn:yes"))),
+                ],
+                2,
+                9,
+                "urn:status:licenses",
+            ),
         ];
         let policy = ResultPolicy {
-            trusted_issuers: credentials.iter().map(|c|c.issuer).collect(),
+            trusted_issuers: credentials.iter().map(|c| c.issuer).collect(),
             snapshots: vec![
-                StatusListSnapshot { status_list:"urn:status:people".into(),version:7,bits:vec![0;128] },
-                StatusListSnapshot { status_list:"urn:status:licenses".into(),version:7,bits:vec![0;128] },
-            ], min_version:7,max_version:7,
+                StatusListSnapshot {
+                    status_list: "urn:status:people".into(),
+                    version: 7,
+                    bits: vec![0; 128],
+                },
+                StatusListSnapshot {
+                    status_list: "urn:status:licenses".into(),
+                    version: 7,
+                    bits: vec![0; 128],
+                },
+            ],
+            min_version: 7,
+            max_version: 7,
         };
         let nonce = VerifierNonce::from_field(Fr::from(424242u64));
-        let rows = vec![BTreeMap::from([("name".into(),Term::Literal(Literal::new_simple_literal("Alice")))])];
-        (credentials,policy,nonce,rows)
+        let rows = vec![BTreeMap::from([(
+            "name".into(),
+            Term::Literal(Literal::new_simple_literal("Alice")),
+        )])];
+        (credentials, policy, nonce, rows)
     }
 
     fn prepared() -> PreparedResult {
-        let (credentials,policy,nonce,rows)=fixture();
-        prepare_result(QUERY,&credentials,&rows,&policy,&nonce).unwrap()
+        let (credentials, policy, nonce, rows) = fixture();
+        prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap()
     }
 
     #[test]
     fn selected_success_survives_failing_scan_candidates_and_independent_status_slots() {
-        let p=prepared();
-        assert_eq!(p.work.selected_credentials,2);
-        assert_eq!(p.work.witness_uses,3);
-        assert_eq!(p.work.shared_memberships,3);
-        assert_eq!(p.work.private_predicates,1);
-        assert_eq!(p.package,"result_v1_k2_n16_p3_r4_f2");
+        let p = prepared();
+        assert_eq!(p.work.selected_credentials, 2);
+        assert_eq!(p.work.witness_uses, 3);
+        assert_eq!(p.work.shared_memberships, 3);
+        assert_eq!(p.work.private_predicates, 1);
+        assert_eq!(p.package, "result_v1_k2_n16_p3_r4_f2");
         assert!(p.toml.contains("status_indices"));
     }
 
     #[test]
     fn public_predicate_uses_member_without_numeric_circuitry() {
-        let (credentials,policy,nonce,_)=fixture();
-        let rows=vec![BTreeMap::from([("age".into(),integer(42))])];
-        let p=prepare_result(PUBLIC_QUERY,&credentials,&rows,&policy,&nonce).unwrap();
-        assert_eq!(p.work.public_predicates,1); assert_eq!(p.work.private_predicates,0);
-        assert_eq!(p.work.selected_credentials,1); assert_eq!(p.work.signature_checks,2);
-        assert_eq!(p.package,"result_v1_k2_n16_p3_r4_f0");
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = vec![BTreeMap::from([("age".into(), integer(42))])];
+        let p = prepare_result(PUBLIC_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(p.work.public_predicates, 1);
+        assert_eq!(p.work.private_predicates, 0);
+        assert_eq!(p.work.selected_credentials, 1);
+        assert_eq!(p.work.signature_checks, 2);
+        assert_eq!(p.package, "result_v1_k2_n16_p3_r4_f0");
         assert!(!p.toml.contains("filter_values"));
-        assert_eq!(p.presentation.issuer_slots[0],p.presentation.issuer_slots[1]);
-        let mut bad=p.presentation.clone(); bad.rows[0].insert("age".into(),disclosed(&integer(12)).unwrap());
-        assert!(public_statement(&bad,&policy,&nonce).unwrap_err().to_string().contains("public FILTER is false"));
+        assert_eq!(
+            p.presentation.issuer_slots[0],
+            p.presentation.issuer_slots[1]
+        );
+        let mut bad = p.presentation.clone();
+        bad.rows[0].insert("age".into(), disclosed(&integer(12)).unwrap());
+        assert!(public_statement(&bad, &policy, &nonce)
+            .unwrap_err()
+            .to_string()
+            .contains("public FILTER is false"));
     }
 
     #[test]
     fn public_manifest_contains_no_private_roots_salts_status_or_witness_attribution() {
-        let (credentials,policy,nonce,rows)=fixture();
-        let p=prepare_result(QUERY,&credentials,&rows,&policy,&nonce).unwrap();
-        let serialized=serde_json::to_value(&p.presentation).unwrap();
-        let object=serialized.as_object().unwrap();
-        assert_eq!(object.keys().map(String::as_str).collect::<BTreeSet<_>>(),BTreeSet::from(["version","query","rows","challenge","issuer_slots","proof"]));
-        let bytes=String::from_utf8(serde_json::to_vec(&p.presentation).unwrap()).unwrap();
+        let (credentials, policy, nonce, rows) = fixture();
+        let p = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let serialized = serde_json::to_value(&p.presentation).unwrap();
+        let object = serialized.as_object().unwrap();
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "version",
+                "query",
+                "rows",
+                "challenge",
+                "issuer_slots",
+                "proof"
+            ])
+        );
+        let bytes = String::from_utf8(serde_json::to_vec(&p.presentation).unwrap()).unwrap();
         for c in &credentials {
             assert!(!bytes.contains(&field_to_hex(&c.graph.commitment)));
             assert!(!bytes.contains(&field_to_hex(&c.graph.salt)));
             assert!(!bytes.contains(&c.status_list));
             assert!(!bytes.contains(&sig::signature_to_hex(&c.signature)));
         }
-        let statement=public_statement(&p.presentation,&policy,&nonce).unwrap();
-        let public=public_bytes(&statement.fields).unwrap();
+        let statement = public_statement(&p.presentation, &policy, &nonce).unwrap();
+        let public = public_bytes(&statement.fields).unwrap();
         for c in &credentials {
-            let root=field_to_be_bytes_32(&c.graph.commitment);
-            assert!(!public.chunks_exact(32).any(|v|v==root));
+            let root = field_to_be_bytes_32(&c.graph.commitment);
+            assert!(!public.chunks_exact(32).any(|v| v == root));
         }
     }
 
     #[test]
     fn changed_reference_and_revoked_or_stale_policy_reject() {
-        let (mut credentials,mut policy,nonce,rows)=fixture();
-        credentials[0].status_index=4;
-        assert!(prepare_result(QUERY,&credentials,&rows,&policy,&nonce).is_err());
-        credentials[0].status_index=3;
-        policy.snapshots[0].bits[0] |= 1<<3;
-        assert!(prepare_result(QUERY,&credentials,&rows,&policy,&nonce).is_err());
-        policy.snapshots[0].bits[0]=0; policy.min_version=8; policy.max_version=9;
-        assert!(prepare_result(QUERY,&credentials,&rows,&policy,&nonce).is_err());
+        let (mut credentials, mut policy, nonce, rows) = fixture();
+        credentials[0].status_index = 4;
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+        credentials[0].status_index = 3;
+        policy.snapshots[0].bits[0] |= 1 << 3;
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+        policy.snapshots[0].bits[0] = 0;
+        policy.min_version = 8;
+        policy.max_version = 9;
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
     }
 
     #[test]
     fn unknown_version_wrong_request_nonce_and_untrusted_issuer_reject() {
-        let (credentials,mut policy,nonce,rows)=fixture();
-        let p=prepare_result(QUERY,&credentials,&rows,&policy,&nonce).unwrap();
-        let mut malformed=p.presentation.clone(); malformed.version=2;
-        assert!(public_statement(&malformed,&policy,&nonce).is_err());
-        let other=VerifierNonce::from_field(Fr::from(777u64));
-        assert!(public_statement(&p.presentation,&policy,&other).is_err());
+        let (credentials, mut policy, nonce, rows) = fixture();
+        let p = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let mut malformed = p.presentation.clone();
+        malformed.version = 2;
+        assert!(public_statement(&malformed, &policy, &nonce).is_err());
+        let other = VerifierNonce::from_field(Fr::from(777u64));
+        assert!(public_statement(&p.presentation, &policy, &other).is_err());
         policy.trusted_issuers.remove(0);
-        assert!(public_statement(&p.presentation,&policy,&nonce).is_err());
-        let error=verify_result(PUBLIC_QUERY,&p.presentation,&policy,&nonce,&InMemorySeenNonces::default(),&CircuitProver::from_crate_root(),Path::new("unused")).unwrap_err();
+        assert!(public_statement(&p.presentation, &policy, &nonce).is_err());
+        let error = verify_result(
+            PUBLIC_QUERY,
+            &p.presentation,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &CircuitProver::from_crate_root(),
+            Path::new("unused"),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("query differs"));
     }
 
     #[test]
     fn false_result_and_duplicate_distinct_rows_reject() {
-        let (credentials,policy,nonce,mut rows)=fixture();
-        rows[0].insert("name".into(),Term::Literal(Literal::new_simple_literal("Bob")));
-        assert!(prepare_result(QUERY,&credentials,&rows,&policy,&nonce).is_err());
-        rows[0].insert("name".into(),Term::Literal(Literal::new_simple_literal("Alice")));
+        let (credentials, policy, nonce, mut rows) = fixture();
+        rows[0].insert(
+            "name".into(),
+            Term::Literal(Literal::new_simple_literal("Bob")),
+        );
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+        rows[0].insert(
+            "name".into(),
+            Term::Literal(Literal::new_simple_literal("Alice")),
+        );
         rows.push(rows[0].clone());
-        assert!(prepare_result(QUERY,&credentials,&rows,&policy,&nonce).is_err());
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_err());
+    }
+
+    #[test]
+    fn ineligible_first_credentials_do_not_hide_later_eligible_witnesses() {
+        let (mut credentials, mut policy, nonce, rows) = fixture();
+        let triples = credentials[0].graph.canonical.triples.clone();
+        let revoked = credential(triples.clone(), 1, 4, "urn:status:people");
+        policy.snapshots[0].bits[0] |= 1 << 4;
+        credentials.insert(0, revoked);
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_ok());
+        credentials.swap(0, 1);
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_ok());
+        let untrusted = credential(triples.clone(), 99, 3, "urn:status:people");
+        credentials.insert(0, untrusted);
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_ok());
+        let oversized = credential(
+            (0..17)
+                .map(|i| triple(&format!("urn:padding:{i}"), "urn:age", integer(42)))
+                .chain(triples)
+                .collect(),
+            1,
+            3,
+            "urn:status:people",
+        );
+        credentials.insert(0, oversized);
+        assert!(prepare_result(QUERY, &credentials, &rows, &policy, &nonce).is_ok());
+    }
+
+    #[test]
+    fn unsupported_numeric_candidate_does_not_block_an_eligible_tuple_in_same_graph() {
+        let (_, mut policy, nonce, _) = fixture();
+        let c = credential(
+            vec![
+                triple("urn:alice", "urn:age", integer(100)),
+                triple("urn:alice", "urn:age", integer(42)),
+            ],
+            1,
+            3,
+            "urn:status:people",
+        );
+        policy.trusted_issuers = vec![c.issuer];
+        let q = "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }";
+        let rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let prepared = prepare_result(q, &[c], &rows, &policy, &nonce).unwrap();
+        let line = prepared
+            .toml
+            .lines()
+            .find(|l| l.starts_with("filter_values = "))
+            .unwrap();
+        assert!(line.contains("42"));
+        assert!(!line.contains("100"));
     }
 
     fn alter_input(toml: &str, key: &str, edit: impl FnOnce(&mut Value)) -> String {
-        let mut edit=Some(edit);
-        toml.lines().map(|line| {
-            if let Some(value)=line.strip_prefix(&format!("{key} = ")) {
-                let mut value:Value=serde_json::from_str(value).unwrap(); edit.take().unwrap()(&mut value);
-                format!("{key} = {value}\n")
-            } else { format!("{line}\n") }
-        }).collect()
+        let mut edit = Some(edit);
+        toml.lines()
+            .map(|line| {
+                if let Some(value) = line.strip_prefix(&format!("{key} = ")) {
+                    let mut value: Value = serde_json::from_str(value).unwrap();
+                    edit.take().unwrap()(&mut value);
+                    format!("{key} = {value}\n")
+                } else {
+                    format!("{line}\n")
+                }
+            })
+            .collect()
     }
 
     /// Real adversarial witnesses exercise the compiled relation, not host prechecks.
@@ -630,23 +1153,53 @@ mod tests {
     #[ignore = "requires pinned nargo; run explicitly in zk-toolchain lane"]
     fn result_relation_rejects_tampered_private_witnesses() {
         pinned_toolchain().unwrap();
-        let p=prepared(); let driver=CircuitProver::from_crate_root();
+        let p = prepared();
+        let driver = CircuitProver::from_crate_root();
         driver.compile_package(p.package).unwrap();
-        let mutations=[
-            ("signature",alter_input(&p.toml,"signatures",|v|v[0][2]=json!("0x01"))),
-            ("status",alter_input(&p.toml,"status_indices",|v|v[0]=json!("0x05"))),
-            ("joined_value",alter_input(&p.toml,"values",|v|v[0][2]=json!("0x01"))),
-            ("hidden_integer",alter_input(&p.toml,"filter_values",|v|v[0][0]=json!(12))),
-            ("blank_type",alter_input(&p.toml,"selected_types",|v|v[0][0][0]=json!(3))),
-            ("padding_leaf",alter_input(&p.toml,"selected_leaves",|v|v[0][0]=json!(15))),
-            ("issuer_identity",alter_input(&p.toml,"issuer_keys",|v|{v[0][0]=json!("0x00");v[0][1]=json!("0x01");})),
-            ("status_policy",alter_input(&p.toml,"accepted_root",|v|*v=json!("0x01"))),
+        let mutations = [
+            (
+                "signature",
+                alter_input(&p.toml, "signatures", |v| v[0][2] = json!("0x01")),
+            ),
+            (
+                "status",
+                alter_input(&p.toml, "status_indices", |v| v[0] = json!("0x05")),
+            ),
+            (
+                "joined_value",
+                alter_input(&p.toml, "values", |v| v[0][2] = json!("0x01")),
+            ),
+            (
+                "hidden_integer",
+                alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(12)),
+            ),
+            (
+                "blank_type",
+                alter_input(&p.toml, "selected_types", |v| v[0][0][0] = json!(3)),
+            ),
+            (
+                "padding_leaf",
+                alter_input(&p.toml, "selected_leaves", |v| v[0][0] = json!(15)),
+            ),
+            (
+                "issuer_identity",
+                alter_input(&p.toml, "issuer_keys", |v| {
+                    v[0][0] = json!("0x00");
+                    v[0][1] = json!("0x01");
+                }),
+            ),
+            (
+                "status_policy",
+                alter_input(&p.toml, "accepted_root", |v| *v = json!("0x01")),
+            ),
         ];
-        for (name,inputs) in mutations {
-            let tag=format!("result_tamper_{name}");
-            let result=driver.gen_package_witness(p.package,&inputs,&tag);
-            driver.cleanup_package_witness(p.package,&tag).unwrap();
-            assert!(result.is_err(),"malicious witness {name} unexpectedly satisfied the circuit");
+        for (name, inputs) in mutations {
+            let tag = format!("result_tamper_{name}");
+            let result = driver.private_package_witness(p.package, &inputs, &tag);
+            assert!(
+                result.is_err(),
+                "malicious witness {name} unexpectedly satisfied the circuit"
+            );
         }
     }
 
@@ -655,36 +1208,209 @@ mod tests {
     #[ignore = "requires pinned nargo and bb; run explicitly in zk-toolchain lane"]
     fn result_real_proof_and_adversarial_verifier() {
         pinned_toolchain().unwrap();
-        let (credentials,policy,nonce,rows)=fixture();
-        let prepared=prepare_result(QUERY,&credentials,&rows,&policy,&nonce).unwrap();
-        let dir=std::env::temp_dir().join(format!("sparq_result_proof_{}",std::process::id()));
+        let (credentials, policy, nonce, rows) = fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let dir = std::env::temp_dir().join(format!("sparq_result_proof_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let driver=CircuitProver::from_crate_root();
-        let p=prepared.prove(&driver,&dir.join("private_proof"),"result_roundtrip").unwrap();
-        let seen=InMemorySeenNonces::default();
-        let verified=verify_result(QUERY,&p,&policy,&nonce,&seen,&driver,&dir.join("positive")).unwrap();
-        assert_eq!(verified.rows,rows);
-        assert!(verify_result(QUERY,&p,&policy,&nonce,&seen,&driver,&dir.join("replay")).is_err());
+        let driver = CircuitProver::from_crate_root();
+        let p = prepared
+            .prove(&driver, &dir.join("private_proof"), "result_roundtrip")
+            .unwrap();
+        let seen = InMemorySeenNonces::default();
+        let verified = verify_result(
+            QUERY,
+            &p,
+            &policy,
+            &nonce,
+            &seen,
+            &driver,
+            &dir.join("positive"),
+        )
+        .unwrap();
+        assert_eq!(verified.rows, rows);
+        assert!(verify_result(
+            QUERY,
+            &p,
+            &policy,
+            &nonce,
+            &seen,
+            &driver,
+            &dir.join("replay")
+        )
+        .is_err());
 
-        let mut changed=p.clone(); changed.rows[0].insert("name".into(),DisclosedTerm::Iri{value:"urn:mallory".into()});
-        assert!(verify_result(QUERY,&changed,&policy,&nonce,&InMemorySeenNonces::default(),&driver,&dir.join("changed_result")).is_err());
-        let mut changed_policy=policy.clone(); changed_policy.snapshots[0].bits[0] |= 1<<3;
-        assert!(verify_result(QUERY,&p,&changed_policy,&nonce,&InMemorySeenNonces::default(),&driver,&dir.join("revoked")).is_err());
-        let mut broken=p.clone(); broken.proof[100]^=1;
-        assert!(verify_result(QUERY,&broken,&policy,&nonce,&InMemorySeenNonces::default(),&driver,&dir.join("broken")).is_err());
+        let mut changed = p.clone();
+        changed.rows[0].insert(
+            "name".into(),
+            DisclosedTerm::Iri {
+                value: "urn:mallory".into(),
+            },
+        );
+        assert!(verify_result(
+            QUERY,
+            &changed,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("changed_result")
+        )
+        .is_err());
+        let shared = dir.join("shared_verification_root");
+        std::thread::scope(|scope| {
+            let valid = scope.spawn(|| {
+                verify_result(
+                    QUERY,
+                    &p,
+                    &policy,
+                    &nonce,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &shared,
+                )
+            });
+            let invalid = scope.spawn(|| {
+                verify_result(
+                    QUERY,
+                    &changed,
+                    &policy,
+                    &nonce,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &shared,
+                )
+            });
+            assert_eq!(valid.join().unwrap().unwrap().rows, rows);
+            assert!(invalid.join().unwrap().is_err());
+        });
+        let mut changed_policy = policy.clone();
+        changed_policy.snapshots[0].bits[0] |= 1 << 3;
+        assert!(verify_result(
+            QUERY,
+            &p,
+            &changed_policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("revoked")
+        )
+        .is_err());
+        let mut broken = p.clone();
+        broken.proof[100] ^= 1;
+        assert!(verify_result(
+            QUERY,
+            &broken,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("broken")
+        )
+        .is_err());
 
         // A second VALID proof answers another query under the same nonce. The
         // verifier must reject the entire substituted statement at the API boundary.
-        let public_rows=vec![BTreeMap::from([("age".into(),integer(42))])];
-        let public_prepared=prepare_result(PUBLIC_QUERY,&credentials,&public_rows,&policy,&nonce).unwrap();
-        let public_proof=public_prepared.prove(&driver,&dir.join("public_proof"),"result_public_roundtrip").unwrap();
-        verify_result(PUBLIC_QUERY,&public_proof,&policy,&nonce,&InMemorySeenNonces::default(),&driver,&dir.join("public_positive")).unwrap();
-        assert!(verify_result(QUERY,&public_proof,&policy,&nonce,&InMemorySeenNonces::default(),&driver,&dir.join("substitution")).is_err());
-        // The corresponding non-ZK backend key cannot stand in for the pinned ZK key.
-        let out=Command::new("bb").args(["write_vk","-b"]).arg(driver.compile_package(prepared.package).unwrap()).arg("-o").arg(dir.join("no_zk")).args(["-t","noir-recursive-no-zk"]).output().unwrap();
-        assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
-        let wrong_vk=std::fs::read(dir.join("no_zk/vk")).unwrap();
-        assert!(!driver.verify_with(&p.proof,&prepared.public_inputs,&wrong_vk,&dir.join("mode_mismatch")).unwrap());
+        let public_rows = vec![BTreeMap::from([("age".into(), integer(42))])];
+        let public_prepared =
+            prepare_result(PUBLIC_QUERY, &credentials, &public_rows, &policy, &nonce).unwrap();
+        let public_proof = public_prepared
+            .prove(
+                &driver,
+                &dir.join("public_proof"),
+                "result_public_roundtrip",
+            )
+            .unwrap();
+        verify_result(
+            PUBLIC_QUERY,
+            &public_proof,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("public_positive"),
+        )
+        .unwrap();
+        assert!(verify_result(
+            QUERY,
+            &public_proof,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("substitution")
+        )
+        .is_err());
+        // Changing both the envelope and verifier nonce passes host equality;
+        // the old cryptographic proof must still reject the different challenge.
+        let fresh_nonce = VerifierNonce::from_field(Fr::from(999_999u64));
+        let mut rechallenged = p.clone();
+        rechallenged.challenge = fresh_nonce.as_field_hex();
+        assert!(verify_result(
+            QUERY,
+            &rechallenged,
+            &policy,
+            &fresh_nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("challenge_binding")
+        )
+        .is_err());
+
+        // VKs can be shared between backend modes. Test an actual non-ZK proof,
+        // rather than incorrectly assuming the VK itself records masking mode.
+        let witness = driver
+            .private_package_witness(prepared.package, &prepared.toml, "result_no_zk_probe")
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&witness.path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(witness.path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        let private_path = witness.path.clone();
+        let out = Command::new("bb")
+            .args(["prove", "-b"])
+            .arg(driver.compile_package(prepared.package).unwrap())
+            .arg("-w")
+            .arg(&witness.path)
+            .arg("-o")
+            .arg(dir.join("no_zk"))
+            .args(["--write_vk", "-t", "noir-recursive-no-zk"])
+            .output()
+            .unwrap();
+        drop(witness);
+        assert!(!private_path.exists());
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut unmasked = p.clone();
+        unmasked.proof = std::fs::read(dir.join("no_zk/proof")).unwrap();
+        assert!(verify_result(
+            QUERY,
+            &unmasked,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("mode_mismatch")
+        )
+        .is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

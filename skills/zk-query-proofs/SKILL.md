@@ -297,3 +297,8 @@ audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 `Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
 backend candidates while retaining all query checks. It preserves original
 wallet/leaf indices and is private preparation, never a verifier trust decision.
+
+[GPT-6] Result preparation filters issuer/status/backend eligibility before
+selecting witnesses. Each proof uses an internally unique private witness directory;
+canonical-key generation and verification also isolate concurrent scratch files.
+Caller tags are descriptive and cannot cause private-result input collisions.
