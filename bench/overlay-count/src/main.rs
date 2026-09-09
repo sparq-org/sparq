@@ -104,6 +104,10 @@ fn main() {
         .unwrap();
     #[cfg(feature = "count-alloc")]
     counting::calibrate();
+    if std::env::args().nth(1).as_deref() == Some("reads-per-generation") {
+        lifecycle::run_reads();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("lifecycle") {
         lifecycle::run_all();
         return;

@@ -7,8 +7,8 @@ included. Build timing and `count-alloc` binaries separately with the same sourc
 lockfile, release profile, two build jobs, and one Rayon runtime thread.
 
 ```sh
-CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml
-CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features count-alloc
+CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features sparq-core/overlay-deleted-projections
+CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features count-alloc,sparq-core/overlay-deleted-projections
 ```
 
 Save each binary before the next build. Each invocation emits the entire fixed
@@ -59,3 +59,16 @@ sums the overlay heap of the initial graph and retained generations. Existing
 allocator counters separately report live requested bytes. Cold-query cases do not
 prime measured forks. A separate oracle records the multi-pattern query's actual
 projection heap growth and verifies the complete four-row result.
+
+The core experiment is OFF by default. Omit `sparq-core/overlay-deleted-projections`
+for the ordinary linear control; the benchmark does not forward or enable it
+implicitly. Timing and allocator comparisons use the same harness, with the core
+feature state recorded separately in build provenance.
+
+The `reads-per-generation` argument runs only the fixed fork/tombstone/read case:
+32,768 initial tombstones, six initially warmed permutations, four retained child
+generations, and reads per generation in `{1, 2, 4, 8, 16}`. Each child adds one
+tombstone, executes the same ordinary single-pattern SELECT that many times, then
+is retained locally. Earlier generations and the initial graph stay alive. The
+existing two warmups, seven timing and three allocation repetitions apply. This
+measures the declared read counts, not a recommended crossover or tuning threshold.

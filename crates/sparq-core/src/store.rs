@@ -179,6 +179,7 @@ struct Overlay {
     /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
     /// production in-place mutator is `TripleStore::apply_delta`, which invalidates
     /// these projections when a tombstone is inserted or removed.
+    #[cfg(feature = "overlay-deleted-projections")]
     deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
 }
 
@@ -217,6 +218,7 @@ impl Overlay {
     }
 
     /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
+    #[cfg(feature = "overlay-deleted-projections")]
     fn invalidate_deleted(&mut self) {
         for slot in &mut self.deleted_by_perm {
             slot.take();
@@ -229,6 +231,7 @@ impl Overlay {
     /// apply_delta invalidates only the mutated overlay under exclusive access.
     /// Concurrent first readers of the same permutation wait for its one sorting
     /// initializer; the cold sort is serialized for that permutation.
+    #[cfg(feature = "overlay-deleted-projections")]
     fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
         if self.deleted.is_empty() {
             return 0;
@@ -290,10 +293,23 @@ impl Overlay {
 
     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
     /// correction to a base range count. The `added` side rides the cached perm-sorted
-    /// projection; [GPT-6 Astra] `deleted` uses the same lazy projection strategy.
+    /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
+    /// default; the experimental feature opts into lazy sorted projections.
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
         let add = self.added_rows(perm, lo, hi).len();
+        #[cfg(feature = "overlay-deleted-projections")]
         let del = self.deleted_count(perm, lo, hi);
+        #[cfg(not(feature = "overlay-deleted-projections"))]
+        let del = {
+            let order = perm.order();
+            self.deleted
+                .iter()
+                .filter(|t| {
+                    let r = [t[order[0]], t[order[1]], t[order[2]]];
+                    r >= lo && r <= hi
+                })
+                .count()
+        };
         (add, del)
     }
 
@@ -307,10 +323,14 @@ impl Overlay {
         let cached: usize = self
             .added_by_perm
             .iter()
-            .chain(&self.deleted_by_perm)
             .filter_map(|slot| slot.get())
             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
             .sum();
+        #[cfg(feature = "overlay-deleted-projections")]
+        let cached = cached + self.deleted_by_perm.iter()
+            .filter_map(|slot| slot.get())
+            .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
+            .sum::<usize>();
         self.added.capacity() * std::mem::size_of::<[Id; 3]>()
             + self.deleted.capacity() * 13
             + cached
@@ -932,17 +952,22 @@ impl TripleStore {
         // Preserve deletion projections across inserts/no-ops: only actual tombstone
         // changes require another sort. No overlay read occurs before publication.
         ov.invalidate_added();
+        #[cfg(feature = "overlay-deleted-projections")]
         let mut deleted_changed = false;
         for t in deletes {
             if let Ok(i) = ov.added.binary_search(t) {
                 ov.added.remove(i); // retract a pending insertion
             } else if self.base_contains(*t) {
-                deleted_changed |= ov.deleted.insert(*t);
+                #[cfg(feature = "overlay-deleted-projections")]
+                { deleted_changed |= ov.deleted.insert(*t); }
+                #[cfg(not(feature = "overlay-deleted-projections"))]
+                { ov.deleted.insert(*t); }
             }
         }
         for t in inserts {
             if ov.deleted.remove(t) {
-                deleted_changed = true;
+                #[cfg(feature = "overlay-deleted-projections")]
+                { deleted_changed = true; }
                 continue; // re-insert of a deleted base triple: just undelete
             }
             if self.base_contains(*t) {
@@ -952,6 +977,7 @@ impl TripleStore {
                 ov.added.insert(i, *t);
             }
         }
+        #[cfg(feature = "overlay-deleted-projections")]
         if deleted_changed {
             ov.invalidate_deleted();
         }

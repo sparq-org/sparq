@@ -233,3 +233,80 @@ pub(super) fn run_all() {
         }
     }
 }
+
+/// [GPT-6 Astra] The sole additional measurement authorized after the opt-in
+/// decision: fixed deletion lineage, varying only reads per retained generation.
+pub(super) fn run_reads() {
+    let pristine = base();
+    let base_heap = pristine.store.heap_bytes();
+    let deletions = delta(D, false);
+    let tombstones: Vec<_> = (0..GENERATIONS)
+        .map(|i| {
+            [
+                iri(&format!("urn:s:{}", 20_000 + i)),
+                iri("urn:p:0"),
+                iri(&format!("urn:o:{}", 20_000 + i)),
+            ]
+        })
+        .collect();
+    check_query(&pristine);
+    println!("{{\"kind\":\"reads_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"initial_warm_perms\":6,\"rayon_threads\":1,\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}",cfg!(feature="count-alloc"),rss());
+    for (reads, name) in [
+        (1, "fork-tombstone-R1"),
+        (2, "fork-tombstone-R2"),
+        (4, "fork-tombstone-R4"),
+        (8, "fork-tombstone-R8"),
+        (16, "fork-tombstone-R16"),
+    ] {
+        let reps = if cfg!(feature = "count-alloc") { 3 } else { 7 };
+        for rep in 0..reps + 2 {
+            let initial = fork(&pristine, &deletions, false);
+            prime(&initial, 6);
+            let initial_heap = initial.store.heap_bytes() - base_heap;
+            let mut generations: Vec<Graph> = Vec::with_capacity(GENERATIONS);
+            let mut records = [Sample::default(); GENERATIONS];
+            for generation in 0..GENERATIONS {
+                let mut sample = measure(|| {
+                    let start = Instant::now();
+                    let mut next = generations.last().unwrap_or(&initial).fork();
+                    let cloned = start.elapsed().as_nanos();
+                    let delta = Instant::now();
+                    next.apply_delta(&[], std::slice::from_ref(&tombstones[generation]))
+                        .unwrap();
+                    let delta = delta.elapsed().as_nanos();
+                    let read = Instant::now();
+                    assert_eq!(run(&next, "query", reads), reads);
+                    let read = read.elapsed().as_nanos();
+                    generations.push(next);
+                    [cloned, delta, read]
+                });
+                sample.initial_heap = initial_heap;
+                sample.retained_heap = initial_heap
+                    + generations
+                        .iter()
+                        .map(|g| g.store.heap_bytes() - base_heap)
+                        .sum::<usize>();
+                records[generation] = sample;
+            }
+            for (generation, graph) in generations.iter().enumerate() {
+                check_query(graph);
+                assert_eq!(
+                    graph.store.len(),
+                    SUBJECTS * PREDICATES - D - generation - 1
+                );
+                for (i, tombstone) in tombstones.iter().enumerate() {
+                    let pattern = tombstone.clone().map(|t| Some(graph.dict.lookup(&t)));
+                    assert_eq!(
+                        graph.store.scan(&pattern).rows.len(),
+                        usize::from(i > generation)
+                    );
+                }
+            }
+            if rep >= 2 {
+                for (generation, &sample) in records.iter().enumerate() {
+                    emit(name, 6, rep - 2, generation + 1, sample);
+                }
+            }
+        }
+    }
+}

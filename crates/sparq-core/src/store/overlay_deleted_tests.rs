@@ -29,6 +29,7 @@ fn sweep(store: &TripleStore, reference: &[[Id; 3]]) {
     for perm in Perm::ALL {
         if !BUILT.contains(&perm) {
             assert!(store.scan_perm(&[None; 3], perm).is_none());
+            #[cfg(feature = "overlay-deleted-projections")]
             if let Some(ov) = &store.overlay {
                 assert!(ov.deleted_by_perm[perm as usize].get().is_none());
             }
@@ -40,6 +41,7 @@ fn sweep(store: &TripleStore, reference: &[[Id; 3]]) {
     }
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_is_lazy_reused_and_accounted() {
     let mut store = TripleStore::from_triples(triples());
@@ -106,6 +108,7 @@ fn deleted_cache_matches_rebuild_after_mixed_deltas() {
     assert!(!store.has_overlay());
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_survives_insert_only_and_noop_deltas() {
     let mut reference = triples();
@@ -146,6 +149,7 @@ fn deleted_cache_survives_insert_only_and_noop_deltas() {
     }
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
     let mut reference = triples();
@@ -174,6 +178,7 @@ fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
     }
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_inclusive_bounds_and_empty_ranges() {
     let mut ov = Overlay::default();
@@ -203,6 +208,7 @@ fn deleted_cache_compressed_base_matches_rebuild() {
     sweep(&store, &reference);
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_fork_and_clone_are_independent() {
     let mut original = TripleStore::from_triples(triples());
@@ -272,6 +278,7 @@ fn deleted_cache_fork_and_clone_are_independent() {
     }
 }
 
+#[cfg(feature = "overlay-deleted-projections")]
 #[test]
 fn deleted_cache_concurrent_first_reads_share_initialized_projection() {
     let mut store = TripleStore::from_triples(triples());
@@ -339,4 +346,41 @@ fn deleted_cache_graph_snapshot_retains_warm_generation() {
             );
         }
     }
+}
+
+// [GPT-6 Astra] Default-off must preserve main's representation and linear-count
+// behavior, not merely return the same rows after allocating a hidden projection.
+#[cfg(not(feature = "overlay-deleted-projections"))]
+#[test]
+fn deleted_projection_feature_off_preserves_main_layout_and_heap() {
+    let mut store = TripleStore::from_triples(triples());
+    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4], [3, 3, 6]]);
+    let before = store.heap_bytes();
+    for &perm in BUILT {
+        for _ in 0..3 {
+            let scan = store
+                .scan_perm(&[Some(12), Some(4), Some(16)], perm)
+                .unwrap();
+            assert_eq!(scan.rows.len(), 1);
+            assert!(matches!(scan.rows, Cow::Borrowed(_)));
+            assert_eq!(store.estimate(&[Some(1), Some(1), Some(2)]), 0);
+            assert_eq!(
+                store.heap_bytes(),
+                before,
+                "default reads retain no deletion projection"
+            );
+        }
+    }
+    let frozen = store.fork();
+    assert_eq!(frozen.heap_bytes(), before);
+    // These are the three fields of main's Overlay. All have pointer alignment
+    // and sizes divisible by that alignment; there is no inter-field padding.
+    let main_fields = std::mem::size_of::<Vec<[Id; 3]>>()
+        + std::mem::size_of::<rustc_hash::FxHashSet<[Id; 3]>>()
+        + std::mem::size_of::<[std::sync::OnceLock<Vec<[Id; 3]>>; 6]>();
+    assert_eq!(std::mem::size_of::<Overlay>(), main_fields);
+    assert_eq!(
+        std::mem::align_of::<Overlay>(),
+        std::mem::align_of::<usize>()
+    );
 }
