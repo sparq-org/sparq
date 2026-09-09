@@ -1,0 +1,95 @@
+{
+  "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "verdict": "approve_for_validation",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "confirmation",
+      "area": "guard/rejection safety",
+      "detail": "Verified in fixed_counting.rs that the CAS is the first statement of begin(); on failure the assert unwinds before any store to PEAK/ALLOCS/REALLOCS/BYTES/ACTIVE. A denied admission therefore cannot clear or reset the admitted window. Base's `assert!(!ACTIVE.swap(false, Relaxed))` performed its side effect before the assertion, which is exactly the defect the old-source control reproduces (ACTIVE=false, deltas (0,0,0))."
+    },
+    {
+      "id": "F2",
+      "severity": "confirmation",
+      "area": "memory ordering",
+      "detail": "Acquire on CAS success pairs with the Release store at the tail of end(): a new owner's baseline LIVE read and resets are ordered after the previous owner's ACTIVE=false and counter readout, including across threads. The five readout loads are sequenced-before the release store and cannot be reordered past it (release forbids LoadStore reordering), and the resets cannot be hoisted above the acquire. Relaxed failure ordering is adequate because the failure path only panics."
+    },
+    {
+      "id": "F3",
+      "severity": "confirmation",
+      "area": "invariant / removed assertion",
+      "detail": "Dropping `assert!(!ACTIVE...)` from begin loses no protection: end clears ACTIVE before releasing WINDOW_OPEN and begin sets ACTIVE only after acquiring it, so ACTIVE=true implies WINDOW_OPEN=true in any contract-conforming execution; there is no reachable stale-ACTIVE state that the old swap would have caught. Allocator hot path, added(), calibrate() body and the counting boundaries (ACTIVE) are byte-identical, consistent with old-source-control.diff terminating before `pub fn calibrate`."
+    },
+    {
+      "id": "F4",
+      "severity": "minor, non-blocking",
+      "area": "ownership completeness",
+      "detail": "No owner token: any thread may call end(), which unconditionally clears ACTIVE and releases WINDOW_OPEN without checking that a window is open or that the caller opened it, so a stray/duplicate end can silently close or steal a live window. The limits list states this. A zero-cost detection would be `assert!(WINDOW_OPEN.swap(false, Release))` in end; not required by the audited single-coordinator callers, so not a blocker."
+    },
+    {
+      "id": "F5",
+      "severity": "minor, non-blocking",
+      "area": "failure mode",
+      "detail": "A panic between begin and end latches WINDOW_OPEN=true for the process lifetime, so every subsequent begin panics. This is not a regression (base latched ACTIVE=true with the same effect), and neither main.rs nor lifecycle.rs wraps a measured closure in catch_unwind, so the run aborts loudly rather than emitting silently corrupt samples."
+    },
+    {
+      "id": "F6",
+      "severity": "evidence scope, non-blocking",
+      "area": "what the regression actually discriminates",
+      "detail": "Both the nested and the competing cases attempt begin while the owner's ACTIVE is already true \u2014 a state the OLD code also denies. The discriminating signal is only the old code's ACTIVE-clearing side effect. The scenario the new guard uniquely prevents (a competing begin landing inside begin's reset sequence, or inside end's readout after ACTIVE.store(false), which the old code would silently ADMIT and reset counters mid-readout) is not executed by any test; it is argued structurally. The barrier sequences the worker strictly after the owner's begin returns. report.json/README acknowledge this; it must not be summarized as 'readout protection tested'."
+    },
+    {
+      "id": "F7",
+      "severity": "evidence scope, non-blocking",
+      "area": "probe design",
+      "detail": "allocation_after_denial() asserts only (ACTIVE, delta)=(true,(1,0,128)) around one known 128-byte request; nothing asserts that pre-denial ALLOCS/REALLOCS/BYTES totals survive the rejection. The old code did not reset them either, so the control could not discriminate that property; preservation rests on inspection of the CAS-first structure (F1). Unsigned delta subtraction on process-global counters would panic on debug overflow rather than report clearly if any concurrent reset ever occurred; safe here because the worker is joined before the probe and the harness is serial single-test."
+    },
+    {
+      "id": "F8",
+      "severity": "confirmation",
+      "area": "unsafe test code and harness hygiene",
+      "detail": "Test unsafe block is sound: nonzero valid Layout(128,8), null checked via handle_alloc_error, deallocated exactly once with the identical layout, no byte dereferenced; it calls ALLOCATOR's GlobalAlloc methods directly (same pattern as the pre-existing calibrate). Panic hook swap, println! and all assert_eq! are outside every counted window; the caught Result temporary (and its payload Box) is dropped at the end of its statement, before the probe snapshot; the two barrier waits on each side are balanced (no deadlock) and the worker is joined before the probe and before end."
+    },
+    {
+      "id": "F9",
+      "severity": "confirmation",
+      "area": "internal evidence consistency",
+      "detail": "Cross-checks reconcile: diff stat 126/4 matches the hunks (README +29; counting.rs +6/+4/+5/+82, deletions = old import, old assert, `(`, `)`); the old-source panic at old_counting_with_tests.rs:195:9 maps to the first assert_eq at fixed line 206 under the 11-line net offset, and that offset is corroborated by caller-search.txt's counting.rs:185/193 line numbers; final-run-old.log prints calibration_windows=4 before failing, matching four clean calibrations under old code. Byte-identity of the committed blob to fixed_counting.rs itself rests on the attested clean-worktree/root verification, not on anything recomputable inside this review."
+    },
+    {
+      "id": "F10",
+      "severity": "cosmetic, non-blocking",
+      "area": "documentation/log parity",
+      "detail": "README's documented reproduction command omits the `-D warnings` used in the recorded rustc invocations, and final-compile-old.log is empty while final-compile-fixed.log carries the xcodebuild/FSEvents linker_messages warning. The asymmetry is plausible (one-shot toolchain cache warning) and the packet correctly declines to claim warning-free linker output; it should not be read as compile-log parity between the two builds."
+    },
+    {
+      "id": "F11",
+      "severity": "scope note, non-blocking",
+      "area": "gating",
+      "detail": "counting.rs is behind default-OFF `count-alloc` inside a detached `[workspace]` crate absent from root members, so root clippy (default and --all-features), rustdoc, cargo fmt --all, nextest and markdownlint hard scope do not reach it; the new test executes only via the documented direct rustc command. The packet claims exactly this and adds no workflow wiring. Consequence to record: the regression cannot self-protect against future edits."
+    }
+  ],
+  "validation_limits": [
+    "Single execution of each binary on one host/toolchain (rustc 1.97.1, aarch64-apple-darwin), debug `rustc --test` only; no repetition, stress loop, timing threshold, randomized scheduling, loom/Miri/TSan, or non-Arm target. Acquire/Release correctness is by the Rust memory model, not by cross-architecture execution.",
+    "No release-profile build of the actual bench binary that calls begin/end was produced or run; no Cargo, clippy, workspace test, preflight, wasm/optimized build, dependency install, or benchmark remeasurement.",
+    "The regression does not force any reset/readout interleaving; the competing attempt is barrier-sequenced after the owner's begin returned (see F6). No test covers a competing begin during begin's reset sequence or during end's readout.",
+    "Counting remains non-atomic as a snapshot: ACTIVE and the counters are Relaxed, so under contract-violating concurrent allocation a reader can observe ACTIVE=true before observing zeroed counters, or vice versa. The guard reserves coordinator entry, not allocator quiescence.",
+    "Correctness still requires the admitted coordinator to call a balanced end with all measured workers quiescent; there is no RAII guard, owner token, or non-owner-end rejection (F4).",
+    "Libtest, panic machinery and thread setup are process-global allocators; the oracle is the four clean calibrations plus a post-machinery known request, not any invalid-window total. This is evidence for the observed executions, not a guarantee against all harness noise.",
+    "The unchanged-context hashes (main.rs, lifecycle.rs, Cargo.toml, store.rs, feature-off declaration) and the committed-blob identity are attested by the packet and root, not independently recomputable in this review."
+  ],
+  "historical_measurement_assessment": {
+    "conclusion": "The caller audit does support retaining the frozen measurements as exact old-head evidence with their original limits, without rerunning any matrix, and the packet correctly refrains from relabeling them as corrected-head runs.",
+    "supporting_reasoning": [
+      "The full text of main.rs and lifecycle.rs is in the packet and I confirmed the audit against it: begin/end appear exactly once each in main.rs (lines 148/153, serial sample loop) and exactly once each in lifecycle.rs measure(); calibrate() is called once from main before dispatch and is byte-identical to base. counting.rs is a private `mod` of a single binary crate, so those files are the complete call surface \u2014 the grep in caller-search.txt is corroborated by full source, not merely trusted.",
+      "concurrent-cold spawns its two readers inside the measured closure and joins both before the closure returns, so end() runs with readers quiescent and neither reader admits or ends a window. There is no second coordinator anywhere.",
+      "Under strict single-coordinator, balanced, quiescent-boundary usage the old and new begin/end are observationally equivalent for the emitted counters: the allocator hot path and ACTIVE boundaries are byte-identical, and the only new work is one extra atomic store in end, executed after ACTIVE=false and after the elapsed_ns capture. The old head also passes the four clean calibrations here.",
+      "Additional weak corroboration: the old head's response to a competing begin while ACTIVE=true is a loud assertion panic, so a benchmark run that completed and emitted samples cannot have contained that interleaving. The genuinely silent old-head corruption paths (admission inside the reset sequence or inside end's readout) require a second begin caller, which does not exist in these callers."
+    ],
+    "caveats": [
+      "This is a static audit of the current head's caller files (equal to base by the attested hashes), not an execution trace of the historical runs and not a per-run assertion of no overlap. It does not cover any frozen number produced by an earlier revision of main.rs/lifecycle.rs with a different call shape; any such datum needs its own check before retention.",
+      "It proves nothing about incidental process-level allocations, allocator-metadata exclusion, or the pre-existing global-allocator/quiescence caveats already attached to those measurements; those limits carry over unchanged.",
+      "No benchmark was rerun on the corrected head, so there is no measured demonstration that the new head reproduces the old numbers \u2014 only the equivalence argument above. Retained data must stay labeled old-head, and no new performance or admission claim is supported by this commit."
+    ]
+  }
+}

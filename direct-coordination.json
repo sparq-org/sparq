@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T16:29:11.577632+00:00",
+  "updated_at": "2026-09-09T16:47:23.906187+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T15:47:11.127882+00:00",
-    "evidence": "direct-4246/layout-comment/final-verified.json"
+    "observed_at": "2026-09-09T16:47:23.906187+00:00",
+    "evidence": "direct-4246/counting-admission/publication-verified.json"
   },
   "rules": {
     "required_check": "gate",
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": 6469,
-    "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+    "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Astra benchmark-window guard repair is committed locally atccded1b4898cf5b317a6591f6ff6108ced23123c;rootverified47frozenfilesandexactcompiledsource/control. ActualOpus5xhighreviewrunning inexecsession38346. PublicPR6469 remains5757; lastchecks91success/9running/12queued/8skipped/1neutral,zero failures;mainunchanged/queueempty/noholdlabels/allinline threadsresolved, allocatorreviewbodyawaitsresponse. No pushes or publicresponse to newfindingyet.",
-    "phase": "Exactccded counter repair under actual independent Opus review;public5757CIpending",
+    "state": "PR6469 open/non-draft atccded. ActualOpus5xhighapprovedexactcounterrepair; rootverified47files/exactcompiledsource/control, normalfastforwardpush andpublicreviewresponse verified. Allinline threadsresolved,review:unreviewedinformational only,noreview:needs hold. Currentheadwasmfeature-offworkflow passed; fullCI/bench/featurematrix/aggregateandnewautomaticCopilotreviewpending; nofailednewheadcheck observed. No mergeadmission yet.",
+    "phase": "Reviewed counter repair published; normal full CI and fresh Copilot review progressing",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -360,175 +360,37 @@
       "resolution_verification": "direct-4246/layout-comment/final-verified.json"
     },
     "full_validation_progress": {
-      "at": "2026-09-09T16:29:11.577632+00:00",
-      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-      "state": "Normal full-tier runs triggered by synchronize; no manual dispatch/retry/cancellation. Priorfa371 passes are historical, not exact-head admission.",
-      "checks": "direct-4246/counting-admission/checks-1627.json",
+      "at": "2026-09-09T16:47:23.906187+00:00",
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "checks": "direct-4246/counting-admission/new-head-checks.json",
+      "runs": "direct-4246/counting-admission/new-head-runs.json",
       "rollup": {
-        "IN_PROGRESS": 9,
-        "SUCCESS": 91,
-        "SKIPPED": 8,
-        "QUEUED": 12,
+        "QUEUED": 24,
+        "IN_PROGRESS": 7,
+        "SUCCESS": 21,
+        "SKIPPED": 5,
         "NEUTRAL": 1
       },
       "failed_checks": 0,
-      "runs": [
-        {
-          "id": 34372377412,
-          "name": "pr-title",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:45:50Z"
-        },
-        {
-          "id": 34372094775,
-          "name": "Running Copilot Code Review",
-          "event": "dynamic",
-          "status": "in_progress",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:18Z"
-        },
-        {
-          "id": 34372087676,
-          "name": "CI",
-          "event": "pull_request",
-          "status": "queued",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087172,
-          "name": "Changed-code mutation review",
-          "event": "pull_request",
-          "status": "in_progress",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087963,
-          "name": "feature-matrix",
-          "event": "pull_request",
-          "status": "queued",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087168,
-          "name": "formal-verification",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372086977,
-          "name": "routing-self-tests",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087336,
-          "name": "pr-title",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087257,
-          "name": "flow-on-gates",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087051,
-          "name": "container-scan",
-          "event": "pull_request",
-          "status": "in_progress",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087222,
-          "name": "supply-chain",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087074,
-          "name": "vectorized-feature-off",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087643,
-          "name": "Benchmarks",
-          "event": "pull_request",
-          "status": "queued",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087246,
-          "name": "ci-summary",
-          "event": "pull_request",
-          "status": "in_progress",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087809,
-          "name": "fuzz",
-          "event": "pull_request",
-          "status": "queued",
-          "conclusion": null,
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087072,
-          "name": "pr-area-label",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        },
-        {
-          "id": 34372087000,
-          "name": "docs-quality",
-          "event": "pull_request",
-          "status": "completed",
-          "conclusion": "success",
-          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-          "created_at": "2026-09-09T15:43:14Z"
-        }
-      ],
-      "remaining": "Existing5757CIprogressing; allocatorrepairreview/publication takespriority. Do notadmit5757 while own repairawaitsreview.",
-      "review": "direct-4246/counting-admission/state-1627.json"
+      "run_ids": {
+        "flow-on-gates": 34378539142,
+        "docs-quality": 34378539072,
+        "container-scan": 34378539077,
+        "supply-chain": 34378539083,
+        "CI": 34378539442,
+        "fuzz": 34378539474,
+        "routing-self-tests": 34378539019,
+        "pr-area-label": 34378539090,
+        "Benchmarks": 34378539462,
+        "vectorized-feature-off": 34378539075,
+        "Changed-code mutation review": 34378539020,
+        "ci-summary": 34378539115,
+        "feature-matrix": 34378539457,
+        "pr-title": 34378675313,
+        "formal-verification": 34378538988,
+        "Running Copilot Code Review": 34378546536
+      },
+      "remaining": "ExistingcurrentheadfullCI, benchmarks, featurematrix andaggregatepending; newautomaticCopilotreviewrunning. Inspectactualnewopt-inlegtestexecution/run-boundaggregatebeforeprotectedenqueue. Priorheads evidencehistorical only."
     },
     "disk_hold": {
       "free_bytes_after_control": 6418264064,
@@ -567,7 +429,7 @@
       "runs": "direct-4246/layout-comment/initial-runs.json",
       "checks": "direct-4246/layout-comment/initial-checks.json"
     },
-    "next_heartbeat": "First collect existingexecsession38346 usingwrite_stdin; it ownsactualOpusreviewforlocalccded. Do notlaunchduplicateorretryexhaustedquota. RequireouterJSONsuccess,is_errorfalse,actualmodelUsageclaude-opus-5,exactccdedreviewedhead. Onapproval recordresult; rootalreadyverified47filesandactualcompiledsource. RevalidatePRstill5757/open/noholds andcurrentmain immediatelybeforeordinaryfastforwardpushccded. Publicbodydraft/review-comment-draft in counting-admission have explicitpendingreviewtext: update accurately fromactualverdict beforepublishing. NewfindingisonCopilotreviewbodyonly, noinline thread; postdedupedgeneralPRcomment afterfreshcomments/headcheck; previouslayoutthreadstaysresolved. Keepcore/declaration/oldbenchmarkdataunchanged. ObserveexistingnormalnewheadCI,no dispatch/retry/cancellation; waitallfullgates+actualnewfeaturetest/aggregate beforeexact-headprotectedenqueue. RegistryOFF,noreleases,heldPRsremainheld;no newimplementationorbenchmatrix.",
+    "next_heartbeat": "Readcheckpointthenbudgetcheck. No liveOpusreviewsorlocalcommands;38346completedverified,do notpoll/relaunch. Watchexistingccdedfullruns andautomaticCopilotreview34378546536; do notrequestduplicate. No newimplementationlane while4246 active. Oncurrentfailedcheck ornewreviewfinding, diagnoseconcreteissueboundedlywithsameAstraagent; no blindretry orfullremeasurement. Onallrequiredgreen, verifyactualnewfeaturelegtest+clippy andaggregatefreshness, thenfreshrevalidatehead/main/holds/threads andordinaryprotectedenqueueexpectedHeadOidccded,jumpfalse. review:unreviewedis informational, review:needsarealhold. RegistryOFF,noreleases,heldPRsremainheld. Broadlocalbuildholdremains; tinydependencyfreerustctestexceptioncompletednotgeneralpermission.",
     "allocator_window_finding": {
       "review": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
       "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
@@ -600,21 +462,42 @@
       },
       "repair_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
       "root_verification": "direct-4246/counting-admission/root-verification.json",
-      "frozen_manifest_verified": 47
+      "frozen_manifest_verified": 47,
+      "review_verdict": "ActualOpus5xhigh approvesexactccdedforvalidation; no blockers. CAS-firstrejectionandAcquire/Releaseownershipspanconfirmed; currentcallerssinglecoordinator. Readout/resetinterleavingsarguedstructurally,notforcedbytest; noownertoken/RAII orarbitraryallocatornoiseguarantee. Newheadperformanceunmeasured;olddataretainedwithoriginalattributionandlimits.",
+      "addressed": true,
+      "published_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "response": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5605455440",
+      "publication_verified": "direct-4246/counting-admission/publication-verified.json",
+      "source_tests": "Exactfinalactualmodulepass;unchangedoldproduction+identicaltestcompiledandfailedfirstassertafterlogginglostcountinginbothnested/competingprobes. Fourclean calibrationsboth. Resets/readoutinterleavingsstructurallyreviewed,notforcedbytest.",
+      "historical_data": "Unchanged/frozenunderoriginalhashes. Currentcallerstaticauditshowsonecoordinator; nothistoricalexecutiontrace,new-headmeasurementorcrossrevisionproof."
     },
     "counting_review_runtime": {
       "session_id": 38346,
       "kind": "exec_command",
       "started_at": "2026-09-09T16:25:26.022731+00:00",
-      "completed": false,
+      "completed": true,
       "input": "direct-4246/counting-admission/opus-input.md",
       "input_sha256": "23ac25b24d40d42416f3fba0938761dea8bbb346c03ebeb5efe2b1e14e676400",
       "output": "direct-4246/counting-admission/opus-review-ccded1b4.json",
       "expected_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
-      "note": "One actual model invocation. Earlier local manifest parsing/redirection failed before Claude execution; no model-budget retry."
-    }
+      "note": "One actual model invocation. Earlier local manifest parsing/redirection failed before Claude execution; no model-budget retry.",
+      "collected_at": "2026-09-09T16:43:04.017501+00:00",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 306624,
+      "output_sha256": "6fa76d3f78384272b8c3883bd841323090a52f7f4bdc9514b27b4034871031bf",
+      "verdict": "approve_for_validation"
+    },
+    "counting_publication": {
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "parent": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+      "prepush": "direct-4246/counting-admission/prepush-final.json",
+      "verified": "direct-4246/counting-admission/publication-verified.json",
+      "body": "direct-4246/counting-admission/pr-body.md",
+      "response": "direct-4246/counting-admission/review-comment.md"
+    },
+    "current_review_status": "ActualOpusreviewchain: runtime6334approvedforvalidation, Linuxneutralitydeclarationfa reviewedreasonedits/mechanicallyverified, layoutcomment5757exactwordingapproved, counterrepairccdedexactheadapproved. No sourceblockers. FinalcurrentheadCI/reviews/holds remain required before ordinary protectedadmission. NeverfabricatecanonicalVERDICT orreview:pass."
   },
   "prs": {
     "4300": {
@@ -1317,7 +1200,7 @@
   },
   "registry_pause": {
     "enabled": false,
-    "verified_at": "2026-09-09T15:40:45.147431+00:00",
-    "evidence": "recovery-20260909/registry-pause-1538.json"
+    "verified_at": "2026-09-09T16:47:23.906187+00:00",
+    "evidence": "recovery-20260909/registry-pause-1645.json"
   }
 }

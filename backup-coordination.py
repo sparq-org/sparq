@@ -177,6 +177,9 @@ for evidence_name in ['root-verification.json', 'head.diff', 'review-preface.md'
     FILES['4246-counting-admission-' + evidence_name] = COUNTING_ADMISSION / evidence_name
 for evidence_name in ['pr-body-draft.md', 'review-comment-draft.md', 'publication-query.json', 'checks-1627.json', 'state-1627.json']:
     FILES['4246-counting-admission-' + evidence_name] = COUNTING_ADMISSION / evidence_name
+for evidence_name in ['opus-review-ccded1b4.json', 'opus-review-result.json', 'opus-stderr.txt', 'prepush-1641.json', 'pr-body.md', 'review-comment.md', 'prepush-final.json', 'body-precheck.json', 'body-edit-result.txt', 'comment-precheck.json', 'comment-result.txt', 'publication-verified.json', 'new-head-checks.json', 'new-head-runs.json']:
+    FILES['4246-counting-admission-' + evidence_name] = COUNTING_ADMISSION / evidence_name
+FILES['registry-pause-1645.json'] = ROOT / 'recovery-20260909/registry-pause-1645.json'
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name
