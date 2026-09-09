@@ -1,0 +1,56 @@
+119-# wasm-equality skipped; the crate legs stay change-scoped by ci-select) so the
+120-# review-fix churn of many concurrent draft worker PRs stops saturating the runner
+121:# pool. THE INVARIANT — a draft-tier gate result must NEVER admit a PR to the merge
+122-# queue — is STRUCTURAL: the gate job's own check-run NAME is tiered. On a draft
+123:# pull_request payload the job below is named `gate, draft-tier`, NOT `gate`, so a
+124:# draft-tier run never produces the required `gate` context at all and the
+125-# ruleset's required_status_checks entry ({context: "gate"}) is unsatisfiable by
+126:# draft-tier results. From the un-draft moment until the full-tier run's fresh
+127-# `gate` concludes, the required context is simply ABSENT — which branch protection
+128-# treats as blocking — so there is no supersession window to race: GitHub event
+129:# latency, a dropped ready_for_review event, or an Actions outage all leave the PR
+130-# blocked, never admitted (`gh pr ready && gh pr merge --auto` arms and waits).
+131-# scripts/ci_summary_gate.py adds defense-in-depth on top: each run knows its own
+132:# tier from the trigger payload (PR_DRAFT below); a draft-tier run re-checks the
+133-# PR's CURRENT draft state via the API before any SUCCESS (un-drafted => FAILURE,
+134:# "stale draft-tier run, full run pending"); a full-tier pull_request run refuses
+135:# to conclude while ANY draft-tier-marked ci-select INSTANCE lacks its own later
+136-# full-tier successor (per-instance — ci/bench/feature-matrix/fuzz all expose the
+137:# identical select check-run name); and stale `gate, draft-tier` check-runs are
+138:# excluded from every sibling set as tier artifacts. `ready_for_review` below
+139-# re-runs this gate (and every tiered sibling workflow) at the un-draft moment,
+140-# producing the first (and only) `gate` check-run on the head SHA. merge_group
+--
+200-
+201-on:
+202:  # [FABLE-5] Draft-tier CI: the default types PLUS ready_for_review — without it
+203:  # the un-draft moment would run NOTHING and the head would keep its draft-tier
+204-  # gate result (the exact stale-green the integrity invariant forbids).
+205-  pull_request:
+206:    types: [opened, synchronize, reopened, ready_for_review]
+207-  # [OPUS-4.8] Merge queue: GitHub runs the required check(s) on a temporary
+208-  # `merge_group` ref before merging. ci-summary is the SINGLE required check, so it
+--
+236-# saturation signal; a permissions failure there degrades to the progress-only signal, it never
+237-# fails the gate by itself), plus the PR's live draft state (`pull-requests: read`
+238:# — the draft-tier conclusion-time re-check; a failure there fail-closes to RED,
+239-# never to a pass). `actions: write` is narrowly required by #3505 for the bounded
+240-# once-only POST that re-runs a newest cancelled workflow; it grants no source write
+--
+257-    # [FABLE-5] Draft-tier CI: the check-run name is TIERED (the same marker
+258-    # expression ci-select.yml uses). A draft pull_request payload renders
+259:    # `gate, draft-tier`; every other event/state (non-draft PR, merge_group,
+260-    # push) renders EXACTLY `gate` — the branch-protection ruleset's required
+261:    # context, which a draft-tier run therefore can never satisfy (the
+262-    # structural half of the integrity invariant above). Pinned by
+263-    # scripts/tests/test_ci_select_wiring.py::TestRequiredCheckAnchor.
+264:    name: gate${{ github.event.pull_request.draft == true && ', draft-tier' || '' }}
+265-    runs-on: ubuntu-latest
+266-    # > the loop's ABSOLUTE budget: ~37 min base (unchanged from the pre-sq-90cv4
+--
+309-          # own trigger payload — pull_request + draft == true => draft tier. The
+310-          # script re-checks the PR's LIVE draft state (PR_NUMBER) at conclusion
+311:          # time and refuses a draft-tier success on a now-ready PR ("stale
+312:          # draft-tier run, full run pending"). All three are empty off the PR
+313-          # path (push/merge_group), which the script reads as full tier.
+314-          EVENT_NAME: ${{ github.event_name }}

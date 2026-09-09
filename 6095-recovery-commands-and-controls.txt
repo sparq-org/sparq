@@ -1,0 +1,5 @@
+Validation runner: /opt/homebrew/bin/python3 /private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/run-validation.py
+Controls runner: PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 /private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/run-controls.py
+Composition: /opt/homebrew/bin/python3 /private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/verify-composition.py
+All shell invocations /bin/zsh login:false, cwd /private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095
+No Cargo, installs, live API, dispatcher, model or benchmark calls.

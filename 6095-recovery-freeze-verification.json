@@ -1,0 +1,10 @@
+{
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "files": 53,
+  "packet": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/review-packet.md",
+  "packet_bytes": 64434,
+  "packet_sha256": "ed7656045f692c25f1591f98f069e068f3a6fadc00ffc8636254a1a8db13a4cd",
+  "manifest_sha256": "69a5d940b48a1ef96266725de7ac57740c998301689aee0e8fad012b571aef61",
+  "clean": true,
+  "source_and_commit_bytes_verified": true
+}

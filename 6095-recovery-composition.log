@@ -1,0 +1,21 @@
+{
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "old_head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+  "old_parent": "8ad990e679cf11018d5fc6a3860741db9e897034",
+  "historical_patch_id": "fc1a1a397884c1e45376d18ba1c14fc4a9c8b3e1",
+  "net_patch_id": "fc1a1a397884c1e45376d18ba1c14fc4a9c8b3e1",
+  "net_files": [
+    "scripts/tests/test_triage_area.py",
+    "scripts/triage-area.py"
+  ],
+  "production_all_top_level_AST_except_DECL_identical": true,
+  "main_TestTriageAreaDiagnostics_AST_identical": true,
+  "ANCHORED_ONLY_AST_identical": true,
+  "no_conflict_resolution_required": true,
+  "source_files": {
+    "scripts/tests/test_triage_area.py": "255eed3a54066d8282fa00761525e06c4892dc9fb1b8fb679d6a802019f57d56",
+    "scripts/triage-area.py": "3a48c6bbd25b4613f8f9c65cfe7ecc6a7868a29557e08e78acae7b2371a50905"
+  },
+  "python": "3.14.5 (main, May 10 2026, 10:21:34) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "workflow_files_identical_to_main": true
+}

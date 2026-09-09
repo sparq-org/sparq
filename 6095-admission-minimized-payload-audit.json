@@ -1,0 +1,21 @@
+{
+  "prepared_at": "2026-09-09T21:22:14.497029+00:00",
+  "original_bytes": 67811,
+  "original_sha256": "e2e70491dbcb874862f59acb205f267b6bea3447866260fe811f731b1b49465d",
+  "rejected_process_started": false,
+  "new_bytes": 46878,
+  "new_sha256": "e33e1f89b18390c803d6fcaa3bc0428751a29cc834138e7ef74cbd3c405a31a8",
+  "retained_sections": [
+    "Exact final delta against main",
+    "Production boundary, declaration parser, full tier dispatch and fallback",
+    "Production read/write callers, global guard and CLI budget boundary",
+    "Test loader, actual rule witness generator and partition helpers",
+    "Complete scope-property class (new hygiene tests are complete in raw diff)",
+    "Workflow execution surface (unchanged main)"
+  ],
+  "excluded": "ALL full/raw logs, source-machine absolute paths, command/environment dumps, personal author/host metadata, previous review/transcripts",
+  "retained_validation": "Sanitized test/control counts/test names and exact deliberate mutation diffs only; explicitly author reported",
+  "absolute_host_path_matches": 0,
+  "credential_pattern_matches": 0,
+  "method": "Substantive data minimization in same authorized Claude CLI route, not alternate provider/tool/indirect execution. New low-risk content inspection; no source publication as workaround."
+}

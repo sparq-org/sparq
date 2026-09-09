@@ -1,0 +1,70 @@
+[
+  {
+    "name": "remove-left-boundary",
+    "tests": 47,
+    "failures": [
+      "test_a_declaration_shaped_string_in_prose_is_not_a_declaration (recovery_tests.TestRuleTableHygiene.test_a_declaration_shaped_string_in_prose_is_not_a_declaration)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  },
+  {
+    "name": "word-boundary-hyphen-inert",
+    "tests": 47,
+    "failures": [
+      "test_a_declaration_shaped_string_in_prose_is_not_a_declaration (recovery_tests.TestRuleTableHygiene.test_a_declaration_shaped_string_in_prose_is_not_a_declaration)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  },
+  {
+    "name": "disable-declaration",
+    "tests": 47,
+    "failures": [
+      "test_a_real_declaration_still_reaches_t0 (recovery_tests.TestRuleTableHygiene.test_a_real_declaration_still_reaches_t0)",
+      "test_cross_cutting_issues_keep_every_area (recovery_tests.TestRuleTableHygiene.test_cross_cutting_issues_keep_every_area)",
+      "test_declaration_span_stops_at_the_sentence_break (recovery_tests.TestRuleTableHygiene.test_declaration_span_stops_at_the_sentence_break)",
+      "test_offenders_keep_row_label_tier_association_and_order (recovery_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order)",
+      "test_title_scope_and_t0_priority (recovery_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority)",
+      "test_unrelated_unknown_still_blocks_after_generator_provisioning (recovery_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  },
+  {
+    "name": "empty-title-partition",
+    "tests": 47,
+    "failures": [
+      "test_a_text_scoped_rule_does_fire_from_the_body (recovery_tests.TestScopeDiscipline.test_a_text_scoped_rule_does_fire_from_the_body)",
+      "test_a_title_scoped_rule_never_fires_from_the_body_alone (recovery_tests.TestScopeDiscipline.test_a_title_scoped_rule_never_fires_from_the_body_alone)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  },
+  {
+    "name": "empty-text-partition",
+    "tests": 47,
+    "failures": [
+      "test_a_text_scoped_rule_does_fire_from_the_body (recovery_tests.TestScopeDiscipline.test_a_text_scoped_rule_does_fire_from_the_body)",
+      "test_a_title_scoped_rule_never_fires_from_the_body_alone (recovery_tests.TestScopeDiscipline.test_a_title_scoped_rule_never_fires_from_the_body_alone)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  },
+  {
+    "name": "partial-title-partition",
+    "tests": 47,
+    "failures": [
+      "test_a_text_scoped_rule_does_fire_from_the_body (recovery_tests.TestScopeDiscipline.test_a_text_scoped_rule_does_fire_from_the_body)",
+      "test_a_title_scoped_rule_never_fires_from_the_body_alone (recovery_tests.TestScopeDiscipline.test_a_title_scoped_rule_never_fires_from_the_body_alone)"
+    ],
+    "errors": [],
+    "success": false,
+    "calibrated_kill": true
+  }
+]

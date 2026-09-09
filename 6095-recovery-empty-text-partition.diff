@@ -1,0 +1,11 @@
+--- a/scripts/tests/test_triage_area.py
++++ b/scripts/tests/test_triage_area.py
+@@ -158,7 +158,7 @@
+ 
+ 
+ def text_rules():
+-    return [r for r in TA.RULES if r[1] == "text"]
++    return []
+ 
+ 
+ #: The ONLY rules permitted to match an issue BODY. Body-matching is what let

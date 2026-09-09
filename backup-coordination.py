@@ -285,6 +285,19 @@ for evidence_name in ['postmerge-query.json', 'state-2055.json', 'runs-2055.json
 FILES["6468-label-maintenance-scheduled-runs-2100.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-2100.json"
 FILES["6095-pr-prerecovery.json"] = ROOT / "direct-6095/pr-prerecovery.json"
 
+# Frozen6095recovery and exact reviewer input; exclude live model outputs.
+for evidence_name in ['author-preflight.log', 'bash-version.log', 'changed-files.txt', 'classifier-selftest.log', 'classifier-suite.log', 'commands-and-controls.txt', 'commands.json', 'commit-message.txt', 'commit-metadata.json', 'commit.txt', 'composition.json', 'composition.log', 'controls-run.log', 'controls.json', 'coverage-baseline.log', 'coverage-summary.json', 'coverage.json', 'diff-check.log', 'disable-declaration.diff', 'disable-declaration.log', 'empty-text-partition.diff', 'empty-text-partition.log', 'empty-title-partition.diff', 'empty-title-partition.log', 'final-diff-check.log', 'freeze.py', 'full.diff', 'historical.diff', 'inputs/assessment-report.json', 'inputs/assessment-state.json', 'inputs/pr-prerecovery.json', 'merge.log', 'migration-selftest.log', 'original-commit.txt', 'partial-title-partition.diff', 'partial-title-partition.log', 'python-version.log', 'remove-left-boundary.diff', 'remove-left-boundary.log', 'report.json', 'review-packet.md', 'run-controls.py', 'run-validation.py', 'sources/.github/workflows/docs-quality.yml', 'sources/.github/workflows/triage-area.yml', 'sources/scripts/bd-to-issues.py', 'sources/scripts/preflight.py', 'sources/scripts/tests/test_triage_area.py', 'sources/scripts/triage-area.py', 'status.txt', 'verify-composition.py', 'word-boundary-hyphen-inert.diff', 'word-boundary-hyphen-inert.log', 'manifest.json', 'freeze-verification.json']:
+    FILES["6095-recovery-" + evidence_name.replace("/", "--")] = ROOT / "direct-6095/recovery" / evidence_name
+
+for evidence_name in ['draft-full-ci-wiring.txt', 'input-manifest.json', 'minimized-payload-audit.json', 'opus-input.md', 'opus-public-source-input.md', 'repository-visibility.json', 'root-verification.json']:
+    FILES["6095-admission-" + evidence_name] = ROOT / "direct-6095/admission" / evidence_name
+
+for evidence_name in ['main-runs-2118.json', 'main-ci-jobs-2124.json', 'main-matrix-jobs-2124.json']:
+    FILES['6468-followup-admission-' + evidence_name] = ROOT / 'direct-6468/followup-admission' / evidence_name
+
+for evidence_name in ['scheduled-runs-2118.json']:
+    FILES['6468-label-maintenance-' + evidence_name] = ROOT / 'direct-6468/label-maintenance' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

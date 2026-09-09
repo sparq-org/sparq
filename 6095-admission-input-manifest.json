@@ -1,0 +1,8 @@
+{
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "bytes": 67811,
+  "sha256": "e2e70491dbcb874862f59acb205f267b6bea3447866260fe811f731b1b49465d",
+  "scope": "Public repository two-file source/test patch and generated validation evidence, no credential/session files or transcripts",
+  "credential_pattern_matches": 0,
+  "scan_limit": "Specific patterns only, not universal absence proof"
+}

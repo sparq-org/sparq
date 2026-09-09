@@ -1,0 +1,63 @@
+{
+  "method": "stdlib trace line events; executable statement start lines from AST, excluding docstrings; not branch coverage",
+  "critical_functions": [
+    {
+      "file": "scripts/triage-area.py",
+      "function": "declared_areas",
+      "statement_lines": 19,
+      "never_executed_statement_start_lines": [
+        {
+          "line": 439,
+          "source": "                hits.append((span.index(frag), area))"
+        }
+      ]
+    },
+    {
+      "file": "scripts/triage-area.py",
+      "function": "classify",
+      "statement_lines": 15,
+      "never_executed_statement_start_lines": []
+    },
+    {
+      "file": "scripts/tests/test_triage_area.py",
+      "function": "test_a_declaration_shaped_string_in_prose_is_not_a_declaration",
+      "statement_lines": 3,
+      "never_executed_statement_start_lines": []
+    },
+    {
+      "file": "scripts/tests/test_triage_area.py",
+      "function": "test_a_real_declaration_still_reaches_t0",
+      "statement_lines": 2,
+      "never_executed_statement_start_lines": []
+    },
+    {
+      "file": "scripts/tests/test_triage_area.py",
+      "function": "_assert_the_partition_was_fully_covered",
+      "statement_lines": 2,
+      "never_executed_statement_start_lines": []
+    },
+    {
+      "file": "scripts/tests/test_triage_area.py",
+      "function": "test_a_title_scoped_rule_never_fires_from_the_body_alone",
+      "statement_lines": 9,
+      "never_executed_statement_start_lines": [
+        {
+          "line": 969,
+          "source": "                leaked.append(f\"{rid} fired from a body-only {witness!r} -> {got[0]}\")"
+        }
+      ]
+    },
+    {
+      "file": "scripts/tests/test_triage_area.py",
+      "function": "test_a_text_scoped_rule_does_fire_from_the_body",
+      "statement_lines": 9,
+      "never_executed_statement_start_lines": [
+        {
+          "line": 986,
+          "source": "                missed.append(f\"{rid} did not fire on body-only {witness!r} \""
+        }
+      ]
+    }
+  ],
+  "calibration": "uncalled function executable lines 2/3 have zero counts"
+}

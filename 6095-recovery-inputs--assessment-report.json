@@ -1,0 +1,14 @@
+{
+  "observed_at": "2026-09-09T20:16:17.414736+00:00",
+  "issue": 4567,
+  "source_issue_state": "OPEN status:ready area:ci; no humanholds/comments",
+  "pr": 6095,
+  "head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+  "state": "OPEN DRAFT MERGEABLE",
+  "hold": "Bot-owned review:needs from stuck-arm gate-failed; concrete unpark condition gate-green",
+  "gate_failure": "Exact 33926976128, Sept4: superseded-legs, newest auto-arm33926979672 cancelled attempt2; auto-redispatch limit1 already used.",
+  "no_retries_or_mutations": true,
+  "native_threads": 0,
+  "actual_independent_review": "Historical botcomments approve not a fresh actualmodelreview; no nativeCopilot review captured",
+  "next": "Review existing code in current-main composition under actual Opus, run narrow tests; preserve holds pending measured gate-green. Do not clone into replacementPRorarm cancelledautoarm."
+}

@@ -1,0 +1,11 @@
+--- a/scripts/triage-area.py
++++ b/scripts/triage-area.py
+@@ -400,7 +400,7 @@
+ # happily and prose discussing a tool surface would parse as a DECLARED one. The
+ # lookbehind also rejects `subcrates:` (word char) and `my_crates:` (underscore).
+ _DECL = re.compile(
+-    r"(?<![\w-])(?:crate_or_surface|crates?|surface)\s*[:=]\s*(.+?)(?:\||\n|\.\s|$)",
++    r"\b(?:crate_or_surface|crates?|surface)\s*[:=]\s*(.+?)(?:\||\n|\.\s|$)",
+     re.I)
+ _SURFACE_TOKENS = {"site": "site", "gui": "gui", "docs": "docs", "bench": "bench",
+                    "ci": "ci", "js": "js"}

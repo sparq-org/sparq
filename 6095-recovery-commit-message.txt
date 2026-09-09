@@ -1,0 +1,16 @@
+Merge current main into PR6095 recovery [GPT-6 Astra]
+
+[GPT-6 Astra] Compose the existing Claude Opus 5 declaration-boundary and
+scope-property non-vacuity repair with main e53464c73f31f7aca800f3867ac054c36408e346.
+The automatic merge required no source repair. The net patch is identical
+to the inherited 0883db68 change, and preserves PR6473 diagnostics and routing.
+
+Validated 47 classifier tests, both embedded self-tests, and six executed
+negative controls. Author preflight is limited by local Bash 3 mapfile
+absence in the privacy gate; normal Linux gate and independent review remain.
+
+Historical source authorship and its Claude Opus 5 trailer remain on ancestor
+0883db681c73ddc338643f135c770c5a036ac3a4. Recovery composition and validation
+were performed by actual OpenAI GPT-6 Astra at xhigh reasoning.
+
+Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

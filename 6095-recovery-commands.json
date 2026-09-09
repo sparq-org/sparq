@@ -1,0 +1,87 @@
+[
+  {
+    "name": "python-version",
+    "argv": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "--version"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 0.023355499986791983,
+    "log": "python-version.log"
+  },
+  {
+    "name": "classifier-suite",
+    "argv": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "scripts/tests/test_triage_area.py"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 2.9760507500031963,
+    "log": "classifier-suite.log"
+  },
+  {
+    "name": "classifier-selftest",
+    "argv": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "scripts/triage-area.py",
+      "--self-test"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 0.23463987500872463,
+    "log": "classifier-selftest.log"
+  },
+  {
+    "name": "migration-selftest",
+    "argv": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "scripts/bd-to-issues.py",
+      "--self-test"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 0.2111761669802945,
+    "log": "migration-selftest.log"
+  },
+  {
+    "name": "author-preflight",
+    "argv": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "scripts/preflight.py",
+      "--changed-files",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/changed-files.txt",
+      "--added-lines",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6095/recovery/full.diff"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 1,
+    "elapsed_seconds": 0.4942760420090053,
+    "log": "author-preflight.log"
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check",
+      "e53464c73f31f7aca800f3867ac054c36408e346"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 0.1554331670049578,
+    "log": "diff-check.log"
+  },
+  {
+    "name": "bash-version",
+    "argv": [
+      "/bin/bash",
+      "--version"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "exit": 0,
+    "elapsed_seconds": 0.005892958986805752,
+    "log": "bash-version.log"
+  }
+]

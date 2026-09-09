@@ -1,0 +1,37 @@
+{
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "parents": [
+    "0883db681c73ddc338643f135c770c5a036ac3a4",
+    "e53464c73f31f7aca800f3867ac054c36408e346"
+  ],
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "branch": "codex/pr6095-recovery",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+  "clean": true,
+  "scope": "Automatic, conflict-free merge of current main into the original PR6095 ancestry. No authored source changes; only the inherited two-file +68/-3 delta remains against main.",
+  "provenance": "Original source commit 0883 retains sparq-orchestrator[bot] authorship and Claude Opus 5 coauthor. Actual OpenAI GPT-6 Astra xhigh performed recovery composition, validation, controls and this evidence; merge commit carries honest Astra trailer.",
+  "contract": "Reject a declaration key that is the tail of a word/underscore/hyphen token; preserve genuine crate/surface declarations and nonempty complete scope-property coverage. This is lexical boundary repair, not a new requirement for declarations to begin a line. Standalone fields following whitespace still work.",
+  "preserved": "Production top-level AST except _DECL is identical to main: full rule table, classifier tier order, candidate census, plan/apply semantics, unknown-label global zero-write guard, pacing/budgets. PR6473 diagnostic tests and ANCHORED_ONLY AST also identical. All other files equal main.",
+  "tests": {
+    "classifier": 47,
+    "classifier_selftest_checks": 17,
+    "migration_selftest_checks": 114,
+    "controls": 6,
+    "control_tests_each": 47,
+    "controls_killed": 6,
+    "survivors": 0,
+    "control_errors": 0
+  },
+  "coverage": "Stdlib trace with called/uncalled calibration before controls. All new test/helper statement starts and classify statement starts executed. Unchanged declared_areas path-fragment hit line439 is not executed by this focused suite; failure-report append lines969/986 naturally unexecuted in green baseline. Not full branch/line coverage claim.",
+  "preflight": "FAIL, only privacy-claims: installed Bash3 has no mapfile at check-privacy-claims.sh:92. G1/G2/G6 and guard-untested pass; no-perf-numbers/readme-template skip because no matching paths. No gate edits or bypass. LinuxCI must execute this check.",
+  "review_state": "Remote PR6095 remains OPEN DRAFT at0883, review:needs/area:ci/trust-surface; no remote calls or mutations in this recovery. Old cancelled auto-arm source check did not prove a source defect. Gate-green bot hold remains until normal exact-head CI and root reconciliation. No rearm/approval/hold clearance.",
+  "trust": "Issue authors control title/body. T0 is a routing declaration tier, not authentication or review/admission evidence. This patch narrows accidental declaration matching; it does not grant label/review/queue authority or sanitize arbitrary prose generally.",
+  "limits": [
+    "Only scoped local Python checks; no full workspace/CI claim.",
+    "Local Python3.14.5 versus docs-quality Python3.12; authoritative Linux gate remains.",
+    "Scope properties catch empty/truncated helpers, but do not claim arbitrary duplicate/overlapping helper corruption proof.",
+    "Real crate inventory comes from this checkout; no live board/classifier replay.",
+    "No fresh independent review by this worker; root will obtain actual Opus."
+  ],
+  "recommended_next_action": "Review frozen exact head with actual Opus; then root updates the existing PR through normal publication/CI/hold reconciliation. No new PR or issue required."
+}
