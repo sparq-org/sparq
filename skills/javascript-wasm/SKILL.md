@@ -396,7 +396,9 @@ const shapesTurtle = store.parseShaclCompact(
 const plan = raw.explain('PREFIX ex: <http://ex/> SELECT ?n ?a WHERE { ?s ex:name ?n . ?s ex:age ?a }');
 // "EXPLAIN (SELECT) — planning-only dry run; nothing is executed.\n...Plan:\n  ..."
 const trace = raw.explainAnalyze('PREFIX ex: <http://ex/> SELECT ?n WHERE { ?s ex:name ?n }');
-// plan + per-operator output rows (wall times read 0 on wasm32 — no monotonic clock)
+// plan + per-operator output rows (wall times read 0 on wasm32 — no monotonic clock —
+// unless an explainPlanAnalyzeJson call already installed the performance.now() trace
+// clock on this thread; see the structured form below)
 ```
 
 **Structured plan tree (`explainPlanJson` / `explainPlanAnalyzeJson`, explain-json bundle
@@ -405,14 +407,15 @@ renders: `sparq-engine`'s `explain_json::PlanNode` as camelCase JSON — per ope
 `{"operator", "estimated", "actual", "nanos", "qError", "children"}` (the sq-jbqh4 schema
 contract, identical to the server's `Accept: application/x-sparq-explain+json` response).
 The dry-run form populates only `estimated`; the analyze form (SELECT/ASK only) fills
-`actual` rows and `qError` = max(est/actual, actual/est) exactly — `nanos` still reads 0 on
-wasm32 (the same no-monotonic-clock caveat as `explainAnalyze`; real per-operator wall
-times come from the desktop-native or server paths). `@sparq/client` exports the matching
-`PlanNode` type + the `parsePlanJson` defensive parse.
+`actual` rows, `qError` = max(est/actual, actual/est), and REAL per-operator wall `nanos` —
+the binding installs `performance.now()` as the engine's trace clock ([FABLE-5] sq-vx7ez,
+issue #2428), so the in-tab plan explorer shows real times at the host timer's resolution
+(browsers may coarsen `performance.now()`; a tiny operator can still legitimately read 0).
+`@sparq/client` exports the matching `PlanNode` type + the `parsePlanJson` defensive parse.
 
 ```js
 const tree = JSON.parse(raw.explainPlanAnalyzeJson('SELECT ?n WHERE { ?s <http://ex/name> ?n }'));
-// { operator: "...", estimated: ..., actual: ..., nanos: 0, qError: ..., children: [...] }
+// { operator: "...", estimated: ..., actual: ..., nanos: 18042, qError: ..., children: [...] }
 ```
 
 **SHACL validation (`SparqStore.validate`, shipped by default).** `validate(data, shapes, format?)` validates an RDF **data graph** against a SHACL **shapes graph** and returns a typed `ValidationReport` (the JSON the wasm binding emits, parsed for you). It runs `sparq-shacl`'s SHACL Core + SHACL-SPARQL (`sh:sparql`) engine inside wasm — a drop-in for `rdf-validate-shacl`. It is **stateless** (does not consult the store's own triples). `format` defaults to `'turtle'` and accepts the same set as `fromString`.

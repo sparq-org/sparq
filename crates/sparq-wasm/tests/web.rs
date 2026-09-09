@@ -925,9 +925,10 @@ mod canon {
 //
 // [FABLE-5] sq-ixc3.19. The native `tests/exported_api.rs::explain_json` covers the Ok
 // arms for coverage; these drive the genuine wasm32 exports through the JS boundary —
-// including the `Err` (JsError) arms `JsError::new` makes wasm32-only — and pin the
-// wasm32 honesty caveat the GUI renders around: ANALYZE `nanos` reads 0 (no monotonic
-// clock) while `actual` row counts stay exact.
+// including the `Err` (JsError) arms `JsError::new` makes wasm32-only — and pin that
+// ANALYZE `nanos` are REAL on wasm32 (the `performance.now()` host clock, sq-vx7ez,
+// #2428 — before it, no monotonic clock existed and every reading was 0) while
+// `actual` row counts stay exact.
 #[cfg(feature = "explain-json")]
 mod explain_json {
     use super::*;
@@ -944,15 +945,44 @@ mod explain_json {
     }
 
     /// `explainPlanAnalyzeJson` executes: exact `actual` rows, and `nanos` present as a
-    /// NUMBER but 0 on wasm32 (the documented no-monotonic-clock caveat).
+    /// NUMBER (never `null` in an ANALYZE tree).
     #[wasm_bindgen_test]
-    fn explain_plan_analyze_json_fills_actuals_zero_nanos() {
+    fn explain_plan_analyze_json_fills_actuals() {
         let store = Store::load(DATA, "turtle").expect("load");
         let json = store
             .explain_plan_analyze_json("PREFIX ex: <http://ex/> SELECT ?n WHERE { ?s ex:name ?n }")
             .expect("explainPlanAnalyzeJson");
         assert!(json.contains("\"actual\":2"), "exact rows: {json}");
-        assert!(json.contains("\"nanos\":0"), "wasm32 nanos read 0: {json}");
+        assert!(!json.contains("\"nanos\":null"), "ANALYZE fills nanos: {json}");
+    }
+
+    /// The `performance.now()` host clock gives real (non-zero) per-operator wall
+    /// times on wasm32 (sq-vx7ez, #2428). A few-thousand-row join keeps the root
+    /// operator's span comfortably above Node's `performance.now()` resolution, so a
+    /// zero reading would mean the clock never routed through the hook.
+    #[wasm_bindgen_test]
+    fn explain_plan_analyze_json_real_nanos_via_host_clock() {
+        let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+        for i in 0..200 {
+            ttl.push_str(&format!("ex:s{} ex:p ex:o{} .\n", i, i % 5));
+        }
+        let store = Store::load(&ttl, "turtle").expect("load");
+        let json = store
+            .explain_plan_analyze_json(
+                "SELECT * WHERE { ?a <http://ex/p> ?x . ?b <http://ex/p> ?x }",
+            )
+            .expect("explainPlanAnalyzeJson");
+        // The FIRST `"nanos":` in the pre-order JSON is the root operator's.
+        let root_nanos: u64 = json
+            .split("\"nanos\":")
+            .nth(1)
+            .expect("ANALYZE tree carries nanos")
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .expect("root nanos is a number");
+        assert!(root_nanos > 0, "host clock supplies real wall time: {json}");
     }
 
     /// A malformed query and a graph-valued ANALYZE cross the boundary as the `Err`

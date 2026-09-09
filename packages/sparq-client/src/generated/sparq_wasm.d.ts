@@ -173,8 +173,9 @@ export class Store {
     /**
      * STRUCTURED `EXPLAIN ANALYZE` — executes the query (SELECT / ASK only) and
      * returns the typed plan tree as camelCase JSON with each operator's `actual`
-     * output rows, wall `nanos` (0 on `wasm32` — no monotonic clock), and `qError`
-     * (= max(est/actual, actual/est)) filled in.
+     * output rows, wall `nanos` (real times, measured via the `performance.now()`
+     * host clock — see the module docs), and `qError` (= max(est/actual,
+     * actual/est)) filled in.
      *
      * A CONSTRUCT / DESCRIBE / UPDATE query is rejected with a clear error — use
      * [`explainPlanJson`](Self::explain_plan_json) for the graph-valued forms.

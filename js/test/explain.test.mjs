@@ -60,15 +60,19 @@ test('explainPlanJson() returns the camelCase typed tree (planning-only)', async
   assert.equal(tree.qError, null);
 });
 
-test('explainPlanAnalyzeJson() executes and fills exact actual rows (nanos read 0 on wasm)', async () => {
+test('explainPlanAnalyzeJson() executes and fills exact actual rows + real wall nanos on wasm', async () => {
   const store = await load();
   const tree = JSON.parse(
     store.explainPlanAnalyzeJson('PREFIX ex: <http://ex/> SELECT ?n WHERE { ?s ex:name ?n }'),
   );
   // Two ex:name triples in the fixture — exact row counts cross the boundary.
   assert.equal(tree.actual, 2);
-  // The documented wasm32 caveat: wall nanos read 0 (a NUMBER, not null) — unmeasured, not free.
-  assert.equal(tree.nanos, 0);
+  // sq-vx7ez (#2428): ANALYZE installs the performance.now() host clock, so wall nanos
+  // are REAL per-operator times — a finite NUMBER (not null). A tiny operator may still
+  // legitimately read 0 under host-timer coarsening, so assert a valid measurement (a
+  // non-negative finite integer) rather than a specific value.
+  assert.equal(typeof tree.nanos, 'number');
+  assert.ok(Number.isFinite(tree.nanos) && tree.nanos >= 0, `nanos=${tree.nanos}`);
   // Graph-valued forms are rejected, matching the Rust API.
   assert.throws(
     () => store.explainPlanAnalyzeJson('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }'),

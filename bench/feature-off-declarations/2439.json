@@ -1,0 +1,5 @@
+{
+  "pr": 2439,
+  "date": "2026-07-17",
+  "reason": "[OPUS-4.8] sq-vx7ez (#2428): the ANALYZE trace path in always-compiled sparq-engine (exec.rs eval_graph_pattern_traced + explain.rs explain_analyze_with_budget) is refactored from inline #[cfg(not(target_arch=\"wasm32\"))] Instant timing to a new exec::trace::Stopwatch abstraction. The host-clock field (host_start) and set_host_clock/host_clock_now helpers are ALL #[cfg(feature = \"explain-json\")]-gated, so with the feature OFF the Stopwatch is an empty struct and Stopwatch::elapsed_nanos() still returns 0 on wasm32 — feature-OFF behaviour is byte-semantically identical to base (row counts exact, wall nanos 0). Refactoring the always-compiled call sites onto Stopwatch::start()/elapsed_nanos() nudges LLVM inlining + panic-location (line!()/Location) metadata, so the feature-OFF wasm content moves. Size delta +0 bytes (+0.000%), well under the +/-2% wasm_bundle_bytes floor, so no floor bump. Not accidental feature leakage: the explain-json host-clock machinery does not compile into the feature-OFF build."
+}

@@ -190,9 +190,10 @@ native-ttl = ["sparq-core/native-ttl"]
 # `children` — the sq-jbqh4 schema contract) the GUI plan explorer renders. Forwards to
 # `sparq-engine/explain-json` (ZERO new dependencies — `explain-json = []` in the
 # engine). OFF by default so the lean `wasm_bundle_bytes` baseline is unchanged; the
-# published bundle (js `build:wasm`) turns it on. `nanos` reads 0 on wasm32 (no
-# monotonic clock) — row counts and q-error are exact; real per-operator wall times
-# come from the desktop-native (`explain_native`) or server (`explain-format=json`) paths.
+# published bundle (js `build:wasm`) turns it on. `nanos` are REAL per-operator wall
+# times on wasm32 too ([FABLE-5] sq-vx7ez, #2428): the ANALYZE binding installs
+# `performance.now()` — bound directly via wasm-bindgen, no js-sys — as the engine's
+# trace clock (`sparq_engine::set_trace_clock`); row counts and q-error are exact.
 explain-json = ["sparq-engine/explain-json"]
 
 [dev-dependencies]

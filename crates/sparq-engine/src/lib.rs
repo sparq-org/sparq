@@ -137,10 +137,12 @@ pub mod dp;
 pub use dp::{with_dp_planner, with_dp_planner_budget, without_dp_planner};
 pub use explain::{explain, explain_analyze, explain_analyze_with_budget};
 // [OPUS-4.8] (sq-u4lgr, #902) Structured EXPLAIN re-exports — gated on `explain-json`.
+// `set_trace_clock` (sq-vx7ez, #2428) lets a host without a monotonic `Instant`
+// (wasm32) supply the ANALYZE trace clock, e.g. `performance.now()`.
 #[cfg(feature = "explain-json")]
 pub use explain_json::{
-    explain_plan, explain_plan_analyze, explain_plan_analyze_with_budget, PlanNode, SlowQuery,
-    SlowQueryRing,
+    explain_plan, explain_plan_analyze, explain_plan_analyze_with_budget, set_trace_clock,
+    PlanNode, SlowQuery, SlowQueryRing,
 };
 pub use update::{
     apply_effects, update, update_in_place, update_in_place_atomic,

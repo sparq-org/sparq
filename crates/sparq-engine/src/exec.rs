@@ -744,6 +744,70 @@ pub(crate) mod trace {
     pub(crate) fn take() -> Vec<Node> {
         NODES.with(|n| std::mem::take(&mut *n.borrow_mut()))
     }
+
+    // ---- host-supplied trace clock (sq-vx7ez, #2428) ---------------------------
+    //
+    // `Instant` is unusable on wasm32-unknown-unknown (it panics), so ANALYZE wall
+    // times read 0 there — unless the embedder installs a clock (the sparq-wasm
+    // binding routes `performance.now()` through this) via
+    // `explain_json::set_trace_clock`. Per-thread (wasm is single-threaded; on
+    // native each test thread gets its own, which is what makes the hook testable
+    // off-wasm). Only `Stopwatch` reads it, and a `Stopwatch` only exists on the
+    // `#[cold]` traced path, so an uninstalled clock costs nothing anywhere.
+    #[cfg(feature = "explain-json")]
+    thread_local! {
+        static HOST_CLOCK: Cell<Option<fn() -> u64>> = const { Cell::new(None) };
+    }
+
+    /// Installs `f` as this thread's trace clock: a monotonic reading in
+    /// NANOSECONDS (only differences are used, so any epoch works).
+    #[cfg(feature = "explain-json")]
+    pub(crate) fn set_host_clock(f: fn() -> u64) {
+        HOST_CLOCK.with(|c| c.set(Some(f)));
+    }
+
+    /// The installed host clock's current reading, if one is installed.
+    #[cfg(feature = "explain-json")]
+    fn host_clock_now() -> Option<u64> {
+        HOST_CLOCK.with(|c| c.get()).map(|f| f())
+    }
+
+    /// Trace stopwatch: one clock read at operator entry, one at exit.
+    ///
+    /// An installed host clock (`explain-json`, see `set_host_clock`) wins on any
+    /// target; otherwise `Instant` off-wasm, and 0 on wasm32 (no monotonic clock).
+    pub(crate) struct Stopwatch {
+        #[cfg(feature = "explain-json")]
+        host_start: Option<u64>,
+        #[cfg(not(target_arch = "wasm32"))]
+        start: std::time::Instant,
+    }
+
+    impl Stopwatch {
+        pub(crate) fn start() -> Self {
+            Stopwatch {
+                #[cfg(feature = "explain-json")]
+                host_start: host_clock_now(),
+                #[cfg(not(target_arch = "wasm32"))]
+                start: std::time::Instant::now(),
+            }
+        }
+
+        pub(crate) fn elapsed_nanos(&self) -> u64 {
+            #[cfg(feature = "explain-json")]
+            if let Some(s) = self.host_start {
+                return host_clock_now().map_or(0, |e| e.saturating_sub(s));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.start.elapsed().as_nanos() as u64
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                0
+            }
+        }
+    }
 }
 
 // ---- Sideways information passing (SIP): correlated graph-pattern join (sq-7d3dj.30.3) ----
@@ -4837,15 +4901,11 @@ fn eval_graph_pattern_traced(graph: &Graph, local: &mut LocalVocab, p: &GraphPat
             trace::set_est(idx, est);
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let start = std::time::Instant::now();
+    // `Instant` off-wasm; a host-installed clock (`explain-json`) when present; 0 on
+    // wasm32 otherwise (no monotonic clock there) — see `trace::Stopwatch`.
+    let sw = trace::Stopwatch::start();
     let r = eval_graph_pattern_inner(graph, local, p);
-    #[cfg(not(target_arch = "wasm32"))]
-    let nanos = start.elapsed().as_nanos() as u64;
-    // `Instant` is unusable on wasm32-unknown-unknown (it panics): rows only there.
-    #[cfg(target_arch = "wasm32")]
-    let nanos = 0u64;
-    trace::exit(idx, r.as_ref().map_or(0, |b| b.rows.len()), nanos);
+    trace::exit(idx, r.as_ref().map_or(0, |b| b.rows.len()), sw.elapsed_nanos());
     r
 }
 

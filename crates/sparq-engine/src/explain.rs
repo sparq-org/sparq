@@ -21,8 +21,10 @@
 //! [`explain_analyze`] EXECUTES the query (SELECT/ASK) with the thread-local
 //! operator trace installed (`exec::trace`): every `eval_graph_pattern`
 //! operator entry records its output row count and wall time, reported as a
-//! tree after the plan. On `wasm32` wall times read 0 (no monotonic clock);
-//! row counts remain exact.
+//! tree after the plan. On `wasm32` wall times read 0 (no monotonic clock)
+//! unless a host clock is installed (`explain-json`'s `set_trace_clock` —
+//! the wasm binding routes `performance.now()` through it); row counts
+//! remain exact either way.
 
 use std::fmt::Write as _;
 
@@ -92,17 +94,13 @@ pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBu
     // Execute under the budget with the operator trace installed.
     let _bguard = exec::budget::install(budget);
     let _tguard = exec::trace::install();
-    #[cfg(not(target_arch = "wasm32"))]
-    let start = std::time::Instant::now();
+    let sw = exec::trace::Stopwatch::start();
     let total_rows = match &q {
         Query::Select { pattern, .. } => exec::eval_select(graph, pattern)?.rows.len(),
         Query::Ask { pattern, .. } => usize::from(exec::eval_ask(graph, pattern)?),
         _ => unreachable!(),
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let total_nanos = start.elapsed().as_nanos() as u64;
-    #[cfg(target_arch = "wasm32")]
-    let total_nanos = 0u64;
+    let total_nanos = sw.elapsed_nanos();
     let nodes = exec::trace::take();
 
     let _ = writeln!(out, "Execution trace (operator → output rows, wall time):");
