@@ -1,0 +1,85 @@
+{
+  "verified_at": "2026-09-09T18:39:14.934401+00:00",
+  "pr": 6469,
+  "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "merge_commit": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "all_changed_files_identical": true,
+  "files": [
+    {
+      "path": ".github/feature-matrix.d/sparq-core.yml",
+      "bytes": 3696,
+      "sha256": "58ca6d0a460976a7a48e502dceeed203e8d8f9292d708a9bdb180dbbcf419e10"
+    },
+    {
+      "path": "bench/benchmarks.toml",
+      "bytes": 193885,
+      "sha256": "2bd1851c08e8e0b14ba9f7c5f0930584931ac8259a1d2000ad64870926250b2d"
+    },
+    {
+      "path": "bench/feature-off-declarations/6469.json",
+      "bytes": 2405,
+      "sha256": "dfbdf0cb231e671d136b01c8b6f8d1e89198f12c0177abb7a8e35c11733d71ed"
+    },
+    {
+      "path": "bench/overlay-count/Cargo.lock",
+      "bytes": 23152,
+      "sha256": "b319e3eafeffff389ed020f2213f89dbc0f7041405a3dc9d42facec6e74681bf"
+    },
+    {
+      "path": "bench/overlay-count/Cargo.toml",
+      "bytes": 562,
+      "sha256": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040"
+    },
+    {
+      "path": "bench/overlay-count/README.md",
+      "bytes": 6532,
+      "sha256": "e0494181eca23a9cfb771e2782f6f049e5ddd412bfba50ecd91a34e9b6edf6a0"
+    },
+    {
+      "path": "bench/overlay-count/src/counting.rs",
+      "bytes": 7734,
+      "sha256": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911"
+    },
+    {
+      "path": "bench/overlay-count/src/lifecycle.rs",
+      "bytes": 13346,
+      "sha256": "d02c77e89674cf79f351f419540f1a69d192adae16bdbbc23a8fbce97c587e2b"
+    },
+    {
+      "path": "bench/overlay-count/src/main.rs",
+      "bytes": 6085,
+      "sha256": "946188525809298d068450911e93b3d0c3bed2e9a7c6cbcd91b713a71e6c5e48"
+    },
+    {
+      "path": "crates/sparq-core/Cargo.toml",
+      "bytes": 11422,
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362"
+    },
+    {
+      "path": "crates/sparq-core/README.md",
+      "bytes": 6331,
+      "sha256": "e58635a8842b94ad2474015e3396225b5fb55fd35a420ec6bc10dc8f4ed71d4b"
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "bytes": 112315,
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c"
+    },
+    {
+      "path": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "bytes": 14664,
+      "sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688"
+    },
+    {
+      "path": "scripts/tests/feature-matrix-legnames.golden.txt",
+      "bytes": 9342,
+      "sha256": "ef6cd71a633787e1a7e819c8ca6a4eb67b25880705e63a33e83dd9279bcfcf53"
+    },
+    {
+      "path": "skills/sparql-query/SKILL.md",
+      "bytes": 90712,
+      "sha256": "68208dc36b7e2a6f088b4bafd1833c7821d34564bf291cf354f52284a339a9e9"
+    }
+  ]
+}

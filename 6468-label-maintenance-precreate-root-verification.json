@@ -1,0 +1,12 @@
+{
+  "verified_at": "2026-09-09T18:47:40.681588+00:00",
+  "head_set_stable": true,
+  "open_prs": 166,
+  "all_paths_checked": 1691,
+  "no_generator_path_changes": true,
+  "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "reviewed_source_identical_after_main_advanced": true,
+  "registry_enabled": false,
+  "graphQL_label_absent": true,
+  "action": "one POST of exact reviewed body; fresh exactREST404stillrequired; no issue/PR labels or other actions"
+}

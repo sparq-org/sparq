@@ -1,0 +1,7 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+Implemented in [PR #6469](https://github.com/sparq-org/sparq/pull/6469), merged through the protected queue as `cea4414b39225b1240f36d968ba1549e700cd32f`. All changed files are byte-identical on main to the independently reviewed head.
+
+The new `sparq-core/overlay-deleted-projections` feature lazily caches deletion projections for range counting, retaining the hash set for membership. Actual tombstone changes invalidate the projections; insert-only and no-op batches retain them. It is intentionally off by default: measurement found cold-read/update and retained-generation memory costs, so this is an explicit experimental opt-in, with no universal crossover or canonical speedup claim. The matching crate README and SPARQL query skill document these limits and the reproducible diagnostic harness.
+
+Actual independent Claude Opus 5 with extra-high reasoning reviewed the source and final performance admission. Full PR checks and the exact merge-group gate passed, including feature execution, conformance/coverage and the applicable default-performance protections. This completes the requested caching implementation within the documented opt-in scope. Post-merge main CI is now running and remains under monitoring; no release is authorized.

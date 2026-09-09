@@ -1,0 +1,142 @@
+diff --git a/scripts/triage-area.py b/scripts/triage-area.py
+index c5c1e2527..f4fd5b17f 100644
+--- a/scripts/triage-area.py
++++ b/scripts/triage-area.py
+@@ -59,0 +60,20 @@
++# BOUNDED WRITE VOLUME PER RUN (#5448). Widening the REACH (#5003) did not widen what
++# is written per ISSUE, but it did widen how much is written per RUN: each classified
++# issue costs exactly one `gh issue edit`, and #3816 counted 832 area-less open issues,
++# so the first `--apply` ticks after the widening could issue several hundred mutating
++# requests in a few minutes. GitHub's SECONDARY rate limits on content-mutating REST
++# requests — documented as roughly 80/minute and 500/hour for the authenticated actor,
++# with the explicit guidance to wait at least one second between them — sit right in that
++# range. Two documented limits, so two mechanisms (see WRITE_PACE_SECONDS /
++# MAX_WRITES_PER_RUN): the pace keeps the per-MINUTE rate down, the budget keeps the
++# per-HOUR spend down. Note what this is arithmetic on: #3816's issue COUNT and GitHub's
++# published limits, not an observed 403. It is sized to keep the lane clear of the limit,
++# not derived from a measured failure.
++#
++# THE CAP IS NEVER SILENT. A budget that quietly dropped the tail would break the one
++# property this lane exists for — that its residue is a number a maintainer sees. Every
++# deferred issue is printed as a `DEFERRED` line, counted in the tally line, and carried
++# into the run summary by .github/workflows/triage-area.yml, and it is reported SEPARATELY
++# from the `LEFT` residue because the two mean opposite things: LEFT needs a human or a new
++# rule, DEFERRED needs nothing at all and is written by the next tick.
++#
+@@ -63,0 +84,2 @@
++#   python3 scripts/triage-area.py --apply --max-writes 400 --write-pace 0.5
++#                                                 # deliberate hand-run with a wider budget
+@@ -80,0 +103 @@ import sys
++import time
+@@ -87,0 +111,33 @@ PARK_LABEL = "needs:area"
++# --- the write budget (#5448) ---------------------------------------------------
++# GitHub's documented SECONDARY rate limits for content-mutating REST requests, per
++# token. Recorded as named constants rather than inlined so the arithmetic below is
++# checkable — scripts/tests/test_triage_area.py::TestWriteBudget asserts the two
++# defaults stay under them.
++SECONDARY_WRITES_PER_MINUTE = 80
++SECONDARY_WRITES_PER_HOUR = 500
++
++# How often .github/workflows/triage-area.yml fires (`cron: '25,55 * * * *'`). The
++# per-run budget is the per-hour allowance divided across the ticks in an hour, so
++# this constant and that cron must agree — the test parses the workflow and pins it.
++TICKS_PER_HOUR = 2
++
++# Seconds between two `gh issue edit` calls. GitHub's own guidance for the
++# content-mutating secondary limit is to wait at least one second between requests;
++# 1.0s also caps this lane at 60 writes/minute against the ~80/minute limit, which is
++# the headroom that matters because the runner shares its token with the repo's other
++# write lanes. Not a retry and not a backoff: the sweep never approaches the limit
++# rather than recovering from it.
++WRITE_PACE_SECONDS = 1.0
++
++# Mutating requests one `--apply` tick may spend. 150 x 2 ticks = 300/hour, i.e. 60%
++# of the documented ~500/hour allowance, leaving the rest for retriage.yml and the
++# other scheduled lanes that mutate issues with the same token. The residue that does
++# not fit is DEFERRED and REPORTED, never dropped: the queue is sorted by issue number
++# and every write removes an issue from it (it now carries an `area:` label), so a
++# backlog larger than one budget drains monotonically over consecutive ticks — the same
++# resume-on-the-next-tick property that already covers a timed-out run.
++MAX_WRITES_PER_RUN = 150
++
++# Indirection so the hermetic tests can assert the pacing without sleeping through it.
++_sleep = time.sleep
++
+@@ -283 +339 @@ RULES = [
+-     r"js/src/|js/package\.json|@jeswr/sparq|rdf/js conformance|\bjs gate\b",
++     r"js/src/|js/package\.json|@sparq-org/sparq|rdf/js conformance|\bjs gate\b",
+@@ -647,0 +704,16 @@ def self_test():
++def _positive_int(text):
++    value = int(text)
++    if value < 1:
++        raise argparse.ArgumentTypeError(
++            "the per-run write budget must be >= 1 — there is no unlimited mode "
++            "(#5448: an unbounded tick is what trips GitHub's secondary write limit)")
++    return value
++
++
++def _non_negative_float(text):
++    value = float(text)
++    if value < 0:
++        raise argparse.ArgumentTypeError("the write pace must be >= 0 seconds")
++    return value
++
++
+@@ -652,0 +725,9 @@ def main():
++    ap.add_argument("--max-writes", type=_positive_int, default=MAX_WRITES_PER_RUN,
++                    metavar="N",
++                    help=f"mutating `gh issue edit` calls this run may spend "
++                         f"(default {MAX_WRITES_PER_RUN}); the rest are reported as "
++                         "DEFERRED and written by the next tick")
++    ap.add_argument("--write-pace", type=_non_negative_float, default=WRITE_PACE_SECONDS,
++                    metavar="SECONDS",
++                    help=f"seconds to wait between two writes (default "
++                         f"{WRITE_PACE_SECONDS})")
+@@ -666,0 +748,9 @@ def main():
++    classified = [r for r in rows if r[1]]
++    left = [r for r in rows if not r[1] and not r[2].startswith("SKIP")]
++    # The per-run write budget (#5448). The split is a deterministic PREFIX of the
++    # issue-number-ordered plan, in BOTH modes: a dry run must show the maintainer the
++    # same deferral the next `--apply` tick will make, or the budget is invisible until
++    # it bites. Every write drops its issue out of `candidate_issues()`, so the deferred
++    # tail is strictly smaller on the next tick.
++    writable, deferred = classified[:a.max_writes], classified[a.max_writes:]
++
+@@ -667,0 +758 @@ def main():
++        deferred_numbers = {it["number"] for it, _, _ in deferred}
+@@ -669 +760,3 @@ def main():
+-                           "areas": add, "evidence": why} for it, add, why in rows], indent=1))
++                           "areas": add, "evidence": why,
++                           "deferred": it["number"] in deferred_numbers}
++                          for it, add, why in rows], indent=1))
+@@ -672,2 +764,0 @@ def main():
+-    classified = [r for r in rows if r[1]]
+-    left = [r for r in rows if not r[1] and not r[2].startswith("SKIP")]
+@@ -677 +768 @@ def main():
+-        print(f"#{it['number']:<5} {','.join(a[5:] for a in add):<40} {why}")
++        print(f"#{it['number']:<5} {','.join(lb[5:] for lb in add):<40} {why}")
+@@ -679,2 +770,4 @@ def main():
+-    print(f"\n-- {len(classified)} classified, {len(left)} left unattributed "
+-          f"(no confident evidence), {len(rows)} scanned")
++    print(f"\n-- {len(classified)} classified ({len(writable)} writable this run, "
++          f"{len(deferred)} deferred to the next tick by the {a.max_writes}/run write "
++          f"budget), {len(left)} left unattributed (no confident evidence), "
++          f"{len(rows)} scanned")
+@@ -682,0 +776,5 @@ def main():
++    # Reported SEPARATELY from LEFT and never merged into it: a DEFERRED issue is fully
++    # classified and needs no human, it just did not fit this tick's write budget.
++    for it, add, _ in deferred:
++        print(f"   DEFERRED #{it['number']} {','.join(lb[5:] for lb in add)} "
++              f"{it['title'][:120]}")
+@@ -687 +785,5 @@ def main():
+-    for it, add, _ in classified:
++    for index, (it, add, _) in enumerate(writable):
++        # Pace the mutating calls under GitHub's per-minute secondary limit. Between
++        # writes only — a lane with one write must not pay a second for nothing.
++        if index and a.write_pace:
++            _sleep(a.write_pace)
+@@ -693,0 +796,4 @@ def main():
++    if deferred:
++        print(f"\ndeferred {len(deferred)} classified issue(s) to the next tick — the "
++              f"{a.max_writes}/run budget keeps this lane under GitHub's secondary write "
++              "limit; they are listed above and nothing about them is lost.")

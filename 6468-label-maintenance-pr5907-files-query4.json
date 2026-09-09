@@ -1,0 +1,1 @@
+{"query": "query($after:String){rateLimit{remaining cost resetAt} repository(owner:\"sparq-org\",name:\"sparq\"){pullRequest(number:5907){number headRefOid changedFiles files(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{path changeType}}}}}", "variables": {"after": "MzAw"}}

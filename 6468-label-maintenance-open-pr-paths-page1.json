@@ -1,0 +1,1 @@
+{"errors":[{"path":["query","repository","pullRequests","nodes","files","nodes","previousFilename"],"extensions":{"code":"undefinedField","typeName":"PullRequestChangedFile","fieldName":"previousFilename"},"locations":[{"line":1,"column":397}],"message":"Field 'previousFilename' doesn't exist on type 'PullRequestChangedFile'"}]}

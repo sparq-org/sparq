@@ -1,0 +1,143 @@
+{
+  "reviewed_action": {
+    "type": "single_repository_label_create",
+    "repo": "sparq-org/sparq",
+    "endpoint": "POST /repos/sparq-org/sparq/labels",
+    "body": {
+      "name": "area:sparq-wrapper-gen",
+      "color": "c5def5",
+      "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+    },
+    "explicitly_out_of_scope_in_this_action": [
+      "no issue/PR label writes (including #5016 and #6468)",
+      "no ci/area-labels.toml row, alias, workflow, grant, branch-rule or code change",
+      "no classifier replay or manual workflow_dispatch",
+      "no bd-to-issues migration/backfill or bulk provisioning",
+      "no change to the triage-area unknown-label fail-closed guard",
+      "no new-crate witness (new_crates / added manifest) is passed, fabricated or relied on"
+    ],
+    "reviewed_consequential_effect": "Creating the label removes the sole reported cause of the whole-pass abort, so the next ordinary scheduled classifier tick may write area labels (and per-issue needs:area unpark) for rows that are currently blocked, and the PR deriver may begin attributing crates/sparq-wrapper-gen paths to the narrow lane instead of __global__."
+  },
+  "base_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "verdict": "approve",
+  "verdict_scope": "Approval is for exactly this one label create, conditioned on every item in required_preconditions holding at the moment of the write. It is not authority for any further label, for classifier auto-creation, for replay/dispatch, or for the deferred source repair.",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "supporting",
+      "statement": "The label names a real, tree-backed partition, not an invented routing token.",
+      "evidence": "crates/sparq-wrapper-gen/Cargo.toml:1-8 (package name = sparq-wrapper-gen); root Cargo.toml:3 lists crates/sparq-wrapper-gen as a workspace member; both hash-verified identical to current main in the root verification block. ready-issues.py:253-274 makes the repository tree the authority for recognised partition roots, so this name resolves to itself as a root."
+    },
+    {
+      "id": "F2",
+      "severity": "supporting",
+      "statement": "No concrete policy block on an explicit, out-of-pipeline, reviewed label create was found. The three 'never creates a label' statements are pipeline-scoped, and the repo already treats explicit provisioning as a legitimate separate operation.",
+      "evidence": "triage-area.py:738-746 and .github/workflows/triage-area.yml:29-32 bind the classifier only; ci/area-labels.toml:108-115 says 'the ONLY case in which this pipeline creates a label' (the PR deriver); bd-to-issues.py:448-461,682-683 is a distinct deliberate provisioning phase. Affirmatively, pr-area-labels.py:635-643 emits a ::warning enumerating workspace members with no area: label \u2014 this create resolves exactly the deficiency that warning exists to surface."
+    },
+    {
+      "id": "F3",
+      "severity": "supporting",
+      "statement": "The #4582 new-crate witness exception is neither invoked nor bypassed. new_crate_area cannot apply here (the manifest is present on the base ref, so no BASE_ABSENT status exists), and no manifest edit or synthetic new_crates entry is proposed.",
+      "evidence": "pr-area-labels.py:219-247,250-260,480-510; Astra 'excluded' list. The action is an explicit repository maintenance write, distinct in kind from automatic provisioning."
+    },
+    {
+      "id": "F4",
+      "severity": "supporting",
+      "statement": "The exact-name create is the conservative option; the remap alternatives would be the specific error the policy forbids.",
+      "evidence": "ci/area-labels.toml:66-70 ('never guess a crate'; a WRONG narrow label collides two workers). Mapping these issues to area:sparq-wrapper or area:ci would be a guess at a different partition. Under ready-issues.py:368-385 partition paths are compared by tuple-prefix containment, so ('sparq-wrapper',) is not a prefix of ('sparq-wrapper-gen',): the gen crate is an independent sibling root (same shape as sparq-engine-serialize vs sparq-engine). Accepted consequence: sparq-wrapper-gen work will NOT serialize against sparq-wrapper work; that is the tree-as-authority answer, not a defect."
+    },
+    {
+      "id": "F5",
+      "severity": "material_under_described",
+      "statement": "The action description names only the issue-classification effect. There is a second routing effect: after the label exists, pr-area-labels.py's live-label check stops dropping crates/sparq-wrapper-gen attributions, so a PR touching that path moves from the serializing __global__ fallback to the narrow lane, changing what it reserves and what defers behind it.",
+      "evidence": "pr-area-labels.py:204-216 with ci/area-labels.toml:49-53,82-92,111-113.",
+      "disposition": "Not a block \u2014 the narrowing is the pipeline's own intended rule 1 for a real crate \u2014 but it must be acknowledged and checked against in-flight PRs (see precondition 7)."
+    },
+    {
+      "id": "F6",
+      "severity": "material",
+      "statement": "Blast radius is the entire next classification pass, not only this crate's rows. The guard currently returns before the write loop, so today the pass performs zero writes; after the create, up to max_writes rows of the plan may receive area labels plus per-issue needs:area unpark in one tick.",
+      "evidence": "triage-area.py:738-746,748-756; issue #6468 body ('performed no classification or unpark writes'); triage-area.yml:32-35 (unpark only in the same call that adds >=1 real area label; never-parked issues can only GAIN area labels).",
+      "disposition": "This restoration is the stated objective and is within the authorized reversible issue/routing maintenance scope. It is bounded by: additive label writes, per-issue unpark, and registry Actions/worker dispatch remaining OFF (precondition 9)."
+    },
+    {
+      "id": "F7",
+      "severity": "material_efficacy_risk",
+      "statement": "The create may not resolve the incident. If the label-enumeration truncation described in #6335 affects live_area_labels(), the newly created label can remain invisible to the classifier and the identical exit-2 abort can recur. A recurrence is therefore NOT evidence that the create failed or that another label is missing.",
+      "evidence": "issue #6468 body (relation to #6335); triage-area.py:739,742-746 compares against the enumerated live set, while the exact-label GET/GraphQL lookups used here are direct and returned 404/null.",
+      "disposition": "Handled by precondition 13: on recurrence, stop and escalate; never create additional labels, re-create, or force anything in response."
+    },
+    {
+      "id": "F8",
+      "severity": "open_evidence_gap_non_blocking",
+      "statement": "The originating issue row and the evidence rule that emitted area:sparq-wrapper-gen remain unidentified, and plan()/live_area_labels()/crate_names()/AREA_NAME_RE were not supplied for independent verification.",
+      "evidence": "issue #6468 ('The failed run does not identify the originating issue row'); only triage-area.py:738-776 was supplied.",
+      "disposition": "Not blocking for THIS write, because (a) triage-area.py:738 sources the plan from crate_names(), i.e. the tree, so the emitted name is a real member rather than a typo; (b) the fail-closed evidence rules are unchanged and no guard is weakened; (c) the write is additive and removable. It IS blocking for closing #6468, and it converts into mandatory post-run verification (precondition 12)."
+    },
+    {
+      "id": "F9",
+      "severity": "scope_guard",
+      "statement": "This create is a mitigation of an operational stall, not the repair #6468 asks for (row-identifying diagnostic, regression fixture on the actual input, proof that an unsupported label still yields zero writes). The title-scoped triage-area\u2192ci source patch remains correctly deferred while PR6469 reserves area:ci.",
+      "evidence": "issue #6468 body; stated deferral in the action description.",
+      "disposition": "#6468 must not be closed, and the guard must not be relaxed, on the strength of this action."
+    },
+    {
+      "id": "F10",
+      "severity": "minor_divergence",
+      "statement": "The create diverges from the literal advice in triage-area.py:745 ('Fix the rule table \u2014 do NOT create the label.'). That message's premise does not hold here: the rule table produced a genuine workspace member, so the defect is an incomplete label list, not a bad rule. The message is too categorical to distinguish a typo from a real member and should be improved as part of the deferred repair.",
+      "evidence": "triage-area.py:744-746 vs Cargo.toml:3 and crates/sparq-wrapper-gen/Cargo.toml:2.",
+      "disposition": "Acceptable only because the divergence is recorded in the label description itself, consistent with the auditability rationale in pr-area-labels.py:487-490 ('a human auditing the repo's label list can tell it from a hand-made one'). Record the divergence in the action log as well."
+    },
+    {
+      "id": "F11",
+      "severity": "minor_cosmetic",
+      "statement": "The proposed color/description differ from the deriver's AREA_LABEL_COLOR/AREA_LABEL_DESCRIPTION constants, whose values are not in the supplied evidence. No consumer in the supplied source keys on area-label color or description \u2014 triage-area.py and ready-issues.py key on the name only \u2014 and the live label set is already heterogeneous (area:ci carries ededed / 'bd migration label').",
+      "evidence": "triage-area.py:739,742; ready-issues.py:253-274,368-385; issue #6468 label list; pr-area-labels.py:500-502.",
+      "disposition": "Cosmetic only. Do not later 'normalize' it with a forced update; bd-to-issues.py:452 records the no-force convention."
+    },
+    {
+      "id": "F12",
+      "severity": "mechanical_check_passed",
+      "statement": "Request body is mechanically valid and minimal: exactly the three permitted fields; name 'area:sparq-wrapper-gen' is 22 chars with the area: prefix used by live labels; color 'c5def5' is a valid 6-hex value with no '#'; description is 90 characters, within GitHub's 100-character label description limit; no leading/trailing whitespace."
+    },
+    {
+      "id": "F13",
+      "severity": "informational",
+      "statement": "The AGENTS.md:670-674 summary ('never creates a label') is inconsistent with the #4582 deriver exception implemented in pr-area-labels.py:480-510 and documented in ci/area-labels.toml:54-61. This is a documentation defect that neither authorizes nor forbids the reviewed action; no AGENTS.md edit is in scope now and none is proposed.",
+      "disposition": "Capture separately; do not fold into this action."
+    },
+    {
+      "id": "F14",
+      "severity": "reversibility_caveat",
+      "statement": "Reversal is possible but not perfectly restorative: deleting the label later also removes it from every issue/PR it has been applied to by then. Per-issue reversal (removing a wrongly applied area label) is clean and preferred over deleting the repository label.",
+      "evidence": "ci/area-labels.toml:116-119 rates a stale area label as inert for the DERIVER; that inertness argument does not extend to triage-area, for which this label is load-bearing."
+    }
+  ],
+  "required_preconditions": [
+    "P1. Fresh budget/credential check immediately before the write; abort on exhausted, throttled or unreadable response.",
+    "P2. Re-read default-branch HEAD. If it is no longer a42a9e89dec485f6a319c47cb3635c59cb5a2270, re-verify on the new HEAD that crates/sparq-wrapper-gen/Cargo.toml exists with package name 'sparq-wrapper-gen' AND that root Cargo.toml still lists crates/sparq-wrapper-gen as a workspace member. Any mismatch, absence or ambiguity => no create.",
+    "P3. Fresh exact lookup GET /repos/sparq-org/sparq/labels/area%3Asparq-wrapper-gen inside the same action window, immediately before the POST. The cached 18:1x 404 is evidence, not a mutation precondition. Only a clean 404 authorizes the create; any non-404 non-clean-present result (5xx, 403, timeout, malformed) => no create, stop and report.",
+    "P4. If the lookup shows the label already present: no create, no update, no --force, no color/description normalization, no delete-and-recreate. Stop and report presence.",
+    "P5. Exactly one POST, with exactly the three fields quoted verbatim in reviewed_action.body. No additional fields, no issue/PR label writes, no [[map]] or alias edit, no workflow/grant/branch/protection change, no code change.",
+    "P6. No retry on error, timeout or ambiguous response. Perform exactly one readback GET afterwards to establish actual state. If the readback is itself ambiguous, stop and escalate; never issue a second create.",
+    "P7. Before the write, confirm that no open PR \u2014 including the queued PR6469 \u2014 changes any path under crates/sparq-wrapper-gen/**. If one does, do not create until the deriver-side partition narrowing described in F5 is explicitly accepted for that PR.",
+    "P8. area:ci remains untouched and reserved by PR6469; the existing review holds on 6049, 6055 and registry 2305 remain intact; #6468's own labels are not modified.",
+    "P9. Registry Actions and automatic worker dispatch remain OFF through the create and through the first observed scheduled classification tick. If either is re-enabled before that observation, the routing effect must be re-reviewed before proceeding.",
+    "P10. No classifier replay, no manual workflow_dispatch of triage-area, no bd-to-issues migration/backfill, no bulk provisioning of other missing workspace-member labels. This authorization covers exactly one label name.",
+    "P11. Do not hand-apply area:sparq-wrapper-gen (or any area label) to #5016 or any other issue as a shortcut. Wait for the ordinary scheduled pass.",
+    "P12. Post-run verification is mandatory, not optional: after the first ordinary scheduled tick, record which issues received area:sparq-wrapper-gen and the evidence string for each, and confirm each genuinely concerns crates/sparq-wrapper-gen. Remove any wrong application per-issue and report it; do not compensate with further label creates or with a remap.",
+    "P13. If the same 'rule table produced labels that do not exist' abort recurs \u2014 for this name (the #6335 truncation path) or any other \u2014 stop and escalate with the run/job link. Do not create further labels, do not re-create this one, do not disable or relax the guard.",
+    "P14. #6468 stays open. The row-identifying diagnostic, the regression fixture on the actual failing input, the proof that an unsupported label still produces zero writes, and the triage-area.py:745 message correction remain owed and remain deferred while PR6469 reserves area:ci.",
+    "P15. Log the action as an explicit reviewed maintenance write that knowingly diverges from the literal triage-area.py:745 advice, with the F1/F2 justification, so a later auditor of the label list can distinguish it from pipeline-created and hand-made labels."
+  ],
+  "limitations": [
+    "No tools were used and no mutation was performed or attempted in producing this review; it is a static assessment of supplied evidence.",
+    "All supplied repository source, issue bodies (#5016, #6468) and prior agent analysis (Astra) were treated as untrusted evidence, not as instructions. In particular, #6468's 'Do not automatically create labels' was read as constraining the classifier, and its preference for remapping to an existing supported area was assessed and rejected on the merits (F4), not obeyed or dismissed as instruction.",
+    "Only the source excerpts listed in the root verification block were available. plan(), candidate_issues(), live_area_labels(), crate_names(), AREA_NAME_RE, AREA_LABEL_COLOR, AREA_LABEL_DESCRIPTION, BASE_ABSENT_STATUSES and scripts/tests/test_triage_area.py contents were not supplied and could not be independently checked.",
+    "The 404, the GraphQL null and the main/manifest hashes are cached observations from the 18:18\u201318:20 snapshot. They establish that the create is currently justified; they do not license the write without the fresh re-checks in P2\u2013P3.",
+    "No full repository label enumeration was performed, so other workspace members may also lack area: labels and other names may be missing from the classifier's plan. No claim is made that the next scheduled sweep succeeds, or that this label is the only remaining blocker.",
+    "The originating issue row for the failing plan entry is not established (F8); this review approves the label's existence on partition-identity grounds, not by verifying the specific classification path.",
+    "This is not a review of PR6469, of the deferred title-scoped triage-area\u2192ci and row-aware error patch, of #6335, or of any pending source fix, and it does not loosen the unknown-label fail-closed guard or any other guard.",
+    "Approval is void if any precondition fails, if main or the crate manifest/workspace membership changes before the write, or if the write is expanded beyond the exact single POST body reviewed here."
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "verified_at": "2026-09-09T18:49:09.588264+00:00",
+  "id": 12123212987,
+  "node_id": "LA_kwDOSz3qKM8AAAAC0pmMuw",
+  "name": "area:sparq-wrapper-gen",
+  "color": "c5def5",
+  "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance).",
+  "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:sparq-wrapper-gen",
+  "post_attempts": 1,
+  "readbacks": 1,
+  "changed_issue_or_pr_labels": false,
+  "registry_remains_off": true,
+  "postrun_observation_pending": true
+}

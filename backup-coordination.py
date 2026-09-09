@@ -217,6 +217,18 @@ for evidence_name in ["report.json", "manifest.json"]:
 for evidence_name in ["label-before-review.json", "issue5016-before-review.json", "source-verification.json", "create-input.json", "opus-input.md", "input-manifest.json"]:
     FILES["6468-label-maintenance-" + evidence_name] = ROOT / "direct-6468/label-maintenance" / evidence_name
 
+for evidence_name in ['queue-1836.json', 'queue-runs-1836.json', 'issue4246-before-close.json', 'main-source-proof.json', 'issue4246-close-comment.md', 'issue4246-comment-precheck.json', 'issue4246-comment-result.txt', 'issue4246-close-precheck.json', 'issue4246-close-result.txt', 'issue4246-closed-verified.json', 'main-runs-1859.json']:
+    FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
+
+for evidence_name in ['comment-result.txt', 'comment-verified.json', 'create-input.json', 'create-readback.json', 'create-result.json', 'docs-drift-comment-result.txt', 'docs-drift-comment-verified.json', 'docs-drift-comment.md', 'docs-drift-dedupe-query-v2.json', 'docs-drift-dedupe-query.json', 'docs-drift-dedupe-v2.json', 'docs-drift-dedupe.json', 'docs-drift-issue5412-precheck.json', 'input-manifest.json', 'issue-comment-precheck.json', 'issue5016-before-review.json', 'label-before-review.json', 'maintenance-comment.md', 'maintenance-verified.json', 'open-pr-paths-page1.json', 'open-pr-paths-query-v2-page2.json', 'open-pr-paths-query-v2.json', 'open-pr-paths-query.json', 'open-pr-paths-root-verification.json', 'open-pr-paths-v2-page1.json', 'open-pr-paths-v2-page2.json', 'opus-input.md', 'opus-review-result.json', 'opus-review.json', 'opus-stderr.txt', 'pr5907-files-page2.json', 'pr5907-files-page3.json', 'pr5907-files-page4.json', 'pr5907-files-page5.json', 'pr5907-files-page6.json', 'pr5907-files-page7.json', 'pr5907-files-page8.json', 'pr5907-files-query2.json', 'pr5907-files-query3.json', 'pr5907-files-query4.json', 'pr5907-files-query5.json', 'pr5907-files-query6.json', 'pr5907-files-query7.json', 'pr5907-files-query8.json', 'precreate-exact-label.json', 'precreate-heads-query1.json', 'precreate-heads-query2.json', 'precreate-heads1.json', 'precreate-heads2.json', 'precreate-registry-pause.json', 'precreate-root-verification.json', 'scheduled-runs-after-create.json', 'source-revalidated-cea4414.json', 'source-verification.json']:
+    FILES["6468-label-maintenance-" + evidence_name] = ROOT / "direct-6468/label-maintenance" / evidence_name
+
+for evidence_name in ['5457-base-to-main-test_triage_area.py.diff', '5457-base-to-main-triage-area.py.diff', '6095-base-to-main-test_triage_area.py.diff', '6095-base-to-main-triage-area.py.diff', 'base-composition.json', 'budget.json', 'p5457.diff', 'p6095.diff', 'pr5457-checks.json', 'pr6095-checks.json', 'report.json', 'report.md', 'reviews-and-holds.json', 'source/main/scripts/tests/test_triage_area.py', 'source/main/scripts/triage-area.py', 'source/pr5457/scripts/tests/test_triage_area.py', 'source/pr5457/scripts/triage-area.py', 'source/pr6095/scripts/tests/test_triage_area.py', 'source/pr6095/scripts/triage-area.py', 'manifest.json', 'root-verification.json']:
+    FILES["6468-conflict-assessment-" + evidence_name.replace("/", "--")] = ROOT / "direct-6468/conflict-assessment" / evidence_name
+
+for evidence_name in ["pr5457-conflict.json", "pr6095-conflict.json"]:
+    FILES["6468-" + evidence_name] = ROOT / "direct-6468" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T18:22:35.446630+00:00",
+  "updated_at": "2026-09-09T18:57:13.517567+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -45,9 +45,9 @@
     ]
   },
   "live_main": {
-    "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T17:56:01.893981+00:00",
-    "evidence": "direct-4246/perf-admission/review-current.json"
+    "oid": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "observed_at": "2026-09-09T18:49:09.588264+00:00",
+    "evidence": "direct-6468/label-maintenance/precreate-heads1.json"
   },
   "rules": {
     "required_check": "gate",
@@ -59,628 +59,103 @@
   },
   "admission_policy": "An independent GitHub account is not an extra direct-admission requirement. OWNER/MEMBER/COLLABORATOR noncontributor verdict restrictions govern automated label promotion. Actual independent Opus source review + green required CI + resolved threads permit direct protected queue admission. review:unreviewed is informational; review:needs is a real hold. Never write a fabricated canonical VERDICT:pass as jeswr.",
   "active_lane": {
+    "issue": 6468,
     "agent": "/root/postmerge_ci",
-    "model": "GPT-6 Astra",
+    "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "issue": 4246,
-    "pr": 6469,
-    "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-    "branch": "codex/overlay-deleted-projections",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
-    "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "PR6469 enqueued normally atposition1 after actualOpus final perf allow and301success8skip1neutral currentheadchecks. ALLGREEN/gate15368unchanged. Monitor merge_group checks; no merge claim, no cancellations/retries.",
-    "phase": "Protected queue admitted; exact merge-group validation pending",
-    "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
-    "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
-    "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
-    "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
-    "dedupe_file": "overlay-cost-dedupe.json",
-    "issue_source_file": "overlay4246-read.json",
-    "scope_guard": "Agent must confirm on fresh main that premise remains present before implementing; do not transplant stopped top-k experiment.",
-    "report_directory": "direct-4246",
-    "report": "direct-4246/report.json",
-    "validation": "44 test executions;4compiledassertionmutantskilled; scopedcoreclippyPASS. Baseline beforeproductionedits; paired24fixedpoints. Coldfirstuse and warmedfork cache-copy memory costs are explicit material tradeoffs. Fullworkspace/conformance/gates not yetrun. Localpreflight soleknownBash3mapfilefailure, no bypass.",
-    "review_runtime": {
-      "session_id": 62677,
-      "kind": "exec_command",
-      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/review-packet.md",
-      "input_sha256": "789519e37efe27e4effcc9efc73ab88b376d9c7e4128a9902c2ebefec713ad13",
-      "input_bytes": 121478,
-      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/opus-review-acfa31cf.json",
-      "started_at": "2026-09-09T12:00:13.879900+00:00",
-      "completed": true,
-      "acceptance": "Require completed successfulJSON, is_errorfalse, actual modelUsage claude-opus-5 and exactreviewedhead. No duplicate or exhaustedquota retry.",
-      "collected_at": "2026-09-09T12:06:15.356833+00:00",
-      "output_sha256": "152e047c1c2cf0e701bff0c17ea41790dcd6ece40cef388f89654bc45def9602",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 236584
+    "phase": "Astra implementation running in isolated issue6468 lane; maintenance awaiting first ordinary scheduled classification",
+    "started_at": "2026-09-09T18:04:24.354143+00:00",
+    "current_issue": "direct-6468/current-1802.json",
+    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
+    "design": {
+      "path": "direct-6468/next-design/report.json",
+      "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7",
+      "manifest_verified": true,
+      "source_verified": true
     },
-    "review_focus": "Deleted cache invalidation across mutation/clone/fork/snapshot/concurrentreads; bounds/permutations; heap/budgetaccounting; measurement/counter soundness; cold-after-write latency and warmed-cache copying. No unconditional performance/admission claim.",
-    "review_verdict": "request_changes, actual Opus5xhigh; no admission approval",
-    "reviewed_head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
-    "review_findings": {
-      "B1": "Unconditional invalidation evicts deletion caches on insert-only deltas into an overlay already holding deletions, causing repeated cold sorts. Existing insert-only control had no deletions. Split invalidation and track actual deleted-set insert/remove changes; add targeted workload/control.",
-      "B2": "Warmed overlay clone/fork deep-copies initialized caches; absent lifecycle measurement. Measure warmedfork/snapshot\u2192apply_delta\u2192read/publish and retained-generation heap before deciding on clone/cache redesign.",
-      "B3": "Missingstore327-851 and workspace mutation/access/replacement inventory. Verify all deleted-set mutators/WAL/compaction/persist paths and document sole-mutator invariant if true.",
-      "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
-    },
-    "latest_agent_status": {
-      "at": "2026-09-09T14:17:16.853952+00:00",
-      "local_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "public_head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "state": "Focused source preservation correction committed. Root inspected the one-file diff. Agent is completing authorized native checks and the single offline compiler-backed proof; final manifest and independent Opus review pending.",
-      "proof_contract": "Unchanged protocol and raw cargo wasm builder; local argv shim may append only --locked and must record full source/forwarded argv. Per-tree private targets, offline dependencies, two jobs, one shared 900-second cap, stop below 10 GiB free. No source declaration, push, or gate edit authorized."
-    },
-    "revision_report": "direct-4246/revision/report.json",
-    "revision_root_verification": "direct-4246/revision/root-verification.json",
-    "revision_validation": "48 scoped test executions,5 compiled controls killed,core/harnessclippyPASS; frozen620-window lifecycle evidence. Known Bash3mapfile preflight failure; fullworkspace/wasm/conformance/canonical ratchets pending. Warm gains coexist with cold and retained-memory regressions; no admission claim.",
-    "focused_review_runtime": {
-      "session_id": 48546,
-      "kind": "exec_command",
-      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/review-packet.md",
-      "input_sha256": "bb45493066e061c65a2c603fb55dd376cae0d21743778e10442c7190f8c63ecf",
-      "input_bytes": 238995,
-      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/opus-review-cb638a42.json",
-      "started_at": "2026-09-09T12:45:31.907288+00:00",
-      "completed": true,
-      "acceptance": "SuccessfulJSON,is_errorfalse,actual modelUsageclaude-opus-5,exactcb638reviewedhead; no duplicate/exhaustedquota retry.",
-      "collected_at": "2026-09-09T12:53:37.457699+00:00",
-      "output_sha256": "996af7a8fc251793b7e4a53ab3c8ebb5f8805408f4b466e3ba54ba7617e57cc0",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 322874
-    },
-    "focused_review_verdict": "defer_performance_admission: source repair sound, B1/B3 resolved, no correctness changes requested; default-on admission withheld for cold/retained-memory/unbounded-D costs.",
-    "focused_review_findings": {
-      "A1": "Ordinary fork/tombstone/read, cold multi-pattern and concurrentcold paths slower with disjoint ranges.",
-      "A2": "Derived cloning copies initialized projections per retained generation, with no cap. B1 retention extends memory lifetime.",
-      "A3": "Durable clear/default delete-all can make D scale with base graph; direction supported by source, not measured here.",
-      "recommendation": "Gate scope; avoid arbitrary threshold or Clone reset. Owner decision default-on/opt-in/drop, and only if continue one fixed R={1,2,4,8,16} read-per-generation measurement."
-    },
-    "coordinator_scope_decision": {
-      "at": "2026-09-09T12:53:37.457699+00:00",
-      "choice": "default-off experimental Cargo opt-in only",
-      "reason": "Correct source with strong measured warm gains, but unsupported general admission. Preserve default linear path and compile out added deletion-cache metadata/bookkeeping; explicit opt-in documents costs. Routine bounded implementation decision within authorized task, no protection/approval bypass.",
-      "measurement_limit": "Only fixed five-point reads-per-generation experiment allowed by reviewer; no threshold/Clone/Arc/permutation redesign."
-    },
-    "feature_revision_contract": "One repo-consistent default-OFF core Cargo feature gates all new deletion-cache fields, accounting, initialization/invalidation and counting. Ordinary build retains main linear path and no added metadata/allocations. Existing added projections unchanged. Required matching docs/skill,feature-off/on tests/scopedclippy,compiledcontrols/default bypass control; only R1,2,4,8,16 fork-tombstone paired data. Twojobs/privatetarget/15minbuildcap; nofullworkspaceyet/installs/remotemutation/newagents/EC2.",
-    "experimental_report": "direct-4246/experimental/report.json",
-    "experimental_root_verification": "direct-4246/experimental/root-verification.json",
-    "experimental_validation": "86 candidateRustpasses+4same-main fixtures;105featurematrix tests;6compiledcontrols killed; scopedoff/on/harnessclippyPASS. Four optimizedbuildswithin cap;400 recordedwindows fixedR1,2,4,8,16 only. Fullvalidation pending; Bash3mapfile preflight stillfails. No default-on/canonical/universalcrossover claim.",
-    "experimental_review_runtime": {
-      "session_id": 81759,
-      "kind": "exec_command",
-      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/review-packet.md",
-      "input_sha256": "1c026b68cd99768cc0d0674b2418044e62c4a1e7b4db0c5dd438813cfe674459",
-      "input_bytes": 159266,
-      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/opus-review-b86b5d5a.json",
-      "started_at": "2026-09-09T13:21:21.783657+00:00",
-      "completed": true,
-      "acceptance": "SuccessfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5,exactb86reviewedhead; no duplicate/exhaustedquota retry.",
-      "collected_at": "2026-09-09T13:45:12.551692+00:00",
-      "output_sha256": "0e885a397124caddbfd827e998d8c32d14f169f2f26ad070a0c7a6c48d276527",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 273955
-    },
-    "validation_readiness": "Verified small readiness report;642lockedpackages cached but13.6GiBfree, noBash>=4/nextest and8externalcorpora absent. Authoritativefullvalidation via normalLinuxCI; do notduplicatebroadlocalbuilds orreclaimunrelatedcaches. Sameagentauthorized onlyopt-in all-targetsclippy plusboundedaggregation/defaultperf/draft-gatingaudit.",
-    "experimental_review_verdict": "approve_for_validation; no source/cfg-boundary blockers. Default-off originalalgorithm/representation intact. Full CI, actualnewleg, aggregatecoverage and defaultperf activation audit pending; no merge/default-on/canonicalclaim.",
-    "pr_url": "https://github.com/sparq-org/sparq/pull/6469",
-    "publication": {
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-      "branch": "codex/overlay-deleted-projections",
-      "draft": true,
-      "precheck": "direct-4246/publication-precheck.json",
-      "postpush_recheck": "direct-4246/publication-postpush.json",
-      "body": "direct-4246/pr-body.md",
-      "verified_pr": "direct-4246/pr6469-initial.json",
-      "initial_runs": "direct-4246/pr6469-runs-initial.json",
-      "bench_jobs": "direct-4246/pr6469-bench-initial-jobs.json"
-    },
-    "full_validation_audit": {
-      "directory": "direct-4246/validation-b86",
-      "manifest_entries": 13,
-      "root_verified": true,
-      "all_targets_clippy": "PASS8.14s, sourceunchanged,diskabove10GiB",
-      "source_findings": "Defaultperf/memory/wasmsizegates do notenableexperiment. Whole-workspaceallfeatureclippy/docintentional. Newlegdynamicaggregatecoversgroupedtest/report; actualPRexecutionproofpending. Draftskipsbench/coverage/heavyrecall; ready_for_review wouldstartnormalfullsuccessors withoutlabels/dispatch."
-    },
-    "current_failure": {
-      "run": 34358709438,
-      "job": 102489885037,
-      "name": "artifact-exact-equality (wasm bundle feature-OFF)",
-      "aggregate_run": 34358709393,
-      "aggregate_job": 102489884746,
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "observed": "Actualbase/headwasm1560241byteseach,binarydifferent;noV2declaration. Automaticreport-onlyderivationexit2. Rootcause notyetestablished; same-size notpass orproofsemantics.",
-      "logs": [
-        "direct-4246/pr6469-wasm-feature-off-failed.log",
-        "direct-4246/pr6469-draft-gate-failed.log"
-      ],
-      "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation.",
-      "diagnosis_report": "direct-4246/wasm-failure-b86/report.json",
-      "diagnosis_manifest_verified": 14,
-      "concrete_cause": "Neutral line-blanking removes newlyadded replacementdelbinding becauseoriginalcompiledbinding wasdeleted; E0425delundefined atstore313. All20nonblankdeletedlinesin store,10compiled+10comments. Auto proof never reached neutral/headcomparison or deletion-neutral/base obligation.",
-      "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof.",
-      "repair_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "repair_state": "Local source correction committed; new proof pending. Public CI failure remains at b86.",
-      "resolved_on_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "resolution": "Full ready_for_review wasm artifact-equality gate passed in34367934418; original b86/6334 failures remain historical evidence."
-    },
-    "wasm_repair_contract": "Restoreexactoriginaldefaultcount_correction underaddedcfg-not; addmutuallyexclusivecfg-on fn; retaindefaultov.deleted.insert statementverbatim and separatefeaturebookkeeping. Keepaccuratecommentchanges. Targetedoff/onlayout/semantic/controltests andoff/onalltargetclippy. Singleexistingreport-onlyproofattempt ifinstalledrawcargotooling/caches suffice,offline/locked/noinstalls,privatepertreetargets,allwasmoptimizedbuilds15mincap anddisk10GiBstop. No substitution/retry, declaration, gateorbaselinechange, remoteaction, newmodels orEC2. Ifproofsuccess, keepgeneratedproposaloutsidecodeforreview; requirebothcomparisons.",
-    "latest_check_snapshot": {
-      "file": "direct-4246/pr6469-checks-1405.json",
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "draft": true,
-      "contexts_returned": 115,
-      "success": 70,
-      "queued_or_running": 28,
-      "skipped": 14,
-      "neutral": 1,
-      "failures": "Onlyknownwasmequalityanddependentdraftaggregate. Pointin-timecheckrollup,notfullgate/fleetproof."
-    },
-    "wasm_repair_runtime": {
-      "owner": "/root/postmerge_ci",
-      "session_id": 18700,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T14:12:34.561420Z",
-      "deadline": "2026-09-09T14:27:34.561420Z",
-      "active_at_report": false,
-      "agent_report": "Base and head raw wasm both compiled, 1,560,265 bytes each with different hashes. Preparing addition-neutral. Separate private targets, offline/locked, proactive 10.5 GiB disk cutoff. Four off and nine on tests, six compiled controls, both all-targets core clippy configurations passed.",
-      "verification_limit": "Agent progress report, final manifest/root verification and actual Opus review pending. Do not duplicate proof or directly poll the agent-owned session while the agent is active.",
-      "next": "Collect frozen report at the next heartbeat; verify exact source, binaries, comparison results, and shim/protocol provenance before one focused actual Opus review. No declaration or push yet.",
-      "completed": true,
-      "result": "Passed in 544.822 seconds, exit 0; neutral=head and deletion-neutral=base. No retry or disk cutoff."
-    },
-    "source_retention": {
-      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "directory": "direct-4246/source-retention",
-      "manifest_files": 79,
-      "root_verification": "direct-4246/source-retention/root-verification.json",
-      "validation": "13 targeted tests pass, six compiled controls killed, off/on all-targets core clippy pass. Original protocol compiler proof passed both obligations. Local environment only; corrected Linux CI pending."
-    },
-    "source_retention_review_runtime": {
-      "session_id": 20716,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T14:38:19.162397+00:00",
-      "completed": true,
-      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/review-packet.md",
-      "input_sha256": "7d426a82683f1dc24133da3ab1214dcc344b3fc803ac3cb82452f103c78450b7",
-      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/opus-review-6334b338.json",
-      "acceptance": "Require success, is_error false, actual modelUsage claude-opus-5 and exact head. No duplicate or exhausted-budget retry. Review includes correcting generated historical [OPUS-5] attribution to actual Astra execution and local scope.",
-      "collected_at": "2026-09-09T14:43:45.573698+00:00",
-      "output_sha256": "b6d80b0cd5fc174ed019bb883662589f194088807d89d5de259954a92d49f72f",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 225361
-    },
-    "source_retention_review_verdict": "approve_for_validation; no source blockers. Declaration content supported after truthful Astra attribution and local-scope edits. Final Linux validation remains required.",
-    "declaration_decision": {
-      "choice": "Push reviewed correction alone as draft, let normal Linux failure-triggered advisory derive evidence, then evaluate declaration.",
-      "reason": "Existing normal workflow derives only when leg2 fails. Adding declaration now would skip Linux derivation requested by reviewer. No workflow/gate edit or manual dispatch.",
-      "local_proposal": "direct-4246/source-retention/proof/declaration-proposal.json",
-      "required_edits": [
-        "Replace historical [OPUS-5] reason prefix with actual [GPT-6 Astra] execution provenance.",
-        "Append exact measured head/environment scope and disclose reason-only edits.",
-        "Keep evidence unchanged; do not present local bytes as Linux bytes."
-      ],
-      "schema_audit": "Existing V2 gate compares numeric declaration filenames; does not parse reason or compare evidence with re-derivation. README supports reviewed per-PR declaration. Adding JSON alone does not alter source layout; final Linux gate still required."
-    },
-    "source_correction_publication": {
-      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "draft": true,
-      "precheck": "direct-4246/6334-prepush.json",
-      "postpush": "direct-4246/6334-postpush.json",
-      "body": "direct-4246/pr-body-6334.md",
-      "verified_body": "direct-4246/6334-body-verified.json",
-      "runs": "direct-4246/pr6469-runs-6334.json"
-    },
-    "linux_proof_pending": {
-      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "run": 34365605984,
-      "instruction": "Wait for natural completed run, collect exact artifact-equality job log and report-only derivation. Expected leg2 remains failed until declaration; distinguish successful derivation from gate pass. If both obligations pass on Linux, preserve its exact generated proposal and proof provenance, apply required truthful attribution/head/environment scope edits under existing actual review, commit only declaration, then normal full validation. Do not claim new JSON-line counts are re-derived or repeat optimized local builds.",
-      "review": "direct-4246/source-retention/opus-review-result.json",
-      "completed": true,
-      "result": "declared in normal Linux run34365605984, job102513392880; root verified exact generated output and both obligation outcomes. Saved linux6334-proof-verification.json."
-    },
-    "b86_new_feature_execution_verified": {
-      "at": "2026-09-09T14:46:36.408914+00:00",
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "run": 34358709776,
-      "new_leg": "sparq-core (overlay-deleted-projections)",
-      "selected_test": true,
-      "actual_group": "g02 sparq-core",
-      "job": 102491249176,
-      "targeted_tests_passed": 9,
-      "artifact": {
-        "id": 10107270520,
-        "name": "feature-matrix-results-1",
-        "failed_step": null
-      },
-      "per_leg_check": 102505586986,
-      "summary_check": 102506358342,
-      "summary_external_id": "34358709776",
-      "app_id": 15368,
-      "limits": "This verifies the earlier b86 draft run only, not corrected-head or full-tier admission. Earlier g01 log was a different core group; the actual experimental leg is g02. Correlation lives on the summary check, while individual check external_id is blank by design."
-    },
-    "declaration_publication": {
-      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "source_parent": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "draft": false,
-      "file": "bench/feature-off-declarations/6469.json",
-      "only_final_commit_change": true,
-      "root_verification": "direct-4246/linux6334-proof-verification.json",
-      "generated_proposal": "direct-4246/linux6334-declaration-generated.json",
-      "committed_declaration": "direct-4246/linux6334-declaration-reviewed.json",
-      "prepush": "direct-4246/declaration-prepush.json",
-      "ready_precheck": "direct-4246/declaration-ready-precheck.json",
-      "ready_verified": "direct-4246/fa371-ready-verified.json",
-      "body": "direct-4246/pr-body-declaration.md"
-    },
-    "full_validation_runs": {
-      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "ready_event_at": "2026-09-09T15:05:25Z",
-      "CI": 34367934853,
-      "Benchmarks": 34367935174,
-      "feature_matrix": 34367934926,
-      "ci_summary": 34367934318,
-      "vectorized_feature_off": 34367934418,
-      "wasm_gate": "SUCCESS, actual leg2 and both comparator/derivation tripwires ran successfully",
-      "copilot_code_review": 34367948623,
-      "copilot_state": "in_progress as of final run inventory; reviewer lists may remain empty while dynamic review runs",
-      "inventory": "direct-4246/fa371-full-runs.json",
-      "wasm_status": "direct-4246/fa371-wasm-full-status.json",
-      "limit": "Earlier same-head draft runs were cancelled by normal workflow supersession following ready_for_review; root did not call cancellation. Only the full successors count for admission."
-    },
-    "copilot_request": {
-      "required_by": "AGENTS.md contribution workflow",
-      "method": "POST requested_reviewers with copilot-pull-request-reviewer[bot], supported by official GitHub documentation",
-      "docs": "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review",
-      "response": "success but requested_reviewers empty; actual dynamic Copilot run34367948623 is independently observed. Do not issue duplicate request; watch the existing run.",
-      "evidence": [
-        "direct-4246/copilot-precheck-fa371.json",
-        "direct-4246/copilot-request-result-fa371.json",
-        "direct-4246/copilot-followup-fa371.json"
-      ]
-    },
-    "next": "Collect full ready_for_review CI and actual Copilot feedback on fa371. Address substantive findings through existing Astra lane and real review as needed. No broad repeated local gates, new benchmarks, duplicate Copilot/Opus requests, registry re-enable, dispatch or release. Only protected exact-head admission once checks and conversations resolve.",
-    "copilot_finding": {
-      "review_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "thread": "PRRT_kwDOSz3qKM6gtyhC",
-      "comment": 3970001492,
-      "url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970001492",
-      "finding": "size_of/align_of assertions assume repr(Rust) layout/no-padding and may fail across compiler versions/targets without semantic regression.",
-      "assessment": "Actual Opus confirms misleading no-padding prose; approves exact comment-only empirical footprint clarification with size/alignment assertions preserved. No runtime defect demonstrated. Single-host control and stable/nightly target limits retained.",
-      "rust_reference": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
-      "agent": "/root/postmerge_ci",
-      "scope": "Read-only assessment plus one compiled metadata-only default-off control in private copy, warm private target and two jobs; no source change, optimized builds, remote action or new review calls.",
-      "evidence": "direct-4246/review-fa371-1522.json",
-      "root_verification": "direct-4246/layout-review/root-verification.json",
-      "correction": "Only approved two-line prose replaced by four-line empirical footprint explanation. Assertions/test/executable code and declaration bytes unchanged. No new local build/test.",
-      "resolved": true,
-      "resolution_head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-      "resolution_url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970364418",
-      "resolution_verification": "direct-4246/layout-comment/final-verified.json"
-    },
-    "full_validation_progress": {
-      "at": "2026-09-09T16:47:23.906187+00:00",
-      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "checks": "direct-4246/counting-admission/new-head-checks.json",
-      "runs": "direct-4246/counting-admission/new-head-runs.json",
-      "rollup": {
-        "QUEUED": 24,
-        "IN_PROGRESS": 7,
-        "SUCCESS": 21,
-        "SKIPPED": 5,
-        "NEUTRAL": 1
-      },
-      "failed_checks": 0,
-      "run_ids": {
-        "flow-on-gates": 34378539142,
-        "docs-quality": 34378539072,
-        "container-scan": 34378539077,
-        "supply-chain": 34378539083,
-        "CI": 34378539442,
-        "fuzz": 34378539474,
-        "routing-self-tests": 34378539019,
-        "pr-area-label": 34378539090,
-        "Benchmarks": 34378539462,
-        "vectorized-feature-off": 34378539075,
-        "Changed-code mutation review": 34378539020,
-        "ci-summary": 34378539115,
-        "feature-matrix": 34378539457,
-        "pr-title": 34378675313,
-        "formal-verification": 34378538988,
-        "Running Copilot Code Review": 34378546536
-      },
-      "remaining": "ExistingcurrentheadfullCI, benchmarks, featurematrix andaggregatepending; newautomaticCopilotreviewrunning. Inspectactualnewopt-inlegtestexecution/run-boundaggregatebeforeprotectedenqueue. Priorheads evidencehistorical only."
-    },
-    "disk_hold": {
-      "free_bytes_after_control": 6418264064,
-      "action": "No further builds. Freeze/back up before task-owned cleanup. No unrelated caches/worktrees touched.",
-      "cleanup": "direct-4246/layout-review/cleanup-result.json",
-      "free_bytes_after_cleanup": 7497883648,
-      "status": "No further builds; frozen source/log/binary evidence preserved and verified against private Git backup."
-    },
-    "layout_review_runtime": {
-      "session_id": 8482,
-      "kind": "exec_command",
-      "completed": true,
-      "input": "direct-4246/layout-review/opus-input.md",
-      "input_sha256": "776b7338fe09cc58c21c75786bea326ee241c7c37e9643b555f35dbf2af22813",
-      "output": "direct-4246/layout-review/opus-review-fa371.json",
-      "started_at": "2026-09-09T15:38:05.925841+00:00",
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "scope": "One Copilot finding plus proposed comment-only clarification; no general implementation re-review.",
-      "collected_at": "2026-09-09T15:40:45.147431+00:00",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 76825,
-      "output_sha256": "84549991127b2a27176878ec4d6179c78cfde3c44f94a68021fcd6a9e6eda5ff",
-      "verdict": "approve_comment_only_fix_for_validation"
-    },
-    "layout_comment_publication": {
-      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-      "parent": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "root_verification": "direct-4246/layout-comment/root-verification.json",
-      "manifest_files_verified": 6,
-      "prepush": "direct-4246/layout-comment/prepush-remote.json",
-      "postpush": "direct-4246/layout-comment/postpush-remote.json",
-      "public_body": "direct-4246/layout-comment/pr-body.md",
-      "review_reply": "direct-4246/layout-comment/review-reply-result.json",
-      "threads_resolved": true,
-      "runs": "direct-4246/layout-comment/initial-runs.json",
-      "checks": "direct-4246/layout-comment/initial-checks.json"
-    },
-    "next_heartbeat": "Readcheckpointthenbudgetcheck. No liveOpusreviewsorlocalcommands;38346completedverified,do notpoll/relaunch. Watchexistingccdedfullruns andautomaticCopilotreview34378546536; do notrequestduplicate. No newimplementationlane while4246 active. Oncurrentfailedcheck ornewreviewfinding, diagnoseconcreteissueboundedlywithsameAstraagent; no blindretry orfullremeasurement. Onallrequiredgreen, verifyactualnewfeaturelegtest+clippy andaggregatefreshness, thenfreshrevalidatehead/main/holds/threads andordinaryprotectedenqueueexpectedHeadOidccded,jumpfalse. review:unreviewedis informational, review:needsarealhold. RegistryOFF,noreleases,heldPRsremainheld. Broadlocalbuildholdremains; tinydependencyfreerustctestexceptioncompletednotgeneralpermission.",
-    "allocator_window_finding": {
-      "review": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
-      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-      "file": "bench/overlay-count/src/counting.rs",
-      "finding": "begin clears ACTIVE before asserting, leaves counter-reset interval open to competing begin; potential overlap/measurement corruption on invalid usage.",
-      "evidence": "direct-4246/layout-comment/review-1558.json",
-      "scope": "SameAstraagent read-only assessment of all begin/end callers, historical measurement validity, minimal correction and actual-module regression/control design; no source/build/remote changes authorized yet.",
-      "root_source_observation": "Current harness appears single coordinator: main sequential loop and lifecycle::measure; concurrent-cold starts/joinstwo workers inside one measuredclosure,workersdo notbegin/end. Need fullinventory/evidencescope before concluding prior data unaffected.",
-      "implementation_authorized": {
-        "design": "Separate WINDOW_OPEN AtomicBool ownership before counter reset, held through end counter snapshot; acquire/release handoff. Existing ACTIVE boundaries/hot allocator path preserved. No core/declaration/workload changes.",
-        "validation": "One actual-module serial regression/calibration and compiled old-source control; competing caller only deterministic/bounded and no panic-noise exact-count claim. Exact directrustc command documented; detachedmodule not claimed reached by workspaceCI.",
-        "resource_exception": "Only dependency-free rustc test/smoke binaries, task-privateoutput<=128MiB, <=120seconds total, >=8GiBfreebefore/after. NoCargo/deps/fullworkspace/optimizedbenchmark builds. Broadbuildholdstays.",
-        "publication": "Localcommitted/frozenevidenceonly. Root verification and actual independent Opus review required before push.",
-        "historical_evidence": "All prior benchmark data stays unchanged and attributed to measured oldheads; assess single-coordinator caller equivalence without fullremeasurement."
-      },
-      "assessment": "Root verified frozen10filecounting-review assessment. Allcurrentbegin/end calls fromsinglecoordinator; concurrentreadersjoinedwithinonewindow. No observed triggerinvalidatespriorfrozenmeasurements. Separateowner guardthroughreadout needed; narrowrepairalready authorized.",
-      "assessment_file": "direct-4246/counting-review/assessment.json",
-      "focused_test_progress": {
-        "evidence": "direct-4246/counting-fix/results.json",
-        "status": "Preliminaryrootread:actualmoduleregressionpasses;same appendedtestcompiledagainstunchangedoldsourcefailsintendedactive/countassertion. Fourclean calibrationspass. Agentfinalfreeze/commit/rootverificationandOpusreviewstillpending.",
-        "executions": {
-          "fixed_compile": 0,
-          "fixed_test": 0,
-          "old_compile": 0,
-          "old_test": 101
-        },
-        "resource_bounds_passed": true,
-        "compiler_note": "Fixedcompileexit0withmacOSlinkerFSEvents/cache-dirwarning (linker_messagesignores-Dwarnings); no sourcewarningfailure or suppression claimed.",
-        "final_source_binding": "Rootverifiedexactfinalcompiledsourceequalscleancommittedccd;oldproductionexact5757andidenticaltest suffix. Finalcandidatepass,compiledoldcontrolassertionfailure,4calibrationsboth. Guard-onlyproductiondelta;hotpath/core/workloads/declarationunchanged."
-      },
-      "repair_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "root_verification": "direct-4246/counting-admission/root-verification.json",
-      "frozen_manifest_verified": 47,
-      "review_verdict": "ActualOpus5xhigh approvesexactccdedforvalidation; no blockers. CAS-firstrejectionandAcquire/Releaseownershipspanconfirmed; currentcallerssinglecoordinator. Readout/resetinterleavingsarguedstructurally,notforcedbytest; noownertoken/RAII orarbitraryallocatornoiseguarantee. Newheadperformanceunmeasured;olddataretainedwithoriginalattributionandlimits.",
-      "addressed": true,
-      "published_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "response": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5605455440",
-      "publication_verified": "direct-4246/counting-admission/publication-verified.json",
-      "source_tests": "Exactfinalactualmodulepass;unchangedoldproduction+identicaltestcompiledandfailedfirstassertafterlogginglostcountinginbothnested/competingprobes. Fourclean calibrationsboth. Resets/readoutinterleavingsstructurallyreviewed,notforcedbytest.",
-      "historical_data": "Unchanged/frozenunderoriginalhashes. Currentcallerstaticauditshowsonecoordinator; nothistoricalexecutiontrace,new-headmeasurementorcrossrevisionproof."
-    },
-    "counting_review_runtime": {
-      "session_id": 38346,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T16:25:26.022731+00:00",
-      "completed": true,
-      "input": "direct-4246/counting-admission/opus-input.md",
-      "input_sha256": "23ac25b24d40d42416f3fba0938761dea8bbb346c03ebeb5efe2b1e14e676400",
-      "output": "direct-4246/counting-admission/opus-review-ccded1b4.json",
-      "expected_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "note": "One actual model invocation. Earlier local manifest parsing/redirection failed before Claude execution; no model-budget retry.",
-      "collected_at": "2026-09-09T16:43:04.017501+00:00",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 306624,
-      "output_sha256": "6fa76d3f78384272b8c3883bd841323090a52f7f4bdc9514b27b4034871031bf",
-      "verdict": "approve_for_validation"
-    },
-    "counting_publication": {
-      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "parent": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
-      "prepush": "direct-4246/counting-admission/prepush-final.json",
-      "verified": "direct-4246/counting-admission/publication-verified.json",
-      "body": "direct-4246/counting-admission/pr-body.md",
-      "response": "direct-4246/counting-admission/review-comment.md"
-    },
-    "current_review_status": "ActualOpusreviewchain: runtime6334approvedforvalidation, Linuxneutralitydeclarationfa reviewedreasonedits/mechanicallyverified, layoutcomment5757exactwordingapproved, counterrepairccdedexactheadapproved. No sourceblockers. FinalcurrentheadCI/reviews/holds remain required before ordinary protectedadmission. NeverfabricatecanonicalVERDICT orreview:pass.",
-    "final_validation": {
-      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "evidence": "direct-4246/counting-admission/full-validation-verification.json",
-      "verified_at": "2026-09-09T17:47:49.472288+00:00",
-      "ci": "300success8skipped1neutral; no failed/pending",
-      "new_feature_executed": true,
-      "linux_privacy_gate": "Actual check-privacy-claims.sh and both-direction self-tests succeeded; local Bash3 limitation remains, no nonexistent ci-preflight wrapper claim."
-    },
-    "final_perf_review": {
-      "state": "completed",
-      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "input": "direct-4246/perf-admission/opus-input.md",
-      "input_sha256": "317a7195d17ba0875d8db83d3f1a5c2cbaac3a309e1ea8104082b9f3e48747d2",
-      "input_bytes": 172000,
+    "maintenance_review": {
+      "state": "completed_conditional_approve",
+      "input": "direct-6468/label-maintenance/opus-input.md",
+      "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
+      "input_bytes": 42793,
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
       "completed": true,
-      "session_id": 13152,
+      "scope": {
+        "name": "area:sparq-wrapper-gen",
+        "color": "c5def5",
+        "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+      },
+      "session_id": 54894,
       "kind": "exec_command",
-      "started_at": "2026-09-09T17:53:44.241670+00:00",
-      "output": "direct-4246/perf-admission/opus-review-ccded-final-perf.json",
-      "acceptance": "Require successful outer JSON, is_errorfalse, actual modelUsage claude-opus-5 and exact ccded head. No duplicate invocation or exhausted-budget retry.",
-      "collected_at": "2026-09-09T17:57:35.954446+00:00",
+      "started_at": "2026-09-09T18:22:35.446630+00:00",
+      "output": "direct-6468/label-maintenance/opus-review.json",
+      "acceptance": "One actual Opus5xhigh invocation; require outer successfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5 and exact action. No duplicate or exhausted-budget retry.",
+      "collected_at": "2026-09-09T18:37:51.640517+00:00",
       "actual_model_verified": "claude-opus-5",
-      "duration_ms": 223484,
-      "output_sha256": "81938a5e85793a8343d36723b429fcb48423dc40faf320bb361db97b635c871d",
-      "verdict": {
-        "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-        "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-        "pr": 6469,
-        "perf_affecting": true,
-        "perf_ok": true,
-        "canonical_number_change": false,
-        "evidence": "perf_affecting=true via four triggers: hot-path/benchmarked-crate edit (crates/sparq-core/src/store.rs overlay count_correction), bench harness addition (bench/overlay-count/**), catalog edit (bench/benchmarks.toml new 'overlay-count-diagnostic', status=diagnostic, featured=false), and perf-adjacent prose (crates/sparq-core/README.md:53-65, skills/sparql-query/SKILL.md:1052-1069). Regression risk: default build unchanged \u2014 every added element in store.rs is cfg-gated (deleted_by_perm field, invalidate_deleted, deleted_count, the experimental count_correction arm, the heap_bytes addend, and the three apply_delta deleted_changed sites); the #[cfg(not(overlay-deleted-projections))] count_correction retains main's linear filter body verbatim and the default 'ov.deleted.insert(*t);' statement is preserved unbraced; residual non-gated edits are doc comments plus a #[cfg(test)] mod registration. Corroborated by bench/feature-off-declarations/6469.json (addition-blanked==head, deletion-blanked==base, size_delta_bytes=0, 12 metadata bytes, Linux CI run 34365605984 job 102513392880 for 6334b33 vs a42a9e8, Rust 1.97.1) and, decisively for this head, by SUCCESS of the protected 'artifact-exact-equality (wasm bundle feature-OFF)' and 'vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)' checks at ccded1b. deleted_projection_feature_off_preserves_main_layout_and_heap pins Overlay size/alignment, Cow::Borrowed and zero retained heap across scans and a fork, and the force_cache_in_feature_off compiled control kills it, so it is non-vacuous. Floors: bench/perf-baseline.json is NOT in the changed-file stat \u2014 no raise, no ratchet-down, no silent loosening; wasm_bundle_bytes unaffected (declared delta 0, and the declaration defers size to that ratchet). Deterministic/timing surfaces green on the exact head: ci-summary gate SUCCESS (rollup 300 success / 8 skipped / 1 neutral, none pending or failed), 'run + track benchmarks' SUCCESS, wasm build/bundle SUCCESS, coverage and all conformance ratchets SUCCESS; parse path (nt.rs/turtle) untouched. Claim evidence: NO positive perf claim exists in the diff \u2014 no MB/s, x-faster, latency, recall or crossover figure in any markdown (rule 2 clean). The only prose numerics ('twelve bytes per deleted triple plus capacity slack') are structural, derivable from size_of::<[Id;3]>() as used in Overlay::heap_bytes. bench/overlay-count/README.md states protocol dimensions only, marks results noncanonical, and explicitly forbids publishing a speedup claim or selecting a quiet subset. README/SKILL state the adverse direction (cold-read and update/read regression, per-retained-generation memory growth, no cap or eviction, 'no universal crossover or canonical speedup is claimed'). Committed measured numbers exist only in the JSON declaration and cite a real Linux CI run/job, source commit, base and pinned toolchain (rules 1 and 3 satisfied); the noncanonical macOS lifecycle data is not in the tree. Opt-in architecture: overlay-deleted-projections=[] is empty, absent from default=['parallel'], enabled by no other feature or dep:, with no engine/CLI/wasm forwarding; new deps (libc, rayon, oxrdf) are confined to the detached bench/overlay-count crate with its own [workspace] and its own Cargo.lock, so the root lock and default build gain nothing. CI wiring verified: dedicated test:true leg in .github/feature-matrix.d/sparq-core.yml with regenerated golden line, executed on this head with build + tests + --all-targets clippy (9 overlay_deleted_tests passed, 187 legs selected). canonical_number_change=false: no perf-baseline floor and no published-results artifact moved; bench/feature-off-declarations/6469.json is a per-PR generated compiler-neutrality artifact under the existing protocol whose own content asserts a zero-byte size delta \u2014 recorded here for maintainer visibility, but it is not a canonical-number edit.",
-        "concerns": "",
-        "residual_nonblocking": [
-          "Not confirmed from this packet that no gating leg builds sparq-core with --all-features (carried over from the earlier review). Non-blocking: floors untouched, ratchet/benchmark jobs green on this head, and no policy deterministic metric (store_bytes_per_triple{,_small}, dict_bytes_per_term, wasm_bundle_bytes, fts_bytes_per_doc, vectors_*_recall_at10, geo_compliance_deficit) constructs a tombstone overlay, so the experiment cannot move one even if compiled in.",
-          "bench/feature-off-declarations/6469.json byte counts are for source commit 6334b33, self-disclosed in its reason string; post-6334b33 commits touch only that JSON, a comment inside a #[cfg(test)] module, and the detached bench crate, and the exact-head protected equality gate passed independently.",
-          "derived:true coexists with a hand-edited reason string (attribution + CI/toolchain scope); numbers unedited and the edit is disclosed in the PR body. Provenance-honesty lane, not a perf blocker.",
-          "bench/overlay-count/src/counting.rs allocator-window regression executes only via the documented direct rustc --test command and is not covered by workspace CI; retained lifecycle measurements remain frozen old-head noncanonical data. Acceptable because no gate consumes them and no claim in the diff rests on them."
-        ],
-        "not_granted": [
-          "default-on enablement",
-          "any crossover, threshold or canonical speedup claim",
-          "any deterministic floor change",
-          "any waiver of gate integration 15368, ALLGREEN merge-group checks, or current holds",
-          "correctness/scope re-review and any new measurement campaign"
-        ],
-        "permissionDecision": "allow",
-        "permissionDecisionReason": "\ud83e\udd16 SPARQ perf-reviewer: perf-affecting (sparq-core store overlay path, bench harness + catalog, perf-adjacent prose) but perf-clean. The feature is default-OFF with the default code path preserved verbatim under cfg, proved by the addition/deletion-blanked neutrality declaration and by the protected artifact-exact-equality (wasm bundle feature-OFF) and feature-resolution checks passing on exact head ccded1b4898cf5b317a6591f6ff6108ced23123c. bench/perf-baseline.json is untouched \u2014 no floor raise, ratchet-down or silent loosening \u2014 and the deterministic ratchets, benchmark and wasm jobs are green (rollup 300 success / 8 skipped / 1 neutral, none pending or failed). No positive performance claim appears anywhere in the diff; the only committed measured numbers cite a real Linux CI run/job, and the local lifecycle data stays out of the tree and is labelled noncanonical. Residual non-blocking notes recorded (unconfirmed --all-features gating-leg audit; declaration derived at 6334b33; hand-edited reason under derived:true; allocator regression not covered by workspace CI). Arming allowed for normal protected queue admission; gate integration 15368, ALLGREEN merge-group checks and all current holds still apply, and no default-on or canonical performance admission is granted."
+      "duration_ms": 248771,
+      "output_sha256": "e942ae3adfdc169dcdcec710916d1855f91f7338a469319d0caa61d1e6fcd23c",
+      "result": "direct-6468/label-maintenance/opus-review-result.json",
+      "verdict": "approve for exact one label create only after all15preconditions; key newpreconditionP7completeopenPRchangedpathcheckrequired beforemutation"
+    },
+    "agent_state": "Implementation running; no additional agents/models authorized.",
+    "maintenance": {
+      "state": "exact_one_label_created_verified",
+      "evidence": "direct-6468/label-maintenance/maintenance-verified.json",
+      "created_at": "2026-09-09T18:49:09.588264+00:00",
+      "label_id": 12123212987,
+      "name": "area:sparq-wrapper-gen",
+      "review": "actualOpus5xhighconditionalapprove; allprewriteconditionsdischarged; mandatorypostrunobservationpending",
+      "preconditions": "166openPRs/1691completechangedpaths; no generatorpathhits/renames;headsetstable;all11reviewedsourcesunchangedonnewmain;freshREST404;registryOFF",
+      "scope": "No issue/PRlabelsapplied,nocode/workflow/protectionchanges,replay/dispatch,forceorretry. Explicitmaintenance knowinglydiffersfromblanketriageremedy745forrealexistingcrate; classifierautoprovisioningstillforbidden.",
+      "next_scheduled": "Firstordinaryscheduledtriage-areaafter18:48create:cron25,55hourly;18:55nominalslotmaybedelayed. Observeactualrun,eventandcreatedtime; no manualtrigger.",
+      "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5607067328",
+      "latest_schedule_observation": {
+        "at": "2026-09-09T18:57:13.517567+00:00",
+        "evidence": "direct-6468/label-maintenance/scheduled-runs-after-create.json",
+        "latest_run": 34378724521,
+        "created_at": "2026-09-09T16:45:31Z",
+        "conclusion": "failure",
+        "before_create": true,
+        "postcreate_run_observed": false
       }
     },
-    "copilot_final": {
-      "id": "PRR_kwDOSz3qKM8AAAABM2bPag",
-      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "concrete_findings": 0,
-      "threads_resolved": true,
-      "generic_human_recommendation": "No required approval or user hold; direct admission uses actual independent Opus review under standing user instruction. Do not claim human approval."
-    },
-    "review_process_note": "Legacy roborev CLI absent (command -v empty). Actual independent Opus review follows user model instruction over stale Codex review routing. No roborev pass claimed.",
-    "queue_admission": {
-      "at": "2026-09-09T18:01:43.409510+00:00",
-      "entry": {
-        "id": "MQE_lQDOSz3qKM8AAAABC1yJ3c4AA2w6zgLJKtM",
-        "position": 1,
-        "state": "AWAITING_CHECKS",
-        "enqueuedAt": "2026-09-09T18:00:39Z",
-        "headCommit": {
-          "oid": "cea4414b39225b1240f36d968ba1549e700cd32f"
-        },
-        "baseCommit": {
-          "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
-        },
-        "pullRequest": {
-          "number": 6469,
-          "headRefOid": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-          "state": "OPEN"
-        }
-      },
-      "pr_reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "comment": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5606416908",
-      "evidence": "direct-4246/perf-admission/queue-verified.json",
-      "verification": "direct-4246/perf-admission/enqueue-root-verification.json"
-    },
-    "queue_initial_runs": {
-      "evidence": "direct-4246/perf-admission/queue-initial-runs.json",
-      "runs": [
-        {
-          "id": 34386432871,
-          "name": "feature-matrix",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "queued",
-          "conclusion": null
-        },
-        {
-          "id": 34386432273,
-          "name": "ci-summary",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "in_progress",
-          "conclusion": null
-        },
-        {
-          "id": 34386432172,
-          "name": "routing-self-tests",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34386432182,
-          "name": "pr-area-label",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34386432660,
-          "name": "CI",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "queued",
-          "conclusion": null
-        },
-        {
-          "id": 34386432378,
-          "name": "flow-on-gates",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34386432254,
-          "name": "vectorized-feature-off",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "completed",
-          "conclusion": "success"
-        },
-        {
-          "id": 34386432230,
-          "name": "docs-quality",
-          "event": "merge_group",
-          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-          "status": "completed",
-          "conclusion": "success"
-        }
+    "conflict_assessment": {
+      "agent": "/root/postmerge_ci",
+      "state": "completed",
+      "prs": [
+        5457,
+        6095
       ],
-      "failures": []
+      "directory": "direct-6468/conflict-assessment",
+      "constraints": "read-only max10min; no source/build/model/remote mutations; respectmanualholds; determine nonoverlap or recover existingchain",
+      "report": "direct-6468/conflict-assessment/report.json",
+      "manifest_verified": 19,
+      "conclusion": "Separateproductionhunks;inactiveolderdraftsnotprerequisite; leaveallholdsandhistoricalsourceintact."
     },
-    "latest_queue_observation": {
-      "at": "2026-09-09T18:22:35.446630+00:00",
-      "queue": "position1AWAITING_CHECKS",
-      "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-      "source_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
-      "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-      "job_snapshots": {
-        "queue-matrix-jobs-1818.json": {
-          "jobs": 57,
-          "states": {
-            "success": 25,
-            "skipped": 1,
-            "in_progress": 6,
-            "queued": 25
-          },
-          "assigned_active_runners": 6
-        },
-        "queue-ci-jobs-1818.json": {
-          "jobs": 34,
-          "states": {
-            "success": 22,
-            "skipped": 8,
-            "in_progress": 4
-          },
-          "assigned_active_runners": 4
-        }
-      },
-      "failures": [],
-      "assessment": "ActualjobsprogressingonassignedGitHubhostedrunners;25matrixgroupsqueued, no failure/starvation proof. Preservecurrentmerge-group evidence."
+    "implementation": {
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "state": "authorized_running",
+      "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
+      "branch": "codex/triage-area-unknown-diagnostics",
+      "directory": "direct-6468/implementation",
+      "contract": "Exactlytriage-area.pyandtests;title-onlyrule/ANCHORED_ONLY;rowlabeltierdiagnostic;globalzero-writeguardbeforebudgetpreserved. NoT0_DECL,census,workflows,policy/budgets,oldPRsource,remotemutations/models/buildinstalls. ScopedPython/selftests/negativecontrolsandcompositioncheck;commitreportfrozenpacket;rootreviews/publishes."
+    },
+    "model": "GPT-6 Astra",
+    "pr": null,
+    "head": null,
+    "branch": "codex/triage-area-unknown-diagnostics",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "state": "ActualAstraxhigh implementing scoped6468 two-file classifier/diagnostic repair. Existing5457/6095draftchanges/holds preserved; source hunks independent. Exact generatorlabelmaintenance reviewed/created/readbackverified; ordinaryscheduledclassificationaftercreate notyetobserved. Rootawaitsfrozenimplementation/test/control/compositionreportbeforeactualOpusreview and any publication.",
+    "documentation_followup": {
+      "issue": 5412,
+      "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
+      "reason": "SameAGENTSentry alreadyhasPLAN/CLAIMdriftissue;addedconfirmedcategoricalnevercreatesvsnewcratewitnessexceptioninstead ofduplicateissue",
+      "verified": "direct-6468/label-maintenance/docs-drift-comment-verified.json"
     }
   },
   "prs": {
@@ -921,32 +396,14 @@
       "queue_effect_evidence": "All47 nightly freshness tests actually executed and passed in merge-group docs-quality34193891103. Log preserved direct-6436/followup/pr6464-queue-docs-quality.log."
     },
     "6469": {
-      "state": "DRAFT_CI_FAILURE",
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "url": "https://github.com/sparq-org/sparq/pull/6469",
+      "state": "MERGED",
+      "merged_at": "2026-09-09T18:36:14Z",
+      "merge_commit": "cea4414b39225b1240f36d968ba1549e700cd32f",
+      "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
       "issue": 4246,
-      "review": "ActualOpus5xhigh approvesfullvalidationofdefault-offexperiment,no sourceblockers.",
-      "CI": 34358709850,
-      "feature_matrix": 34358709776,
-      "aggregate": 34358709393,
-      "docs_quality": 34358709436,
-      "bench": 34358709884,
-      "bench_limit": "Actual run+trackbenchmarksjob102490081378SKIPPED; greenaggregate notperfevidence.",
-      "ready_transition_executed": false,
-      "failure": {
-        "run": 34358709438,
-        "job": 102489885037,
-        "name": "artifact-exact-equality (wasm bundle feature-OFF)",
-        "aggregate_run": 34358709393,
-        "aggregate_job": 102489884746,
-        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-        "observed": "Actualbase/headwasm1560241byteseach,binarydifferent;noV2declaration. Automaticreport-onlyderivationexit2. Rootcause notyetestablished; same-size notpass orproofsemantics.",
-        "logs": [
-          "direct-4246/pr6469-wasm-feature-off-failed.log",
-          "direct-4246/pr6469-draft-gate-failed.log"
-        ],
-        "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation."
-      }
+      "issue_state": "CLOSED",
+      "source_verification": "direct-4246/perf-admission/main-source-proof.json",
+      "postmerge": "mainCIpending; initialbatch-merge/release-plzfailureshistoricalpatternnotyetdiagnosed; no releaseauthorization"
     }
   },
   "registry": {
@@ -1384,8 +841,8 @@
   },
   "registry_pause": {
     "enabled": false,
-    "observed_at": "2026-09-09T17:56:01.893981+00:00",
-    "evidence": "direct-4246/perf-admission/registry-pause.json"
+    "observed_at": "2026-09-09T18:47:40Z",
+    "evidence": "direct-6468/label-maintenance/precreate-registry-pause.json"
   },
   "actions_snapshot": {
     "observed_at": "2026-09-09T17:56:01.893981+00:00",
@@ -1402,40 +859,756 @@
       "direct-4246/perf-admission/in-progress-runs.json"
     ]
   },
-  "next_lane": {
-    "issue": 6468,
-    "agent": "/root/postmerge_ci",
-    "actual_model": "GPT-6 Astra",
-    "effort": "xhigh",
-    "phase": "Source design complete; exact existing-crate label maintenance prepared for independent Opus review; source edits still deferred",
-    "started_at": "2026-09-09T18:04:24.354143+00:00",
-    "current_issue": "direct-6468/current-1802.json",
-    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
-    "design": {
-      "path": "direct-6468/next-design/report.json",
-      "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7",
-      "manifest_verified": true,
-      "source_verified": true
-    },
-    "maintenance_review": {
-      "state": "running",
-      "input": "direct-6468/label-maintenance/opus-input.md",
-      "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
-      "input_bytes": 42793,
-      "expected_model": "claude-opus-5",
+  "completed_lanes": {
+    "4246": {
+      "agent": "/root/postmerge_ci",
+      "model": "GPT-6 Astra",
       "effort": "xhigh",
-      "completed": false,
-      "scope": {
-        "name": "area:sparq-wrapper-gen",
-        "color": "c5def5",
-        "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+      "issue": 4246,
+      "pr": 6469,
+      "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "branch": "codex/overlay-deleted-projections",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
+      "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+      "state": "PR6469 merged normally18:36:14Z ascea4414;15changedfilesidenticaltoreviewedccded;issue4246closedafterlinkedresolutioncomment. MainCIpending; no release.",
+      "phase": "MERGED; source and issue closure verified; post-merge main CI pending",
+      "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
+      "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
+      "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
+      "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
+      "dedupe_file": "overlay-cost-dedupe.json",
+      "issue_source_file": "overlay4246-read.json",
+      "scope_guard": "Agent must confirm on fresh main that premise remains present before implementing; do not transplant stopped top-k experiment.",
+      "report_directory": "direct-4246",
+      "report": "direct-4246/report.json",
+      "validation": "44 test executions;4compiledassertionmutantskilled; scopedcoreclippyPASS. Baseline beforeproductionedits; paired24fixedpoints. Coldfirstuse and warmedfork cache-copy memory costs are explicit material tradeoffs. Fullworkspace/conformance/gates not yetrun. Localpreflight soleknownBash3mapfilefailure, no bypass.",
+      "review_runtime": {
+        "session_id": 62677,
+        "kind": "exec_command",
+        "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/review-packet.md",
+        "input_sha256": "789519e37efe27e4effcc9efc73ab88b376d9c7e4128a9902c2ebefec713ad13",
+        "input_bytes": 121478,
+        "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/opus-review-acfa31cf.json",
+        "started_at": "2026-09-09T12:00:13.879900+00:00",
+        "completed": true,
+        "acceptance": "Require completed successfulJSON, is_errorfalse, actual modelUsage claude-opus-5 and exactreviewedhead. No duplicate or exhaustedquota retry.",
+        "collected_at": "2026-09-09T12:06:15.356833+00:00",
+        "output_sha256": "152e047c1c2cf0e701bff0c17ea41790dcd6ece40cef388f89654bc45def9602",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 236584
       },
-      "session_id": 54894,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T18:22:35.446630+00:00",
-      "output": "direct-6468/label-maintenance/opus-review.json",
-      "acceptance": "One actual Opus5xhigh invocation; require outer successfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5 and exact action. No duplicate or exhausted-budget retry."
-    },
-    "agent_state": "Preparation completed; idle, no source edits or builds pending."
+      "review_focus": "Deleted cache invalidation across mutation/clone/fork/snapshot/concurrentreads; bounds/permutations; heap/budgetaccounting; measurement/counter soundness; cold-after-write latency and warmed-cache copying. No unconditional performance/admission claim.",
+      "review_verdict": "request_changes, actual Opus5xhigh; no admission approval",
+      "reviewed_head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+      "review_findings": {
+        "B1": "Unconditional invalidation evicts deletion caches on insert-only deltas into an overlay already holding deletions, causing repeated cold sorts. Existing insert-only control had no deletions. Split invalidation and track actual deleted-set insert/remove changes; add targeted workload/control.",
+        "B2": "Warmed overlay clone/fork deep-copies initialized caches; absent lifecycle measurement. Measure warmedfork/snapshot\u2192apply_delta\u2192read/publish and retained-generation heap before deciding on clone/cache redesign.",
+        "B3": "Missingstore327-851 and workspace mutation/access/replacement inventory. Verify all deleted-set mutators/WAL/compaction/persist paths and document sole-mutator invariant if true.",
+        "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
+      },
+      "latest_agent_status": {
+        "at": "2026-09-09T14:17:16.853952+00:00",
+        "local_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "public_head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "state": "Focused source preservation correction committed. Root inspected the one-file diff. Agent is completing authorized native checks and the single offline compiler-backed proof; final manifest and independent Opus review pending.",
+        "proof_contract": "Unchanged protocol and raw cargo wasm builder; local argv shim may append only --locked and must record full source/forwarded argv. Per-tree private targets, offline dependencies, two jobs, one shared 900-second cap, stop below 10 GiB free. No source declaration, push, or gate edit authorized."
+      },
+      "revision_report": "direct-4246/revision/report.json",
+      "revision_root_verification": "direct-4246/revision/root-verification.json",
+      "revision_validation": "48 scoped test executions,5 compiled controls killed,core/harnessclippyPASS; frozen620-window lifecycle evidence. Known Bash3mapfile preflight failure; fullworkspace/wasm/conformance/canonical ratchets pending. Warm gains coexist with cold and retained-memory regressions; no admission claim.",
+      "focused_review_runtime": {
+        "session_id": 48546,
+        "kind": "exec_command",
+        "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/review-packet.md",
+        "input_sha256": "bb45493066e061c65a2c603fb55dd376cae0d21743778e10442c7190f8c63ecf",
+        "input_bytes": 238995,
+        "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/opus-review-cb638a42.json",
+        "started_at": "2026-09-09T12:45:31.907288+00:00",
+        "completed": true,
+        "acceptance": "SuccessfulJSON,is_errorfalse,actual modelUsageclaude-opus-5,exactcb638reviewedhead; no duplicate/exhaustedquota retry.",
+        "collected_at": "2026-09-09T12:53:37.457699+00:00",
+        "output_sha256": "996af7a8fc251793b7e4a53ab3c8ebb5f8805408f4b466e3ba54ba7617e57cc0",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 322874
+      },
+      "focused_review_verdict": "defer_performance_admission: source repair sound, B1/B3 resolved, no correctness changes requested; default-on admission withheld for cold/retained-memory/unbounded-D costs.",
+      "focused_review_findings": {
+        "A1": "Ordinary fork/tombstone/read, cold multi-pattern and concurrentcold paths slower with disjoint ranges.",
+        "A2": "Derived cloning copies initialized projections per retained generation, with no cap. B1 retention extends memory lifetime.",
+        "A3": "Durable clear/default delete-all can make D scale with base graph; direction supported by source, not measured here.",
+        "recommendation": "Gate scope; avoid arbitrary threshold or Clone reset. Owner decision default-on/opt-in/drop, and only if continue one fixed R={1,2,4,8,16} read-per-generation measurement."
+      },
+      "coordinator_scope_decision": {
+        "at": "2026-09-09T12:53:37.457699+00:00",
+        "choice": "default-off experimental Cargo opt-in only",
+        "reason": "Correct source with strong measured warm gains, but unsupported general admission. Preserve default linear path and compile out added deletion-cache metadata/bookkeeping; explicit opt-in documents costs. Routine bounded implementation decision within authorized task, no protection/approval bypass.",
+        "measurement_limit": "Only fixed five-point reads-per-generation experiment allowed by reviewer; no threshold/Clone/Arc/permutation redesign."
+      },
+      "feature_revision_contract": "One repo-consistent default-OFF core Cargo feature gates all new deletion-cache fields, accounting, initialization/invalidation and counting. Ordinary build retains main linear path and no added metadata/allocations. Existing added projections unchanged. Required matching docs/skill,feature-off/on tests/scopedclippy,compiledcontrols/default bypass control; only R1,2,4,8,16 fork-tombstone paired data. Twojobs/privatetarget/15minbuildcap; nofullworkspaceyet/installs/remotemutation/newagents/EC2.",
+      "experimental_report": "direct-4246/experimental/report.json",
+      "experimental_root_verification": "direct-4246/experimental/root-verification.json",
+      "experimental_validation": "86 candidateRustpasses+4same-main fixtures;105featurematrix tests;6compiledcontrols killed; scopedoff/on/harnessclippyPASS. Four optimizedbuildswithin cap;400 recordedwindows fixedR1,2,4,8,16 only. Fullvalidation pending; Bash3mapfile preflight stillfails. No default-on/canonical/universalcrossover claim.",
+      "experimental_review_runtime": {
+        "session_id": 81759,
+        "kind": "exec_command",
+        "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/review-packet.md",
+        "input_sha256": "1c026b68cd99768cc0d0674b2418044e62c4a1e7b4db0c5dd438813cfe674459",
+        "input_bytes": 159266,
+        "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/opus-review-b86b5d5a.json",
+        "started_at": "2026-09-09T13:21:21.783657+00:00",
+        "completed": true,
+        "acceptance": "SuccessfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5,exactb86reviewedhead; no duplicate/exhaustedquota retry.",
+        "collected_at": "2026-09-09T13:45:12.551692+00:00",
+        "output_sha256": "0e885a397124caddbfd827e998d8c32d14f169f2f26ad070a0c7a6c48d276527",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 273955
+      },
+      "validation_readiness": "Verified small readiness report;642lockedpackages cached but13.6GiBfree, noBash>=4/nextest and8externalcorpora absent. Authoritativefullvalidation via normalLinuxCI; do notduplicatebroadlocalbuilds orreclaimunrelatedcaches. Sameagentauthorized onlyopt-in all-targetsclippy plusboundedaggregation/defaultperf/draft-gatingaudit.",
+      "experimental_review_verdict": "approve_for_validation; no source/cfg-boundary blockers. Default-off originalalgorithm/representation intact. Full CI, actualnewleg, aggregatecoverage and defaultperf activation audit pending; no merge/default-on/canonicalclaim.",
+      "pr_url": "https://github.com/sparq-org/sparq/pull/6469",
+      "publication": {
+        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+        "branch": "codex/overlay-deleted-projections",
+        "draft": true,
+        "precheck": "direct-4246/publication-precheck.json",
+        "postpush_recheck": "direct-4246/publication-postpush.json",
+        "body": "direct-4246/pr-body.md",
+        "verified_pr": "direct-4246/pr6469-initial.json",
+        "initial_runs": "direct-4246/pr6469-runs-initial.json",
+        "bench_jobs": "direct-4246/pr6469-bench-initial-jobs.json"
+      },
+      "full_validation_audit": {
+        "directory": "direct-4246/validation-b86",
+        "manifest_entries": 13,
+        "root_verified": true,
+        "all_targets_clippy": "PASS8.14s, sourceunchanged,diskabove10GiB",
+        "source_findings": "Defaultperf/memory/wasmsizegates do notenableexperiment. Whole-workspaceallfeatureclippy/docintentional. Newlegdynamicaggregatecoversgroupedtest/report; actualPRexecutionproofpending. Draftskipsbench/coverage/heavyrecall; ready_for_review wouldstartnormalfullsuccessors withoutlabels/dispatch."
+      },
+      "current_failure": {
+        "run": 34358709438,
+        "job": 102489885037,
+        "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+        "aggregate_run": 34358709393,
+        "aggregate_job": 102489884746,
+        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "observed": "Actualbase/headwasm1560241byteseach,binarydifferent;noV2declaration. Automaticreport-onlyderivationexit2. Rootcause notyetestablished; same-size notpass orproofsemantics.",
+        "logs": [
+          "direct-4246/pr6469-wasm-feature-off-failed.log",
+          "direct-4246/pr6469-draft-gate-failed.log"
+        ],
+        "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation.",
+        "diagnosis_report": "direct-4246/wasm-failure-b86/report.json",
+        "diagnosis_manifest_verified": 14,
+        "concrete_cause": "Neutral line-blanking removes newlyadded replacementdelbinding becauseoriginalcompiledbinding wasdeleted; E0425delundefined atstore313. All20nonblankdeletedlinesin store,10compiled+10comments. Auto proof never reached neutral/headcomparison or deletion-neutral/base obligation.",
+        "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof.",
+        "repair_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "repair_state": "Local source correction committed; new proof pending. Public CI failure remains at b86.",
+        "resolved_on_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+        "resolution": "Full ready_for_review wasm artifact-equality gate passed in34367934418; original b86/6334 failures remain historical evidence."
+      },
+      "wasm_repair_contract": "Restoreexactoriginaldefaultcount_correction underaddedcfg-not; addmutuallyexclusivecfg-on fn; retaindefaultov.deleted.insert statementverbatim and separatefeaturebookkeeping. Keepaccuratecommentchanges. Targetedoff/onlayout/semantic/controltests andoff/onalltargetclippy. Singleexistingreport-onlyproofattempt ifinstalledrawcargotooling/caches suffice,offline/locked/noinstalls,privatepertreetargets,allwasmoptimizedbuilds15mincap anddisk10GiBstop. No substitution/retry, declaration, gateorbaselinechange, remoteaction, newmodels orEC2. Ifproofsuccess, keepgeneratedproposaloutsidecodeforreview; requirebothcomparisons.",
+      "latest_check_snapshot": {
+        "file": "direct-4246/pr6469-checks-1405.json",
+        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "draft": true,
+        "contexts_returned": 115,
+        "success": 70,
+        "queued_or_running": 28,
+        "skipped": 14,
+        "neutral": 1,
+        "failures": "Onlyknownwasmequalityanddependentdraftaggregate. Pointin-timecheckrollup,notfullgate/fleetproof."
+      },
+      "wasm_repair_runtime": {
+        "owner": "/root/postmerge_ci",
+        "session_id": 18700,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T14:12:34.561420Z",
+        "deadline": "2026-09-09T14:27:34.561420Z",
+        "active_at_report": false,
+        "agent_report": "Base and head raw wasm both compiled, 1,560,265 bytes each with different hashes. Preparing addition-neutral. Separate private targets, offline/locked, proactive 10.5 GiB disk cutoff. Four off and nine on tests, six compiled controls, both all-targets core clippy configurations passed.",
+        "verification_limit": "Agent progress report, final manifest/root verification and actual Opus review pending. Do not duplicate proof or directly poll the agent-owned session while the agent is active.",
+        "next": "Collect frozen report at the next heartbeat; verify exact source, binaries, comparison results, and shim/protocol provenance before one focused actual Opus review. No declaration or push yet.",
+        "completed": true,
+        "result": "Passed in 544.822 seconds, exit 0; neutral=head and deletion-neutral=base. No retry or disk cutoff."
+      },
+      "source_retention": {
+        "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "directory": "direct-4246/source-retention",
+        "manifest_files": 79,
+        "root_verification": "direct-4246/source-retention/root-verification.json",
+        "validation": "13 targeted tests pass, six compiled controls killed, off/on all-targets core clippy pass. Original protocol compiler proof passed both obligations. Local environment only; corrected Linux CI pending."
+      },
+      "source_retention_review_runtime": {
+        "session_id": 20716,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T14:38:19.162397+00:00",
+        "completed": true,
+        "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/review-packet.md",
+        "input_sha256": "7d426a82683f1dc24133da3ab1214dcc344b3fc803ac3cb82452f103c78450b7",
+        "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/opus-review-6334b338.json",
+        "acceptance": "Require success, is_error false, actual modelUsage claude-opus-5 and exact head. No duplicate or exhausted-budget retry. Review includes correcting generated historical [OPUS-5] attribution to actual Astra execution and local scope.",
+        "collected_at": "2026-09-09T14:43:45.573698+00:00",
+        "output_sha256": "b6d80b0cd5fc174ed019bb883662589f194088807d89d5de259954a92d49f72f",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 225361
+      },
+      "source_retention_review_verdict": "approve_for_validation; no source blockers. Declaration content supported after truthful Astra attribution and local-scope edits. Final Linux validation remains required.",
+      "declaration_decision": {
+        "choice": "Push reviewed correction alone as draft, let normal Linux failure-triggered advisory derive evidence, then evaluate declaration.",
+        "reason": "Existing normal workflow derives only when leg2 fails. Adding declaration now would skip Linux derivation requested by reviewer. No workflow/gate edit or manual dispatch.",
+        "local_proposal": "direct-4246/source-retention/proof/declaration-proposal.json",
+        "required_edits": [
+          "Replace historical [OPUS-5] reason prefix with actual [GPT-6 Astra] execution provenance.",
+          "Append exact measured head/environment scope and disclose reason-only edits.",
+          "Keep evidence unchanged; do not present local bytes as Linux bytes."
+        ],
+        "schema_audit": "Existing V2 gate compares numeric declaration filenames; does not parse reason or compare evidence with re-derivation. README supports reviewed per-PR declaration. Adding JSON alone does not alter source layout; final Linux gate still required."
+      },
+      "source_correction_publication": {
+        "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "draft": true,
+        "precheck": "direct-4246/6334-prepush.json",
+        "postpush": "direct-4246/6334-postpush.json",
+        "body": "direct-4246/pr-body-6334.md",
+        "verified_body": "direct-4246/6334-body-verified.json",
+        "runs": "direct-4246/pr6469-runs-6334.json"
+      },
+      "linux_proof_pending": {
+        "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "run": 34365605984,
+        "instruction": "Wait for natural completed run, collect exact artifact-equality job log and report-only derivation. Expected leg2 remains failed until declaration; distinguish successful derivation from gate pass. If both obligations pass on Linux, preserve its exact generated proposal and proof provenance, apply required truthful attribution/head/environment scope edits under existing actual review, commit only declaration, then normal full validation. Do not claim new JSON-line counts are re-derived or repeat optimized local builds.",
+        "review": "direct-4246/source-retention/opus-review-result.json",
+        "completed": true,
+        "result": "declared in normal Linux run34365605984, job102513392880; root verified exact generated output and both obligation outcomes. Saved linux6334-proof-verification.json."
+      },
+      "b86_new_feature_execution_verified": {
+        "at": "2026-09-09T14:46:36.408914+00:00",
+        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "run": 34358709776,
+        "new_leg": "sparq-core (overlay-deleted-projections)",
+        "selected_test": true,
+        "actual_group": "g02 sparq-core",
+        "job": 102491249176,
+        "targeted_tests_passed": 9,
+        "artifact": {
+          "id": 10107270520,
+          "name": "feature-matrix-results-1",
+          "failed_step": null
+        },
+        "per_leg_check": 102505586986,
+        "summary_check": 102506358342,
+        "summary_external_id": "34358709776",
+        "app_id": 15368,
+        "limits": "This verifies the earlier b86 draft run only, not corrected-head or full-tier admission. Earlier g01 log was a different core group; the actual experimental leg is g02. Correlation lives on the summary check, while individual check external_id is blank by design."
+      },
+      "declaration_publication": {
+        "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+        "source_parent": "6334b338587fe5c635c69a09e134917ec35eaaca",
+        "draft": false,
+        "file": "bench/feature-off-declarations/6469.json",
+        "only_final_commit_change": true,
+        "root_verification": "direct-4246/linux6334-proof-verification.json",
+        "generated_proposal": "direct-4246/linux6334-declaration-generated.json",
+        "committed_declaration": "direct-4246/linux6334-declaration-reviewed.json",
+        "prepush": "direct-4246/declaration-prepush.json",
+        "ready_precheck": "direct-4246/declaration-ready-precheck.json",
+        "ready_verified": "direct-4246/fa371-ready-verified.json",
+        "body": "direct-4246/pr-body-declaration.md"
+      },
+      "full_validation_runs": {
+        "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+        "ready_event_at": "2026-09-09T15:05:25Z",
+        "CI": 34367934853,
+        "Benchmarks": 34367935174,
+        "feature_matrix": 34367934926,
+        "ci_summary": 34367934318,
+        "vectorized_feature_off": 34367934418,
+        "wasm_gate": "SUCCESS, actual leg2 and both comparator/derivation tripwires ran successfully",
+        "copilot_code_review": 34367948623,
+        "copilot_state": "in_progress as of final run inventory; reviewer lists may remain empty while dynamic review runs",
+        "inventory": "direct-4246/fa371-full-runs.json",
+        "wasm_status": "direct-4246/fa371-wasm-full-status.json",
+        "limit": "Earlier same-head draft runs were cancelled by normal workflow supersession following ready_for_review; root did not call cancellation. Only the full successors count for admission."
+      },
+      "copilot_request": {
+        "required_by": "AGENTS.md contribution workflow",
+        "method": "POST requested_reviewers with copilot-pull-request-reviewer[bot], supported by official GitHub documentation",
+        "docs": "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review",
+        "response": "success but requested_reviewers empty; actual dynamic Copilot run34367948623 is independently observed. Do not issue duplicate request; watch the existing run.",
+        "evidence": [
+          "direct-4246/copilot-precheck-fa371.json",
+          "direct-4246/copilot-request-result-fa371.json",
+          "direct-4246/copilot-followup-fa371.json"
+        ]
+      },
+      "next": "Collect full ready_for_review CI and actual Copilot feedback on fa371. Address substantive findings through existing Astra lane and real review as needed. No broad repeated local gates, new benchmarks, duplicate Copilot/Opus requests, registry re-enable, dispatch or release. Only protected exact-head admission once checks and conversations resolve.",
+      "copilot_finding": {
+        "review_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+        "thread": "PRRT_kwDOSz3qKM6gtyhC",
+        "comment": 3970001492,
+        "url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970001492",
+        "finding": "size_of/align_of assertions assume repr(Rust) layout/no-padding and may fail across compiler versions/targets without semantic regression.",
+        "assessment": "Actual Opus confirms misleading no-padding prose; approves exact comment-only empirical footprint clarification with size/alignment assertions preserved. No runtime defect demonstrated. Single-host control and stable/nightly target limits retained.",
+        "rust_reference": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
+        "agent": "/root/postmerge_ci",
+        "scope": "Read-only assessment plus one compiled metadata-only default-off control in private copy, warm private target and two jobs; no source change, optimized builds, remote action or new review calls.",
+        "evidence": "direct-4246/review-fa371-1522.json",
+        "root_verification": "direct-4246/layout-review/root-verification.json",
+        "correction": "Only approved two-line prose replaced by four-line empirical footprint explanation. Assertions/test/executable code and declaration bytes unchanged. No new local build/test.",
+        "resolved": true,
+        "resolution_head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+        "resolution_url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970364418",
+        "resolution_verification": "direct-4246/layout-comment/final-verified.json"
+      },
+      "full_validation_progress": {
+        "at": "2026-09-09T16:47:23.906187+00:00",
+        "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "checks": "direct-4246/counting-admission/new-head-checks.json",
+        "runs": "direct-4246/counting-admission/new-head-runs.json",
+        "rollup": {
+          "QUEUED": 24,
+          "IN_PROGRESS": 7,
+          "SUCCESS": 21,
+          "SKIPPED": 5,
+          "NEUTRAL": 1
+        },
+        "failed_checks": 0,
+        "run_ids": {
+          "flow-on-gates": 34378539142,
+          "docs-quality": 34378539072,
+          "container-scan": 34378539077,
+          "supply-chain": 34378539083,
+          "CI": 34378539442,
+          "fuzz": 34378539474,
+          "routing-self-tests": 34378539019,
+          "pr-area-label": 34378539090,
+          "Benchmarks": 34378539462,
+          "vectorized-feature-off": 34378539075,
+          "Changed-code mutation review": 34378539020,
+          "ci-summary": 34378539115,
+          "feature-matrix": 34378539457,
+          "pr-title": 34378675313,
+          "formal-verification": 34378538988,
+          "Running Copilot Code Review": 34378546536
+        },
+        "remaining": "ExistingcurrentheadfullCI, benchmarks, featurematrix andaggregatepending; newautomaticCopilotreviewrunning. Inspectactualnewopt-inlegtestexecution/run-boundaggregatebeforeprotectedenqueue. Priorheads evidencehistorical only."
+      },
+      "disk_hold": {
+        "free_bytes_after_control": 6418264064,
+        "action": "No further builds. Freeze/back up before task-owned cleanup. No unrelated caches/worktrees touched.",
+        "cleanup": "direct-4246/layout-review/cleanup-result.json",
+        "free_bytes_after_cleanup": 7497883648,
+        "status": "No further builds; frozen source/log/binary evidence preserved and verified against private Git backup."
+      },
+      "layout_review_runtime": {
+        "session_id": 8482,
+        "kind": "exec_command",
+        "completed": true,
+        "input": "direct-4246/layout-review/opus-input.md",
+        "input_sha256": "776b7338fe09cc58c21c75786bea326ee241c7c37e9643b555f35dbf2af22813",
+        "output": "direct-4246/layout-review/opus-review-fa371.json",
+        "started_at": "2026-09-09T15:38:05.925841+00:00",
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "scope": "One Copilot finding plus proposed comment-only clarification; no general implementation re-review.",
+        "collected_at": "2026-09-09T15:40:45.147431+00:00",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 76825,
+        "output_sha256": "84549991127b2a27176878ec4d6179c78cfde3c44f94a68021fcd6a9e6eda5ff",
+        "verdict": "approve_comment_only_fix_for_validation"
+      },
+      "layout_comment_publication": {
+        "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+        "parent": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+        "root_verification": "direct-4246/layout-comment/root-verification.json",
+        "manifest_files_verified": 6,
+        "prepush": "direct-4246/layout-comment/prepush-remote.json",
+        "postpush": "direct-4246/layout-comment/postpush-remote.json",
+        "public_body": "direct-4246/layout-comment/pr-body.md",
+        "review_reply": "direct-4246/layout-comment/review-reply-result.json",
+        "threads_resolved": true,
+        "runs": "direct-4246/layout-comment/initial-runs.json",
+        "checks": "direct-4246/layout-comment/initial-checks.json"
+      },
+      "next_heartbeat": "Readcheckpointthenbudgetcheck. No liveOpusreviewsorlocalcommands;38346completedverified,do notpoll/relaunch. Watchexistingccdedfullruns andautomaticCopilotreview34378546536; do notrequestduplicate. No newimplementationlane while4246 active. Oncurrentfailedcheck ornewreviewfinding, diagnoseconcreteissueboundedlywithsameAstraagent; no blindretry orfullremeasurement. Onallrequiredgreen, verifyactualnewfeaturelegtest+clippy andaggregatefreshness, thenfreshrevalidatehead/main/holds/threads andordinaryprotectedenqueueexpectedHeadOidccded,jumpfalse. review:unreviewedis informational, review:needsarealhold. RegistryOFF,noreleases,heldPRsremainheld. Broadlocalbuildholdremains; tinydependencyfreerustctestexceptioncompletednotgeneralpermission.",
+      "allocator_window_finding": {
+        "review": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
+        "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+        "file": "bench/overlay-count/src/counting.rs",
+        "finding": "begin clears ACTIVE before asserting, leaves counter-reset interval open to competing begin; potential overlap/measurement corruption on invalid usage.",
+        "evidence": "direct-4246/layout-comment/review-1558.json",
+        "scope": "SameAstraagent read-only assessment of all begin/end callers, historical measurement validity, minimal correction and actual-module regression/control design; no source/build/remote changes authorized yet.",
+        "root_source_observation": "Current harness appears single coordinator: main sequential loop and lifecycle::measure; concurrent-cold starts/joinstwo workers inside one measuredclosure,workersdo notbegin/end. Need fullinventory/evidencescope before concluding prior data unaffected.",
+        "implementation_authorized": {
+          "design": "Separate WINDOW_OPEN AtomicBool ownership before counter reset, held through end counter snapshot; acquire/release handoff. Existing ACTIVE boundaries/hot allocator path preserved. No core/declaration/workload changes.",
+          "validation": "One actual-module serial regression/calibration and compiled old-source control; competing caller only deterministic/bounded and no panic-noise exact-count claim. Exact directrustc command documented; detachedmodule not claimed reached by workspaceCI.",
+          "resource_exception": "Only dependency-free rustc test/smoke binaries, task-privateoutput<=128MiB, <=120seconds total, >=8GiBfreebefore/after. NoCargo/deps/fullworkspace/optimizedbenchmark builds. Broadbuildholdstays.",
+          "publication": "Localcommitted/frozenevidenceonly. Root verification and actual independent Opus review required before push.",
+          "historical_evidence": "All prior benchmark data stays unchanged and attributed to measured oldheads; assess single-coordinator caller equivalence without fullremeasurement."
+        },
+        "assessment": "Root verified frozen10filecounting-review assessment. Allcurrentbegin/end calls fromsinglecoordinator; concurrentreadersjoinedwithinonewindow. No observed triggerinvalidatespriorfrozenmeasurements. Separateowner guardthroughreadout needed; narrowrepairalready authorized.",
+        "assessment_file": "direct-4246/counting-review/assessment.json",
+        "focused_test_progress": {
+          "evidence": "direct-4246/counting-fix/results.json",
+          "status": "Preliminaryrootread:actualmoduleregressionpasses;same appendedtestcompiledagainstunchangedoldsourcefailsintendedactive/countassertion. Fourclean calibrationspass. Agentfinalfreeze/commit/rootverificationandOpusreviewstillpending.",
+          "executions": {
+            "fixed_compile": 0,
+            "fixed_test": 0,
+            "old_compile": 0,
+            "old_test": 101
+          },
+          "resource_bounds_passed": true,
+          "compiler_note": "Fixedcompileexit0withmacOSlinkerFSEvents/cache-dirwarning (linker_messagesignores-Dwarnings); no sourcewarningfailure or suppression claimed.",
+          "final_source_binding": "Rootverifiedexactfinalcompiledsourceequalscleancommittedccd;oldproductionexact5757andidenticaltest suffix. Finalcandidatepass,compiledoldcontrolassertionfailure,4calibrationsboth. Guard-onlyproductiondelta;hotpath/core/workloads/declarationunchanged."
+        },
+        "repair_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "root_verification": "direct-4246/counting-admission/root-verification.json",
+        "frozen_manifest_verified": 47,
+        "review_verdict": "ActualOpus5xhigh approvesexactccdedforvalidation; no blockers. CAS-firstrejectionandAcquire/Releaseownershipspanconfirmed; currentcallerssinglecoordinator. Readout/resetinterleavingsarguedstructurally,notforcedbytest; noownertoken/RAII orarbitraryallocatornoiseguarantee. Newheadperformanceunmeasured;olddataretainedwithoriginalattributionandlimits.",
+        "addressed": true,
+        "published_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "response": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5605455440",
+        "publication_verified": "direct-4246/counting-admission/publication-verified.json",
+        "source_tests": "Exactfinalactualmodulepass;unchangedoldproduction+identicaltestcompiledandfailedfirstassertafterlogginglostcountinginbothnested/competingprobes. Fourclean calibrationsboth. Resets/readoutinterleavingsstructurallyreviewed,notforcedbytest.",
+        "historical_data": "Unchanged/frozenunderoriginalhashes. Currentcallerstaticauditshowsonecoordinator; nothistoricalexecutiontrace,new-headmeasurementorcrossrevisionproof."
+      },
+      "counting_review_runtime": {
+        "session_id": 38346,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T16:25:26.022731+00:00",
+        "completed": true,
+        "input": "direct-4246/counting-admission/opus-input.md",
+        "input_sha256": "23ac25b24d40d42416f3fba0938761dea8bbb346c03ebeb5efe2b1e14e676400",
+        "output": "direct-4246/counting-admission/opus-review-ccded1b4.json",
+        "expected_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "note": "One actual model invocation. Earlier local manifest parsing/redirection failed before Claude execution; no model-budget retry.",
+        "collected_at": "2026-09-09T16:43:04.017501+00:00",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 306624,
+        "output_sha256": "6fa76d3f78384272b8c3883bd841323090a52f7f4bdc9514b27b4034871031bf",
+        "verdict": "approve_for_validation"
+      },
+      "counting_publication": {
+        "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "parent": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+        "prepush": "direct-4246/counting-admission/prepush-final.json",
+        "verified": "direct-4246/counting-admission/publication-verified.json",
+        "body": "direct-4246/counting-admission/pr-body.md",
+        "response": "direct-4246/counting-admission/review-comment.md"
+      },
+      "current_review_status": "ActualOpusreviewchain: runtime6334approvedforvalidation, Linuxneutralitydeclarationfa reviewedreasonedits/mechanicallyverified, layoutcomment5757exactwordingapproved, counterrepairccdedexactheadapproved. No sourceblockers. FinalcurrentheadCI/reviews/holds remain required before ordinary protectedadmission. NeverfabricatecanonicalVERDICT orreview:pass.",
+      "final_validation": {
+        "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "evidence": "direct-4246/counting-admission/full-validation-verification.json",
+        "verified_at": "2026-09-09T17:47:49.472288+00:00",
+        "ci": "300success8skipped1neutral; no failed/pending",
+        "new_feature_executed": true,
+        "linux_privacy_gate": "Actual check-privacy-claims.sh and both-direction self-tests succeeded; local Bash3 limitation remains, no nonexistent ci-preflight wrapper claim."
+      },
+      "final_perf_review": {
+        "state": "completed",
+        "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "input": "direct-4246/perf-admission/opus-input.md",
+        "input_sha256": "317a7195d17ba0875d8db83d3f1a5c2cbaac3a309e1ea8104082b9f3e48747d2",
+        "input_bytes": 172000,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "completed": true,
+        "session_id": 13152,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T17:53:44.241670+00:00",
+        "output": "direct-4246/perf-admission/opus-review-ccded-final-perf.json",
+        "acceptance": "Require successful outer JSON, is_errorfalse, actual modelUsage claude-opus-5 and exact ccded head. No duplicate invocation or exhausted-budget retry.",
+        "collected_at": "2026-09-09T17:57:35.954446+00:00",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 223484,
+        "output_sha256": "81938a5e85793a8343d36723b429fcb48423dc40faf320bb361db97b635c871d",
+        "verdict": {
+          "reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+          "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+          "pr": 6469,
+          "perf_affecting": true,
+          "perf_ok": true,
+          "canonical_number_change": false,
+          "evidence": "perf_affecting=true via four triggers: hot-path/benchmarked-crate edit (crates/sparq-core/src/store.rs overlay count_correction), bench harness addition (bench/overlay-count/**), catalog edit (bench/benchmarks.toml new 'overlay-count-diagnostic', status=diagnostic, featured=false), and perf-adjacent prose (crates/sparq-core/README.md:53-65, skills/sparql-query/SKILL.md:1052-1069). Regression risk: default build unchanged \u2014 every added element in store.rs is cfg-gated (deleted_by_perm field, invalidate_deleted, deleted_count, the experimental count_correction arm, the heap_bytes addend, and the three apply_delta deleted_changed sites); the #[cfg(not(overlay-deleted-projections))] count_correction retains main's linear filter body verbatim and the default 'ov.deleted.insert(*t);' statement is preserved unbraced; residual non-gated edits are doc comments plus a #[cfg(test)] mod registration. Corroborated by bench/feature-off-declarations/6469.json (addition-blanked==head, deletion-blanked==base, size_delta_bytes=0, 12 metadata bytes, Linux CI run 34365605984 job 102513392880 for 6334b33 vs a42a9e8, Rust 1.97.1) and, decisively for this head, by SUCCESS of the protected 'artifact-exact-equality (wasm bundle feature-OFF)' and 'vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)' checks at ccded1b. deleted_projection_feature_off_preserves_main_layout_and_heap pins Overlay size/alignment, Cow::Borrowed and zero retained heap across scans and a fork, and the force_cache_in_feature_off compiled control kills it, so it is non-vacuous. Floors: bench/perf-baseline.json is NOT in the changed-file stat \u2014 no raise, no ratchet-down, no silent loosening; wasm_bundle_bytes unaffected (declared delta 0, and the declaration defers size to that ratchet). Deterministic/timing surfaces green on the exact head: ci-summary gate SUCCESS (rollup 300 success / 8 skipped / 1 neutral, none pending or failed), 'run + track benchmarks' SUCCESS, wasm build/bundle SUCCESS, coverage and all conformance ratchets SUCCESS; parse path (nt.rs/turtle) untouched. Claim evidence: NO positive perf claim exists in the diff \u2014 no MB/s, x-faster, latency, recall or crossover figure in any markdown (rule 2 clean). The only prose numerics ('twelve bytes per deleted triple plus capacity slack') are structural, derivable from size_of::<[Id;3]>() as used in Overlay::heap_bytes. bench/overlay-count/README.md states protocol dimensions only, marks results noncanonical, and explicitly forbids publishing a speedup claim or selecting a quiet subset. README/SKILL state the adverse direction (cold-read and update/read regression, per-retained-generation memory growth, no cap or eviction, 'no universal crossover or canonical speedup is claimed'). Committed measured numbers exist only in the JSON declaration and cite a real Linux CI run/job, source commit, base and pinned toolchain (rules 1 and 3 satisfied); the noncanonical macOS lifecycle data is not in the tree. Opt-in architecture: overlay-deleted-projections=[] is empty, absent from default=['parallel'], enabled by no other feature or dep:, with no engine/CLI/wasm forwarding; new deps (libc, rayon, oxrdf) are confined to the detached bench/overlay-count crate with its own [workspace] and its own Cargo.lock, so the root lock and default build gain nothing. CI wiring verified: dedicated test:true leg in .github/feature-matrix.d/sparq-core.yml with regenerated golden line, executed on this head with build + tests + --all-targets clippy (9 overlay_deleted_tests passed, 187 legs selected). canonical_number_change=false: no perf-baseline floor and no published-results artifact moved; bench/feature-off-declarations/6469.json is a per-PR generated compiler-neutrality artifact under the existing protocol whose own content asserts a zero-byte size delta \u2014 recorded here for maintainer visibility, but it is not a canonical-number edit.",
+          "concerns": "",
+          "residual_nonblocking": [
+            "Not confirmed from this packet that no gating leg builds sparq-core with --all-features (carried over from the earlier review). Non-blocking: floors untouched, ratchet/benchmark jobs green on this head, and no policy deterministic metric (store_bytes_per_triple{,_small}, dict_bytes_per_term, wasm_bundle_bytes, fts_bytes_per_doc, vectors_*_recall_at10, geo_compliance_deficit) constructs a tombstone overlay, so the experiment cannot move one even if compiled in.",
+            "bench/feature-off-declarations/6469.json byte counts are for source commit 6334b33, self-disclosed in its reason string; post-6334b33 commits touch only that JSON, a comment inside a #[cfg(test)] module, and the detached bench crate, and the exact-head protected equality gate passed independently.",
+            "derived:true coexists with a hand-edited reason string (attribution + CI/toolchain scope); numbers unedited and the edit is disclosed in the PR body. Provenance-honesty lane, not a perf blocker.",
+            "bench/overlay-count/src/counting.rs allocator-window regression executes only via the documented direct rustc --test command and is not covered by workspace CI; retained lifecycle measurements remain frozen old-head noncanonical data. Acceptable because no gate consumes them and no claim in the diff rests on them."
+          ],
+          "not_granted": [
+            "default-on enablement",
+            "any crossover, threshold or canonical speedup claim",
+            "any deterministic floor change",
+            "any waiver of gate integration 15368, ALLGREEN merge-group checks, or current holds",
+            "correctness/scope re-review and any new measurement campaign"
+          ],
+          "permissionDecision": "allow",
+          "permissionDecisionReason": "\ud83e\udd16 SPARQ perf-reviewer: perf-affecting (sparq-core store overlay path, bench harness + catalog, perf-adjacent prose) but perf-clean. The feature is default-OFF with the default code path preserved verbatim under cfg, proved by the addition/deletion-blanked neutrality declaration and by the protected artifact-exact-equality (wasm bundle feature-OFF) and feature-resolution checks passing on exact head ccded1b4898cf5b317a6591f6ff6108ced23123c. bench/perf-baseline.json is untouched \u2014 no floor raise, ratchet-down or silent loosening \u2014 and the deterministic ratchets, benchmark and wasm jobs are green (rollup 300 success / 8 skipped / 1 neutral, none pending or failed). No positive performance claim appears anywhere in the diff; the only committed measured numbers cite a real Linux CI run/job, and the local lifecycle data stays out of the tree and is labelled noncanonical. Residual non-blocking notes recorded (unconfirmed --all-features gating-leg audit; declaration derived at 6334b33; hand-edited reason under derived:true; allocator regression not covered by workspace CI). Arming allowed for normal protected queue admission; gate integration 15368, ALLGREEN merge-group checks and all current holds still apply, and no default-on or canonical performance admission is granted."
+        }
+      },
+      "copilot_final": {
+        "id": "PRR_kwDOSz3qKM8AAAABM2bPag",
+        "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "concrete_findings": 0,
+        "threads_resolved": true,
+        "generic_human_recommendation": "No required approval or user hold; direct admission uses actual independent Opus review under standing user instruction. Do not claim human approval."
+      },
+      "review_process_note": "Legacy roborev CLI absent (command -v empty). Actual independent Opus review follows user model instruction over stale Codex review routing. No roborev pass claimed.",
+      "queue_admission": {
+        "at": "2026-09-09T18:01:43.409510+00:00",
+        "entry": {
+          "id": "MQE_lQDOSz3qKM8AAAABC1yJ3c4AA2w6zgLJKtM",
+          "position": 1,
+          "state": "AWAITING_CHECKS",
+          "enqueuedAt": "2026-09-09T18:00:39Z",
+          "headCommit": {
+            "oid": "cea4414b39225b1240f36d968ba1549e700cd32f"
+          },
+          "baseCommit": {
+            "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+          },
+          "pullRequest": {
+            "number": 6469,
+            "headRefOid": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+            "state": "OPEN"
+          }
+        },
+        "pr_reviewed_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "comment": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5606416908",
+        "evidence": "direct-4246/perf-admission/queue-verified.json",
+        "verification": "direct-4246/perf-admission/enqueue-root-verification.json"
+      },
+      "queue_initial_runs": {
+        "evidence": "direct-4246/perf-admission/queue-initial-runs.json",
+        "runs": [
+          {
+            "id": 34386432871,
+            "name": "feature-matrix",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 34386432273,
+            "name": "ci-summary",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "in_progress",
+            "conclusion": null
+          },
+          {
+            "id": 34386432172,
+            "name": "routing-self-tests",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34386432182,
+            "name": "pr-area-label",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34386432660,
+            "name": "CI",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 34386432378,
+            "name": "flow-on-gates",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34386432254,
+            "name": "vectorized-feature-off",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "id": 34386432230,
+            "name": "docs-quality",
+            "event": "merge_group",
+            "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ],
+        "failures": []
+      },
+      "latest_queue_observation": {
+        "at": "2026-09-09T18:22:35.446630+00:00",
+        "queue": "position1AWAITING_CHECKS",
+        "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+        "source_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+        "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+        "job_snapshots": {
+          "queue-matrix-jobs-1818.json": {
+            "jobs": 57,
+            "states": {
+              "success": 25,
+              "skipped": 1,
+              "in_progress": 6,
+              "queued": 25
+            },
+            "assigned_active_runners": 6
+          },
+          "queue-ci-jobs-1818.json": {
+            "jobs": 34,
+            "states": {
+              "success": 22,
+              "skipped": 8,
+              "in_progress": 4
+            },
+            "assigned_active_runners": 4
+          }
+        },
+        "failures": [],
+        "assessment": "ActualjobsprogressingonassignedGitHubhostedrunners;25matrixgroupsqueued, no failure/starvation proof. Preservecurrentmerge-group evidence."
+      },
+      "merge": {
+        "at": "2026-09-09T18:36:14Z",
+        "commit": "cea4414b39225b1240f36d968ba1549e700cd32f",
+        "proof": "direct-4246/perf-admission/main-source-proof.json",
+        "issue_closed_evidence": "direct-4246/perf-admission/issue4246-closed-verified.json",
+        "issue_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5606962270"
+      }
+    }
+  },
+  "postmerge_watch": {
+    "pr": 6469,
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "observed_at": "2026-09-09T18:57:13.517567+00:00",
+    "evidence": "direct-4246/perf-admission/main-runs-1859.json",
+    "push_runs": [
+      {
+        "id": 34390025043,
+        "name": "Benchmarks",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 34390022861,
+        "name": "release-plz",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 34390022676,
+        "name": "scorecard",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390022725,
+        "name": "vectorized-feature-off",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390023354,
+        "name": "feature-matrix",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 34390022799,
+        "name": "container-scan",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390022757,
+        "name": "pkg-ingest",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390023582,
+        "name": "fuzz",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 34390022915,
+        "name": "supply-chain",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390022590,
+        "name": "docs-quality",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390023351,
+        "name": "CI",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 34390022720,
+        "name": "batch-merge",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 34390022724,
+        "name": "Python bindings",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390022784,
+        "name": "pages",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 34390022510,
+        "name": "formal-verification",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 34390022549,
+        "name": "routing-self-tests",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390022530,
+        "name": "ci-summary",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 34390022517,
+        "name": "js",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "status": "CI/matrix/formal/pagesqueued;benchmark/fuzz/aggregateprogressing;completedcoreancillarychecksgreen. Batchmerge/release-plzfailuresundifferentiatedfromhistoricalfailures; no source-regression/health claim andno releaseauthorization/retry.",
+    "merged_worktree": "Keepissue4246untilagentfinishedreadingitandcleanupapprovedbyexactclean/inactive/sourcebackupevidence; donotreapwhileused."
   }
 }

@@ -1,0 +1,13 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+I completed one explicit, independently reviewed maintenance action: created the missing `area:sparq-wrapper-gen` repository label for the existing `crates/sparq-wrapper-gen` workspace member. One create and one exact readback succeeded. No issue or PR labels were changed directly; registry Actions and automatic worker dispatch remain disabled.
+
+Actual Claude Opus 5, extra-high reasoning, approved this exact action after reviewing the routing policy. The crate manifest, workspace membership, issue derivation and PR partition rules agree on the exact crate name. Mapping it to `wrapper`, `sparq-wrapper` or `ci` would reserve the wrong partition. Before the write, I enumerated all open PR changed paths, including the complete large PR file list, and revalidated the head set: none touched this crate. The relevant source remained identical after main advanced through #6469.
+
+This is deliberate repository maintenance and knowingly differs from the blanket “do NOT create the label” remedy in `triage-area.py`. That remedy conflates a typo with a real workspace member lacking its supported label. The classifier still cannot create labels; the PR deriver's automatic new-crate witness restriction and the global unknown-label zero-write guard remain unchanged. The label description identifies this as reviewed maintenance.
+
+The effect is broader than #5016: a later ordinary scheduled classification pass can resume its bounded label/unpark writes, and later PR attribution can recognize this exact partition. No live replay or manual dispatch was used. I will inspect the first ordinary scheduled run after this action, record every application of the new label and its classification evidence, and verify each concerns the actual generator crate. A repeated unknown-label abort will be investigated without creating more labels or weakening the guard. The related enumeration issue #6335 could still prevent the sweep from seeing the new label.
+
+This issue remains open. A separate two-file source repair is now in progress: title-scoped routing for triage-area diagnostics, offending issue/label/tier details, and regression tests proving unsupported labels still cause zero writes even beyond the write-budget prefix. Older PRs #5457 and #6095 retain their own changes and holds.
+
+Review artifact SHA256: `e942ae3adfdc169dcdcec710916d1855f91f7338a469319d0caa61d1e6fcd23c`. Created label ID: `12123212987`.

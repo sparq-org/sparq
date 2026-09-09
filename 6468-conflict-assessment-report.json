@@ -1,0 +1,107 @@
+{
+  "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "observed_at": "2026-09-09T18:48:56.772851+00:00",
+  "mode": "Bounded read-only conflict/hold assessment. No source changes, tests/builds, model sessions or remote writes.",
+  "requests": "One fresh budget check, one GraphQL query covering both named PRs, one gh pr checks read for each. No API retries, workflow/job logs or transcripts read. The6095 checks command returned a local running session; waited for that same request before parsing, without reissuing it.",
+  "recommendation": {
+    "decision": "6468 can remain a self-contained two-file slice; neither existing PR is a prerequisite. Same-file overlap is real, but the proposed production hunks are separate and no human PR hold was found. Prefer the bounded6468 rule/row-diagnostic repair after the root-owned label maintenance, without importing either older chain.",
+    "next_step": "If root authorizes implementation, create one new isolated6468 branch on verified maincea4414b. Change only early RULES title routing and the existing global unknown-label diagnostic in scripts/triage-area.py, plus a new focused test class and the required ANCHORED_ONLY entry in scripts/tests/test_triage_area.py. Do not edit _DECL, its declaration tests, existing scope-property loops, census modes or workflows.",
+    "composition": "Before publication, review the final6468 delta against6095 full two-file diff; retain6095 T0 lookbehind/non-vacuity changes as separate historical Opus work. The current6468 plan has no patch yet, so this is source-hunk independence, not an executed three-way merge proof.",
+    "priority_after6468": "6095 is the smaller plausible recovery lane: a live T0 suffix-matching defect remains on main, the reviewed patch is still absent and source composition is nearly trivial. First diagnose its exact failing aggregate check rather than rearm/retry or import its stale gate-forgiveness policy.5457 needs premise refresh and conflict resolution first; do not recover it merely because it touches the same files."
+  },
+  "prs": [
+    {
+      "number": 5457,
+      "head": "f2f3d5dffd5b4c4064f41ed42a9eaab308770c9f",
+      "draft": true,
+      "mergeable": "CONFLICTING",
+      "source_issue": 5004,
+      "historical_authorship": "Both commits carry Claude Opus5 trailers; preserve that authorship in any later recovery. No source adopted here.",
+      "files": [
+        ".github/workflows/routing-self-tests.yml",
+        ".github/workflows/triage-area.yml",
+        "scripts/tests/test_readiness_visibility.py",
+        "scripts/tests/test_triage_area.py",
+        "scripts/triage-area.py"
+      ],
+      "diff_stat": "+296/-0 across5files from merge base1161f535",
+      "purpose": "Adds read-only --census, parked/unparked split, census output/CLI tests, workflow step and routing trigger coverage. It neither changes classification RULES nor resolves an unknown area label.",
+      "hunk_locations": [
+        "PRhead scripts/triage-area.py:564 census,583 print_census,743 main/--census; tests:659 TestUnattributedCensus.",
+        "6468 plan instead touches maincea scripts/triage-area.py:150 RULES and742-746 unknown guard. main CLI adjacency and test-file EOF require care when5457 is eventually rebased."
+      ],
+      "review_findings": [
+        "Recorded exact-head round2 approve comment5160164370, Aug2, repeats unresolved minor wording: unparked issues may have role/priority/kind/needs:user labels, so no board state at all is inaccurate. No native review threads (0). These are recorded bot review claims, not a new independent review.",
+        "Current main candidate_issues536-558 and report rows764-780 already cover every area-less open issue, including unparked ones.5457 prose still says the ordinary residue report is based on --label needs:area. New census distinctions may retain value, but the old visibility premise is partly stale and must be reassessed.",
+        "The proposed workflow census step has no if:always; a preceding classification-step failure can skip it. It cannot repair6468 global unknown-label failure. No broader workflow fix evaluated."
+      ],
+      "hold": {
+        "labels": "review:parked, area:ci",
+        "latest_applying_actor": "sparq-orchestrator at2026-08-31T12:55:55Z",
+        "capacity_receipt": "comment5478676754: class=capacity cause=dispatch-missed, six missed dispatches, exactheadf2f3d5d.",
+        "conflict_receipts": "comment5478980428 lists conflicts in triage-area.yml, test_readiness_visibility.py and triage-area.py; comment5483372109 records machine head-unmoved soft park.",
+        "human_hold_found": false,
+        "preserve": "Leave the existing draft/park in place. No unlabel, bypass, model retry or reinterpretation of old registry-only arming prose."
+      },
+      "checks": "Current gh pr checks returns64rows; no fail/pending buckets. Old gate,draft-tier30713907892/job91406094023 isSUCCESS. This is old-head draft evidence, not proof a current merged tree passes."
+    },
+    {
+      "number": 6095,
+      "head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+      "draft": true,
+      "mergeable": "MERGEABLE",
+      "source_issue": 4567,
+      "historical_authorship": "Single commit0883db681 carries Claude Opus5 trailer. Preserve it; any later Astra repair uses its own honest attribution.",
+      "files": [
+        "scripts/triage-area.py",
+        "scripts/tests/test_triage_area.py"
+      ],
+      "diff_stat": "+68/-3 across2files from merge base8ad990e6",
+      "purpose": "Adds (?<![\\w-]) to T0 _DECL; rejects tool-surface/subcrates/my_crates prose while preserving actual declaration forms. Adds behavioral false-positive/acceptance tests and non-vacuity counts to existing title/text property loops.",
+      "hunk_locations": [
+        "Current main _DECL393-394 lacks boundary; PR399-401 adds it.6468 should not edit this region.",
+        "PRtests709-744 adds T0 tests;793-806 adds partition helper;825-856 augments loops. Main ANCHORED_ONLY745-746 remains a disjoint set literal, though6095 shifts its line to785. Keep6468 tests separate and preserve these loops."
+      ],
+      "main_satisfaction": "Not on main. Since6095 merge base, test_triage_area.py is byte-identical to main; production classifier differs only at339 in the @jeswr/sparq -> @sparq-org/sparq token. Preserve the new package name in any recovery.",
+      "review_findings": [
+        "Recorded exact-head approve comments5489661959 (round2) and5547308494 (round7), no reported correctness/security blocker. Current native review list has only an automated benchmark COMMENTED review; no native approval, no unresolved threads(0). Do not equate bot narratives with fresh actual independent review.",
+        "trust-surface was added by sparq-orchestrator at2026-09-04T22:47:31Z; comment5547310828 records an audit trail for the two files. It is not evidence of a human stop instruction."
+      ],
+      "hold": {
+        "labels": "review:needs, trust-surface, area:ci",
+        "provenance": "All17 returned label events are bot-authored. Prior machine budget parks were automatically cleared. Latest sequence: bot review:pass -> review:changes after failed gate -> review:needs at2026-09-04T23:38:30Z.",
+        "receipt": "comment5547682876 reports stuck-arm gate-failed on samehead and routes fix; it is a real unresolved gate blocker, not a manually applied needs:user/review:needs-user hold.",
+        "human_hold_found": false,
+        "preserve": "Do not clear review:needs, rearm, waive failed gate, or revive registry retries. Root owns any recovery after exact CI diagnosis/review."
+      },
+      "checks": {
+        "rows": 71,
+        "failing": [
+          {
+            "name": "gate",
+            "run": 33926976128,
+            "job": 101197513303
+          },
+          {
+            "name": "gate, draft-tier",
+            "run": 33468969774,
+            "job": 99734623342
+          }
+        ],
+        "limits": "Both stillFAILURE in current read; all other returned rows notfail/pending. Source of aggregate failure uninspected: no job log was authorized/read in this assessment."
+      }
+    }
+  ],
+  "hold_evidence_completeness": {
+    "5457": "16comments,0native reviews,0threads,4label events; all pageInfo complete.",
+    "6095": "23comments,1native benchmark review,0threads,17label events; all pageInfo complete.",
+    "limit": "Only these two PR surfaces were read. Source issue5004/4567 holds and any off-platform instruction are unverified. Absence of human PR hold is not authorization to remove machine labels or change admission."
+  },
+  "next_validation_plan_if_authorized": [
+    "6468 fixtures: captured no-area6468 ->ci, current area:ci row skipped, T0 explicit declaration stillwins, body/mid-title mentions negative, genuine5016 retains sparq-wrapper-gen.",
+    "Unknown-label actual-main mocked CLI fixture must exit2 and produce zero writes for all rows, even a known earlier row and an unknown row beyond max-writes1. Pin issue/label/tier diagnostic; no classifier auto-create or live replay.",
+    "Preserve future6095 non-vacuity checks when adding anchored title rule; no rewrites of existing scope tests. Final composed tests/review required before either later merge."
+  ],
+  "precise_future_read_for6095": "If root prioritizes6095 recovery: first read metadata for run33926976128 to revalidate head/event/attempt, then designated aggregate job101197513303 log once; inspect only named deciding failures. Draft aggregate33468969774/job99734623342 is separate older evidence. No rerun until cause/recovery scope is reviewed.",
+  "preserved": "No worktree/source changes. Existing6468 design and all4246 evidence untouched. Registry pause and old approval holds unchanged."
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "pr": 6095,
+    "path": "scripts/triage-area.py",
+    "base": "8ad990e679cf11018d5fc6a3860741db9e897034",
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "identical_base_to_main": false
+  },
+  {
+    "pr": 6095,
+    "path": "scripts/tests/test_triage_area.py",
+    "base": "8ad990e679cf11018d5fc6a3860741db9e897034",
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "identical_base_to_main": true
+  },
+  {
+    "pr": 5457,
+    "path": "scripts/triage-area.py",
+    "base": "1161f535547506bd7867341edfdf3b0aedf8de39",
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "identical_base_to_main": false
+  },
+  {
+    "pr": 5457,
+    "path": "scripts/tests/test_triage_area.py",
+    "base": "1161f535547506bd7867341edfdf3b0aedf8de39",
+    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+    "identical_base_to_main": false
+  }
+]

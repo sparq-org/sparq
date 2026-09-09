@@ -1,0 +1,7 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+There is another confirmed mismatch in this same `pr-area-labels` documentation entry. On main `cea4414b39225b1240f36d968ba1549e700cd32f`, [AGENTS.md](https://github.com/sparq-org/sparq/blob/cea4414b39225b1240f36d968ba1549e700cd32f/AGENTS.md#L670) says the deriver “never creates a label”, while [the normative policy](https://github.com/sparq-org/sparq/blob/cea4414b39225b1240f36d968ba1549e700cd32f/ci/area-labels.toml#L54) and [implementation](https://github.com/sparq-org/sparq/blob/cea4414b39225b1240f36d968ba1549e700cd32f/scripts/pr-area-labels.py#L480) allow the narrow new-crate manifest witness introduced in #4582.
+
+Please include this in the entry's reconciliation: distinguish the PR deriver's witnessed automatic creation from the issue classifier, which still never creates labels, and from separately reviewed repository maintenance. Do not broaden the witness condition or change routing code as part of the documentation fix. The inaccurate categorical summary surfaced during #6468 recovery and independently reviewed label maintenance; it is separate from that issue's classifier diagnostic repair.
+
+The existing PLAN/CLAIM distinction in this issue remains necessary. Recording the related discrepancy here keeps repair of the same entry together instead of opening a duplicate documentation task.

@@ -1,0 +1,378 @@
+diff --git a/.github/workflows/routing-self-tests.yml b/.github/workflows/routing-self-tests.yml
+index 0eaebb53c..663dd8498 100644
+--- a/.github/workflows/routing-self-tests.yml
++++ b/.github/workflows/routing-self-tests.yml
+@@ -104,6 +104,11 @@ on:
+       # TestAreaClassifierCronSeam asserts the same seam (scheduled, unconditional,
+       # --apply, self-tested first, issues:write) and is vacuous without this trigger.
+       - ".github/workflows/triage-area.yml"
++      # [OPUS-5] #5004 — the SCRIPT side of that seam. The census report is a cross-FILE
++      # contract: triage-area.py prints `== `/`   UNPARKED ` and triage-area.yml seds for
++      # exactly those prefixes, so renaming one alone leaves a lane that runs, exits 0 and
++      # reports nothing. Without this trigger a script-only PR never runs the assertion.
++      - "scripts/triage-area.py"
+       # ...and the workflow that self-tests triage.py + retriage.py on every PR.
+       - ".github/workflows/docs-quality.yml"
+       # [OPUS-5] the maintainer front door (#1135 / #4145) — the curated TOML, the renderer
+@@ -219,6 +224,11 @@ on:
+       # TestAreaClassifierCronSeam asserts the same seam (scheduled, unconditional,
+       # --apply, self-tested first, issues:write) and is vacuous without this trigger.
+       - ".github/workflows/triage-area.yml"
++      # [OPUS-5] #5004 — the SCRIPT side of that seam. The census report is a cross-FILE
++      # contract: triage-area.py prints `== `/`   UNPARKED ` and triage-area.yml seds for
++      # exactly those prefixes, so renaming one alone leaves a lane that runs, exits 0 and
++      # reports nothing. Without this trigger a script-only PR never runs the assertion.
++      - "scripts/triage-area.py"
+       # ...and the workflow that self-tests triage.py + retriage.py on every PR.
+       - ".github/workflows/docs-quality.yml"
+       # [OPUS-5] the maintainer front door (#1135 / #4145) — the curated TOML, the renderer
+diff --git a/.github/workflows/triage-area.yml b/.github/workflows/triage-area.yml
+index a24f0a157..c5c445086 100644
+--- a/.github/workflows/triage-area.yml
++++ b/.github/workflows/triage-area.yml
+@@ -126,3 +126,35 @@ jobs:
+             sed -n 's/^   LEFT /- /p' "$log"
+           } >> "$GITHUB_STEP_SUMMARY"
+           echo "::notice title=area-less residue::${summary}"
++
++      # #5004 — THE HALF THE STEP ABOVE CANNOT SEE. That report is built on the
++      # `--label needs:area` query, so it counts only issues that already carry the park.
++      # The registry's `curate-frontier.py` skips on a WIDER predicate — any issue whose area
++      # it cannot derive — and re-skips those every 30 minutes with no label and no count. A
++      # no-area issue that was never parked is invisible to BOTH ends: `triage.py` withholds
++      # the park from epics, gated issues and role/priority-incomplete ones, and `retriage.py`
++      # computes that park delta and then discards it (PROMOTING deltas only), so nothing
++      # ever applies it. This step is the sparq side of the cross-repo gap: the curator's own
++      # predicate, evaluated against the board it reads.
++      #
++      # READ-ONLY, and a SEPARATE step on purpose — its own failure domain, so a census fault
++      # can never abort or half-apply the label sweep above, and a reader can see at a glance
++      # that nothing here writes. `--census` runs no rule and edits no issue.
++      #
++      # No `if:`, for the same reason as the step above: a count printed only when something
++      # happened is exactly the silence this closes.
++      - name: Report the unattributed class the registry curator skips
++        run: |
++          set -euo pipefail
++          log="$RUNNER_TEMP/triage-area-census.log"
++          python3 scripts/triage-area.py --census | tee "$log"
++          # The script's own tally line:
++          # "== N open issue(s) carry no area: label (P parked needs:area, U with no board state ...)".
++          tally=$(sed -n 's/^== //p' "$log" | tail -1)
++          tally=${tally:-'no census line — the census produced no report'}
++          {
++            printf '### unattributed class (registry curator skip predicate)\n\n%s\n\n' "$tally"
++            printf 'The registry curator cannot stage an issue whose area it cannot derive: it logs `skip #N: no confident area` and re-skips it on every tick, in a repository this one cannot change. The count above is that class measured on the board it reads. The issues listed below are the half that carries no `needs:area` park either, so no report on either side of the fence and no board query surfaces them — attributing one, or parking it, is what removes it from this list.\n\n'
++            sed -n 's/^   UNPARKED /- /p' "$log"
++          } >> "$GITHUB_STEP_SUMMARY"
++          echo "::notice title=unattributed class::${tally}"
+diff --git a/scripts/tests/test_readiness_visibility.py b/scripts/tests/test_readiness_visibility.py
+index ea7b2f2f0..dae774284 100644
+--- a/scripts/tests/test_readiness_visibility.py
++++ b/scripts/tests/test_readiness_visibility.py
+@@ -1324,6 +1324,38 @@ class TestAreaClassifierCronSeam(unittest.TestCase):
+         self.assertIn("LEFT", run,
+                       "the residue report must extract the classifier's LEFT lines")
+ 
++    def test_the_wider_unattributed_class_is_always_reported(self):
++        # [OPUS-5] #5004. The step pinned above extracts `LEFT` lines from the
++        # `--label needs:area` sweep, so it counts only issues that already carry the park.
++        # The registry curator skips a WIDER class — any issue whose area it cannot derive —
++        # and a no-area issue that was never parked (triage.py withholds the park from epics,
++        # gated and role/priority-incomplete issues; retriage.py computes that delta and
++        # discards it) is in NEITHER report. Deleting the census step restores that blind
++        # spot, and a lane that has stopped counting looks exactly like a lane with nothing
++        # to count — which is why this is pinned here rather than left to review.
++        run = self._run_blocks()
++        self.assertIn("triage-area.py --census", run,
++                      "triage-area.yml must run the --census pass, or the unattributed "
++                      "class the registry curator skips is counted nowhere")
++        # The census prints `== <tally>` and `   UNPARKED #N ...`; the report step must
++        # extract BOTH or the count reaches no human. Pinned against the script's own
++        # prefixes so renaming one without the other reds here rather than at the next cron.
++        self.assertIn("s/^== //p", run, "the census tally is never extracted")
++        self.assertIn("s/^   UNPARKED /- /p", run,
++                      "the previously-invisible issues never reach the run summary")
++
++    def test_the_census_step_cannot_write_to_the_board(self):
++        # It runs in a job holding `issues: write`. `--census` is read-only by construction
++        # (scripts/tests/test_triage_area.py asserts its argv reaches only `issue list`);
++        # this pins that the WORKFLOW does not pair it with a mutating flag in the same step.
++        for step in self._steps():
++            run = step.get("run") or ""
++            if "--census" not in run:
++                continue
++            self.assertNotIn("--apply", run,
++                             "the census step must not also apply labels — it is a "
++                             "separate failure domain from the sweep on purpose")
++
+     def test_this_lane_never_runs_on_a_pull_request(self):
+         # It holds `issues: write` and executes the checked-out tree. A `pull_request`
+         # trigger would run PR-authored code with a write token; `pull_request_target`
+diff --git a/scripts/tests/test_triage_area.py b/scripts/tests/test_triage_area.py
+index 3ec193c5f..2542cf921 100644
+--- a/scripts/tests/test_triage_area.py
++++ b/scripts/tests/test_triage_area.py
+@@ -656,5 +656,125 @@ class TestScopeDiscipline(unittest.TestCase):
+         self.assertEqual(areas("ieee754 OPT: gate-neutral kernels.nr cleanups"), ["zk"])
+ 
+ 
++class TestUnattributedCensus(unittest.TestCase):
++    """#5004 — the class the `--label needs:area` query cannot see.
++
++    Per #5004 — a claim about the private registry that nothing here can check — its
++    `curate-frontier.py` skips any issue whose area it cannot derive and re-skips it every
++    tick forever. The half that IS checkable is the board: sparq's residue report (#3816)
++    is built on the PARK query, so it counts only issues that already carry the park, while
++    `triage.py` withholds that park from epics, from externally-gated issues and from
++    anything still missing a role or a priority, and `retriage.py` computes the park delta
++    and discards it (PROMOTING deltas only). A no-area issue that was never parked
++    therefore appears in NEITHER report — which is the whole finding.
++
++    These pin the census predicate rather than the prose: the split is what makes the
++    previously-invisible half a number, so each half is asserted independently.
++    """
++
++    @staticmethod
++    def _iss(number, *labels, title="whatever"):
++        return {"number": number, "title": title,
++                "labels": [{"name": lb} for lb in labels]}
++
++    def test_the_unparked_half_is_counted(self):
++        """THE HEADLINE. A no-area issue with no park is the class #5004 is about; if the
++        census only ever returned parked issues it would restate the report that already
++        exists and close nothing."""
++        parked, unparked = TA.census([self._iss(1)])
++        self.assertEqual([it["number"] for it in unparked], [1])
++        self.assertEqual(parked, [])
++
++    def test_the_parked_half_is_reported_separately(self):
++        """The two halves must not be merged: the parked one is already covered by the
++        residue report, so collapsing them would hide how much of the count is NEW."""
++        parked, unparked = TA.census([self._iss(2, TA.PARK_LABEL)])
++        self.assertEqual([it["number"] for it in parked], [2])
++        self.assertEqual(unparked, [])
++
++    def test_the_withheld_park_classes_are_exactly_what_shows_up_unparked(self):
++        """The three shapes `triage.py` deliberately refuses to park — an epic, an
++        externally-gated issue, and one missing a role/priority — are the population
++        `retriage.py` hands on and nothing picks up. They are the census's reason to
++        exist, so assert them by name rather than trusting one generic fixture."""
++        _, unparked = TA.census([
++            self._iss(31, "kind:epic", "priority:P1", "role:impl"),
++            self._iss(32, "priority:P1", "role:impl", "needs:user"),
++            self._iss(33),  # the zero-label class
++        ])
++        self.assertEqual([it["number"] for it in unparked], [31, 32, 33])
++
++    def test_an_attributable_issue_is_not_in_the_class(self):
++        """`area:` present => the curator CAN stage it => it is not the residue. Including
++        the drifted shape (a human added an area but left the park on): counting it would
++        inflate the number with work that is already routable."""
++        parked, unparked = TA.census([
++            self._iss(4, "area:sparq-core"),
++            self._iss(5, "area:sparq-core", TA.PARK_LABEL),
++        ])
++        self.assertEqual((parked, unparked), ([], []))
++
++    def test_the_count_is_printed_even_when_the_class_is_empty(self):
++        """ALWAYS-PRINTED is the point — #5004's finding is silence, and a count emitted
++        only when it is non-zero is indistinguishable from a lane that stopped running."""
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            TA.print_census([self._iss(6, "area:sparq-core")])
++        tally = [ln for ln in buf.getvalue().splitlines() if ln.startswith("== ")]
++        self.assertEqual(len(tally), 1, buf.getvalue())
++        self.assertIn("0 open issue(s) carry no area: label", tally[0])
++
++    def test_the_report_prefixes_cannot_be_sed_by_the_classifier_report(self):
++        """triage-area.yml runs two report steps, and the classifier's extracts `^-- `
++        and `^   LEFT `. They read separate logs today, so this pins the property that
++        keeps them separable if that ever stops being true: were the census to reuse
++        either prefix, one step would absorb the other's lines and the number would be
++        WRONG rather than missing — the harder failure to notice."""
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            TA.print_census([self._iss(7), self._iss(8, TA.PARK_LABEL)])
++        lines = buf.getvalue().splitlines()
++        self.assertEqual([ln for ln in lines if ln.startswith(("-- ", "   LEFT "))], [])
++        self.assertEqual([ln.split()[1] for ln in lines if ln.startswith("   UNPARKED ")],
++                         ["#7"], buf.getvalue())
++
++    def test_a_fetch_at_the_limit_raises_instead_of_undercounting(self):
++        """The census asks for the WHOLE board, not just the park. A fetch that quietly
++        stops at a limit reports FEWER unattributed issues than exist and reads exactly
++        like a shrinking backlog — #5004's failure mode, reintroduced by the fix.
++
++        Since #5003 the census shares the classifier's cursor-paginated `open_issues()`,
++        so a short count is impossible by construction and the remaining risk is the
++        other half: an implausible snapshot must fail CLOSED, not half-report."""
++        rows = [{"number": n, "title": "x", "labels": []} for n in range(20)]
++        real = TA._gh
++        TA._gh = lambda a: __import__("json").dumps([rows])
++        self.addCleanup(lambda: setattr(TA, "_gh", real))
++        with self.assertRaises(SystemExit):
++            TA.open_issues(ceiling=10)
++
++    def test_the_census_mode_writes_nothing(self):
++        """It reports on a live board from a job that holds `issues: write`. Assert on the
++        argv it hands `gh`, not on the absence of an apply call: `--census` must reach the
++        READ endpoint only — the shared paginated `open_issues()` fetch since #5003."""
++        calls = []
++        real = TA._gh
++        TA._gh = lambda a: (calls.append(list(a)),
++                            __import__("json").dumps(
++                                [[{"number": 9, "title": "x", "labels": []}]]))[1]
++        self.addCleanup(lambda: setattr(TA, "_gh", real))
++        real_argv = sys.argv
++        sys.argv = ["triage-area.py", "--census"]
++        self.addCleanup(lambda: setattr(sys, "argv", real_argv))
++        with contextlib.redirect_stdout(io.StringIO()):
++            self.assertEqual(TA.main(), 0)
++        self.assertEqual([c[:2] for c in calls], [["api", "--paginate"]], calls)
++        for argv in calls:
++            self.assertNotIn("--method", argv)
++            self.assertNotIn("-X", argv)
++            self.assertNotIn("--add-label", argv)
++            self.assertNotIn("--remove-label", argv)
++
++
+ if __name__ == "__main__":
+     unittest.main(verbosity=2)
+diff --git a/scripts/triage-area.py b/scripts/triage-area.py
+index c5c1e2527..3f77fdd3b 100644
+--- a/scripts/triage-area.py
++++ b/scripts/triage-area.py
+@@ -61,6 +61,7 @@
+ #   python3 scripts/triage-area.py                # dry run: full proposed mapping
+ #   python3 scripts/triage-area.py --apply        # apply (add area:*; drop needs:area
+ #                                                 #  only where it was actually set)
++#   python3 scripts/triage-area.py --census       # read-only: count the unattributed class
+ #
+ # Maintainer authorisation for the automated pass: sparq-org/sparq#1135 (2026-07-26).
+ #
+@@ -72,6 +73,14 @@
+ # scripts/tests/test_triage_area.py before it writes anything, and always reports the
+ # left-parked residue to the run summary — the issues no rule can attribute are a visible
+ # count for a human, not silence.
++#
++# THE PARK IS NOT THE WHOLE CLASS (#5004). That residue report is built on the
++# `--label needs:area` query, so it describes only issues that already carry the park. Per
++# #5004 — a claim about the private registry, not checkable from here — its
++# `curate-frontier.py` skips on a WIDER predicate, any issue whose area it cannot derive,
++# and a no-area issue that was never parked belongs to neither report.
++# `--census` computes that wider predicate here and the cron always prints it; see the
++# block above `open_issues()` for why the two sets diverge and why the census only counts.
+ import argparse
+ import json
+ import os
+@@ -502,6 +511,92 @@ def candidate_issues():
+             if not any((n or "").startswith("area:") for n in label_names(it))]
+ 
+ 
++# --- the unattributed census (#5004) --------------------------------------------
++# [OPUS-5] THE CLASS THE PARK QUERY CANNOT SEE.
++#
++# The classifier's own residue report (#3816) is assembled from the rows the sweep LEFT
++# unattributed and is written up in `triage-area.yml` against the `--label needs:area`
++# population, so every report built that way — including that run-summary one — describes
++# only the issues that ALREADY carry the park. (Since #5003 the sweep's own QUEUE is wider
++# than the park; the census below is about what gets COUNTED and reported, not fetched.)
++#
++# PER sparq#5004 — a statement about the PRIVATE `jeswr/agent-account-registry`, not
++# something this repository can check — its `curate-frontier.py` skips on a WIDER
++# predicate: any issue whose area it cannot derive, logged `skip #N: no confident area`,
++# whether or not that issue is parked. Only the sparq half is verifiable from here, and
++# that half is enough on its own: the two label sets genuinely differ, and the gap between
++# them is structural rather than incidental:
++#
++#   * `triage.py` applies the park only to an issue that is otherwise triage-complete —
++#     it deliberately withholds it from an epic, from an externally-gated issue, and from
++#     anything still missing a role or a priority;
++#   * `retriage.py` COMPUTES that park delta and then discards it, because it emits
++#     PROMOTING deltas only. Its own docstring records the leftover population and hands
++#     it on: "clearing that population is `needs:area` work, not this layer's."
++#
++# Nothing then picks it up. `triage-area.py` is that layer, and it was querying the park —
++# so a no-area issue that was never parked is invisible to BOTH ends: sparq reports on the
++# park it is not in, and the registry re-skips it every half hour with no label, no count
++# and no route back to a human. That is #5004, and it is the half of it that sparq owns:
++# the curator lives in another repository, but the board it reads is this one.
++#
++# This census is READ-ONLY and deliberately so. It computes the curator's predicate on
++# sparq's side of the fence and hands the count to `triage-area.yml`, which always prints
++# it — the always-printed-count shape #5004 asks for. It does NOT write `needs:area` onto
++# the unparked half: that would be a mass relabel of the live board under park rules
++# `triage.py` deliberately withholds from epics and gated issues, and it is a separate
++# decision from making the number visible.
++#
++# This asks for the WHOLE board, not just the park, and the open-issue count is already the
++# larger figure (`retriage.py`'s docstring carries the live measurement; no number is
++# restated here, because one pinned in a comment did not survive the week last time). A
++# silently short fetch would UNDERCOUNT the very residue the census exists to surface — the
++# exact failure mode #5004 is about, reintroduced by the fix. Detected, never assumed.
++#
++# So the census does NOT carry a fetch of its own: it reuses `open_issues()` above, the one
++# cursor-paginated snapshot #5003 introduced. That is the same requirement arrived at from
++# the other end — #5003 needed the classifier to stop truncating its queue, #5004 needs the
++# census to stop undercounting its class, and a `--limit` fetch fails both the same way.
++# One fetch means the two reports cannot drift into disagreeing about the same board, and
++# `FETCH_CEILING` gives the census its fail-closed guarantee: pagination runs to exhaustion,
++# so a short count is impossible, and an implausible snapshot raises instead of half-
++# reporting. `open_issues()` also drops PRs, which the census must not count either.
++def census(issues):
++    """Split the OPEN issues into (parked, unparked) halves of the unattributed class.
++
++    `unattributed` = carries no `area:` label = the registry curator's skip predicate.
++    `parked` are the ones the existing residue report already describes; `unparked` are
++    the ones no report on either side of the fence has ever counted.
++    """
++    parked, unparked = [], []
++    for it in sorted(issues, key=lambda i: i["number"]):
++        # `label_names()` is the shared tolerant reader: since the census took over the
++        # classifier's REST fetch (#5003) both callers see the same payload shape, so both
++        # must read it the same way — and it is the predicate that decides the count.
++        names = label_names(it)
++        if any((n or "").startswith("area:") for n in names):
++            continue
++        (parked if PARK_LABEL in names else unparked).append(it)
++    return parked, unparked
++
++
++def print_census(issues):
++    """The always-printed count, in the shape `triage-area.yml` reads back out.
++
++    `== ` is the tally line and `   UNPARKED ` the per-issue lines, deliberately distinct
++    from the classifier's own `-- `/`   LEFT `. The two report steps read SEPARATE logs
++    today, so that distinctness is defence in depth rather than the thing keeping them
++    apart: it is what stops a later merge of the two reports — or a `--census` run teed
++    into the classifier's log — from having one step silently absorb the other's lines.
++    """
++    parked, unparked = census(issues)
++    print(f"== {len(parked) + len(unparked)} open issue(s) carry no area: label "
++          f"({len(parked)} parked {PARK_LABEL}, {len(unparked)} with no board state at all), "
++          f"{len(issues)} open")
++    for it in unparked:
++        print(f"   UNPARKED #{it['number']} {it['title'][:120]}")
++
++
+ def plan(issues, crates):
+     """The proposed mapping. Deterministic, and a no-op for an issue that already
+     carries an area (idempotence: re-running never re-decides settled work).
+@@ -650,9 +745,16 @@ def main():
+     ap.add_argument("--apply", action="store_true", help="write labels (default: dry run)")
+     ap.add_argument("--self-test", action="store_true", help="offline rule unit tests")
+     ap.add_argument("--json", action="store_true", help="emit the plan as JSON")
++    ap.add_argument("--census", action="store_true",
++                    help="READ-ONLY: count every open issue with no area: label (#5004)")
+     a = ap.parse_args()
+     if a.self_test:
+         return self_test()
++    if a.census:
++        # Read-only and independent of the rule table: it neither classifies nor writes, so
++        # it reports the same number whether or not the sweep above ran or wrote anything.
++        print_census(open_issues())
++        return 0
+ 
+     crates = crate_names()
+     known = live_area_labels()
