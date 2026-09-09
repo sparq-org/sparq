@@ -516,16 +516,102 @@ fn local_plan_is_deterministic_for_identical_inputs() {
 }
 
 #[test]
+fn flat_operator_and_bgp_input_volume_is_rejected_before_recursive_parser_work() {
+    use sparq_zk_compose::planner::{MAX_DISCLOSURE_QUERY_BYTES, MAX_DISCLOSURE_QUERY_PUNCTUATION};
+    let huge = " ".repeat(MAX_DISCLOSURE_QUERY_BYTES + 1);
+    assert_eq!(
+        DisclosureQuery::parse(&huge),
+        Err(PlanError::LimitExceeded("query text bytes"))
+    );
+    let comparisons = std::iter::repeat_n("?age > 0", 100)
+        .collect::<Vec<_>>()
+        .join(" && ");
+    let flat_filter = format!(
+        "SELECT DISTINCT ?s WHERE {{ ?s <http://example.org/age> ?age FILTER({comparisons}) }}"
+    );
+    assert_eq!(
+        DisclosureQuery::parse(&flat_filter),
+        Err(PlanError::LimitExceeded("query punctuation fuel"))
+    );
+    let flat_bgp = format!(
+        "SELECT DISTINCT ?s WHERE {{ {} }}",
+        "?s ?p ?o . ".repeat(100)
+    );
+    assert_eq!(
+        DisclosureQuery::parse(&flat_bgp),
+        Err(PlanError::LimitExceeded("query punctuation fuel"))
+    );
+    let nested = format!(
+        "SELECT DISTINCT ?s WHERE {{ {} ?s ?p ?o {} }}",
+        "{".repeat(200),
+        "}".repeat(200)
+    );
+    assert_eq!(
+        DisclosureQuery::parse(&nested),
+        Err(PlanError::LimitExceeded("query punctuation fuel"))
+    );
+    // The resource counter intentionally does not tokenize or reinterpret RDF:
+    // literal punctuation consumes fuel as well, a documented conservative cap.
+    let literal = format!(
+        "SELECT DISTINCT ?s WHERE {{ ?s ?p \"{}\" }}",
+        "!".repeat(MAX_DISCLOSURE_QUERY_PUNCTUATION)
+    );
+    assert_eq!(
+        DisclosureQuery::parse(&literal),
+        Err(PlanError::LimitExceeded("query punctuation fuel"))
+    );
+}
+
+#[test]
+fn admitted_ast_counts_bound_flat_filters_and_expanded_bgp_patterns() {
+    use sparq_zk_compose::planner::{MAX_DISCLOSURE_FILTERS, MAX_DISCLOSURE_PATTERNS};
+    let comparisons = std::iter::repeat_n("?age > 0", MAX_DISCLOSURE_FILTERS + 1)
+        .collect::<Vec<_>>()
+        .join(" && ");
+    let filters = format!(
+        "SELECT DISTINCT ?s WHERE {{ ?s <http://example.org/age> ?age FILTER({comparisons}) }}"
+    );
+    assert_eq!(
+        DisclosureQuery::parse(&filters),
+        Err(PlanError::LimitExceeded("admitted FILTER comparisons"))
+    );
+    let objects = std::iter::repeat_n("?o", MAX_DISCLOSURE_PATTERNS + 1)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let bgp = format!("SELECT DISTINCT ?s WHERE {{ ?s a {objects} }}");
+    assert_eq!(
+        DisclosureQuery::parse(&bgp),
+        Err(PlanError::LimitExceeded("admitted BGP patterns"))
+    );
+    let mut programmatic = query("SELECT DISTINCT ?s WHERE { ?s ex:age ?age FILTER(?age > 0) }");
+    programmatic.filters = vec![programmatic.filters[0].clone(); MAX_DISCLOSURE_FILTERS + 1];
+    assert_eq!(
+        plan_disclosure(&programmatic, &[], &[], PlannerLimits::default()),
+        Err(PlanError::LimitExceeded("admitted FILTER comparisons"))
+    );
+}
+
+#[test]
 fn admitted_candidates_preserve_wallet_indices_and_query_checks() {
     let q = query("SELECT DISTINCT ?s WHERE { ?s ex:age ?age FILTER(?age >= 18) }");
     let graph = credential(&[triple("alice", "age", integer("42"))], 1);
     let graphs = [graph.clone(), graph];
     let rows = [row(&[("s", iri("alice").into())])];
     let plan = sparq_zk_compose::planner::plan_disclosure_admitted(
-        &q, &graphs, &rows, PlannerLimits::default(), |_, witness, _| witness.credential == 1,
-    ).unwrap();
+        &q,
+        &graphs,
+        &rows,
+        PlannerLimits::default(),
+        |_, witness, _| witness.credential == 1,
+    )
+    .unwrap();
     assert_eq!(plan.authentication, vec![1]);
     assert!(sparq_zk_compose::planner::plan_disclosure_admitted(
-        &q, &graphs, &rows, PlannerLimits::default(), |_, _, _| false,
-    ).is_err());
+        &q,
+        &graphs,
+        &rows,
+        PlannerLimits::default(),
+        |_, _, _| false,
+    )
+    .is_err());
 }

@@ -39,3 +39,9 @@ Contributing: [`AGENTS.md`](../../AGENTS.md).
 candidate eligibility without changing committed graphs or query semantics. The
 callback receives the pattern index, original wallet/leaf reference and triple;
 a rejection only removes that candidate, and all ordinary planner checks remain.
+
+[GPT-6] Optional `planner::optimize_disclosure[_admitted]` jointly chooses witnesses
+across fixed released rows, minimizing authentication count and then shared
+membership count within explicit resource and credential-capacity bounds. Its
+report separates established structural optimality from budget exhaustion. This
+does not change the baseline selection policy or assert a measured runtime gain.

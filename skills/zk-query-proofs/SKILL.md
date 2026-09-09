@@ -281,3 +281,11 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 `Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
 backend candidates while retaining all query checks. It preserves original
 wallet/leaf indices and is private preparation, never a verifier trust decision.
+
+[GPT-6] Explicit `planner::optimize_disclosure[_admitted]` jointly minimizes
+credential authentication count and then shared membership count for fixed
+released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
+`BudgetExhausted`; an exhausted feasible plan never implies optimality. Backend
+admission and credential-capacity limits remain enforced. This is structural host
+selection, not a calibrated speed claim or cryptographic assurance; see
+[disclosure planning](references/disclosure-planner.md).
