@@ -514,3 +514,18 @@ fn local_plan_is_deterministic_for_identical_inputs() {
     assert_eq!(a, b);
     assert_eq!(a.explanation(), b.explanation());
 }
+
+#[test]
+fn admitted_candidates_preserve_wallet_indices_and_query_checks() {
+    let q = query("SELECT DISTINCT ?s WHERE { ?s ex:age ?age FILTER(?age >= 18) }");
+    let graph = credential(&[triple("alice", "age", integer("42"))], 1);
+    let graphs = [graph.clone(), graph];
+    let rows = [row(&[("s", iri("alice").into())])];
+    let plan = sparq_zk_compose::planner::plan_disclosure_admitted(
+        &q, &graphs, &rows, PlannerLimits::default(), |_, witness, _| witness.credential == 1,
+    ).unwrap();
+    assert_eq!(plan.authentication, vec![1]);
+    assert!(sparq_zk_compose::planner::plan_disclosure_admitted(
+        &q, &graphs, &rows, PlannerLimits::default(), |_, _, _| false,
+    ).is_err());
+}

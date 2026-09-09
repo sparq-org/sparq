@@ -276,3 +276,8 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 - `noir-circuit-patterns` / `noir-optimisation` — writing/sizing the Noir circuits this crate drives (`zk/compose/`).
 - `sparql-formal-semantics` — the Pérez–Arenas–Gutiérrez fragment + blank-node scoping the Q6 guard and `verify::recheck` enforce.
 - `mpc-protocols` — the multi-party layer that composes with this single-prover ZK estate.
+
+[GPT-6] `planner::plan_disclosure_admitted` additionally accepts a predicate
+`Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
+backend candidates while retaining all query checks. It preserves original
+wallet/leaf indices and is private preparation, never a verifier trust decision.

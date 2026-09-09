@@ -34,3 +34,8 @@ Contributing: [`AGENTS.md`](../../AGENTS.md).
 ## License
 
 [MIT](../../LICENSE).
+
+[GPT-6] Backend builders can use `planner::plan_disclosure_admitted` to restrict
+candidate eligibility without changing committed graphs or query semantics. The
+callback receives the pattern index, original wallet/leaf reference and triple;
+a rejection only removes that candidate, and all ordinary planner checks remain.
