@@ -229,6 +229,8 @@ for evidence_name in ['5457-base-to-main-test_triage_area.py.diff', '5457-base-t
 for evidence_name in ["pr5457-conflict.json", "pr6095-conflict.json"]:
     FILES["6468-" + evidence_name] = ROOT / "direct-6468" / evidence_name
 
+FILES["6468-source-admission-review-preface-draft.md"] = ROOT / "direct-6468/source-admission/review-preface-draft.md"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
