@@ -83,17 +83,17 @@ impl CircuitProver {
         CircuitProver::new(compose)
     }
 
-    fn package_dir(&self, id: &CircuitId) -> PathBuf {
-        self.compose_dir.join(id.package())
-    }
-
     fn target_dir(&self) -> PathBuf {
         self.compose_dir.join("target")
     }
 
     /// `nargo compile --package P`. Idempotent; produces `target/P.json`.
     pub fn compile(&self, id: &CircuitId) -> Result<PathBuf, DriverError> {
-        let pkg = id.package();
+        self.compile_package(&id.package())
+    }
+
+    // [GPT-6] Crate-private package dispatch also serves the isolated result contract.
+    pub(crate) fn compile_package(&self, pkg: &str) -> Result<PathBuf, DriverError> {
         run(
             "nargo",
             Command::new("nargo")
@@ -138,15 +138,29 @@ impl CircuitProver {
         prover_toml: &str,
         tag: &str,
     ) -> Result<PathBuf, DriverError> {
-        let pkg = id.package();
+        self.gen_package_witness(&id.package(), prover_toml, tag)
+    }
+
+    // [GPT-6] Callers supply a fixed, internally selected member name.
+    pub(crate) fn gen_package_witness(
+        &self, pkg: &str, prover_toml: &str, tag: &str,
+    ) -> Result<PathBuf, DriverError> {
         // Empty tag => legacy shared names; non-empty => per-call-unique names.
         let (prover_name, witness_name) = if tag.is_empty() {
             ("Prover".to_string(), format!("{pkg}_w"))
         } else {
             (format!("Prover_{tag}"), format!("{pkg}_w_{tag}"))
         };
-        let toml_path = self.package_dir(id).join(format!("{prover_name}.toml"));
-        std::fs::write(&toml_path, prover_toml)?;
+        let toml_path = self.compose_dir.join(pkg).join(format!("{prover_name}.toml"));
+        // [GPT-6] Input files contain credential secrets: restrict before writing.
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        let mut input = options.open(&toml_path)?;
+        #[cfg(unix)]
+        { use std::os::unix::fs::PermissionsExt; input.set_permissions(std::fs::Permissions::from_mode(0o600))?; }
+        std::io::Write::write_all(&mut input, prover_toml.as_bytes())?;
         let witness_path = self.target_dir().join(format!("{witness_name}.gz"));
         // nargo execute exits 0 even on a failed assertion / bad input — it
         // signals failure by NOT writing the witness file (and printing to
@@ -203,8 +217,15 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
-        let acir = self.compile(id)?;
-        let witness = self.gen_witness_tagged(id, prover_toml, tag)?;
+        self.prove_package(&id.package(), prover_toml, out_dir, tag)
+    }
+
+    // [GPT-6] Shares the explicit noir-recursive (ZK) backend with legacy members.
+    pub(crate) fn prove_package(
+        &self, pkg: &str, prover_toml: &str, out_dir: &Path, tag: &str,
+    ) -> Result<ProofArtifacts, DriverError> {
+        let acir = self.compile_package(pkg)?;
+        let witness = self.gen_package_witness(pkg, prover_toml, tag)?;
         std::fs::create_dir_all(out_dir)?;
 
         // `--write_vk` emits proof, public_inputs, AND vk in one pass (bb
@@ -230,6 +251,22 @@ impl CircuitProver {
         Ok(ProofArtifacts { proof, public_inputs, vk })
     }
 
+    // [GPT-6] The private-result API removes credential/witness files on success or error.
+    #[cfg(feature = "successful-results")]
+    pub(crate) fn cleanup_package_witness(&self, pkg: &str, tag: &str) -> Result<(), DriverError> {
+        for path in [
+            self.compose_dir.join(pkg).join(format!("Prover_{tag}.toml")),
+            self.target_dir().join(format!("{pkg}_w_{tag}.gz")),
+        ] {
+            match std::fs::remove_file(path) {
+                Ok(()) => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(DriverError::Io(e)),
+            }
+        }
+        Ok(())
+    }
+
     /// Recompute the CANONICAL verification key for a circuit-family member,
     /// verifier-side, from the compiled member named by `id` — never trusting a
     /// prover-supplied vk (audit #2). Compiles the member (idempotent) then runs
@@ -238,7 +275,12 @@ impl CircuitProver {
     /// vk to `bb prove --write_vk`, so this is the authentic member vk.
     // [OPUS-4.8] new verifier-side canonical-vk path (audit #2).
     pub fn canonical_vk(&self, id: &CircuitId, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
-        let acir = self.compile(id)?;
+        self.canonical_package_vk(&id.package(), work_dir)
+    }
+
+    // [GPT-6] Rebuilds a member key locally; never consumes an untrusted bundled VK.
+    pub(crate) fn canonical_package_vk(&self, pkg: &str, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
+        let acir = self.compile_package(pkg)?;
         std::fs::create_dir_all(work_dir)?;
         run(
             "bb",

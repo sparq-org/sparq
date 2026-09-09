@@ -267,3 +267,19 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 - `noir-circuit-patterns` / `noir-optimisation` — writing/sizing the Noir circuits this crate drives (`zk/compose/`).
 - `sparql-formal-semantics` — the Pérez–Arenas–Gutiérrez fragment + blank-node scoping the Q6 guard and `verify::recheck` enforce.
 - `mpc-protocols` — the multi-party layer that composes with this single-prover ZK estate.
+
+## Private successful-result experiment
+
+[GPT-6] With `sparq-zk-compose/successful-results`, use
+`result::prepare_result(query, credentials, rows, policy, nonce)`, then
+`PreparedResult::prove(driver, output_dir, unique_tag)`. The relying party calls
+`result::verify_result(expected_query, presentation, policy, nonce, seen, driver,
+work_dir)` with independently chosen request/trust/status/freshness inputs.
+Successful verification returns released mappings. The new contract is separate
+from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, selected
+IRIs/literals, and bounded private canonical `xsd:integer` predicates are admitted.
+Public predicates run in the verifier and select the member without numeric
+circuitry. Roots/salts/status indices and intermediate encodings are private;
+issuer slots/capacities/result size remain public. See the crate README's
+“Successful-result contract” section for exact scope. Research-stage, not externally
+audited: no complete-answer, absence, wallet-size or holder-identity guarantee.

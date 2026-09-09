@@ -133,3 +133,7 @@ pub use verifier::{FileSeenNonces, InMemorySeenNonces, SeenNonces, VerifierNonce
 pub use verifier::RevocationPolicy;
 // [OPUS-4.8] sq-cwq: external holder trust anchor for the HolderPop binding's PoP.
 pub use verifier::HolderRegistry;
+
+// [GPT-6] Versioned authenticated-result experiment, off by default.
+#[cfg(feature = "successful-results")]
+pub mod result;

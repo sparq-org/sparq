@@ -28,3 +28,45 @@ Contributing: [`AGENTS.md`](../../AGENTS.md).
 ## License
 
 [MIT](../../LICENSE).
+
+## Successful-result contract (opt-in)
+
+[GPT-6] Enable `successful-results` for `result::{prepare_result, verify_result}`.
+This research-stage addition is **not externally audited** and leaves the legacy
+complete-scan verifier intact. It accepts nonempty `SELECT DISTINCT` answers for
+positive BGPs with canonical nonnegative integer FILTERs. The verifier takes its
+expected query, trusted issuer keys, authoritative status snapshots and fresh nonce
+independently. It returns released mappings after checking the canonical circuit
+key, public-input reconstruction and the proof. It does not assert answer
+completeness, wallet completeness, absence or holder identity.
+
+The fixed capacity is two credential slots, sixteen triples per credential, three
+patterns, four released rows, six variables and two private predicates. A single
+credential repeats a private credential slot; this does not assert two distinct
+credentials. Private integers are bounded by `MAX_PRIVATE_INTEGER`; public
+predicates use the shared planner semantics. Selected blank nodes are rejected
+in-circuit. Public predicates choose the `f0` member without numeric circuitry;
+the `f2` member binds private numeric values back to canonical literal encodings.
+Measured member costs live in `tests/gate_count_snapshot.json`.
+
+The presentation contains only version, query, released RDF terms, challenge, two
+issuer key slots and proof bytes. Its reconstructed public inputs additionally
+contain the accepted status-policy root and query-derived layout. Graph roots,
+sizes, salts, credential status references, signatures, selected sources and hidden
+term encodings stay in the private witness. Issuer identities, fixed capacities
+and result size remain observable. Public issuer slots are ordered canonically;
+individual list references are not disclosed. Each signature binds its own
+private status index, list and version, and that list/version/root must belong to
+the relying party's freshness-curated policy. Only existing clear-index
+status-bound Schnorr credentials are accepted in this first wire contract.
+
+`PreparedResult` has no Debug or serialization implementation. Its local work
+counts identify selected credentials, shared leaves, witness uses and residual
+predicates without entering the presentation. Input files use owner-only access
+on Unix; successful-result proving cleans input/witness files after success or
+error, although process termination can leave local files. The pinned backend is
+Noir beta.21 and bb 5.0.0-nightly.20260324, explicitly `noir-recursive` (the installed
+CLI identifies this as the ZK target; `noir-recursive-no-zk` is a different target).
+
+Use a durable `SeenNonces` implementation. Authentication of external status
+snapshots and selecting acceptable issuers remain the relying party's job.

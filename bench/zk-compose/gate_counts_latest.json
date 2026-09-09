@@ -4,42 +4,124 @@
   "bb_version": "5.0.0-nightly.20260324",
   "nargo_version": "nargo version = 1.0.0-beta.21",
   "benchmarks": {
-    "filter_decimal_i3_f2": { "circuit_size": 17416 },
-    "filter_f64": { "circuit_size": 3634 },
-    "filter_f64_d1": { "circuit_size": 17416 },
-    "filter_f64_d2": { "circuit_size": 17416 },
-    "filter_f64_d3": { "circuit_size": 17416 },
-    "filter_f64_d4": { "circuit_size": 17416 },
-    "filter_int_d1": { "circuit_size": 17416 },
-    "filter_int_d2": { "circuit_size": 17416 },
-    "filter_int_d3": { "circuit_size": 17416 },
-    "filter_int_d4": { "circuit_size": 17416 },
-    "filter_signed_int_d2": { "circuit_size": 17416 },
-    "filter_signed_int_d4": { "circuit_size": 17416 },
-    "filter_value_dl_decimal": { "circuit_size": 3070 },
-    "filter_value_dl_datetime": { "circuit_size": 3070 },
-    "filter_value_dl_f64": { "circuit_size": 4502 },
-    "filter_value_dl_int": { "circuit_size": 3033 },
-    "hidden_issuer_d4": { "circuit_size": 24452 },
-    "holder_pok": { "circuit_size": 10334 },
-    "holder_set_d4": { "circuit_size": 10650 },
-    "join_eq_na16_nb16": { "circuit_size": 7025 },
-    "join_eq_na16_nb64": { "circuit_size": 12885 },
-    "join_eq_na64_nb16": { "circuit_size": 12885 },
-    "join_eq_na64_nb64": { "circuit_size": 18681 },
-    "path_reach_d2_k1_n16": { "circuit_size": 5156 },
-    "path_reach_d4_k1_n16": { "circuit_size": 5497 },
-    "path_reach_d4_k2_n16": { "circuit_size": 8322 },
-    "path_reach_d8_k1_n16": { "circuit_size": 6180 },
-    "revoke_hidden_ref_d10_a4": { "circuit_size": 4308 },
-    "revoke_unset_d10": { "circuit_size": 899 },
-    "scan_k1_n16_r4": { "circuit_size": 5991 },
-    "scan_k1_n16_r8": { "circuit_size": 7038 },
-    "scan_k1_n64_r4": { "circuit_size": 14923 },
-    "scan_k1_n64_r8": { "circuit_size": 18850 },
-    "scan_k2_n16_r4": { "circuit_size": 9254 },
-    "scan_k2_n16_r8": { "circuit_size": 11261 },
-    "scan_k2_n64_r4": { "circuit_size": 27054 },
-    "scan_k2_n64_r8": { "circuit_size": 34821 }
-  }
+    "filter_decimal_i3_f2": {
+      "circuit_size": 17416
+    },
+    "filter_f64": {
+      "circuit_size": 3634
+    },
+    "filter_f64_d1": {
+      "circuit_size": 17416
+    },
+    "filter_f64_d2": {
+      "circuit_size": 17416
+    },
+    "filter_f64_d3": {
+      "circuit_size": 17416
+    },
+    "filter_f64_d4": {
+      "circuit_size": 17416
+    },
+    "filter_int_d1": {
+      "circuit_size": 17416
+    },
+    "filter_int_d2": {
+      "circuit_size": 17416
+    },
+    "filter_int_d3": {
+      "circuit_size": 17416
+    },
+    "filter_int_d4": {
+      "circuit_size": 17416
+    },
+    "filter_signed_int_d2": {
+      "circuit_size": 17416
+    },
+    "filter_signed_int_d4": {
+      "circuit_size": 17416
+    },
+    "filter_value_dl_decimal": {
+      "circuit_size": 3070
+    },
+    "filter_value_dl_datetime": {
+      "circuit_size": 3070
+    },
+    "filter_value_dl_f64": {
+      "circuit_size": 4502
+    },
+    "filter_value_dl_int": {
+      "circuit_size": 3033
+    },
+    "hidden_issuer_d4": {
+      "circuit_size": 24452
+    },
+    "holder_pok": {
+      "circuit_size": 10334
+    },
+    "holder_set_d4": {
+      "circuit_size": 10650
+    },
+    "join_eq_na16_nb16": {
+      "circuit_size": 7025
+    },
+    "join_eq_na16_nb64": {
+      "circuit_size": 12885
+    },
+    "join_eq_na64_nb16": {
+      "circuit_size": 12885
+    },
+    "join_eq_na64_nb64": {
+      "circuit_size": 18681
+    },
+    "path_reach_d2_k1_n16": {
+      "circuit_size": 5156
+    },
+    "path_reach_d4_k1_n16": {
+      "circuit_size": 5497
+    },
+    "path_reach_d4_k2_n16": {
+      "circuit_size": 8322
+    },
+    "path_reach_d8_k1_n16": {
+      "circuit_size": 6180
+    },
+    "revoke_hidden_ref_d10_a4": {
+      "circuit_size": 4308
+    },
+    "revoke_unset_d10": {
+      "circuit_size": 899
+    },
+    "scan_k1_n16_r4": {
+      "circuit_size": 5991
+    },
+    "scan_k1_n16_r8": {
+      "circuit_size": 7038
+    },
+    "scan_k1_n64_r4": {
+      "circuit_size": 14923
+    },
+    "scan_k1_n64_r8": {
+      "circuit_size": 18850
+    },
+    "scan_k2_n16_r4": {
+      "circuit_size": 9254
+    },
+    "scan_k2_n16_r8": {
+      "circuit_size": 11261
+    },
+    "scan_k2_n64_r4": {
+      "circuit_size": 27054
+    },
+    "scan_k2_n64_r8": {
+      "circuit_size": 34821
+    },
+    "result_v1_k2_n16_p3_r4_f0": {
+      "circuit_size": 59101
+    },
+    "result_v1_k2_n16_p3_r4_f2": {
+      "circuit_size": 95775
+    }
+  },
+  "result_members_measured_at": "2026-09-09",
+  "result_members_platform": "darwin arm64"
 }

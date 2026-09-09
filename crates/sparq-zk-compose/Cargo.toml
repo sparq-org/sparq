@@ -18,6 +18,8 @@ publish = false
 
 [features]
 default = []
+# [GPT-6] Additive private-witness result contract; legacy verifier unchanged.
+successful-results = ["dep:blake3"]
 # [OPUS-4.8] sq-xojl + sq-cfmv: the DUAL-LEAF value lane — the
 # `CircuitId::FilterValueDl` member id + `ProofInputs::FilterValueDl` public
 # inputs (sq-xojl) AND the fail-closed `(commitment-method × circuit)` dispatch
@@ -47,6 +49,8 @@ commitment-value-only = ["dual-leaf", "sparq-zk/commitment-value-only"]
 extended-fragment = []
 
 [dependencies]
+# [GPT-6] Private term-type openings for the opt-in result relation.
+blake3 = { version = "1", optional = true }
 sparq-zk = { path = "../sparq-zk" }
 oxrdf = { workspace = true }
 serde = { version = "1", features = ["derive"] }
