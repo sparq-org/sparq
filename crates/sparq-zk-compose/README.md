@@ -122,3 +122,6 @@ contents. Its file lock uses the existing Unix `libc` dependency to preserve the
 Rust 1.88 minimum; lock and I/O errors fail closed. This coordinates cooperating
 driver processes on a local filesystem. External nargo writes, network filesystem
 locking semantics, and deleting the cache during a job are outside that contract.
+
+[GPT-6] Both planner paths reject oversized credential slices before traversal,
+including empty or ineligible graphs, via `MAX_DISCLOSURE_CREDENTIALS`.

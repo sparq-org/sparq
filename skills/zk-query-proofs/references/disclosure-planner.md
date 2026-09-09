@@ -36,6 +36,12 @@ work, and limits both parsed and programmatically constructed shapes using
 `MAX_DISCLOSURE_PATTERNS` and `MAX_DISCLOSURE_FILTERS`. These are host safeguards,
 not proof circuit capacities.
 
+Both selection paths reject more than `MAX_DISCLOSURE_CREDENTIALS` supplied
+credentials using a slice-length check before validation, statistics, or search.
+Empty and ineligible credentials count toward this cap. This independently bounds
+empty-graph traversal and the optimizer's input statistics prepass, since empty
+graphs do not consume candidate-triple fuel.
+
 `plan_disclosure(&query, &credentials, &released, PlannerLimits::default())` takes
 `GraphCommitment` values and released rows represented as
 `BTreeMap<String, oxrdf::Term>`. Each row must have exactly the projected variable

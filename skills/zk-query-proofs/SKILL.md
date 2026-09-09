@@ -338,3 +338,7 @@ processes may share a local workspace; do not run external nargo writes or remov
 the cache during those jobs. Unique legacy prover tags remain required for legacy
 witness APIs. Lock failures reject; the existing Unix platform and Rust 1.88
 minimum are preserved.
+
+[GPT-6] Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
+supplied slice before traversing credentials; empty and ineligible graphs count.
+This input bound is independent of candidate-triple search fuel.
