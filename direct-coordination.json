@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T13:05:19.603042+00:00",
+  "updated_at": "2026-09-09T13:21:21.783657+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": null,
-    "head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Actual Opus followup completed and verified. Same Astra worker assigned bounded default-off Cargo feature revision, cfg/default proof and one fixed R sweep; no remote publication/admission. Preserve frozen cb638 evidence.",
-    "phase": "Implement default-off experimental feature and fixed measured crossover",
+    "state": "Feature revision frozen and88manifestfiles/source/diffs verified by root; actual Opus review running in exec81759. Collect this exact session, never duplicate. Same Astra agent doing bounded read-only full-validation readiness preparation.",
+    "phase": "Actual Opus5 xhigh review of frozen default-off feature",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -145,7 +145,22 @@
       "reason": "Correct source with strong measured warm gains, but unsupported general admission. Preserve default linear path and compile out added deletion-cache metadata/bookkeeping; explicit opt-in documents costs. Routine bounded implementation decision within authorized task, no protection/approval bypass.",
       "measurement_limit": "Only fixed five-point reads-per-generation experiment allowed by reviewer; no threshold/Clone/Arc/permutation redesign."
     },
-    "feature_revision_contract": "One repo-consistent default-OFF core Cargo feature gates all new deletion-cache fields, accounting, initialization/invalidation and counting. Ordinary build retains main linear path and no added metadata/allocations. Existing added projections unchanged. Required matching docs/skill,feature-off/on tests/scopedclippy,compiledcontrols/default bypass control; only R1,2,4,8,16 fork-tombstone paired data. Twojobs/privatetarget/15minbuildcap; nofullworkspaceyet/installs/remotemutation/newagents/EC2."
+    "feature_revision_contract": "One repo-consistent default-OFF core Cargo feature gates all new deletion-cache fields, accounting, initialization/invalidation and counting. Ordinary build retains main linear path and no added metadata/allocations. Existing added projections unchanged. Required matching docs/skill,feature-off/on tests/scopedclippy,compiledcontrols/default bypass control; only R1,2,4,8,16 fork-tombstone paired data. Twojobs/privatetarget/15minbuildcap; nofullworkspaceyet/installs/remotemutation/newagents/EC2.",
+    "experimental_report": "direct-4246/experimental/report.json",
+    "experimental_root_verification": "direct-4246/experimental/root-verification.json",
+    "experimental_validation": "86 candidateRustpasses+4same-main fixtures;105featurematrix tests;6compiledcontrols killed; scopedoff/on/harnessclippyPASS. Four optimizedbuildswithin cap;400 recordedwindows fixedR1,2,4,8,16 only. Fullvalidation pending; Bash3mapfile preflight stillfails. No default-on/canonical/universalcrossover claim.",
+    "experimental_review_runtime": {
+      "session_id": 81759,
+      "kind": "exec_command",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/review-packet.md",
+      "input_sha256": "1c026b68cd99768cc0d0674b2418044e62c4a1e7b4db0c5dd438813cfe674459",
+      "input_bytes": 159266,
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/experimental/opus-review-b86b5d5a.json",
+      "started_at": "2026-09-09T13:21:21.783657+00:00",
+      "completed": false,
+      "acceptance": "SuccessfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5,exactb86reviewedhead; no duplicate/exhaustedquota retry."
+    },
+    "validation_readiness": "Assigned same agent bounded read-only command/tool/cache/disk planning while review runs; no actualfullbuild/test/installs yet."
   },
   "prs": {
     "4300": {
@@ -433,7 +448,7 @@
     }
   },
   "next_actions": [
-    "Collect same Astra default-off4246 feature revision and fixed five-point R measurement. Verify source,feature defaults/representation,test/control/manifests; then one focused actual Opus followup. Both previous reviews completed; do not rerun.",
+    "Collect actual Opus feature-boundary review exec81759, verify success/model/exactb86head. Both prior reviews complete. Collect small validation-readiness plan; authorize required full checks after review clears, with one sequential bounded private lane and no redundant local/CI work.",
     "Fullworkspace/conformance/wasm/canonical ratchets and Linux-capable preflight remain required before normal protected exact-head admission. Default-on caching is rejected; no publication until focusedopt-in review clears and validations are concrete.",
     "After active4246 terminal state, act on6468 narrow classifier/diagnostic proposal and separatelyreview generatorlabel/partition policy. No guessedexistingalias or labelcreation; preserve zero-write unknown-label guard.",
     "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",

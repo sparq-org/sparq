@@ -1,0 +1,428 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "prior_reviewed_head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+  "base_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "decision": "Experimental opt-in implementation complete; no default-on or merge-admission claim. Root selected default-off after actual Opus deferred performance admission.",
+  "feature": "sparq-core/overlay-deleted-projections",
+  "default_off_contract": [
+    "Feature declaration is empty and absent from every default set and dependency feature enablement. Core default remains parallel.",
+    "All six deletion slots, deleted_count initializer, deleted invalidation method/flag/update bookkeeping, heap contribution and derived clone state are compiled out when disabled. Main linear filter is retained. Existing added-cache behavior unchanged.",
+    "Four identical off semantic/layout/heap tests pass on both candidate and a42 main runtime. The baseline adds only a cfg(test) fixture module; expected unknown-feature cfg warnings are disclosed.",
+    "Force-cache-on-in-feature-off compiled control fails the actual retained-heap assertion; no timing assertion or zero-test result."
+  ],
+  "forwarding": "No public engine/CLI/wasm forwarding or runtime switch. Rust users enable the feature on their direct core dependency. Standalone benchmark opts in explicitly with Cargo dependency-feature syntax.",
+  "docs": "Core README, matching sparql-query skill and benchmark protocol document experimental use, cold sort, true-update invalidation, concurrent first-reader waiting, per-permutation and per-retained-generation memory, no cap/eviction and no universal crossover/speedup claim.",
+  "ci": "Dedicated test:true opt-in leg in .github/feature-matrix.d/sparq-core.yml, with officially regenerated name golden. Existing executor passes its features to cargo build/test/clippy. Ordinary defaults unchanged.",
+  "validation": {
+    "candidate_rust_passes": 86,
+    "candidate_test_results": {
+      "store-off": [
+        [
+          14,
+          0,
+          1
+        ]
+      ],
+      "store-on": [
+        [
+          19,
+          0,
+          1
+        ]
+      ],
+      "store-compact-off": [
+        [
+          14,
+          0,
+          1
+        ]
+      ],
+      "store-compact-on": [
+        [
+          19,
+          0,
+          1
+        ]
+      ],
+      "snapshot-fork-off": [
+        [
+          3,
+          0,
+          0
+        ],
+        [
+          7,
+          0,
+          0
+        ]
+      ],
+      "snapshot-fork-on": [
+        [
+          3,
+          0,
+          0
+        ],
+        [
+          7,
+          0,
+          0
+        ]
+      ]
+    },
+    "main_reference_passes": 4,
+    "feature_matrix_tests": 105,
+    "compiled_controls": [
+      {
+        "name": "unconditional_deleted_invalidation",
+        "exit": 101,
+        "seconds": 8.753635375000002,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+        ]
+      },
+      {
+        "name": "remove_deleted_invalidation",
+        "exit": 101,
+        "seconds": 6.043293457999999,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 4 passed; 5 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.08s"
+        ]
+      },
+      {
+        "name": "ignore_tombstone_insert_flag",
+        "exit": 101,
+        "seconds": 5.311953875,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+        ]
+      },
+      {
+        "name": "ignore_tombstone_remove_flag",
+        "exit": 101,
+        "seconds": 4.926250875000001,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+        ]
+      },
+      {
+        "name": "remove_deleted_cache_use",
+        "exit": 101,
+        "seconds": 6.247343416,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 5 passed; 4 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+        ]
+      },
+      {
+        "name": "force_cache_in_feature_off",
+        "exit": 101,
+        "seconds": 10.563433084000003,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--lib",
+          "deleted_projection_feature_off_preserves_main_layout_and_heap",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.01s"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "name": "store-off",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--lib",
+          "store::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 7.4393259579999995
+      },
+      {
+        "name": "store-on",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 5.032448790999999
+      },
+      {
+        "name": "store-compact-off",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--no-default-features",
+          "--features",
+          "compact-index",
+          "--lib",
+          "store::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 5.393832249999999
+      },
+      {
+        "name": "store-compact-on",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--no-default-features",
+          "--features",
+          "compact-index,overlay-deleted-projections",
+          "--lib",
+          "store::",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 7.1293376670000015
+      },
+      {
+        "name": "snapshot-fork-off",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--test",
+          "snapshot",
+          "--test",
+          "fork_differential",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 11.401729583000002
+      },
+      {
+        "name": "clippy-core-off",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "clippy",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--lib",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit": 0,
+        "seconds": 2.0668088749999995
+      },
+      {
+        "name": "snapshot-fork-on",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--test",
+          "snapshot",
+          "--test",
+          "fork_differential",
+          "--",
+          "--test-threads=1"
+        ],
+        "exit": 0,
+        "seconds": 23.340536125
+      },
+      {
+        "name": "clippy-core-on",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "clippy",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit": 0,
+        "seconds": 1.8588882499999997
+      },
+      {
+        "name": "clippy-harness",
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "clippy",
+          "--locked",
+          "--offline",
+          "--manifest-path",
+          "bench/overlay-count/Cargo.toml",
+          "--features",
+          "count-alloc,sparq-core/overlay-deleted-projections",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit": 0,
+        "seconds": 4.974330958000003
+      },
+      {
+        "name": "feature-matrix",
+        "command": [
+          "/opt/homebrew/bin/python3",
+          "scripts/tests/test_feature_matrix_assemble.py"
+        ],
+        "exit": 0,
+        "seconds": 23.934785250000004
+      },
+      {
+        "name": "preflight",
+        "command": [
+          "python3",
+          "scripts/preflight.py",
+          "--base",
+          "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+        ],
+        "exit": 1,
+        "seconds": 1.6346569159999973
+      }
+    ],
+    "preflight": "Known Bash3 mapfile failure only; no gate changed/weakened.",
+    "setup_note": "First assembler attempt used an existing Python lacking PyYAML; existing Homebrew Python3.14/PyYAML6.0.3 regenerated the golden. No installation; final golden exact and105 matrix tests green."
+  },
+  "measurement": {
+    "varied_dimension": "Only reads per generation R={1,2,4,8,16}",
+    "fixed": "D32768; six initially warm projections; four retained child generations plus initial graph; one additional tombstone per child; ordinary single-pattern SELECT; same generated200000-triple fixture/harness as declared.",
+    "warmups": 2,
+    "timing_reps": 7,
+    "allocation_reps": 3,
+    "recorded_windows": 400,
+    "optimized_build_wall_seconds": 90.962619708,
+    "result": "R1/R2/R4 regress; R8/R16 have lower observed medians in this fixed fixture. See all per-generation and four-window-sum ranges. This does not establish an admission threshold, production read/write distribution, or tail bound.",
+    "retained_memory": "At generation4 the opt-in retains7659640 reported overlay bytes vs3727360 main, independent of R. Initial six projections and four child single-permutation caches explain the delta. First true-update child copies then discards six projections; that cost is intentionally preserved.",
+    "scope": "No other parameter points or baseline/semantic remeasurements; earlier adverse cold/multi/concurrent evidence remains preserved.",
+    "limits": "Setup/cache priming excluded from windows. Output publication is local retained ownership, not server/I/O publication. Requested allocator bytes exclude allocator metadata, stack and mapped memory; store heap estimates omit fixed boxed metadata. RSS remains cumulative setup-inclusive high-water, not query heap."
+  },
+  "limits": [
+    "Full workspace/nextest, wasm/W3C/canonical perf, mapped/WAL crash execution and Miri remain unrun in this scoped stage.",
+    "Feature-on cold and memory regressions are unchanged and remain reasons against default enablement.",
+    "Prior B1/B3 source review resolution is preserved; this stage only adds cfg gating/docs/test registration and the single permitted measurement extension.",
+    "No Clone/Arc/threshold/other optimizer changes, no network install, model call, GitHub write, release, EC2 or registry action."
+  ],
+  "next": "Root to verify immutable evidence and obtain focused independent Opus review of the default-off boundary before later full gates/publication/admission.",
+  "completed_at": "2026-09-09T13:11:22.425532+00:00"
+}

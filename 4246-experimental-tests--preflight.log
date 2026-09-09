@@ -1,0 +1,31 @@
+preflight: ran  G1 new-crate-completeness, G2 public-api-to-skill, G6 new-config-to-docs, no-perf-numbers, readme-template, privacy-claims, guard-untested
+
+preflight: FAIL — 1 mechanical finding(s):
+
+  [privacy-claims] (diff)
+      scripts/check-privacy-claims.sh: line 92: mapfile: command not found
+      Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>
+      BrokenPipeError: [Errno 32] Broken pipe
+      fix: reproduce with: bash scripts/check-privacy-claims.sh
+
+
+NOT CHECKED BY THIS SCRIPT — you must execute these yourself before opening the PR.
+They are the two largest preventable review-failure classes in the verdict corpus
+(GUARD-NOT-PINNED 63 findings, CLAIM-vs-CODE 67 findings) and neither is decidable
+by static analysis:
+
+  1. MUTATE YOUR HEADLINE GUARD. Take the feature named in your PR title. DELETE or
+     INVERT it in the worktree and RUN the suite. If nothing goes red, your test is
+     vacuous — that is a blocking defect, and it is the single most common one the
+     reviewers find. Do not reason about it; execute it. Report which test died.
+     (`guard-untested` above only catches a guard with NO test at all. A test that
+     exists but asserts a bound, a type, or a marker string instead of the behaviour
+     passes this script and fails review.)
+
+  2. READ YOUR OWN PROSE AGAINST YOUR OWN DIFF. For every line of documentation,
+     rustdoc, README, SKILL.md, comment, research record or PR-body claim you added:
+     point at the code in THIS diff that makes it true. If you cannot, delete the
+     sentence or fix the code. Overclaiming is blocking. The corpus is full of
+     diffs whose docs describe a module, flag, constant or test file that the diff
+     does not contain.
+

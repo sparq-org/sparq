@@ -1,0 +1,192 @@
+[
+  {
+    "name": "store-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 7.4393259579999995
+  },
+  {
+    "name": "store-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 5.032448790999999
+  },
+  {
+    "name": "store-compact-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--no-default-features",
+      "--features",
+      "compact-index",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 5.393832249999999
+  },
+  {
+    "name": "store-compact-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--no-default-features",
+      "--features",
+      "compact-index,overlay-deleted-projections",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 7.1293376670000015
+  },
+  {
+    "name": "snapshot-fork-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--test",
+      "snapshot",
+      "--test",
+      "fork_differential",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 11.401729583000002
+  },
+  {
+    "name": "clippy-core-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 2.0668088749999995
+  },
+  {
+    "name": "snapshot-fork-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--test",
+      "snapshot",
+      "--test",
+      "fork_differential",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 23.340536125
+  },
+  {
+    "name": "clippy-core-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--lib",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 1.8588882499999997
+  },
+  {
+    "name": "clippy-harness",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml",
+      "--features",
+      "count-alloc,sparq-core/overlay-deleted-projections",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 4.974330958000003
+  },
+  {
+    "name": "feature-matrix",
+    "command": [
+      "/opt/homebrew/bin/python3",
+      "scripts/tests/test_feature_matrix_assemble.py"
+    ],
+    "exit": 0,
+    "seconds": 23.934785250000004
+  },
+  {
+    "name": "preflight",
+    "command": [
+      "python3",
+      "scripts/preflight.py",
+      "--base",
+      "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+    ],
+    "exit": 1,
+    "seconds": 1.6346569159999973
+  }
+]

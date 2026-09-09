@@ -1,0 +1,11 @@
+--- store.rs
++++ ignore_tombstone_remove_flag
+@@ -967,7 +967,7 @@
+         for t in inserts {
+             if ov.deleted.remove(t) {
+                 #[cfg(feature = "overlay-deleted-projections")]
+-                { deleted_changed = true; }
++                {}
+                 continue; // re-insert of a deleted base triple: just undelete
+             }
+             if self.base_contains(*t) {

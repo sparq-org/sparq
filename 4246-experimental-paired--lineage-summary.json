@@ -1,0 +1,865 @@
+{
+  "meaning": "Sum of four measured clone/delta/read/retain windows per sample; setup priming and between-window accounting are excluded. No additional measurements.",
+  "rows": [
+    {
+      "reads_per_generation": 1,
+      "main-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 800459,
+          "median": 821000,
+          "max": 885791,
+          "mean": 826636.8571428572,
+          "sample_stdev": 30218.415916063343
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 4947332,
+          "median": 5198542,
+          "max": 5388625,
+          "mean": 5172274,
+          "sample_stdev": 132704.97484018197
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "main-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 819084,
+          "median": 819625,
+          "max": 1057291,
+          "mean": 898666.6666666666,
+          "sample_stdev": 137372.96864497516
+        },
+        "allocs": {
+          "n": 3,
+          "min": 244,
+          "median": 244,
+          "max": 244,
+          "mean": 244,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 3432988,
+          "median": 3432988,
+          "max": 3432988,
+          "mean": 3432988,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 4886126,
+          "median": 4999291,
+          "max": 5183042,
+          "mean": 5022819.666666667,
+          "sample_stdev": 149849.84611381264
+        },
+        "allocs": {
+          "n": 3,
+          "min": 257,
+          "median": 257,
+          "max": 257,
+          "mean": 257,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 8545756,
+          "median": 8545756,
+          "max": 8545756,
+          "mean": 8545756,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate_main_median_window_sum_ratio": 6.3319634591961025
+    },
+    {
+      "reads_per_generation": 2,
+      "main-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 1524624,
+          "median": 1576875,
+          "max": 1793999,
+          "mean": 1606874.857142857,
+          "sample_stdev": 88098.9544686893
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 4843041,
+          "median": 5090958,
+          "max": 5590167,
+          "mean": 5178499.714285715,
+          "sample_stdev": 263474.5107771112
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "main-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 1548750,
+          "median": 1548875,
+          "max": 1610000,
+          "mean": 1569208.3333333333,
+          "sample_stdev": 35326.67488362489
+        },
+        "allocs": {
+          "n": 3,
+          "min": 460,
+          "median": 460,
+          "max": 460,
+          "mean": 460,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 3456320,
+          "median": 3456320,
+          "max": 3456320,
+          "mean": 3456320,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 4921789,
+          "median": 5049458,
+          "max": 5330376,
+          "mean": 5100541,
+          "sample_stdev": 209028.55979267522
+        },
+        "allocs": {
+          "n": 3,
+          "min": 473,
+          "median": 473,
+          "max": 473,
+          "mean": 473,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 8569088,
+          "median": 8569088,
+          "max": 8569088,
+          "mean": 8569088,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate_main_median_window_sum_ratio": 3.228510820451843
+    },
+    {
+      "reads_per_generation": 4,
+      "main-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 2894334,
+          "median": 3088417,
+          "max": 3664250,
+          "mean": 3128542,
+          "sample_stdev": 256447.18217532957
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 4868750,
+          "median": 5358750,
+          "max": 5543458,
+          "mean": 5298440.285714285,
+          "sample_stdev": 226537.7373056671
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "main-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 2963665,
+          "median": 3015209,
+          "max": 3029084,
+          "mean": 3002652.6666666665,
+          "sample_stdev": 34469.66086768672
+        },
+        "allocs": {
+          "n": 3,
+          "min": 892,
+          "median": 892,
+          "max": 892,
+          "mean": 892,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 3502984,
+          "median": 3502984,
+          "max": 3502984,
+          "mean": 3502984,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 4904710,
+          "median": 5438125,
+          "max": 5790625,
+          "mean": 5377820,
+          "sample_stdev": 446025.6344370803
+        },
+        "allocs": {
+          "n": 3,
+          "min": 905,
+          "median": 905,
+          "max": 905,
+          "mean": 905,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 8615752,
+          "median": 8615752,
+          "max": 8615752,
+          "mean": 8615752,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate_main_median_window_sum_ratio": 1.7351121950177064
+    },
+    {
+      "reads_per_generation": 8,
+      "main-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 5729459,
+          "median": 5965500,
+          "max": 6190583,
+          "mean": 5986857.142857143,
+          "sample_stdev": 153296.85680559857
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 4914374,
+          "median": 5285374,
+          "max": 5386082,
+          "mean": 5215844.857142857,
+          "sample_stdev": 185006.6635281268
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "main-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 6099917,
+          "median": 6174876,
+          "max": 6237167,
+          "mean": 6170653.333333333,
+          "sample_stdev": 68722.36761297833
+        },
+        "allocs": {
+          "n": 3,
+          "min": 1756,
+          "median": 1756,
+          "max": 1756,
+          "mean": 1756,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 3596312,
+          "median": 3596312,
+          "max": 3596312,
+          "mean": 3596312,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 4985500,
+          "median": 5145377,
+          "max": 5367875,
+          "mean": 5166250.666666667,
+          "sample_stdev": 192040.21096201008
+        },
+        "allocs": {
+          "n": 3,
+          "min": 1769,
+          "median": 1769,
+          "max": 1769,
+          "mean": 1769,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 8709080,
+          "median": 8709080,
+          "max": 8709080,
+          "mean": 8709080,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate_main_median_window_sum_ratio": 0.8859901097980052
+    },
+    {
+      "reads_per_generation": 16,
+      "main-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 11401208,
+          "median": 12255416,
+          "max": 12867041,
+          "mean": 12103868.42857143,
+          "sample_stdev": 526483.1764475345
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-time": {
+        "elapsed_ns": {
+          "n": 7,
+          "min": 4985043,
+          "median": 5313458,
+          "max": 5634917,
+          "mean": 5289750.285714285,
+          "sample_stdev": 227671.40276995287
+        },
+        "allocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 7,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 7,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "main-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 11610667,
+          "median": 12358083,
+          "max": 12596249,
+          "mean": 12188333,
+          "sample_stdev": 514251.1706899655
+        },
+        "allocs": {
+          "n": 3,
+          "min": 3484,
+          "median": 3484,
+          "max": 3484,
+          "mean": 3484,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 3782968,
+          "median": 3782968,
+          "max": 3782968,
+          "mean": 3782968,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 3727360,
+          "median": 3727360,
+          "max": 3727360,
+          "mean": 3727360,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate-count": {
+        "elapsed_ns": {
+          "n": 3,
+          "min": 5027582,
+          "median": 5235543,
+          "max": 5725875,
+          "mean": 5329666.666666667,
+          "sample_stdev": 358535.5309203445
+        },
+        "allocs": {
+          "n": 3,
+          "min": 3497,
+          "median": 3497,
+          "max": 3497,
+          "mean": 3497,
+          "sample_stdev": 0.0
+        },
+        "reallocs": {
+          "n": 3,
+          "min": 0,
+          "median": 0,
+          "max": 0,
+          "mean": 0,
+          "sample_stdev": 0.0
+        },
+        "requested_bytes": {
+          "n": 3,
+          "min": 8895736,
+          "median": 8895736,
+          "max": 8895736,
+          "mean": 8895736,
+          "sample_stdev": 0.0
+        },
+        "retained_overlay_heap_at_generation4": {
+          "n": 3,
+          "min": 7659640,
+          "median": 7659640,
+          "max": 7659640,
+          "mean": 7659640,
+          "sample_stdev": 0.0
+        }
+      },
+      "candidate_main_median_window_sum_ratio": 0.4335599868662149
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/crates/sparq-core)
+   Compiling spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/vendor/spargebra)
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/crates/sparq-substrate)
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/crates/sparq-engine)
+   Compiling overlay-count-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/bench/overlay-count)
+    Finished `release` profile [optimized] target(s) in 46.42s

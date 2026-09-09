@@ -1,0 +1,76 @@
+[
+  {
+    "name": "candidate-time",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--locked",
+      "--offline",
+      "--release",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml",
+      "--features",
+      "sparq-core/overlay-deleted-projections"
+    ],
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "started": 1788959136.107661,
+    "ended": 1788959173.7172859,
+    "sha256": "dd806a1c96a6d00325717f620d602bd464e8b1367936afa86ea983bf684d91d3",
+    "bytes": 5419136
+  },
+  {
+    "name": "candidate-count",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--locked",
+      "--offline",
+      "--release",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml",
+      "--features",
+      "sparq-core/overlay-deleted-projections,count-alloc"
+    ],
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "started": 1788959173.7882528,
+    "ended": 1788959177.283675,
+    "sha256": "00d593358bf0a898866f94a6eb4514fe0f54097864beff27fa883890a69f0f21",
+    "bytes": 5420784
+  },
+  {
+    "name": "main-time",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--locked",
+      "--offline",
+      "--release",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml"
+    ],
+    "head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+    "started": 1788959177.315407,
+    "ended": 1788959223.972341,
+    "sha256": "77f06415fa9b672a79fa17819715aeefe510258879d4f5178ca24530808d4fe8",
+    "bytes": 5401520
+  },
+  {
+    "name": "main-count",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "build",
+      "--locked",
+      "--offline",
+      "--release",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml",
+      "--features",
+      "count-alloc"
+    ],
+    "head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+    "started": 1788959223.999806,
+    "ended": 1788959227.041208,
+    "sha256": "c182be236d47dc07a083230a823d23b87f646add545cbae0f488b06097181d07",
+    "bytes": 5419824
+  }
+]

@@ -1,0 +1,11 @@
+--- store.rs
++++ remove_deleted_invalidation
+@@ -979,7 +979,7 @@
+         }
+         #[cfg(feature = "overlay-deleted-projections")]
+         if deleted_changed {
+-            ov.invalidate_deleted();
++            let _ = deleted_changed;
+         }
+         self.overlay = if ov.is_empty() { None } else { Some(ov) };
+     }

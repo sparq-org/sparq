@@ -1,0 +1,157 @@
+test_failure_annotation_names_the_real_situation (__main__.TestAssembleFailureAnnotation.test_failure_annotation_names_the_real_situation) ... ok
+test_failure_annotation_script_fires (__main__.TestAssembleFailureAnnotation.test_failure_annotation_script_fires)
+NON-VACUOUS: execute the step's script and assert the annotation + the ... ok
+test_failure_attribution_step_has_no_id_or_outputs_dependency (__main__.TestAssembleFailureAnnotation.test_failure_attribution_step_has_no_id_or_outputs_dependency) ... ok
+test_failure_attribution_step_is_last (__main__.TestAssembleFailureAnnotation.test_failure_attribution_step_is_last) ... ok
+test_setup_job_has_exactly_one_failure_attribution_step (__main__.TestAssembleFailureAnnotation.test_setup_job_has_exactly_one_failure_attribution_step) ... ok
+test_assembled_json_is_fromjson_ready (__main__.TestFeatureMatrixAssemble.test_assembled_json_is_fromjson_ready)
+The default output is a single JSON object {"include": [legs]}. ... ok
+test_every_fragment_is_a_clean_leg_list (__main__.TestFeatureMatrixAssemble.test_every_fragment_is_a_clean_leg_list) ... ok
+test_golden_is_exact_names_output (__main__.TestFeatureMatrixAssemble.test_golden_is_exact_names_output)
+The golden is REGENERATED, never hand-edited: it == `--names` stdout, byte-for-byte. ... ok
+test_leg_names_match_golden_exactly (__main__.TestFeatureMatrixAssemble.test_leg_names_match_golden_exactly)
+Assembled `opt-in <name>` set == the pre-split golden set, byte-for-byte. ... ok
+test_names_mode_matches_default_mode (__main__.TestFeatureMatrixAssemble.test_names_mode_matches_default_mode) ... ok
+test_no_duplicate_leg_names (__main__.TestFeatureMatrixAssemble.test_no_duplicate_leg_names) ... ok
+test_no_leg_name_is_advisory_or_informational (__main__.TestFeatureMatrixAssemble.test_no_leg_name_is_advisory_or_informational)
+Every leg must GATE — none may match ci-summary's advisory exclusion. ... ok
+test_workflow_uses_dynamic_fromjson_matrix (__main__.TestFeatureMatrixAssemble.test_workflow_uses_dynamic_fromjson_matrix) ... ok
+test_absent_trigger_run_id_omits_external_id (__main__.TestGroupReporter.test_absent_trigger_run_id_omits_external_id)
+Backward-compat: with no TRIGGER_RUN_ID (e.g. a bootstrap run) the summary ... ok
+test_duplicate_leg_across_artifacts_is_refused (__main__.TestGroupReporter.test_duplicate_leg_across_artifacts_is_refused) ... ok
+test_external_id_correlation_token_on_every_summary_path (__main__.TestGroupReporter.test_external_id_correlation_token_on_every_summary_path)
+Finding 2: whichever verdict the reporter reaches, the head-SHA summary ... ok
+test_fork_denial_string_on_a_non_fork_run_fails_closed (__main__.TestGroupReporter.test_fork_denial_string_on_a_non_fork_run_fails_closed) ... ok
+test_fork_token_denial_degrades_to_warning_ONLY_when_fork_pr (__main__.TestGroupReporter.test_fork_token_denial_degrades_to_warning_ONLY_when_fork_pr) ... ok
+test_incomplete_results_fail_closed (__main__.TestGroupReporter.test_incomplete_results_fail_closed) ... ok
+test_malformed_artifacts_fail_closed_without_posting (__main__.TestGroupReporter.test_malformed_artifacts_fail_closed_without_posting) ... ok
+test_missing_reporter_env_is_fatal (__main__.TestGroupReporter.test_missing_reporter_env_is_fatal) ... ok
+test_real_assembled_legs_pass_reporter_validation (__main__.TestGroupReporter.test_real_assembled_legs_pass_reporter_validation)
+End-to-end coherence: EXECUTION-mode output for real assembled legs ... ok
+test_unassembled_leg_name_is_refused_and_nothing_posts (__main__.TestGroupReporter.test_unassembled_leg_name_is_refused_and_nothing_posts) ... ok
+test_unexpected_api_failure_fails_closed_after_retries (__main__.TestGroupReporter.test_unexpected_api_failure_fails_closed_after_retries) ... ok
+test_valid_results_post_terminal_check_runs (__main__.TestGroupReporter.test_valid_results_post_terminal_check_runs) ... ok
+test_zero_artifacts_with_successful_groups_is_an_inconsistency (__main__.TestGroupReporter.test_zero_artifacts_with_successful_groups_is_an_inconsistency) ... ok
+test_all_green_writes_a_success_result_per_leg (__main__.TestGroupRunner.test_all_green_writes_a_success_result_per_leg) ... ok
+test_execution_mode_makes_no_github_api_call (__main__.TestGroupRunner.test_execution_mode_makes_no_github_api_call) ... ok
+test_failing_leg_continues_reports_and_reds_the_group (__main__.TestGroupRunner.test_failing_leg_continues_reports_and_reds_the_group) ... ok
+test_missing_results_env_is_fatal (__main__.TestGroupRunner.test_missing_results_env_is_fatal) ... ok
+test_untested_leg_skips_cargo_test (__main__.TestGroupRunner.test_untested_leg_skips_cargo_test) ... ok
+test_NO_job_in_the_pr_workflow_holds_checks_write (__main__.TestGroupedWorkflowWiring.test_NO_job_in_the_pr_workflow_holds_checks_write)
+THE finding-1 invariant: this workflow is PR/merge_group-triggered, so ... ok
+test_assemble_step_uses_grouped_mode (__main__.TestGroupedWorkflowWiring.test_assemble_step_uses_grouped_mode) ... ok
+test_group_job_checkout_does_not_persist_credentials (__main__.TestGroupedWorkflowWiring.test_group_job_checkout_does_not_persist_credentials) ... ok
+test_group_job_env_has_no_token (__main__.TestGroupedWorkflowWiring.test_group_job_env_has_no_token) ... ok
+test_group_job_is_unprivileged (__main__.TestGroupedWorkflowWiring.test_group_job_is_unprivileged) ... ok
+test_group_job_runs_the_group_runner_script (__main__.TestGroupedWorkflowWiring.test_group_job_runs_the_group_runner_script) ... ok
+test_group_job_uploads_results_artifact (__main__.TestGroupedWorkflowWiring.test_group_job_uploads_results_artifact) ... ok
+test_job_names_are_not_advisory (__main__.TestGroupedWorkflowWiring.test_job_names_are_not_advisory) ... ok
+test_no_cargo_running_job_holds_checks_write_or_token (__main__.TestGroupedWorkflowWiring.test_no_cargo_running_job_holds_checks_write_or_token)
+Workflow-wide sweep: any job that executes cargo (i.e. PR-controlled ... ok
+test_rust_path_filter_covers_the_matrix_scripts_and_tests (__main__.TestGroupedWorkflowWiring.test_rust_path_filter_covers_the_matrix_scripts_and_tests) ... ok
+test_setup_uploads_selected_matrix_and_metadata (__main__.TestGroupedWorkflowWiring.test_setup_uploads_selected_matrix_and_metadata)
+Finding 2: the reporter's completeness ground truth is the run's OWN ... ok
+test_explicit_weight_overrides_heuristic (__main__.TestGrouping.test_explicit_weight_overrides_heuristic) ... ok
+test_group_capacity_respected_for_multi_leg_groups (__main__.TestGrouping.test_group_capacity_respected_for_multi_leg_groups) ... ok
+test_grouped_composes_with_selection (__main__.TestGrouping.test_grouped_composes_with_selection) ... ok
+test_grouped_main_output_shape (__main__.TestGrouping.test_grouped_main_output_shape) ... ok
+test_grouping_is_deterministic (__main__.TestGrouping.test_grouping_is_deterministic) ... ok
+test_grouping_partitions_the_full_leg_set (__main__.TestGrouping.test_grouping_partitions_the_full_leg_set) ... ok
+test_groups_are_meaningfully_fewer_than_legs (__main__.TestGrouping.test_groups_are_meaningfully_fewer_than_legs) ... ok
+test_same_crate_legs_cluster_before_packing (__main__.TestGrouping.test_same_crate_legs_cluster_before_packing) ... ok
+test_single_overweight_leg_gets_its_own_group (__main__.TestGrouping.test_single_overweight_leg_gets_its_own_group) ... ok
+test_docs_only_batch_assembles_zero_legs (__main__.TestMergeGroupClassAccounting.test_docs_only_batch_assembles_zero_legs) ... ok
+test_engine_batch_keeps_its_affected_legs (__main__.TestMergeGroupClassAccounting.test_engine_batch_keeps_its_affected_legs) ... ok
+test_unresolvable_batch_fails_safe_to_full_merge_group_set (__main__.TestMergeGroupClassAccounting.test_unresolvable_batch_fails_safe_to_full_merge_group_set) ... ok
+test_checkout_has_the_merge_base (__main__.TestPreMergeC1Job.test_checkout_has_the_merge_base)
+A default pull_request checkout fetches only `refs/pull/N/merge` at depth 1 — ... ok
+test_guard_step_is_gated_on_a_clean_test_merge (__main__.TestPreMergeC1Job.test_guard_step_is_gated_on_a_clean_test_merge)
+A conflicted working tree is not the merge result; grading it would be a ... ok
+test_job_gates (__main__.TestPreMergeC1Job.test_job_gates)
+Post-#3773 a check gates unless DECLARED advisory; assert both halves — the ... ok
+test_job_is_unprivileged (__main__.TestPreMergeC1Job.test_job_is_unprivileged)
+It checks out the PR head and merges the base locally; it needs nothing but ... ok
+test_merges_the_current_base_tip (__main__.TestPreMergeC1Job.test_merges_the_current_base_tip)
+Without this the job grades the same stale tree `setup` already graded. ... ok
+test_publishes_the_base_sha_it_graded (__main__.TestPreMergeC1Job.test_publishes_the_base_sha_it_graded)
+PR #5253 review round 1. The job resolves the base tip WHILE RUNNING, and no PR ... ok
+test_pull_request_only_and_path_filtered (__main__.TestPreMergeC1Job.test_pull_request_only_and_path_filtered)
+merge_group/push already check out an actually-merged tree, so re-merging ... ok
+test_runs_the_c1_guard_itself (__main__.TestPreMergeC1Job.test_runs_the_c1_guard_itself)
+The point of the job: the SAME check, not a re-implementation of it. ... ok
+test_test_merge_starts_at_the_pr_head (__main__.TestPreMergeC1Job.test_test_merge_starts_at_the_pr_head)
+PR #5253 review round 2. On `pull_request`, actions/checkout WITHOUT an explicit ... ok
+test_unstaleable_c1_verdict_stays_wired_on_merge_group (__main__.TestPreMergeC1Job.test_unstaleable_c1_verdict_stays_wired_on_merge_group)
+PR #5253 review round 1 — the LIFECYCLE half, not another substring of this job. ... ok
+test_no_pull_request_trigger (__main__.TestReportWorkflowTrustBoundary.test_no_pull_request_trigger) ... ok
+test_reporter_downloads_by_run_id (__main__.TestReportWorkflowTrustBoundary.test_reporter_downloads_by_run_id) ... ok
+test_reporter_holds_checks_write_and_runs_no_cargo (__main__.TestReportWorkflowTrustBoundary.test_reporter_holds_checks_write_and_runs_no_cargo) ... ok
+test_reporter_job_name_gates (__main__.TestReportWorkflowTrustBoundary.test_reporter_job_name_gates) ... ok
+test_reporter_sets_fork_pr_from_server_event_fields (__main__.TestReportWorkflowTrustBoundary.test_reporter_sets_fork_pr_from_server_event_fields) ... ok
+test_reporter_validates_head_sha_against_server_value (__main__.TestReportWorkflowTrustBoundary.test_reporter_validates_head_sha_against_server_value) ... ok
+test_reporter_wires_trigger_run_id_from_server_value (__main__.TestReportWorkflowTrustBoundary.test_reporter_wires_trigger_run_id_from_server_value) ... ok
+test_triggered_by_workflow_run_on_feature_matrix (__main__.TestReportWorkflowTrustBoundary.test_triggered_by_workflow_run_on_feature_matrix) ... ok
+test_change_class_adds_no_legs_full_golden_set_preserved (__main__.TestSelectionFiltering.test_change_class_adds_no_legs_full_golden_set_preserved) ... ok
+test_main_applies_selection_to_matrix_json (__main__.TestSelectionFiltering.test_main_applies_selection_to_matrix_json) ... ok
+test_malformed_affected_fails_closed_to_full (__main__.TestSelectionFiltering.test_malformed_affected_fails_closed_to_full) ... warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+warning: --select-mode selected but --affected is missing/malformed; FAILING CLOSED to the full leg set (sq-fmx4u.3, design §4.3)
+ok
+test_names_mode_ignores_selection_flags (__main__.TestSelectionFiltering.test_names_mode_ignores_selection_flags) ... ok
+test_selected_keeps_only_affected_crates (__main__.TestSelectionFiltering.test_selected_keeps_only_affected_crates) ... ok
+test_selected_with_empty_affected_yields_zero_legs (__main__.TestSelectionFiltering.test_selected_with_empty_affected_yields_zero_legs) ... ok
+test_shadow_full_and_unset_modes_keep_all (__main__.TestSelectionFiltering.test_shadow_full_and_unset_modes_keep_all) ... ok
+test_check_tier_is_green_empty_on_every_event (__main__.TestTierBehaviorPreservation.test_check_tier_is_green_empty_on_every_event) ... ok
+test_emitted_legs_have_exactly_the_four_workflow_keys (__main__.TestTierBehaviorPreservation.test_emitted_legs_have_exactly_the_four_workflow_keys) ... ok
+test_no_real_fragment_is_annotated_yet (__main__.TestTierBehaviorPreservation.test_no_real_fragment_is_annotated_yet) ... ok
+test_pull_request_and_merge_group_emit_the_full_set (__main__.TestTierBehaviorPreservation.test_pull_request_and_merge_group_emit_the_full_set) ... ok
+test_push_emits_the_full_set (__main__.TestTierBehaviorPreservation.test_push_emits_the_full_set) ... ok
+test_explicit_test_and_check_are_accepted (__main__.TestTierFieldValidation.test_explicit_test_and_check_are_accepted) ... ok
+test_malformed_tier_value_errors (__main__.TestTierFieldValidation.test_malformed_tier_value_errors) ... error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpz3rgr101/frag.yml[0]: `tier` must be one of ['test', 'check'] (got 'bogus'); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpz3rgr101/frag.yml[0]: `tier` must be one of ['test', 'check'] (got 'checkk'); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpz3rgr101/frag.yml[0]: `tier` must be one of ['test', 'check'] (got None); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpz3rgr101/frag.yml[0]: `tier` must be one of ['test', 'check'] (got 3); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpz3rgr101/frag.yml[0]: `tier` must be one of ['test', 'check'] (got ['a', 'b']); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+ok
+test_missing_tier_defaults_to_test (__main__.TestTierFieldValidation.test_missing_tier_defaults_to_test) ... ok
+test_null_tier_errors (__main__.TestTierFieldValidation.test_null_tier_errors) ... error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpifhekw3x/frag.yml[0]: `tier` must be one of ['test', 'check'] (got None); a missing `tier` defaults to 'test'. An unrecognised value is never silently demoted to the check tier.
+ok
+test_tier_reason_override_key_is_allowed (__main__.TestTierFieldValidation.test_tier_reason_override_key_is_allowed) ... ok
+test_unknown_extra_key_still_errors (__main__.TestTierFieldValidation.test_unknown_extra_key_still_errors) ... error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmpw6tusmp2/frag.yml[0]: bad keys (unexpected ['bogus-key'])
+ok
+test_backstop_check_tier_is_empty (__main__.TestTierFiltering.test_backstop_check_tier_is_empty) ... ok
+test_backstop_test_tier_emits_all_legs_regardless_of_tier (__main__.TestTierFiltering.test_backstop_test_tier_emits_all_legs_regardless_of_tier) ... ok
+test_malformed_shard_flag_is_a_hard_error (__main__.TestTierFiltering.test_malformed_shard_flag_is_a_hard_error) ... error: --shard must be one of ['engine', 'rest'] (got 'nope')
+ok
+test_malformed_tier_flag_is_a_hard_error (__main__.TestTierFiltering.test_malformed_tier_flag_is_a_hard_error) ... error: --tier must be one of ['test', 'check'] (got 'checkk')
+error: --tier must be one of ['test', 'check'] (got 'TEST')
+error: --tier must be one of ['test', 'check'] (got 'full')
+error: --tier must be one of ['test', 'check'] (got '')
+ok
+test_pull_request_check_tier_selects_only_check_legs (__main__.TestTierFiltering.test_pull_request_check_tier_selects_only_check_legs) ... ok
+test_pull_request_default_tier_is_test (__main__.TestTierFiltering.test_pull_request_default_tier_is_test) ... ok
+test_pull_request_test_tier_excludes_check_legs (__main__.TestTierFiltering.test_pull_request_test_tier_excludes_check_legs) ... ok
+test_shard_engine_vs_rest_partitions_the_check_legs (__main__.TestTierFiltering.test_shard_engine_vs_rest_partitions_the_check_legs) ... ok
+test_shard_none_is_a_noop (__main__.TestTierFiltering.test_shard_none_is_a_noop) ... ok
+test_every_fragment_points_at_the_golden (__main__.TestTwoFileScopeRuleIsDocumented.test_every_fragment_points_at_the_golden)
+A fragment author/decomposer reading ONLY their crate's file still sees the rule ... ok
+test_fragment_dir_readme_gives_the_regeneration_command (__main__.TestTwoFileScopeRuleIsDocumented.test_fragment_dir_readme_gives_the_regeneration_command) ... ok
+test_fragment_dir_readme_states_both_in_scope_paths (__main__.TestTwoFileScopeRuleIsDocumented.test_fragment_dir_readme_states_both_in_scope_paths) ... ok
+test_explicit_positive_weight_is_accepted (__main__.TestWeightFieldValidation.test_explicit_positive_weight_is_accepted) ... ok
+test_malformed_weight_errors (__main__.TestWeightFieldValidation.test_malformed_weight_errors) ... error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got 0); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got -1); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got 'abc'); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got True); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got nan); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got inf); omit it to use the crate-size heuristic
+error: ../../../../../../var/folders/bg/h3_9072n3hq_xjcw2_f17m3m0000gp/T/tmp8do6c8p8/frag.yml[0]: `weight` must be a positive finite number (got [1]); omit it to use the crate-size heuristic
+ok
+test_missing_weight_defaults_to_heuristic (__main__.TestWeightFieldValidation.test_missing_weight_defaults_to_heuristic) ... ok
+
+----------------------------------------------------------------------
+Ran 105 tests in 23.436s
+
+OK

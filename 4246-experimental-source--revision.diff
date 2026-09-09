@@ -1,0 +1,429 @@
+diff --git a/.github/feature-matrix.d/sparq-core.yml b/.github/feature-matrix.d/sparq-core.yml
+index bb0bb9011..fb8381eea 100644
+--- a/.github/feature-matrix.d/sparq-core.yml
++++ b/.github/feature-matrix.d/sparq-core.yml
+@@ -70,3 +70,10 @@
+   crate: "sparq-core"
+   features: "spqcprm2,mmap"
+   test: true
++
++# [GPT-6 Astra] #4246: explicitly exercise the experimental deletion cache;
++# ordinary/core defaults remain feature-off. Includes ownership/invalidation tests.
++- name: "sparq-core (overlay-deleted-projections)"
++  crate: "sparq-core"
++  features: "overlay-deleted-projections"
++  test: true
+diff --git a/bench/overlay-count/README.md b/bench/overlay-count/README.md
+index f1e41d12b..8868f7e59 100644
+--- a/bench/overlay-count/README.md
++++ b/bench/overlay-count/README.md
+@@ -7,8 +7,8 @@ included. Build timing and `count-alloc` binaries separately with the same sourc
+ lockfile, release profile, two build jobs, and one Rayon runtime thread.
+ 
+ ```sh
+-CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml
+-CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features count-alloc
++CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features sparq-core/overlay-deleted-projections
++CARGO_BUILD_JOBS=2 cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml --features count-alloc,sparq-core/overlay-deleted-projections
+ ```
+ 
+ Save each binary before the next build. Each invocation emits the entire fixed
+@@ -59,3 +59,16 @@ sums the overlay heap of the initial graph and retained generations. Existing
+ allocator counters separately report live requested bytes. Cold-query cases do not
+ prime measured forks. A separate oracle records the multi-pattern query's actual
+ projection heap growth and verifies the complete four-row result.
++
++The core experiment is OFF by default. Omit `sparq-core/overlay-deleted-projections`
++for the ordinary linear control; the benchmark does not forward or enable it
++implicitly. Timing and allocator comparisons use the same harness, with the core
++feature state recorded separately in build provenance.
++
++The `reads-per-generation` argument runs only the fixed fork/tombstone/read case:
++32,768 initial tombstones, six initially warmed permutations, four retained child
++generations, and reads per generation in `{1, 2, 4, 8, 16}`. Each child adds one
++tombstone, executes the same ordinary single-pattern SELECT that many times, then
++is retained locally. Earlier generations and the initial graph stay alive. The
++existing two warmups, seven timing and three allocation repetitions apply. This
++measures the declared read counts, not a recommended crossover or tuning threshold.
+diff --git a/bench/overlay-count/src/lifecycle.rs b/bench/overlay-count/src/lifecycle.rs
+index 7207ea933..beb1bfdbd 100644
+--- a/bench/overlay-count/src/lifecycle.rs
++++ b/bench/overlay-count/src/lifecycle.rs
+@@ -233,3 +233,80 @@ pub(super) fn run_all() {
+         }
+     }
+ }
++
++/// [GPT-6 Astra] The sole additional measurement authorized after the opt-in
++/// decision: fixed deletion lineage, varying only reads per retained generation.
++pub(super) fn run_reads() {
++    let pristine = base();
++    let base_heap = pristine.store.heap_bytes();
++    let deletions = delta(D, false);
++    let tombstones: Vec<_> = (0..GENERATIONS)
++        .map(|i| {
++            [
++                iri(&format!("urn:s:{}", 20_000 + i)),
++                iri("urn:p:0"),
++                iri(&format!("urn:o:{}", 20_000 + i)),
++            ]
++        })
++        .collect();
++    check_query(&pristine);
++    println!("{{\"kind\":\"reads_fixture\",\"subjects\":{SUBJECTS},\"predicates\":{PREDICATES},\"deletions\":{D},\"generations\":{GENERATIONS},\"initial_warm_perms\":6,\"rayon_threads\":1,\"counting\":{},\"setup_process_peak_rss_bytes\":{}}}",cfg!(feature="count-alloc"),rss());
++    for (reads, name) in [
++        (1, "fork-tombstone-R1"),
++        (2, "fork-tombstone-R2"),
++        (4, "fork-tombstone-R4"),
++        (8, "fork-tombstone-R8"),
++        (16, "fork-tombstone-R16"),
++    ] {
++        let reps = if cfg!(feature = "count-alloc") { 3 } else { 7 };
++        for rep in 0..reps + 2 {
++            let initial = fork(&pristine, &deletions, false);
++            prime(&initial, 6);
++            let initial_heap = initial.store.heap_bytes() - base_heap;
++            let mut generations: Vec<Graph> = Vec::with_capacity(GENERATIONS);
++            let mut records = [Sample::default(); GENERATIONS];
++            for generation in 0..GENERATIONS {
++                let mut sample = measure(|| {
++                    let start = Instant::now();
++                    let mut next = generations.last().unwrap_or(&initial).fork();
++                    let cloned = start.elapsed().as_nanos();
++                    let delta = Instant::now();
++                    next.apply_delta(&[], std::slice::from_ref(&tombstones[generation]))
++                        .unwrap();
++                    let delta = delta.elapsed().as_nanos();
++                    let read = Instant::now();
++                    assert_eq!(run(&next, "query", reads), reads);
++                    let read = read.elapsed().as_nanos();
++                    generations.push(next);
++                    [cloned, delta, read]
++                });
++                sample.initial_heap = initial_heap;
++                sample.retained_heap = initial_heap
++                    + generations
++                        .iter()
++                        .map(|g| g.store.heap_bytes() - base_heap)
++                        .sum::<usize>();
++                records[generation] = sample;
++            }
++            for (generation, graph) in generations.iter().enumerate() {
++                check_query(graph);
++                assert_eq!(
++                    graph.store.len(),
++                    SUBJECTS * PREDICATES - D - generation - 1
++                );
++                for (i, tombstone) in tombstones.iter().enumerate() {
++                    let pattern = tombstone.clone().map(|t| Some(graph.dict.lookup(&t)));
++                    assert_eq!(
++                        graph.store.scan(&pattern).rows.len(),
++                        usize::from(i > generation)
++                    );
++                }
++            }
++            if rep >= 2 {
++                for (generation, &sample) in records.iter().enumerate() {
++                    emit(name, 6, rep - 2, generation + 1, sample);
++                }
++            }
++        }
++    }
++}
+diff --git a/bench/overlay-count/src/main.rs b/bench/overlay-count/src/main.rs
+index 063a2cf09..0857ef8f7 100644
+--- a/bench/overlay-count/src/main.rs
++++ b/bench/overlay-count/src/main.rs
+@@ -104,6 +104,10 @@ fn main() {
+         .unwrap();
+     #[cfg(feature = "count-alloc")]
+     counting::calibrate();
++    if std::env::args().nth(1).as_deref() == Some("reads-per-generation") {
++        lifecycle::run_reads();
++        return;
++    }
+     if std::env::args().nth(1).as_deref() == Some("lifecycle") {
+         lifecycle::run_all();
+         return;
+diff --git a/crates/sparq-core/Cargo.toml b/crates/sparq-core/Cargo.toml
+index dc26565f6..860b41edf 100644
+--- a/crates/sparq-core/Cargo.toml
++++ b/crates/sparq-core/Cargo.toml
+@@ -30,6 +30,9 @@ parallel = ["dep:rayon", "dep:memchr"]
+ # pattern is still answered by one of them, but some merge joins fall back to hashing.
+ # ~halves index memory (36 vs 72 B/triple) — for the memory-constrained browser target.
+ compact-index = []
++# [GPT-6 Astra] Experimental lazy tombstone projections. OFF by default: cold
++# reads sort and allocate; forks copy retained projections. See the crate README.
++overlay-deleted-projections = []
+ # Out-of-core querying: persist the indexes and memory-map them (native only).
+ mmap = ["dep:memmap2"]
+ # [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
+diff --git a/crates/sparq-core/README.md b/crates/sparq-core/README.md
+index 104180743..4a63f6c2c 100644
+--- a/crates/sparq-core/README.md
++++ b/crates/sparq-core/README.md
+@@ -50,6 +50,19 @@ assert_eq!(count, 1);
+ - **Incremental updates** — start from `Graph::new()` / `Graph::default()` (an empty graph) and
+   `insert_triple(s, p, o)` / `remove_triple(s, p, o)` a single triple from `oxrdf` terms, or apply
+   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
++- **Experimental deletion projections** — [GPT-6 Astra] enable the default-off
++  `overlay-deleted-projections` Cargo feature on `sparq-core` to cache sorted
++  tombstone projections for repeated range counts. The default uses the original
++  linear deletion scan and carries no deletion projection slots. Each requested
++  permutation first sorts the full tombstone set; an actual tombstone change
++  invalidates those projections, and concurrent first readers wait for the same
++  initializer. Each initialized vector retains twelve bytes per deleted triple
++  plus capacity slack, alongside the deletion hash set; up to all built
++  permutations may be retained. Forks and snapshots deep-copy initialized vectors,
++  so memory grows with each retained generation. There is no deletion-count cap
++  or eviction policy. This experiment can regress cold reads and update/read
++  cycles; opt-in is not a general performance recommendation. Reproduce local
++  lifecycle measurements with `bench/overlay-count`; results are noncanonical.
+ - **Out-of-core store** — query datasets larger than RAM from a memory-mapped on-disk store,
+   with optional block compression and near-zero resident heap. The opt-in `block-bloom` feature
+   adds per-block Bloom filters on high-NDV columns to skip the block decode on equality-bound
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index d90091aa6..c495a305b 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -179,6 +179,7 @@ struct Overlay {
+     /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
+     /// production in-place mutator is `TripleStore::apply_delta`, which invalidates
+     /// these projections when a tombstone is inserted or removed.
++    #[cfg(feature = "overlay-deleted-projections")]
+     deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
+ }
+ 
+@@ -217,6 +218,7 @@ impl Overlay {
+     }
+ 
+     /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
++    #[cfg(feature = "overlay-deleted-projections")]
+     fn invalidate_deleted(&mut self) {
+         for slot in &mut self.deleted_by_perm {
+             slot.take();
+@@ -229,6 +231,7 @@ impl Overlay {
+     /// apply_delta invalidates only the mutated overlay under exclusive access.
+     /// Concurrent first readers of the same permutation wait for its one sorting
+     /// initializer; the cold sort is serialized for that permutation.
++    #[cfg(feature = "overlay-deleted-projections")]
+     fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
+         if self.deleted.is_empty() {
+             return 0;
+@@ -290,10 +293,23 @@ impl Overlay {
+ 
+     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
+     /// correction to a base range count. The `added` side rides the cached perm-sorted
+-    /// projection; [GPT-6 Astra] `deleted` uses the same lazy projection strategy.
++    /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
++    /// default; the experimental feature opts into lazy sorted projections.
+     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+         let add = self.added_rows(perm, lo, hi).len();
++        #[cfg(feature = "overlay-deleted-projections")]
+         let del = self.deleted_count(perm, lo, hi);
++        #[cfg(not(feature = "overlay-deleted-projections"))]
++        let del = {
++            let order = perm.order();
++            self.deleted
++                .iter()
++                .filter(|t| {
++                    let r = [t[order[0]], t[order[1]], t[order[2]]];
++                    r >= lo && r <= hi
++                })
++                .count()
++        };
+         (add, del)
+     }
+ 
+@@ -307,10 +323,14 @@ impl Overlay {
+         let cached: usize = self
+             .added_by_perm
+             .iter()
+-            .chain(&self.deleted_by_perm)
+             .filter_map(|slot| slot.get())
+             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
+             .sum();
++        #[cfg(feature = "overlay-deleted-projections")]
++        let cached = cached + self.deleted_by_perm.iter()
++            .filter_map(|slot| slot.get())
++            .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
++            .sum::<usize>();
+         self.added.capacity() * std::mem::size_of::<[Id; 3]>()
+             + self.deleted.capacity() * 13
+             + cached
+@@ -932,17 +952,22 @@ impl TripleStore {
+         // Preserve deletion projections across inserts/no-ops: only actual tombstone
+         // changes require another sort. No overlay read occurs before publication.
+         ov.invalidate_added();
++        #[cfg(feature = "overlay-deleted-projections")]
+         let mut deleted_changed = false;
+         for t in deletes {
+             if let Ok(i) = ov.added.binary_search(t) {
+                 ov.added.remove(i); // retract a pending insertion
+             } else if self.base_contains(*t) {
+-                deleted_changed |= ov.deleted.insert(*t);
++                #[cfg(feature = "overlay-deleted-projections")]
++                { deleted_changed |= ov.deleted.insert(*t); }
++                #[cfg(not(feature = "overlay-deleted-projections"))]
++                { ov.deleted.insert(*t); }
+             }
+         }
+         for t in inserts {
+             if ov.deleted.remove(t) {
+-                deleted_changed = true;
++                #[cfg(feature = "overlay-deleted-projections")]
++                { deleted_changed = true; }
+                 continue; // re-insert of a deleted base triple: just undelete
+             }
+             if self.base_contains(*t) {
+@@ -952,6 +977,7 @@ impl TripleStore {
+                 ov.added.insert(i, *t);
+             }
+         }
++        #[cfg(feature = "overlay-deleted-projections")]
+         if deleted_changed {
+             ov.invalidate_deleted();
+         }
+diff --git a/crates/sparq-core/src/store/overlay_deleted_tests.rs b/crates/sparq-core/src/store/overlay_deleted_tests.rs
+index a3bd4f3e3..c5bb1aab2 100644
+--- a/crates/sparq-core/src/store/overlay_deleted_tests.rs
++++ b/crates/sparq-core/src/store/overlay_deleted_tests.rs
+@@ -29,6 +29,7 @@ fn sweep(store: &TripleStore, reference: &[[Id; 3]]) {
+     for perm in Perm::ALL {
+         if !BUILT.contains(&perm) {
+             assert!(store.scan_perm(&[None; 3], perm).is_none());
++            #[cfg(feature = "overlay-deleted-projections")]
+             if let Some(ov) = &store.overlay {
+                 assert!(ov.deleted_by_perm[perm as usize].get().is_none());
+             }
+@@ -40,6 +41,7 @@ fn sweep(store: &TripleStore, reference: &[[Id; 3]]) {
+     }
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_is_lazy_reused_and_accounted() {
+     let mut store = TripleStore::from_triples(triples());
+@@ -106,6 +108,7 @@ fn deleted_cache_matches_rebuild_after_mixed_deltas() {
+     assert!(!store.has_overlay());
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_survives_insert_only_and_noop_deltas() {
+     let mut reference = triples();
+@@ -146,6 +149,7 @@ fn deleted_cache_survives_insert_only_and_noop_deltas() {
+     }
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
+     let mut reference = triples();
+@@ -174,6 +178,7 @@ fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
+     }
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_inclusive_bounds_and_empty_ranges() {
+     let mut ov = Overlay::default();
+@@ -203,6 +208,7 @@ fn deleted_cache_compressed_base_matches_rebuild() {
+     sweep(&store, &reference);
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_fork_and_clone_are_independent() {
+     let mut original = TripleStore::from_triples(triples());
+@@ -272,6 +278,7 @@ fn deleted_cache_fork_and_clone_are_independent() {
+     }
+ }
+ 
++#[cfg(feature = "overlay-deleted-projections")]
+ #[test]
+ fn deleted_cache_concurrent_first_reads_share_initialized_projection() {
+     let mut store = TripleStore::from_triples(triples());
+@@ -340,3 +347,40 @@ fn deleted_cache_graph_snapshot_retains_warm_generation() {
+         }
+     }
+ }
++
++// [GPT-6 Astra] Default-off must preserve main's representation and linear-count
++// behavior, not merely return the same rows after allocating a hidden projection.
++#[cfg(not(feature = "overlay-deleted-projections"))]
++#[test]
++fn deleted_projection_feature_off_preserves_main_layout_and_heap() {
++    let mut store = TripleStore::from_triples(triples());
++    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4], [3, 3, 6]]);
++    let before = store.heap_bytes();
++    for &perm in BUILT {
++        for _ in 0..3 {
++            let scan = store
++                .scan_perm(&[Some(12), Some(4), Some(16)], perm)
++                .unwrap();
++            assert_eq!(scan.rows.len(), 1);
++            assert!(matches!(scan.rows, Cow::Borrowed(_)));
++            assert_eq!(store.estimate(&[Some(1), Some(1), Some(2)]), 0);
++            assert_eq!(
++                store.heap_bytes(),
++                before,
++                "default reads retain no deletion projection"
++            );
++        }
++    }
++    let frozen = store.fork();
++    assert_eq!(frozen.heap_bytes(), before);
++    // These are the three fields of main's Overlay. All have pointer alignment
++    // and sizes divisible by that alignment; there is no inter-field padding.
++    let main_fields = std::mem::size_of::<Vec<[Id; 3]>>()
++        + std::mem::size_of::<rustc_hash::FxHashSet<[Id; 3]>>()
++        + std::mem::size_of::<[std::sync::OnceLock<Vec<[Id; 3]>>; 6]>();
++    assert_eq!(std::mem::size_of::<Overlay>(), main_fields);
++    assert_eq!(
++        std::mem::align_of::<Overlay>(),
++        std::mem::align_of::<usize>()
++    );
++}
+diff --git a/scripts/tests/feature-matrix-legnames.golden.txt b/scripts/tests/feature-matrix-legnames.golden.txt
+index 63c630c74..2fb05b12d 100644
+--- a/scripts/tests/feature-matrix-legnames.golden.txt
++++ b/scripts/tests/feature-matrix-legnames.golden.txt
+@@ -19,6 +19,7 @@ opt-in sparq-core (iri-fast)
+ opt-in sparq-core (jsonld)
+ opt-in sparq-core (mmap, dict-spill)
+ opt-in sparq-core (native-ttl)
++opt-in sparq-core (overlay-deleted-projections)
+ opt-in sparq-core (spqcprm2, mmap)
+ opt-in sparq-engine (algebra-rewrite)
+ opt-in sparq-engine (antijoin-static-decline)
+diff --git a/skills/sparql-query/SKILL.md b/skills/sparql-query/SKILL.md
+index 7269a8c5a..e83775d3d 100644
+--- a/skills/sparql-query/SKILL.md
++++ b/skills/sparql-query/SKILL.md
+@@ -1049,6 +1049,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
+   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
+   # Ok::<(), String>(())
+   ```
++- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
++  direct core dependency:
++
++  ```toml
++  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
++  ```
++
++  Cargo unifies this feature for engine queries using that same core package.
++  No engine, CLI or runtime flag is required or added. It is off in default builds,
++  which keep linear deletion counting and no deletion-cache state. The experiment
++  sorts all tombstones on first use of each permutation; actual tombstone changes
++  invalidate projections, and concurrent first readers share a blocking initializer.
++  Each requested vector retains twelve bytes per tombstone plus capacity slack,
++  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
++  retained generations multiply this cost. No cap or eviction is provided. Cold
++  reads and update/read cycles can regress; measure the intended workload using
++  `bench/overlay-count` before choosing this opt-in. No universal crossover or
++  canonical speedup is claimed.
+ - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
+   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
+   it can be shared across the async handlers of an axum/actix/tower server directly with

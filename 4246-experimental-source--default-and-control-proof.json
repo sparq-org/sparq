@@ -1,0 +1,16 @@
+{
+  "feature": "overlay-deleted-projections",
+  "core_default": [
+    "parallel"
+  ],
+  "manifest_mentions": [
+    "crates/sparq-core/Cargo.toml"
+  ],
+  "no_dependency_enables_feature": true,
+  "core_feature_has_no_dependencies": true,
+  "forwarding": "No forwarding added. Direct sparq-core opt-in unifies into its engine consumers; diagnostic uses explicit --features sparq-core/overlay-deleted-projections.",
+  "main_control_runtime_exact_after_test_only_suffix": true,
+  "test_fixture_identical": true,
+  "benchmark_sources_identical": true,
+  "baseline_test_limitation": "The exact copied test fixture names an unknown feature in baseline cfg attributes, causing expected check-cfg warnings. Baseline Cargo manifests/runtime are unchanged; false cfg branches are omitted and four default tests execute."
+}

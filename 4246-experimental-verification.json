@@ -1,0 +1,48 @@
+{
+  "candidate": {
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "clean": true
+  },
+  "main_control": {
+    "head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+    "clean": true
+  },
+  "source": {
+    "copied_source_files_exact": 16,
+    "both_diffs_exact": true,
+    "all_provenance_hashes_match": true,
+    "identical_harness": true,
+    "baseline_runtime_exact_except_test_only_suffix": true
+  },
+  "preserved_manifests": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/manifest.json",
+      "sha256": "9a19cc95fd4acffa34a7625b9c041fcb66a5aa56f210bb325676913271c2deb7",
+      "head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+      "verified_files": 79
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/manifest.json",
+      "sha256": "4709cb1529348554120cc8487eb76aa8c9ad5618360d1fe22a5d0ad77a2fe090",
+      "head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+      "verified_files": 95
+    }
+  ],
+  "measurement": {
+    "verified_binary_hashes": 4,
+    "recorded_windows": {
+      "candidate-time": 140,
+      "candidate-count": 60,
+      "main-time": 140,
+      "main-count": 60
+    },
+    "total_windows": 400,
+    "all_execution_exit_zero": true
+  },
+  "validation": {
+    "test_and_clippy_statuses_expected": true,
+    "six_controls_compiled_and_failed_behaviorally": true,
+    "known_preflight_limit": "Bash3 mapfile unavailable; exact log retained"
+  },
+  "verified_at": "2026-09-09T13:17:56.927293+00:00"
+}

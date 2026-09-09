@@ -1,0 +1,6 @@
+{
+  "initial_projection_heap_difference": 2359296,
+  "all_twenty_points_match_six_requested_projections": true,
+  "timed_child_queries": "SPO exact subject/predicate query, after true tombstone mutation invalidates cloned projections; one projection reinitialized per child.",
+  "feature_off_proof": "Separate compiled default-off/main fixtures and gate-disabled mutant; no additional off timing matrix performed."
+}

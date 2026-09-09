@@ -1,0 +1,1 @@
+Initial AWS-CLI Python lacked PyYAML. Existing /opt/homebrew/bin/python3 has PyYAML6.0.3; official assembler regeneration succeeded. No package installation. The transient empty golden in checkpoint87e00cce was corrected before validation.

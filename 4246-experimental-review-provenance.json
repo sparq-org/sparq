@@ -1,0 +1,152 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "control_head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+  "main_runtime": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "prior_reviewed": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+  "model": "OpenAI GPT-6 Astra xhigh, actual implementation runtime",
+  "harness_identical": true,
+  "main_test_only_suffix": "Source/main runtime equality after stripping only appended #[cfg(test)] fixture module proven in source/default-and-control-proof.json; baseline Cargo.toml unchanged.",
+  "harness_files": {
+    "bench/overlay-count/Cargo.toml": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040",
+    "bench/overlay-count/Cargo.lock": "b319e3eafeffff389ed020f2213f89dbc0f7041405a3dc9d42facec6e74681bf",
+    "bench/overlay-count/README.md": "73d93c0b757e2186a094768f82cdff9006209598e3442e070f831ebb83c90f4d",
+    "bench/overlay-count/src/counting.rs": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "bench/overlay-count/src/main.rs": "946188525809298d068450911e93b3d0c3bed2e9a7c6cbcd91b713a71e6c5e48",
+    "bench/overlay-count/src/lifecycle.rs": "d02c77e89674cf79f351f419540f1a69d192adae16bdbbc23a8fbce97c587e2b"
+  },
+  "runtime_files": {
+    "candidate": {
+      "crates/sparq-core/src/store.rs": "f1fb1b676cb31948879246e6a0d91958da62f6b7491a430aec7918cf65a0209e",
+      "crates/sparq-core/src/lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "crates/sparq-core/Cargo.toml": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+      "crates/sparq-engine/src/exec.rs": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd"
+    },
+    "main": {
+      "crates/sparq-core/src/store.rs": "fed800fce5c9b9cc7332f8494d1507b8f1d07138861ee1d00a2547f8cb227474",
+      "crates/sparq-core/src/lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "crates/sparq-core/Cargo.toml": "81b61ab780d45b36e188b5d5fc0ad9bb3c50ff2227fee6b650f34584a415a4df",
+      "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+      "crates/sparq-engine/src/exec.rs": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd"
+    }
+  },
+  "builds": [
+    {
+      "name": "candidate-time",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--manifest-path",
+        "bench/overlay-count/Cargo.toml",
+        "--features",
+        "sparq-core/overlay-deleted-projections"
+      ],
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "started": 1788959136.107661,
+      "ended": 1788959173.7172859,
+      "sha256": "dd806a1c96a6d00325717f620d602bd464e8b1367936afa86ea983bf684d91d3",
+      "bytes": 5419136
+    },
+    {
+      "name": "candidate-count",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--manifest-path",
+        "bench/overlay-count/Cargo.toml",
+        "--features",
+        "sparq-core/overlay-deleted-projections,count-alloc"
+      ],
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "started": 1788959173.7882528,
+      "ended": 1788959177.283675,
+      "sha256": "00d593358bf0a898866f94a6eb4514fe0f54097864beff27fa883890a69f0f21",
+      "bytes": 5420784
+    },
+    {
+      "name": "main-time",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--manifest-path",
+        "bench/overlay-count/Cargo.toml"
+      ],
+      "head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+      "started": 1788959177.315407,
+      "ended": 1788959223.972341,
+      "sha256": "77f06415fa9b672a79fa17819715aeefe510258879d4f5178ca24530808d4fe8",
+      "bytes": 5401520
+    },
+    {
+      "name": "main-count",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--manifest-path",
+        "bench/overlay-count/Cargo.toml",
+        "--features",
+        "count-alloc"
+      ],
+      "head": "0613b5c3d1f2b1174bcccfcd1a6bb64551ca9485",
+      "started": 1788959223.999806,
+      "ended": 1788959227.041208,
+      "sha256": "c182be236d47dc07a083230a823d23b87f646add545cbae0f488b06097181d07",
+      "bytes": 5419824
+    }
+  ],
+  "executions": [
+    {
+      "name": "main-time",
+      "exit": 0,
+      "started": 1788959236.712,
+      "ended": 1788959238.2788649,
+      "binary_sha256": "77f06415fa9b672a79fa17819715aeefe510258879d4f5178ca24530808d4fe8"
+    },
+    {
+      "name": "candidate-time",
+      "exit": 0,
+      "started": 1788959238.2891881,
+      "ended": 1788959240.035935,
+      "binary_sha256": "dd806a1c96a6d00325717f620d602bd464e8b1367936afa86ea983bf684d91d3"
+    },
+    {
+      "name": "candidate-count",
+      "exit": 0,
+      "started": 1788959240.048128,
+      "ended": 1788959241.302473,
+      "binary_sha256": "00d593358bf0a898866f94a6eb4514fe0f54097864beff27fa883890a69f0f21"
+    },
+    {
+      "name": "main-count",
+      "exit": 0,
+      "started": 1788959241.311748,
+      "ended": 1788959242.452029,
+      "binary_sha256": "c182be236d47dc07a083230a823d23b87f646add545cbae0f488b06097181d07"
+    }
+  ],
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)\n",
+  "profile": "opt-level=3,lto=false,codegen-units=16,debug=false",
+  "build_jobs": 2,
+  "rayon_threads": 1,
+  "warmups": 2,
+  "timing_reps": 7,
+  "allocation_reps": 3,
+  "optimized_build_wall_seconds": 90.962619708,
+  "no_build_during_timing": true,
+  "measurement_count": 400,
+  "host_evidence": "host.json (same Apple M1/16GiB/macOS host as prior reviewed stage)",
+  "generated_at": "2026-09-09T13:09:49.187046+00:00"
+}

@@ -1,0 +1,94 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246-optin-main/crates/sparq-core)
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+  --> crates/sparq-core/src/store/overlay_deleted_tests.rs:44:7
+   |
+44 | #[cfg(feature = "overlay-deleted-projections")]
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+   = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: requested on the command line with `-W unexpected-cfgs`
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:111:7
+    |
+111 | #[cfg(feature = "overlay-deleted-projections")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:152:7
+    |
+152 | #[cfg(feature = "overlay-deleted-projections")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:181:7
+    |
+181 | #[cfg(feature = "overlay-deleted-projections")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:211:7
+    |
+211 | #[cfg(feature = "overlay-deleted-projections")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:281:7
+    |
+281 | #[cfg(feature = "overlay-deleted-projections")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+   --> crates/sparq-core/src/store/overlay_deleted_tests.rs:353:11
+    |
+353 | #[cfg(not(feature = "overlay-deleted-projections"))]
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+    = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `overlay-deleted-projections`
+  --> crates/sparq-core/src/store/overlay_deleted_tests.rs:32:19
+   |
+32 |             #[cfg(feature = "overlay-deleted-projections")]
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `block-bloom`, `compact-index`, `default`, `dict-spill`, `elias-fano`, `iri-fast`, `jsonld`, `mmap`, `native-ttl`, `parallel`, `rdfxml`, `shared`, and `spqcprm2`
+   = help: consider adding `overlay-deleted-projections` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: `sparq-core` (lib test) generated 8 warnings
+    Finished `test` profile [unoptimized] target(s) in 8.59s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_core-53b43ac9cb50e22c)
+
+running 4 tests
+test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+test store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.05s
+

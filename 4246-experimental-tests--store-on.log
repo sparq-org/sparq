@@ -1,0 +1,28 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-core)
+    Finished `test` profile [unoptimized] target(s) in 4.07s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_core-5d77b6001c8fb29f)
+
+running 20 tests
+test store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication ... ok
+test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+test store::overlay_deleted_tests::deleted_cache_concurrent_first_reads_share_initialized_projection ... ok
+test store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent ... ok
+test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+test store::overlay_deleted_tests::deleted_cache_inclusive_bounds_and_empty_ranges ... ok
+test store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted ... ok
+test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+test store::overlay_deleted_tests::deleted_cache_survives_insert_only_and_noop_deltas ... ok
+test store::tests::build_raw_perms_no_capacity_slack ... ok
+test store::tests::compressed_scans_match_raw ... ok
+test store::tests::derive_plan_pairs_are_derivable ... ok
+test store::tests::derived_perms_match_radix_all_build ... ok
+test store::tests::from_triples_independent_dedup_removes_all_duplicates ... ok
+test store::tests::from_triples_perms_match_reference_sort ... ok
+test store::tests::measure_derived_vs_radix_all_build ... ignored, timing measurement; non-canonical, run explicitly
+test store::tests::overlay_scans_match_rebuild ... ok
+test store::tests::overlay_zero_copy_fast_path ... ok
+test store::tests::radix_sort_equiv_comparison_sort ... ok
+test store::tests::scan_perm_selects_named_permutation ... ok
+
+test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.58s
+

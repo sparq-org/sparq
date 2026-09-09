@@ -1,0 +1,70 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "prior": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+  "verified_at": "2026-09-09T13:19:34.121446+00:00",
+  "manifest_entries": 88,
+  "manifest_all_files_verified": true,
+  "manifest_sha256": "c0ce2485c772011abf5dd1684d93c4920155a31659b8d868b2c9c06c71eac228",
+  "packet_sha256": "1c026b68cd99768cc0d0674b2418044e62c4a1e7b4db0c5dd438813cfe674459",
+  "packet_bytes": 159266,
+  "clean_head_verified": true,
+  "both_diffs_match_git": true,
+  "full_source_copies_match_git": [
+    "rust-toolchain.toml",
+    "scripts/run-feature-matrix-group.py",
+    "skills/sparql-query/SKILL.md",
+    ".github/feature-matrix.d/sparq-core.yml",
+    "scripts/tests/feature-matrix-legnames.golden.txt",
+    "crates/sparq-core/Cargo.toml",
+    "crates/sparq-core/README.md",
+    "crates/sparq-core/src/lib.rs",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+    "bench/overlay-count/Cargo.toml",
+    "bench/overlay-count/Cargo.lock",
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs",
+    "bench/overlay-count/src/main.rs",
+    "bench/overlay-count/src/lifecycle.rs"
+  ],
+  "test_log_summaries": {
+    "tests/feature-on-initial.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.56s"
+    ],
+    "tests/store-compact-off.log": [
+      "test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 105 filtered out; finished in 0.60s"
+    ],
+    "tests/clippy-harness.log": [],
+    "tests/preflight.log": [],
+    "tests/store-on.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.58s"
+    ],
+    "tests/snapshot-fork-off.log": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.44s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s"
+    ],
+    "tests/feature-matrix.log": [
+      "Ran 105 tests in 23.436s"
+    ],
+    "tests/store-compact-on.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 105 filtered out; finished in 0.46s"
+    ],
+    "tests/feature-off-initial.log": [
+      "test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.70s"
+    ],
+    "tests/main-identical-default-tests.log": [
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.05s"
+    ],
+    "tests/clippy-core-on.log": [],
+    "tests/store-off.log": [
+      "test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.73s"
+    ],
+    "tests/snapshot-fork-on.log": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s"
+    ],
+    "tests/clippy-core-off.log": []
+  },
+  "limits": "Frozen source/artifact/test-output verification only; not a rerun of benchmarks or fullworkspace/admission checks."
+}

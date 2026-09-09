@@ -1,0 +1,11 @@
+--- store.rs
++++ unconditional_deleted_invalidation
+@@ -978,7 +978,7 @@
+             }
+         }
+         #[cfg(feature = "overlay-deleted-projections")]
+-        if deleted_changed {
++        if deleted_changed || !ov.deleted.is_empty() {
+             ov.invalidate_deleted();
+         }
+         self.overlay = if ov.is_empty() { None } else { Some(ov) };

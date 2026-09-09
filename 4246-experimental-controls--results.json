@@ -1,0 +1,154 @@
+{
+  "command": [
+    "/Users/jesght/.cargo/bin/cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-core",
+    "--features",
+    "overlay-deleted-projections",
+    "--lib",
+    "store::overlay_deleted_tests::",
+    "--",
+    "--test-threads=1"
+  ],
+  "results": [
+    {
+      "name": "unconditional_deleted_invalidation",
+      "exit": 101,
+      "seconds": 8.753635375000002,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+      ]
+    },
+    {
+      "name": "remove_deleted_invalidation",
+      "exit": 101,
+      "seconds": 6.043293457999999,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 4 passed; 5 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.08s"
+      ]
+    },
+    {
+      "name": "ignore_tombstone_insert_flag",
+      "exit": 101,
+      "seconds": 5.311953875,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+      ]
+    },
+    {
+      "name": "ignore_tombstone_remove_flag",
+      "exit": 101,
+      "seconds": 4.926250875000001,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+      ]
+    },
+    {
+      "name": "remove_deleted_cache_use",
+      "exit": 101,
+      "seconds": 6.247343416,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 5 passed; 4 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+      ]
+    },
+    {
+      "name": "force_cache_in_feature_off",
+      "exit": 101,
+      "seconds": 10.563433084000003,
+      "compiled": true,
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--lib",
+        "deleted_projection_feature_off_preserves_main_layout_and_heap",
+        "--",
+        "--test-threads=1"
+      ],
+      "summaries": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.01s"
+      ]
+    }
+  ]
+}

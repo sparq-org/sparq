@@ -130,6 +130,10 @@ for evidence_name in [*json.loads((OVERLAY_4246_REVISION / 'manifest.json').read
     FILES['4246-revision-' + evidence_name.replace('/', '--')] = OVERLAY_4246_REVISION / evidence_name
 FILES['4246-opus-review-cb638a42.json'] = OVERLAY_4246_REVISION / 'opus-review-cb638a42.json'
 
+OVERLAY_4246_EXPERIMENTAL = ROOT / 'direct-4246/experimental'
+for evidence_name in [*json.loads((OVERLAY_4246_EXPERIMENTAL / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['4246-experimental-' + evidence_name.replace('/', '--')] = OVERLAY_4246_EXPERIMENTAL / evidence_name
+
 TRIAGE_6468 = ROOT / 'direct-6468'
 for evidence_name in [*json.loads((TRIAGE_6468 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['6468-diagnosis-' + evidence_name.replace('/', '--')] = TRIAGE_6468 / evidence_name
