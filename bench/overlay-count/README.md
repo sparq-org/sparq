@@ -72,3 +72,32 @@ tombstone, executes the same ordinary single-pattern SELECT that many times, the
 is retained locally. Earlier generations and the initial graph stay alive. The
 existing two warmups, seven timing and three allocation repetitions apply. This
 measures the declared read counts, not a recommended crossover or tuning threshold.
+
+### Allocator window regression
+
+<!-- [GPT-6 Astra] Test the actual allocator module without building the benchmark. -->
+From the repository root, with its pinned Rust toolchain already installed:
+
+```sh
+test_dir=$(mktemp -d)
+rustc --edition=2021 --test bench/overlay-count/src/counting.rs \
+  -o "$test_dir/counting-window-tests"
+"$test_dir/counting-window-tests" --exact tests::window_ownership_and_calibration \
+  --test-threads=1 --nocapture
+```
+
+This depends only on the standard library. The detached benchmark is not reached
+by ordinary workspace tests; do not treat that CI as execution of this command.
+One serial test checks repeated clean calibrations and nested/competing admission
+against the real module. Panic handling and thread machinery can allocate, so the
+denied-admission checks measure a known request after that machinery has finished,
+rather than asserting exact totals for an invalid window. Libtest itself can
+allocate globally; unexpected calibration counts are a failure to investigate,
+not a reason to adjust the oracle or repeat until green.
+
+Window ownership covers counter reset and readout. The successful coordinator must
+balance `begin` with `end`, with workers quiescent at both boundaries. The guard
+does not make arbitrary concurrent allocator activity into an atomic snapshot or
+authorize another caller to end the owner's window. The regression synchronizes
+a competing attempt after the owner has begun; it does not claim to execute every
+possible reset/readout interleaving.
