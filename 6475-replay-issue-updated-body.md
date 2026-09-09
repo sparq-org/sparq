@@ -1,0 +1,52 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+`canonicalize_quads` produced different canonical strings for datasets related by a bijective blank-node rename. This blocked the protected merge queue for #6095. The failing Rust code/test is inherited from main `e53464c73f31f7aca800f3867ac054c36408e346`; the merge-group delta contains only the classifier's two Python files.
+
+The [failed matrix job](https://github.com/sparq-org/sparq/actions/runs/34409424033/job/102661090898) is displayed as `opt-in group (g20 sparq-vectors)`, but its failing fourth leg is `cargo test -p sparq-canon --features concept`. `canonical_output_invariant_under_bnode_relabeling` failed at [the assertion](https://github.com/sparq-org/sparq/blob/e53464c73f31f7aca800f3867ac054c36408e346/crates/sparq-canon/tests/proptest_canon_determinism.rs#L379), with eight tests passing and one failing. The [required gate](https://github.com/sparq-org/sparq/actions/runs/34409423697/job/102660112366) confirmed the failed leg before failing fast; it was not a reporter timeout.
+
+The shrunk input, transcribed from the logged property specification using the test's `materialize` function:
+
+```nq
+_:b4 <http://ex/q> _:b2 _:b3 .
+_:b4 <http://ex/p> _:b0 .
+_:b0 <http://ex/q> _:b3 _:b2 .
+```
+
+Rename every occurrence consistently (`b0→zz0`, `b2→zz4`, `b3→zz3`, `b4→zz5`):
+
+```nq
+_:zz5 <http://ex/q> _:zz4 _:zz3 .
+_:zz5 <http://ex/p> _:zz0 .
+_:zz0 <http://ex/q> _:zz3 _:zz4 .
+```
+
+The captured canonical strings were:
+
+```nq
+_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .
+_:c14n1 <http://ex/p> _:c14n0 .
+_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .
+```
+
+and:
+
+```nq
+_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .
+_:c14n1 <http://ex/p> _:c14n0 .
+_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .
+```
+
+The mapping is bijective across subject, object and graph positions; predicates/default graph are unchanged. This is a valid invariance counterexample through the exposed production API. Saved proptest regression seed: `cc 14c0b82fcdfee2504e7e213e7c440c3f891a8ba23ad553051fd08ab226c0cf2a`.
+
+The saved pair now reproduces directly in **unmodified `rdf-canon 0.15.3` / `oxrdf 0.2.4`**, without a Sparq crate, bridge, parser, proptest or engine linked. A standalone harness constructs the quads directly with checked oxrdf constructors; its printed inputs and both canonical outputs match the CI counterexample byte-for-byte. The one-edge positive control passes, and the three-quad pair reports `relabel_invariant=false` and exits with failure.
+
+This was one fixed-pair replay plus its positive control, built offline with locked dependencies using the repository-pinned Rust toolchain. The package checksums and dependency set were verified against the failed main revision. It localizes the defect below Sparq's conversion layer; changing that bridge is not the demonstrated repair boundary. The responsible N-degree-hash/issuer decision is still being traced, and no production algorithm correction or broad conformance result is claimed. The public-source review packet for this replay has SHA-256 `b0692054c4600485b8c429be557055b2202c25281842abd15fdc28591e826f23`.
+
+Acceptance:
+
+- Replay the saved explicit datasets and localize the first semantic/canonical mismatch on the pinned dependency versions.
+- Add a fixed regression that checks the production API across the complete rename; retain the randomized property and its strength.
+- Repair the responsible path with independent soundness review and relevant conformance coverage.
+- Advance through ordinary protected checks. Do not rerun/requeue #6095 for a lucky randomized pass or cancel its remaining live merge-group evidence.
+
+Exact test-name and `sparq-canon`/`relabeling` issue searches found no match; a broader blank-node canonicalization search returned only unrelated dependency-policy issue #5470.

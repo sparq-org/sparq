@@ -1,0 +1,20 @@
+{
+  "core": {
+    "limit": 5000,
+    "remaining": 4974,
+    "reset": 1788993819,
+    "used": 26
+  },
+  "graphql": {
+    "limit": 5000,
+    "remaining": 5000,
+    "reset": 1788996053,
+    "used": 0
+  },
+  "search": {
+    "limit": 30,
+    "remaining": 30,
+    "reset": 1788992513,
+    "used": 0
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "requests": [
+    {
+      "url": "https://registry.npmjs.org/rdf-canonize/4.0.1",
+      "file": "reference-package-metadata.json",
+      "status": "curl exit0"
+    },
+    {
+      "url": "https://registry.npmjs.org/rdf-canonize/-/rdf-canonize-4.0.1.tgz",
+      "file": "rdf-canonize-4.0.1.tgz",
+      "status": "curl exit0; metadata sha512 integrity matched"
+    },
+    {
+      "url": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/",
+      "file": "rdfc-20240521.html",
+      "status": "curl exit0"
+    }
+  ],
+  "earlier_web_tool_limit": "raw GitHub v4.0.1 package.json/RDFC10Sync web reads returned cache miss; no package execution based on these failed reads. Public npm archive was used."
+}

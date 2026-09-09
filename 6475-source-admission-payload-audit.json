@@ -1,0 +1,16 @@
+{
+  "created_at": "2026-09-09T22:58:18.167234+00:00",
+  "bytes": 100125,
+  "sha256": "8de62046687df273e7c2a8bc080473708944ecc36f13295a3fe2b73986423cbc",
+  "public_sources": "Pinned public rdf-canon/rdf-canonize source, W3C permissively licensed normative excerpts with attribution, task-authored fixed fixtures and structured observed outputs. No raw host/environment/build logs or private repository material.",
+  "local_path_markers": {
+    "/private/": 0,
+    "/Users/": 0,
+    "/opt/homebrew/": 0,
+    "/home/runner/": 0
+  },
+  "credential_shaped_matches": 0,
+  "base_packet_sha256": "1f862c034d10297101c8c334a8c70866c1ce1dc99143063a86b04adde233259d",
+  "v5_supplement_sha256": "aa5cc4889928dd6a18c9fc769a59766393aaacf4434c81893d75bf8189e2bf36",
+  "review_scope": "One actual Opus5xhigh source/soundness assessment, no productionpatch orreviewpassclaim; no duplicate/exhaustedbudgetretry"
+}

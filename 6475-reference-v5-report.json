@@ -1,0 +1,178 @@
+{
+  "author": "OpenAI GPT-6 Astra; actual xhigh lane",
+  "package": "rdf-canonize5.0.0",
+  "gitHead": "9502eee92d87e8685d96b9d325477d767c86fb83",
+  "metadata_url": "https://registry.npmjs.org/rdf-canonize/5.0.0",
+  "archive_url": "https://registry.npmjs.org/rdf-canonize/-/rdf-canonize-5.0.0.tgz",
+  "archive_sha256": "ad8ef5d1a3400a152668de5f3ab4611b1b3b2347bb237542cd8e3c7835707f7a",
+  "archive_integrity": "sha512-g8OUrgMXAR9ys/ZuJVfBr05sPPoMA7nHIVs8VEvg9QwM5W4GR2qSFEEHjsyHF1eWlBaf8Ev40WNjQFQ+nJTO3w==",
+  "integrity_verified": true,
+  "node": "v24.19.0",
+  "algorithm": "unmodified RDFC10Sync directly; no async loader, install, native addon or lifecycle script",
+  "diagnostic_options": {
+    "maxDeepIterations": 16,
+    "timeout": 1000
+  },
+  "defaults": "No options passed; maxWorkFactor1 calculates2 deep iterations for the saved pair. All12 orders rejected with the same documented error.",
+  "summary": {
+    "default_errors": 12,
+    "diagnostic_successes": 12,
+    "distinct_outputs": 2,
+    "same_order_relabel_equal": true,
+    "order_invariant": false
+  },
+  "single_edge_positive_control": true,
+  "existing_W3C_fixture_controls": {
+    "passed": 3,
+    "ids": [
+      "#test021c",
+      "#test058c",
+      "#test073c"
+    ]
+  },
+  "outputs": {
+    "d426d4355240eeb9ba0426c80989fbd4f98f258dfe470e9e2041132307bcef86": {
+      "output": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+      "cases": [
+        {
+          "labeling": "original",
+          "order": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "labeling": "original",
+          "order": [
+            0,
+            2,
+            1
+          ]
+        },
+        {
+          "labeling": "original",
+          "order": [
+            1,
+            0,
+            2
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            0,
+            2,
+            1
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            1,
+            0,
+            2
+          ]
+        }
+      ]
+    },
+    "7807795c1390a9b22935165bfb5d0a3f93af026ae4d1266ea96c43990864ed50": {
+      "output": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n",
+      "cases": [
+        {
+          "labeling": "original",
+          "order": [
+            1,
+            2,
+            0
+          ]
+        },
+        {
+          "labeling": "original",
+          "order": [
+            2,
+            0,
+            1
+          ]
+        },
+        {
+          "labeling": "original",
+          "order": [
+            2,
+            1,
+            0
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            1,
+            2,
+            0
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            2,
+            0,
+            1
+          ]
+        },
+        {
+          "labeling": "renamed",
+          "order": [
+            2,
+            1,
+            0
+          ]
+        }
+      ]
+    }
+  },
+  "exact_phase2_cases_byte_identical": true,
+  "algorithm_source_comparison": "RDFC10Sync.js, RDFC10.js, IdentifierIssuer.js, MessageDigest.js, NQuads.js and Permuter.js are each byte-identical to4.0.1. Complete per-file hashes retained.",
+  "conclusion": "Current5.0.0 reference does not remove the observed order dependence under the fixed bounded diagnostic options. This corroborates phase2 behavior; standard-level soundness interpretation remains provisional for independent review.",
+  "limits": [
+    "Default rejection is not canonicalization success.",
+    "Same-order relabeling agrees; the independently observed defect here is quad-order dependence.",
+    "Only the declared counterexample/orders and three W3C controls were executed, not full conformance or proof.",
+    "Direct synchronous module invocation was inspected and uses built-in Node crypto; normal async public API was not executed.",
+    "No production edit, dependency change, gate weakening, remote mutation, installation or new model call."
+  ],
+  "resources": {
+    "commands": [
+      {
+        "argv": [
+          "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+          "reference-replay.cjs"
+        ],
+        "exit": 0,
+        "seconds": 0.314207125,
+        "free_before": 6824099840,
+        "free_after": 6824087552
+      },
+      {
+        "argv": [
+          "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+          "reference-fixtures.cjs"
+        ],
+        "exit": 0,
+        "seconds": 0.11335204100000001,
+        "free_before": 6824083456,
+        "free_after": 6824079360
+      }
+    ],
+    "free_at_freeze": 6821044224,
+    "floor_bytes": 6442450944,
+    "elapsed_seconds": 159.22798800468445
+  }
+}

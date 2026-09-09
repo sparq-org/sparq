@@ -1,0 +1,36 @@
+{
+  "proptest_seed": "cc 14c0b82fcdfee2504e7e213e7c440c3f891a8ba23ad553051fd08ab226c0cf2a",
+  "spec": [
+    {
+      "subject_bnode": 4,
+      "predicate": 1,
+      "object_bnode": 2,
+      "graph_bnode": 3
+    },
+    {
+      "subject_bnode": 4,
+      "predicate": 0,
+      "object_bnode": 0,
+      "graph": "default"
+    },
+    {
+      "subject_bnode": 0,
+      "predicate": 1,
+      "object_bnode": 3,
+      "graph_bnode": 2
+    }
+  ],
+  "permutation": [
+    0,
+    1,
+    4,
+    3,
+    5,
+    2
+  ],
+  "original_nquads": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n",
+  "renamed_nquads": "_:zz5 <http://ex/q> _:zz4 _:zz3 .\n_:zz5 <http://ex/p> _:zz0 .\n_:zz0 <http://ex/q> _:zz3 _:zz4 .\n",
+  "logged_left": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+  "logged_right": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n",
+  "evidence": "Spec, permutation, seed and output strings copied from exact failed job. The two N-Quads inputs are source-derived transcriptions of materialize/base_label, not a new executed Rust reproduction."
+}

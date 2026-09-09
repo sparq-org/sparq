@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-09T23:00:48.529624+00:00",
+  "trace_manifest_files": 365,
+  "trace_manifest_sha256": "f0ce2f9c48fabcb7faadc32762d641a99afdf73f588be4b054c3088f4cbe6f1c",
+  "v5_manifest_files": 41,
+  "v5_manifest_sha256": "3c93d0609db1301217da76750615c4db44fc3d0f3a29ab1686c7b9e59c6b0dd6",
+  "packet_audit": "payload-audit.json",
+  "root_checks": "Allmanifestfilehashes/bytesverified, publicpacketpaths/credentialpatternauditpassed; all12caseoutputassociationanddefault-vsdiagnosticdistinctionincluded; currentupstreamtagsanddocumentedW3Clabelederratalistschecked",
+  "standard_claim": "ProvisionalpendingactualOpusreview,notacceptederratum",
+  "production_change": false
+}

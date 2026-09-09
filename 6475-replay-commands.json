@@ -1,0 +1,78 @@
+[
+  {
+    "name": "toolchain",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "-Vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6969995264,
+    "free_after": 6969982976,
+    "elapsed_total_seconds": 0.25610883301123977,
+    "limit": null
+  },
+  {
+    "name": "format",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2024",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness/src/main.rs"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6969974784,
+    "free_after": 6969933824,
+    "elapsed_total_seconds": 0.5215050830156542,
+    "limit": null
+  },
+  {
+    "name": "resolve",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6969913344,
+    "free_after": 6969913344,
+    "elapsed_total_seconds": 1.832613417005632,
+    "limit": null
+  },
+  {
+    "name": "build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--locked",
+      "--offline"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6969905152,
+    "free_after": 6836940800,
+    "elapsed_total_seconds": 20.95031620800728,
+    "limit": null
+  },
+  {
+    "name": "replay",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/target/debug/canon-relabel-replay"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "exit": 1,
+    "expected_exit": 1,
+    "free_before": 6836936704,
+    "free_after": 6836699136,
+    "elapsed_total_seconds": 21.493258875008905,
+    "limit": null
+  }
+]

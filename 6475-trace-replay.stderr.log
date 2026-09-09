@@ -1,0 +1,81 @@
+TRACE h1 node=b0 hash=0dffb953cf2396662e6f44c4dac2121efe5f2e50feea75409ee8836c320a2ba5
+TRACE h1 node=b4 hash=70eaaa62710908bd8ce3f926f8a971e4ae0029557623d6e71c895aa708ade5fa
+TRACE issue prefix=c14n existing=b0 issued=c14n0
+TRACE issue prefix=c14n existing=b4 issued=c14n1
+TRACE h1 node=zz0 hash=0dffb953cf2396662e6f44c4dac2121efe5f2e50feea75409ee8836c320a2ba5
+TRACE h1 node=zz5 hash=70eaaa62710908bd8ce3f926f8a971e4ae0029557623d6e71c895aa708ade5fa
+TRACE issue prefix=c14n existing=zz0 issued=c14n0
+TRACE issue prefix=c14n existing=zz5 issued=c14n1
+TRACE h1 node=b0 hash=84e1a25aeaed612753af5589745abe7e1bacb42361d2ef457c79e7242325302a
+TRACE h1 node=b2 hash=166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218
+TRACE h1 node=b3 hash=166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218
+TRACE h1 node=b4 hash=ae1d96e8ca946868bcebe52e0c02d06500b308d60b2ccd25d6f657da4ca29782
+TRACE issue prefix=c14n existing=b0 issued=c14n0
+TRACE issue prefix=c14n existing=b4 issued=c14n1
+TRACE issue prefix=b existing=b2 issued=b0
+TRACE related node=b0 quad="_:b0 <http://ex/q> _:b3 _:b2" input="s<http://ex/q>_:c14n0"
+TRACE related node=b3 quad="_:b0 <http://ex/q> _:b3 _:b2" input="o<http://ex/q>166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE related node=b4 quad="_:b4 <http://ex/q> _:b2 _:b3" input="s<http://ex/q>_:c14n1"
+TRACE related node=b3 quad="_:b4 <http://ex/q> _:b2 _:b3" input="g166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE hn node=b2 groups={"0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e": ["b3"], "a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9": ["b3"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["b0"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["b4"]}
+TRACE issue prefix=b existing=b3 issued=b1
+TRACE related node=b0 quad="_:b0 <http://ex/q> _:b3 _:b2" input="s<http://ex/q>_:c14n0"
+TRACE related node=b2 quad="_:b0 <http://ex/q> _:b3 _:b2" input="g_:b0"
+TRACE related node=b4 quad="_:b4 <http://ex/q> _:b2 _:b3" input="s<http://ex/q>_:c14n1"
+TRACE related node=b2 quad="_:b4 <http://ex/q> _:b2 _:b3" input="o<http://ex/q>_:b0"
+TRACE hn node=b3 groups={"48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da": ["b2"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["b0"], "e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065": ["b2"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["b4"]}
+TRACE nd node=b3 data="48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55 issuer={"b2": "b0", "b3": "b1"}
+TRACE nd node=b2 data="0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8 issuer={"b2": "b0", "b3": "b1"}
+TRACE issue prefix=b existing=b3 issued=b0
+TRACE related node=b0 quad="_:b0 <http://ex/q> _:b3 _:b2" input="s<http://ex/q>_:c14n0"
+TRACE related node=b2 quad="_:b0 <http://ex/q> _:b3 _:b2" input="g166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE related node=b4 quad="_:b4 <http://ex/q> _:b2 _:b3" input="s<http://ex/q>_:c14n1"
+TRACE related node=b2 quad="_:b4 <http://ex/q> _:b2 _:b3" input="o<http://ex/q>166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE hn node=b3 groups={"0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e": ["b2"], "a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9": ["b2"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["b0"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["b4"]}
+TRACE issue prefix=b existing=b2 issued=b1
+TRACE related node=b0 quad="_:b0 <http://ex/q> _:b3 _:b2" input="s<http://ex/q>_:c14n0"
+TRACE related node=b3 quad="_:b0 <http://ex/q> _:b3 _:b2" input="o<http://ex/q>_:b0"
+TRACE related node=b4 quad="_:b4 <http://ex/q> _:b2 _:b3" input="s<http://ex/q>_:c14n1"
+TRACE related node=b3 quad="_:b4 <http://ex/q> _:b2 _:b3" input="g_:b0"
+TRACE hn node=b2 groups={"48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da": ["b3"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["b0"], "e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065": ["b3"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["b4"]}
+TRACE nd node=b2 data="48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55 issuer={"b2": "b1", "b3": "b0"}
+TRACE nd node=b3 data="0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8 issuer={"b2": "b1", "b3": "b0"}
+TRACE issue prefix=c14n existing=b2 issued=c14n2
+TRACE issue prefix=c14n existing=b3 issued=c14n3
+TRACE h1 node=zz0 hash=84e1a25aeaed612753af5589745abe7e1bacb42361d2ef457c79e7242325302a
+TRACE h1 node=zz3 hash=166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218
+TRACE h1 node=zz4 hash=166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218
+TRACE h1 node=zz5 hash=ae1d96e8ca946868bcebe52e0c02d06500b308d60b2ccd25d6f657da4ca29782
+TRACE issue prefix=c14n existing=zz0 issued=c14n0
+TRACE issue prefix=c14n existing=zz5 issued=c14n1
+TRACE issue prefix=b existing=zz3 issued=b0
+TRACE related node=zz5 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="s<http://ex/q>_:c14n1"
+TRACE related node=zz4 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="o<http://ex/q>166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE related node=zz0 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="s<http://ex/q>_:c14n0"
+TRACE related node=zz4 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="g166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE hn node=zz3 groups={"0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e": ["zz4"], "a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9": ["zz4"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["zz0"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["zz5"]}
+TRACE issue prefix=b existing=zz4 issued=b1
+TRACE related node=zz5 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="s<http://ex/q>_:c14n1"
+TRACE related node=zz3 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="g_:b0"
+TRACE related node=zz0 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="s<http://ex/q>_:c14n0"
+TRACE related node=zz3 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="o<http://ex/q>_:b0"
+TRACE hn node=zz4 groups={"48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da": ["zz3"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["zz0"], "e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065": ["zz3"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["zz5"]}
+TRACE nd node=zz4 data="48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55 issuer={"zz3": "b0", "zz4": "b1"}
+TRACE nd node=zz3 data="0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8 issuer={"zz3": "b0", "zz4": "b1"}
+TRACE issue prefix=b existing=zz4 issued=b0
+TRACE related node=zz5 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="s<http://ex/q>_:c14n1"
+TRACE related node=zz3 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="g166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE related node=zz0 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="s<http://ex/q>_:c14n0"
+TRACE related node=zz3 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="o<http://ex/q>166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218"
+TRACE hn node=zz4 groups={"0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e": ["zz3"], "a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9": ["zz3"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["zz0"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["zz5"]}
+TRACE issue prefix=b existing=zz3 issued=b1
+TRACE related node=zz5 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="s<http://ex/q>_:c14n1"
+TRACE related node=zz4 quad="_:zz5 <http://ex/q> _:zz4 _:zz3" input="o<http://ex/q>_:b0"
+TRACE related node=zz0 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="s<http://ex/q>_:c14n0"
+TRACE related node=zz4 quad="_:zz0 <http://ex/q> _:zz3 _:zz4" input="g_:b0"
+TRACE hn node=zz3 groups={"48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da": ["zz4"], "dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203": ["zz0"], "e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065": ["zz4"], "fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25": ["zz5"]}
+TRACE nd node=zz3 data="48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55 issuer={"zz3": "b1", "zz4": "b0"}
+TRACE nd node=zz4 data="0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1" hash=a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8 issuer={"zz3": "b1", "zz4": "b0"}
+TRACE issue prefix=c14n existing=zz3 issued=c14n2
+TRACE issue prefix=c14n existing=zz4 issued=c14n3
+Error: "saved relabeling pair violates canonicalization invariance in direct rdf-canon"

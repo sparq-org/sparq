@@ -1,0 +1,8 @@
+{
+  "argv": [
+    "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "reference-fixtures.cjs"
+  ],
+  "exit": 0,
+  "seconds": 0.3131085
+}

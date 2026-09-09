@@ -1,0 +1,48 @@
+--- rdf-canon-0.15.3/src/canon.rs
++++ upstream-traced/src/canon.rs
+@@ -1,3 +1,4 @@
++// [GPT-6 Astra] Scratch-only tracing; upstream algorithm and dependency cache unchanged.
+ use crate::{
+     counter::{HndqCallCounter, SimpleHndqCallCounter},
+     error::CanonicalizationError,
+@@ -164,6 +165,7 @@
+ 
+         // 4) Increment identifier counter.
+         self.increment();
++        eprintln!("TRACE issue prefix={} existing={} issued={}", self.identifier_prefix, existing_identifier, issued_identifier);
+ 
+         // 5) Return issued identifier.
+         issued_identifier
+@@ -252,6 +254,7 @@
+         let span_ca_3_1 = debug_span!("", indent = 1).entered();
+ 
+         let hash = hash_first_degree_quads::<D>(&state, n).unwrap();
++        eprintln!("TRACE h1 node={} hash={}", n, hash);
+ 
+         #[cfg(feature = "log")]
+         span_ca_3_1.exit();
+@@ -645,6 +648,7 @@
+     debug!(indent = 1, "input: \"{}\"", input);
+ 
+     // 5) Return the hash that results from passing input through the hash algorithm.
++    eprintln!("TRACE related node={} quad={:?} input={:?}", related, quad.to_string(), input);
+     let output = hash::<D>(input);
+ 
+     #[cfg(feature = "log")]
+@@ -869,6 +873,8 @@
+     #[cfg(feature = "log")]
+     span_hndq_3.exit();
+ 
++    eprintln!("TRACE hn node={} groups={:?}", identifier, h_n);
++
+     // 4) Create an empty string, data to hash.
+     let mut data_to_hash = Vec::<String>::new();
+ 
+@@ -1113,6 +1119,7 @@
+     .entered();
+ 
+     let hash = hash::<D>(data_to_hash.join(""));
++    eprintln!("TRACE nd node={} data={:?} hash={} issuer={:?}", identifier, data_to_hash.join(""), hash, issuer.issued_identifiers_map.iter().collect::<BTreeMap<_, _>>());
+ 
+     #[cfg(feature = "log")]
+     {

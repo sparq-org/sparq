@@ -1,0 +1,44 @@
+{
+  "original": [
+    [
+      "b4",
+      "q",
+      "b2",
+      "b3"
+    ],
+    [
+      "b4",
+      "p",
+      "b0",
+      null
+    ],
+    [
+      "b0",
+      "q",
+      "b3",
+      "b2"
+    ]
+  ],
+  "swap_b2_b3_fixed_anchors": [
+    [
+      "b4",
+      "q",
+      "b3",
+      "b2"
+    ],
+    [
+      "b4",
+      "p",
+      "b0",
+      null
+    ],
+    [
+      "b0",
+      "q",
+      "b2",
+      "b3"
+    ]
+  ],
+  "same_dataset": false,
+  "anchor_reason": "The sole p edge fixes its subject b4 and object b0; swapping b2 and b3 is not an automorphism."
+}

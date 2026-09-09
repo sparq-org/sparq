@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "reference-replay.cjs"
+  ],
+  "exit": 0,
+  "seconds": 0.5152455,
+  "free_before": 6812254208,
+  "free_after": 6812241920
+}

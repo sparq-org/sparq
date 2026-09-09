@@ -1,0 +1,9 @@
+{
+  "verified_at": "2026-09-09T22:45:23.501590+00:00",
+  "manifest_files": 48,
+  "manifest_sha256": "74d15beb79d48793ed3416e9e7d8f9aefd14d667ab9b1f129b2b8803877ea666",
+  "packet_sha256": "b0692054c4600485b8c429be557055b2202c25281842abd15fdc28591e826f23",
+  "root_checks": "All48filehashes/bytesverified; exactharness/sourceconstructors and directtwo-dependency manifest read; resolveproof40packages/noSparq; observedcanonicalstringsbyteequalCI; positivecontrolexecutedPASS",
+  "limits": "One fixedpair+oneedgecontrol, not full conformance; nodegreedecisionrepairprovenyet; no productionedit",
+  "next": "Astra sameagentphase2trace and normativecomparison in separatetask-owned copy; actualOpusreviewbeforeacceptingalgorithmrepair"
+}

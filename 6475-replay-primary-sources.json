@@ -1,0 +1,12 @@
+{
+  "urls": {
+    "spec": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/",
+    "related_hash": "https://www.w3.org/TR/rdf-canon/#hash-related-blank-node",
+    "n_degree": "https://www.w3.org/TR/rdf-canon/#hash-nd-quads",
+    "errata": "https://w3c.github.io/rdf-canon/errata/",
+    "upstream": "https://github.com/zkp-ld/rdf-canon"
+  },
+  "read_via": "Web primary-source read; cached tagged crate sources independently verified against registry archive checksum.",
+  "source_inference": "The specification requires isomorphic datasets to canonicalize identically. Its related-node algorithm combines related position, predicate unless graph position, then related-node identifier/hash. Changing that construction needs interoperability review; no spec-conformance repair is claimed here.",
+  "errata_limit": "Rendered errata page contains workflow and empty issue lists; that does not establish absence of relevant errata."
+}

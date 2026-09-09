@@ -1,0 +1,75 @@
+{
+  "issue": 6475,
+  "phase": "bounded scratch trace/localization; no production correction",
+  "author": "OpenAI GPT-6 Astra; inherited xhigh lane",
+  "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "decision": "No responsible Rust-only algorithm patch established. Seek soundness review of a provisional shared-algorithm counterexample before selecting a repair.",
+  "confirmed": [
+    "Scratch-only instrumentation leaves direct upstream output byte-identical to phase1 and Linux CI.",
+    "b2 and b3 have the same first-degree hash 166b37005906f602b8c3e82241f325ff2d22e757fe1ec677be8f8684c7805218; anchors b0/b4 are c14n0/c14n1.",
+    "All four top-level N-degree calls (b2,b3,zz3,zz4) have identical preimage bytes and SHA256 a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8. This is information loss before hashing, not a cryptographic collision.",
+    "Related hashes encode s+q+anchor, g+other and o+q+other independently. Grouping discards which anchor shares the quad with each object/graph role.",
+    "Stably sorting tied hash results preserves BTreeMap input-label order, choosing b2 before b3 and zz3 before zz4. The temporary issuers are swapped; canonical outputs differ.",
+    "Unmodified Digital Bazaar rdf-canonize4.0.1 exactly preserves relabeling for the provided input order, but reversing only quad order changes canonical output for each dataset.",
+    "The reference default budget rejects both inputs at2 deep iterations. Reported ordering defect uses explicit maxDeepIterations16 and timeout1000ms only in this isolated diagnostic; no production budget changed.",
+    "Reference one-edge positive control and existing W3C test021c/test058c/test073c pass. This is not full conformance validation."
+  ],
+  "normative_assessment": {
+    "provisional": "The traced information-loss path agrees with the visible normative steps. A standard-level counterexample is plausible, not an accepted erratum or complete compliance judgment.",
+    "steps": [
+      "4.7.3 steps1-5 encode position/predicate/related identifier, not the full correlated quad.",
+      "4.8.3 steps3.1.1-3.1.2 aggregate these independently into Hn.",
+      "4.4.3 steps5.2-5.3 sort N-degree results only by hash, then issue labels in each result issuer order."
+    ],
+    "not_responsible": [
+      "The >= versus > pruning discrepancy is not exercised: every Hn group for this pair has one member and a single permutation, with no prior chosen path.",
+      "Lexical b10 versus b2 issuer-order risk is not exercised: only b0 and b1 temporary identifiers exist.",
+      "No repeated node within a quad or duplicate quad exists; mention-set multiplicity is not the cause.",
+      "Sparq bridge, parser, proptest RNG, and default randomized HashMap iteration are unnecessary for the failure."
+    ],
+    "links": {
+      "conformance": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/#conformance",
+      "canonicalization": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/#canon-algorithm",
+      "related": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/#hash-related-algorithm",
+      "ndegree": "https://www.w3.org/TR/2024/REC-rdf-canon-20240521/#hash-nd-quads-algorithm",
+      "upstream_rust": "https://github.com/zkp-ld/rdf-canon/tree/v0.15.3",
+      "reference": "https://github.com/digitalbazaar/rdf-canonize/tree/7d06569ac53441bc4786943d2336c98cbb29d1bb",
+      "reference_metadata": "https://registry.npmjs.org/rdf-canonize/4.0.1"
+    }
+  },
+  "candidate_correction": null,
+  "why_no_patch": "Adding quad context would change the specified hash algorithm. Sorting original labels, changing input ordering, or silently rejecting the saved shape does not establish conformant canonicalization. Tied hashes can also represent genuine symmetry; blanket tie rejection is not justified.",
+  "next_smallest_step": "Have independent Opus review exact trace, topology and primary-source correspondence. If confirmed, root can prepare an upstream/W3C reproducer and choose a compatibility-preserving repair or explicitly reviewed fail-closed contract; do not weaken the invariance property.",
+  "ownership": "Phase1 focused ownership check remains authoritative: PR5357 documentation-only bridge removal is review:needs-user. Preserve that hold and PR6095 review:changes/live evidence. No fresh remote PR mutation/read required here.",
+  "limits": [
+    "One pinned reference version, not a latest-version survey.",
+    "Reference synchronous internal module invoked directly to avoid unrelated async dependency loading; actual unmodified source and package archive retained.",
+    "Reference has independent implementation structure but may share standard lineage; not an independent mathematical proof.",
+    "No candidate correction, Rust upstream fixture suite, broader randomized campaign, full workspace, or engine build run.",
+    "Only three packaged W3C fixtures executed, on JS reference.",
+    "No standard-level claim accepted before independent review."
+  ],
+  "resources": {
+    "rust_build_and_replay_seconds": 17.092842249999997,
+    "rust_floor_bytes": 6442450944,
+    "free_at_report": 6770237440,
+    "build_jobs": 2,
+    "target": "task-owned trace/target",
+    "no_installs": true,
+    "no_remote_mutations": true,
+    "no_production_edits": true
+  },
+  "evidence": [
+    "replay.log",
+    "replay.stderr.log",
+    "nd-summary.json",
+    "topology-proof.json",
+    "instrumentation.diff",
+    "dependency-proof.json",
+    "reference-replay.json",
+    "reference-fixtures.json",
+    "reference-package-metadata.json",
+    "source-state.json",
+    "commands.json"
+  ]
+}

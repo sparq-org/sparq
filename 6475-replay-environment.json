@@ -1,0 +1,8 @@
+{
+  "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+  "RUSTDOC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustdoc",
+  "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/target",
+  "CARGO_BUILD_JOBS": "2",
+  "CARGO_NET_OFFLINE": "true",
+  "CARGO_INCREMENTAL": "0"
+}

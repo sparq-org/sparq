@@ -1,0 +1,10 @@
+input_original: _:b4 <http://ex/q> _:b2 _:b3 .
+input_original: _:b4 <http://ex/p> _:b0 .
+input_original: _:b0 <http://ex/q> _:b3 _:b2 .
+input_renamed: _:zz5 <http://ex/q> _:zz4 _:zz3 .
+input_renamed: _:zz5 <http://ex/p> _:zz0 .
+input_renamed: _:zz0 <http://ex/q> _:zz3 _:zz4 .
+single_edge_control_equal=true
+original_canonical="_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+renamed_canonical="_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+relabel_invariant=false

@@ -1,0 +1,116 @@
+{
+  "root_results": [
+    {
+      "node": "b2",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "b2": "b0",
+        "b3": "b1"
+      }
+    },
+    {
+      "node": "b3",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "b2": "b1",
+        "b3": "b0"
+      }
+    },
+    {
+      "node": "zz3",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "zz3": "b0",
+        "zz4": "b1"
+      }
+    },
+    {
+      "node": "zz4",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "zz3": "b1",
+        "zz4": "b0"
+      }
+    }
+  ],
+  "all_nd_results": [
+    {
+      "node": "b3",
+      "preimage": "48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55",
+      "issuer": {
+        "b2": "b0",
+        "b3": "b1"
+      }
+    },
+    {
+      "node": "b2",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "b2": "b0",
+        "b3": "b1"
+      }
+    },
+    {
+      "node": "b2",
+      "preimage": "48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55",
+      "issuer": {
+        "b2": "b1",
+        "b3": "b0"
+      }
+    },
+    {
+      "node": "b3",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "b2": "b1",
+        "b3": "b0"
+      }
+    },
+    {
+      "node": "zz4",
+      "preimage": "48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55",
+      "issuer": {
+        "zz3": "b0",
+        "zz4": "b1"
+      }
+    },
+    {
+      "node": "zz3",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "zz3": "b0",
+        "zz4": "b1"
+      }
+    },
+    {
+      "node": "zz3",
+      "preimage": "48dd923ee6c17016cd4b881684cf668df66e4a103a0b6cd1a131b75eeda4b2da_:b0dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0e8b6351e6f2671494b76ca4a68aaf202f11f0e407bee1ce7e69a95908c886065_:b0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55",
+      "issuer": {
+        "zz3": "b1",
+        "zz4": "b0"
+      }
+    },
+    {
+      "node": "zz4",
+      "preimage": "0feea0387efd853c14bd3f73580df4bfabaaab7c8cc23d7e9450cf8c74aae72e_:b1_:b1<e0920fb2a9003fe3a7feb7836f356bcf0e8d8d4e3c5fffd09c33b2f73b0eaf55>a62ddaca740d6a4674973d915e71813364dd497a676ad565e2c61394ac5b77b9_:b1dad1b426b8ad7a67e066020401940210bb554b2736faa7a37bc420d3ca168203_:c14n0fcc967479af6bb9a287d2d9275ccd98eb6df35c189e83804ade5579269547f25_:c14n1",
+      "hash": "a812f907ae7c594b7fd02586a57c254860f399e64e6b3bbf13fa0e56e38f81e8",
+      "issuer": {
+        "zz3": "b1",
+        "zz4": "b0"
+      }
+    }
+  ],
+  "equal_root_preimages": true,
+  "all_sha256_recomputed": true
+}

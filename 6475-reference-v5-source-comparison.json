@@ -1,0 +1,86 @@
+[
+  {
+    "path": "LICENSE",
+    "new_sha256": "ce809f30d8416b87c46a5affa6e5f8cdad868df31045986ea510bed856b397aa",
+    "old_sha256": "ce809f30d8416b87c46a5affa6e5f8cdad868df31045986ea510bed856b397aa",
+    "identical": true
+  },
+  {
+    "path": "README.md",
+    "new_sha256": "72815c66b35797b99eb0fcbd5eaec602ebdf27f640a8aa2cc1c86ddb2f71f068",
+    "old_sha256": "5cc7fd73a9e6f645c3192d417978078967ef1512091a774c99671e487b1b7bb8",
+    "identical": false
+  },
+  {
+    "path": "index.js",
+    "new_sha256": "f255d71cfe0cc54bd85753e8227bb6b0071cb12deee963cd3a216f07e17d14a8",
+    "old_sha256": "f255d71cfe0cc54bd85753e8227bb6b0071cb12deee963cd3a216f07e17d14a8",
+    "identical": true
+  },
+  {
+    "path": "lib/IdentifierIssuer.js",
+    "new_sha256": "83aca58cc739075dd5aebd25bf5fac8d41ed4f008add508604a409c1989da9ee",
+    "old_sha256": "83aca58cc739075dd5aebd25bf5fac8d41ed4f008add508604a409c1989da9ee",
+    "identical": true
+  },
+  {
+    "path": "lib/MessageDigest-webcrypto.js",
+    "new_sha256": "d05a577b14e39cdbf49b3f72d7dc2a127073e6413350c3cdb76df713c6d0a3bd",
+    "old_sha256": "d05a577b14e39cdbf49b3f72d7dc2a127073e6413350c3cdb76df713c6d0a3bd",
+    "identical": true
+  },
+  {
+    "path": "lib/MessageDigest.js",
+    "new_sha256": "3b211d9b672c1b440cd4f47f70dec96898669c51902d4912599e4f448de52ea9",
+    "old_sha256": "3b211d9b672c1b440cd4f47f70dec96898669c51902d4912599e4f448de52ea9",
+    "identical": true
+  },
+  {
+    "path": "lib/NQuads.js",
+    "new_sha256": "7555c8cdff0dd702ff0c0ef836200fda382746b02e0b9f657c012d4c2c2b3a32",
+    "old_sha256": "7555c8cdff0dd702ff0c0ef836200fda382746b02e0b9f657c012d4c2c2b3a32",
+    "identical": true
+  },
+  {
+    "path": "lib/Permuter.js",
+    "new_sha256": "4a4e9e3d1c461d1937da98e9edd258d0b95be7cfa402be2c3d75aaeeb21e24d8",
+    "old_sha256": "4a4e9e3d1c461d1937da98e9edd258d0b95be7cfa402be2c3d75aaeeb21e24d8",
+    "identical": true
+  },
+  {
+    "path": "lib/RDFC10.js",
+    "new_sha256": "454a1158dd18a1559f7259573ffd9748999921cd18064c3ed48ab2b135446a98",
+    "old_sha256": "454a1158dd18a1559f7259573ffd9748999921cd18064c3ed48ab2b135446a98",
+    "identical": true
+  },
+  {
+    "path": "lib/RDFC10Sync.js",
+    "new_sha256": "0f08af51ac41dc730f146cc1eb12b07d913f67ffbf1498d9b124e1cef589a02d",
+    "old_sha256": "0f08af51ac41dc730f146cc1eb12b07d913f67ffbf1498d9b124e1cef589a02d",
+    "identical": true
+  },
+  {
+    "path": "lib/index.js",
+    "new_sha256": "8bc236cb8cea6a8e6fb8cf46e826bae7bb6618883c83413000e16d45d57726ac",
+    "old_sha256": "cb35db662298276d79cc31cba6c88d7d6a443ddece4814b173daad83ece17269",
+    "identical": false
+  },
+  {
+    "path": "lib/platform-browser.js",
+    "new_sha256": "03db9714392fb29c13dae8aae3d8f2b4ce7a91e7b7c17bccdb2f59043f715e9c",
+    "old_sha256": "03db9714392fb29c13dae8aae3d8f2b4ce7a91e7b7c17bccdb2f59043f715e9c",
+    "identical": true
+  },
+  {
+    "path": "lib/platform.js",
+    "new_sha256": "5b670b95cf78d897a8fcc664b1aa8f13d58589c33032d63dd6a827871ed20d1d",
+    "old_sha256": "5b670b95cf78d897a8fcc664b1aa8f13d58589c33032d63dd6a827871ed20d1d",
+    "identical": true
+  },
+  {
+    "path": "package.json",
+    "new_sha256": "4fea40db683ef464ac7e36227d7c80e7076b6dc92e262c9d342058e4b1cf36cf",
+    "old_sha256": "e4c57203b59332365eb04d8f3267ee951b8644ba3c6f77fab8cd2035ad7c3dab",
+    "identical": false
+  }
+]

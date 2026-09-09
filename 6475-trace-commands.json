@@ -1,0 +1,78 @@
+[
+  {
+    "name": "toolchain",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "-Vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6945341440,
+    "free_after": 6945329152,
+    "elapsed_total_seconds": 0.262916542,
+    "limit": null
+  },
+  {
+    "name": "format",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2024",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness/src/main.rs"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6945325056,
+    "free_after": 6945148928,
+    "elapsed_total_seconds": 0.5292924170000001,
+    "limit": null
+  },
+  {
+    "name": "resolve",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6945148928,
+    "free_after": 6944927744,
+    "elapsed_total_seconds": 1.319711583,
+    "limit": null
+  },
+  {
+    "name": "build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--locked",
+      "--offline"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6944927744,
+    "free_after": 6850420736,
+    "elapsed_total_seconds": 16.552377458,
+    "limit": null
+  },
+  {
+    "name": "replay",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/target/debug/canon-relabel-replay"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/harness",
+    "exit": 1,
+    "expected_exit": 1,
+    "free_before": 6850420736,
+    "free_after": 6850191360,
+    "elapsed_total_seconds": 17.092842249999997,
+    "limit": null
+  }
+]

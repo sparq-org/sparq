@@ -1,0 +1,246 @@
+{
+  "created_at": "2026-09-09T22:28:27.842522+00:00",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1466,
+      "sha256": "814cc2185a14133513c2876ca31046b739fd0be179ea12d921219f00b4c7db0c"
+    },
+    {
+      "path": "binary/canon-relabel-replay",
+      "bytes": 1894368,
+      "sha256": "144c9b942b989d029357fd719c429bedd3d8f7e3775c10e8dc75ce577f2f1c5b"
+    },
+    {
+      "path": "budget.json",
+      "bytes": 299,
+      "sha256": "9e55b0598ab32610a167c870351496b0e303359b3bfeda19dc7521f9064be2fd"
+    },
+    {
+      "path": "build.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build.stderr.log",
+      "bytes": 1228,
+      "sha256": "20a59ef63830e43c9aced680cbe2bc1228da0f37b64dfb8f12cd75301a72b111"
+    },
+    {
+      "path": "canon-area-prs.json",
+      "bytes": 79,
+      "sha256": "c9938edecb99d754b2d039ac9eec320a94c769b6a6417921e2dcbef9e2fe01a0"
+    },
+    {
+      "path": "canon-mentioned-prs.json",
+      "bytes": 8239,
+      "sha256": "1f1256a6460bb73711d0647a93966af75fae1c5ea6e2815eae77ba8c6649256f"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 2226,
+      "sha256": "06f7083356e172b7cca965e38e108aa57e18281e7301c223e6377d11063c70da"
+    },
+    {
+      "path": "counterexample.json",
+      "bytes": 1227,
+      "sha256": "2f0eb8333bb978ae600ff70e9b7914d607a5df1194dc6848a6230310a0953ef0"
+    },
+    {
+      "path": "dependency-proof.json",
+      "bytes": 6485,
+      "sha256": "0ad205cd353567881d5009c4d362a0c9169a162024bae00f336c2863ed482d93"
+    },
+    {
+      "path": "environment.json",
+      "bytes": 360,
+      "sha256": "fa38f966fdcb2630418efda385e8d1c63e1109312a388510434892b80b074035"
+    },
+    {
+      "path": "format.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "format.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "freeze.py",
+      "bytes": 10998,
+      "sha256": "549d43fde21954d175e621e8c806718138df95bdf6901512e65e145bebbfe649"
+    },
+    {
+      "path": "harness/Cargo.lock",
+      "bytes": 9125,
+      "sha256": "400ddb4c1a7a5d5207e6cbbf205cd381bf11b203669278d1d995e2b66c92d0e4"
+    },
+    {
+      "path": "harness/Cargo.toml",
+      "bytes": 226,
+      "sha256": "b3245df1687f2943139038527e11e096d5b4c6a42ccbd9390637d18747bce654"
+    },
+    {
+      "path": "harness/src/main.rs",
+      "bytes": 2069,
+      "sha256": "35b4e93110d38f7995155bd6bee02fc9e7725671736c84161e299938ed410984"
+    },
+    {
+      "path": "lock-comparison.json",
+      "bytes": 57,
+      "sha256": "c21040fa54713dd5670e3831e89a50e7acf7414ba25bfebba0e1c244a5665bbc"
+    },
+    {
+      "path": "original.nq",
+      "bytes": 88,
+      "sha256": "f23eb429d2cc47c596456d0c1d9af7fca7ca6aeaaebac7bdead2a572acf145de"
+    },
+    {
+      "path": "pr5357-files.json",
+      "bytes": 20397,
+      "sha256": "a5a38273a040c9cbe813b85d02b624326551286ad42a6923085c0adf0ad6957c"
+    },
+    {
+      "path": "pr5357.json",
+      "bytes": 17002,
+      "sha256": "92671bc0a732dc56fcd4f228e30ee21afe5ad55263ebb9bfce1b71061639caad"
+    },
+    {
+      "path": "primary-sources.json",
+      "bytes": 931,
+      "sha256": "e20643609922204c6d3194cbb27d67bb6eb43edee7124a47c0d28d5cd7afff79"
+    },
+    {
+      "path": "renamed.nq",
+      "bytes": 96,
+      "sha256": "98859014a42429bcd583401d605d77f8878daf0ec25f5d10d767bccaeec431b5"
+    },
+    {
+      "path": "replay.log",
+      "bytes": 605,
+      "sha256": "a05e3f17f0c4e1beb5ec88b65e53c5e4d39c2d8e57b17d25ab72a8625b84e6e7"
+    },
+    {
+      "path": "replay.stderr.log",
+      "bytes": 88,
+      "sha256": "d63969abd7c4b3e39c350373d0c425812d563e7cf9e2778c8120906ad197a51b"
+    },
+    {
+      "path": "report.json",
+      "bytes": 5554,
+      "sha256": "4bd9ba55e0df3cc993158958e8adac80c9f2b4cd3d32fbe45866fa79930fa6c4"
+    },
+    {
+      "path": "resolve.json",
+      "bytes": 182822,
+      "sha256": "90a41fb80d616077718f74ade1faeace468f7f07145240366bf24bba837b84da"
+    },
+    {
+      "path": "resolve.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 10678,
+      "sha256": "b0692054c4600485b8c429be557055b2202c25281842abd15fdc28591e826f23"
+    },
+    {
+      "path": "run.py",
+      "bytes": 2097,
+      "sha256": "ee3d2546538210712c54210313777048636189d3e4f40a68ea3c257ffa804d39"
+    },
+    {
+      "path": "seed.txt",
+      "bytes": 68,
+      "sha256": "e80e275d817897d406d08b8e359f9a8510bba554c14d977e0534137bc5423fcf"
+    },
+    {
+      "path": "sparq-source/crates/sparq-canon/Cargo.toml",
+      "bytes": 5684,
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7"
+    },
+    {
+      "path": "sparq-source/crates/sparq-canon/src/lib.rs",
+      "bytes": 43172,
+      "sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55"
+    },
+    {
+      "path": "sparq-source/crates/sparq-canon/tests/proptest_canon_determinism.rs",
+      "bytes": 25933,
+      "sha256": "64787c32306bbf81f97c9753f35a2d18ad43aa5bb81b37a8863ac04f67ac4011"
+    },
+    {
+      "path": "toolchain.log",
+      "bytes": 192,
+      "sha256": "e794146d99fad54562fdcbd4a7c8b22b0240d2b0312ff6d879d67939b3131850"
+    },
+    {
+      "path": "toolchain.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "upstream-relabel-issues.json",
+      "bytes": 79,
+      "sha256": "c9938edecb99d754b2d039ac9eec320a94c769b6a6417921e2dcbef9e2fe01a0"
+    },
+    {
+      "path": "upstream-source/oxrdf-0.2.4/Cargo.toml",
+      "bytes": 7136,
+      "sha256": "6cc379a3079d3e6f13660a368eb667ef705fbfa38a164d4fe3e1ad9de1847fe2"
+    },
+    {
+      "path": "upstream-source/oxrdf-0.2.4/Cargo.toml.orig",
+      "bytes": 696,
+      "sha256": "7b32e3fa00b7366ccf0fd0e5fb82566231929cbb5484b42b18bea9256ef63fa9"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/CHANGELOG.md",
+      "bytes": 4499,
+      "sha256": "3a6440874fd6ed2749738f36eb5308774e091e88d00c38d5d313979379755ab6"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/Cargo.toml",
+      "bytes": 1616,
+      "sha256": "ccc10377ae9ec259d7331c891250e578530071576f57b5cbdf52173ee5677644"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/Cargo.toml.orig",
+      "bytes": 851,
+      "sha256": "2866e650c6dd0747553c1fbe6643a1db39e39ab9f2405aa6deee786347bc1527"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/LICENSE",
+      "bytes": 1063,
+      "sha256": "e64e3518f947def0fb68d9ee9d523c634dc3155f956b70052c74a81f1aad5cef"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/src/api.rs",
+      "bytes": 33463,
+      "sha256": "14fa5d996d822a7d7ec238a358e768cb787999867d8f6f2e945ed28b0e3d252b"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/src/canon.rs",
+      "bytes": 53743,
+      "sha256": "3eae4632aeab0cf8587bd48c590c97f7bec37e5838cb6c6efa02333a6b9142e1"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/src/counter.rs",
+      "bytes": 2870,
+      "sha256": "39c22221896b75c713423aab9cf371acfdf8fc1861a28b8d590a9690f5c9fe69"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/src/error.rs",
+      "bytes": 818,
+      "sha256": "10912213e9e707a8bc32d53f2a1a8290f0adebf826664d4f9392c553ac88e78e"
+    },
+    {
+      "path": "upstream-source/rdf-canon-0.15.3/src/lib.rs",
+      "bytes": 10189,
+      "sha256": "d7ff5c45adbf22d41b99d306bfdf65f7d28b9f6ca7e8fb20687fa2fff9de88b8"
+    }
+  ]
+}

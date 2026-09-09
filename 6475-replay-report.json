@@ -1,0 +1,71 @@
+{
+  "issue": 6475,
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
+  "branch": "codex/canon-relabel-invariance",
+  "worktree_clean": true,
+  "provenance": "Actual OpenAI GPT-6 Astra xhigh authored the scratch harness and evidence. Production source and cached dependencies were not modified.",
+  "result": "REPRODUCED_AND_LOCALIZED_UPSTREAM. The direct rdf-canon0.15.3/oxrdf0.2.4 harness emits byte-identical left/right canonical strings to the Linux CI failure and exits1; the one-edge positive control passes. No Sparq crate, bridge, parser, proptest or engine is linked.",
+  "executed": {
+    "build": "cargo build --locked --offline",
+    "runtime": "native aarch64-apple-darwin, pinned rustc1.97.1 (8bab26f4f68e0e26f0bb7960be334d5b520ea452)",
+    "tests": "One exact saved three-quad pair plus one-edge calibration in a standalone main, not cargo test. No randomized cases or performance measurements.",
+    "elapsed_total_seconds": 21.493258875008905,
+    "jobs": 2,
+    "free_before_bytes": 6969995264,
+    "free_after_bytes": 6836699136,
+    "floor_bytes": 6442450944,
+    "limit_seconds": 300,
+    "limits_triggered": false,
+    "registry_package_drift_from_main": []
+  },
+  "dependency_proof": "Two direct dependencies,40 resolved packages. rdf-canon has no enabled features; oxrdf default. Locked checksum matches each cached .crate archive; all311 rdf-canon and16 oxrdf archive files equal expanded source. Full metadata/lock/feature and binary/source hashes preserved.",
+  "bridge_exclusion": "The input quads are constructed directly as oxrdf0.2.4 values with checked term constructors. Their printed N-Quads exactly equal the saved source-derived CI fixtures. No oxrdf0.3\u2192text\u2192oxrdf0.2 bridge runs. This independently reproduces the failure below the bridge, so changing Sparq serialization is not the repair boundary.",
+  "mechanism_evidence": "Sparq canonicalize_quads atlib.rs310\u2013312 simply bridges and invokes rdf_canon. Upstream canon.rs602\u2013662 constructs per-related-node hashes;708\u2013854 groups subject/object/graph mentions;320\u2013449 uses N-degree hashes and issuer order. The two ambiguous nodes b2/b3 exchange object versus graph-name positions across the q quads; fixed anchors b4/b0 are distinguished by the p triple. Their first-degree descriptions coincide; the related-node representation is the narrow investigation target. The replay proves an upstream path failure, but this phase did not instrument internal hashes or prove which algorithm line must change.",
+  "repair_recommendation": {
+    "boundary": "Persist the exact pair/seed as a permanent Sparq regression, then repair or patch-pin the upstream canonicalizer component shared by all standard canonicalize/issue/digest consumers. Keep the bridge, proptest case count and gate policy unchanged.",
+    "not_yet_justified": "No safe one-line production correction is established. Sorting original labels, swallowing failure, special-casing these quads, or retrying for green would mask the defect. A speculative change to related-hash inputs may alter standardized output and needs specification/upstream comparison plus W3C regression validation.",
+    "next_bounded_step": "Use the frozen minimal harness to capture upstream N-degree hash/issuer trace on this pair and compare the same pair with an independent established implementation before choosing a narrow dependency patch. Preserve exact baseline outputs and all existing conformance/poison-input limits."
+  },
+  "ownership": {
+    "area_query": "repo:sparq-org/sparq is:pr is:open label:area:sparq-canon",
+    "area_results": 0,
+    "mention_query": "repo:sparq-org/sparq is:pr is:open \"sparq-canon\"",
+    "mention_results": [
+      5357,
+      6148
+    ],
+    "relevant_pr": {
+      "number": 5357,
+      "head": "d460484e050889b931cc4b83b5cae09a09992d6f",
+      "state": "OPEN DRAFT",
+      "labels": [
+        "review:needs-user",
+        "area:docs"
+      ],
+      "files": [
+        "research/sparq-canon-oxrdf03-bridge-removal.md"
+      ],
+      "action": "Preserve its hold and historical authorship; this diagnostic does not adopt its bridge-removal design or supersede its review. Its only source change is documentation, so no confirmed Rust hunk conflict."
+    },
+    "limits": "Focused searches and5357 file listing, not a complete path census of every open PR.6148 title/body indicates site/guide documentation; its files were not fetched."
+  },
+  "upstream_lookup": {
+    "query": "repo:zkp-ld/rdf-canon is:issue relabel",
+    "count": 0,
+    "limits": "One focused lookup does not establish no upstream duplicate or fix."
+  },
+  "scope_limits": [
+    "Native macOS reproduction, not new Linux/wasm conformance.",
+    "No actual Sparq library build due disk/engine dev-dependency constraints; original CI supplies the actual Sparq-path failure.",
+    "No production repair, commit, push, rerun, requeue, model invocation, registry/release/EC2 change.",
+    "All6095 evidence remains unchanged; issue6475 worktree stays clean."
+  ],
+  "paths": {
+    "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/target",
+    "target_allocated_kib": 94872,
+    "binary": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/binary/canon-relabel-replay",
+    "harness": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/harness",
+    "input_bundle_manifest": "1ef65eb20334c6934a82876cf712658c7bb383ac4f344107e4757da45ba46239"
+  }
+}

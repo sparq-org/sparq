@@ -1,0 +1,337 @@
+{
+  "packages": [
+    {
+      "name": "base16ct",
+      "version": "0.2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "alloc"
+      ]
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "canon-relabel-replay",
+      "version": "0.0.0",
+      "source": null,
+      "features": []
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.2.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "std"
+      ]
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "alloc",
+        "block-buffer",
+        "core-api",
+        "default",
+        "std"
+      ]
+    },
+    {
+      "name": "either",
+      "version": "1.16.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "std",
+        "use_std"
+      ]
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "more_lengths"
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.2.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "std"
+      ]
+    },
+    {
+      "name": "itertools",
+      "version": "0.14.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "use_alloc",
+        "use_std"
+      ]
+    },
+    {
+      "name": "libc",
+      "version": "0.2.186",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "alloc",
+        "default",
+        "race",
+        "std"
+      ]
+    },
+    {
+      "name": "oxilangtag",
+      "version": "0.1.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "std"
+      ]
+    },
+    {
+      "name": "oxiri",
+      "version": "0.2.11",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "oxrdf",
+      "version": "0.2.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default"
+      ]
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "ppv-lite86",
+      "version": "0.2.21",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "simd",
+        "std"
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.106",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "proc-macro"
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.45",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "proc-macro"
+      ]
+    },
+    {
+      "name": "rand",
+      "version": "0.8.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "alloc",
+        "default",
+        "getrandom",
+        "libc",
+        "rand_chacha",
+        "std",
+        "std_rng"
+      ]
+    },
+    {
+      "name": "rand_chacha",
+      "version": "0.3.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "std"
+      ]
+    },
+    {
+      "name": "rand_core",
+      "version": "0.6.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "alloc",
+        "getrandom",
+        "std"
+      ]
+    },
+    {
+      "name": "rdf-canon",
+      "version": "0.15.3",
+      "source": null,
+      "features": []
+    },
+    {
+      "name": "serde",
+      "version": "1.0.228",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "std"
+      ]
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.228",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "result",
+        "std"
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.228",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default"
+      ]
+    },
+    {
+      "name": "sha2",
+      "version": "0.10.9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "std"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "2.0.117",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "visit-mut"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.18",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "default",
+        "std"
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.18",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "attributes",
+        "default",
+        "std",
+        "tracing-attributes"
+      ]
+    },
+    {
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "once_cell",
+        "std"
+      ]
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "version_check",
+      "version": "0.9.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "wasi",
+      "version": "0.11.1+wasi-snapshot-preview1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    },
+    {
+      "name": "zerocopy",
+      "version": "0.8.50",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": [
+        "simd"
+      ]
+    },
+    {
+      "name": "zerocopy-derive",
+      "version": "0.8.50",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "features": []
+    }
+  ],
+  "changed_copy_files": [
+    "src/canon.rs"
+  ],
+  "original_source_sha256": "3eae4632aeab0cf8587bd48c590c97f7bec37e5838cb6c6efa02333a6b9142e1",
+  "instrumented_source_sha256": "0907cbb45e02b1f2a60db349901e7dff652359f28ad7beb200899bcfacd71f05",
+  "replay_stdout_byte_identical_to_phase1": true
+}
