@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T20:18:26.480094+00:00",
+  "updated_at": "2026-09-09T20:31:47.350163+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -294,7 +294,18 @@
       "docs_quality": 34399858346,
       "CI": 34399858588,
       "feature_matrix": 34399858565,
-      "validation": "direct-6468/followup-admission/queue-validation-proof.json"
+      "validation": "direct-6468/followup-admission/queue-validation-proof.json",
+      "latest_observation": {
+        "at": "2026-09-09T20:31:47.350163+00:00",
+        "state": "AWAITING_CHECKS",
+        "position": 1,
+        "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+        "evidence": "direct-6468/followup-admission/queue-progress-2031.json",
+        "matrix": "39success1skip9running8queued,57total,0failures",
+        "CI": "21success8skip2running3queued,34total,0failures",
+        "runner_health": "All11activejobs have assignedGitHubrunners; newstarts20:30 showprogress. Queuedworkflow does notindicatestall. No capacityintervention warranted.",
+        "mutation": "none"
+      }
     }
   },
   "prs": {
@@ -569,7 +580,18 @@
         "docs_quality": 34399858346,
         "CI": 34399858588,
         "feature_matrix": 34399858565,
-        "validation": "direct-6468/followup-admission/queue-validation-proof.json"
+        "validation": "direct-6468/followup-admission/queue-validation-proof.json",
+        "latest_observation": {
+          "at": "2026-09-09T20:31:47.350163+00:00",
+          "state": "AWAITING_CHECKS",
+          "position": 1,
+          "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+          "evidence": "direct-6468/followup-admission/queue-progress-2031.json",
+          "matrix": "39success1skip9running8queued,57total,0failures",
+          "CI": "21success8skip2running3queued,34total,0failures",
+          "runner_health": "All11activejobs have assignedGitHubrunners; newstarts20:30 showprogress. Queuedworkflow does notindicatestall. No capacityintervention warranted.",
+          "mutation": "none"
+        }
       }
     },
     "6095": {

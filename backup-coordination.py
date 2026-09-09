@@ -271,6 +271,10 @@ FILES["6468-label-maintenance-scheduled-runs-2018.json"] = ROOT / "direct-6468/l
 for evidence_name in ['assessment-query.json', 'assessment-report.json', 'assessment-state.json', 'gate-33926976128-failed.log']:
     FILES["6095-" + evidence_name] = ROOT / "direct-6095" / evidence_name
 
+# PR6473 bounded2031queue progress.
+for evidence_name in ['state-2030.json', 'queue-runs-2030.json', 'queue-matrix-jobs-2031.json', 'queue-ci-jobs-2031.json', 'queue-progress-2031.json']:
+    FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
