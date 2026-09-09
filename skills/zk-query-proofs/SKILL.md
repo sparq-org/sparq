@@ -330,3 +330,11 @@ for the baseline, and `max_search_steps` to bound candidate attempts. Inspect
 but has no established optimum; exhaustion without a feasible plan returns
 `ResultError::SearchExhausted`. Neither diagnostics nor private attributions enter
 the public presentation, and the independent verifier is unchanged.
+
+[GPT-6] `CircuitProver::compile` returns an immutable content-addressed snapshot
+under the ignored target cache. Driver compile/execute calls share a Unix advisory
+workspace lock, and proof/key jobs consume their own ACIR copies. Concurrent driver
+processes may share a local workspace; do not run external nargo writes or remove
+the cache during those jobs. Unique legacy prover tags remain required for legacy
+witness APIs. Lock failures reject; the existing Unix platform and Rust 1.88
+minimum are preserved.

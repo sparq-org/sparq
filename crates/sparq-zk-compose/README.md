@@ -112,3 +112,13 @@ An exhausted search uses a complete feasible incumbent if available, records
 truncated. Capacity selection applies to the chosen plan, so fewer selected
 credentials can choose the smaller signature circuit. Structural search metrics
 are local diagnostics; measured circuit costs are in the generated gate snapshot.
+
+[GPT-6] The native subprocess driver serializes nargo compile and execute through
+an OS advisory lock on the local workspace's target cache, including execute's
+implicit compilation. Canonical-key generation and proving copy ACIR into their
+own job directories while holding the lock. The public `compile` method returns
+a reusable immutable content-addressed snapshot and rejects conflicting cache
+contents. Its file lock uses the existing Unix `libc` dependency to preserve the
+Rust 1.88 minimum; lock and I/O errors fail closed. This coordinates cooperating
+driver processes on a local filesystem. External nargo writes, network filesystem
+locking semantics, and deleting the cache during a job are outside that contract.

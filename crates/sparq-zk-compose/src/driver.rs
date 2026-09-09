@@ -94,6 +94,45 @@ impl Drop for ScratchDir {
     }
 }
 
+// [GPT-6] nargo beta.21 has no target-directory override. Every driver compile
+// and execute holds this advisory per-workspace OS lock, including implicit
+// compilation during execute. Opening a fresh fd per acquisition coordinates
+// independent driver instances, threads, and processes on a local filesystem.
+// Closing the exclusively owned File releases flock on every return/unwind path.
+struct NargoCacheLock {
+    _file: std::fs::File,
+}
+impl NargoCacheLock {
+    fn acquire(target_dir: &Path) -> Result<Self, DriverError> {
+        std::fs::create_dir_all(target_dir)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(target_dir.join("sparq_nargo.lock"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            // SAFETY: file exclusively owns this valid open fd and remains live
+            // throughout the call. flock takes no pointers and does not close it.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            Ok(Self { _file: file })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "nargo cache locking requires an OS advisory lock",
+            )
+            .into())
+        }
+    }
+}
+
 // [GPT-6] The witness is born under 0700, before nargo creates it. Neither this
 // owner nor its credential-input path is serializable or printable with Debug.
 #[cfg(feature = "successful-results")]
@@ -142,13 +181,28 @@ impl CircuitProver {
         self.compose_dir.join("target")
     }
 
-    /// `nargo compile --package P`. Idempotent; produces `target/P.json`.
+    /// Compiles a member and returns an immutable, content-addressed ACIR snapshot.
+    ///
+    /// Snapshots live in the ignored target cache and may be reused until that
+    /// cache is removed. Unlike nargo's mutable `target/P.json`, the returned
+    /// file is never rewritten by this driver. Compile/execute cache operations
+    /// are serialized across cooperating processes using this local workspace.
+    /// Do not run external nargo writes or remove the cache during driver jobs.
     pub fn compile(&self, id: &CircuitId) -> Result<PathBuf, DriverError> {
         self.compile_package(&id.package())
     }
 
     // [GPT-6] Crate-private package dispatch also serves the isolated result contract.
     pub(crate) fn compile_package(&self, pkg: &str) -> Result<PathBuf, DriverError> {
+        self.with_compiled_bytes(pkg, |bytes, _lock| self.snapshot_acir(pkg, bytes))
+    }
+
+    fn with_compiled_bytes<T>(
+        &self,
+        pkg: &str,
+        consume: impl FnOnce(&[u8], &NargoCacheLock) -> Result<T, DriverError>,
+    ) -> Result<T, DriverError> {
+        let lock = NargoCacheLock::acquire(&self.target_dir())?;
         run(
             "nargo",
             Command::new("nargo")
@@ -157,8 +211,42 @@ impl CircuitProver {
                 .arg(pkg)
                 .current_dir(&self.compose_dir),
         )?;
-        let acir = self.target_dir().join(format!("{pkg}.json"));
-        Ok(acir)
+        let bytes = std::fs::read(self.target_dir().join(format!("{pkg}.json")))?;
+        consume(&bytes, &lock)
+    }
+
+    // Called while the workspace lock is held. Verify existing cache content;
+    // publish a new immutable name atomically so a crash cannot cache half JSON.
+    fn snapshot_acir(&self, pkg: &str, bytes: &[u8]) -> Result<PathBuf, DriverError> {
+        let root = self.target_dir().join("sparq_acir_cache");
+        std::fs::create_dir_all(&root)?;
+        let digest = blake3::hash(bytes).to_hex();
+        let path = root.join(format!("{pkg}_{digest}.json"));
+        match std::fs::read(&path) {
+            Ok(existing) if existing == bytes => return Ok(path),
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "compiled ACIR snapshot differs from its content address",
+                )
+                .into())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let temporary = ScratchDir::new(&root, "publish")?;
+        let file = temporary.0.join("acir.json");
+        std::fs::write(&file, bytes)?;
+        std::fs::rename(file, &path)?;
+        Ok(path)
+    }
+
+    fn compile_into(&self, pkg: &str, job_dir: &Path) -> Result<PathBuf, DriverError> {
+        self.with_compiled_bytes(pkg, |bytes, _lock| {
+            let path = job_dir.join("acir.json");
+            std::fs::write(&path, bytes)?;
+            Ok(path)
+        })
     }
 
     /// Write `Prover.toml` and run `nargo execute`, returning the witness
@@ -219,6 +307,9 @@ impl CircuitProver {
         prover_name: &str,
         witness_name: &str,
     ) -> Result<PathBuf, DriverError> {
+        // Execute can implicitly rewrite shared compilation caches too. Hold the
+        // same OS lock through input publication, compilation and witness writing.
+        let _cache_lock = NargoCacheLock::acquire(&self.target_dir())?;
         let toml_path = self
             .compose_dir
             .join(pkg)
@@ -313,9 +404,9 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
-        let acir = self.compile_package(pkg)?;
-        let witness = self.private_package_witness(pkg, prover_toml, tag)?;
         let scratch = ScratchDir::new(out_dir, "prove")?;
+        let acir = self.compile_into(pkg, &scratch.0)?;
+        let witness = self.private_package_witness(pkg, prover_toml, tag)?;
         self.prove_witness(&acir, &witness.path, &scratch.0)
     }
 
@@ -357,7 +448,8 @@ impl CircuitProver {
         out_dir: &Path,
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
-        let acir = self.compile_package(pkg)?;
+        let scratch = ScratchDir::new(out_dir, "acir")?;
+        let acir = self.compile_into(pkg, &scratch.0)?;
         let witness = self.gen_package_witness(pkg, prover_toml, tag)?;
         self.prove_witness(&acir, &witness, out_dir)
     }
@@ -414,8 +506,8 @@ impl CircuitProver {
         pkg: &str,
         work_dir: &Path,
     ) -> Result<Vec<u8>, DriverError> {
-        let acir = self.compile_package(pkg)?;
         let scratch = ScratchDir::new(work_dir, "vk")?;
+        let acir = self.compile_into(pkg, &scratch.0)?;
         let work_dir = &scratch.0;
         run(
             "bb",
@@ -548,6 +640,124 @@ mod driver_glue_tests {
         );
         assert!(paths.iter().all(|p| !p.exists()));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn content_addressed_compile_cache_never_rewrites_returned_snapshots() {
+        let root = ScratchDir::new(&std::env::temp_dir(), "compile_cache_test").unwrap();
+        let prover = CircuitProver::new(&root.0);
+        let _lock = NargoCacheLock::acquire(&prover.target_dir()).unwrap();
+        let first = prover
+            .snapshot_acir("member", b"first compiled circuit")
+            .unwrap();
+        let second = prover
+            .snapshot_acir("member", b"second compiled circuit")
+            .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(&first).unwrap(), b"first compiled circuit");
+        assert_eq!(
+            prover
+                .snapshot_acir("member", b"first compiled circuit")
+                .unwrap(),
+            first
+        );
+        std::fs::write(&first, b"corrupted cache").unwrap();
+        assert!(prover
+            .snapshot_acir("member", b"first compiled circuit")
+            .is_err());
+    }
+
+    // Run by the parent regression in independent processes. The sentinel must
+    // never already exist while a cooperating process holds the advisory lock.
+    #[test]
+    fn nargo_cache_lock_process_worker() {
+        let Some(root) = std::env::var_os("SPARQ_TEST_NARGO_LOCK_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        for _ in 0..8 {
+            let _lock = NargoCacheLock::acquire(&root).unwrap();
+            let sentinel = root.join("writer_active");
+            let _writer = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&sentinel)
+                .expect("two processes entered the nargo cache concurrently");
+            let counter_path = root.join("count");
+            let value: u32 = std::fs::read_to_string(&counter_path)
+                .unwrap()
+                .parse()
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::fs::write(counter_path, (value + 1).to_string()).unwrap();
+            std::fs::remove_file(sentinel).unwrap();
+        }
+    }
+
+    #[test]
+    fn nargo_cache_lock_serializes_independent_processes_and_releases_on_drop() {
+        let root = ScratchDir::new(&std::env::temp_dir(), "process_lock_test").unwrap();
+        std::fs::write(root.0.join("count"), "0").unwrap();
+        let mut children: Vec<_> = (0..4)
+            .map(|_| {
+                Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "driver::driver_glue_tests::nargo_cache_lock_process_worker",
+                        "--nocapture",
+                    ])
+                    .env("SPARQ_TEST_NARGO_LOCK_ROOT", &root.0)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for child in children.drain(..) {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "lock worker failed: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert_eq!(std::fs::read_to_string(root.0.join("count")).unwrap(), "32");
+        let lock = NargoCacheLock::acquire(&root.0).unwrap();
+        drop(lock);
+        let _reacquired = NargoCacheLock::acquire(&root.0).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo; stresses shared compiler cache and immutable snapshots"]
+    fn real_concurrent_compile_returns_immutable_complete_acir() {
+        let id = CircuitId::FilterInt { d: 1 };
+        let prover = CircuitProver::from_crate_root();
+        let expected = std::fs::read(prover.compile(&id).unwrap()).unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..4)
+                .map(|_| {
+                    let expected = &expected;
+                    let barrier = &barrier;
+                    let id = &id;
+                    scope.spawn(move || {
+                        let independent = CircuitProver::from_crate_root();
+                        barrier.wait();
+                        for _ in 0..3 {
+                            let snapshot = independent.compile(id).unwrap();
+                            let bytes = std::fs::read(&snapshot).unwrap();
+                            assert_eq!(&bytes, expected);
+                            assert!(serde_json::from_slice::<serde_json::Value>(&bytes).is_ok());
+                            assert!(snapshot.parent().unwrap().ends_with("sparq_acir_cache"));
+                        }
+                    })
+                })
+                .collect();
+            for job in jobs {
+                job.join().unwrap();
+            }
+        });
     }
 
     /// A name no executable on a sane PATH resolves to — drives the `Spawn` arm
