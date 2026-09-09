@@ -173,6 +173,9 @@ struct Overlay {
     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`
     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].
     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
+    /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the
+    /// hash set above for merge membership; even SPO needs its own sorted projection.
+    deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
 }
 
 impl Overlay {
@@ -181,14 +184,14 @@ impl Overlay {
     ///
     /// Built LAZILY on the first scan that needs this permutation rather than eagerly
     /// for all six in [`TripleStore::apply_delta`]: a write batch then stays O(batch)
-    /// (it only drops the caches, see [`Overlay::invalidate_added`]) instead of paying
+    /// (it only drops the caches, see [`Overlay::invalidate_projections`]) instead of paying
     /// O(6·k log k) per call, and a store only ever materialises the projections its
     /// query mix actually scans — so the memory cost is bounded by the permutations in
     /// use, not a flat 6×. SPO needs no projection or sort at all: `added` is already
     /// canonical-SPO sorted, so that permutation ALIASES it and costs nothing.
     ///
     /// `OnceLock` (not `RefCell`) because scans take `&self` and `TripleStore` must stay
-    /// `Sync`; a race just recomputes the same value and discards the loser.
+    /// `Sync`; concurrent readers share the synchronized initialization.
     fn added_sorted(&self, perm: Perm) -> &[[Id; 3]] {
         let order = perm.order();
         if order == [0, 1, 2] {
@@ -202,12 +205,32 @@ impl Overlay {
         })
     }
 
-    /// Drops every cached projection — called whenever `added` is about to change, so a
-    /// cache can never outlive the `added` it was derived from.
-    fn invalidate_added(&mut self) {
-        for slot in &mut self.added_by_perm {
+    /// [GPT-6 Astra] Drops both sets of projections before any delta mutation.
+    fn invalidate_projections(&mut self) {
+        for slot in self.added_by_perm.iter_mut().chain(&mut self.deleted_by_perm) {
             slot.take();
         }
+    }
+
+    /// [GPT-6 Astra] Counts deletions using a lazily sorted projection (#4246).
+    /// The first request costs O(d log d) and one additional vector; later requests
+    /// use two binary searches. Clone copies initialized vectors by value, and
+    /// apply_delta invalidates only the mutated overlay under exclusive access.
+    fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
+        if self.deleted.is_empty() {
+            return 0;
+        }
+        let rows = self.deleted_by_perm[perm as usize].get_or_init(|| {
+            let order = perm.order();
+            let mut rows: Vec<[Id; 3]> = self
+                .deleted
+                .iter()
+                .map(|t| [t[order[0]], t[order[1]], t[order[2]]])
+                .collect();
+            rows.sort_unstable();
+            rows
+        });
+        rows.partition_point(|r| *r <= hi) - rows.partition_point(|r| *r < lo)
     }
 
     /// The `added` triples matching the inclusive `[lo, hi]` key range, as rows in
@@ -254,19 +277,10 @@ impl Overlay {
 
     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
     /// correction to a base range count. The `added` side rides the cached perm-sorted
-    /// projection (O(log k), two binary searches); the `deleted` side is an unordered
-    /// hash set and stays O(|deleted|).
+    /// projection; [GPT-6 Astra] `deleted` uses the same lazy projection strategy.
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
-        let order = perm.order();
         let add = self.added_rows(perm, lo, hi).len();
-        let del = self
-            .deleted
-            .iter()
-            .filter(|t| {
-                let r = [t[order[0]], t[order[1]], t[order[2]]];
-                r >= lo && r <= hi
-            })
-            .count();
+        let del = self.deleted_count(perm, lo, hi);
         (add, del)
     }
 
@@ -276,10 +290,11 @@ impl Overlay {
 
     fn heap_bytes(&self) -> usize {
         // The cached perm-sorted projections are part of the overlay's footprint; SPO
-        // aliases `added` and so never occupies a slot.
+        // aliases `added`; [GPT-6 Astra] deleted projections own all requested perms.
         let cached: usize = self
             .added_by_perm
             .iter()
+            .chain(&self.deleted_by_perm)
             .filter_map(|slot| slot.get())
             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
             .sum();
@@ -900,11 +915,11 @@ impl TripleStore {
             return;
         }
         let mut ov = self.overlay.take().unwrap_or_default();
-        // `added` is about to change, so every cached perm-sorted projection of it is
+        // [GPT-6 Astra] Either delta set can change, so all cached projections are
         // stale from here on. Dropping them up front (O(1) per permutation) keeps the
         // write path O(batch) — the projections are rebuilt lazily by the next scan
         // that needs them, and only for the permutations it actually scans.
-        ov.invalidate_added();
+        ov.invalidate_projections();
         for t in deletes {
             if let Ok(i) = ov.added.binary_search(t) {
                 ov.added.remove(i); // retract a pending insertion
@@ -1144,6 +1159,10 @@ fn lower_bound(rows: &[[Id; 3]], key: &[Id; 3]) -> usize {
 fn upper_bound(rows: &[[Id; 3]], key: &[Id; 3]) -> usize {
     rows.partition_point(|row| row <= key)
 }
+
+#[cfg(test)]
+#[path = "store/overlay_deleted_tests.rs"]
+mod overlay_deleted_tests;
 
 #[cfg(test)]
 mod tests {
