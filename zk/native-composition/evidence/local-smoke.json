@@ -1,5 +1,41 @@
 {
   "backend": "dock-legogroth16-bls12-381",
+  "build_input_digests": {
+    "algorithm": "blake2b-512",
+    "cargo_lock": {
+      "digest": "ab172ee8ed65aa14d7d252f938947f1cb7716d047234204a1f8c2049d8d979d74d9c08803b39eacf8592399fd4b3ad1b4c266a08bfabbf6fe7eda87258c795b1",
+      "path": "Cargo.lock"
+    },
+    "circuit_source": {
+      "digest": "f1de4923be439b7cdfc2c50fb1c2e36db395e55b965f918f11b220a67d212ea79bb8f67c870f8be5a3bd693471e22d12f432ecb551933f8ec9da0d39a777655b",
+      "path": "circuits/eligibility.circom"
+    }
+  },
+  "capabilities": {
+    "setup": {
+      "included_in_run": true,
+      "kind": "fresh local circuit-specific experimental setup",
+      "production_setup_ceremony": false,
+      "timed_separately_from_presentation": true,
+      "timing_field": "local_smoke_timings_ms.setup"
+    },
+    "status": "research_spike_not_externally_audited",
+    "supported": {
+      "curve_and_scalar_field": "BLS12-381",
+      "relation": "income - 12 * rent >= threshold; unsigned 32-bit values",
+      "residual_route": "Circom R1CS via Dock LegoGroth16",
+      "same_witness_binding": "Dock EqualWitnesses in one composite proof",
+      "signature": "Dock BBS+ signed message tuples"
+    },
+    "unsupported": [
+      "Noir/Barretenberg BN254 linkage",
+      "RDF credential adapter",
+      "W3C bbs-2023 wire format",
+      "credential status or revocation",
+      "credential validity periods",
+      "complete SPARQL query verification"
+    ]
+  },
   "checks": {
     "changed_context": true,
     "changed_disclosure": true,
@@ -31,13 +67,31 @@
     "rayon_threads_environment": null
   },
   "local_smoke_timings_ms": {
-    "prove": 27.851916,
-    "setup": 25.574167,
-    "verify": 9.06225
+    "prove": 32.611666,
+    "setup": 27.936542000000003,
+    "verify": 11.069958
   },
   "proof_bytes": 1289,
   "proof_system_version": "0.34.0",
   "provenance": "local correctness smoke; not canonical performance evidence",
   "r1cs_constraints": 137,
+  "rejection_stages": {
+    "changed_context": "verification",
+    "changed_disclosure": "verification",
+    "changed_nonce": "verification",
+    "changed_threshold": "verification",
+    "different_authenticated_subjects": "verification",
+    "negative_residual_does_not_wrap": "construction",
+    "same_nonce_without_witness_links": "verification",
+    "signed_income_exceeds_u32": "construction",
+    "spliced_income": "verification",
+    "spliced_rent": "verification",
+    "spliced_valid_residual_proof": "verification",
+    "swapped_issuer_signature": "verification",
+    "trailing_proof_bytes": "decoding",
+    "truncated_proof": "decoding",
+    "unsupported_noir_link": "backend_selection",
+    "wrong_issuer": "verification"
+  },
   "relation": "income - 12 * rent >= threshold, unsigned 32-bit inputs"
 }

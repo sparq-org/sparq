@@ -33,6 +33,15 @@ separate from presentation construction. Presentation construction currently
 includes witness calculation, WASM loading, and proof generation.
 An example local run is retained in [the structured evidence](evidence/local-smoke.json).
 
+Each negative case also records its actual `rejection_stages` entry: backend
+selection, construction, decoding, or verification. A construction rejection
+means the experiment did not obtain a proof to submit; it is not evidence that
+the verifier rejected that malformed witness. The report's `capabilities` object
+summarizes the supported route, unsupported integrations and separate setup cost.
+`build_input_digests` identifies the exact circuit source and Cargo lockfile
+embedded at compilation using BLAKE2b-512. These provenance hashes are not public
+inputs of the composite proof.
+
 This command fails before generating setup or proofs:
 
 ```sh
@@ -50,6 +59,8 @@ The verifier supplies the issuer keys, signature parameters, disclosed schema
 tags, circuit verification key, threshold, context and fresh challenge. Its proof
 specification is constructed independently of the holder. Neither a holder's
 suggested equality list nor a holder-selected issuer trust list is accepted.
+Matching signed subject identifiers does not itself authenticate the holder or
+establish the real-world identity of that subject.
 
 The composite statement contains:
 
