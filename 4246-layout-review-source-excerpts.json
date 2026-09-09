@@ -1,0 +1,112 @@
+{
+  "crates/sparq-core/src/store.rs": {
+    "file_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+    "excerpts": [
+      {
+        "start": 160,
+        "end": 186,
+        "text": "160: /// triples INSERTED since the last compaction, and base triples DELETED since then.\n161: /// Consulted at scan time \u2014 the base stays immutable (and mmap-able), and an update\n162: /// batch costs O(batch) instead of the O(n) full rebuild. Invariants kept by\n163: /// [`TripleStore::apply_delta`]: `added` is canonical-SPO sorted + deduplicated and\n164: /// DISJOINT from both the base and `deleted`; `deleted` only ever holds base triples.\n165: ///\n166: /// `Clone` because [`TripleStore::fork`] carries the overlay into the forked store\n167: /// BY VALUE (O(overlay), bounded by the compaction policy) while the base indexes are\n168: /// shared structurally.\n169: #[derive(Default, Clone)]\n170: struct Overlay {\n171:     added: Vec<[Id; 3]>,\n172:     deleted: FxHashSet<[Id; 3]>,\n173:     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`\n174:     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].\n175:     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],\n176:     /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the\n177:     /// hash set above for merge membership; even SPO needs its own sorted projection.\n178:     /// Full use retains up to `BUILT.len()` vectors, each with `deleted.len()`\n179:     /// twelve-byte rows plus capacity slack, alongside that hash set. The sole\n180:     /// production in-place mutator is `TripleStore::apply_delta`, which invalidates\n181:     /// these projections when a tombstone is inserted or removed.\n182:     #[cfg(feature = \"overlay-deleted-projections\")]\n183:     deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],\n184: }\n185: \n186: impl Overlay {"
+      },
+      {
+        "start": 325,
+        "end": 341,
+        "text": "325:     fn heap_bytes(&self) -> usize {\n326:         // The cached perm-sorted projections are part of the overlay's footprint; SPO\n327:         // aliases `added`; [GPT-6 Astra] deleted projections own all requested perms.\n328:         let cached: usize = self\n329:             .added_by_perm\n330:             .iter()\n331:             .filter_map(|slot| slot.get())\n332:             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())\n333:             .sum();\n334:         #[cfg(feature = \"overlay-deleted-projections\")]\n335:         let cached = cached + self.deleted_by_perm.iter()\n336:             .filter_map(|slot| slot.get())\n337:             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())\n338:             .sum::<usize>();\n339:         self.added.capacity() * std::mem::size_of::<[Id; 3]>()\n340:             + self.deleted.capacity() * 13\n341:             + cached"
+      },
+      {
+        "start": 1011,
+        "end": 1039,
+        "text": "1011:     /// A structural FORK of this store: the immutable base permutation indexes and\n1012:     /// planner stats are SHARED (Arc bumps, O(1)); the pending delta-overlay is\n1013:     /// carried by value (O(overlay), bounded by the compaction policy). The fork and\n1014:     /// the original then evolve independently through [`apply_delta`](Self::apply_delta)\n1015:     /// \u2014 neither ever mutates the shared base, so existing readers are unaffected.\n1016:     pub fn fork(&self) -> TripleStore {\n1017:         TripleStore {\n1018:             perms: std::sync::Arc::clone(&self.perms),\n1019:             pred_stats: std::sync::Arc::clone(&self.pred_stats),\n1020:             overlay: self.overlay.clone(),\n1021:         }\n1022:     }\n1023: \n1024:     /// Number of pending overlay entries (insertions + deletions) \u2014 the input to a\n1025:     /// compaction threshold policy (a fork costs O(this); folding it costs O(n)).\n1026:     pub fn overlay_len(&self) -> usize {\n1027:         self.overlay.as_ref().map_or(0, |ov| ov.added.len() + ov.deleted.len())\n1028:     }\n1029: \n1030:     /// Heap footprint of the permutation indexes in bytes (for benchmarking). Memory-\n1031:     /// mapped permutations contribute 0 \u2014 their resident pages are OS page cache.\n1032:     pub fn heap_bytes(&self) -> usize {\n1033:         self.perms.iter().map(PermData::heap_bytes).sum::<usize>()\n1034:             + self.overlay.as_ref().map_or(0, |ov| ov.heap_bytes())\n1035:     }\n1036: \n1037:     /// Chooses the permutation whose sort order places all bound pattern\n1038:     /// positions as a contiguous prefix, so the matches form one range. Returns\n1039:     /// the permutation and the number of leading bound columns."
+      }
+    ]
+  },
+  "crates/sparq-core/src/store/overlay_deleted_tests.rs": {
+    "file_sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1",
+    "excerpts": [
+      {
+        "start": 350,
+        "end": 386,
+        "text": "350: \n351: // [GPT-6 Astra] Default-off must preserve main's representation and linear-count\n352: // behavior, not merely return the same rows after allocating a hidden projection.\n353: #[cfg(not(feature = \"overlay-deleted-projections\"))]\n354: #[test]\n355: fn deleted_projection_feature_off_preserves_main_layout_and_heap() {\n356:     let mut store = TripleStore::from_triples(triples());\n357:     store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4], [3, 3, 6]]);\n358:     let before = store.heap_bytes();\n359:     for &perm in BUILT {\n360:         for _ in 0..3 {\n361:             let scan = store\n362:                 .scan_perm(&[Some(12), Some(4), Some(16)], perm)\n363:                 .unwrap();\n364:             assert_eq!(scan.rows.len(), 1);\n365:             assert!(matches!(scan.rows, Cow::Borrowed(_)));\n366:             assert_eq!(store.estimate(&[Some(1), Some(1), Some(2)]), 0);\n367:             assert_eq!(\n368:                 store.heap_bytes(),\n369:                 before,\n370:                 \"default reads retain no deletion projection\"\n371:             );\n372:         }\n373:     }\n374:     let frozen = store.fork();\n375:     assert_eq!(frozen.heap_bytes(), before);\n376:     // These are the three fields of main's Overlay. All have pointer alignment\n377:     // and sizes divisible by that alignment; there is no inter-field padding.\n378:     let main_fields = std::mem::size_of::<Vec<[Id; 3]>>()\n379:         + std::mem::size_of::<rustc_hash::FxHashSet<[Id; 3]>>()\n380:         + std::mem::size_of::<[std::sync::OnceLock<Vec<[Id; 3]>>; 6]>();\n381:     assert_eq!(std::mem::size_of::<Overlay>(), main_fields);\n382:     assert_eq!(\n383:         std::mem::align_of::<Overlay>(),\n384:         std::mem::align_of::<usize>()\n385:     );\n386: }"
+      }
+    ]
+  },
+  "rust-toolchain.toml": {
+    "file_sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37",
+    "excerpts": [
+      {
+        "start": 76,
+        "end": 87,
+        "text": "76: #\n77: # Precedence matters and is easy to get wrong. rustup resolves, highest first:\n78: #   1. `cargo +<toolchain>` / `rustc +<toolchain>`\n79: #   2. the `RUSTUP_TOOLCHAIN` environment variable\n80: #   3. a `rustup override set` directory override\n81: #   4. THIS FILE\n82: #   5. `rustup default`\n83: # So this file BEATS every `rustup default stable` in the workflow tree \u2014 all 40\n84: # of those lines are now COMPLETE no-ops, and is in turn BEATEN by `+toolchain`\n85: # and `RUSTUP_TOOLCHAIN`.\n86: # [OPUS-5] They add no components either: `rustup default stable` only selects.\n87: # Measured: of the 40 `run:` blocks containing `rustup default stable`, 7 also"
+      },
+      {
+        "start": 125,
+        "end": 135,
+        "text": "125: # bump as a change that can red the whole workspace, and verify it as one.\n126: #\n127: # =============================================================================\n128: \n129: [toolchain]\n130: # The exact compiler sparq CI is currently GREEN on: `rustup show\n131: # active-toolchain` in the `lint` job reported\n132: # `stable-x86_64-unknown-linux-gnu unchanged - rustc 1.97.1 (8bab26f4f 2026-07-14)`\n133: # on three consecutive successful runs. Pinning the version that passes, not\n134: # the newest that exists.\n135: channel = \"1.97.1\""
+      }
+    ]
+  },
+  ".github/workflows/ci.yml": {
+    "file_sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    "excerpts": [
+      {
+        "start": 397,
+        "end": 410,
+        "text": "397:   build-archive:\n398:     name: build + archive test binaries (+ doctests once)\n399:     # [FABLE-5] sq-fmx4u.3: the workspace archive runs whenever the affected\n400:     # closure is NON-EMPTY (design \u00a75.2) \u2014 the bulk shards it feeds are narrowed,\n401:     # not skipped, so they need the archive for any non-empty selection. Only a\n402:     # provably-empty closure (every changed path SAFE-listed/non-crate) skips it;\n403:     # the shards then skip too via `needs`. Fail-closed: an empty/missing `mode`\n404:     # or `affected` output satisfies a disjunct => RUN.\n405:     needs: [changes, select]\n406:     if: >-\n407:       needs.changes.outputs.rust_changed == 'true' &&\n408:       (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')\n409:     runs-on: ubuntu-latest\n410:     steps:"
+      },
+      {
+        "start": 420,
+        "end": 429,
+        "text": "420:       - name: Rust (preinstalled stable)\n421:         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image\n422:         # ships a rustup stable toolchain; the SHA-pinned action's `rustup\n423:         # toolchain install stable` re-downloads the whole toolchain whenever\n424:         # the image lags the newest release. Use the preinstalled one \u2014\n425:         # `rustup default`/`component add` never trigger a toolchain download.\n426:         run: |\n427:           rustup default stable\n428:           rustup show active-toolchain\n429:       - name: Cache cargo + target"
+      },
+      {
+        "start": 503,
+        "end": 522,
+        "text": "503:       # .tar.zst is self-contained (binaries + the metadata nextest needs to run them\n504:       # on another runner with `--archive-file`), so the shards never recompile.\n505:       #\n506:       # [OPUS-4.8] The archive runs `--features approx-ann,filtered-ann,vec-predicate`\n507:       # (#363, LOAD-BEARING): sparq-vectors' heavy recall/over-fetch/vec-predicate tests are\n508:       # MODULE-gated (`#![cfg(feature = ...)]`) and MUST run in this sharded lane \u2014 without\n509:       # these the gated binaries compile EMPTY and the heavy-hnsw shard's exact filter matches\n510:       # ZERO tests (nextest exit 4). These three are the ONLY opt-in features carried here.\n511:       # GUARD (sq-vya1): the archive carries NO OTHER opt-in features (we deliberately avoid\n512:       # `--all-features` \u2014 cross-crate conflicts + heavy/native/network deps would not even\n513:       # resolve; see feature-matrix.yml's SCOPE). Any test behind a DEFAULT-OFF feature OTHER\n514:       # than those three compiles EMPTY here and runs SILENTLY-zero in the shards \u2014 its coverage\n515:       # is the JOB OF feature-matrix.yml (per-leg `cargo test -p <crate> --features <set>`,\n516:       # gated by ci-summary). When you add/feature-gate a test: a sparq-vectors recall/vec test\n517:       # rides these archive features; ANYTHING ELSE must be wired into a feature-matrix.yml leg\n518:       # (read that file's GUARD block). Prove a suite is reached: `cargo nextest list -p <crate>\n519:       # --features <set>` must SHOW its test names.\n520:       - name: Build + archive test binaries (nextest archive)\n521:         run: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst\n522:       # [OPUS-4.8] Upload the archive immediately after the build, BEFORE doctests, so"
+      }
+    ]
+  },
+  ".github/workflows/miri.yml": {
+    "file_sha256": "88870662daf42be929f3f3c02063da853be29062b6bdca2f1c1936297d4a50fc",
+    "excerpts": [
+      {
+        "start": 145,
+        "end": 151,
+        "text": "145: env:\n146:   CARGO_TERM_COLOR: always\n147:   RUST_BACKTRACE: 1\n148:   # See the header for why each flag is load-bearing. Kept in one place so a future toolchain\n149:   # bump only edits here.\n150:   MIRIFLAGS: \"-Zmiri-tree-borrows -Zmiri-ignore-leaks -Zmiri-disable-isolation\"\n151: "
+      },
+      {
+        "start": 183,
+        "end": 206,
+        "text": "183:     # [OPUS-5] PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`\n184:     # pinning STABLE. rustup resolves that file (precedence 4) ABOVE the `rustup default\n185:     # <toolchain>` that `dtolnay/rust-toolchain` performs (precedence 5), so with the pin\n186:     # in place a plain `cargo`/`rustc` in this job resolves to pinned stable, NOT the\n187:     # nightly this lane declares. The `cargo +nightly-2026-06-11 miri \u2026` calls below are\n188:     # precedence 1 and were already immune; this env var (precedence 2) restores the\n189:     # pre-pin behaviour for everything else in the job \u2014 notably the `rustc -vV` that\n190:     # Swatinem/rust-cache derives its cache key from, which would otherwise silently\n191:     # re-key the Miri cache onto stable. Keep in sync with the `toolchain:` input below.\n192:     env:\n193:       RUSTUP_TOOLCHAIN: nightly-2026-06-11\n194:     steps:\n195:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0\n196:         with:\n197:           persist-credentials: false\n198:       # Miri ships ONLY on nightly. Pin the nightly channel by DATE so the lane is\n199:       # reproducible and a future nightly regression cannot silently break it; bump the date\n200:       # deliberately (same pinned dtolnay action + nightly the `fuzz` lane uses). The `miri`\n201:       # + `rust-src` components are required: `cargo miri` builds a Miri sysroot from source.\n202:       - name: Install Rust (nightly, pinned) + miri\n203:         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly via toolchain input\n204:         with:\n205:           toolchain: nightly-2026-06-11\n206:           components: miri, rust-src"
+      },
+      {
+        "start": 248,
+        "end": 266,
+        "text": "248:       - name: cargo miri nextest run (shard ${{ matrix.shard }}/24)\n249:         env:\n250:           NEXTEST_EXPERIMENTAL_LIBTEST_JSON: \"1\"\n251:         run: >-\n252:           cargo +nightly-2026-06-11 miri nextest run -p sparq-core\n253:           --partition count:${{ matrix.shard }}/24 --no-fail-fast\n254:           --message-format libtest-json-plus --message-format-version 0.1\n255:           > \"miri-shard-${{ matrix.shard }}.jsonl\" 2> \"miri-shard-${{ matrix.shard }}.stderr\"\n256:           || true\n257:       # Classify: a genuine UB/assertion failure reds the shard (exit 1); timeout-only debt is\n258:       # tolerated (exit 0). This step's exit code IS the shard verdict, so a real UB regression\n259:       # still reds the workflow and re-fires the no-verdict alarm.\n260:       - name: Classify shard verdict (UB failure = fatal, timeout debt = non-fatal)\n261:         run: |\n262:           cat \"miri-shard-${{ matrix.shard }}.stderr\" || true\n263:           python3 scripts/miri_classify_verdict.py \\\n264:             --shard \"${{ matrix.shard }}/24\" \\\n265:             --events \"miri-shard-${{ matrix.shard }}.jsonl\"\n266: "
+      }
+    ]
+  },
+  ".github/workflows/asan.yml": {
+    "file_sha256": "3fd60b54334818f483e24a2334d64dea0053f0b4cd51212273bbaa8b6d5ca8d9",
+    "excerpts": [
+      {
+        "start": 107,
+        "end": 119,
+        "text": "107:     # default <toolchain>` that `dtolnay/rust-toolchain` performs (precedence 5). The\n108:     # `cargo +nightly-2026-06-11 test -Zbuild-std \u2026` calls below are precedence 1 and were\n109:     # already immune; this env var (precedence 2) restores the pre-pin behaviour for every\n110:     # other cargo/rustc invocation in the job, including the `rustc -vV` that\n111:     # Swatinem/rust-cache keys its cache on. `-Zbuild-std` requires nightly, so a silent\n112:     # fallback to stable here would be a hard failure rather than a quiet one \u2014 but it\n113:     # would still be caused by the pin, not by the sanitizer. Keep in sync with the\n114:     # `toolchain:` input below.\n115:     env:\n116:       RUSTUP_TOOLCHAIN: nightly-2026-06-11\n117:     steps:\n118:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0\n119:       # [OPUS-4.8] sq-czlh: reclaim ~20-30 GB of pre-installed SDKs/toolchains BEFORE the"
+      },
+      {
+        "start": 144,
+        "end": 158,
+        "text": "144:           # the miri sysroot.\n145:           key: asan\n146:       # The sparq-core half of the corruption corpus: the deterministic\n147:       # mmap_corruption_oracle (truncate + bit-flip sweep over every on-disk section) under\n148:       # --features mmap,dict-spill \u2014 the exact B5 mmap surface Miri structurally cannot run.\n149:       # -Zbuild-std rebuilds std under ASan; --target makes that apply. A heap OOB / UAF / UB\n150:       # in the validators on a corrupt fixture fails the run with an ASan report.\n151:       - name: ASan \u2014 sparq-core mmap corruption oracle\n152:         run: |\n153:           cargo +nightly-2026-06-11 test -Zbuild-std \\\n154:             --target \"$ASAN_TARGET\" \\\n155:             -p sparq-core --features mmap,dict-spill \\\n156:             --test mmap_corruption_oracle\n157:       # The sparq-vectors half: the VectorStore + DiskAnnIndex open-validation corpus\n158:       # (truncated files / wrong magic / oversized lengths). These read their own mmap/"
+      }
+    ]
+  },
+  ".github/feature-matrix.d/sparq-core.yml": {
+    "file_sha256": "58ca6d0a460976a7a48e502dceeed203e8d8f9292d708a9bdb180dbbcf419e10",
+    "excerpts": [
+      {
+        "start": 78,
+        "end": 79,
+        "text": "78:   features: \"overlay-deleted-projections\"\n79:   test: true"
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "source_copy": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/layout-metadata-control-fa371",
+    "du_allocated_kib": 94772,
+    "du_allocated_bytes": 97046528,
+    "ownership": "Created solely for this one negative control by exporting exactfa371; only store.rs differs. Full mutant source/diff and exact test are archived in this bundle. No .git metadata/branch was created."
+  },
+  "warm_target": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "du_allocated_kib": 1893228,
+    "du_allocated_bytes": 1938665472,
+    "ownership": "Existing task-private native cache reused by prior lanes; NOT wholly attributable to this control. Do not infer all of it is expendable without root decisions. Specific control binary path/hash is in source-state.json."
+  },
+  "measurement": "du -sk on the two exact paths after the test. Allocated-size reporting may not equal reclaimable physical bytes on APFS. No unrelated directories inventoried or files removed.",
+  "free_bytes_after_control": 6418264064,
+  "cleanup": "No cleanup performed; root verifies/backups first."
+}

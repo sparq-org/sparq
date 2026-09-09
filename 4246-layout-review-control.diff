@@ -1,0 +1,12 @@
+--- fa371/store.rs
++++ control/store.rs
+@@ -170,6 +170,9 @@
+ struct Overlay {
+     added: Vec<[Id; 3]>,
+     deleted: FxHashSet<[Id; 3]>,
++    // [GPT-6 Astra] Negative control only: uninitialized cache metadata, no reads.
++    #[cfg(not(feature = "overlay-deleted-projections"))]
++    _layout_control_deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
+     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`
+     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].
+     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],

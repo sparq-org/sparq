@@ -1,0 +1,35 @@
+{
+  "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+  "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/layout-metadata-control-fa371",
+  "command": [
+    "/Users/jesght/.cargo/bin/cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-core",
+    "--lib",
+    "store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap",
+    "--",
+    "--exact",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "started_at": 1788967777.208362,
+  "free_disk_bytes_before": 6423900160,
+  "mutant_sha256": "8c0acbe4ef9f58c21d8f8078f2ed7a68278005fc8e666ee600a1f164821c9d38",
+  "test_sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1",
+  "environment": {
+    "CARGO_BUILD_JOBS": "2",
+    "RAYON_NUM_THREADS": "2",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "RUSTUP_TOOLCHAIN": "1.97.1"
+  },
+  "scope": "Only one metadata field added under cfg-not in exported task-private source. No changes to methods, reads, heap accounting, tests or other source.",
+  "exit": 101,
+  "seconds": 13.497494917000001,
+  "free_disk_bytes_after": 6418264064
+}

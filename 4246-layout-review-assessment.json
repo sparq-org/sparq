@@ -1,0 +1,109 @@
+{
+  "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+  "comment_id": 3970001492,
+  "thread": "PRRT_kwDOSz3qKM6gtyhC",
+  "assessment": "Intentional and effective empirical default-off inline-footprint tripwire; no demonstrated correctness defect or current-target failure. Copilot correctly identifies an unsupported portability claim in the no-padding/pointer-alignment prose. Recommend a narrowly scoped comment/diagnostic clarification while retaining the assertions, subject to root/independent review; do not claim repr(Rust) guarantees this footprint.",
+  "evidence": {
+    "test": "crates/sparq-core/src/store/overlay_deleted_tests.rs:350\u2013386; comments explicitly say representation/linear behavior, not merely rows. The expected size is recomputed from the three existing field TYPES in the active build; it is not a fixed248-byte cross-platform constant, and no field offsets/order are asserted.",
+    "field_types": "Default Overlay has Vec<[Id;3]>, FxHashSet<[Id;3]> (rustc_hash alias to std HashSet with FxBuildHasher), and6 OnceLock<Vec<[Id;3]>> slots for existing added projections. New deletion slots are cfg(feature) only. These standard-library/container layouts are not stable ABI contracts.",
+    "heap": "Overlay::heap_bytes counts owned vector/hashset backing storage and initialized projection capacities. TripleStore::heap_bytes adds permutation buffers and overlay backing storage. Neither counts inline Overlay metadata; an empty OnceLock array contributes no owned backing allocation. Removing the size assertion in favor of these heap checks alone loses real coverage.",
+    "control": "Exact unchanged default-off test compiled and executed on pinned1.97.1 aarch64-apple-darwin; one metadata-only cfg-not field added to an exported source copy. Exit101 after13.497s at size assertion381:440 versus248 (+192bytes). All preceding rows, borrowed scans, repeated read heap checks and fork heap checks passed. The later alignment assertion was not reached; it was not separately calibrated by this control.",
+    "baseline": "Reused prior actual6334 four-case default-off suite, including this exact test. Git provesfa371 changes only declaration JSON, so runtime/test/manifests/toolchain are identical. No fresh baseline run claimed.",
+    "source_frozen": "Current fa371 source and declaration remain clean and unchanged. No implementation edit, commit, remote mutation, extra build, optimized/wasm build or independent review call."
+  },
+  "workflow_context": {
+    "stable": "rust-toolchain.toml135 pins1.97.1. ci.yml397\u2013429 and521 build/archive workspace tests on ubuntu-latest with ordinary cargo and no higher-priority toolchain override at this job; the pin governs rather than floating rustup default stable. Other ordinary core feature legs except the explicit cache-on leg also compile this cfg-not test.",
+    "nightly": "miri.yml193/205 explicitly selects nightly-2026-06-11;248\u2013265 invokes cargo +nightly-2026-06-11 miri nextest run -p sparq-core across24 shards with no test-name exclusion. This default-off unit test is eligible there; genuine assertion failures are classified fatal. Thus the stable pin alone does not cover every executing compiler. No Miri run was performed or inspected here.",
+    "asan_boundary": "asan.yml153\u2013156 selects only mmap_corruption_oracle integration tests, not the core unit-test module; do not call that an execution of this assertion.",
+    "limits": "No randomized-layout, new architecture, nightly, Miri, MSRV test run or compiler-version matrix was attempted. The native control is evidence for the observed host only. Source wiring is not current run-success evidence."
+  },
+  "recommendation": {
+    "smallest": "Correct the comment to state this is an empirical inline-size/alignment regression budget on the supported toolchains/targets, not a repr(Rust) or std-container-layout guarantee. Add descriptive assertion messages if root authorizes. Preserve the existing size and heap behavioral checks; do not change repr, fields, cfg/defaults, runtime or equality limits.",
+    "possible_comment": "These checks are empirical inline-footprint tripwires for the supported toolchains and targets, not repr(Rust) layout guarantees. A compiler or target can change padding or alignment; investigate a failure against the exact main source under the same configuration before changing the budget, and retain coverage for unintended default-off cache metadata.",
+    "policy_limit": "If maintainers require every semantically valid target/compiler layout to pass without examining footprint changes, keeping universal physical-layout assertions conflicts with that requirement. That policy has not been established by this comment; root chooses it. No assertion suppression or target exemption proposed here.",
+    "portable_alternative": "An exhaustive pattern/constructor of the actual default-off Overlay, with all three expected fields, no `..`, and explicit checks of their field types, can reject an extra cache field at compile time without requiring any padding/offset guarantee. It would preserve field-shape/default-off absence coverage and existing heap/row tests, but not detect layout/attribute-only physical growth or all field-type-internal layout growth. It is a different, narrower contract; not implemented or tested.",
+    "rejected_shortcuts": "A mirrored nominal repr(Rust) struct is not a portable proof of identical layout; different nominal types need not lay out alike. Adding repr(C), a hand-sized tolerance, removing all footprint coverage, or hiding the test by compiler/target would expand or weaken scope and is not justified by current evidence."
+  },
+  "primary_sources": [
+    {
+      "url": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
+      "title": "Rust Reference: Rust representation",
+      "accessed": "2026-09-09",
+      "finding": "Layout may change between compilations. Default repr(Rust) guarantees appropriate field alignment, aggregate alignment at least the field maximum, and nonoverlap; it does not guarantee field order, minimum aggregate size, or absence of extra padding."
+    },
+    {
+      "url": "https://doc.rust-lang.org/std/mem/fn.size_of.html",
+      "title": "std::mem::size_of",
+      "accessed": "2026-09-09",
+      "finding": "Reports the actual type size, including alignment padding, for the compilation. A check of a measured footprint is meaningful without that footprint being a language guarantee."
+    }
+  ],
+  "control_result": {
+    "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+    "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/layout-metadata-control-fa371",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "store::overlay_deleted_tests::deleted_projection_feature_off_preserves_main_layout_and_heap",
+      "--",
+      "--exact",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    "started_at": 1788967777.208362,
+    "free_disk_bytes_before": 6423900160,
+    "mutant_sha256": "8c0acbe4ef9f58c21d8f8078f2ed7a68278005fc8e666ee600a1f164821c9d38",
+    "test_sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1",
+    "environment": {
+      "CARGO_BUILD_JOBS": "2",
+      "RAYON_NUM_THREADS": "2",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_TOOLCHAIN": "1.97.1"
+    },
+    "scope": "Only one metadata field added under cfg-not in exported task-private source. No changes to methods, reads, heap accounting, tests or other source.",
+    "exit": 101,
+    "seconds": 13.497494917000001,
+    "free_disk_bytes_after": 6418264064
+  },
+  "source_state": {
+    "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+    "source_status": "clean",
+    "delta_since_native_baseline_head": [
+      "bench/feature-off-declarations/6469.json"
+    ],
+    "native_baseline_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+    "native_baseline_scope": "Prior executed four-test feature-off suite on6334, including this exact test. Currentfa371 adds only the declaration; all runtime/test/manifest/toolchain files byte-identical. No new baseline build claimed.",
+    "store_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+    "test_sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1",
+    "declaration_sha256": "dfbdf0cb231e671d136b01c8b6f8d1e89198f12c0177abb7a8e35c11733d71ed",
+    "control_binary_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_core-53b43ac9cb50e22c",
+    "control_binary_sha256": "4fd17c02be04a3a9b083a6b9a2f19c1fc7a1196b3d8a561f2fde6e9753bc0da8",
+    "control_binary_bytes": 9899632
+  },
+  "cleanup_inventory": {
+    "source_copy": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/layout-metadata-control-fa371",
+      "du_allocated_kib": 94772,
+      "du_allocated_bytes": 97046528,
+      "ownership": "Created solely for this one negative control by exporting exactfa371; only store.rs differs. Full mutant source/diff and exact test are archived in this bundle. No .git metadata/branch was created."
+    },
+    "warm_target": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "du_allocated_kib": 1893228,
+      "du_allocated_bytes": 1938665472,
+      "ownership": "Existing task-private native cache reused by prior lanes; NOT wholly attributable to this control. Do not infer all of it is expendable without root decisions. Specific control binary path/hash is in source-state.json."
+    },
+    "measurement": "du -sk on the two exact paths after the test. Allocated-size reporting may not equal reclaimable physical bytes on APFS. No unrelated directories inventoried or files removed.",
+    "free_bytes_after_control": 6418264064,
+    "cleanup": "No cleanup performed; root verifies/backups first."
+  },
+  "decision_owner": "Root independently decides response and any focused actual Opus review; this is Astra assessment, not independent review/admission."
+}

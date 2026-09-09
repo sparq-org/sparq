@@ -152,6 +152,11 @@ for evidence_name in ['source-retention/opus-review-6334b338.json', 'source-rete
     FILES['4246-' + evidence_name.replace('/', '--')] = ROOT / 'direct-4246' / evidence_name
 for evidence_name in ['linux6334-proof-run.json', 'pr6469-checks-1458.json', 'linux6334-proof-job.log', 'linux6334-proof-step.txt', 'linux6334-declaration-generated.json', 'linux6334-declaration-reviewed.json', 'linux6334-proof-verification.json', 'declaration-commit-message.txt', 'declaration-head.txt', 'pr-body-declaration.md', 'declaration-prepush.json', 'declaration-postpush.json', 'declaration-ready-precheck.json', 'fa371-ready-verified.json', 'copilot-precheck-fa371.json', 'copilot-request.json', 'copilot-request-result-fa371.json', 'copilot-followup-fa371.json', 'fa371-full-runs.json', 'fa371-wasm-full-status.json']:
     FILES['4246-' + evidence_name.replace('/', '--')] = ROOT / 'direct-4246' / evidence_name
+for evidence_name in ['review-fa371-1522-query.json', 'review-fa371-1522.json', 'checks-fa371-1522.json']:
+    FILES['4246-' + evidence_name] = ROOT / 'direct-4246' / evidence_name
+LAYOUT_REVIEW = ROOT / 'direct-4246/layout-review'
+for evidence_name in [*json.loads((LAYOUT_REVIEW / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json', 'control-binary', 'opus-input.md']:
+    FILES['4246-layout-review-' + evidence_name.replace('/', '--')] = LAYOUT_REVIEW / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name

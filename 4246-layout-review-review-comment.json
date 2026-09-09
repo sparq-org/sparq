@@ -1,0 +1,26 @@
+{
+  "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+  "thread": {
+    "id": "PRRT_kwDOSz3qKM6gtyhC",
+    "isResolved": false,
+    "isOutdated": false,
+    "path": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+    "line": 386,
+    "comments": {
+      "pageInfo": {
+        "hasNextPage": false
+      },
+      "nodes": [
+        {
+          "databaseId": 3970001492,
+          "body": "This test asserts `size_of::<Overlay>()` and `align_of::<Overlay>()` based on an assumed field layout/no-padding guarantee, but `Overlay` is not `repr(C)` and Rust does not guarantee field order or padding across compiler versions/targets. This makes the default-off test brittle and can fail without any behavioral regression.",
+          "url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970001492",
+          "author": {
+            "login": "copilot-pull-request-reviewer"
+          },
+          "createdAt": "2026-09-09T15:09:45Z"
+        }
+      ]
+    }
+  }
+}

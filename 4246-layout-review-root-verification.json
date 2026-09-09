@@ -1,0 +1,14 @@
+{
+  "verified_at": "2026-09-09T15:37:35.272360+00:00",
+  "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+  "manifest_files_verified": 16,
+  "manifest_sha256": "27099886616db3b48750a94c18b117214256c23130df4bf19dc6340fa9e215b7",
+  "worktree_clean": true,
+  "source_test_exact": true,
+  "control_binary_preserved": {
+    "file": "control-binary",
+    "bytes": 9899632,
+    "sha256": "4fd17c02be04a3a9b083a6b9a2f19c1fc7a1196b3d8a561f2fde6e9753bc0da8"
+  },
+  "control": "Compiled single metadata-only mutant, exit101 at size check 440 vs248; prior runtime/heap/fork checks passed. No portability proof."
+}

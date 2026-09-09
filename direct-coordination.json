@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T15:11:19.399302+00:00",
+  "updated_at": "2026-09-09T15:37:35.272360+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T14:17:16.853952+00:00",
-    "evidence": "recovery-20260909/monitor-1418.json"
+    "observed_at": "2026-09-09T15:28:35.865108+00:00",
+    "evidence": "direct-4246/review-fa371-1522.json"
   },
   "rules": {
     "required_check": "gate",
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Published declaration-only fa371 after actual Linux proof. PR is now non-draft, body verified. Full ready_for_review wasm gate34367934418 passed with actual leg2 and both tripwire steps successful. Remaining full CI, benchmark/coverage/conformance and Copilot feedback pending; no merge admission yet.",
-    "phase": "Ready for review; full CI and Copilot review running",
+    "state": "Final fa371 has no observed failed full-tier checks. Benchmark job, workspace clippy and listed conformance checks passed; tests/coverage/feature-matrix/aggregate still running or queued. One unresolved Copilot COMMENTED thread questions layout-test portability; same Astra agent assigned bounded assessment and metadata-only negative control, source frozen.",
+    "phase": "Full CI progressing; assess one Copilot layout-test comment",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -340,7 +340,51 @@
         "direct-4246/copilot-followup-fa371.json"
       ]
     },
-    "next": "Collect full ready_for_review CI and actual Copilot feedback on fa371. Address substantive findings through existing Astra lane and real review as needed. No broad repeated local gates, new benchmarks, duplicate Copilot/Opus requests, registry re-enable, dispatch or release. Only protected exact-head admission once checks and conversations resolve."
+    "next": "Collect full ready_for_review CI and actual Copilot feedback on fa371. Address substantive findings through existing Astra lane and real review as needed. No broad repeated local gates, new benchmarks, duplicate Copilot/Opus requests, registry re-enable, dispatch or release. Only protected exact-head admission once checks and conversations resolve.",
+    "copilot_finding": {
+      "review_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "thread": "PRRT_kwDOSz3qKM6gtyhC",
+      "comment": 3970001492,
+      "url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970001492",
+      "finding": "size_of/align_of assertions assume repr(Rust) layout/no-padding and may fail across compiler versions/targets without semantic regression.",
+      "assessment": "Root verified all16files/source/test/compiledcontrol. Actual no-padding language overstated; proposed comment-only empirical footprint clarification, assertions preserved. Focused independent Opus review pending.",
+      "rust_reference": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
+      "agent": "/root/postmerge_ci",
+      "scope": "Read-only assessment plus one compiled metadata-only default-off control in private copy, warm private target and two jobs; no source change, optimized builds, remote action or new review calls.",
+      "evidence": "direct-4246/review-fa371-1522.json",
+      "root_verification": "direct-4246/layout-review/root-verification.json"
+    },
+    "full_validation_progress": {
+      "at": "2026-09-09T15:28:35.865108+00:00",
+      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "benchmarks": {
+        "run": 34367935174,
+        "job": 102521969633,
+        "conclusion": "success",
+        "generated_metrics": "All five deterministic storage/dictionary/wasm values equal main according to benchmark-action review on this exact head; no timing speedup inference."
+      },
+      "workspace_clippy": "success",
+      "listed_conformance_checks": "SPARQL, SHACL, GeoSPARQL, Solid WAC/ACP, ODRL, JSON-LD and inference success on full run34367934853.",
+      "remaining": "Test archive/wasm/coverage/feature matrix and aggregate continue; no failed current full check observed. Raw rollup also contains obsolete cancelled draft checks; do not mistake those for current failures.",
+      "checks": "direct-4246/checks-fa371-1522.json",
+      "review": "direct-4246/review-fa371-1522.json"
+    },
+    "disk_hold": {
+      "free_bytes_after_control": 6418264064,
+      "action": "No further builds. Freeze/back up before task-owned cleanup. No unrelated caches/worktrees touched."
+    },
+    "layout_review_runtime": {
+      "session_id": 8482,
+      "kind": "exec_command",
+      "completed": false,
+      "input": "direct-4246/layout-review/opus-input.md",
+      "input_sha256": "776b7338fe09cc58c21c75786bea326ee241c7c37e9643b555f35dbf2af22813",
+      "output": "direct-4246/layout-review/opus-review-fa371.json",
+      "started_at": "2026-09-09T15:38:05.925841+00:00",
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "scope": "One Copilot finding plus proposed comment-only clarification; no general implementation re-review."
+    }
   },
   "prs": {
     "4300": {

@@ -1,0 +1,14 @@
+[
+  {
+    "url": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
+    "title": "Rust Reference: Rust representation",
+    "accessed": "2026-09-09",
+    "finding": "Layout may change between compilations. Default repr(Rust) guarantees appropriate field alignment, aggregate alignment at least the field maximum, and nonoverlap; it does not guarantee field order, minimum aggregate size, or absence of extra padding."
+  },
+  {
+    "url": "https://doc.rust-lang.org/std/mem/fn.size_of.html",
+    "title": "std::mem::size_of",
+    "accessed": "2026-09-09",
+    "finding": "Reports the actual type size, including alignment padding, for the compilation. A check of a measured footprint is meaningful without that footprint being a language guarantee."
+  }
+]
