@@ -258,6 +258,11 @@ for evidence_name in ['scheduled-runs-1942.json', 'scheduled-34395557649.log', '
 for evidence_name in ['main-runs-1942.json']:
     FILES['4246-perf-admission-' + evidence_name] = ROOT / 'direct-4246/perf-admission' / evidence_name
 
+# Completed6473publication, actual review and bounded CI recovery evidence.
+for evidence_name in ['docs-quality-jobs.json', 'final-error-consumers.json', 'gate-preretry-jobs.json', 'gate-retry-receipt.txt', 'input-manifest.json', 'linux-validation-proof.json', 'matrix-preretry-run.json', 'matrix-retry-receipt.txt', 'opus-input.md', 'opus-review-afa9c648.json', 'opus-review-result.json', 'opus-stderr.txt', 'pr-body.md', 'pr-created.txt', 'pr-initial-runs.json', 'pr-initial-state.json', 'pr-postretry-state.json', 'pr-preretry-state.json', 'pr-query.json', 'pr-runs-after-matrix-retry.json', 'pr6473-docs-quality.log', 'pr6473-gate-failed.log', 'pr6473-matrix-detect-failed.log', 'pr6473-matrix-jobs.json', 'pr6473-recovered-files.json', 'precreate-pr-state.json', 'prepublish-query.json', 'prepublish-state.json', 'root-verification.json']:
+    FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
+FILES["4246-perf-admission-main-runs-2001.json"] = ROOT / "direct-4246/perf-admission/main-runs-2001.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

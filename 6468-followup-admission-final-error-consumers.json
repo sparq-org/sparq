@@ -1,0 +1,13 @@
+{
+  "afa9c6489db0351855acd9297a6aa2c845434106": {
+    "exit": 1,
+    "matches": []
+  },
+  "cea4414b39225b1240f36d968ba1549e700cd32f": {
+    "exit": 0,
+    "matches": [
+      "cea4414b39225b1240f36d968ba1549e700cd32f:scripts/triage-area.py:744:        print(f\"ERROR: rule table produced labels that do not exist: {unknown}\", file=sys.stderr)",
+      "cea4414b39225b1240f36d968ba1549e700cd32f:scripts/triage-area.py:745:        print(\"Fix the rule table \u2014 do NOT create the label.\", file=sys.stderr)"
+    ]
+  }
+}

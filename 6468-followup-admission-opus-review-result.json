@@ -1,0 +1,95 @@
+{
+  "reviewed_head": "afa9c6489db0351855acd9297a6aa2c845434106",
+  "verdict": "approve_for_validation",
+  "blocking_findings": [],
+  "addressed_findings": [
+    {
+      "id": "NB1",
+      "status": "addressed",
+      "evidence": "Remedy prose now opens with the hard prohibition 'Do not create a label based on this failure.', names the exact verification call (GET /repos/{owner}/{repo}/labels/{url-encoded-name}), routes provisioning to 'a separate reviewed maintenance action', and retains 'This classifier never creates labels.' Re-derived from source: the print is a plain (non-f) string, so the literal braces are safe; guard still `return 2` with no writes, no `gh label create` anywhere in the diff."
+    },
+    {
+      "id": "NB2",
+      "status": "addressed",
+      "evidence": "New test_rule_precedes_benchmark_and_website_collisions pins ['ci'] + 'T1 triage-area:' for 'triage-area: benchmark\u2026' and 'triage-area: website routing'. New move-rule-late control (rule re-inserted at end of RULES) reds exactly that test with ['bench'] != ['ci'], so table position is now calibrated, not comment-only."
+    },
+    {
+      "id": "NB3",
+      "status": "addressed",
+      "evidence": "ERROR line now reads 'absent from the fetched area-label set (len(known) area labels; the fetch may be incomplete)', naming truncation as a candidate cause and exposing the fetched count; attribution no longer asserts the labels 'do not exist'. #6335 itself correctly left out of scope."
+    },
+    {
+      "id": "NB5",
+      "status": "addressed",
+      "evidence": "drop-title-anchor now runs the full 45-test suite (reds both the new scope test and TestScopeDiscipline.test_the_scope_immune_rules_are_exactly_the_fully_anchored_ones), and a new remove-anchor-metadata control mutates only ANCHORED_ONLY (removing 'triage-area') against the full suite, killing on the equality property. This empirically confirms the ANCHORED_ONLY addition is mechanically forced, not discretionary. Summary key honestly renamed to tests_identical_to_worktree_except_explicit_metadata_control. Arithmetic checks out: 7x8 + 45 + 45 + 8 = 154 executions, 10 mutants, zero survivors."
+    },
+    {
+      "id": "NB6",
+      "status": "addressed",
+      "evidence": "test_diagnostic_escapes_records_without_dumping_issue_body now asserts, before any JSON decode, that no stderr line starts with '::' and that exactly one line starts with 'UNKNOWN_AREA '. The unescape-record-newlines mutant is now killed by the behavioural assertion (failures=1) rather than by a JSONDecodeError."
+    },
+    {
+      "id": "NB7",
+      "status": "addressed",
+      "evidence": "run_main gains apply=True kwarg; the outside-budget blocking test now includes the (False, ()) dry-run case and still asserts (2, [], '', 0), pinning that the guard precedes the `if not a.apply` branch and emits no stdout."
+    },
+    {
+      "id": "NB4",
+      "status": "retained_by_choice",
+      "evidence": "No cap added; record volume stays finite (bounded by FETCH_CEILING rows x labels per row) and per-record. Acceptable: log-legibility only, no safety or write-path consequence."
+    }
+  ],
+  "nonblocking_findings": [
+    {
+      "id": "NB4",
+      "severity": "low",
+      "location": "scripts/triage-area.py record loop",
+      "finding": "Unbounded (though finite) per-row record output; a systematically missing label family or a truncated fetch could produce a large stderr block in the scheduled lane. Deliberately retained for complete offender records.",
+      "recommendation": "None required; optionally cap with an explicit '+N more' line later."
+    },
+    {
+      "id": "NB10",
+      "severity": "low",
+      "location": "scripts/tests/test_triage_area.py, unknown-block prose assertions",
+      "finding": "Six assertIn assertions pin exact operator prose, one of which embeds the fetched count and its ungrammatical plural ('(1 area labels'). Any wording or plural fix reds the suite for a non-behavioural reason. Behavioural assertions (exit 2, zero gh calls, empty stdout, record set) are the load-bearing ones and are sound.",
+      "recommendation": "Optionally loosen the count-bearing assertion to a stable fragment, or fix the plural and the assertion together."
+    },
+    {
+      "id": "NB11",
+      "severity": "low",
+      "location": "run-controls.py move-rule-late insertion",
+      "finding": "The late-position mutant locates the RULES terminator by scanning for the first '\\n]\\n' after 'RULES = [' \u2014 a heuristic, not a parse. The observed kill (['bench']) proves the rule was moved after at least bench-generic, so the control is valid as executed; the heuristic is control tooling only and ships nothing.",
+      "recommendation": "None."
+    },
+    {
+      "id": "NB9",
+      "severity": "low",
+      "location": "str.removeprefix in the new test helper vs interpreters",
+      "finding": "Local run is Python 3.14.5; docs-quality pins setup-python 3.12, so the gated suite is fine. The scheduled .github/workflows/triage-area.yml lane invokes bare `python3` with no setup-python step; ubuntu-latest's default python3 is well above 3.9, so no practical exposure, but it is unverified from the packet.",
+      "recommendation": "Confirm the scheduled lane's python3 version once on the first observed tick."
+    },
+    {
+      "id": "NB8",
+      "severity": "low",
+      "location": "test fixtures coupled to real crates/ (sparq-wrapper, sparq-wrapper-gen)",
+      "finding": "Carried unchanged from parent review; intentional per author. A future crate rename would red these tests for reasons unrelated to routing.",
+      "recommendation": "Note the coupling in the PR body."
+    }
+  ],
+  "scope_confirmations": [
+    "Delta is exactly two files (+27/-9) plus control tooling evidence; production change is confined to two print statements inside the existing unknown-label block. Guard ordering, `return 2`, zero-write semantics and plan()/classify()/declared_areas() are untouched.",
+    "No label creation is introduced anywhere; the global unknown-label guard is not relaxed, narrowed, or made conditional on --apply, --json or the write budget.",
+    "No source from #5457 or #6095 is adopted; the only 6095 interaction is a read-only `git apply --check`. This review clears no hold on 5457/6095 and makes no approval statement about them.",
+    "Prior scheduled run 34395557649 SUCCESS on old main cea4414 is treated as unrelated to this unmerged source and is not counted as validation evidence.",
+    "All test, self-test, control and preflight outputs are author-supplied and were not reproduced; no tools, execution, GitHub reads/writes, dispatch or live classifier replay were performed."
+  ],
+  "perf_affecting": false,
+  "remaining_validation": [
+    "Protected Linux CI on afa9c64: docs-quality quick-gates step running `scripts/triage-area.py --self-test` and `scripts/tests/test_triage_area.py` under the pinned python 3.12, plus the privacy-claims / empirical-honesty gate under bash >= 4. The local preflight exit 1 at check-privacy-claims.sh:92 (Bash 3.2 mapfile) is an UNRUN gate, not a waived one, and must go green there.",
+    "Verify `git diff 5f758d2..afa9c64` is exactly the packet's two-file +27/-9 delta and `cea4414..afa9c64` the full patch, with a clean worktree and no other file, branch, hold or authorship touched.",
+    "Grep workflows, docs, runbooks and alert/annotation rules for the now-removed failure strings ('rule table produced', 'do NOT create the label', 'labels that do not exist', 'separately reviewed label provisioning') to confirm no consumer or runbook depends on prior message text.",
+    "Fresh Copilot review, thread resolution and hold checks after source approval. No roborev result and no native human approval is claimed or implied.",
+    "Registry Actions and worker dispatch remain OFF; no releases, protection changes or live classifier replay authorised. OBSERVE (do not replay) the first ordinary scheduled triage-area tick on merged main: record set, exit status, and absence of writes on a failing tick.",
+    "Optional, not required for approval: fix the '(1 area labels' plural together with its assertion; confirm the scheduled lane's python3 version."
+  ]
+}

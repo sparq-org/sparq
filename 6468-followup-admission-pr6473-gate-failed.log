@@ -1,0 +1,24 @@
+gate	Wait for all other checks, then aggregate	﻿2026-09-09T19:53:54.2848418Z ##[group]Run python3 scripts/ci_summary_gate.py
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2850143Z [36;1mpython3 scripts/ci_summary_gate.py[0m
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2894037Z shell: /usr/bin/bash -e {0}
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2895197Z env:
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2906922Z   GH_TOKEN: ***
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2907903Z   REPO: sparq-org/sparq
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2909076Z   SHA: afa9c6489db0351855acd9297a6aa2c845434106
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2910405Z   SELF_RUN_ID: 34397783664
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2911462Z   EVENT_NAME: pull_request
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2912513Z   PR_DRAFT: false
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2913447Z   PR_NUMBER: 6473
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:54.2914359Z ##[endgroup]
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:55.7918580Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:55.7920065Z ci-summary: evaluating tier=full (event=pull_request).
+gate	Wait for all other checks, then aggregate	2026-09-09T19:53:55.7921087Z attempt 1: 36 check-run(s), 33 running, all-terminal stable for 0/2 poll(s)
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:18.4592979Z   workflow-run resolver: ignored 6 check-run(s) from superseded runs/attempts (#3505).
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:18.4594174Z attempt 2: 40 check-run(s), 19 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0249288Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0250848Z   workflow-run resolver: ignored 7 check-run(s) from superseded runs/attempts (#3505).
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0252015Z attempt 3: 39 check-run(s), 17 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0255106Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 17 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0258128Z - ✗ detect rust changes (feature-matrix): failure
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0281043Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+gate	Wait for all other checks, then aggregate	2026-09-09T19:54:20.0332134Z ##[error]Process completed with exit code 1.

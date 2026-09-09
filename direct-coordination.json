@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T19:50:57.176167+00:00",
+  "updated_at": "2026-09-09T20:00:31.922370+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Actual Opus focused final delta review running",
+    "phase": "PR6473 external checks/Copilot pending after verified single infra recovery",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
     "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
@@ -152,12 +152,12 @@
       "root_verification": "direct-6468/source-admission/root-verification.json"
     },
     "model": "GPT-6 Astra",
-    "pr": null,
+    "pr": 6473,
     "head": "afa9c6489db0351855acd9297a6aa2c845434106",
     "branch": "codex/triage-area-unknown-diagnostics",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
     "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "state": "Final followup frozen and root verified; awaiting focused actual Opus review before push/publication.",
+    "state": "Afa9source unchanged; Opus approved; Linux45tests andprivacy gate executedSUCCESS. Matrix GitHubdiff transient recovered attempt2. Aggregate retry accepted once; awaitingnormaladmission.",
     "documentation_followup": {
       "issue": 5412,
       "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
@@ -179,7 +179,7 @@
       "effort": "xhigh",
       "output": "direct-6468/source-admission/opus-review-5f758d2a.json",
       "session_id": 85170,
-      "rejection": "Automaticapprovalreview rejected externalClaude export of private source/reviewpacket as not specificallyauthorized; no process launched/outputfilescreated. No alternatechannel/model/push attempted.",
+      "rejection": "Historical initial automatic-approval rejection, resolved with new verified PUBLIC-repository risk facts; see approval_resolution. No pending approval.",
       "risk_audit": "direct-6468/source-admission/payload-risk-audit.json",
       "repo_visibility": {
         "full_name": "sparq-org/sparq",
@@ -224,7 +224,7 @@
       "root_verification": "direct-6468/followup-admission/root-verification.json"
     },
     "followup_review": {
-      "state": "running",
+      "state": "completed",
       "head": "afa9c6489db0351855acd9297a6aa2c845434106",
       "input": "direct-6468/followup-admission/opus-input.md",
       "input_sha256": "05ab0997f531de5caa9622cad9e37c010bb71a70da43a516448ad9b38bacb2c1",
@@ -235,8 +235,50 @@
       "session_id": 37673,
       "kind": "exec_command",
       "started_at": "2026-09-09T19:49:28.992457+00:00",
-      "completed": false,
-      "acceptance": "One actual Opus5xhigh invocation. Require successful outer JSON, actual modelUsage and exact afa9 head; no duplicate or exhausted-budget retry."
+      "completed": true,
+      "acceptance": "One actual Opus5xhigh invocation. Require successful outer JSON, actual modelUsage and exact afa9 head; no duplicate or exhausted-budget retry.",
+      "actual_model_verified": "claude-opus-5",
+      "collected_at": "2026-09-09T19:51:48.068504+00:00",
+      "duration_ms": 96986,
+      "output_sha256": "58b405c9018ef10c161b37c32517cb2c88de284506b057e69e2342b69c4000d4",
+      "result": "direct-6468/followup-admission/opus-review-result.json",
+      "verdict": "approve_for_validation"
+    },
+    "publication": {
+      "pr": 6473,
+      "url": "https://github.com/sparq-org/sparq/pull/6473",
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "base": "main",
+      "draft": false,
+      "body": "direct-6468/followup-admission/pr-body.md"
+    },
+    "ci_recovery": {
+      "at": "2026-09-09T19:57:56.230176+00:00",
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "run": 34397783877,
+      "job": 102621666118,
+      "cause": "dorny paths-filter: GitHub diff temporarily unavailable due to heavy server load, resource PullRequest field diff code not_available. Not a rate-budget exhaustion.",
+      "proof": "direct-6468/followup-admission/pr6473-matrix-detect-failed.log",
+      "revalidation": "Exact head/OPEN main/nohold; terminal run attempt1; same RESTfiles endpoint now returns exactly2reviewedfiles.",
+      "action": "One POST /actions/jobs/102621666118/rerun acceptedHTTP201",
+      "attempts": 1,
+      "receipt": "direct-6468/followup-admission/matrix-retry-receipt.txt",
+      "next": "Observe attempt2; only after matrix recovery and freshtargetcheck rerun failed aggregate once. No repeat storm.",
+      "matrix_recovered": true,
+      "matrix_attempt": 2,
+      "matrix_conclusion": "success",
+      "aggregate_run": 34397783664,
+      "aggregate_job": 102621664513,
+      "aggregate_retry": "onePOSTacceptedHTTP201, awaiting observation",
+      "aggregate_receipt": "direct-6468/followup-admission/gate-retry-receipt.txt"
+    },
+    "linux_validation": {
+      "proof": "direct-6468/followup-admission/linux-validation-proof.json",
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "run": 34397783624,
+      "suite_tests": 45,
+      "privacy": "executedPASS",
+      "python": "3.12.14"
     }
   },
   "prs": {
@@ -484,7 +526,21 @@
       "issue": 4246,
       "issue_state": "CLOSED",
       "source_verification": "direct-4246/perf-admission/main-source-proof.json",
-      "postmerge": "mainCIpending; initialbatch-merge/release-plzfailureshistoricalpatternnotyetdiagnosed; no releaseauthorization"
+      "postmerge": "Main CI, feature-matrix and aggregate verifiedSUCCESS; release-plz/batch-merge failures not re-diagnosed, registry/release holds remain."
+    },
+    "6473": {
+      "issue": 6468,
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "state": "OPEN_CI_AND_COPILOT_PENDING",
+      "url": "https://github.com/sparq-org/sparq/pull/6473",
+      "branch": "codex/triage-area-unknown-diagnostics",
+      "review": "Actual Opus5xhigh original5f758 and finalafa9 approve_for_validation, no blockers, perf_affectingfalse",
+      "review_result": "direct-6468/followup-admission/opus-review-result.json",
+      "linux_tests": "45actualtests+privacyPASS",
+      "matrix": "attempt2SUCCESS after GitHubdiffnot_available",
+      "gate": "oneboundedretryaccepted;resultpending",
+      "copilot": "34397789869in_progress;alreadyrequestedautomatically",
+      "review_threads": 0
     }
   },
   "registry": {
@@ -535,11 +591,12 @@
     }
   },
   "next_actions": [
-    "Collect focused actual Opus review of afa9c648, then publish narrow6468PR and observe actual Linux validation; do not waive Bash3 privacy check.",
-    "Verify first post-label-repair ordinary scheduled34395557649: issue effects/evidence and registryOFF; keep6468open until source landed and recovery criteria proven.",
-    "Monitor maincea4414 feature-matrix and aggregate; CI nowSUCCESS. Preserve release/registry holds.",
-    "After6468terminal, reassess existing6095 failed gate and source-issue holds without rearming or starting duplicate work.",
-    "Preserve frozen evidence/checkpoint in private local Git ref; one substantive lane; no busy model sessions."
+    "Read PR6473 exactafa9 status, Copilot review bodies/threads and run34397783664attempt2; no duplicate reruns. Matrix34397783877attempt2SUCCESS and Linux45tests+privacy already verified; do not repeat local tests or Opus review unless source changes.",
+    "Resolve Copilot findings with concrete fix or reasoned reply; revalidate holds/head/main/protections and all requiredgatechecks before normal protected enqueue expectedHeadOidafa9,jumpfalse. Never forge review:pass.",
+    "Observe eventual ordinary scheduledgenerator5016labelapplication and firsttriage-area tickafter6473merge. Firstpost-maintenance34395557649alreadySUCCESS150writes, correct5016classification deferred; no recipients at1950. No replay/newlabels.",
+    "PR6469 mainCI/matrix/aggregate allSUCCESS; registry/release holds remain. No needrepeat broad mainCIpolls.",
+    "After6473terminal, reassess existing6095exactfailedgatelog and sourceissueholds beforeanynewimplementation; no rearm, holdclearing or duplicate oldchain.",
+    "KeepprivateGitcheckpoint/evidence durable; one substantive implementationlane; heartbeat10min, yieldbetweenexternalstages withoutbusyloops."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -1575,19 +1632,19 @@
   },
   "postmerge_watch": {
     "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "observed_at": "2026-09-09T19:50:57.176167+00:00",
-    "evidence": "direct-4246/perf-admission/main-runs-1942.json",
+    "observed_at": "2026-09-09T19:57:56.230176+00:00",
+    "evidence": "direct-4246/perf-admission/main-runs-2001.json",
     "CI": {
       "id": 34390023351,
       "conclusion": "success"
     },
     "feature_matrix": {
       "id": 34390023354,
-      "state": "queued; previous jobs actively progressed"
+      "conclusion": "success"
     },
     "aggregate": {
       "id": 34390022530,
-      "state": "in_progress"
+      "conclusion": "success"
     },
     "unresolved_noncore_failures": [
       34390022720,
