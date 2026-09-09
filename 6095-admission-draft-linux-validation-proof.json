@@ -1,0 +1,18 @@
+{
+  "verified_at": "2026-09-09T21:39:29.606798+00:00",
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "docs_run": 34407157834,
+  "routing_run": 34407157862,
+  "classifier_tests": 47,
+  "classifier_embedded": "SELF-TEST PASSED",
+  "docs_python": "3.12.14",
+  "privacy": "executed PASS",
+  "migration_self_checks": 114,
+  "migration": "bd-to-issues self-test PASSED",
+  "migration_python": "Linux python3; exact minor not observed",
+  "full_required_gate": "not satisfied by draft-tier",
+  "logs": {
+    "draft-docs-quality.log": "18bf2ba9c4ee293fd278573b2edf0ecb9deef19956adf34c2ae88c01df9aa6d2",
+    "draft-routing-self-tests.log": "1103eb7c3667e91b150171f73cdccfdefadff55a4de268cb8143c54bd337d7f6"
+  }
+}

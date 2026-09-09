@@ -1,0 +1,9 @@
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/pr-area-labels.py:112:    def declared_areas(self):
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/pr-area-labels.py:638:    missing = sorted((policy.declared_areas() | policy.members) - known)
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/tests/test_triage_area.py:843:        """[OPUS-5] (#4567) `_DECL` must not match the TAIL of a longer word.
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/tests/test_triage_area.py:861:            self.assertEqual(TA.declared_areas(body, CRATES), [], body)
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/tests/test_triage_area.py:867:        author-declared path. Without this, tightening `_DECL` to something that never
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/triage-area.py:402:_DECL = re.compile(
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/triage-area.py:414:def declared_areas(body, crates):
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/triage-area.py:426:    for m in _DECL.finditer(body or ""):
+86b8dfa232ad7d315dd56df28759ac5fca7b365c:scripts/triage-area.py:457:    d = declared_areas(body, crates)

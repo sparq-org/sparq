@@ -1,0 +1,16 @@
+{
+  "verified_at": "2026-09-09T21:27:49.834726+00:00",
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "main_function_byte_identical_to_main": true,
+  "main6473diagnosticclass_AST_identical": "Already rootverified in root-verification.json; full47test baseline includes it unchanged. No redundant rerun.",
+  "live_crates_verified": [
+    "crates/sparq-core/Cargo.toml",
+    "crates/sparq-mpc/Cargo.toml",
+    "crates/sparq-py/Cargo.toml"
+  ],
+  "bd_to_issues_source_byte_identical": true,
+  "bd_module_execution": "47-test suite imports helper and114embeddedmigration checks executed at frozenhead; command/output53filemanifestrootverified",
+  "control_test_identity": "See frozen run-controls.py; actual worktree test module loader is inspected before admission",
+  "consumer_grep": "declaration-consumers.txt",
+  "review_nits": "Optional tighter punctuation/Unicode boundary policy, helper duplicate-set checks and naming changes deferred; scope is exact lexical word/underscore/ASCIIhyphen boundary. T2 fallback may still classify one-crate prose at lower tier; no general prose rejection or authorization claim."
+}

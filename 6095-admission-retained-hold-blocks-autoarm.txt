@@ -1,0 +1,59 @@
+307:         "area:sparq-mpc",
+308:         "area:sparq-trust",
+309:     }
+310: )
+311: # [FABLE-5] #3759 finding 1: a PR flipped to review:changes (e.g. by the merge-queue
+312: # dequeued-feedback loop) is in the fix lane and must NEVER be armed — even if a stale
+313: # review:pass is still present. This is belt-and-suspenders with the feedback workflow
+314: # atomically REMOVING review:pass when it adds review:changes: the sweep treats
+315: # review:changes (and review:needs) as a HARD exclusion independent of review:pass, so
+316: # a race that momentarily left BOTH labels on the PR can never re-arm the dequeued PR
+317: # before remediation.
+318: REVIEW_CHANGES_LABELS = frozenset({"review:changes", "review:needs"})
+319: # [OPUS-5] #1135: headRefName/author/title are the release-PR guard's ONLY inputs. If any
+320: # of them stops being requested here, parse_pr yields None for it and arm_block_reason
+321: # fails CLOSED (see its docstring) — the guard degrades to refusing, never to admitting.
+322: PR_FIELDS = (
+
+642:         # cuts a `v*` tag and (with `publish = true`) publishes 37 crates to crates.io,
+643:         # which cannot be undone. Keyed on branch/author/title, so relabelling the PR — in
+644:         # either direction — cannot change this answer. FAIL-CLOSED on an unknown branch.
+645:         release_reason = release_pr_guard.arm_block_reason(
+646:             head_ref=pr.head_ref,
+647:             author_login=pr.author_login,
+648:             title=pr.title,
+649:         )
+650:         if release_reason:
+651:             return release_reason
+652:         blocked = self.security_labels(pr)
+653:         if blocked:
+654:             return f"security-surface ({', '.join(blocked)})"
+655:         # [FABLE-5] #3759 finding 1: review:changes is a HARD exclusion checked BEFORE
+656:         # review:pass, so a PR in the fix lane is never armed even with a stale
+657:         # review:pass still on it (a re-arm before remediation is the exact bug).
+658:         changes = sorted(pr.labels & REVIEW_CHANGES_LABELS)
+659:         if changes:
+660:             return f"changes-requested ({', '.join(changes)})"
+661:         if pr.base_ref != self.default_branch:
+662:             return f"non-default-base ({pr.base_ref or 'unknown'})"
+663:         if require_review and REVIEW_LABEL not in pr.labels:
+664:             return "review-label-removed"
+665:         if pr.armed:
+
+1367:     for label in sorted(expected_guards):
+1368:         fake, messages, outcome = exercise(fixture(labels=(REVIEW_LABEL, label)))
+1369:         assert not graphql_calls(fake), (label, fake.calls)
+1370:         assert any("security-surface" in message for message in messages), (label, messages)
+1371: 
+1372:     # [FABLE-5] #3759 finding 1: review:changes is a HARD exclusion. A dequeued PR that
+1373:     # still carries a STALE review:pass (a race left both on) must NEVER be armed — the
+1374:     # fix-lane label wins. Both review-hold labels are checked independent of review:pass.
+1375:     for hold in ("review:changes", "review:needs"):
+1376:         fake, messages, outcome = exercise(fixture(labels=(REVIEW_LABEL, hold)))
+1377:         assert not graphql_calls(fake), (hold, fake.calls)
+1378:         assert any("changes-requested" in message for message in messages), (hold, messages)
+1379:     # It also stops an arm when review:changes appears only on the live refresh.
+1380:     fake, messages, outcome = exercise(clean, views=[fixture(labels=(REVIEW_LABEL, "review:changes"))])
+1381:     assert not graphql_calls(fake), fake.calls
+1382:     assert any("changes-requested" in message for message in messages), messages
+1383: 

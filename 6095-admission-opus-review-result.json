@@ -1,0 +1,68 @@
+{
+  "reviewed_head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "verdict": "approve_for_validation",
+  "blocking_findings": [],
+  "nonblocking_findings": [
+    {
+      "location": "scripts/triage-area.py:402-404 (_DECL)",
+      "finding": "Residual left-boundary gap: the lookbehind excludes only `\\w` (Unicode-aware, so accented/non-Latin letters are correctly covered) and ASCII hyphen-minus. `/`, `.`, `:`, backtick and Unicode dashes (U+2010/2011/2013) remain acceptable left neighbours, so `path/to/surface: sparq-core`, `meta.crates: ...` or `tool\u2011surface:` (U+2011) still parse as a T0 declaration.",
+      "severity": "optional",
+      "suggestion": "If maintainers want it tighter, widen to something like `(?<![\\w\\-/.\\u2010-\\u2015])`; not required \u2014 this is strictly narrower than the pre-patch behaviour and over-tightening risks rejecting real fields."
+    },
+    {
+      "location": "scripts/tests/test_triage_area.py:857-864 (prose fixture assertions)",
+      "finding": "The `classify(...) == ([], \"\")` half of the negative test also depends on T2 `_bd_derive` -> bd-to-issues.derive_areas declining two-crate bodies. That module is not in this packet, so a future T2 change can red this test for reasons unrelated to the T0 boundary. The `TA.declared_areas(...) == []` half is the boundary-specific assertion and is correctly present.",
+      "severity": "optional"
+    },
+    {
+      "location": "scripts/tests/test_triage_area.py:842-864 (docstring claim 'prose is not evidence')",
+      "finding": "No fixture pins the single-crate prose case (`the tool-surface: sparq-core mapping ...` naming one crate). Such an issue now falls out of T0 into T1/T2 and may still be labelled with lower-trust evidence rather than staying parked. The docstring is honest that the two-crate shape is what makes these fixtures end in ([], \"\"), but the general framing is broader than what is asserted.",
+      "severity": "optional"
+    },
+    {
+      "location": "scripts/tests/test_triage_area.py:926-938, 973, 991 (_assert_the_partition_was_fully_covered)",
+      "finding": "Vacuity check runs after the leaked/missed assertEqual, so a genuine leak masks the vacuity diagnostic; and the second check compares lengths only, so a helper returning duplicated or mis-scoped rows could in principle keep the arithmetic green (the realistic mutants are caught by the leaked/missed assertions and by the partial-partition control).",
+      "severity": "optional",
+      "suggestion": "Optionally assert rule-id sets (disjoint union) instead of counts, and/or call the vacuity helper first."
+    },
+    {
+      "location": "scripts/tests/test_triage_area.py:872-878 (positive T0 fixtures)",
+      "finding": "Fixtures hardcode live workspace crate names (sparq-core, sparq-mpc, sparq-py) via crate_names(); a crate rename reds them. Consistent with existing tests in this file and arguably desirable.",
+      "severity": "optional"
+    },
+    {
+      "location": "scripts/tests/test_triage_area.py:842 (test class placement)",
+      "finding": "The T0 prose test lives in TestRuleTableHygiene although T0 precedes the rule table; the added file-header comment explains the routing-around rationale. Naming/placement nit only.",
+      "severity": "optional"
+    },
+    {
+      "location": "scripts/triage-area.py:403 (alternation)",
+      "finding": "Pre-existing asymmetry unchanged by this patch: `crates?` accepts the plural but `surface` has no `surfaces?`, so `surfaces: sparq-core` is not a declaration. Out of scope; noted only so it is not mistaken for a regression.",
+      "severity": "optional"
+    }
+  ],
+  "perf_affecting": false,
+  "control_assessment": {
+    "summary": "Reported controls are well-targeted and discriminating; each ran 47 tests with 0 errors and failed through assertions, consistent with a suite that still imports cleanly under every mutant. Not independently executed by me.",
+    "discrimination": [
+      "remove-left-boundary and word-boundary-hyphen-inert both red exactly test_a_declaration_shaped_string_in_prose_is_not_a_declaration; the `\\b` variant is the load-bearing control because only the `tool-surface:` fixture distinguishes `\\b` from `(?<![\\w-])` \u2014 it proves the hyphen in the character class is not decorative.",
+      "disable-declaration `(?!)` reds test_a_real_declaration_still_reaches_t0 plus pre-existing T0/diagnostic tests, so the negative test cannot be satisfied by simply breaking the field \u2014 the over-tightening direction is pinned.",
+      "empty-title/empty-text partitions red both scope properties via the assertGreater(checked, 0) leg; partial-title-partition ([:1]) passes that leg and reds via the sum leg, so both independent checks in the new helper are separately exercised.",
+      "The disable-declaration fallout also demonstrates the #6473 diagnostic tests (TestTriageAreaDiagnostics) genuinely exercise the T0 path, i.e. they were present and live in the control runs."
+    ],
+    "gaps": [
+      "No control removing only `-` from the class (behaviourally subsumed by the `\\b` control, since `(?<!\\w)` and `\\b` coincide on these fixtures).",
+      "No control for a helper returning duplicate/mis-scoped rules (the length-only sum check would not catch it).",
+      "No control touching the unchanged write path (apply_row bare-unpark guard, #6473 unknown-label zero-write guard) \u2014 appropriate for this patch's scope, but it means those remain covered only by the pre-existing suite.",
+      "Control outcomes are reported under a `recovery_tests` module name; the identity of the executed file relative to scripts/tests/test_triage_area.py is author-reported, not shown."
+    ]
+  },
+  "remaining_validation": [
+    "Exact-head CI on the real runners: docs-quality quick-gates step `python3 scripts/triage-area.py --self-test` + `python3 scripts/tests/test_triage_area.py` on Linux/Python 3.12 (all 47 tests, 17 embedded classifier checks, 114 migration checks).",
+    "Actual privacy checker run \u2014 the author preflight skipped it because local Bash 3 lacks `mapfile`; this is an unrun mechanical gate, not a pass.",
+    "Confirm the live crate list still contains sparq-core / sparq-mpc / sparq-py and that bd-to-issues.derive_areas is importable at head, since the new fixtures depend on both.",
+    "Repo-wide grep that `_DECL` / declared_areas have no other consumers whose behaviour changes with the tightened boundary (not verifiable from this packet).",
+    "Executed confirmation that the #6473 global unknown-label zero-write guard and UNKNOWN_AREA diagnostics are byte/behaviour-identical to main (packet asserts AST identity; I did not execute).",
+    "Process holds this review cannot clear: PR is still draft, bot review state is 'needs', Copilot/branch-protection and exact-head required checks must run; the prior gate failure was a cancelled auto-arm supersession, not source approval."
+  ]
+}

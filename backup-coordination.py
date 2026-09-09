@@ -298,6 +298,12 @@ for evidence_name in ['main-runs-2118.json', 'main-ci-jobs-2124.json', 'main-mat
 for evidence_name in ['scheduled-runs-2118.json']:
     FILES['6468-label-maintenance-' + evidence_name] = ROOT / 'direct-6468/label-maintenance' / evidence_name
 
+# Completed PR6095 independent review, publication and ready-for-review evidence.
+for evidence_name in ['opus-review-86b8dfa2.json', 'opus-review-result.json', 'declaration-consumers.txt', 'remaining-local-verification.json', 'prepublish-query.json', 'prepublish-state.json', 'postpush-state.json', 'pr-body.md', 'pr-body-updated.txt', 'pr-initial-runs.json', 'pr-before-ready.json', 'pr-ready-revalidation.json', 'draft-docs-quality.log', 'draft-routing-self-tests.log', 'draft-linux-validation-proof.json', 'retained-hold-blocks-autoarm.txt', 'pr-immediate-ready.json', 'ready-receipt.txt', 'pr-after-ready.json', 'pr-ready-runs.json']:
+    FILES["6095-admission-" + evidence_name] = ROOT / "direct-6095/admission" / evidence_name
+FILES["6468-main-runs-2141.json"] = ROOT / "direct-6468/followup-admission/main-runs-2141.json"
+FILES["6468-scheduled-runs-2141.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-2141.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

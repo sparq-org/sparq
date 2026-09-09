@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T21:25:35.067323+00:00",
+  "updated_at": "2026-09-09T21:42:35.672146+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,7 +64,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Actual Opus5 xhigh review running on minimized public-source packet",
+    "phase": "Ready for review; full required CI and Copilot in progress; review:needs retained",
     "started_at": "2026-09-09T20:57:38.644034+00:00",
     "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
     "main": "e53464c73f31f7aca800f3867ac054c36408e346",
@@ -72,10 +72,10 @@
     "local_branch": "codex/pr6095-recovery",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
     "directory": "direct-6095/recovery",
-    "state": "Clean local merge; original0883andmain e534parents; remote still0883draftheld",
-    "constraints": "Keep draft and review:needs; preserve historicalOpusandnew6473code. AtmosttwoPythonfiles. No workflow/census/policy/budgets; no builds/install/EC2/models/remote writes. ~15min boundedfreeze; rootactualOpusreviewbeforepublication.",
+    "state": "86b8 published, actual Opus approve_for_validation and draft Linux47tests/privacy verified. Normal ready transition completed; no hold clear or arm.",
+    "constraints": "Existing reviewed two-file recovery only; retain review:needs and trust-surface until exact full gate15368 and all review/provenance requirements pass. No workflow/policy/budget/protection edits, releases or registry activation.",
     "assessment": "direct-6095/assessment-report.json",
-    "agent_state": "completed/idle; frozen source and53files root verified",
+    "agent_state": "Source recovery completed; agent performing separate bounded read-only diagnosis of two main operational failures",
     "recovery": {
       "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
       "parents": [
@@ -87,7 +87,7 @@
       "root_verification": "direct-6095/admission/root-verification.json"
     },
     "review": {
-      "state": "running",
+      "state": "completed",
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
       "input": "direct-6095/admission/opus-public-source-input.md",
@@ -103,15 +103,50 @@
       "kind": "exec_command",
       "session_id": 2193,
       "started_at": "2026-09-09T21:23:34.222037+00:00",
-      "completed": false,
+      "completed": true,
       "approval_resolution": "Initial complete packet rejected before process start. Removed all raw logs, absolute local paths, personal metadata and environment/command dumps; freshAPIconfirmedPUBLIC repo. Same authorized ClaudeCLI reviewed minimized source/structured-evidence packet; auto-approval accepted. No alternate destination/tool or publication workaround. No pending user approval.",
-      "acceptance": "Collect session2193 once; require successful outerJSON, actual modelUsage claude-opus-5 and exact86b8head. No duplicate or exhausted-budget retry."
+      "acceptance": "Completed and collected once: successful outer JSON, actual modelUsage claude-opus-5, exact86b8 head verified. No further model invocation needed.",
+      "collected_at": "2026-09-09T21:26:23.498256+00:00",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 164061,
+      "output_sha256": "0460b354e9ff7f54e8a7caa5e3cee2ab85c0dd8294d6bf20603beb932fcac949",
+      "result": "direct-6095/admission/opus-review-result.json",
+      "verdict": "approve_for_validation"
     },
     "admission_plan": {
       "draft_constraint": "Draft checks are named gate, draft-tier and cannot satisfy required gate. This is repository-enforced, not an approval barrier introduced here.",
       "sequence": "After actual Opus source approval, revalidate and push the clean recovery head to EXISTING PR branch. Keep review:needs. Obtain actual Linux diagnostics; mark ready_for_review when source/diagnostics permit so required full gate and Copilot run. Reconcile bot gate-failed hold only after the exact full gate is green and all review requirements/hold provenance checked. Never arm while held.",
       "wiring": "direct-6095/admission/draft-full-ci-wiring.txt",
       "clarification": "Earlier broad checkpoint wording to keep both draft and hold until fullgate was overconstrained; ready_for_review is necessary for fullCI, while the live machine hold remains. No workflow/protection exemption is needed."
+    },
+    "publication": {
+      "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+      "pr": 6095,
+      "branch": "sparq-agent/issue-4567-33468488192-1",
+      "draft": false,
+      "hold": "review:needs",
+      "verified": "direct-6095/admission/pr-after-ready.json",
+      "ready_receipt": "direct-6095/admission/ready-receipt.txt",
+      "ready_at": "2026-09-09T21:40:28Z"
+    },
+    "linux_validation": {
+      "proof": "direct-6095/admission/draft-linux-validation-proof.json",
+      "classifier_tests": 47,
+      "docs_python": "3.12.14",
+      "privacy": "executedPASS",
+      "migration_checks": 114,
+      "limitation": "draft diagnostics; full required gate and exact final full-CI evidence pending"
+    },
+    "ci": {
+      "evidence": "direct-6095/admission/pr-ready-runs.json",
+      "gate": 34408213967,
+      "CI": 34408214172,
+      "feature_matrix": 34408214185,
+      "docs_quality": 34408213881,
+      "routing": 34408214033,
+      "copilot": 34408223107,
+      "observed_at": "2026-09-09T21:42:35.672146+00:00",
+      "state": "full CI/Copilot in progress; draft gate complete but not admission evidence"
     }
   },
   "prs": {
@@ -388,14 +423,41 @@
       }
     },
     "6095": {
-      "state": "OPEN_MACHINE_GATE_HOLD",
-      "head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+      "state": "OPEN_HELD_FULL_CI",
+      "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
       "issue": 4567,
-      "draft": true,
-      "hold": "review:needs set by bot stuck-arm gate-failed; sourceissue4567nohumanholds in completecomments/labels. No mutation/rearm/holdclear performed.",
-      "exact_gate": "33926976128failed superseded-legs: newest auto-arm33926979672cancelled attempt2 after one automatic redispatch. No source test failure asserted.",
-      "analysis": "direct-6095/assessment-report.json",
-      "next": "After6473terminal, plan recovery of existing historicalOpuschain with fresh composition/tests/actualOpusreview. Preserve review:needs until its realgate-green condition and allotheradmissionrequirements proven; never replayautoarm to evadethehold."
+      "draft": false,
+      "hold": "review:needs; machine gate-failed receipt, provenance to be freshly revalidated before any reconciliation",
+      "review": "Actual Opus5xhigh approve_for_validation, no blockers; originalOpus source composed unchanged withmain",
+      "publication": {
+        "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+        "pr": 6095,
+        "branch": "sparq-agent/issue-4567-33468488192-1",
+        "draft": false,
+        "hold": "review:needs",
+        "verified": "direct-6095/admission/pr-after-ready.json",
+        "ready_receipt": "direct-6095/admission/ready-receipt.txt",
+        "ready_at": "2026-09-09T21:40:28Z"
+      },
+      "linux_validation": {
+        "proof": "direct-6095/admission/draft-linux-validation-proof.json",
+        "classifier_tests": 47,
+        "docs_python": "3.12.14",
+        "privacy": "executedPASS",
+        "migration_checks": 114,
+        "limitation": "draft diagnostics; full required gate and exact final full-CI evidence pending"
+      },
+      "ci": {
+        "evidence": "direct-6095/admission/pr-ready-runs.json",
+        "gate": 34408213967,
+        "CI": 34408214172,
+        "feature_matrix": 34408214185,
+        "docs_quality": 34408213881,
+        "routing": 34408214033,
+        "copilot": 34408223107,
+        "observed_at": "2026-09-09T21:42:35.672146+00:00",
+        "state": "full CI/Copilot in progress; draft gate complete but not admission evidence"
+      }
     }
   },
   "registry": {
@@ -446,11 +508,11 @@
     }
   },
   "next_actions": [
-    "Collect the ONE actual Opus review session2193 of minimized public-source packet e33e1f89, exact recovery86b8. Initial larger-packet approval rejection was resolved by removing rawlogs/localpaths/metadata and rechecking public visibility; no pending userapproval, no duplicate modelcall.",
-    "PR6473 is merged as e53464c7; issue6468 closed with verified resolving-PR comment. Watch main CI34402964231, matrix34402964196 and aggregate34402964040. Merge-group workflows all succeeded; exact reviewed files and queue45tests/privacy were already verified.",
-    "Observe first ordinary scheduled classifier on e534 or descendant and any eventual generator-label applications. Latest34395557649 predates source merge but proves earlier maintenance recovery and150writes; #5016 deferred. Registry staysOFF; no manual replay/newlabels.",
-    "For6095 follow verified draft/full-CI sequence: draft gate cannot satisfy required gate. After source approval publish existing branch and, after appropriate diagnostics, use normal ready_for_review to run full gate/Copilot while retaining review:needs. Reconcile bot hold only after exactgate-green and allotheradmissionrequirements; no autoarm replay or replacementPR.",
-    "Preserve ALLGREEN and existing6049/6055/registry2305approval holds. No release or new EC2 authorization. Source/work/evidence stay durable; one substantive lane and cheap observations."
+    "PR6095 is now ready_for_review at exact86b8, full CI34408214172/matrix34408214185/gate34408213967 and Copilot34408223107 in progress. Opus review2193 completed and collected; no duplicate review. Keep review:needs/trust-surface and do not arm.",
+    "After exact full gate15368green and all reviews/threads checked, freshly verify live label timeline to distinguish bot-owned gate-failed hold from any human intervention. Reconcile only when proven eligible, then normal expectedHeadOid protected queue admission; no fabricated canonical review:pass.",
+    "Collect bounded read-only main operational diagnosis from /root/postmerge_ci. Main core CI/matrix/aggregate for merged6473e534are ALLSUCCESS; no rechecking old successful heads or unauthorized releases.",
+    "Observe first ordinary scheduled classifier on e534 or descendant and eventual generator-label applications. Latest34395557649 still predates source merge; #5016 correctly planned but deferred. Registry staysOFF; no manual replay/newlabels.",
+    "Preserve ALLGREEN and existing6049/6055/registry2305approval holds. Keep source and explicit completed evidence durable in private localGit checkpoint; token-conscious one substantive lane."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -1746,19 +1808,22 @@
   "postmerge_watch": {
     "head": "e53464c73f31f7aca800f3867ac054c36408e346",
     "pr": 6473,
-    "observed_at": "2026-09-09T21:23:34.222037+00:00",
-    "evidence": "direct-6468/followup-admission/main-runs-2118.json",
+    "observed_at": "2026-09-09T21:42:35.672146+00:00",
+    "evidence": "direct-6468/followup-admission/main-runs-2141.json",
     "CI": {
       "id": 34402964231,
-      "state": "queued"
+      "state": "completed",
+      "conclusion": "success"
     },
     "feature_matrix": {
       "id": 34402964196,
-      "state": "queued"
+      "state": "completed",
+      "conclusion": "success"
     },
     "aggregate": {
       "id": 34402964040,
-      "state": "in_progress"
+      "state": "completed",
+      "conclusion": "success"
     },
     "docs_quality": {
       "id": 34402963993,
@@ -1778,7 +1843,8 @@
         "direct-6468/followup-admission/main-ci-jobs-2124.json",
         "direct-6468/followup-admission/main-matrix-jobs-2124.json"
       ]
-    }
+    },
+    "state": "Main CI, feature matrix and required aggregate allSUCCESS; two noncore failure causes under bounded read-only diagnosis"
   },
   "classifier_watch": {
     "issue": 6468,
@@ -1789,8 +1855,18 @@
     "latest_scheduled_created": "2026-09-09T19:31:23Z",
     "latest_scheduled_conclusion": "success",
     "latest_run_predates_source_merge": true,
-    "checked_at": "2026-09-09T21:23:34.222037+00:00",
-    "evidence": "direct-6468/label-maintenance/scheduled-runs-2118.json",
+    "checked_at": "2026-09-09T21:42:35.672146+00:00",
+    "evidence": "direct-6468/label-maintenance/scheduled-runs-2141.json",
     "next": "Observe first ordinary scheduled run containing merged source. Recheck every eventual area:sparq-wrapper-gen recipient and actual evidence; #5016 was correctly planned and deferred. No live replay or additional label creation."
+  },
+  "operational_diagnosis_e534": {
+    "agent": "/root/postmerge_ci",
+    "state": "running read-only max5min",
+    "runs": [
+      34402964058,
+      34402964004
+    ],
+    "directory": "recovery-20260909/main-e534-operational",
+    "scope": "Named failed-job diagnostics and at most2dedupe searches only; no retries/mutations/models/releases"
   }
 }
