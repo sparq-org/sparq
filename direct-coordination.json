@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T18:01:43.409510+00:00",
+  "updated_at": "2026-09-09T18:04:50.851819+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -581,6 +581,76 @@
       "comment": "https://github.com/sparq-org/sparq/pull/6469#issuecomment-5606416908",
       "evidence": "direct-4246/perf-admission/queue-verified.json",
       "verification": "direct-4246/perf-admission/enqueue-root-verification.json"
+    },
+    "queue_initial_runs": {
+      "evidence": "direct-4246/perf-admission/queue-initial-runs.json",
+      "runs": [
+        {
+          "id": 34386432871,
+          "name": "feature-matrix",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34386432273,
+          "name": "ci-summary",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "id": 34386432172,
+          "name": "routing-self-tests",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34386432182,
+          "name": "pr-area-label",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34386432660,
+          "name": "CI",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "queued",
+          "conclusion": null
+        },
+        {
+          "id": 34386432378,
+          "name": "flow-on-gates",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34386432254,
+          "name": "vectorized-feature-off",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 34386432230,
+          "name": "docs-quality",
+          "event": "merge_group",
+          "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "failures": []
     }
   },
   "prs": {
@@ -1301,5 +1371,15 @@
       "direct-4246/perf-admission/queued-runs.json",
       "direct-4246/perf-admission/in-progress-runs.json"
     ]
+  },
+  "next_lane": {
+    "issue": 6468,
+    "agent": "/root/postmerge_ci",
+    "actual_model": "GPT-6 Astra",
+    "effort": "xhigh",
+    "phase": "read-only policy/design preparation while6469 reservesarea:ci",
+    "started_at": "2026-09-09T18:04:24.354143+00:00",
+    "current_issue": "direct-6468/current-1802.json",
+    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review."
   }
 }

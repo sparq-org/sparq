@@ -207,6 +207,9 @@ for evidence_name in ["opus-input.md", "input-manifest.json", "head-without-gene
 for evidence_name in ['benchmark-jobs.json', 'body-edit-result.txt', 'body-precheck.json', 'comment-precheck.json', 'comment-result.txt', 'enqueue-checks.json', 'enqueue-input.json', 'enqueue-precheck.json', 'enqueue-result.json', 'enqueue-root-verification.json', 'enqueue-rules.json', 'final-review-comment.md', 'in-progress-runs.json', 'opus-review-ccded-final-perf.json', 'opus-review-result.json', 'opus-stderr.txt', 'pr-body-final-draft.md', 'pr-body-final.md', 'queue-query.json', 'queue-verified.json', 'queued-runs.json', 'registry-pause.json', 'review-current.json']:
     FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
 
+FILES["4246-perf-admission-queue-initial-runs.json"] = ROOT / "direct-4246/perf-admission/queue-initial-runs.json"
+FILES["6468-current-1802.json"] = ROOT / "direct-6468/current-1802.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
