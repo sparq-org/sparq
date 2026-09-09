@@ -309,3 +309,11 @@ The default `CredentialCapacity::Smallest` reveals the selected capacity; choose
 `prepare_result_with_options(..., ResultOptions { credential_capacity:
 CredentialCapacity::HideInTwo })` to keep the fixed two-slot policy. The verifier
 checks the bounded issuer-slot shape and derives the member independently.
+
+[GPT-6] Explicit `planner::optimize_disclosure[_admitted]` jointly minimizes
+credential authentication count and then shared membership count for fixed
+released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
+`BudgetExhausted`; an exhausted feasible plan never implies optimality. Backend
+admission and credential-capacity limits remain enforced. This is structural host
+selection, not a calibrated speed claim or cryptographic assurance; see
+[disclosure planning](references/disclosure-planner.md).

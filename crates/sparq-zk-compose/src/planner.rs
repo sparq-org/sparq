@@ -26,6 +26,28 @@ use sparq_zk::commit::GraphCommitment;
 use sparq_zk::verify::{fragment_filters, FilterCmp};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod optimize;
+#[doc(inline)]
+pub use optimize::{
+    optimize_disclosure, optimize_disclosure_admitted, OptimizationCompletion, OptimizationLimits,
+    OptimizationReport, OptimizationStats, PlanObjective,
+};
+
+/// Maximum query text size before invoking the shared SPARQL parser.
+pub const MAX_DISCLOSURE_QUERY_BYTES: usize = 8192;
+/// Conservative raw ASCII punctuation budget before parsing, including literals and IRIs.
+///
+/// This is resource admission, not tokenization. Counting punctuation everywhere
+/// bounds flat operator chains before parser-side recursive AST work. A query
+/// with punctuation-heavy public literals may be rejected despite simple algebra.
+pub const MAX_DISCLOSURE_QUERY_PUNCTUATION: usize = 256;
+/// Maximum admitted BGP patterns, including programmatically constructed query shapes.
+pub const MAX_DISCLOSURE_PATTERNS: usize = 64;
+/// Maximum normalized FILTER comparisons evaluated per candidate binding.
+pub const MAX_DISCLOSURE_FILTERS: usize = 32;
+// Bound local AST walks after the preparse fuel check; not a circuit capacity.
+const MAX_DISCLOSURE_AST_NODES: usize = 512;
+
 /// The result contract admitted by the planner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryKind {
@@ -76,8 +98,22 @@ impl DisclosureQuery {
     ///
     /// # Errors
     /// Rejects malformed queries, bag SELECT, modifiers, nonpositive operators,
-    /// expression projections, blank-node syntax, and unsupported FILTERs.
+    /// expression projections, blank-node syntax, unsupported FILTERs, and resource
+    /// limits. Raw punctuation in public literals and IRIs counts toward the cap.
     pub fn parse(sparql: &str) -> Result<Self, PlanError> {
+        if sparql.len() > MAX_DISCLOSURE_QUERY_BYTES {
+            return Err(PlanError::LimitExceeded("query text bytes"));
+        }
+        if sparql
+            .bytes()
+            .filter(u8::is_ascii_punctuation)
+            .take(MAX_DISCLOSURE_QUERY_PUNCTUATION + 1)
+            .count()
+            > MAX_DISCLOSURE_QUERY_PUNCTUATION
+        {
+            return Err(PlanError::LimitExceeded("query punctuation fuel"));
+        }
+        // The vendored parser additionally guards actual syntactic nesting.
         let parsed = spargebra::SparqlParser::new()
             .parse_query(sparql)
             .map_err(|e| PlanError::Parse(e.to_string()))?;
@@ -155,6 +191,12 @@ impl DisclosureQuery {
     }
 
     fn validate(&self) -> Result<(), PlanError> {
+        if self.patterns.len() > MAX_DISCLOSURE_PATTERNS {
+            return Err(PlanError::LimitExceeded("admitted BGP patterns"));
+        }
+        if self.filters.len() > MAX_DISCLOSURE_FILTERS {
+            return Err(PlanError::LimitExceeded("admitted FILTER comparisons"));
+        }
         if self.patterns.is_empty() {
             return Err(unsupported("empty BGP"));
         }
@@ -207,46 +249,80 @@ fn collect_patterns(
     pattern: &GraphPattern,
     out: &mut Vec<[QuerySlot; 3]>,
 ) -> Result<BTreeSet<String>, PlanError> {
-    match pattern {
-        GraphPattern::Bgp { patterns } => {
-            let mut variables = BTreeSet::new();
-            for triple in patterns {
-                let predicate = match &triple.predicate {
-                    NamedNodePattern::NamedNode(n) => QuerySlot::Constant(n.clone().into()),
-                    NamedNodePattern::Variable(v) => QuerySlot::Variable(v.as_str().to_owned()),
-                };
-                let slots = [
-                    term_slot(&triple.subject)?,
-                    predicate,
-                    term_slot(&triple.object)?,
-                ];
-                for slot in &slots {
-                    if let QuerySlot::Variable(v) = slot {
-                        variables.insert(v.clone());
-                    }
-                }
-                out.push(slots);
-            }
-            Ok(variables)
-        }
-        GraphPattern::Join { left, right } => {
-            let mut variables = collect_patterns(left, out)?;
-            variables.extend(collect_patterns(right, out)?);
-            Ok(variables)
-        }
-        GraphPattern::Filter { expr, inner } => {
-            let variables = collect_patterns(inner, out)?;
-            let mut filter_variables = BTreeSet::new();
-            collect_filter_variables(expr, &mut filter_variables)?;
-            // Flattening FILTERs is only valid when their variables are bound
-            // by the FILTER's own input, not by a sibling join added later.
-            if !filter_variables.is_subset(&variables) {
-                return Err(unsupported("FILTER variable outside its input scope"));
-            }
-            Ok(variables)
-        }
-        _ => Err(unsupported("operator outside positive BGP/JOIN/FILTER")),
+    enum Visit<'a> {
+        Pattern(&'a GraphPattern),
+        Join,
+        Filter(&'a Expression),
     }
+    let mut pending = vec![Visit::Pattern(pattern)];
+    let mut scopes: Vec<BTreeSet<String>> = Vec::new();
+    let mut nodes = 0;
+    while let Some(visit) = pending.pop() {
+        nodes += 1;
+        if nodes > MAX_DISCLOSURE_AST_NODES {
+            return Err(PlanError::LimitExceeded("query AST nodes"));
+        }
+        match visit {
+            Visit::Pattern(GraphPattern::Bgp { patterns }) => {
+                if patterns.len() > MAX_DISCLOSURE_PATTERNS.saturating_sub(out.len()) {
+                    return Err(PlanError::LimitExceeded("admitted BGP patterns"));
+                }
+                let mut variables = BTreeSet::new();
+                for triple in patterns {
+                    let predicate = match &triple.predicate {
+                        NamedNodePattern::NamedNode(n) => QuerySlot::Constant(n.clone().into()),
+                        NamedNodePattern::Variable(v) => QuerySlot::Variable(v.as_str().to_owned()),
+                    };
+                    let slots = [
+                        term_slot(&triple.subject)?,
+                        predicate,
+                        term_slot(&triple.object)?,
+                    ];
+                    for slot in &slots {
+                        if let QuerySlot::Variable(v) = slot {
+                            variables.insert(v.clone());
+                        }
+                    }
+                    out.push(slots);
+                }
+                scopes.push(variables);
+            }
+            Visit::Pattern(GraphPattern::Join { left, right }) => {
+                pending.push(Visit::Join);
+                pending.push(Visit::Pattern(right));
+                pending.push(Visit::Pattern(left));
+            }
+            Visit::Join => {
+                let right = scopes
+                    .pop()
+                    .ok_or_else(|| unsupported("missing right JOIN scope"))?;
+                let left = scopes
+                    .last_mut()
+                    .ok_or_else(|| unsupported("missing left JOIN scope"))?;
+                left.extend(right);
+            }
+            Visit::Pattern(GraphPattern::Filter { expr, inner }) => {
+                pending.push(Visit::Filter(expr));
+                pending.push(Visit::Pattern(inner));
+            }
+            Visit::Filter(expr) => {
+                let variables = scopes
+                    .last()
+                    .ok_or_else(|| unsupported("missing FILTER input scope"))?;
+                let mut filter_variables = BTreeSet::new();
+                collect_filter_variables(expr, &mut filter_variables)?;
+                // Flattening FILTERs is only valid when their variables are bound
+                // by the FILTER's own input, not by a sibling join added later.
+                if !filter_variables.is_subset(variables) {
+                    return Err(unsupported("FILTER variable outside its input scope"));
+                }
+            }
+            _ => return Err(unsupported("operator outside positive BGP/JOIN/FILTER")),
+        }
+    }
+    scopes
+        .pop()
+        .ok_or_else(|| unsupported("missing query scope"))
 }
 
 fn collect_filter_variables(
@@ -254,22 +330,30 @@ fn collect_filter_variables(
     out: &mut BTreeSet<String>,
 ) -> Result<(), PlanError> {
     use Expression as E;
-    match expr {
-        E::Variable(v) => {
-            out.insert(v.as_str().to_owned());
+    let mut pending = vec![expr];
+    let mut nodes = 0;
+    while let Some(expr) = pending.pop() {
+        nodes += 1;
+        if nodes > MAX_DISCLOSURE_AST_NODES {
+            return Err(PlanError::LimitExceeded("FILTER AST nodes"));
         }
-        E::Literal(_) => {}
-        E::And(a, b)
-        | E::Less(a, b)
-        | E::LessOrEqual(a, b)
-        | E::Greater(a, b)
-        | E::GreaterOrEqual(a, b)
-        | E::Equal(a, b) => {
-            collect_filter_variables(a, out)?;
-            collect_filter_variables(b, out)?;
+        match expr {
+            E::Variable(v) => {
+                out.insert(v.as_str().to_owned());
+            }
+            E::Literal(_) => {}
+            E::And(a, b)
+            | E::Less(a, b)
+            | E::LessOrEqual(a, b)
+            | E::Greater(a, b)
+            | E::GreaterOrEqual(a, b)
+            | E::Equal(a, b) => {
+                pending.push(b);
+                pending.push(a);
+            }
+            E::Not(inner) => pending.push(inner),
+            _ => return Err(unsupported("FILTER expression")),
         }
-        E::Not(inner) => collect_filter_variables(inner, out)?,
-        _ => return Err(unsupported("FILTER expression")),
     }
     Ok(())
 }
@@ -489,13 +573,13 @@ pub fn plan_disclosure_admitted<A>(
 where
     A: Fn(usize, MembershipRef, &Triple) -> bool,
 {
-    query.validate()?;
     if query.patterns.len() > limits.max_patterns {
         return Err(PlanError::LimitExceeded("patterns"));
     }
     if released.len() > limits.max_results {
         return Err(PlanError::LimitExceeded("released rows"));
     }
+    query.validate()?;
     if query.kind == QueryKind::Ask && (released.len() != 1 || !released[0].is_empty()) {
         return Err(PlanError::InvalidRelease {
             row: 0,
@@ -503,27 +587,13 @@ where
         });
     }
     validate_released(query, released)?;
-    let mut search_steps = 0;
-    let mut rows = Vec::with_capacity(released.len());
-    let mut memberships = BTreeSet::new();
-    let mut authentication = BTreeSet::new();
-    let mut metrics = PlanMetrics {
-        released_rows: released.len(),
-        ..Default::default()
+    let mut budget = SearchBudget {
+        used: 0,
+        limit: limits.max_search_steps,
     };
+    let mut selected = Vec::with_capacity(released.len());
     for (row_index, release) in released.iter().enumerate() {
-        let bindings = release
-            .iter()
-            .map(|(v, t)| {
-                (
-                    v.clone(),
-                    ScopedTerm {
-                        term: t.clone(),
-                        credential: None,
-                    },
-                )
-            })
-            .collect();
+        let bindings = released_bindings(release);
         let mut witnesses = Vec::with_capacity(query.patterns.len());
         if !find_witness(
             query,
@@ -531,12 +601,30 @@ where
             0,
             &bindings,
             &mut witnesses,
-            &mut search_steps,
-            limits.max_search_steps,
+            &mut budget,
             &admit,
         )? {
             return Err(PlanError::NoWitness { row: row_index });
         }
+        selected.push(witnesses);
+    }
+    assemble_plan(query, credentials.len(), released, selected)
+}
+
+fn assemble_plan(
+    query: &DisclosureQuery,
+    credential_count: usize,
+    released: &[BTreeMap<String, Term>],
+    selected: Vec<Vec<MembershipRef>>,
+) -> Result<DisclosurePlan, PlanError> {
+    let mut rows = Vec::with_capacity(released.len());
+    let mut memberships = BTreeSet::new();
+    let mut authentication = BTreeSet::new();
+    let mut metrics = PlanMetrics {
+        released_rows: released.len(),
+        ..Default::default()
+    };
+    for (release, witnesses) in released.iter().zip(selected) {
         for witness in &witnesses {
             memberships.insert(*witness);
             authentication.insert(witness.credential);
@@ -559,7 +647,7 @@ where
     }
     metrics.unique_memberships = memberships.len();
     metrics.authentication_obligations = authentication.len();
-    metrics.unused_credentials = credentials.len() - authentication.len();
+    metrics.unused_credentials = credential_count - authentication.len();
     Ok(DisclosurePlan {
         rows,
         authentication: authentication.into_iter().collect(),
@@ -607,6 +695,21 @@ struct ScopedTerm {
     credential: Option<usize>,
 }
 
+fn released_bindings(release: &BTreeMap<String, Term>) -> BTreeMap<String, ScopedTerm> {
+    release
+        .iter()
+        .map(|(variable, term)| {
+            (
+                variable.clone(),
+                ScopedTerm {
+                    term: term.clone(),
+                    credential: None,
+                },
+            )
+        })
+        .collect()
+}
+
 fn triple_terms(triple: &Triple) -> [Term; 3] {
     [
         triple.subject.clone().into(),
@@ -615,14 +718,18 @@ fn triple_terms(triple: &Triple) -> [Term; 3] {
     ]
 }
 
+struct SearchBudget {
+    used: usize,
+    limit: usize,
+}
+
 fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
     query: &DisclosureQuery,
     credentials: &[GraphCommitment],
     pattern_index: usize,
     bindings: &BTreeMap<String, ScopedTerm>,
     witnesses: &mut Vec<MembershipRef>,
-    search_steps: &mut usize,
-    max_search_steps: usize,
+    budget: &mut SearchBudget,
     admit: &A,
 ) -> Result<bool, PlanError> {
     if pattern_index == query.patterns.len() {
@@ -635,46 +742,14 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
     }
     for (credential, graph) in credentials.iter().enumerate() {
         for (leaf, triple) in graph.canonical.triples.iter().enumerate() {
-            if *search_steps >= max_search_steps {
+            if budget.used >= budget.limit {
                 return Err(PlanError::LimitExceeded("candidate triple attempts"));
             }
-            *search_steps += 1;
+            budget.used += 1;
             if !admit(pattern_index, MembershipRef { credential, leaf }, triple) {
                 continue;
             }
-            let mut next = bindings.clone();
-            let terms = triple_terms(triple);
-            let mut matches = true;
-            for (slot, term) in query.patterns[pattern_index].iter().zip(terms) {
-                match slot {
-                    QuerySlot::Constant(expected) => matches &= term == *expected,
-                    QuerySlot::Variable(variable) => {
-                        let scope = matches!(&term, Term::BlankNode(_)).then_some(credential);
-                        let value = ScopedTerm {
-                            term,
-                            credential: scope,
-                        };
-                        match next.get(variable) {
-                            Some(expected) => matches &= value == *expected,
-                            None => {
-                                next.insert(variable.clone(), value);
-                            }
-                        }
-                    }
-                }
-                if !matches {
-                    break;
-                }
-            }
-            // Early predicates are safe because parsing required each FILTER
-            // variable to be bound inside its original positive input scope.
-            if matches
-                && query.filters.iter().all(|filter| {
-                    next.get(&filter.variable).is_none_or(|value| {
-                        canonical_integer(&value.term)
-                            .is_some_and(|v| integer_comparison(v, filter.op, filter.bound))
-                    })
-                })
+            if let Some(next) = extend_bindings(query, pattern_index, credential, triple, bindings)
             {
                 witnesses.push(MembershipRef { credential, leaf });
                 if find_witness(
@@ -683,8 +758,7 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
                     pattern_index + 1,
                     &next,
                     witnesses,
-                    search_steps,
-                    max_search_steps,
+                    budget,
                     admit,
                 )? {
                     return Ok(true);
@@ -694,6 +768,53 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
         }
     }
     Ok(false)
+}
+
+// Shared by first-success and optimizing selection: admission can only restrict
+// candidates; RDF identity and early predicates always use this same relation.
+fn extend_bindings(
+    query: &DisclosureQuery,
+    pattern_index: usize,
+    credential: usize,
+    triple: &Triple,
+    bindings: &BTreeMap<String, ScopedTerm>,
+) -> Option<BTreeMap<String, ScopedTerm>> {
+    let mut next = bindings.clone();
+    for (slot, term) in query.patterns[pattern_index]
+        .iter()
+        .zip(triple_terms(triple))
+    {
+        match slot {
+            QuerySlot::Constant(expected) if term != *expected => return None,
+            QuerySlot::Constant(_) => {}
+            QuerySlot::Variable(variable) => {
+                let scope = matches!(&term, Term::BlankNode(_)).then_some(credential);
+                let value = ScopedTerm {
+                    term,
+                    credential: scope,
+                };
+                match next.get(variable) {
+                    Some(expected) if value != *expected => return None,
+                    Some(_) => {}
+                    None => {
+                        next.insert(variable.clone(), value);
+                    }
+                }
+            }
+        }
+    }
+    // Parsing required every FILTER variable to be directly bound in its own
+    // positive input scope, so rejecting an already-bound failing value is safe.
+    query
+        .filters
+        .iter()
+        .all(|filter| {
+            next.get(&filter.variable).is_none_or(|value| {
+                canonical_integer(&value.term)
+                    .is_some_and(|v| integer_comparison(v, filter.op, filter.bound))
+            })
+        })
+        .then_some(next)
 }
 
 /// Parses the exact canonical nonnegative xsd:integer witness representation.

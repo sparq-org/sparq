@@ -25,6 +25,17 @@ predicate relation. The same term can still appear in an ordinary BGP without an
 integer FILTER. RDF identity, including literal lexical form and datatype, is
 preserved for pattern matching and DISTINCT; FILTER uses numeric comparison.
 
+Admission has conservative resource limits before any witness search. Query text
+is limited by `MAX_DISCLOSURE_QUERY_BYTES`; raw ASCII punctuation, including
+punctuation inside public literals and IRIs, is limited by
+`MAX_DISCLOSURE_QUERY_PUNCTUATION`. This preparse fuel counter does not tokenize or
+assign SPARQL meaning. It can reject a simple query containing unusually
+punctuation-heavy terms. The existing parser additionally limits syntactic
+nesting. The planner walks graph and expression ASTs iteratively with bounded
+work, and limits both parsed and programmatically constructed shapes using
+`MAX_DISCLOSURE_PATTERNS` and `MAX_DISCLOSURE_FILTERS`. These are host safeguards,
+not proof circuit capacities.
+
 `plan_disclosure(&query, &credentials, &released, PlannerLimits::default())` takes
 `GraphCommitment` values and released rows represented as
 `BTreeMap<String, oxrdf::Term>`. Each row must have exactly the projected variable
@@ -89,3 +100,58 @@ hidden disclosure, mixed passing/failing candidates, join backtracking, shared
 memberships, independent credentials, blank-node scope, exact release domains,
 unsupported query operators, and bounded search. These tests do not run a prover
 and provide no cryptographic assurance.
+
+## Optional joint witness optimization
+
+<!-- [GPT-6] zkp-8: bounded structural selection, no calibrated latency claim. -->
+
+`optimize_disclosure` and `optimize_disclosure_admitted` are explicit alternatives
+to the unchanged first-success selection policy. They keep the exact query and
+released rows fixed and jointly choose witnesses across all rows. The objective
+is lexicographic: minimize unique credential authentication obligations first,
+then unique credential/leaf memberships. It measures structural work only; it is
+not a calibrated estimate of proving latency or proof size.
+
+The admitted variant takes the same deterministic backend restriction as
+`plan_disclosure_admitted`. No query check is waived. Original credential and
+canonical leaf indices are retained, and committed graphs are never trimmed.
+`OptimizationLimits.max_authentications` additionally restricts joint assignments
+to a backend's distinct-credential capacity. Optimality and infeasibility are
+always relative to these admission and capacity restrictions.
+
+Search streams candidates in deterministic released-row, pattern, original
+credential and canonical-leaf order. It maintains reference counts for selected
+credentials and memberships and prunes prefixes which exceed capacity or cannot
+improve the incumbent objective. It does not store an exponential list of each
+row's possible witnesses. Equal objective values keep the first assignment in
+that traversal order.
+
+`OptimizationLimits.planner` supplies the pattern, result and global candidate
+budget. `max_pattern_occurrences` bounds the joint result-by-pattern positions;
+an absolute implementation cap also bounds recursive stack and live partial
+bindings. The `OptimizationReport` returns fixed input sizes, candidate attempts,
+successively improved complete assignments, and pruned prefixes. Counts and selected
+witnesses remain private local diagnostics.
+
+The completion flag has three meanings:
+
+- `Optimal`: search established the minimum structural objective in the admitted
+  space; `plan` contains a complete feasible assignment.
+- `Infeasible`: exhaustive search found no admitted assignment for the fixed
+  released rows; `plan` is absent. This is a host search result, not a proof of
+  query absence.
+- `BudgetExhausted`: optimality and infeasibility are unestablished. `plan` may
+  contain the best complete feasible assignment seen so far, or be absent if none
+  was reached. It never contains only some requested rows.
+
+A caller may explicitly use an exhausted search's feasible plan, subject to normal
+proof construction and verification, but must retain its incomplete-optimization
+status. An exhausted search without a plan must not be reported as an impossible
+query. The baseline preparation path does not silently switch policies.
+
+`tests/disclosure_optimizer.rs` compares the complete objective and deterministic
+tie assignment against an independently implemented exhaustive oracle across
+small datasets. Further regressions cover shared credentials, membership reuse,
+capacity restrictions, admission, exact rows, RDF identity, and forced exhaustion.
+These are structural host tests; they do not measure prover runtime or audit
+cryptographic correctness.

@@ -96,3 +96,9 @@ file permissions on Unix, and are cleaned by their scope owner. Both canonical-k
 generation and verification now allocate independent subdirectories under the
 caller's scratch root, so concurrent calls cannot exchange proof/input/key files.
 Cleanup after abnormal process termination remains best effort.
+
+[GPT-6] Optional `planner::optimize_disclosure[_admitted]` jointly chooses witnesses
+across fixed released rows, minimizing authentication count and then shared
+membership count within explicit resource and credential-capacity bounds. Its
+report separates established structural optimality from budget exhaustion. This
+does not change the baseline selection policy or assert a measured runtime gain.
