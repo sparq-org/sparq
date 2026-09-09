@@ -5902,6 +5902,7 @@ dependencies = [
  "oxrdf 0.3.3",
  "serde",
  "serde_json",
+ "spargebra",
  "sparq-zk",
 ]
 

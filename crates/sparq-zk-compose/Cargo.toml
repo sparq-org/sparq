@@ -53,6 +53,8 @@ extended-fragment = []
 blake3 = { version = "1", optional = true }
 sparq-zk = { path = "../sparq-zk" }
 oxrdf = { workspace = true }
+# [GPT-6] The disclosure planner admits the query through the shared SPARQL AST.
+spargebra = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # [OPUS-4.8] sq-aih (audit #4 durability): advisory file locking (`flock`) for the

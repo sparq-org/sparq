@@ -39,6 +39,8 @@ pub mod driver;
 pub mod holder;
 pub mod issuer;
 pub mod manifest;
+// [GPT-6] Research-grade disclosure obligations and PRIVATE successful-row witnesses.
+pub mod planner;
 // [OPUS-5] sq-rsd3v.3: witnessed-rule-shape N3 derivation — the host mirror of
 // the in-circuit relation, the fail-closed PROVABLE-SUBSET admission gate, and
 // the rule-graph commitment (the rule author as ISSUER, so a proof says WHOSE
