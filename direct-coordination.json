@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T14:17:16.853952+00:00",
+  "updated_at": "2026-09-09T14:18:16.146936+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -214,6 +214,17 @@
       "skipped": 14,
       "neutral": 1,
       "failures": "Onlyknownwasmequalityanddependentdraftaggregate. Pointin-timecheckrollup,notfullgate/fleetproof."
+    },
+    "wasm_repair_runtime": {
+      "owner": "/root/postmerge_ci",
+      "session_id": 18700,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T14:12:34.561420Z",
+      "deadline": "2026-09-09T14:27:34.561420Z",
+      "active_at_report": true,
+      "agent_report": "Base and head raw wasm both compiled, 1,560,265 bytes each with different hashes. Preparing addition-neutral. Separate private targets, offline/locked, proactive 10.5 GiB disk cutoff. Four off and nine on tests, six compiled controls, both all-targets core clippy configurations passed.",
+      "verification_limit": "Agent progress report, final manifest/root verification and actual Opus review pending. Do not duplicate proof or directly poll the agent-owned session while the agent is active.",
+      "next": "Collect frozen report at the next heartbeat; verify exact source, binaries, comparison results, and shim/protocol provenance before one focused actual Opus review. No declaration or push yet."
     }
   },
   "prs": {
