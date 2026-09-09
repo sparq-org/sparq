@@ -330,6 +330,12 @@ for evidence_name in ['README.md', 'commands.json', 'fixtures/manifest.jsonld', 
 for evidence_name in ['rdf-canon-tags.json', 'rdf-canonize-tags.json', 'w3c-accepted-errata.json', 'w3c-raised-errata.json', 'normative-excerpts.md', 'opus-public-input.md', 'payload-audit.json', 'root-verification.json']:
     FILES["6475-source-admission-" + evidence_name] = ROOT / "direct-6475/source-admission" / evidence_name
 
+for evidence_name in ['opus-soundness-review.json', 'opus-soundness-review.stderr.log', 'opus-soundness-result.json', 'review-completion.json']:
+    FILES['6475-source-admission-' + evidence_name] = ROOT / 'direct-6475/source-admission' / evidence_name
+
+for evidence_name in ['registry-pause-2322.json', 'live-state-2322.json', 'w3c-all-issues.json', 'rust-all-issues.json', 'js-all-issues.json', 'w3c-211-comments.json', 'w3c-16-comments.json', 'prior-art-assessment.json', 'progress-comment.md', 'issue-before-comment.json', 'progress-comment-url.txt', 'progress-comment-readback.json', 'progress-comment-verified.json', 'actions-queued-2326.json', 'actions-running-2326.json', 'runners-2326.json', 'older-main-jobs-2328.json']:
+    FILES['6475-source-admission-' + evidence_name] = ROOT / 'direct-6475/source-admission' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

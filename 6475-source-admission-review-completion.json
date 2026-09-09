@@ -1,0 +1,37 @@
+{
+  "collected_at": "2026-09-09T23:21:33.028529+00:00",
+  "session_id": 21832,
+  "state": "completed_collected",
+  "exit_code": 0,
+  "output_sha256": "15062f10f7df9b642f5041697c177d060918738179b8d70604dac99029556c2f",
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 35101,
+      "outputTokens": 23,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.035216,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-opus-5": {
+      "inputTokens": 2,
+      "outputTokens": 27401,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 42640,
+      "webSearchRequests": 0,
+      "costUSD": 1.111435,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-opus-5",
+      "provider": "firstParty"
+    }
+  },
+  "effort_requested": "xhigh",
+  "verdict": "CONFIRMED-BUT-SCOPED: the supplied fixed datasets, trace and independent reference results are internally consistent and, taken at face value, establish a reproducible canonicalization-invariance failure for this exact input pair in upstream rdf-canon 0.15.3, whose proximate cause is an unresolved tie between two structurally distinguishable blank nodes at RDFC-1.0 \u00a74.4.3(5.3). The evidence supports classifying this as shared-algorithm underdetermination rather than a proven Rust-only coding error, but it does NOT establish an accepted standards erratum, does not close the root-cause search, and does not justify any production change. No patch exists; none is approved. Repository should remain blocked pending owner decision; the smallest responsible next step is read-only evidence completion plus upstream/W3C reproducer filing.",
+  "production_change_approved": false,
+  "root_assessment": "Review is source-only evidence assessment. No production edit approved. Shared algorithm ambiguity remains provisional, not accepted erratum. Next bounded work B1/B5/B7 plus offline W3C baseline if affordable. No quarantine, owner-approval invention, upstream posting, tie rejection or blind adoption of reviewer scope. Rust defaults emitted outputs; JS defaults rejected. Auxiliary Haiku usage recorded separately from actual Opus review."
+}

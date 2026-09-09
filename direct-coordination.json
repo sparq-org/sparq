@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T23:00:48.529624+00:00",
+  "updated_at": "2026-09-09T23:27:46.453047+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "observed_at": "2026-09-09T20:57:38.644034+00:00",
-    "evidence": "direct-6468/followup-admission/state-2055.json"
+    "observed_at": "2026-09-09T23:24:58.003787+00:00",
+    "evidence": "direct-6475/source-admission/live-state-2322.json"
   },
   "rules": {
     "required_check": "gate",
@@ -63,16 +63,16 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Actual independent Opus5xhigh soundness review running; source remains unchanged",
+    "phase": "Bounded evidence completion after independent Opus review",
     "started_at": "2026-09-09T22:22:32.104545+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/canon-relabel-invariance",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
     "directory": "direct-6475/replay",
-    "state": "Rootverified365tracefilesand41v5files. v5alsohas2canonicaloutputs across12diagnosticcases; defaults rejectall12. One actualOpusCLI review launched, no productionpatch.",
+    "state": "Opus review collected once. No patch yet; complete Sparq seam/consumers, Rust work limits and 12-case matrix, affordable offline W3C baseline.",
     "inputs": "direct-6095/queue-incident/manifest.json",
     "constraints": "OneactiveAstra xhigh lane in ownissue6475worktree. Keep>=6GiBfree, noengine/workspacebuild/toolchain/globalinstall/cachemutation/productionpatchyet. Preserve6095review:changesand5357review:needs-user. Tracefreeze beforeactualOpus5xhigh soundnessreview. No remotererun/requeue/cancel/release/registryenable.",
-    "review_requirement": "Any final repair needs actual independent ClaudeOpus5xhigh soundness review and protected validation; no review invocation yet",
+    "review_requirement": "Actual independent Opus5 xhigh reviewed evidence only, no production change approved; actual future repair needs independent patch review and protected validation.",
     "replay": {
       "state": "completed_frozen_root_verified",
       "manifest_files": 48,
@@ -110,7 +110,7 @@
       "limits": "Onlyexactpair/all6orders/tworenamevariants and3fixtures; notfullconformance; internal synchronousseam notasyncwrapper"
     },
     "soundness_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 21832,
       "expected_model": "claude-opus-5",
@@ -120,12 +120,29 @@
       "input_sha256": "8de62046687df273e7c2a8bc080473708944ecc36f13295a3fe2b73986423cbc",
       "output": "direct-6475/source-admission/opus-soundness-review.json",
       "started_at": "2026-09-09T23:00:48.529624+00:00",
-      "completed": false,
+      "completed": true,
       "scope": "Source/evidence/standard/failclosedrepairconstraintsassessment only; no patchsupplied, production_change_approvedmustfalse",
       "acceptance": "Collect session21832once; successfulouterJSON andactualmodelUsageclaude-opus-5; parseverdict andlimitations. No duplicatecall or exhaustedbudgetretry.",
-      "privacy": "Auditedpublicsource-onlyinput; hostpaths/rawenvironment/buildlogs excluded. LicensedW3Cnormativetext includedwithattribution; currentupstreamtags/labelederratalists qualifyunknowns."
+      "privacy": "Auditedpublicsource-onlyinput; hostpaths/rawenvironment/buildlogs excluded. LicensedW3Cnormativetext includedwithattribution; currentupstreamtags/labelederratalists qualifyunknowns.",
+      "collected_at": "2026-09-09T23:21:33.028529+00:00",
+      "exit_code": 0,
+      "output_sha256": "15062f10f7df9b642f5041697c177d060918738179b8d70604dac99029556c2f",
+      "parsed_result": "direct-6475/source-admission/opus-soundness-result.json",
+      "completion_receipt": "direct-6475/source-admission/review-completion.json",
+      "actual_model": "claude-opus-5",
+      "auxiliary_model_usage": "claude-haiku-4-5-20251001 recorded by CLI",
+      "verdict": "confirmed_but_scoped",
+      "production_change_approved": false,
+      "public_progress": "https://github.com/sparq-org/sparq/issues/6475#issuecomment-5610159807"
     },
-    "agent_state": "postmerge_ci completed/idle, no commands running; actualClaudeCLI review is the only active review process"
+    "agent_state": "postmerge_ci running bounded evidence completion; no review process active",
+    "evidence_completion": {
+      "state": "running",
+      "agent": "/root/postmerge_ci",
+      "scope": "B1 Sparq seam/consumers, B5 default work limits, B7 fullRust12cases, affordable offline packagedW3C baseline; no productionedit",
+      "time_bound_minutes": 15,
+      "prior_art": "direct-6475/source-admission/prior-art-assessment.json"
+    }
   },
   "prs": {
     "4300": {
@@ -561,7 +578,7 @@
     }
   },
   "next_actions": [
-    "Collect ONE actualOpus5xhigh soundness review session21832 for6475 public input8de62046 (100125bytes). All365trace/41v5manifestfilesrootverified; no productionpatch. Require successfulouterJSON/actualmodelUsage and boundedqualifiedassessment; no duplicate/exhaustedretry. Then choose safe boundedrepair/design experiment throughAstra xhigh sameagent, preserving tests/profiles/limits and existingholds.",
+    "Continue single Astra xhigh agent on bounded evidence completion B1/B5/B7 and offline W3C baseline if affordable; all earlier bundles frozen, no production edit. Opus session21832 completed/collected: do not poll/relaunch. Prior-art read-only search and public progress update via root.",
     "PR6095 waits on6475 with review:changes retained. Gate34409423697/job102660112366failed on real canonicalization invariant in matrix34409424033/job102661090898 (g20sparq-vectors groupscanon asleg4). Original reviewedPythonhead86b8unchanged; no lucky requeue or cancellationofremainingliveMG2adb evidence.",
     "Before eventual6095hold reconciliation, freshlyread currentlabeltimeline/humaninterventions, repairmergedmainandnewexactreview/checkevidence. Then normalprotectedqueue only. Afteractual6095merge verifytwofiles/queue47tests/gate, commentbeforeclosing4567 andwatchmain.",
     "First ordinary scheduled classifier containing6473 fix is34409971933(e534,22:00:34Z),SUCCESS; actual45tests and150writes verified. Onlyremainingmaintenancewatch is eventualgenerator-label recipients:5016correctlyplannedDEFERRED,0currentrecipients. No manualreplay/newlabels.",
@@ -916,35 +933,14 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-09T14:17:16.853952+00:00",
-    "query": "recovery-20260909/monitor-1418.json",
-    "queue_entries": 0,
-    "queued_runs": 3,
-    "in_progress_runs": 1,
-    "run_inventory": [
-      "recovery-20260909/queued-1418.json",
-      "recovery-20260909/in-progress-1418.json"
-    ],
-    "limit": "Workflow-run counts are not queued-job counts or proof of runner reserve. No cancellation or dispatch performed.",
+    "at": "2026-09-09T23:27:46.453047+00:00",
+    "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "pr6095": "OPEN same86b8 head, review:changes held, no queueentry",
+    "issue6475": "OPEN; bot-added role:impl/status:untriaged observed; public progresscomment exactreadbackverified",
     "registry_actions_enabled": false,
-    "registry_evidence": "recovery-20260909/registry-pause-1418.json",
-    "pr6469_checks": {
-      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "draft": true,
-      "counts": {
-        "success": 89,
-        "in_progress": 8,
-        "queued": 1,
-        "skipped": 15,
-        "neutral": 1,
-        "failure": 2
-      },
-      "only_failures": "Known wasm exact-equality check and its dependent draft gate.",
-      "workspace_clippy": "success",
-      "core_group": "success, job 102491249335",
-      "actual_feature_leg_evidence": "Not yet collected. gh run view refused logs while parent run is in progress; no retry. Wait for ordinary completion and inspect actual test/report evidence.",
-      "evidence": "direct-4246/pr6469-checks-1418.json"
-    }
+    "queued_runs": 1,
+    "in_progress_runs": 3,
+    "limit": "Workflow-run counts are not queued-job counts or proof of runner reserve. No cancellation/dispatch/release."
   },
   "registry_pause": {
     "enabled": false,
@@ -952,18 +948,23 @@
     "evidence": "direct-6468/label-maintenance/precreate-registry-pause.json"
   },
   "actions_snapshot": {
-    "observed_at": "2026-09-09T17:56:01.893981+00:00",
+    "observed_at": "2026-09-09T23:27:46.453047+00:00",
     "queued": 1,
-    "in_progress": 2,
+    "in_progress": 3,
     "queued_run": 32217747734,
-    "queue_note": "One historical scheduled batch-merge run from Aug19 remains queued; neither live merge_group nor current review:pass evidence canceled. No capacity intervention warranted by this low workflow-run backlog. Job/runner saturation not inferred from run counts.",
+    "queue_note": "Same historical Aug19 scheduled batch-merge run. No capacity intervention warranted from run counts. RegistryActions remain OFF.",
     "in_progress_runs": [
-      34335830135,
+      34416654126,
+      34416533010,
       34327540479
     ],
+    "older_ci": "34327540479 has four active advisory mutation shards20-23/24, started19:23-21:15 UTC; not a15-hour single stalled job. No cancellation performed.",
+    "runner_note": "Repository self-hosted runner list is empty; this does not measure GitHub-hosted capacity or organization runner reserve. Four active mutation jobs name GitHub Actions runners.",
     "evidence": [
-      "direct-4246/perf-admission/queued-runs.json",
-      "direct-4246/perf-admission/in-progress-runs.json"
+      "direct-6475/source-admission/actions-queued-2326.json",
+      "direct-6475/source-admission/actions-running-2326.json",
+      "direct-6475/source-admission/runners-2326.json",
+      "direct-6475/source-admission/older-main-jobs-2328.json"
     ]
   },
   "completed_lanes": {
@@ -1937,9 +1938,9 @@
     "issue_verified": "recovery-20260909/main-e534-operational/release-issue-verified.json"
   },
   "registry_latest_pause": {
-    "observed_at": "2026-09-09T21:57:58.639121+00:00",
     "enabled": false,
-    "evidence": "direct-6095/admission/registry-pause-2155.json"
+    "observed_at": "2026-09-09T23:24:58.003787+00:00",
+    "evidence": "direct-6475/source-admission/registry-pause-2322.json"
   },
   "waiting_lanes": {
     "6095": {

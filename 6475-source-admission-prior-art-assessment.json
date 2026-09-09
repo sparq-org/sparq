@@ -1,0 +1,58 @@
+{
+  "observed_at": "2026-09-09T23:24:58.003787+00:00",
+  "scope": "Read-only full issue/PR bodies for all states in three upstream repositories; title/body match review, plus complete comments on W3C211 and16. Not all comments/reviews/mail archives searched. No upstream public mutation. Web search returned irrelevant material and is not evidence.",
+  "files": {
+    "w3c-all-issues.json": {
+      "sha256": "c66aedbe1d0afd97bf0b2c0e785a82806fd98cfcd8481be63dfeaa2d29b7ffd1",
+      "bytes": 1016344,
+      "records": 229
+    },
+    "rust-all-issues.json": {
+      "sha256": "9f5c274ddb9838a9d76a2e94e7ab5f075b20dbd5795f38831ad6794143ea4b06",
+      "bytes": 83032,
+      "records": 24
+    },
+    "js-all-issues.json": {
+      "sha256": "cdf4c09bf44270d5e354141e606d95228d8edba20b06ab387096bfc5414dc888",
+      "bytes": 350165,
+      "records": 85
+    },
+    "w3c-211-comments.json": {
+      "sha256": "7f5d8586c7a5230657e0c6a0b0fc75b978ddad2fc40f2ee9948ca45789aa837c",
+      "bytes": 1726,
+      "records": 1
+    },
+    "w3c-16-comments.json": {
+      "sha256": "2ed785191c43978171c3a19e305194dc1da1873baa2709eedd56abb70f60001e",
+      "bytes": 3494,
+      "records": 2
+    }
+  },
+  "findings": [
+    {
+      "url": "https://github.com/w3c/rdf-canon/issues/211",
+      "finding": "Related step4.4.3(3) order concern, self-retracted in sole comment; no supplied fixed counterexample or accepted algorithm correction."
+    },
+    {
+      "url": "https://github.com/w3c/rdf-canon/issues/16",
+      "finding": "Optional duplicate-related-hash failure discussed; comments treated duplicates as input quad duplicates and closed. Not a demonstrated ambiguity fix or authority for blanket tie rejection."
+    },
+    {
+      "url": "https://github.com/w3c/rdf-canon/issues/125",
+      "finding": "General graph endpoint/multiplicity question extracted from111, not the exact counterexample."
+    },
+    {
+      "url": "https://github.com/w3c/rdf-canon/pull/230",
+      "finding": "Example hash copy/paste correction according to PR body, not a demonstrated algorithm change."
+    },
+    {
+      "url": "https://github.com/zkp-ld/rdf-canon/pull/9",
+      "finding": "HNDQ call limit introduced as poison-dataset countermeasure; defaults require source inspection."
+    },
+    {
+      "url": "https://github.com/digitalbazaar/rdf-canonize/issues/46",
+      "finding": "Existing fail-closed deep recursion design discussion; does not establish a correctness repair for currentpair."
+    }
+  ],
+  "conclusion": "No exact prior report identified in inspected bodies; novelty remains unestablished. No accepted standards erratum claimed."
+}
