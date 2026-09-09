@@ -1,0 +1,12 @@
+248: 2026-09-09T22:08:12.3373308Z attempt 40: 101 check-run(s), 29 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+249: 2026-09-09T22:08:13.5720249Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+250: 2026-09-09T22:08:13.5721383Z   workflow-run resolver: ignored 8 check-run(s) from superseded runs/attempts (#3505).
+251: 2026-09-09T22:08:13.5722527Z attempt 41: 101 check-run(s), 29 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+252: 2026-09-09T22:08:13.5725081Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 29 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+253: 2026-09-09T22:08:13.5727001Z - ✗ opt-in group (g20 sparq-vectors): failure
+254: 2026-09-09T22:08:13.5751453Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+255: 2026-09-09T22:08:13.5801376Z ##[error]Process completed with exit code 1.
+256: 2026-09-09T22:08:13.5937482Z Post job cleanup.
+257: 2026-09-09T22:08:13.6782553Z [command]/usr/bin/git version
+258: 2026-09-09T22:08:13.6833758Z git version 2.55.0
+259: 2026-09-09T22:08:13.6879678Z Temporarily overriding HOME='/home/runner/work/_temp/005095bf-fa6b-4415-b0d2-711c0e306d8b' before making global git config changes

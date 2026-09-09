@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-09T22:18:08.015184+00:00",
+  "manifest_files": 28,
+  "manifest_sha256": "1ef65eb20334c6934a82876cf712658c7bb383ac4f344107e4757da45ba46239",
+  "counterexample": "Original and renamed3quad datasets structurally inspected; mappingbijective acrossallpositions; two loggedcanonicalstringsdiffer",
+  "boundary": "CI exposedpathfailure established; no localreplayyet; bridgevsupstreamunlocalized",
+  "dedupe": "Two exact agentqueries0matches, root broaderqueryonlyunrelated5470",
+  "next": "Create scoped issue and begin bounded deterministic replay/localization; no lucky rerun or cancellation"
+}

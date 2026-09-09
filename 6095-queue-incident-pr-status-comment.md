@@ -1,0 +1,7 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The protected merge-group gate for `2adb86d91345deb51e95b11af4e2b5572343c236` failed, and this PR is currently out of the queue. The exact failure is now tracked in #6475: the `sparq-canon --features concept` leg failed its blank-node relabeling invariance property on a reduced three-quad dataset.
+
+[The failed matrix job](https://github.com/sparq-org/sparq/actions/runs/34409424033/job/102661090898) is displayed as the grouped `g20 sparq-vectors` job, but canonicalization is the failing fourth leg. [The required gate](https://github.com/sparq-org/sparq/actions/runs/34409423697/job/102660112366) confirmed that failure before failing fast. The failed Rust code and test are inherited from main; this merge-group's delta is only the two reviewed classifier files. The property uses a bijective rename across all blank-node positions, and its captured canonical strings differ. Bridge versus upstream canonicalizer remains to be localized.
+
+The counterexample, regression seed and failure evidence are preserved. A bounded deterministic replay for #6475 is underway in an isolated worktree. The current `review:changes` hold is retained. This PR's reviewed source is unchanged; I will not requeue it merely to obtain a lucky randomized pass or cancel its remaining live merge-group runs. Queue recovery will follow the diagnosed fix and fresh protected-check evidence.

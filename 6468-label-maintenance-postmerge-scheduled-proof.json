@@ -1,0 +1,20 @@
+{
+  "verified_at": "2026-09-09T22:12:34.018648+00:00",
+  "run": 34409971933,
+  "event": "schedule",
+  "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "created_at": "2026-09-09T22:00:34Z",
+  "conclusion": "success",
+  "classifier_suite_tests": 45,
+  "embedded_tests": "SELF-TEST PASSED",
+  "actual_applied": 150,
+  "classified": 1098,
+  "deferred": 948,
+  "unattributed": 415,
+  "scanned": 1513,
+  "generator_issue_5016": "Still correctly planned and DEFERRED by the150/run write budget",
+  "generator_label_current_recipients": 0,
+  "deferred_receipt": "clear the needs:area park\tClassify the needs:area backlog\t2026-09-09T22:01:18.7597981Z    DEFERRED #5016 sparq-wrapper-gen sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)",
+  "logs_sha256": "83096ccbadf714d2764755be1bb10842bee0fb4d66f6e5b64bf11fd3e0096e8c",
+  "limitation": "Source-merge scheduled recovery proven; eventual generator-label application not yet observed. No manual trigger or additional label creation."
+}

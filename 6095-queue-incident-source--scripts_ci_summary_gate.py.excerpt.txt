@@ -1,0 +1,57 @@
+1960:             not reporter_grace_started
+1961:             and attempt == cfg.max_total_polls
+1962:             and reporter_grace_eligible
+1963:         ):
+1964:             reporter_grace_started = True
+1965:             poll_limit = cfg.max_total_polls + cfg.reporter_grace_polls
+1966:             print(
+1967:                 "::notice::ci-summary ordinary poll cap reached after every "
+1968:                 "non-reporter sibling became terminal, but the structurally required "
+1969:                 "current feature-matrix report is unresolved or has not completed "
+1970:                 "the normal settle window. Granting one "
+1971:                 f"bounded reporter-only grace of {cfg.reporter_grace_polls} poll(s) "
+1972:                 f"at the normal {cfg.interval}s cadence (#6299); it cannot re-arm or "
+1973:                 "extend an ordinary pending sibling, and expiry remains fail-closed."
+1974:             )
+1975: 
+1976:         # [FABLE-5] FAIL-FAST (header §FAIL-FAST): a concluded gating failure in
+1977:         # the (already forgiveness-filtered) sibling set decides the verdict now
+1978:         # — a genuine `failure` in the authoritative newest run is never forgiven,
+1979:         # so every later render REDs
+1980:         # anyway; waiting out the remaining legs only delays the red and the
+1981:         # fast-fix trigger behind it. Applies only while siblings are still
+1982:         # outstanding (pending / awaiting_full): an all-terminal set renders via
+1983:         # the normal settle path below, byte-identical to before. The first
+1984:         # observation arms a grace re-poll (immediate, no sleep — dodges an API
+1985:         # read race); the red fires when a fresh fetch re-observes the same set.
+1986:         # awaiting_report is included so a real failing leg still fails FAST while
+1987:         # the gate is (correctly) holding for the reporter verdict.
+1988:         if pending or awaiting_full or awaiting_report:
+1989:             ff = failfast_failures(runs)
+1990:             if ff:
+1991:                 key = tuple(sorted((r.get("name", ""), r.get("id") or 0) for r in ff))
+1992:                 if key == ff_suspect:
+1993:                     _emit(
+1994:                         f"### ci-summary: FAILED (fail-fast) — {len(ff)} gating "
+1995:                         f"check(s) concluded failure while {pending} sibling(s) "
+1996:                         f"were still running; no later state can turn this verdict "
+1997:                         f"green (a newest-run failure is never forgiven), so the gate "
+1998:                         f"REDs now instead of waiting out the remaining legs.",
+1999:                         cfg.summary_path,
+2000:                     )
+2001:                     for r in ff:
+2002:                         _emit(f"- ✗ {r.get('name')}: failure", cfg.summary_path)
+2003:                     print(
+2004:                         "::error::ci-summary failed fast — a gating check concluded "
+2005:                         "failure; the remaining siblings were not waited on."
+2006:                     )
+2007:                     return 1
+2008:                 ff_suspect = key
+2009:                 print(
+2010:                     f"  fail-fast: {len(ff)} concluded gating failure(s) observed — "
+2011:                     f"immediate grace re-poll to confirm before concluding."
+2012:                 )
+2013:                 continue  # no sleep: the grace re-poll is deliberately immediate
+2014:             ff_suspect = None
+2015: 
+2016:         # [OPUS-5] #3781 — UNSATISFIABLE HOLD: detect it, do not wait it out.

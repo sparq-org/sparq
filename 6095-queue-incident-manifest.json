@@ -1,0 +1,146 @@
+{
+  "created_at": "2026-09-09T22:15:42.192623+00:00",
+  "head": "2adb86d91345deb51e95b11af4e2b5572343c236",
+  "files": [
+    {
+      "path": "budget.json",
+      "bytes": 299,
+      "sha256": "33c76c681c344d82feedb9bcf9ef165edff39965d05cd5cf7de5ed3cde113cb7"
+    },
+    {
+      "path": "ci-jobs.json",
+      "bytes": 92042,
+      "sha256": "bc8a3e29ec0831d521f0d0deb992eddcd6101e452e307a9f8da4d7018fbb1c59"
+    },
+    {
+      "path": "ci-run.json",
+      "bytes": 12503,
+      "sha256": "7e69fc1b831789625d097a3fac2b9d4c7b53901b7ee7c8c07ecfadad8994294c"
+    },
+    {
+      "path": "counterexample.json",
+      "bytes": 1227,
+      "sha256": "2f0eb8333bb978ae600ff70e9b7914d607a5df1194dc6848a6230310a0953ef0"
+    },
+    {
+      "path": "dedupe-canon.json",
+      "bytes": 79,
+      "sha256": "c9938edecb99d754b2d039ac9eec320a94c769b6a6417921e2dcbef9e2fe01a0"
+    },
+    {
+      "path": "dedupe-exact.json",
+      "bytes": 79,
+      "sha256": "c9938edecb99d754b2d039ac9eec320a94c769b6a6417921e2dcbef9e2fe01a0"
+    },
+    {
+      "path": "gate-job102660112366-excerpts.txt",
+      "bytes": 1521,
+      "sha256": "4d3dd6ed45388d844f7d75bf009268524fca1ad86d90498286bf9cdaafb9524e"
+    },
+    {
+      "path": "gate-job102660112366.log",
+      "bytes": 27834,
+      "sha256": "5501070ded14698dc2e1f23e5fe2080bda6b86ab3e57a024640da176922e2237"
+    },
+    {
+      "path": "gate-jobs.json",
+      "bytes": 1852,
+      "sha256": "e7126794414f805e3ce777a3671509237c48cb70d0535d6b040ef37629b04ac2"
+    },
+    {
+      "path": "gate-run.json",
+      "bytes": 12291,
+      "sha256": "a8b15ded1650e4edb2d9ed01f54f954eaa8ec1804cbbdd1b0ed31606e33e08b5"
+    },
+    {
+      "path": "matrix-jobs.json",
+      "bytes": 147648,
+      "sha256": "1653fa79c426050970fc8a8fb7c10d9b5db1053a460d41fe6c723b3e20ba10d8"
+    },
+    {
+      "path": "matrix-run.json",
+      "bytes": 12534,
+      "sha256": "43a0b7cee3f146e5e939742a20c14a2dff496e03227fce7d5eb240b894d57f97"
+    },
+    {
+      "path": "merge-comparison.json",
+      "bytes": 27765,
+      "sha256": "74bf95efbc95ef214809884a07a792cb29703e742b08ac512041e1b688446297"
+    },
+    {
+      "path": "original.nq",
+      "bytes": 88,
+      "sha256": "f23eb429d2cc47c596456d0c1d9af7fca7ca6aeaaebac7bdead2a572acf145de"
+    },
+    {
+      "path": "renamed.nq",
+      "bytes": 96,
+      "sha256": "98859014a42429bcd583401d605d77f8878daf0ec25f5d10d767bccaeec431b5"
+    },
+    {
+      "path": "report.json",
+      "bytes": 4699,
+      "sha256": "b2402bffbbbe77fb0d3763acc0318213058e9848f65ca32b1bf7d020ce6bfb97"
+    },
+    {
+      "path": "seed.txt",
+      "bytes": 68,
+      "sha256": "e80e275d817897d406d08b8e359f9a8510bba554c14d977e0534137bc5423fcf"
+    },
+    {
+      "path": "source/.github/feature-matrix.d/sparq-canon.yml",
+      "bytes": 1936,
+      "sha256": "1cf1343f46c2806b4b0400fc0563575595f2bf5777282270c022b5a5700afce7"
+    },
+    {
+      "path": "source/.github/workflows/feature-matrix.yml",
+      "bytes": 77840,
+      "sha256": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d"
+    },
+    {
+      "path": "source/Cargo.lock.excerpt.txt",
+      "bytes": 395,
+      "sha256": "16ba4f9d66f97fcd53c559bbb1a384a64f70241cee9ca6355481b9f347953f0a"
+    },
+    {
+      "path": "source/crates/sparq-canon/Cargo.toml",
+      "bytes": 5684,
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7"
+    },
+    {
+      "path": "source/crates/sparq-canon/src/lib.rs",
+      "bytes": 43172,
+      "sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55"
+    },
+    {
+      "path": "source/crates/sparq-canon/tests/proptest_canon_determinism.rs",
+      "bytes": 25933,
+      "sha256": "64787c32306bbf81f97c9753f35a2d18ad43aa5bb81b37a8863ac04f67ac4011"
+    },
+    {
+      "path": "source/rust-toolchain.toml",
+      "bytes": 10596,
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    },
+    {
+      "path": "source/scripts/run-feature-matrix-group.py",
+      "bytes": 32705,
+      "sha256": "9e02f873b46ec75c6e2e55f22d37d14387df92161117cc5a849fceb1daa4321f"
+    },
+    {
+      "path": "source/scripts_ci_summary_gate.py.excerpt.txt",
+      "bytes": 3645,
+      "sha256": "97799a3bee14f2f35f0cad4756d58f9be345f50f6189f38c14e1590be1f5ef50"
+    },
+    {
+      "path": "vectors-job102661090898-excerpts.txt",
+      "bytes": 8572,
+      "sha256": "a815807f2659abf57b5f30cb9f3f37ec127d25090950d193d1f01fe88212b0a0"
+    },
+    {
+      "path": "vectors-job102661090898.log",
+      "bytes": 227684,
+      "sha256": "85669f25d51417b72e90f799b53bfc199e2634610ba2b0ff4dfe0fbc6d575d97"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+2684: 2026-09-09T22:07:43.9582214Z 
+2685: 2026-09-09T22:07:43.9582691Z      Running tests/fuzz_seed_dedup.rs (target/debug/deps/fuzz_seed_dedup-22b9c87f2fb68f7b)
+2686: 2026-09-09T22:07:43.9590413Z 
+2687: 2026-09-09T22:07:43.9590579Z running 1 test
+2688: 2026-09-09T22:07:43.9598055Z test duplicate_quad_reproducer_preserves_distinct_count ... ok
+2689: 2026-09-09T22:07:43.9598554Z 
+2690: 2026-09-09T22:07:43.9598982Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2691: 2026-09-09T22:07:43.9599579Z 
+2692: 2026-09-09T22:07:43.9600508Z      Running tests/proptest_canon_determinism.rs (target/debug/deps/proptest_canon_determinism-fc93f7470db15125)
+2693: 2026-09-09T22:07:43.9609743Z 
+2694: 2026-09-09T22:07:43.9609919Z running 9 tests
+2695: 2026-09-09T22:07:44.0243038Z test generator_produces_the_claimed_structures ... ok
+2696: 2026-09-09T22:07:44.0324376Z test idempotence_unit ... ok
+2697: 2026-09-09T22:07:44.0324919Z test issued_map_agreement_unit ... ok
+2698: 2026-09-09T22:07:44.6455048Z test canonical_output_invariant_under_bnode_relabeling ... FAILED
+2699: 2026-09-09T22:07:44.6514540Z test non_isomorphic_datasets_differ_unit ... ok
+2700: 2026-09-09T22:07:44.6544651Z test symmetric_cycle_relabeling_unit ... ok
+2701: 2026-09-09T22:07:44.7689680Z test canonical_output_invariant_under_quad_permutation ... ok
+2702: 2026-09-09T22:07:44.7847195Z test canonicalization_is_idempotent ... ok
+2703: 2026-09-09T22:07:45.6915182Z test issued_map_agrees_with_canonical_output ... ok
+2704: 2026-09-09T22:07:45.6915616Z 
+2705: 2026-09-09T22:07:45.6915738Z failures:
+2706: 2026-09-09T22:07:45.6915918Z 
+2707: 2026-09-09T22:07:45.6916206Z ---- canonical_output_invariant_under_bnode_relabeling stdout ----
+2708: 2026-09-09T22:07:45.6917084Z proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+2709: 2026-09-09T22:07:45.6918098Z proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+2710: 2026-09-09T22:07:45.6919441Z proptest: Saving this and future failures in /home/runner/work/sparq/sparq/crates/sparq-canon/tests/proptest_canon_determinism.proptest-regressions
+2711: 2026-09-09T22:07:45.6921102Z proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file. (You may need to create it.)
+2712: 2026-09-09T22:07:45.6922310Z cc 14c0b82fcdfee2504e7e213e7c440c3f891a8ba23ad553051fd08ab226c0cf2a
+2713: 2026-09-09T22:07:45.6922820Z 
+2714: 2026-09-09T22:07:45.6923551Z thread 'canonical_output_invariant_under_bnode_relabeling' (9652) panicked at crates/sparq-canon/tests/proptest_canon_determinism.rs:361:1:
+2715: 2026-09-09T22:07:45.6924824Z Test failed: assertion failed: `(left == right)` 
+2716: 2026-09-09T22:07:45.6925764Z   left: `"_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"`, 
+2717: 2026-09-09T22:07:45.6927331Z  right: `"_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"`: canonical output must not depend on input blank-node labels
+2718: 2026-09-09T22:07:45.6930407Z spec: [QuadSpec { subject: Bnode(4), predicate: 1, object: Bnode(2), graph: Bnode(3) }, QuadSpec { subject: Bnode(4), predicate: 0, object: Bnode(0), graph: Default }, QuadSpec { subject: Bnode(0), predicate: 1, object: Bnode(3), graph: Bnode(2) }] at crates/sparq-canon/tests/proptest_canon_determinism.rs:379.
+2719: 2026-09-09T22:07:45.6932391Z minimal failing input: spec = [
+2720: 2026-09-09T22:07:45.6932810Z     QuadSpec {
+2721: 2026-09-09T22:07:45.6933127Z         subject: Bnode(
+2722: 2026-09-09T22:07:45.6933472Z             4,
+2723: 2026-09-09T22:07:45.6933662Z         ),
+2724: 2026-09-09T22:07:45.6934103Z         predicate: 1,
+2725: 2026-09-09T22:07:45.6934329Z         object: Bnode(
+2726: 2026-09-09T22:07:45.6934528Z             2,
+2727: 2026-09-09T22:07:45.6934707Z         ),
+2728: 2026-09-09T22:07:45.6934885Z         graph: Bnode(
+2729: 2026-09-09T22:07:45.6935097Z             3,
+2730: 2026-09-09T22:07:45.6935277Z         ),
+2731: 2026-09-09T22:07:45.6935445Z     },
+2732: 2026-09-09T22:07:45.6935621Z     QuadSpec {
+2733: 2026-09-09T22:07:45.6935811Z         subject: Bnode(
+2734: 2026-09-09T22:07:45.6936188Z             4,
+2735: 2026-09-09T22:07:45.6936488Z         ),
+2736: 2026-09-09T22:07:45.6936786Z         predicate: 0,
+2737: 2026-09-09T22:07:45.6937633Z error: test failed, to rerun pass `-p sparq-canon --test proptest_canon_determinism`
+2738: 2026-09-09T22:07:45.6938098Z         object: Bnode(
+2739: 2026-09-09T22:07:45.6938304Z             0,
+2740: 2026-09-09T22:07:45.6938488Z         ),
+2741: 2026-09-09T22:07:45.6938671Z         graph: Default,
+2742: 2026-09-09T22:07:45.6938870Z     },
+2743: 2026-09-09T22:07:45.6939047Z     QuadSpec {
+2744: 2026-09-09T22:07:45.6939235Z         subject: Bnode(
+2745: 2026-09-09T22:07:45.6939432Z             0,
+2746: 2026-09-09T22:07:45.6939605Z         ),
+2747: 2026-09-09T22:07:45.6939782Z         predicate: 1,
+2748: 2026-09-09T22:07:45.6939983Z         object: Bnode(
+2749: 2026-09-09T22:07:45.6940174Z             3,
+2750: 2026-09-09T22:07:45.6940352Z         ),
+2751: 2026-09-09T22:07:45.6940542Z         graph: Bnode(
+2752: 2026-09-09T22:07:45.6940730Z             2,
+2753: 2026-09-09T22:07:45.6940899Z         ),
+2754: 2026-09-09T22:07:45.6941062Z     },
+2755: 2026-09-09T22:07:45.6941233Z ], perm = [
+2756: 2026-09-09T22:07:45.6941403Z     0,
+2757: 2026-09-09T22:07:45.6941564Z     1,
+2758: 2026-09-09T22:07:45.6941729Z     4,
+2759: 2026-09-09T22:07:45.6941888Z     3,
+2760: 2026-09-09T22:07:45.6942051Z     5,
+2761: 2026-09-09T22:07:45.6942217Z     2,
+2762: 2026-09-09T22:07:45.6942385Z ]
+2763: 2026-09-09T22:07:45.6942563Z 	successes: 211
+2764: 2026-09-09T22:07:45.6942756Z 	local rejects: 0
+2765: 2026-09-09T22:07:45.6943133Z 	global rejects: 0
+2766: 2026-09-09T22:07:45.6943250Z 
+2767: 2026-09-09T22:07:45.6943333Z stack backtrace:
+2768: 2026-09-09T22:07:45.6943545Z    0: __rustc::rust_begin_unwind
+2769: 2026-09-09T22:07:45.6944216Z              at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:689:5
+2770: 2026-09-09T22:07:45.6944694Z    1: core::panicking::panic_fmt
+2771: 2026-09-09T22:07:45.6945121Z              at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/panicking.rs:80:14
+2772: 2026-09-09T22:07:45.6945724Z    2: proptest_canon_determinism::canonical_output_invariant_under_bnode_relabeling
+2773: 2026-09-09T22:07:45.6946367Z              at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/sugar.rs:163:17
+2774: 2026-09-09T22:07:45.6947047Z    3: proptest_canon_determinism::canonical_output_invariant_under_bnode_relabeling::{closure#0}
+2775: 2026-09-09T22:07:45.6947724Z              at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/sugar.rs:159:28
+2776: 2026-09-09T22:07:45.6948589Z    4: <proptest_canon_determinism::canonical_output_invariant_under_bnode_relabeling::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+2777: 2026-09-09T22:07:45.6949395Z              at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+2778: 2026-09-09T22:07:45.6950049Z    5: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+2779: 2026-09-09T22:07:45.6950681Z              at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+2780: 2026-09-09T22:07:45.6951274Z note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+2781: 2026-09-09T22:07:45.6951597Z 
+2782: 2026-09-09T22:07:45.6951606Z 
+2783: 2026-09-09T22:07:45.6951680Z failures:
+2784: 2026-09-09T22:07:45.6951911Z     canonical_output_invariant_under_bnode_relabeling
+2785: 2026-09-09T22:07:45.6952133Z 
+2786: 2026-09-09T22:07:45.6952511Z test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+2787: 2026-09-09T22:07:45.6952880Z 
+2788: 2026-09-09T22:07:45.7024360Z ##[endgroup]
+2789: 2026-09-09T22:07:45.7051004Z ##[error]opt-in sparq-canon (concept — content-addressed record envelope + recompute guard): FAILED at test (continuing with the group's remaining legs)
+2790: 2026-09-09T22:07:45.7060818Z ##[error]1 of 4 leg(s) failed: opt-in sparq-canon (concept — content-addressed record envelope + recompute guard)
+2791: 2026-09-09T22:07:45.7082400Z ##[error]Process completed with exit code 1.

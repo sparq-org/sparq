@@ -1,0 +1,13 @@
+4150: name = "rdf-canon"
+4151: version = "0.15.3"
+4152: source = "registry+https://github.com/rust-lang/crates.io-index"
+4153: checksum = "6783be73f4fa73010f249412ad8f0bb1ac9cdb22b2310bf20a967d80d5906dd0"
+4154: dependencies = [
+4155:  "base16ct",
+4156:  "digest 0.10.7",
+4157:  "itertools 0.14.0",
+4158:  "oxrdf 0.2.4",
+4159:  "sha2 0.10.9",
+4160:  "thiserror 2.0.18",
+4161:  "tracing",
+4162: ]

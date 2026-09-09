@@ -310,6 +310,14 @@ for evidence_name in ['pr-progress-2145.json', 'pr-runs-2145.json', 'full-docs-q
 for evidence_name in ['advisory-excerpts.txt', 'batch-failed-job-excerpts.txt', 'batch-failed-job.log', 'batch-jobs.json', 'batch-run.json', 'budget.json', 'issue3337.json', 'issue3399.json', 'main-delta-files.txt', 'release-dedupe.json', 'release-failed-job-excerpts.txt', 'release-failed-job.log', 'release-jobs.json', 'release-run.json', 'report.json', 'ring-dedupe.json', 'source/.github/advisory-registry.json', 'source/.github/workflows/batch-merge.yml', 'source/.github/workflows/release-plz.yml', 'source/crates/sparq-engine/Cargo.toml', 'source/crates/sparq-introspect/Cargo.toml', 'source/release-plz.toml', 'manifest.json', 'root-release-dedupe.json', 'root-verification.json', 'release-packaging-issue.md', 'release-issue-url.txt', 'release-issue-verified.json']:
     FILES["main-e534-operational-" + evidence_name.replace("/", "--")] = ROOT / "recovery-20260909/main-e534-operational" / evidence_name
 
+# PR6095 canonicalization incident and issue6475 replay handoff.
+for evidence_name in ['budget.json', 'ci-jobs.json', 'ci-run.json', 'counterexample.json', 'dedupe-canon.json', 'dedupe-exact.json', 'gate-job102660112366-excerpts.txt', 'gate-job102660112366.log', 'gate-jobs.json', 'gate-run.json', 'matrix-jobs.json', 'matrix-run.json', 'merge-comparison.json', 'original.nq', 'renamed.nq', 'report.json', 'seed.txt', 'source/.github/feature-matrix.d/sparq-canon.yml', 'source/.github/workflows/feature-matrix.yml', 'source/Cargo.lock.excerpt.txt', 'source/crates/sparq-canon/Cargo.toml', 'source/crates/sparq-canon/src/lib.rs', 'source/crates/sparq-canon/tests/proptest_canon_determinism.rs', 'source/rust-toolchain.toml', 'source/scripts/run-feature-matrix-group.py', 'source/scripts_ci_summary_gate.py.excerpt.txt', 'vectors-job102661090898-excerpts.txt', 'vectors-job102661090898.log', 'manifest.json', 'root-dedupe.json', 'canonicalization-issue.md', 'root-verification.json', 'issue-url.txt', 'issue-verified.json', 'pr-before-status-comment.json', 'pr-status-comment.md', 'pr-status-comment-url.txt', 'pr-status-comment-verified.json']:
+    FILES["6095-queue-incident-" + evidence_name.replace("/", "--")] = ROOT / "direct-6095/queue-incident" / evidence_name
+for evidence_name in ["queue-state-2209.json", "queue-runs-2209.json"]:
+    FILES["6095-admission-" + evidence_name] = ROOT / "direct-6095/admission" / evidence_name
+for evidence_name in ["scheduled-runs-2209.json", "postmerge-scheduled-34409971933.log", "generator-label-recipients-2211.json", "postmerge-scheduled-proof.json"]:
+    FILES["6468-label-maintenance-" + evidence_name] = ROOT / "direct-6468/label-maintenance" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
