@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-08T19:25:17.637992+00:00",
+  "updated_at": "2026-09-09T02:06:57.622869+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -43,8 +43,8 @@
     ]
   },
   "live_main": {
-    "oid": "cf19a52c6880c496cefaca24046174902bc30958",
-    "observed_at": "2026-09-08T19:25:17.637992+00:00"
+    "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+    "observed_at": "2026-09-09T02:06:57.622869+00:00"
   },
   "rules": {
     "required_check": "gate",
@@ -59,123 +59,21 @@
     "agent": "/root/postmerge_ci",
     "model": "GPT-6 Astra",
     "effort": "xhigh",
-    "pr": 5983,
-    "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
-    "branch": "codex/perf-topk-leading-tie-reject",
-    "main": "cf19a52c6880c496cefaca24046174902bc30958",
-    "state": "Read-only option-C design and scheduled-sweeper effect evidence collected and root manifest verified. Same Astra xhigh agent now authorized ONE lazy per-pattern preparation experiment from dc23141d8 on new isolated branch. Focused semantic/work controls first, then original8 plus predeclared6 modest/intermittent points. Stop top-k admission work if material regressions remain; no further iteration without root evaluation.",
-    "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
-    "contract": "Prepare each probe once on first demand inside existing indexed walk. Preserve pattern order, all eligibility checks, cap/block/failure state and complete ties; conservative fallback for unproved cases. No thresholds, new storage API or join framework. Meaningful eager-preparation negative control, then identical extended harness across comparison sources;14predeclaredpoints, one sequential measurement lane/two build jobs/Rayon1/15minoptimizedbuildcap. No sweep/noisehunting/networkinstall/fullworkspace/EC2/newmodel/remote mutations. Commit/freeze combined review evidence; stop and report NO-GO if drained/favorable/modest/intermittent costs remain material.",
-    "phase": "One bounded lazy-preparation experiment",
-    "feasibility_report": "direct-5983/feasibility.json",
-    "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
-    "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
-    "scope": "Keep PreparedGraphApplier, txn helpers, public API and dependency changes out. Preserve main bind_join and historical Luke Dary/Sonnet5 contribution provenance. New Astra repairs remain honestly attributed.",
-    "cache": "Warm task-local implementation/target only, two jobs; shared target writes forbidden.",
-    "issue": 6465,
-    "source_pr": 5983,
-    "source_head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
-    "stage1_head": "803bb795201782551d984221a48b32ed391f7d9c",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-early-tie",
-    "stage1_report": "direct-5983/implementation/report.json",
-    "stage1_report_sha256": "376dd157cb77c8ddd19a172dad52f4532577ee704bc9b063087ca07841c1a781",
-    "stage1_validation": "Raw T1 paired tests1pass1fail; exact-main fallback2pass; raw max_rows regression1failure. Repaired focused19pass +existing17pass. Six calibrated controls all killed, no survivors/harness errors. Root verified24-file evidence manifest and clean803 before next stage.",
-    "stage1_limits": "Raw resource test stopped at max_rows; no claim that later raw byte-limit assertions ran. No speed measurement, full gate, conformance or actual independent review yet.",
-    "findings_comment": "https://github.com/sparq-org/sparq/pull/5983#issuecomment-5582162691",
-    "semantic_report": "direct-5983/semantic/report.json",
-    "semantic_validation": "26 focused tests pass in default/no-default/compact-index;25 additional passes;1 pre-existing ignored microbenchmark. Eight controls all killed with26tests each,0 survivors/errors. Final default26pass after comment-only change. No performance/full conformance/full gate claimed.",
-    "review_runtime": {
-      "session_id": 66012,
-      "kind": "exec_command",
-      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/review-packet.md",
-      "input_sha256": "ef7b0dc4d5bd22642aa673516bdb40a33b83e8049f2447364d617bf96de18458",
-      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/opus-review-9e8bdfc9.json",
-      "completed": true,
-      "started_at": "2026-09-08T09:16:50.726933+00:00",
-      "acceptance": "Require complete successful JSON, is_error=false and actual modelUsage claude-opus-5. Never launch a duplicate or retry exhausted quota.",
-      "collected_at": "2026-09-08T09:36:56.406177+00:00",
-      "output_sha256": "29e8a23b693282065d40afaece8f9cd14cc2188639e286c198a1db88561975cb",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 492938
-    },
-    "review_verdict": "Only baseline9e8bdfc9 cleared for measurement by actual Opus5 xhigh. Current dc23141d8 repair is not independently reviewed; no admission approval.",
-    "review_findings": {
-      "F1": "Measure all retained scans plus global per-probe subject vectors under fork overlays/tombstones: full-query latency, allocation counts/bytes and peak memory. Linear setup/fallback costs may negate gain.",
-      "F2": "Measure drained prefix and oversized tie groups causing expensive fallback after attempted work.",
-      "F3": "Public tie-order/pagination documentation before admission; no stable tie order guaranteed.",
-      "F4": "Explicit execution trace instead of absence-of-BGP inference before admission.",
-      "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
-    },
-    "benchmark_status": {
-      "observed_at": "2026-09-08T10:19:15.933818+00:00",
-      "agent_report": "Completed original bounded diagnostic: six binaries built within original cap;296 measured queries passed oracle. Root verified139-file evidence manifest and clean provenance. Current9e8bdfc9 NO-GO; preserved unmodified for paired repair comparison.",
-      "harness_commit": "87179e16487e770de4b4c45ed4be008308c47450",
-      "build_start": {
-        "started_unix": 1788860716.937938,
-        "budget_seconds": 900
-      },
-      "evidence_directory": "direct-5983/diagnostic",
-      "pending": null,
-      "summary_sha256_observed": "a4819e42cb13d45d7edda75cb53af31da85bf7fa46b876802181f4250d5ef1f2",
-      "limitations": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer. getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
-      "verified": true,
-      "manifest_entries": 139,
-      "root_verification": "direct-5983/diagnostic/root-verification.json",
-      "report": "direct-5983/diagnostic/report.json",
-      "report_sha256": "3435d2c1d8e005bfb5cd449703d3c7ccecfc84038c04cf3e9170a62b53f9800c",
-      "decision": "NO_GO for admission of the current candidate; GO only for one focused decline-cost repair followed by this same matrix",
-      "total_measured_queries": 296,
-      "oracle": "All measured subject vectors matched generated total-order oracle; separate path checks passed.",
-      "limits": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer. getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
-      "finding_comment": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275",
-      "confirmation": [
-        {
-          "case": "drained",
-          "candidate_over_disabled": 1.3330252431891876,
-          "ranges_disjoint": true
-        },
-        {
-          "case": "drained-overlay",
-          "candidate_over_disabled": 1.4800763064434297,
-          "ranges_disjoint": true
-        },
-        {
-          "case": "ties",
-          "candidate_over_disabled": 1.228757025299843,
-          "ranges_disjoint": true
-        },
-        {
-          "case": "ties-overlay",
-          "candidate_over_disabled": 1.3933783518882783,
-          "ranges_disjoint": true
-        }
-      ]
-    },
-    "reviewed_baseline_head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
-    "early_tie_status": {
-      "observed_at": "2026-09-08T10:53:28.849474+00:00",
-      "agent_report": "Runtime2files+78/-7 clean; optimized builds57sec. Old/disabled/main binaries unchanged. No further runtime edits or broad measurement planned. Finishing allocation-saving control and frozen paired report.",
-      "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
-      "evidence_directory": "direct-5983/early-tie",
-      "final_report_pending": false,
-      "root_manifest_verified": true,
-      "manifest_entries": 153,
-      "report": "direct-5983/early-tie/report.json",
-      "report_sha256": "3a1c55e1078c679b3294c64961a3f06eef73551efee55b36a6077374a350c778",
-      "packet": "direct-5983/early-tie/review-packet.md",
-      "packet_sha256": "0c9c0f99d646ac99051a7d74f3c650e2c2c99ec7cdfb3f892a307dd00a0d7b6a",
-      "decision": "Repair has measured allocation benefit; full candidate remains NO_GO for admission",
-      "effect": "Compiled early-guard-disabled control reproduces old allocations exactly and fails both allocation-saving assertions. Avoids1200846requestedbytes/37allocations base ties and4560846/43overlay. Favorable allocation metrics and peak query heap unchanged. Tie latency noisy; drained overhead remains.",
-      "validation": "46 focused default passes;29 compact-index passes.102processes/329measuredsamples passed correctness checks including allocation controls. Root verified all153 manifest entries and clean dc source.",
-      "limitation": "Local diagnostic only; cumulative RSS and requested-heap limits unchanged. No independent Opus review of dc23141d8 repair yet, no full workspace/conformance gate."
-    },
-    "drained_design": {
-      "report": "direct-5983/drained-design/report.json",
-      "report_sha256": "e5d6a94d2b094f240910a909ec5affd537c0cd4990add4eb56ce06dae95dbe79",
-      "manifest_entries_verified": 4,
-      "selected_option": "C: lazy per-pattern preparation",
-      "limits": "Source-supported allocation-timing experiment, not proven solution. Near-half fixture does16384constant-probe checks before block-width rejection. Generic scans repeat all-tombstone correction; exact contains compressed lookups decode/allocate. No new cutoff or storage API justified."
-    }
+    "issue": 4246,
+    "pr": null,
+    "head": null,
+    "branch": null,
+    "worktree": null,
+    "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+    "state": "Same Astra agent assigned existing issue4246 on a fresh isolated current-main worktree. Verify current premise and measure baseline before production change, then minimal lazy sorted deleted-projection cache if reproduced; no dormant top-k code.",
+    "phase": "Measure-first ordinary SPARQL overlay counting recovery",
+    "contract": "Follow repo/Rustskills. Retain deleted hashset; lazily prepare only requested permutation caches. Correct invalidation for apply_delta/delete-reinsert/clones/forks/snapshots/concurrentreads. Scoped semantic and cache-use/invalidation negativecontrols; bounded cold/warm scan and ordinarySPARQL paired measurements plus addedmemory. One sequential optimized lane/twojobs/warmprivatetarget/15minbuildcap. No wider storage/publicAPIrewrite/fullworkspaceyet/networkinstalls/EC2/remote mutations/newagents/models. Freeze source/caller/cache/mutation context for actual Opusreview beforePRadmission.",
+    "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
+    "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
+    "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
+    "dedupe_file": "overlay-cost-dedupe.json",
+    "issue_source_file": "overlay4246-read.json",
+    "scope_guard": "Agent must confirm on fresh main that premise remains present before implementing; do not transplant stopped top-k experiment."
   },
   "prs": {
     "4300": {
@@ -418,7 +316,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-08T19:25:17.637992+00:00",
+    "observed_at": "2026-09-09T02:06:57.622869+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -462,11 +360,11 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci single option-C lazy-preparation experiment (source/tests/eager control +14predeclaredpoint evidence). No duplicate lane. If it fails the stated practical viability conditions, stop top-k admission and reprioritize.",
-    "If viable, address remaining F3-F5 and obtain actual Opus review of combined candidate/harness before required full validation/admission. Current baseline/early-tie candidates remain NO-GO; no review approval carries to new source.",
-    "Keep exact candidate/disabled/main original diagnostic binaries and rawdata unchanged. Any further measurement must answer a named unresolved question, not broaden/repeat the sweep without a source change.",
-    "Observe natural nightly final outcome and later sweeper evidence. First post-fix sweeper34213698157 actually skipped rearm and missed stuck-arm cycle on3built-in502 attempts;0claims/reruns, no production receipt query. Do not infer recovery health from green. Registry OFF/ALLGREEN/all holds/releases unchanged.",
-    "Keep checkpoint and confirmed evidence in private local Git recovery ref."
+    "Collect existing postmerge_ci issue4246 baseline/source/cache fix report and exact isolated worktree/head. Ensure freshmain premise holds and no top-k changes leak into newlane.",
+    "After concrete viable candidate/evidence, obtain actual Opus5xhigh independent whole-change review including cache invalidation/clone/read callers; resolve findings,requiredtests/Copilot and normal protected admission.",
+    "Top-k recovery is stopped atd08295b6; preserve all frozen original/control evidence. Final finding is public6465; do not restart it or spend more measurement/review tokens without a new task decision.",
+    "At a suitable agent break, bounded read-only triage of named scheduled alarm/triage failures and laternaturalnightly/sweeper effect. Originalnightlycancelled; no recovery writes proven by earliergreen sweeper. No manualprobes/retrystorms; registryOFF/ALLGREEN/holds/releasesunchanged.",
+    "Keep checkpoints and confirmed artifacts in existing private local Git recovery ref."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -482,9 +380,9 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4997,
-    "resetAt": "2026-09-08T20:20:21Z",
-    "observed_at": "2026-09-08T19:25:17.637992+00:00",
+    "remaining": 4989,
+    "resetAt": "2026-09-09T02:37:37Z",
+    "observed_at": "2026-09-09T02:06:57.622869+00:00",
     "exhausted": false
   },
   "actions_backlog": {
@@ -548,12 +446,12 @@
     "pr": 6464
   },
   "nightly_health": {
-    "observed_at": "2026-09-08T19:25:17.637992+00:00",
+    "observed_at": "2026-09-09T02:06:57.622869+00:00",
     "run": 34202612161,
     "main": "cf19a52c6880c496cefaca24046174902bc30958",
     "event": "schedule",
     "created_at": "2026-09-08T08:05:14Z",
-    "state": "in_progress",
+    "state": "completed",
     "freshness_job": 101984657840,
     "freshness_conclusion": "success",
     "actual_reason": "no prior same-head schedule; admit its first heavy attempt",
@@ -561,12 +459,14 @@
     "inventory": "45 created jobs returned in full at observation:29success,7skipped,9in_progress. Coverage nightly running and11 mutation jobs created so far. Do not mistake currently created matrix jobs for eventual full51-leg inventory.",
     "limits": "First natural admission proven; heavy completion/retry-after-incomplete behavior not yet proven. No manual dispatch or heavy measurement initiated by root.",
     "latest_run_status": {
-      "conclusion": null,
+      "conclusion": "cancelled",
       "head_sha": "cf19a52c6880c496cefaca24046174902bc30958",
       "id": 34202612161,
-      "status": "in_progress",
-      "updated_at": "2026-09-08T19:03:05Z"
-    }
+      "status": "completed",
+      "updated_at": "2026-09-09T00:12:19Z"
+    },
+    "outcome": "Originalfirstnaturalcf19nightly34202612161completedCANCELLED at2026-09-09T00:12:19Z. Actor/cause and completeheavyartifactinventory not inspected. Coordinator did not cancel/retry. Firstadmission was proven; fullheavycompletion remains unproven.",
+    "next": "Wait for ordinaryeligiblelater scheduled execution on currentmain; no manualdispatch/retry orreleaseauthorization."
   },
   "issues": {
     "6465": {
@@ -574,7 +474,15 @@
       "url": "https://github.com/sparq-org/sparq/issues/6465",
       "purpose": "Track executed T1/T2 regressions in unmerged PR5983 top-k and bounded recovery. Not a main regression claim.",
       "dedupe": "No repeated-variable hits; three budget hits inspected and unrelated. Original PR revalidated immediately before recording findings.",
-      "performance_finding": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275"
+      "performance_finding": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275",
+      "final_no_go_comment": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5594652872",
+      "decision": "Stopped recovery; unresolved originalcandidate bugs/performance/admission work not closed ormerged."
+    },
+    "4246": {
+      "state": "OPEN",
+      "url": "https://github.com/sparq-org/sparq/issues/4246",
+      "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
+      "purpose": "Existing deletion projection/counting performance issue selected after exact dedupe; no newduplicateissue."
     }
   },
   "usage_observation": {
@@ -583,5 +491,170 @@
     "spend_control_reached": false,
     "reset_credit_used": false,
     "limit_caveat": "Other missing windows are unavailable, not zero usage. No reset/purchase performed."
+  },
+  "completed_topk_lane": {
+    "agent": "/root/postmerge_ci",
+    "model": "GPT-6 Astra",
+    "effort": "xhigh",
+    "pr": 5983,
+    "head": "d08295b6c06ca6f6829de82a210708bab8e44a28",
+    "branch": "codex/perf-topk-lazy-probes",
+    "main": "cf19a52c6880c496cefaca24046174902bc30958",
+    "state": "STOPPED/NO-GO after final bounded lazy-preparation experiment. No further top-k implementation or measurement. Public final finding posted6465; source/data/binaries preserved. Later repairs not independently reviewed or admitted.",
+    "report_directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983",
+    "contract": "Prepare each probe once on first demand inside existing indexed walk. Preserve pattern order, all eligibility checks, cap/block/failure state and complete ties; conservative fallback for unproved cases. No thresholds, new storage API or join framework. Meaningful eager-preparation negative control, then identical extended harness across comparison sources;14predeclaredpoints, one sequential measurement lane/two build jobs/Rayon1/15minoptimizedbuildcap. No sweep/noisehunting/networkinstall/fullworkspace/EC2/newmodel/remote mutations. Commit/freeze combined review evidence; stop and report NO-GO if drained/favorable/modest/intermittent costs remain material.",
+    "phase": "Stopped after confirmed adverse costs",
+    "feasibility_report": "direct-5983/feasibility.json",
+    "feasibility_sha256": "b68ec233e4e6ea54c30778ba0a37699979b7cb5287821e2f63edf38f40c78af8",
+    "source_finding": "T1 repeated-variable wrong result and T2 intermediate max_rows bypass now executed on exact imported top-k delta. Main fallback handles T1 correctly. Repaired candidate declines repeated variables, active budgets and multi-valued probes.",
+    "scope": "Keep PreparedGraphApplier, txn helpers, public API and dependency changes out. Preserve main bind_join and historical Luke Dary/Sonnet5 contribution provenance. New Astra repairs remain honestly attributed.",
+    "cache": "Warm task-local implementation/target only, two jobs; shared target writes forbidden.",
+    "issue": 6465,
+    "source_pr": 5983,
+    "source_head": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+    "stage1_head": "803bb795201782551d984221a48b32ed391f7d9c",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes",
+    "stage1_report": "direct-5983/implementation/report.json",
+    "stage1_report_sha256": "376dd157cb77c8ddd19a172dad52f4532577ee704bc9b063087ca07841c1a781",
+    "stage1_validation": "Raw T1 paired tests1pass1fail; exact-main fallback2pass; raw max_rows regression1failure. Repaired focused19pass +existing17pass. Six calibrated controls all killed, no survivors/harness errors. Root verified24-file evidence manifest and clean803 before next stage.",
+    "stage1_limits": "Raw resource test stopped at max_rows; no claim that later raw byte-limit assertions ran. No speed measurement, full gate, conformance or actual independent review yet.",
+    "findings_comment": "https://github.com/sparq-org/sparq/pull/5983#issuecomment-5582162691",
+    "semantic_report": "direct-5983/semantic/report.json",
+    "semantic_validation": "26 focused tests pass in default/no-default/compact-index;25 additional passes;1 pre-existing ignored microbenchmark. Eight controls all killed with26tests each,0 survivors/errors. Final default26pass after comment-only change. No performance/full conformance/full gate claimed.",
+    "review_runtime": {
+      "session_id": 66012,
+      "kind": "exec_command",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/review-packet.md",
+      "input_sha256": "ef7b0dc4d5bd22642aa673516bdb40a33b83e8049f2447364d617bf96de18458",
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic/opus-review-9e8bdfc9.json",
+      "completed": true,
+      "started_at": "2026-09-08T09:16:50.726933+00:00",
+      "acceptance": "Require complete successful JSON, is_error=false and actual modelUsage claude-opus-5. Never launch a duplicate or retry exhausted quota.",
+      "collected_at": "2026-09-08T09:36:56.406177+00:00",
+      "output_sha256": "29e8a23b693282065d40afaece8f9cd14cc2188639e286c198a1db88561975cb",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 492938
+    },
+    "review_verdict": "Only baseline9e8bdfc9 cleared for measurement by actual Opus5 xhigh. Current dc23141d8 repair is not independently reviewed; no admission approval.",
+    "review_findings": {
+      "F1": "Measure all retained scans plus global per-probe subject vectors under fork overlays/tombstones: full-query latency, allocation counts/bytes and peak memory. Linear setup/fallback costs may negate gain.",
+      "F2": "Measure drained prefix and oversized tie groups causing expensive fallback after attempted work.",
+      "F3": "Public tie-order/pagination documentation before admission; no stable tie order guaranteed.",
+      "F4": "Explicit execution trace instead of absence-of-BGP inference before admission.",
+      "F5": "Pin actual engagement in tie/OFFSET/view/fork cases; add obj_const multi-match and Reduced coverage; provide quoted-triple helpers/modifier dispatcher/threshold source context."
+    },
+    "benchmark_status": {
+      "observed_at": "2026-09-08T10:19:15.933818+00:00",
+      "agent_report": "Completed original bounded diagnostic: six binaries built within original cap;296 measured queries passed oracle. Root verified139-file evidence manifest and clean provenance. Current9e8bdfc9 NO-GO; preserved unmodified for paired repair comparison.",
+      "harness_commit": "87179e16487e770de4b4c45ed4be008308c47450",
+      "build_start": {
+        "started_unix": 1788860716.937938,
+        "budget_seconds": 900
+      },
+      "evidence_directory": "direct-5983/diagnostic",
+      "pending": null,
+      "summary_sha256_observed": "a4819e42cb13d45d7edda75cb53af31da85bf7fa46b876802181f4250d5ef1f2",
+      "limitations": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer. getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
+      "verified": true,
+      "manifest_entries": 139,
+      "root_verification": "direct-5983/diagnostic/root-verification.json",
+      "report": "direct-5983/diagnostic/report.json",
+      "report_sha256": "3435d2c1d8e005bfb5cd449703d3c7ccecfc84038c04cf3e9170a62b53f9800c",
+      "decision": "NO_GO for admission of the current candidate; GO only for one focused decline-cost repair followed by this same matrix",
+      "total_measured_queries": 296,
+      "oracle": "All measured subject vectors matched generated total-order oracle; separate path checks passed.",
+      "limits": "Main and admission-disabled control medians differ by several percent in some points despite identical allocation metrics; binary/code layout and process/host variation are not disentangled. Primary attribution therefore uses the same-candidate disabled control, with main retained as a separate measured baseline. Reverse-order adverse confirmation still has disjoint ranges; do not ascribe every main/disabled timing delta to the optimizer. getrusage RUSAGE_SELF reports cumulative process peak RSS (Darwin bytes). Setup, pre-query after warmup, and post-query values are separate fields. Setup/warmup can dominate later peaks; a zero later increase is not zero query memory. The pre-query difference includes warmup, result checking and output; it is not an isolated query peak.",
+      "finding_comment": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5583577275",
+      "confirmation": [
+        {
+          "case": "drained",
+          "candidate_over_disabled": 1.3330252431891876,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "drained-overlay",
+          "candidate_over_disabled": 1.4800763064434297,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "ties",
+          "candidate_over_disabled": 1.228757025299843,
+          "ranges_disjoint": true
+        },
+        {
+          "case": "ties-overlay",
+          "candidate_over_disabled": 1.3933783518882783,
+          "ranges_disjoint": true
+        }
+      ]
+    },
+    "reviewed_baseline_head": "9e8bdfc95c916b62550fb8c3142f804bbbfb2444",
+    "early_tie_status": {
+      "observed_at": "2026-09-08T10:53:28.849474+00:00",
+      "agent_report": "Runtime2files+78/-7 clean; optimized builds57sec. Old/disabled/main binaries unchanged. No further runtime edits or broad measurement planned. Finishing allocation-saving control and frozen paired report.",
+      "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+      "evidence_directory": "direct-5983/early-tie",
+      "final_report_pending": false,
+      "root_manifest_verified": true,
+      "manifest_entries": 153,
+      "report": "direct-5983/early-tie/report.json",
+      "report_sha256": "3a1c55e1078c679b3294c64961a3f06eef73551efee55b36a6077374a350c778",
+      "packet": "direct-5983/early-tie/review-packet.md",
+      "packet_sha256": "0c9c0f99d646ac99051a7d74f3c650e2c2c99ec7cdfb3f892a307dd00a0d7b6a",
+      "decision": "Repair has measured allocation benefit; full candidate remains NO_GO for admission",
+      "effect": "Compiled early-guard-disabled control reproduces old allocations exactly and fails both allocation-saving assertions. Avoids1200846requestedbytes/37allocations base ties and4560846/43overlay. Favorable allocation metrics and peak query heap unchanged. Tie latency noisy; drained overhead remains.",
+      "validation": "46 focused default passes;29 compact-index passes.102processes/329measuredsamples passed correctness checks including allocation controls. Root verified all153 manifest entries and clean dc source.",
+      "limitation": "Local diagnostic only; cumulative RSS and requested-heap limits unchanged. No independent Opus review of dc23141d8 repair yet, no full workspace/conformance gate."
+    },
+    "drained_design": {
+      "report": "direct-5983/drained-design/report.json",
+      "report_sha256": "e5d6a94d2b094f240910a909ec5affd537c0cd4990add4eb56ce06dae95dbe79",
+      "manifest_entries_verified": 4,
+      "selected_option": "C: lazy per-pattern preparation",
+      "limits": "Source-supported allocation-timing experiment, not proven solution. Near-half fixture does16384constant-probe checks before block-width rejection. Generic scans repeat all-tombstone correction; exact contains compressed lookups decode/allocate. No new cutoff or storage API justified."
+    },
+    "lazy_status": {
+      "report": "direct-5983/lazy-probes/report.json",
+      "report_sha256": "f32bc8e7e937da8a2c526cd074635f4b3091f0a859faf9d6f16570570d14449c",
+      "packet": "direct-5983/lazy-probes/review-packet.md",
+      "packet_sha256": "1bbfb50b49f49eace625d888440f5b7220305c295d998d0e4e98b5e53d1799f7",
+      "manifest_entries_verified": 254,
+      "clean_head_verified": true,
+      "validation": "51 default and34compact-index passes,3targetedcompiledcontrols killed;14cases180processes578samples. Avoided800000requestedbytes base and3040000overlay vs eager control; heappeaksunchanged. Drained latency remains material; some favorable/modest cases slightly slower vs dc. Local diagnostic limits remain.",
+      "decision": "NO_GO: stop top-k admission implementation and measurement; no further iteration without root evaluation",
+      "finding_comment": "https://github.com/sparq-org/sparq/issues/6465#issuecomment-5594652872"
+    }
+  },
+  "main_health": {
+    "head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+    "observed_at": "2026-09-09T02:06:57.622869+00:00",
+    "aggregate_ci_summary": {
+      "run": 34280482031,
+      "conclusion": "success"
+    },
+    "CI": {
+      "run": 34280482521,
+      "conclusion": "success"
+    },
+    "evidence": "main-a42a9e89-runs.json",
+    "scope": "Currentmain61listedruns fit onepage. Required aggregate green;source not authored/merged by this coordinator in this turn."
+  },
+  "pending_operational_triage": {
+    "priority": "Bounded read-only at an agent break, not another implementation lane",
+    "runs": [
+      {
+        "id": 34299934012,
+        "name": "triage-area"
+      },
+      {
+        "id": 34294635463,
+        "name": "ci-latency-alarm"
+      },
+      {
+        "id": 34283562709,
+        "name": "review-alarm"
+      }
+    ],
+    "scope": "Scheduled failures observed on newmain; causes uninspected. Inspect latest named errors before issue/action. Main aggregateSUCCESS. batch-merge34280482086/release-plz34280482037 alsofailed, prior hold-relatedcauses known but currentlogs unverified; neverrestore registrytoken orauthorize release to turngreen."
   }
 }

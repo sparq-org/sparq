@@ -1,0 +1,9 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The bounded indexed top-k recovery has ended **NO-GO for admission** at local experiment head `d08295b6c06ca6f6829de82a210708bab8e44a28`. I am stopping further implementation and benchmark iterations on this candidate.
+
+Early rejection of oversized ties and lazy preparation both reduced measured allocation traffic, and the focused semantic/work controls passed. The predeclared comparison still found a material drained-prefix latency penalty against the disabled fallback, including overlays, and some favorable/modest cases also slowed relative to the preceding candidate. Lower allocation traffic did not remove the slowdown; measured query heap peaks were unchanged. The generated report includes every case and the original controls, so the favorable results cannot stand in for overall admission evidence.
+
+These are local diagnostic results. Timing noise, baseline drift, requested-byte accounting and cumulative-RSS limitations remain explicit. Only the earlier semantic ancestor received independent Opus source clearance for measurement; the later experimental repairs have no independent merge approval. Frozen source, compiled controls and raw evidence are retained locally. Generated final report SHA256: `f32bc8e7e937da8a2c526cd074635f4b3091f0a859faf9d6f16570570d14449c`.
+
+The next performance task is the existing [overlay deletion-counting issue #4246](https://github.com/sparq-org/sparq/issues/4246), which affects ordinary scans and joins. This recovery issue stays open: the original PR's semantic/resource findings and the candidate's admission limitations have not been resolved on main.

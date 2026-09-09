@@ -1,0 +1,2984 @@
+[
+  {
+    "case": "base",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 0.547375,
+          "minimum": 0.5415,
+          "maximum": 0.550458,
+          "mean": 0.5468332857142857,
+          "sample_stddev": 0.0029836266362871125,
+          "all_samples": [
+            0.5415,
+            0.545584,
+            0.550458,
+            0.548625,
+            0.548958,
+            0.545333,
+            0.547375
+          ]
+        },
+        "allocations": {
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45531136,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45531136,
+          "after_warmup": 47136768,
+          "final_cumulative": 47333376,
+          "increase_after_warmup": 196608
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 0.549458,
+          "minimum": 0.545458,
+          "maximum": 0.568625,
+          "mean": 0.5556547142857143,
+          "sample_stddev": 0.01032450542341352,
+          "all_samples": [
+            0.568625,
+            0.564792,
+            0.56625,
+            0.547834,
+            0.547166,
+            0.545458,
+            0.549458
+          ]
+        },
+        "allocations": {
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1226953,
+          "peak_live_delta": 1209777
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45498368,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45498368,
+          "after_warmup": 47120384,
+          "final_cumulative": 47316992,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 26.1225,
+          "minimum": 17.937083,
+          "maximum": 38.665792,
+          "mean": 27.629166714285713,
+          "sample_stddev": 8.477922810692776,
+          "all_samples": [
+            18.440042,
+            28.78,
+            38.579542,
+            17.937083,
+            38.665792,
+            26.1225,
+            24.879208
+          ]
+        },
+        "allocations": {
+          "allocs": 150474,
+          "reallocs": 799,
+          "requested_bytes": 85941830,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 70139904,
+          "final_cumulative": 74694656,
+          "increase_after_warmup": 4554752
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 14.385375,
+          "minimum": 14.102,
+          "maximum": 15.316125,
+          "mean": 14.465958428571428,
+          "sample_stddev": 0.4069314449555586,
+          "all_samples": [
+            14.102,
+            14.169458,
+            15.316125,
+            14.569042,
+            14.385375,
+            14.2865,
+            14.433209
+          ]
+        },
+        "allocations": {
+          "allocs": 150474,
+          "reallocs": 799,
+          "requested_bytes": 85941830,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45580288,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45580288,
+          "after_warmup": 70156288,
+          "final_cumulative": 70402048,
+          "increase_after_warmup": 245760
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 0.9962089914060764,
+      "new_over_disabled": 0.020954158292659585,
+      "new_over_main": 0.038050798119618014,
+      "disabled_over_main": 1.8159067803237663
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "base",
+    "k": 512,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 1.222917,
+          "minimum": 1.217666,
+          "maximum": 1.225833,
+          "mean": 1.2226012857142856,
+          "sample_stddev": 0.0025750236707187692,
+          "all_samples": [
+            1.225833,
+            1.223917,
+            1.222917,
+            1.22125,
+            1.223709,
+            1.222917,
+            1.217666
+          ]
+        },
+        "allocations": {
+          "allocs": 5822,
+          "reallocs": 24,
+          "requested_bytes": 2107158,
+          "peak_live_delta": 1876609
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45531136,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45531136,
+          "after_warmup": 48119808,
+          "final_cumulative": 48349184,
+          "increase_after_warmup": 229376
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 1.2025,
+          "minimum": 1.198542,
+          "maximum": 1.210875,
+          "mean": 1.2036905714285715,
+          "sample_stddev": 0.004074368861436994,
+          "all_samples": [
+            1.200333,
+            1.210875,
+            1.205583,
+            1.198542,
+            1.205584,
+            1.2025,
+            1.202417
+          ]
+        },
+        "allocations": {
+          "allocs": 5822,
+          "reallocs": 24,
+          "requested_bytes": 2107014,
+          "peak_live_delta": 1876465
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45498368,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45498368,
+          "after_warmup": 48037888,
+          "final_cumulative": 48234496,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 14.393667,
+          "minimum": 14.319458,
+          "maximum": 15.103458,
+          "mean": 14.488059428571429,
+          "sample_stddev": 0.28141899517851626,
+          "all_samples": [
+            14.33925,
+            14.328083,
+            14.319458,
+            15.103458,
+            14.5385,
+            14.394,
+            14.393667
+          ]
+        },
+        "allocations": {
+          "allocs": 152008,
+          "reallocs": 799,
+          "requested_bytes": 86057859,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45563904,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45563904,
+          "after_warmup": 70320128,
+          "final_cumulative": 70647808,
+          "increase_after_warmup": 327680
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.97575,
+          "minimum": 17.040458,
+          "maximum": 19.677708,
+          "mean": 18.098654857142858,
+          "sample_stddev": 1.0266616639012458,
+          "all_samples": [
+            19.677708,
+            17.97575,
+            17.040458,
+            19.246667,
+            17.124625,
+            17.448209,
+            18.177167
+          ]
+        },
+        "allocations": {
+          "allocs": 152008,
+          "reallocs": 799,
+          "requested_bytes": 86057859,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 72728576,
+          "final_cumulative": 74924032,
+          "increase_after_warmup": 2195456
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0169787941787942,
+      "new_over_disabled": 0.08496215731543602,
+      "new_over_main": 0.06803148686424766,
+      "disabled_over_main": 0.8007269237723044
+    },
+    "new_ranges_disjoint_from": {
+      "dc": true,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 5.993958,
+          "minimum": 5.82375,
+          "maximum": 6.2405,
+          "mean": 5.996910714285714,
+          "sample_stddev": 0.15345447688127167,
+          "all_samples": [
+            6.2405,
+            6.0675,
+            6.115417,
+            5.82375,
+            5.8655,
+            5.993958,
+            5.87175
+          ]
+        },
+        "allocations": {
+          "allocs": 231,
+          "reallocs": 10,
+          "requested_bytes": 5187097,
+          "peak_live_delta": 5169921
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 92176384,
+          "final_cumulative": 92389376,
+          "increase_after_warmup": 212992
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 5.709417,
+          "minimum": 5.647333,
+          "maximum": 5.735125,
+          "mean": 5.696125,
+          "sample_stddev": 0.03215839423333612,
+          "all_samples": [
+            5.709959,
+            5.724417,
+            5.735125,
+            5.666458,
+            5.709417,
+            5.647333,
+            5.680166
+          ]
+        },
+        "allocations": {
+          "allocs": 231,
+          "reallocs": 10,
+          "requested_bytes": 5186953,
+          "peak_live_delta": 5169777
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 92176384,
+          "final_cumulative": 92389376,
+          "increase_after_warmup": 212992
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 17.981791,
+          "minimum": 17.840208,
+          "maximum": 18.368584,
+          "mean": 18.051618857142856,
+          "sample_stddev": 0.2082786095909582,
+          "all_samples": [
+            18.037333,
+            17.840208,
+            17.875583,
+            17.981791,
+            18.368584,
+            17.94575,
+            18.312083
+          ]
+        },
+        "allocations": {
+          "allocs": 120353,
+          "reallocs": 109,
+          "requested_bytes": 54067206,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89178112,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89178112,
+          "after_warmup": 105005056,
+          "final_cumulative": 105234432,
+          "increase_after_warmup": 229376
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.8945,
+          "minimum": 17.843,
+          "maximum": 18.602833,
+          "mean": 18.073773714285714,
+          "sample_stddev": 0.3353029649748192,
+          "all_samples": [
+            18.602833,
+            18.522583,
+            17.900042,
+            17.8945,
+            17.843,
+            17.875416,
+            17.878042
+          ]
+        },
+        "allocations": {
+          "allocs": 120353,
+          "reallocs": 109,
+          "requested_bytes": 54067206,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89145344,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89145344,
+          "after_warmup": 106479616,
+          "final_cumulative": 106479616,
+          "increase_after_warmup": 0
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0498371374870674,
+      "new_over_disabled": 0.33333487192682865,
+      "new_over_main": 0.33496090977674703,
+      "disabled_over_main": 1.0048780910335577
+    },
+    "new_ranges_disjoint_from": {
+      "dc": true,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "overlay",
+    "k": 512,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 6.443125,
+          "minimum": 6.357625,
+          "maximum": 6.514208,
+          "mean": 6.44472,
+          "sample_stddev": 0.04776654608265785,
+          "all_samples": [
+            6.514208,
+            6.468083,
+            6.46275,
+            6.443125,
+            6.424791,
+            6.442458,
+            6.357625
+          ]
+        },
+        "allocations": {
+          "allocs": 5829,
+          "reallocs": 24,
+          "requested_bytes": 6067158,
+          "peak_live_delta": 5836609
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 93011968,
+          "final_cumulative": 93257728,
+          "increase_after_warmup": 245760
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 6.4385,
+          "minimum": 6.305709,
+          "maximum": 6.475792,
+          "mean": 6.424077571428572,
+          "sample_stddev": 0.05842025738519457,
+          "all_samples": [
+            6.4385,
+            6.471167,
+            6.44775,
+            6.397,
+            6.305709,
+            6.475792,
+            6.432625
+          ]
+        },
+        "allocations": {
+          "allocs": 5829,
+          "reallocs": 24,
+          "requested_bytes": 6067014,
+          "peak_live_delta": 5836465
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 92946432,
+          "final_cumulative": 93126656,
+          "increase_after_warmup": 180224
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 18.179125,
+          "minimum": 18.052042,
+          "maximum": 19.355916,
+          "mean": 18.385999857142856,
+          "sample_stddev": 0.4609093964354341,
+          "all_samples": [
+            18.432958,
+            19.355916,
+            18.484333,
+            18.179125,
+            18.061834,
+            18.052042,
+            18.135791
+          ]
+        },
+        "allocations": {
+          "allocs": 121887,
+          "reallocs": 109,
+          "requested_bytes": 54183235,
+          "peak_live_delta": 14469644
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 105250816,
+          "final_cumulative": 105447424,
+          "increase_after_warmup": 196608
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 18.304041,
+          "minimum": 18.037833,
+          "maximum": 18.733333,
+          "mean": 18.293344857142856,
+          "sample_stddev": 0.23204688498550455,
+          "all_samples": [
+            18.359667,
+            18.304041,
+            18.357666,
+            18.733333,
+            18.165583,
+            18.037833,
+            18.095291
+          ]
+        },
+        "allocations": {
+          "allocs": 121887,
+          "reallocs": 109,
+          "requested_bytes": 54183235,
+          "peak_live_delta": 14469644
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "overlay",
+          "n": 50000,
+          "k": 512,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89128960,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 512,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89128960,
+          "after_warmup": 106561536,
+          "final_cumulative": 106561536,
+          "increase_after_warmup": 0
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.00071833501592,
+      "new_over_disabled": 0.3544243741104151,
+      "new_over_main": 0.35200560357136434,
+      "disabled_over_main": 0.9931754960557615
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "drained",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 10.561125,
+          "minimum": 10.526416,
+          "maximum": 11.068833,
+          "mean": 10.652315285714286,
+          "sample_stddev": 0.19414897777627205,
+          "all_samples": [
+            10.549167,
+            10.54125,
+            10.561125,
+            10.526416,
+            11.068833,
+            10.607625,
+            10.711791
+          ]
+        },
+        "allocations": {
+          "allocs": 75524,
+          "reallocs": 631,
+          "requested_bytes": 57771894,
+          "peak_live_delta": 8500044
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44924928,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 44924928,
+          "after_warmup": 59211776,
+          "final_cumulative": 59424768,
+          "increase_after_warmup": 212992
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 10.938958,
+          "minimum": 10.844042,
+          "maximum": 11.238542,
+          "mean": 10.972309428571428,
+          "sample_stddev": 0.1370328300929592,
+          "all_samples": [
+            10.899375,
+            11.038791,
+            10.99275,
+            10.938958,
+            10.853708,
+            10.844042,
+            11.238542
+          ]
+        },
+        "allocations": {
+          "allocs": 75528,
+          "reallocs": 631,
+          "requested_bytes": 58571750,
+          "peak_live_delta": 8500044
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44908544,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 44908544,
+          "after_warmup": 59211776,
+          "final_cumulative": 59408384,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 8.609375,
+          "minimum": 8.31575,
+          "maximum": 9.010791,
+          "mean": 8.606392714285715,
+          "sample_stddev": 0.2614593730344569,
+          "all_samples": [
+            9.010791,
+            8.609375,
+            8.822833,
+            8.714791,
+            8.440625,
+            8.31575,
+            8.330584
+          ]
+        },
+        "allocations": {
+          "allocs": 75445,
+          "reallocs": 630,
+          "requested_bytes": 57469062,
+          "peak_live_delta": 8500044
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44974080,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 44974080,
+          "after_warmup": 59113472,
+          "final_cumulative": 60981248,
+          "increase_after_warmup": 1867776
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 8.367292,
+          "minimum": 8.325625,
+          "maximum": 8.416083,
+          "mean": 8.365238142857143,
+          "sample_stddev": 0.032773616209936254,
+          "all_samples": [
+            8.416083,
+            8.393333,
+            8.370208,
+            8.356167,
+            8.325625,
+            8.367292,
+            8.327959
+          ]
+        },
+        "allocations": {
+          "allocs": 75445,
+          "reallocs": 630,
+          "requested_bytes": 57469062,
+          "peak_live_delta": 8500044
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44957696,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 44957696,
+          "after_warmup": 59146240,
+          "final_cumulative": 59408384,
+          "increase_after_warmup": 262144
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 0.9654598728690613,
+      "new_over_disabled": 1.22670054446461,
+      "new_over_main": 1.2621915190721202,
+      "disabled_over_main": 1.0289320606953838
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "drained-overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 17.848792,
+          "minimum": 17.842083,
+          "maximum": 17.912166,
+          "mean": 17.862131,
+          "sample_stddev": 0.02546276125377337,
+          "all_samples": [
+            17.862459,
+            17.848792,
+            17.878042,
+            17.843166,
+            17.848209,
+            17.912166,
+            17.842083
+          ]
+        },
+        "allocations": {
+          "allocs": 60435,
+          "reallocs": 103,
+          "requested_bytes": 34429994,
+          "peak_live_delta": 7219788
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88129536,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 88129536,
+          "after_warmup": 96780288,
+          "final_cumulative": 97009664,
+          "increase_after_warmup": 229376
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 21.043125,
+          "minimum": 20.997416,
+          "maximum": 21.344042,
+          "mean": 21.082226000000002,
+          "sample_stddev": 0.12186714652576978,
+          "all_samples": [
+            21.030792,
+            20.998666,
+            20.997416,
+            21.344042,
+            21.114,
+            21.047541,
+            21.043125
+          ]
+        },
+        "allocations": {
+          "allocs": 60443,
+          "reallocs": 103,
+          "requested_bytes": 37469850,
+          "peak_live_delta": 7219788
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88129536,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 88129536,
+          "after_warmup": 97189888,
+          "final_cumulative": 97484800,
+          "increase_after_warmup": 294912
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 13.7655,
+          "minimum": 13.729375,
+          "maximum": 14.618,
+          "mean": 13.929869142857143,
+          "sample_stddev": 0.32949030909341825,
+          "all_samples": [
+            14.090959,
+            14.618,
+            13.834167,
+            13.7655,
+            13.737625,
+            13.733458,
+            13.729375
+          ]
+        },
+        "allocations": {
+          "allocs": 60353,
+          "reallocs": 102,
+          "requested_bytes": 32687154,
+          "peak_live_delta": 7219788
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88178688,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 88178688,
+          "after_warmup": 97976320,
+          "final_cumulative": 98369536,
+          "increase_after_warmup": 393216
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 14.463,
+          "minimum": 13.808,
+          "maximum": 18.530958,
+          "mean": 14.974803571428572,
+          "sample_stddev": 1.6638096783872096,
+          "all_samples": [
+            13.808,
+            13.858458,
+            14.158875,
+            14.540375,
+            14.463,
+            18.530958,
+            15.463959
+          ]
+        },
+        "allocations": {
+          "allocs": 60353,
+          "reallocs": 102,
+          "requested_bytes": 32687154,
+          "peak_live_delta": 7219788
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88096768,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 88096768,
+          "after_warmup": 96583680,
+          "final_cumulative": 97681408,
+          "increase_after_warmup": 1097728
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 0.8482006355995129,
+      "new_over_disabled": 1.2966323054011841,
+      "new_over_main": 1.2341002558252092,
+      "disabled_over_main": 0.9517734909769757
+    },
+    "new_ranges_disjoint_from": {
+      "dc": true,
+      "disabled": true,
+      "main": false
+    }
+  },
+  {
+    "case": "ties",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 16.560416,
+          "minimum": 16.536834,
+          "maximum": 16.846291,
+          "mean": 16.61269042857143,
+          "sample_stddev": 0.11016540251345924,
+          "all_samples": [
+            16.846291,
+            16.546375,
+            16.536834,
+            16.553292,
+            16.651375,
+            16.560416,
+            16.59425
+          ]
+        },
+        "allocations": {
+          "allocs": 150520,
+          "reallocs": 800,
+          "requested_bytes": 85943668,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45514752,
+          "after_warmup": 70254592,
+          "final_cumulative": 70483968,
+          "increase_after_warmup": 229376
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 16.278375,
+          "minimum": 16.110708,
+          "maximum": 16.79525,
+          "mean": 16.284589142857143,
+          "sample_stddev": 0.23987270806438749,
+          "all_samples": [
+            16.284166,
+            16.11525,
+            16.79525,
+            16.278375,
+            16.124875,
+            16.2835,
+            16.110708
+          ]
+        },
+        "allocations": {
+          "allocs": 150520,
+          "reallocs": 800,
+          "requested_bytes": 85943668,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45498368,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45498368,
+          "after_warmup": 70205440,
+          "final_cumulative": 70467584,
+          "increase_after_warmup": 262144
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 14.505292,
+          "minimum": 14.277541,
+          "maximum": 22.38825,
+          "mean": 15.822386714285715,
+          "sample_stddev": 2.9462069515644296,
+          "all_samples": [
+            15.626208,
+            22.38825,
+            15.340666,
+            14.505292,
+            14.306625,
+            14.312125,
+            14.277541
+          ]
+        },
+        "allocations": {
+          "allocs": 150474,
+          "reallocs": 799,
+          "requested_bytes": 85941830,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45563904,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45563904,
+          "after_warmup": 70172672,
+          "final_cumulative": 70483968,
+          "increase_after_warmup": 311296
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 14.615584,
+          "minimum": 14.134,
+          "maximum": 15.091208,
+          "mean": 14.520577428571428,
+          "sample_stddev": 0.34001179676390514,
+          "all_samples": [
+            14.134,
+            14.136375,
+            14.35925,
+            15.091208,
+            14.639333,
+            14.615584,
+            14.668292
+          ]
+        },
+        "allocations": {
+          "allocs": 150474,
+          "reallocs": 799,
+          "requested_bytes": 85941830,
+          "peak_live_delta": 18597196
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 25001,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 70123520,
+          "final_cumulative": 70385664,
+          "increase_after_warmup": 262144
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0173261151681294,
+      "new_over_disabled": 1.1416809809826647,
+      "new_over_main": 1.1330656373361474,
+      "disabled_over_main": 0.9924538082091007
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": false,
+      "main": true
+    }
+  },
+  {
+    "case": "ties-overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 20.731833,
+          "minimum": 20.673166,
+          "maximum": 20.753041,
+          "mean": 20.727964,
+          "sample_stddev": 0.02674978145082128,
+          "all_samples": [
+            20.673166,
+            20.753041,
+            20.725208,
+            20.74325,
+            20.731833,
+            20.747208,
+            20.722042
+          ]
+        },
+        "allocations": {
+          "allocs": 120400,
+          "reallocs": 110,
+          "requested_bytes": 54669044,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89145344,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89145344,
+          "after_warmup": 105054208,
+          "final_cumulative": 105381888,
+          "increase_after_warmup": 327680
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 20.626083,
+          "minimum": 20.5665,
+          "maximum": 21.459541,
+          "mean": 20.775892857142857,
+          "sample_stddev": 0.32487701984619216,
+          "all_samples": [
+            20.626083,
+            20.675334,
+            20.571416,
+            20.5665,
+            20.612084,
+            21.459541,
+            20.920292
+          ]
+        },
+        "allocations": {
+          "allocs": 120400,
+          "reallocs": 110,
+          "requested_bytes": 54669044,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 105086976,
+          "final_cumulative": 105365504,
+          "increase_after_warmup": 278528
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 17.93825,
+          "minimum": 17.859625,
+          "maximum": 18.077417,
+          "mean": 17.949315285714288,
+          "sample_stddev": 0.07771464086582863,
+          "all_samples": [
+            17.998041,
+            17.865041,
+            18.077417,
+            17.986208,
+            17.920625,
+            17.93825,
+            17.859625
+          ]
+        },
+        "allocations": {
+          "allocs": 120353,
+          "reallocs": 109,
+          "requested_bytes": 54067206,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 106512384,
+          "final_cumulative": 106512384,
+          "increase_after_warmup": 0
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.9685,
+          "minimum": 17.879667,
+          "maximum": 18.390542,
+          "mean": 18.050416857142856,
+          "sample_stddev": 0.2128206663769824,
+          "all_samples": [
+            17.9685,
+            17.978833,
+            17.902167,
+            17.91125,
+            17.879667,
+            18.390542,
+            18.321959
+          ]
+        },
+        "allocations": {
+          "allocs": 120353,
+          "reallocs": 109,
+          "requested_bytes": 54067206,
+          "peak_live_delta": 14436940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "ties-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 40000,
+          "tied_rows": 20001,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 105005056,
+          "final_cumulative": 105283584,
+          "increase_after_warmup": 278528
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0051270035129791,
+      "new_over_disabled": 1.155733307318161,
+      "new_over_main": 1.153787628349612,
+      "disabled_over_main": 0.9983164983164984
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "prefix128",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 0.586958,
+          "minimum": 0.581875,
+          "maximum": 0.624666,
+          "mean": 0.591607,
+          "sample_stddev": 0.014774090789847854,
+          "all_samples": [
+            0.624666,
+            0.5895,
+            0.58775,
+            0.586958,
+            0.585625,
+            0.584875,
+            0.581875
+          ]
+        },
+        "allocations": {
+          "allocs": 448,
+          "reallocs": 16,
+          "requested_bytes": 1268697,
+          "peak_live_delta": 1244353
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45514752,
+          "after_warmup": 47185920,
+          "final_cumulative": 47415296,
+          "increase_after_warmup": 229376
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 0.581291,
+          "minimum": 0.575667,
+          "maximum": 0.586167,
+          "mean": 0.581643,
+          "sample_stddev": 0.0033290103133914485,
+          "all_samples": [
+            0.58075,
+            0.584667,
+            0.586167,
+            0.581792,
+            0.581291,
+            0.581167,
+            0.575667
+          ]
+        },
+        "allocations": {
+          "allocs": 448,
+          "reallocs": 16,
+          "requested_bytes": 1268553,
+          "peak_live_delta": 1244209
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45514752,
+          "after_warmup": 47185920,
+          "final_cumulative": 47415296,
+          "increase_after_warmup": 229376
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 13.401833,
+          "minimum": 13.383875,
+          "maximum": 13.445792,
+          "mean": 13.408148714285714,
+          "sample_stddev": 0.023525438881590345,
+          "all_samples": [
+            13.434541,
+            13.407,
+            13.383875,
+            13.39725,
+            13.38675,
+            13.401833,
+            13.445792
+          ]
+        },
+        "allocations": {
+          "allocs": 150058,
+          "reallocs": 637,
+          "requested_bytes": 80107846,
+          "peak_live_delta": 16964172
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45563904,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45563904,
+          "after_warmup": 70303744,
+          "final_cumulative": 70516736,
+          "increase_after_warmup": 212992
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 13.442917,
+          "minimum": 13.4115,
+          "maximum": 13.55375,
+          "mean": 13.452196428571428,
+          "sample_stddev": 0.04740559362514522,
+          "all_samples": [
+            13.55375,
+            13.451,
+            13.423458,
+            13.454917,
+            13.427833,
+            13.442917,
+            13.4115
+          ]
+        },
+        "allocations": {
+          "allocs": 150058,
+          "reallocs": 637,
+          "requested_bytes": 80107846,
+          "peak_live_delta": 16964172
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 70238208,
+          "final_cumulative": 70500352,
+          "increase_after_warmup": 262144
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.00974898974868,
+      "new_over_disabled": 0.043796844804736786,
+      "new_over_main": 0.04366299367912485,
+      "disabled_over_main": 0.9969438180716284
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "prefix128-overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 5.875,
+          "minimum": 5.786958,
+          "maximum": 5.944333,
+          "mean": 5.8596008571428575,
+          "sample_stddev": 0.05581335779312032,
+          "all_samples": [
+            5.891416,
+            5.875,
+            5.944333,
+            5.88725,
+            5.786958,
+            5.801291,
+            5.830958
+          ]
+        },
+        "allocations": {
+          "allocs": 455,
+          "reallocs": 16,
+          "requested_bytes": 5226789,
+          "peak_live_delta": 5202445
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89178112,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89178112,
+          "after_warmup": 92225536,
+          "final_cumulative": 92471296,
+          "increase_after_warmup": 245760
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 5.740875,
+          "minimum": 5.682708,
+          "maximum": 5.786708,
+          "mean": 5.742375,
+          "sample_stddev": 0.03333909637847634,
+          "all_samples": [
+            5.737209,
+            5.76525,
+            5.740875,
+            5.72475,
+            5.759125,
+            5.682708,
+            5.786708
+          ]
+        },
+        "allocations": {
+          "allocs": 455,
+          "reallocs": 16,
+          "requested_bytes": 5226645,
+          "peak_live_delta": 5202301
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 90177536,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 90177536,
+          "after_warmup": 93618176,
+          "final_cumulative": 93814784,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 17.954875,
+          "minimum": 17.822708,
+          "maximum": 18.240291,
+          "mean": 17.963636857142856,
+          "sample_stddev": 0.13281757840164138,
+          "all_samples": [
+            17.954875,
+            17.913334,
+            17.882,
+            17.822708,
+            17.957167,
+            17.975083,
+            18.240291
+          ]
+        },
+        "allocations": {
+          "allocs": 119969,
+          "reallocs": 109,
+          "requested_bytes": 54024338,
+          "peak_live_delta": 14404172
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89145344,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89145344,
+          "after_warmup": 104923136,
+          "final_cumulative": 105136128,
+          "increase_after_warmup": 212992
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.890417,
+          "minimum": 17.795083,
+          "maximum": 19.211375,
+          "mean": 18.211928571428572,
+          "sample_stddev": 0.6103526857909988,
+          "all_samples": [
+            18.9865,
+            17.8485,
+            17.9,
+            17.795083,
+            17.890417,
+            17.851625,
+            19.211375
+          ]
+        },
+        "allocations": {
+          "allocs": 119969,
+          "reallocs": 109,
+          "requested_bytes": 54024338,
+          "peak_live_delta": 14404172
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix128-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39872,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 104939520,
+          "final_cumulative": 105201664,
+          "increase_after_warmup": 262144
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0233631632808589,
+      "new_over_disabled": 0.32720918413522787,
+      "new_over_main": 0.3283880973819671,
+      "disabled_over_main": 1.0036029344648592
+    },
+    "new_ranges_disjoint_from": {
+      "dc": true,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "prefix800",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 0.648,
+          "minimum": 0.645083,
+          "maximum": 0.659958,
+          "mean": 0.6494942857142857,
+          "sample_stddev": 0.005251586767009458,
+          "all_samples": [
+            0.648,
+            0.652584,
+            0.647709,
+            0.645083,
+            0.645084,
+            0.648042,
+            0.659958
+          ]
+        },
+        "allocations": {
+          "allocs": 640,
+          "reallocs": 18,
+          "requested_bytes": 1306201,
+          "peak_live_delta": 1273665
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 47251456,
+          "final_cumulative": 47448064,
+          "increase_after_warmup": 196608
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 0.638792,
+          "minimum": 0.638,
+          "maximum": 0.6685,
+          "mean": 0.6452677142857143,
+          "sample_stddev": 0.011110381042284807,
+          "all_samples": [
+            0.63875,
+            0.638583,
+            0.638792,
+            0.638,
+            0.644666,
+            0.649583,
+            0.6685
+          ]
+        },
+        "allocations": {
+          "allocs": 640,
+          "reallocs": 18,
+          "requested_bytes": 1306057,
+          "peak_live_delta": 1273521
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45514752,
+          "after_warmup": 47235072,
+          "final_cumulative": 47464448,
+          "increase_after_warmup": 229376
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 13.442084,
+          "minimum": 13.252458,
+          "maximum": 14.085166,
+          "mean": 13.499041714285713,
+          "sample_stddev": 0.28400200418290095,
+          "all_samples": [
+            13.442084,
+            14.085166,
+            13.506583,
+            13.346125,
+            13.282959,
+            13.252458,
+            13.577917
+          ]
+        },
+        "allocations": {
+          "allocs": 148042,
+          "reallocs": 637,
+          "requested_bytes": 79892806,
+          "peak_live_delta": 16792140
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 70008832,
+          "final_cumulative": 70320128,
+          "increase_after_warmup": 311296
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 13.675709,
+          "minimum": 13.301834,
+          "maximum": 13.958208,
+          "mean": 13.614,
+          "sample_stddev": 0.23750385319540973,
+          "all_samples": [
+            13.675709,
+            13.301834,
+            13.747875,
+            13.433208,
+            13.958208,
+            13.773625,
+            13.407541
+          ]
+        },
+        "allocations": {
+          "allocs": 148042,
+          "reallocs": 637,
+          "requested_bytes": 79892806,
+          "peak_live_delta": 16792140
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 49200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 70008832,
+          "final_cumulative": 70549504,
+          "increase_after_warmup": 540672
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0144147077608987,
+      "new_over_disabled": 0.04820681078916037,
+      "new_over_main": 0.0473832837478481,
+      "disabled_over_main": 0.9829167906395201
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "prefix800-overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 5.9195,
+          "minimum": 5.836416,
+          "maximum": 5.955,
+          "mean": 5.903339142857143,
+          "sample_stddev": 0.04319851838674023,
+          "all_samples": [
+            5.942958,
+            5.836416,
+            5.922125,
+            5.866375,
+            5.9195,
+            5.881,
+            5.955
+          ]
+        },
+        "allocations": {
+          "allocs": 647,
+          "reallocs": 18,
+          "requested_bytes": 5254213,
+          "peak_live_delta": 5221677
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89145344,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89145344,
+          "after_warmup": 92258304,
+          "final_cumulative": 92471296,
+          "increase_after_warmup": 212992
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 5.815584,
+          "minimum": 5.711125,
+          "maximum": 5.874542,
+          "mean": 5.805690714285714,
+          "sample_stddev": 0.05096282088514555,
+          "all_samples": [
+            5.795292,
+            5.828875,
+            5.711125,
+            5.783209,
+            5.874542,
+            5.815584,
+            5.831208
+          ]
+        },
+        "allocations": {
+          "allocs": 647,
+          "reallocs": 18,
+          "requested_bytes": 5254069,
+          "peak_live_delta": 5221533
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 92258304,
+          "final_cumulative": 92487680,
+          "increase_after_warmup": 229376
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 17.6965,
+          "minimum": 17.648166,
+          "maximum": 18.022791,
+          "mean": 17.752345000000002,
+          "sample_stddev": 0.12598817709346163,
+          "all_samples": [
+            18.022791,
+            17.688333,
+            17.692167,
+            17.771708,
+            17.74675,
+            17.648166,
+            17.6965
+          ]
+        },
+        "allocations": {
+          "allocs": 117953,
+          "reallocs": 109,
+          "requested_bytes": 53799218,
+          "peak_live_delta": 14232140
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89161728,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89161728,
+          "after_warmup": 104693760,
+          "final_cumulative": 104923136,
+          "increase_after_warmup": 229376
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.732041,
+          "minimum": 17.644333,
+          "maximum": 18.583792,
+          "mean": 17.872023714285714,
+          "sample_stddev": 0.3408736549112754,
+          "all_samples": [
+            17.698,
+            17.733625,
+            17.644333,
+            17.670208,
+            18.583792,
+            18.042167,
+            17.732041
+          ]
+        },
+        "allocations": {
+          "allocs": 117953,
+          "reallocs": 109,
+          "requested_bytes": 53799218,
+          "peak_live_delta": 14232140
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "prefix800-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 39200,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89128960,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89128960,
+          "after_warmup": 106119168,
+          "final_cumulative": 106119168,
+          "increase_after_warmup": 0
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0178685408034687,
+      "new_over_disabled": 0.334501172548244,
+      "new_over_main": 0.33383071920485635,
+      "disabled_over_main": 0.997995662202676
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "intermittent",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 0.545334,
+          "minimum": 0.542167,
+          "maximum": 0.613542,
+          "mean": 0.5601311428571428,
+          "sample_stddev": 0.026696067996545697,
+          "all_samples": [
+            0.543791,
+            0.545334,
+            0.542167,
+            0.543875,
+            0.577917,
+            0.613542,
+            0.554292
+          ]
+        },
+        "allocations": {
+          "allocs": 220,
+          "reallocs": 10,
+          "requested_bytes": 1201601,
+          "peak_live_delta": 1184425
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 43750,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45498368,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45498368,
+          "after_warmup": 47087616,
+          "final_cumulative": 47316992,
+          "increase_after_warmup": 229376
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 0.537,
+          "minimum": 0.53175,
+          "maximum": 0.5425,
+          "mean": 0.5365594285714286,
+          "sample_stddev": 0.003904225525297045,
+          "all_samples": [
+            0.539333,
+            0.5425,
+            0.537,
+            0.53175,
+            0.538041,
+            0.531917,
+            0.535375
+          ]
+        },
+        "allocations": {
+          "allocs": 220,
+          "reallocs": 10,
+          "requested_bytes": 1201457,
+          "peak_live_delta": 1184281
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 43750,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45514752,
+          "after_warmup": 47104000,
+          "final_cumulative": 47300608,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 12.706208,
+          "minimum": 12.701916,
+          "maximum": 12.7345,
+          "mean": 12.712970285714286,
+          "sample_stddev": 0.013165412396557477,
+          "all_samples": [
+            12.701916,
+            12.709584,
+            12.705084,
+            12.729125,
+            12.704375,
+            12.7345,
+            12.706208
+          ]
+        },
+        "allocations": {
+          "allocs": 131692,
+          "reallocs": 637,
+          "requested_bytes": 78148806,
+          "peak_live_delta": 15396940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 43750,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45547520,
+          "after_warmup": 68304896,
+          "final_cumulative": 68665344,
+          "increase_after_warmup": 360448
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 12.74175,
+          "minimum": 12.654708,
+          "maximum": 12.771916,
+          "mean": 12.720273857142857,
+          "sample_stddev": 0.04234114979319194,
+          "all_samples": [
+            12.74175,
+            12.699959,
+            12.744125,
+            12.680917,
+            12.654708,
+            12.771916,
+            12.748542
+          ]
+        },
+        "allocations": {
+          "allocs": 131692,
+          "reallocs": 637,
+          "requested_bytes": 78148806,
+          "peak_live_delta": 15396940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 43750,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45531136,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 45531136,
+          "after_warmup": 68354048,
+          "final_cumulative": 68616192,
+          "increase_after_warmup": 262144
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0155195530726255,
+      "new_over_disabled": 0.04291870556502774,
+      "new_over_main": 0.042798987580198955,
+      "disabled_over_main": 0.9972105872427257
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  },
+  {
+    "case": "intermittent-overlay",
+    "k": 1,
+    "variants": {
+      "new": {
+        "whole_query_ms": {
+          "median": 6.012125,
+          "minimum": 5.715125,
+          "maximum": 6.575167,
+          "mean": 6.023684571428571,
+          "sample_stddev": 0.30517375518757484,
+          "all_samples": [
+            6.012125,
+            6.257459,
+            6.575167,
+            6.012583,
+            5.823708,
+            5.769625,
+            5.715125
+          ]
+        },
+        "allocations": {
+          "allocs": 227,
+          "reallocs": 10,
+          "requested_bytes": 5046601,
+          "peak_live_delta": 5029425
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 35000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89096192,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89096192,
+          "after_warmup": 92225536,
+          "final_cumulative": 92389376,
+          "increase_after_warmup": 163840
+        }
+      },
+      "dc": {
+        "whole_query_ms": {
+          "median": 5.708167,
+          "minimum": 5.690166,
+          "maximum": 5.762042,
+          "mean": 5.716856857142857,
+          "sample_stddev": 0.027141218109661032,
+          "all_samples": [
+            5.70625,
+            5.747291,
+            5.690166,
+            5.708167,
+            5.762042,
+            5.709541,
+            5.694541
+          ]
+        },
+        "allocations": {
+          "allocs": 227,
+          "reallocs": 10,
+          "requested_bytes": 5046457,
+          "peak_live_delta": 5029281
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 35000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89079808,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89079808,
+          "after_warmup": 92209152,
+          "final_cumulative": 92405760,
+          "increase_after_warmup": 196608
+        }
+      },
+      "disabled": {
+        "whole_query_ms": {
+          "median": 17.540583,
+          "minimum": 17.241542,
+          "maximum": 18.558458,
+          "mean": 17.671006,
+          "sample_stddev": 0.4643369957304723,
+          "all_samples": [
+            17.540583,
+            17.345167,
+            17.324709,
+            17.241542,
+            18.558458,
+            17.745375,
+            17.941208
+          ]
+        },
+        "allocations": {
+          "allocs": 105353,
+          "reallocs": 109,
+          "requested_bytes": 52347206,
+          "peak_live_delta": 13156940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 35000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89063424,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89063424,
+          "after_warmup": 103120896,
+          "final_cumulative": 104513536,
+          "increase_after_warmup": 1392640
+        }
+      },
+      "main": {
+        "whole_query_ms": {
+          "median": 17.562125,
+          "minimum": 17.274584,
+          "maximum": 44.476417,
+          "mean": 21.423404857142856,
+          "sample_stddev": 10.16883289880819,
+          "all_samples": [
+            17.274584,
+            44.476417,
+            18.116458,
+            17.615667,
+            17.505417,
+            17.413166,
+            17.562125
+          ]
+        },
+        "allocations": {
+          "allocs": 105353,
+          "reallocs": 109,
+          "requested_bytes": 52347206,
+          "peak_live_delta": 13156940
+        },
+        "fixture": {
+          "kind": "fixture",
+          "case": "intermittent-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 35000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 89047040,
+          "counting": "false"
+        },
+        "verification": {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        },
+        "rss_bytes": {
+          "setup": 89047040,
+          "after_warmup": 103104512,
+          "final_cumulative": 103874560,
+          "increase_after_warmup": 770048
+        }
+      }
+    },
+    "median_ratios": {
+      "new_over_dc": 1.0532496684136956,
+      "new_over_disabled": 0.34275514103493593,
+      "new_over_main": 0.34233471177320507,
+      "disabled_over_main": 0.99877338306156
+    },
+    "new_ranges_disjoint_from": {
+      "dc": false,
+      "disabled": true,
+      "main": true
+    }
+  }
+]

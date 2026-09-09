@@ -1,0 +1,2 @@
+   Compiling indexed-topk-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-main/target/bench-wrapper)
+    Finished `release` profile [optimized] target(s) in 2.19s

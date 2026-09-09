@@ -1,0 +1,133 @@
+[
+  {
+    "name": "preparation-final",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "indexed_topk_preparation_tests",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "seconds": 7.793601036071777,
+    "source_sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3"
+  },
+  {
+    "name": "mutant-eager",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "indexed_topk_preparation_tests",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 101,
+    "seconds": 6.5022852420806885,
+    "source_sha256": "399b9523da3252132e6193c3ee6182a29d7d1e10894bce3ad5e7faf2dca2c45a"
+  },
+  {
+    "name": "mutant-late-cardinality",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 101,
+    "seconds": 5.142286062240601,
+    "source_sha256": "d1cc89c95db1fff7d6c19ed386dcfca27760757e22c023f4ba248f07c8e745ef"
+  },
+  {
+    "name": "mutant-unvisited",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--test",
+      "topk_orderby_indexed_differential",
+      "unvisited_lazy_probe_keeps_empty_result_on_fallback",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 101,
+    "seconds": 6.398841142654419,
+    "source_sha256": "fb3f967225f8b6c12247d93b58e3b99580f1ce4aff01d79a72878a7564228012"
+  },
+  {
+    "name": "restored-preparation",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "indexed_topk_preparation_tests",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "seconds": 4.79875111579895,
+    "source_sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3"
+  },
+  {
+    "name": "compact-preparation",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--features",
+      "sparq-core/compact-index",
+      "--lib",
+      "indexed_topk_preparation_tests",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "seconds": 34.059046268463135,
+    "source_sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3"
+  },
+  {
+    "name": "compact-semantic",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--features",
+      "sparq-core/compact-index",
+      "--test",
+      "topk_orderby_indexed_differential",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "seconds": 31.84034490585327,
+    "source_sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3"
+  }
+]

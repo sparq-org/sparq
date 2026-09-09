@@ -1,0 +1,26 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 5.52s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-d6792543dfcef2e5)
+
+running 3 tests
+test exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting ... ok
+test exec::indexed_topk_preparation_tests::later_variable_preparation_is_avoided_before_block_decline ... FAILED
+test exec::indexed_topk_preparation_tests::successful_rows_prepare_each_probe_once ... ok
+
+failures:
+
+---- exec::indexed_topk_preparation_tests::later_variable_preparation_is_avoided_before_block_decline stdout ----
+
+thread 'exec::indexed_topk_preparation_tests::later_variable_preparation_is_avoided_before_block_decline' (1747240) panicked at crates/sparq-engine/src/exec.rs:3646:13:
+assertion `left == right` failed: later variable scans/vectors must remain unprepared
+  left: (6, 22529)
+ right: (2, 6145)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    exec::indexed_topk_preparation_tests::later_variable_preparation_is_avoided_before_block_decline
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 318 filtered out; finished in 0.34s
+
+error: test failed, to rerun pass `-p sparq-engine --lib`

@@ -1,0 +1,42 @@
+{
+  "new": {
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes",
+    "head": "d08295b6c06ca6f6829de82a210708bab8e44a28",
+    "tree": "f73b949bc61f48194ed5f89beaba234e14017204",
+    "branch": "codex/perf-topk-lazy-probes",
+    "runtime_exec_sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3",
+    "core_store_sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "status_porcelain": "",
+    "compiled_harness": "target/bench-wrapper, exact extended bytes from new committed bench/indexed-topk; original tracked control harness not used"
+  },
+  "dc": {
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-dc",
+    "head": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+    "tree": "c71d0525faecf02b7ce867ff6f603543cbb53a48",
+    "branch": "codex/topk-lazy-control-dc",
+    "runtime_exec_sha256": "bb8f7a2649dca33111be2b57663fc37e99803d8c205708a2e28df05913f8e778",
+    "core_store_sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "status_porcelain": "",
+    "compiled_harness": "target/bench-wrapper, exact extended bytes from new committed bench/indexed-topk; original tracked control harness not used"
+  },
+  "disabled": {
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-disabled",
+    "head": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+    "tree": "42889638f21c10fd4bb655610206e99e3d49d2f6",
+    "branch": "codex/topk-lazy-control-disabled",
+    "runtime_exec_sha256": "1e80f5d2d33c20346c1b628cb4b3cb056b96918ee61d4b1ed7bbc56de6380bf0",
+    "core_store_sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "status_porcelain": "",
+    "compiled_harness": "target/bench-wrapper, exact extended bytes from new committed bench/indexed-topk; original tracked control harness not used"
+  },
+  "main": {
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-main",
+    "head": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+    "tree": "8548778b3dac184ca032ffc9a9dd7d9c50b265f8",
+    "branch": "codex/topk-lazy-control-main",
+    "runtime_exec_sha256": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd",
+    "core_store_sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "status_porcelain": "",
+    "compiled_harness": "target/bench-wrapper, exact extended bytes from new committed bench/indexed-topk; original tracked control harness not used"
+  }
+}

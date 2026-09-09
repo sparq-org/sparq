@@ -1,0 +1,14 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-core)
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-substrate)
+   Compiling sparq-introspect v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-introspect)
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 32.90s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-075557363b3cec57)
+
+running 3 tests
+test exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting ... ok
+test exec::indexed_topk_preparation_tests::later_variable_preparation_is_avoided_before_block_decline ... ok
+test exec::indexed_topk_preparation_tests::successful_rows_prepare_each_probe_once ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 318 filtered out; finished in 0.56s
+

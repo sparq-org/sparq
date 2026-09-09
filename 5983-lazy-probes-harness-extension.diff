@@ -1,0 +1,69 @@
+diff --git a/bench/indexed-topk/README.md b/bench/indexed-topk/README.md
+index 07abb5383..70dbafb00 100644
+--- a/bench/indexed-topk/README.md
++++ b/bench/indexed-topk/README.md
+@@ -15,3 +15,10 @@ Timing covers the full `sparq_engine::query` call, including parse, evaluation a
+ RSS is the OS cumulative process high-water mark, recorded after fixture construction and before/after measured queries. Setup can dominate it, so a zero increase cannot establish zero query memory. Allocation-window peaks provide a separate query-specific requested-heap estimate. Start each case/mode in a fresh process, retain setup and query observations separately, and report this limitation rather than relabeling cumulative RSS as a resettable query peak.
+ 
+ Warm up, retain every repetition, and report dispersion rather than best-of-only results. Preserve host/toolchain/source/harness/binary hashes and fixture dimensions alongside raw output. The allocator is a minimal forwarding wrapper inspired by the existing harness; calibration does not substitute for Miri or independent review. No speedup, allocation reduction or pre-admission clearance is established by adding this harness.
++
++[GPT-6 Astra] The lazy-preparation experiment adds `prefix128`, `prefix800`, and
++`intermittent`, each with an `-overlay` variant. Prefixes count live rows after
++deletions; intermittent fixtures reject every eighth live priority rank, starting
++with the best row. Existing cases, whole-query window, oracle, features and
++allocator remain unchanged. Build this exact extended harness against each
++comparison source; old binaries with fewer fixture cases are not comparable.
+diff --git a/bench/indexed-topk/src/main.rs b/bench/indexed-topk/src/main.rs
+index 5770186cf..6e5c4c7db 100644
+--- a/bench/indexed-topk/src/main.rs
++++ b/bench/indexed-topk/src/main.rs
+@@ -42,18 +42,26 @@ fn fixture(case: &str, n: usize, k: usize) -> Fixture {
+     assert!(matches!(
+         case,
+         "base" | "overlay" | "drained" | "drained-overlay" | "ties" | "ties-overlay"
++            | "prefix128" | "prefix128-overlay" | "prefix800" | "prefix800-overlay"
++            | "intermittent" | "intermittent-overlay"
+     ));
+     assert!(n >= 1024 && n <= 100_000 && k > 0 && k <= 1024);
+     let overlay = case.contains("overlay");
+     let drained = case.starts_with("drained");
+     let ties = case.starts_with("ties");
++    // [GPT-6 Astra] Predeclared miss fixtures use LIVE rank so the overlay
++    // has exactly the same leading miss count after its every-fifth deletions.
++    let prefix = if case.starts_with("prefix128") { 128 } else if case.starts_with("prefix800") { 800 } else { 0 };
++    let intermittent = case.starts_with("intermittent");
+     let mut ttl = String::new();
+     let mut deletes = Vec::new();
+     let mut expected = Vec::new();
+     let (mut seed_rows, mut pending_rows, mut tied_rows) = (0, 0, 0);
+     for i in 0..n {
+         let p = priority(i, n, ties);
+-        let status = if pending(i, n, drained) {
++        let live_rank = n - 1 - i - if overlay { (n - 1) / 5 - i / 5 } else { 0 };
++        let is_pending = if prefix > 0 { live_rank >= prefix } else if intermittent { live_rank % 8 != 0 } else { pending(i, n, drained) };
++        let status = if is_pending {
+             "pending"
+         } else {
+             "done"
+@@ -75,7 +83,7 @@ fn fixture(case: &str, n: usize, k: usize) -> Fixture {
+         } else {
+             seed_rows += 1;
+             tied_rows += usize::from(ties && p == n + 1);
+-            if pending(i, n, drained) {
++            if is_pending {
+                 pending_rows += 1;
+                 expected.push((p, i));
+             }
+@@ -97,6 +105,12 @@ fn fixture(case: &str, n: usize, k: usize) -> Fixture {
+         assert!(pending_rows * 2 >= seed_rows);
+         assert!(pending_rows * 2 - seed_rows <= 4);
+     }
++    if prefix > 0 {
++        assert_eq!(seed_rows - pending_rows, prefix);
++    }
++    if intermittent {
++        assert_eq!(seed_rows - pending_rows, seed_rows.div_ceil(8));
++    }
+     if ties {
+         assert!(tied_rows > (seed_rows / 2).max(256).max(2 * k));
+     }

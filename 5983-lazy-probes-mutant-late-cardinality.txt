@@ -1,0 +1,37 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 4.36s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-d6792543dfcef2e5)
+
+running 1 test
+test exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting ... FAILED
+
+failures:
+
+---- exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting stdout ----
+
+thread 'exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting' (1747633) panicked at crates/sparq-engine/src/exec.rs:3664:9:
+late cardinality guard must decline: EXPLAIN ANALYZE (SELECT) — plan below, then the per-operator execution trace.
+Plan:
+  Slice (offset 0, limit 1)
+    Project ?s
+      OrderBy (1 key(s))
+        BGP [binary join plan: greedy GOO ordering] (7 patterns)
+          1. scan ?s <urn:c> ?c (est 1 rows, sorted by ?s) [seed: smallest estimate]
+          2. bind join (index nested-loop, predicted) on ?s into ?s <urn:peer> <urn:X> (est 4096 rows) → est 1 rows
+          3. bind join (index nested-loop, predicted) on ?s into ?s <urn:status> "pending" (est 4096 rows) → est 1 rows
+          4. bind join (index nested-loop, predicted) on ?s into ?s <urn:priority> ?p (est 4096 rows) → est 1 rows
+          5. bind join (index nested-loop, predicted) on ?s into ?s <urn:seq> ?seq (est 4096 rows) → est 1 rows
+          6. bind join (index nested-loop, predicted) on ?s into ?s <urn:a> ?a (est 4096 rows) → est 1 rows
+          7. bind join (index nested-loop, predicted) on ?s into ?s <urn:b> ?b (est 4096 rows) → est 1 rows
+Execution trace (operator → output rows, wall time):
+Total: 1 result row(s) in 357.5µs
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    exec::indexed_topk_preparation_tests::late_selective_probe_still_declines_before_emitting
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 320 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `-p sparq-engine --lib`

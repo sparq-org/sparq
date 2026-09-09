@@ -1,0 +1,32 @@
+{
+  "head": "d08295b6c06ca6f6829de82a210708bab8e44a28",
+  "status_porcelain": "",
+  "diff_check_exit": 0,
+  "no_more_runtime_work_or_measurements": true,
+  "preserved": [
+    {
+      "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/semantic",
+      "entries_verified": 39,
+      "manifest_sha256": "fbd160cfbc9631e18f35cc3f8626dae78fa7ecbc88341f132823e6e93ec5c012",
+      "errors": []
+    },
+    {
+      "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic",
+      "entries_verified": 139,
+      "manifest_sha256": "1370e03aebb96faaaf657e5cb0e491d09272348a2949d7a59a610986fb4d735e",
+      "errors": []
+    },
+    {
+      "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/early-tie",
+      "entries_verified": 153,
+      "manifest_sha256": "56b1e1769712dde17d670f8848e388629a89be52bfb6c951deb21649db953849",
+      "errors": []
+    },
+    {
+      "directory": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/drained-design",
+      "entries_verified": 4,
+      "manifest_sha256": "3f1cd90625c3add5d47ddd619538479bf6a38284842d5d4143dfd05acb21bcd5",
+      "errors": []
+    }
+  ]
+}

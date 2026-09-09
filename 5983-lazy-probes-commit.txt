@@ -1,0 +1,11 @@
+commit d08295b6c06ca6f6829de82a210708bab8e44a28
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Tue Sep 8 20:37:20 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Tue Sep 8 20:37:20 2026 +0100
+
+    perf(engine): prepare indexed top-k probes only when reached
+    
+    [GPT-6 Astra] Keep resolved pattern order and existing block, tie, failure, cardinality, static-sort, view, budget and fanout guards. Delay each scan and subject vector until the first candidate reaches it; unvisited exclusions conservatively use fallback. Add deterministic preparation/eligibility controls and modest/intermittent semantic fixtures. Import the previously committed local diagnostic harness with six predeclared live-rank miss fixtures for identical-source comparisons; no production dependency or storage API changes.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

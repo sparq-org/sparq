@@ -1,0 +1,10 @@
+{
+  "head": "d08295b6c06ca6f6829de82a210708bab8e44a28",
+  "manifest_entries": 254,
+  "packet_sha256": "1bbfb50b49f49eace625d888440f5b7220305c295d998d0e4e98b5e53d1799f7",
+  "packet_bytes": 74120,
+  "verified_at": "2026-09-09T02:00:23.753619+00:00",
+  "clean_worktree": true,
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes",
+  "branch": "refs/heads/codex/perf-topk-lazy-probes"
+}

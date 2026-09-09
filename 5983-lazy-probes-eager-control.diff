@@ -1,0 +1,14 @@
+--- new/exec.rs
++++ eager/exec.rs
+@@ -3423,6 +3423,11 @@
+     // by prepare_other to each exact scan count before that probe is used. A
+     // successful row must visit every pattern, so it passes the same admission
+     // rule. Unvisited patterns stay unproved and cannot authorize an empty result.
++
++    // [GPT-6 Astra] Measurement counterfactual: previous eager placement.
++    for op in &mut other_pats {
++        if !prepare_other(graph, op, rows.len()) { return Ok(None); }
++    }
+ 
+     // The output column list is FIXED across every candidate (hub, order, then
+     // each other pattern's object variable, in pattern order) — compute it and

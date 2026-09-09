@@ -1,0 +1,7 @@
+{
+  "Cargo.toml": "6bf23b632c2e18b1696220a5a3899a1478058756c3cf988e7514eb39987dc4c7",
+  "Cargo.lock": "b953da71182f9233f76753b739fbf8dca4f0f18fe8f769b27f2cc010ec3dcc5f",
+  "README.md": "de32cc95e177590f8701af6d38535c4fc6ebf7b9aff01d14d2ba3637ddb91ac2",
+  "src/main.rs": "d0f7fe5d6d86e6ac86398e05affc393afd34bb7bee5699408b4f25d789d6f9f7",
+  "src/counting.rs": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2"
+}

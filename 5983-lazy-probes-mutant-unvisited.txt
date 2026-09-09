@@ -1,0 +1,33 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-probes/crates/sparq-engine)
+    Finished `test` profile [unoptimized] target(s) in 5.73s
+     Running tests/topk_orderby_indexed_differential.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/topk_orderby_indexed_differential-b40845b531114b9c)
+
+running 1 test
+test unvisited_lazy_probe_keeps_empty_result_on_fallback ... FAILED
+
+failures:
+
+---- unvisited_lazy_probe_keeps_empty_result_on_fallback stdout ----
+
+thread 'unvisited_lazy_probe_keeps_empty_result_on_fallback' (1748232) panicked at crates/sparq-engine/tests/topk_orderby_indexed_differential.rs:59:5:
+unvisited probe must not authorize indexed admission: EXPLAIN ANALYZE (SELECT) — plan below, then the per-operator execution trace.
+Plan:
+  Slice (offset 0, limit 1)
+    Project ?s
+      OrderBy (1 key(s))
+        BGP [binary join plan: greedy GOO ordering] (3 patterns)
+          1. scan ?s <urn:p> ?p (est 32 rows, sorted by ?s) [seed: smallest estimate]
+          2. merge join on ?s with scan ?s <urn:status> "pending" (est 32 rows, sorted by ?s) → est 32 rows
+          3. merge join on ?s with scan ?s <urn:later> ?v (est 64 rows, sorted by ?s) → est 64 rows
+Execution trace (operator → output rows, wall time):
+Total: 0 result row(s) in 24.0µs
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    unvisited_lazy_probe_keeps_empty_result_on_fallback
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p sparq-engine --test topk_orderby_indexed_differential`

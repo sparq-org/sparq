@@ -1,0 +1,913 @@
+{
+  "records": [
+    {
+      "name": "control-base-k1-new-verify",
+      "variant": "new",
+      "case": "base",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-timing",
+        "verify",
+        "base",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "indexed"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896441.264023,
+      "wall_seconds": 0.9560587406158447,
+      "binary_sha256": "2856a8a0c5c01d06567f6508477a115e86c52fbe282bbc59f8f064ccf068169d",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 46399488,
+          "counting": "false"
+        },
+        {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-base-k1-new-verify.txt"
+    },
+    {
+      "name": "control-base-k1-new-count",
+      "variant": "new",
+      "case": "base",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-count",
+        "measure",
+        "base",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "indexed"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896442.229876,
+      "wall_seconds": 0.30053281784057617,
+      "binary_sha256": "3fcb3595e0015f96e586df8e58147e693f18d54f4b40f1ac636edcafbc12ce2d",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45563904,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600052,
+          "reallocs": 37,
+          "requested_bytes": 123826099,
+          "peak_live_delta": 47136880,
+          "ending_live": 31549462
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550746,
+          "pre_query_max_rss": 47153152,
+          "post_query_max_rss": 47169536,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550746,
+          "pre_query_max_rss": 47153152,
+          "post_query_max_rss": 47218688,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550746,
+          "pre_query_max_rss": 47153152,
+          "post_query_max_rss": 47235072,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-base-k1-new-count.txt"
+    },
+    {
+      "name": "control-base-k1-eager-verify",
+      "variant": "eager",
+      "case": "base",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "verify",
+        "base",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "indexed"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896442.535459,
+      "wall_seconds": 0.2717409133911133,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45514752,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600052,
+          "reallocs": 37,
+          "requested_bytes": 123826099,
+          "peak_live_delta": 47136880,
+          "ending_live": 31549463
+        },
+        {
+          "kind": "verify",
+          "path": "indexed-inferred",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-base-k1-eager-verify.txt"
+    },
+    {
+      "name": "control-base-k1-eager-count",
+      "variant": "eager",
+      "case": "base",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "measure",
+        "base",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "indexed"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896442.811832,
+      "wall_seconds": 0.2567009925842285,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "base",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 50000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 45547520,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600050,
+          "reallocs": 37,
+          "requested_bytes": 123823387,
+          "peak_live_delta": 47134168,
+          "ending_live": 31549464
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550748,
+          "pre_query_max_rss": 47120384,
+          "post_query_max_rss": 47153152,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550748,
+          "pre_query_max_rss": 47120384,
+          "post_query_max_rss": 47218688,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 224,
+          "reallocs": 10,
+          "requested_bytes": 1227097,
+          "peak_live_delta": 1209921,
+          "ending_live": 31550748,
+          "pre_query_max_rss": 47120384,
+          "post_query_max_rss": 47218688,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-base-k1-eager-count.txt"
+    },
+    {
+      "name": "control-drained-k1-new-verify",
+      "variant": "new",
+      "case": "drained",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-timing",
+        "verify",
+        "drained",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896443.080988,
+      "wall_seconds": 0.2670419216156006,
+      "binary_sha256": "2856a8a0c5c01d06567f6508477a115e86c52fbe282bbc59f8f064ccf068169d",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44908544,
+          "counting": "false"
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-k1-new-verify.txt"
+    },
+    {
+      "name": "control-drained-k1-new-count",
+      "variant": "new",
+      "case": "drained",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-count",
+        "measure",
+        "drained",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896443.35299,
+      "wall_seconds": 0.31262707710266113,
+      "binary_sha256": "3fcb3595e0015f96e586df8e58147e693f18d54f4b40f1ac636edcafbc12ce2d",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44941312,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600048,
+          "reallocs": 36,
+          "requested_bytes": 122592406,
+          "peak_live_delta": 46569948,
+          "ending_live": 30987670
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 75524,
+          "reallocs": 631,
+          "requested_bytes": 57771894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988954,
+          "pre_query_max_rss": 59097088,
+          "post_query_max_rss": 59129856,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 75524,
+          "reallocs": 631,
+          "requested_bytes": 57771894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988954,
+          "pre_query_max_rss": 59097088,
+          "post_query_max_rss": 59146240,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 75524,
+          "reallocs": 631,
+          "requested_bytes": 57771894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988954,
+          "pre_query_max_rss": 59097088,
+          "post_query_max_rss": 59146240,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-k1-new-count.txt"
+    },
+    {
+      "name": "control-drained-k1-eager-verify",
+      "variant": "eager",
+      "case": "drained",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "verify",
+        "drained",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896443.6724968,
+      "wall_seconds": 0.2691371440887451,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.7763671875,
+        4.986328125,
+        8.58447265625
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44957696,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600051,
+          "reallocs": 36,
+          "requested_bytes": 122594822,
+          "peak_live_delta": 46572364,
+          "ending_live": 30987671
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-k1-eager-verify.txt"
+    },
+    {
+      "name": "control-drained-k1-eager-count",
+      "variant": "eager",
+      "case": "drained",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "measure",
+        "drained",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896443.9461708,
+      "wall_seconds": 0.2973341941833496,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.1533203125,
+        4.919921875,
+        8.53955078125
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 50000,
+          "pending_rows": 25001,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 0,
+          "setup_max_rss": 44957696,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 2600049,
+          "reallocs": 36,
+          "requested_bytes": 122592454,
+          "peak_live_delta": 46569996,
+          "ending_live": 30987672
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 75528,
+          "reallocs": 631,
+          "requested_bytes": 58571894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988956,
+          "pre_query_max_rss": 59146240,
+          "post_query_max_rss": 59162624,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 75528,
+          "reallocs": 631,
+          "requested_bytes": 58571894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988956,
+          "pre_query_max_rss": 59146240,
+          "post_query_max_rss": 59179008,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 75528,
+          "reallocs": 631,
+          "requested_bytes": 58571894,
+          "peak_live_delta": 8500044,
+          "ending_live": 30988956,
+          "pre_query_max_rss": 59146240,
+          "post_query_max_rss": 59195392,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-k1-eager-count.txt"
+    },
+    {
+      "name": "control-drained-overlay-k1-new-verify",
+      "variant": "new",
+      "case": "drained-overlay",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-timing",
+        "verify",
+        "drained-overlay",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896444.25805,
+      "wall_seconds": 0.3260831832885742,
+      "binary_sha256": "2856a8a0c5c01d06567f6508477a115e86c52fbe282bbc59f8f064ccf068169d",
+      "load_average": [
+        8.1533203125,
+        4.919921875,
+        8.53955078125
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88129536,
+          "counting": "false"
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-overlay-k1-new-verify.txt"
+    },
+    {
+      "name": "control-drained-overlay-k1-new-count",
+      "variant": "new",
+      "case": "drained-overlay",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/new-count",
+        "measure",
+        "drained-overlay",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896444.589201,
+      "wall_seconds": 0.3696439266204834,
+      "binary_sha256": "3fcb3595e0015f96e586df8e58147e693f18d54f4b40f1ac636edcafbc12ce2d",
+      "load_average": [
+        8.1533203125,
+        4.919921875,
+        8.53955078125
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88129536,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 3050097,
+          "reallocs": 20066,
+          "requested_bytes": 188749241,
+          "peak_live_delta": 79990839,
+          "ending_live": 36287720
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 60435,
+          "reallocs": 103,
+          "requested_bytes": 34429994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289004,
+          "pre_query_max_rss": 96665600,
+          "post_query_max_rss": 96698368,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 60435,
+          "reallocs": 103,
+          "requested_bytes": 34429994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289004,
+          "pre_query_max_rss": 96665600,
+          "post_query_max_rss": 96714752,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 60435,
+          "reallocs": 103,
+          "requested_bytes": 34429994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289004,
+          "pre_query_max_rss": 96665600,
+          "post_query_max_rss": 96747520,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-overlay-k1-new-count.txt"
+    },
+    {
+      "name": "control-drained-overlay-k1-eager-verify",
+      "variant": "eager",
+      "case": "drained-overlay",
+      "n": 50000,
+      "k": 1,
+      "mode": "verify",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "verify",
+        "drained-overlay",
+        "50000",
+        "1",
+        "0",
+        "1",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896444.965882,
+      "wall_seconds": 0.32485294342041016,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.1533203125,
+        4.919921875,
+        8.53955078125
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88145920,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 3050097,
+          "reallocs": 20066,
+          "requested_bytes": 188749241,
+          "peak_live_delta": 79990839,
+          "ending_live": 36287721
+        },
+        {
+          "kind": "verify",
+          "path": "fallback",
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-overlay-k1-eager-verify.txt"
+    },
+    {
+      "name": "control-drained-overlay-k1-eager-count",
+      "variant": "eager",
+      "case": "drained-overlay",
+      "n": 50000,
+      "k": 1,
+      "mode": "count",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/bins/eager-count",
+        "measure",
+        "drained-overlay",
+        "50000",
+        "1",
+        "2",
+        "3",
+        "fallback"
+      ],
+      "exit_code": 0,
+      "started_unix": 1788896445.295499,
+      "wall_seconds": 0.38583803176879883,
+      "binary_sha256": "cf3aafe26b44df0859769b5ef47626033b085ee4eccab11ffac0061e22e27369",
+      "load_average": [
+        8.1533203125,
+        4.919921875,
+        8.53955078125
+      ],
+      "rows": [
+        {
+          "kind": "fixture",
+          "case": "drained-overlay",
+          "n": 50000,
+          "k": 1,
+          "seed_rows": 40000,
+          "pending_rows": 20000,
+          "tied_rows": 0,
+          "probe_predicates": 6,
+          "tombstones": 70000,
+          "setup_max_rss": 88145920,
+          "counting": "true"
+        },
+        {
+          "kind": "setup_alloc",
+          "allocs": 3050097,
+          "reallocs": 20066,
+          "requested_bytes": 188749241,
+          "peak_live_delta": 79990839,
+          "ending_live": 36287722
+        },
+        {
+          "kind": "sample",
+          "rep": 0,
+          "allocs": 60443,
+          "reallocs": 103,
+          "requested_bytes": 37469994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289006,
+          "pre_query_max_rss": 97107968,
+          "post_query_max_rss": 97124352,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 1,
+          "allocs": 60443,
+          "reallocs": 103,
+          "requested_bytes": 37469994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289006,
+          "pre_query_max_rss": 97107968,
+          "post_query_max_rss": 97157120,
+          "rows": 1,
+          "oracle": "pass"
+        },
+        {
+          "kind": "sample",
+          "rep": 2,
+          "allocs": 60443,
+          "reallocs": 103,
+          "requested_bytes": 37469994,
+          "peak_live_delta": 7219788,
+          "ending_live": 36289006,
+          "pre_query_max_rss": 97107968,
+          "post_query_max_rss": 97189888,
+          "rows": 1,
+          "oracle": "pass"
+        }
+      ],
+      "raw": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/lazy-probes/raw/control-drained-overlay-k1-eager-count.txt"
+    }
+  ],
+  "checks": [
+    {
+      "case": "base",
+      "positive_control": "identical allocation metrics",
+      "metrics": {
+        "allocs": 224,
+        "reallocs": 10,
+        "requested_bytes": 1227097,
+        "peak_live_delta": 1209921
+      }
+    },
+    {
+      "case": "drained",
+      "seed_rows": 50000,
+      "minimum_avoided_bytes": 800000,
+      "new": {
+        "allocs": 75524,
+        "reallocs": 631,
+        "requested_bytes": 57771894,
+        "peak_live_delta": 8500044
+      },
+      "eager": {
+        "allocs": 75528,
+        "reallocs": 631,
+        "requested_bytes": 58571894,
+        "peak_live_delta": 8500044
+      },
+      "avoided_requested_bytes": 800000,
+      "avoided_allocations": 4
+    },
+    {
+      "case": "drained-overlay",
+      "seed_rows": 40000,
+      "minimum_avoided_bytes": 640000,
+      "new": {
+        "allocs": 60435,
+        "reallocs": 103,
+        "requested_bytes": 34429994,
+        "peak_live_delta": 7219788
+      },
+      "eager": {
+        "allocs": 60443,
+        "reallocs": 103,
+        "requested_bytes": 37469994,
+        "peak_live_delta": 7219788
+      },
+      "avoided_requested_bytes": 3040000,
+      "avoided_allocations": 8
+    }
+  ],
+  "passed": true
+}

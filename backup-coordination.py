@@ -112,6 +112,13 @@ for evidence_prefix, evidence_subdir in [('5983-drained-design-', 'direct-5983/d
     for evidence_name in [*json.loads((evidence_root / 'manifest.json').read_text())['files'], 'manifest.json']:
         FILES[evidence_prefix + evidence_name.replace('/', '--')] = evidence_root / evidence_name
 
+LAZY_PROBES = ROOT / 'direct-5983/lazy-probes'
+for evidence_name in [*json.loads((LAZY_PROBES / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['5983-lazy-probes-' + evidence_name.replace('/', '--')] = LAZY_PROBES / evidence_name
+for evidence_name in ['overlay-cost-dedupe-query.json', 'overlay-cost-dedupe.json', 'overlay4246-read-query.json', 'overlay4246-read.json', 'overlay4246-start-comment.md', 'main-a42a9e89-runs.json']:
+    FILES[evidence_name] = ROOT / evidence_name
+FILES['5983-final-no-go-comment.md'] = ROOT / 'direct-5983/final-no-go-comment.md'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,20 @@
+[
+  {
+    "variant": "dc",
+    "ref": "dc23141d8c9e640e599085b0ed1616da35d8fc87",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-dc",
+    "exit_code": 0
+  },
+  {
+    "variant": "disabled",
+    "ref": "3861b78658cd1fc06b5ac10189b80a355493be9e",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-disabled",
+    "exit_code": 0
+  },
+  {
+    "variant": "main",
+    "ref": "f6362852ef4b9878c6c1f0f678e05411b4f410e6",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr5983-lazy-control-main",
+    "exit_code": 0
+  }
+]

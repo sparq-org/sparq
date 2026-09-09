@@ -1,0 +1,3 @@
+compact-preparation: build/test running (30s)
+compact-semantic: build/test running (30s)
+Source restored

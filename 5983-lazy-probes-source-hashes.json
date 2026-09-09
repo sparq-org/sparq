@@ -1,0 +1,42 @@
+{
+  "crates/sparq-engine/src/exec.rs": {
+    "sha256": "cd77483dfeed68e7db26d81b2390e3fbe98a650d00bf4fdaac1f53ebbc7367f3",
+    "git_blob": "f2ad08e457a7a98a7d55b726f8c3e0a8288e0176"
+  },
+  "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs": {
+    "sha256": "f219268f83fffc6fb0f19f9bfe9b777fa47892924e5ac72e08ce76fdecdc852e",
+    "git_blob": "48e4d395e1d617c2eea4016dcf25d7b9ce8d5e9d"
+  },
+  "crates/sparq-core/src/store.rs": {
+    "sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+    "git_blob": "e4b19e441dcd32eac5e3fde63c38dabeb4493f4c"
+  },
+  "crates/sparq-core/src/compress.rs": {
+    "sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+    "git_blob": "46162fd605fb93ad7e98a559ff6f142bd27340fa"
+  },
+  "bench/benchmarks.toml": {
+    "sha256": "38d8a838a8fb8c49b307fb37225a599e333cbebc592c02c3d3e02a431297b581",
+    "git_blob": "760b605982c5233b74fe291d44972f314a37205c"
+  },
+  "bench/indexed-topk/Cargo.toml": {
+    "sha256": "6bf23b632c2e18b1696220a5a3899a1478058756c3cf988e7514eb39987dc4c7",
+    "git_blob": "b449858dbdde5bfc46c72c04bb05e7d007ed3507"
+  },
+  "bench/indexed-topk/Cargo.lock": {
+    "sha256": "b953da71182f9233f76753b739fbf8dca4f0f18fe8f769b27f2cc010ec3dcc5f",
+    "git_blob": "e28c00f2a9503387aa97e7daca350c40cfb6e845"
+  },
+  "bench/indexed-topk/README.md": {
+    "sha256": "de32cc95e177590f8701af6d38535c4fc6ebf7b9aff01d14d2ba3637ddb91ac2",
+    "git_blob": "70dbafb0006a3f1ced2a08db4e4a11aae9f8fbe8"
+  },
+  "bench/indexed-topk/src/main.rs": {
+    "sha256": "d0f7fe5d6d86e6ac86398e05affc393afd34bb7bee5699408b4f25d789d6f9f7",
+    "git_blob": "6e5c4c7db0a5bc898e0e9f74d83642f9aec3ba90"
+  },
+  "bench/indexed-topk/src/counting.rs": {
+    "sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "git_blob": "e9a6e298126fb651d267e8f564a5408062995dec"
+  }
+}

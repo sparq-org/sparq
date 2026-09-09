@@ -1,0 +1,8 @@
+kind=fixture	case=overlay	n=50000	k=1	seed_rows=40000	pending_rows=40000	tied_rows=0	probe_predicates=6	tombstones=70000	setup_max_rss=89145344	counting=false
+kind=sample	rep=0	whole_query_ns=18602833	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=1	whole_query_ns=18522583	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=2	whole_query_ns=17900042	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=3	whole_query_ns=17894500	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=4	whole_query_ns=17843000	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=5	whole_query_ns=17875416	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass
+kind=sample	rep=6	whole_query_ns=17878042	pre_query_max_rss=106479616	post_query_max_rss=106479616	rows=1	oracle=pass

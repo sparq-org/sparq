@@ -1,0 +1,7 @@
+{
+  "base_main": "cf19a52c6880c496cefaca24046174902bc30958",
+  "bind_join_byte_identical": true,
+  "bind_join_sha256": "6a9aee8fbe5641934ec17646c8a6025f5ff7b828aae17bc1fb34b3525577645d",
+  "runtime_delta_stat": " crates/sparq-engine/src/exec.rs                    | 164 +++++++++++++++------\n .../tests/topk_orderby_indexed_differential.rs     |  46 ++++++\n 2 files changed, 166 insertions(+), 44 deletions(-)\n",
+  "whole_delta_stat": " bench/benchmarks.toml                              |  15 +\n bench/indexed-topk/Cargo.lock                      | 931 +++++++++++++++++++++\n bench/indexed-topk/Cargo.toml                      |  27 +\n bench/indexed-topk/README.md                       |  24 +\n bench/indexed-topk/src/counting.rs                 | 119 +++\n bench/indexed-topk/src/main.rs                     | 234 ++++++\n crates/sparq-engine/src/exec.rs                    | 164 +++-\n .../tests/topk_orderby_indexed_differential.rs     |  46 +\n 8 files changed, 1516 insertions(+), 44 deletions(-)\n"
+}

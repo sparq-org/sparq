@@ -1,0 +1,5 @@
+kind=fixture	case=intermittent-overlay	n=50000	k=1	seed_rows=40000	pending_rows=35000	tied_rows=0	probe_predicates=6	tombstones=70000	setup_max_rss=89096192	counting=true
+kind=setup_alloc	allocs=3050097	reallocs=20067	requested_bytes=189905831	peak_live_delta=80537644	ending_live=36834534
+kind=sample	rep=0	allocs=105353	reallocs=109	requested_bytes=52347206	peak_live_delta=13156940	ending_live=36835818	pre_query_max_rss=104775680	post_query_max_rss=104808448	rows=1	oracle=pass
+kind=sample	rep=1	allocs=105353	reallocs=109	requested_bytes=52347206	peak_live_delta=13156940	ending_live=36835818	pre_query_max_rss=104775680	post_query_max_rss=104824832	rows=1	oracle=pass
+kind=sample	rep=2	allocs=105353	reallocs=109	requested_bytes=52347206	peak_live_delta=13156940	ending_live=36835818	pre_query_max_rss=104775680	post_query_max_rss=104824832	rows=1	oracle=pass
