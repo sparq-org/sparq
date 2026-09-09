@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T20:00:31.922370+00:00",
+  "updated_at": "2026-09-09T20:18:26.480094+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6473 external checks/Copilot pending after verified single infra recovery",
+    "phase": "PR6473 admitted normal queue, merge-group checks pending",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
     "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
@@ -120,7 +120,9 @@
         "evidence": "direct-6468/label-maintenance/postcreate-scheduled-verification.json",
         "applied": 150,
         "new_label_recipients": 0,
-        "new_label_5016": "correct T2 classification, deferred by write budget; eventual application still to observe"
+        "new_label_5016": "correct T2 classification, deferred by write budget; eventual application still to observe",
+        "checked_again_at": "2026-09-09T20:18:26.480094+00:00",
+        "no_new_run_evidence": "direct-6468/label-maintenance/scheduled-runs-2018.json"
       }
     },
     "conflict_assessment": {
@@ -269,7 +271,7 @@
       "matrix_conclusion": "success",
       "aggregate_run": 34397783664,
       "aggregate_job": 102621664513,
-      "aggregate_retry": "onePOSTacceptedHTTP201, awaiting observation",
+      "aggregate_retry": "attempt2SUCCESS; completed20:00:44Z, job102623664012",
       "aggregate_receipt": "direct-6468/followup-admission/gate-retry-receipt.txt"
     },
     "linux_validation": {
@@ -279,6 +281,20 @@
       "suite_tests": 45,
       "privacy": "executedPASS",
       "python": "3.12.14"
+    },
+    "queue": {
+      "entry_id": "MQE_lQDOSz3qKM8AAAABC44lCc4AA2w6zgLJmhw",
+      "position": 1,
+      "state": "AWAITING_CHECKS",
+      "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "admitted_at": "2026-09-09T20:15:02.031948+00:00",
+      "proof": "direct-6468/followup-admission/admission-verification.json",
+      "latest_runs": "direct-6468/followup-admission/queue-initial-runs.json",
+      "required_gate": 34399858325,
+      "docs_quality": 34399858346,
+      "CI": 34399858588,
+      "feature_matrix": 34399858565,
+      "validation": "direct-6468/followup-admission/queue-validation-proof.json"
     }
   },
   "prs": {
@@ -531,16 +547,40 @@
     "6473": {
       "issue": 6468,
       "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "state": "OPEN_CI_AND_COPILOT_PENDING",
+      "state": "QUEUED",
       "url": "https://github.com/sparq-org/sparq/pull/6473",
       "branch": "codex/triage-area-unknown-diagnostics",
       "review": "Actual Opus5xhigh original5f758 and finalafa9 approve_for_validation, no blockers, perf_affectingfalse",
       "review_result": "direct-6468/followup-admission/opus-review-result.json",
       "linux_tests": "45actualtests+privacyPASS",
       "matrix": "attempt2SUCCESS after GitHubdiffnot_available",
-      "gate": "oneboundedretryaccepted;resultpending",
-      "copilot": "34397789869in_progress;alreadyrequestedautomatically",
-      "review_threads": 0
+      "gate": "34397783664attempt2SUCCESS,app15368",
+      "copilot": "34397789869SUCCESS; exactheadapprovalrecommended,0comments",
+      "review_threads": 0,
+      "queue": {
+        "entry_id": "MQE_lQDOSz3qKM8AAAABC44lCc4AA2w6zgLJmhw",
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+        "admitted_at": "2026-09-09T20:15:02.031948+00:00",
+        "proof": "direct-6468/followup-admission/admission-verification.json",
+        "latest_runs": "direct-6468/followup-admission/queue-initial-runs.json",
+        "required_gate": 34399858325,
+        "docs_quality": 34399858346,
+        "CI": 34399858588,
+        "feature_matrix": 34399858565,
+        "validation": "direct-6468/followup-admission/queue-validation-proof.json"
+      }
+    },
+    "6095": {
+      "state": "OPEN_MACHINE_GATE_HOLD",
+      "head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+      "issue": 4567,
+      "draft": true,
+      "hold": "review:needs set by bot stuck-arm gate-failed; sourceissue4567nohumanholds in completecomments/labels. No mutation/rearm/holdclear performed.",
+      "exact_gate": "33926976128failed superseded-legs: newest auto-arm33926979672cancelled attempt2 after one automatic redispatch. No source test failure asserted.",
+      "analysis": "direct-6095/assessment-report.json",
+      "next": "After6473terminal, plan recovery of existing historicalOpuschain with fresh composition/tests/actualOpusreview. Preserve review:needs until its realgate-green condition and allotheradmissionrequirements proven; never replayautoarm to evadethehold."
     }
   },
   "registry": {
@@ -591,12 +631,11 @@
     }
   },
   "next_actions": [
-    "Read PR6473 exactafa9 status, Copilot review bodies/threads and run34397783664attempt2; no duplicate reruns. Matrix34397783877attempt2SUCCESS and Linux45tests+privacy already verified; do not repeat local tests or Opus review unless source changes.",
-    "Resolve Copilot findings with concrete fix or reasoned reply; revalidate holds/head/main/protections and all requiredgatechecks before normal protected enqueue expectedHeadOidafa9,jumpfalse. Never forge review:pass.",
-    "Observe eventual ordinary scheduledgenerator5016labelapplication and firsttriage-area tickafter6473merge. Firstpost-maintenance34395557649alreadySUCCESS150writes, correct5016classification deferred; no recipients at1950. No replay/newlabels.",
-    "PR6469 mainCI/matrix/aggregate allSUCCESS; registry/release holds remain. No needrepeat broad mainCIpolls.",
-    "After6473terminal, reassess existing6095exactfailedgatelog and sourceissueholds beforeanynewimplementation; no rearm, holdclearing or duplicate oldchain.",
-    "KeepprivateGitcheckpoint/evidence durable; one substantive implementationlane; heartbeat10min, yieldbetweenexternalstages withoutbusyloops."
+    "Observe PR6473 position1 merge-group e53464c73f31f7aca800f3867ac054c36408e346: gate34399858325; CI34399858588/matrix34399858565 pending, docs-quality34399858346SUCCESS. Preserve allcurrentruns; no reenqueue or extra old-head reruns.",
+    "After6473merge, verify two reviewed files onmain, actualmerge-group tests, postmergeCI, then linkresolvingPRonissue6468 and closeonlywhencriteria met. Continue ordinaryschedulednewlabel5016andnewsourceobservation; no manualclassifierreplay.",
+    "Next existing6095: boundedread nowidentified actualoldfailure(auto-arm33926979672cancelledattempt2), no humanholdonsource4567, botgate-greenholdstillactive. Afterstable6473main compose existinghistoricalOpusbranchwithcurrentmain, narrowAstraimplementation/testingifneeded, onefreshactualOpusreview; preservebotreview:needs untilalladmissionrequirements. No restartregistry/replayautoarm/clonePRorholdescape.",
+    "PR6469mainCI/matrix/aggregate alreadyverifiedSUCCESS. RegistryOFF, ALLGREEN and pending6049/6055/2305holds and releasepause unchanged.",
+    "Savecheckpoint/evidenceprivateGitref andyieldbetweenexternalstages; one substantive lane, no idle model sessions."
   ],
   "followup_lane": {
     "issue": 6462,

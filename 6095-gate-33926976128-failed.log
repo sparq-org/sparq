@@ -1,0 +1,221 @@
+gate	UNKNOWN STEP	﻿2026-09-04T23:24:42.9078972Z Current runner version: '2.337.0'
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9104611Z ##[group]Runner Image Provisioner
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9105557Z Hosted Compute Agent
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9106231Z Version: 20260828.587
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9106953Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9107713Z Build Date: 2026-08-28T16:44:25Z
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9108663Z Worker ID: {5b6a2e3f-1ec9-422d-97f3-13bada1b19aa}
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9109453Z Azure Region: eastus
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9110091Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9111813Z ##[group]Operating System
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9112499Z Ubuntu
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9113146Z 24.04.4
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9113757Z LTS
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9114275Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9114965Z ##[group]Runner Image
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9115591Z Image: ubuntu-24.04
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9116233Z Version: 20260831.293.1
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9117571Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9119356Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9120347Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9121936Z ##[group]GITHUB_TOKEN Permissions
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9124160Z Actions: write
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9124874Z Checks: read
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9125456Z Contents: read
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9126069Z Metadata: read
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9126708Z PullRequests: read
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9127309Z Statuses: read
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9127937Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9130773Z Secret source: Actions
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9132329Z Prepare workflow directory
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9458422Z Prepare all required actions
+gate	UNKNOWN STEP	2026-09-04T23:24:42.9506126Z Getting action download info
+gate	UNKNOWN STEP	2026-09-04T23:24:43.1519817Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+gate	UNKNOWN STEP	2026-09-04T23:24:43.4584821Z Complete job name: gate
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5323012Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5324069Z with:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5324536Z   persist-credentials: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5325301Z   sparse-checkout: scripts/ci_summary_gate.py
+gate	UNKNOWN STEP	.github/advisory-registry.json
+gate	UNKNOWN STEP	
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5326114Z   sparse-checkout-cone-mode: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5326667Z   repository: sparq-org/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5330838Z   token: ***
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5331386Z   ssh-strict: true
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5331848Z   ssh-user: git
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5332376Z   clean: true
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5332802Z   fetch-depth: 1
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5333255Z   fetch-tags: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5333719Z   show-progress: true
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5334183Z   lfs: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5334624Z   submodules: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5335083Z   set-safe-directory: true
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5335595Z   allow-unsafe-pr-checkout: false
+gate	UNKNOWN STEP	2026-09-04T23:24:43.5336332Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6365873Z Syncing repository: sparq-org/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6367670Z ##[group]Getting Git version info
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6368352Z Working directory is '/home/runner/work/sparq/sparq'
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6369805Z [command]/usr/bin/git version
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6407949Z git version 2.55.0
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6428842Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6440772Z Temporarily overriding HOME='/home/runner/work/_temp/e91d3fa2-8809-4820-ba9f-f867235b3025' before making global git config changes
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6443233Z Adding repository directory to the temporary git global config as a safe directory
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6447388Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6496257Z Deleting the contents of '/home/runner/work/sparq/sparq'
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6500482Z ##[group]Determining repository object format
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6502193Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6503563Z ##[group]Initializing the repository
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6507738Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6586879Z hint: Using 'master' as the name for the initial branch. This default branch name
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6588911Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6592369Z hint: to use in all of your new repositories, which will suppress this warning,
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6595090Z hint: call:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6596015Z hint:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6597318Z hint: 	git config --global init.defaultBranch <name>
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6598356Z hint:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6599459Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6600920Z hint: 'development'. The just-created branch can be renamed via this command:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6602114Z hint:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6602777Z hint: 	git branch -m <name>
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6603538Z hint:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6604517Z hint: Disable this message with "git config set advice.defaultBranchName false"
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6606082Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6608976Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6647522Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6649016Z ##[group]Disabling automatic garbage collection
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6651611Z [command]/usr/bin/git config --local gc.auto 0
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6687077Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6689456Z ##[group]Setting up auth
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6690590Z Removing SSH command configuration
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6693498Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+gate	UNKNOWN STEP	2026-09-04T23:24:43.6731163Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7064210Z Removing HTTP extra header
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7072019Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7112401Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7370078Z Removing includeIf entries pointing to credentials config files
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7375980Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7415044Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7656373Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7699285Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7735929Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7774268Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7812139Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7845443Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7846568Z ##[group]Fetching the repository
+gate	UNKNOWN STEP	2026-09-04T23:24:43.7853634Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +a1c40828f1ce658369b71450a1867d356e5d1410:refs/remotes/pull/6095/merge
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0552496Z From https://github.com/sparq-org/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0554470Z  * [new ref]         a1c40828f1ce658369b71450a1867d356e5d1410 -> pull/6095/merge
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0557880Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0559118Z ##[group]Determining the checkout info
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0560429Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0561476Z ##[group]Setting up sparse checkout
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0564086Z [command]/usr/bin/git config core.sparseCheckout true
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0602944Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0631187Z .git/info/sparse-checkout
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0640284Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0641727Z ##[group]Checking out the ref
+gate	UNKNOWN STEP	2026-09-04T23:24:44.0646337Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6095/merge
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4927314Z Note: switching to 'refs/remotes/pull/6095/merge'.
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4928298Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4929410Z You are in 'detached HEAD' state. You can look around, make experimental
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4941001Z changes and commit them, and you can discard any commits you make in this
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4942437Z state without impacting any branches by switching back to a branch.
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4943197Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4943729Z If you want to create a new branch to retain commits you create, you may
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4944974Z do so (now or later) by using -c with the switch command. Example:
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4945743Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4946099Z   git switch -c <new-branch-name>
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4946667Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4947034Z Or undo this operation with:
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4947568Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4947873Z   git switch -
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4948352Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4949311Z Turn off this advice by setting config variable advice.detachedHead to false
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4950283Z 
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4951451Z HEAD is now at a1c4082 Merge 0883db681c73ddc338643f135c770c5a036ac3a4 into 0c3a4afe244d7f1d6ddc8569b4257f6f3e2e8405
+gate	UNKNOWN STEP	2026-09-04T23:24:44.4955498Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5002208Z [command]/usr/bin/git log -1 --format=%H
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5034822Z a1c40828f1ce658369b71450a1867d356e5d1410
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5044230Z ##[group]Removing auth
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5045259Z Removing SSH command configuration
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5047734Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5089462Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5343439Z Removing HTTP extra header
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5346419Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5386893Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5641517Z Removing includeIf entries pointing to credentials config files
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5645527Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5677190Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5680844Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5684113Z includeif.gitdir:/github/workspace/.git.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5687043Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5693839Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5717905Z /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5728372Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5766534Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5802139Z /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5811565Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5848055Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5876162Z /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5887531Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5934235Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5963625Z /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.5976723Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6019571Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6269717Z Removing credentials config '/home/runner/work/_temp/git-credentials-978cdc6a-c4e5-47d5-ab53-45a3de662ab9.config'
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6274268Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6547732Z ##[group]Run python3 scripts/ci_summary_gate.py
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6549528Z [36;1mpython3 scripts/ci_summary_gate.py[0m
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6595828Z shell: /usr/bin/bash -e {0}
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6596915Z env:
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6608301Z   GH_TOKEN: ***
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6609454Z   REPO: sparq-org/sparq
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6610635Z   SHA: 0883db681c73ddc338643f135c770c5a036ac3a4
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6611981Z   SELF_RUN_ID: 33926976128
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6613047Z   EVENT_NAME: pull_request
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6614094Z   PR_DRAFT: false
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6615017Z   PR_NUMBER: 6095
+gate	UNKNOWN STEP	2026-09-04T23:24:44.6615926Z ##[endgroup]
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2265237Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2266147Z ci-summary: evaluating tier=full (event=pull_request).
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2270209Z   workflow-run resolver: 48 run(s) declared NO LEGS (guarded label-flip no-op, #3781) — ignored, so the previous real run of each workflow stays authoritative: 33468990185, 33468990215, 33468990229, 33468990239, 33816607326, 33816607360, 33816607368, 33816607374, 33816608692, 33816608744, 33816608788, 33816608837, 33840575576, 33840575582, 33840575602, 33840575659, 33840575850, 33840575854, 33840575871, 33840575881, 33853460962, 33853461008, 33853461089, 33853461094, 33853461594, 33853461610, 33853461621, 33853461659, 33917452681, 33917452683, 33917452693, 33917452738, 33917456715, 33917456727, 33917456734, 33917456760, 33926973929, 33926973987, 33926974008, 33926974110, 33926979790, 33926979812, 33926979821, 33926979885, 33926981018, 33926981029, 33926981031, 33926981035
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2295478Z ##[notice]ci-summary #3505: newest workflow 'auto-arm' run 33926979672 was cancelled; requested its one bounded re-run (run_attempt marker=1).
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2302839Z   workflow-run resolver: ignored 578 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:24:53.2303469Z attempt 1: 35 check-run(s), 30 running, all-terminal stable for 0/2 poll(s)
+gate	UNKNOWN STEP	2026-09-04T23:25:20.1327835Z   workflow-run resolver: ignored 578 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:25:20.1328796Z attempt 2: 37 check-run(s), 29 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	UNKNOWN STEP	2026-09-04T23:25:46.4014814Z   workflow-run resolver: ignored 578 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:25:46.4016557Z attempt 3: 37 check-run(s), 28 running, all-terminal stable for 0/2 poll(s)
+gate	UNKNOWN STEP	2026-09-04T23:26:13.7003172Z   workflow-run resolver: ignored 580 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:26:13.7004946Z attempt 4: 36 check-run(s), 25 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	UNKNOWN STEP	2026-09-04T23:26:40.2482326Z   workflow-run resolver: ignored 580 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:26:40.2482996Z attempt 5: 36 check-run(s), 24 running, all-terminal stable for 0/2 poll(s)
+gate	UNKNOWN STEP	2026-09-04T23:27:07.4715900Z   workflow-run resolver: ignored 581 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:27:07.4717409Z attempt 6: 35 check-run(s), 22 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	UNKNOWN STEP	2026-09-04T23:27:34.1419635Z   workflow-run resolver: ignored 587 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:27:34.1420357Z attempt 7: 34 check-run(s), 20 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	UNKNOWN STEP	2026-09-04T23:28:00.7199282Z   workflow-run resolver: ignored 583 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:28:00.7199995Z attempt 8: 39 check-run(s), 17 running, all-terminal stable for 0/2 poll(s) (name set changed)
+gate	UNKNOWN STEP	2026-09-04T23:28:27.2182336Z   workflow-run resolver: ignored 583 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:28:27.2183303Z attempt 9: 39 check-run(s), 17 running, all-terminal stable for 0/2 poll(s)
+gate	UNKNOWN STEP	2026-09-04T23:28:54.0447240Z   workflow-run resolver: ignored 583 check-run(s) from superseded runs/attempts (#3505).
+gate	UNKNOWN STEP	2026-09-04T23:28:54.0448123Z attempt 10: 39 check-run(s), 17 running, all-terminal stable for 0/2 poll(s)
+gate	UNKNOWN STEP	2026-09-04T23:29:20.7196056Z ### ci-summary: FAILED — superseded-legs, re-run required (#3505): newest workflow 'auto-arm' run 33926979672 was cancelled on attempt 2; the gate auto-re-dispatches at most once. The gate did not treat the cancelled newest run as a test failure and did not dispatch it more than once; a fresh workflow run or new head is required.
+gate	UNKNOWN STEP	2026-09-04T23:29:20.7204471Z ##[error]ci-summary failed — superseded-legs, re-run required (#3505): newest workflow 'auto-arm' run 33926979672 was cancelled on attempt 2; the gate auto-re-dispatches at most once
+gate	UNKNOWN STEP	2026-09-04T23:29:20.7271639Z ##[error]Process completed with exit code 1.
+gate	UNKNOWN STEP	2026-09-04T23:29:20.7414103Z Post job cleanup.
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8313441Z [command]/usr/bin/git version
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8356855Z git version 2.55.0
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8395867Z Temporarily overriding HOME='/home/runner/work/_temp/ecbebffb-f21f-4980-89b9-0253b5c6463d' before making global git config changes
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8397117Z Adding repository directory to the temporary git global config as a safe directory
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8400056Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8437406Z Removing SSH command configuration
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8444651Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8483398Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8747510Z Removing HTTP extra header
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8754886Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+gate	UNKNOWN STEP	2026-09-04T23:29:20.8791689Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+gate	UNKNOWN STEP	2026-09-04T23:29:20.9072217Z Removing includeIf entries pointing to credentials config files
+gate	UNKNOWN STEP	2026-09-04T23:29:20.9078921Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+gate	UNKNOWN STEP	2026-09-04T23:29:20.9122149Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+gate	UNKNOWN STEP	2026-09-04T23:29:20.9590270Z Cleaning up orphan processes

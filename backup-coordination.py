@@ -263,6 +263,14 @@ for evidence_name in ['docs-quality-jobs.json', 'final-error-consumers.json', 'g
     FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
 FILES["4246-perf-admission-main-runs-2001.json"] = ROOT / "direct-4246/perf-admission/main-runs-2001.json"
 
+# PR6473 protected admission and merge-group evidence.
+for evidence_name in ['admission-checks-2013.json', 'admission-query.json', 'admission-state-2012.json', 'admission-verification.json', 'docs-quality-jobs.json', 'enqueue-input.json', 'enqueue-result.json', 'final-error-consumers.json', 'gate-preretry-jobs.json', 'gate-retry-receipt.txt', 'input-manifest.json', 'linux-validation-proof.json', 'main-rules-2012.json', 'matrix-preretry-run.json', 'matrix-retry-receipt.txt', 'opus-input.md', 'opus-review-afa9c648.json', 'opus-review-result.json', 'opus-stderr.txt', 'pr-body.md', 'pr-created.txt', 'pr-initial-runs.json', 'pr-initial-state.json', 'pr-postretry-state.json', 'pr-preretry-state.json', 'pr-query.json', 'pr-runs-2012.json', 'pr-runs-after-matrix-retry.json', 'pr6473-docs-quality.log', 'pr6473-gate-failed.log', 'pr6473-matrix-detect-failed.log', 'pr6473-matrix-jobs.json', 'pr6473-recovered-files.json', 'precreate-pr-state.json', 'preenqueue-state.json', 'prepublish-query.json', 'prepublish-state.json', 'queue-docs-quality.log', 'queue-initial-runs.json', 'queue-latched-state.json', 'queue-validation-proof.json', 'registry-pause-2013.json', 'root-verification.json']:
+    FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
+FILES["6468-label-maintenance-scheduled-runs-2018.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-2018.json"
+
+for evidence_name in ['assessment-query.json', 'assessment-report.json', 'assessment-state.json', 'gate-33926976128-failed.log']:
+    FILES["6095-" + evidence_name] = ROOT / "direct-6095" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

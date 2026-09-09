@@ -1,0 +1,18 @@
+{
+  "verified_at": "2026-09-09T20:14:14.968257+00:00",
+  "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+  "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "protected_gate_app": 15368,
+  "check_runs": 113,
+  "success": 31,
+  "skipped": 82,
+  "copilot": "completed approval recommended no comments exact head",
+  "opus": "Actual Opus5xhigh source+delta approve_for_validation, no blockers",
+  "threads": 0,
+  "holds": [],
+  "review_unreviewed": "informational; direct admission does not fabricate canonical review label",
+  "grouping": "ALLGREEN unchanged",
+  "source": "clean exact head and full diff independently byte-verified",
+  "linux": "45 tests and privacy gate actually executed/pass",
+  "registry_actions_enabled": false
+}
