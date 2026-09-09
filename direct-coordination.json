@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T16:09:42.620379+00:00",
+  "updated_at": "2026-09-09T16:25:26.022731+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -69,7 +69,7 @@
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
     "state": "SameAstraagentauthorizedminimaldiagnosticguardrepairandtinyregression. Rootsourceinventoryshowsonewindowcoordinatorincludingconcurrentreaders. CurrentPRheadremains5757,allrequiredCIstillpending,nofailureobserved. No mergeadmission untilnewreviewfindingresolved.",
-    "phase": "Astra repairing benchmark window ownership with tiny isolated regression;5757 fullCIpending",
+    "phase": "Exactccded counter repair under actual independent Opus review;public5757CIpending",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -584,7 +584,36 @@
         "historical_evidence": "All prior benchmark data stays unchanged and attributed to measured oldheads; assess single-coordinator caller equivalence without fullremeasurement."
       },
       "assessment": "Root verified frozen10filecounting-review assessment. Allcurrentbegin/end calls fromsinglecoordinator; concurrentreadersjoinedwithinonewindow. No observed triggerinvalidatespriorfrozenmeasurements. Separateowner guardthroughreadout needed; narrowrepairalready authorized.",
-      "assessment_file": "direct-4246/counting-review/assessment.json"
+      "assessment_file": "direct-4246/counting-review/assessment.json",
+      "focused_test_progress": {
+        "evidence": "direct-4246/counting-fix/results.json",
+        "status": "Preliminaryrootread:actualmoduleregressionpasses;same appendedtestcompiledagainstunchangedoldsourcefailsintendedactive/countassertion. Fourclean calibrationspass. Agentfinalfreeze/commit/rootverificationandOpusreviewstillpending.",
+        "executions": {
+          "fixed_compile": 0,
+          "fixed_test": 0,
+          "old_compile": 0,
+          "old_test": 101
+        },
+        "resource_bounds_passed": true,
+        "compiler_note": "Fixedcompileexit0withmacOSlinkerFSEvents/cache-dirwarning (linker_messagesignores-Dwarnings); no sourcewarningfailure or suppression claimed.",
+        "final_source_binding": "Rootverifiedexactfinalcompiledsourceequalscleancommittedccd;oldproductionexact5757andidenticaltest suffix. Finalcandidatepass,compiledoldcontrolassertionfailure,4calibrationsboth. Guard-onlyproductiondelta;hotpath/core/workloads/declarationunchanged."
+      },
+      "repair_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "root_verification": "direct-4246/counting-admission/root-verification.json",
+      "frozen_manifest_verified": 47
+    },
+    "counting_review_runtime": {
+      "session_id": 38346,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T16:25:26.022731+00:00",
+      "completed": false,
+      "input": "direct-4246/counting-admission/opus-input.md",
+      "input_sha256": "23ac25b24d40d42416f3fba0938761dea8bbb346c03ebeb5efe2b1e14e676400",
+      "output": "direct-4246/counting-admission/opus-review-ccded1b4.json",
+      "expected_head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "note": "One actual model invocation. Earlier local manifest parsing/redirection failed before Claude execution; no model-budget retry."
     }
   },
   "prs": {

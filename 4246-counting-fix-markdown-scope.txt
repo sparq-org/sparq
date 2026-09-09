@@ -1,0 +1,18 @@
+.markdownlint-cli2.jsonc SHA256 058439caa9f8c41298ab47a4781c683ac2cdae854b9c764b7fa91f374073c14a
+1: // markdownlint-cli2 config — HARD documentation-quality gate (bead sq-5fd1). [OPUS-4.8]
+2: //
+3: // SCOPE: this HARD gate covers the user-facing + governance doc surface — the
+4: // top-level governance docs, the `skills/` usage tree (the source of truth for using
+5: // sparq), `docs/`, every crate README/doc, the `book/` mdBook sources (issue #5020),
+6: // AND (as of sq-rqyo) the `research/` design records + the `zk/` research scaffolds,
+7: // whose ~97-violation cosmetic backlog (mostly missing code-fence languages) has been
+8: // cleared. The only carve-out is third-party `vendor/` trees (any `**/vendor` subtree)
+9: // and the vendored ontologies, kept in `ignores` below. `bench/` markdown is still out
+10: // of HARD scope and is checked ADVISORY-only (whole-repo) so any new backlog there
+11: // stays visible.
+12: //
+13: // RULESET: markdownlint defaults, MINUS the rules that fight this repo's deliberate
+14: // house style (long unwrapped lines, bare/autolink URLs, inline HTML for the logo +
+15: // metadata comments, CHANGELOG-style repeated/duplicate headings) and MINUS the
+16: // purely-cosmetic "blank line around X" rules that are render-irrelevant here. What
+17: // remains catches REAL defects: broken link fragments, mismatched table columns,

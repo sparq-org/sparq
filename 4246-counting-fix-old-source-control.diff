@@ -1,0 +1,53 @@
+--- fixed_counting.rs
++++ old_counting_with_tests.rs
+@@ -2,15 +2,10 @@
+ //! Requested live bytes exclude allocator metadata and transient realloc internals.
+ 
+ use std::alloc::{GlobalAlloc, Layout, System};
+-use std::sync::atomic::{
+-    AtomicBool, AtomicU64,
+-    Ordering::{Acquire, Relaxed, Release},
+-};
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+ 
+ struct Counting;
+ static ACTIVE: AtomicBool = AtomicBool::new(false);
+-// [GPT-6 Astra] Reserve reset/readout as well as the active counting interval.
+-static WINDOW_OPEN: AtomicBool = AtomicBool::new(false);
+ static LIVE: AtomicU64 = AtomicU64::new(0);
+ static PEAK: AtomicU64 = AtomicU64::new(0);
+ static ALLOCS: AtomicU64 = AtomicU64::new(0);
+@@ -82,11 +77,8 @@
+ static ALLOCATOR: Counting = Counting;
+ 
+ /// Begin a window while the benchmark and its initialized Rayon pool are idle.
+-/// The successful coordinator must balance this with `end` after its workers finish.
+ pub fn begin() -> u64 {
+-    assert!(WINDOW_OPEN
+-        .compare_exchange(false, true, Acquire, Relaxed)
+-        .is_ok());
++    assert!(!ACTIVE.swap(false, Relaxed));
+     let baseline = LIVE.load(Relaxed);
+     PEAK.store(baseline, Relaxed);
+     ALLOCS.store(0, Relaxed);
+@@ -97,18 +89,15 @@
+ }
+ 
+ /// Stop the window before formatting output or checking returned query results.
+-/// The admitted coordinator calls this with all measured workers quiescent.
+ pub fn end(baseline: u64) -> (u64, u64, u64, u64, u64) {
+     ACTIVE.store(false, Relaxed);
+-    let result = (
++    (
+         ALLOCS.load(Relaxed),
+         REALLOCS.load(Relaxed),
+         BYTES.load(Relaxed),
+         PEAK.load(Relaxed).saturating_sub(baseline),
+         LIVE.load(Relaxed),
+-    );
+-    WINDOW_OPEN.store(false, Release);
+-    result
++    )
+ }
+ 
+ pub fn calibrate() {

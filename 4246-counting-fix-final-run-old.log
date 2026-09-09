@@ -1,0 +1,18 @@
+
+running 1 test
+test tests::window_ownership_and_calibration ... calibration_windows=4 nested=(true, (false, (0, 0, 0))) competing=(true, (false, (0, 0, 0)))
+
+thread 'tests::window_ownership_and_calibration' (2876046) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/old_counting_with_tests.rs:195:9:
+assertion `left == right` failed
+  left: (true, (false, (0, 0, 0)))
+ right: (true, (true, (1, 0, 128)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    tests::window_ownership_and_calibration
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

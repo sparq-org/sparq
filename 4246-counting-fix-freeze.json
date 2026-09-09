@@ -1,0 +1,12 @@
+{
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "base": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "packet_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/review-packet.md",
+  "packet_bytes": 69424,
+  "packet_sha256": "00a63d3c493631d60073fbef1387fb764cc3298e110e0602d8a69d74d106c243",
+  "manifest_sha256": "9d2e29befdd78f7f39112ee54892103883b3c10ac1b6d25ce4a09cd3cacfda3b",
+  "manifest_entries": 47,
+  "total_manifest_bytes": 4632540,
+  "free_bytes_at_freeze": 10509320192,
+  "clean_worktree": true
+}

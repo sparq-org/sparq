@@ -1,0 +1,80 @@
+{
+  "base_head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "limits": {
+    "total_seconds": 120,
+    "output_bytes": 134217728,
+    "minimum_free_bytes": 8589934592
+  },
+  "elapsed_seconds": 7.55841275,
+  "minimum_observed_free_bytes": 10518798336,
+  "final_free_bytes": 10518749184,
+  "output_bytes": 2218364,
+  "results": [
+    {
+      "name": "compile-fixed",
+      "command": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+        "--edition=2021",
+        "--test",
+        "-D",
+        "warnings",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/bench/overlay-count/src/counting.rs",
+        "-o",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/outputs/fixed-tests"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 5.916188833,
+      "free_bytes_after": 10520104960
+    },
+    {
+      "name": "run-fixed",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/outputs/fixed-tests",
+        "--exact",
+        "tests::window_ownership_and_calibration",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 0.700766583,
+      "free_bytes_after": 10520023040
+    },
+    {
+      "name": "compile-old",
+      "command": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+        "--edition=2021",
+        "--test",
+        "-D",
+        "warnings",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/old_counting_with_tests.rs",
+        "-o",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/outputs/old-tests"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 0.40236941700000006,
+      "free_bytes_after": 10518798336
+    },
+    {
+      "name": "run-old",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/outputs/old-tests",
+        "--exact",
+        "tests::window_ownership_and_calibration",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "expected_exit": 101,
+      "exit": 101,
+      "seconds": 0.48230400000000007,
+      "free_bytes_after": 10518794240
+    }
+  ],
+  "stop_reason": null,
+  "old_source_prefix_exact": true,
+  "identical_actual_test_suffix": true
+}

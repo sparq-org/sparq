@@ -1,0 +1,15 @@
+{
+  "rustfmt": "Pinned rustfmt 1.97.1 --edition 2021 --check on counting.rs passed; only this file formatted.",
+  "whitespace": "git diff --check passed for both changed files.",
+  "compiler": "Final candidate and old-source control compile with rustc --test -D warnings; candidate emits linker_messages warning which ignores -D warnings, preserved verbatim.",
+  "not_executed": [
+    "Cargo clippy",
+    "workspace tests",
+    "cargo fmt --all",
+    "Markdownlint",
+    "benchmarks"
+  ],
+  "ci_scope": "overlay-count declares an independent workspace and is absent from root members. Root workspace clippy and cargo fmt --all do not cover it. CI explicitly covers bench/dict but no overlay-count entry was found in ci.yml/bench.yml. README is outside hard markdownlint scope; whole-corpus advisory config covers bench markdown. No new workflow wiring in this fix.",
+  "preflight_limit": "Only dependency-free rustc regression and formatting/whitespace checks authorized under broad build hold; full preflight and benchmark rebuild not attempted.",
+  "packaging_note": "An initial scope collector used nonexistent crates/sparq-core/src/overlay.rs and stopped. Corrected collector verifies the actual store.rs; no build or test retried for this bookkeeping error."
+}

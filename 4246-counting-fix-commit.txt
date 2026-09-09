@@ -1,0 +1,11 @@
+commit ccded1b4898cf5b317a6591f6ff6108ced23123c
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 17:20:49 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 17:20:49 2026 +0100
+
+    fix(bench): retain allocation window ownership through readout
+    
+    Reserve begin reset and end readout with a separate ownership guard, preserving allocator counting boundaries. Add a direct std-only regression for clean calibrations and denied nested or competing admission.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

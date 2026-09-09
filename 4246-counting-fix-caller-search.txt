@@ -1,0 +1,10 @@
+bench/overlay-count/src/lifecycle.rs:23:fn measure(f: impl FnOnce() -> [u128; 3]) -> Sample {
+bench/overlay-count/src/lifecycle.rs:26:    let live_before = counting::begin();
+bench/overlay-count/src/lifecycle.rs:33:    let counts = counting::end(live_before);
+bench/overlay-count/src/lifecycle.rs:154:                        return std::thread::scope(|scope| {
+bench/overlay-count/src/lifecycle.rs:163:                            [a.join().unwrap(), b.join().unwrap(), 0]
+bench/overlay-count/src/counting.rs:185:        let worker = std::thread::spawn(move || {
+bench/overlay-count/src/counting.rs:193:        let competing_denied = worker.join().unwrap();
+bench/overlay-count/src/main.rs:106:    counting::calibrate();
+bench/overlay-count/src/main.rs:148:                    let baseline = counting::begin();
+bench/overlay-count/src/main.rs:153:                    let counts = counting::end(baseline);

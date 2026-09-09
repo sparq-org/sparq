@@ -1,0 +1,51 @@
+{
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "base": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "provenance": "Implemented and validated by the actual inherited OpenAI GPT-6 Astra xhigh runtime. No independent reviewer/model call performed in this task.",
+  "decision": "Focused bench-only correction ready for independent review; no new measurement or admission claim.",
+  "change": "A separate WINDOW_OPEN CAS acquires ownership before all counter reset and releases only after all five end counters are read. ACTIVE boundaries and allocator hot path remain unchanged. README documents the direct module regression and contract.",
+  "diff": {
+    "files": 2,
+    "insertions": 126,
+    "deletions": 4
+  },
+  "validation": {
+    "final_candidate": "1 passed, 0 failed, 0 filtered; four clean calibrations plus nested and synchronized competing denied admission.",
+    "old_source_control": "Compiled successfully with exact old production and byte-identical final test suffix; 1 failed, 0 passed, 0 filtered. Four clean calibrations passed before behavioral failure.",
+    "known_request": "After each denied admission, fixed ACTIVE=true and allocation/reallocation/requested-byte deltas=(1,0,128); old ACTIVE=false and deltas=(0,0,0). Invalid-window totals are deliberately not treated as exact allocation evidence.",
+    "format": "Pinned rustfmt --check on counting.rs and git diff --check pass. Only touched Rust file formatted.",
+    "compiler_warning": "Candidate compilation exits 0 but emits Xcode FSEvents/DARWIN_USER_CACHE_DIR linker warnings. Rust linker_messages ignores -D warnings; full verbatim logs preserved. No claim of warning-free linker output.",
+    "not_run": "No Cargo, Clippy, full preflight, optimized or wasm build, dependency install, benchmark remeasurement, or remote action.",
+    "ci_scope": "This is a detached bench workspace. Ordinary root workspace tests/lints do not execute this regression. Exact direct rustc command is documented; no workflow wiring changed."
+  },
+  "resource_limits": {
+    "total_seconds": 120,
+    "output_bytes": 134217728,
+    "minimum_free_bytes": 8589934592
+  },
+  "resource_actual": {
+    "total_two_round_seconds": 13.851786665999999,
+    "minimum_observed_free_bytes_during_final": 10515320832,
+    "final_test_free_bytes": 10515406848,
+    "first_round_preserved": "preformat/ contains unchanged first source, binary and log bytes. A second pair binds results to the real formatting change, not a retry of failed/noisy tests."
+  },
+  "caller_assessment": [
+    "main.rs initializes one Rayon worker and calibrates before dispatch. Its normal sample loop synchronously calls begin/run/end.",
+    "lifecycle.rs measure() is the only lifecycle begin/end wrapper. run_all and reads-per-generation invoke it serially.",
+    "The concurrent-cold workload spawns two readers inside one measured closure and joins both before returning; neither reader admits or ends a window.",
+    "calibrate() uses a balanced begin/end and is byte-identical to base."
+  ],
+  "historical_measurements": "No bug-triggering overlapping or nested coordinator call was found in existing production callers. The old implementation also passes the four clean calibrations here. This supports retaining existing exact-old-head single-coordinator measurements with their original global-allocator/quiescence limits; it is not a historical execution trace, proof against incidental process allocations, or corrected-head remeasurement. All frozen prior data remain unchanged.",
+  "limits": [
+    "Balanced end by the successful coordinator with workers quiescent is still required; no owner token, RAII or non-owner end enforcement is added.",
+    "The ownership guard prevents competing begin from resetting counters during initialization/readout. ACTIVE and counter operations do not provide an atomic snapshot under arbitrary concurrent allocations.",
+    "The competing regression is synchronized after owner begin returns. It does not force reset/readout interleavings, nor use timing thresholds or probabilistic stress.",
+    "Panic hooks/payloads and thread machinery can allocate. Known-request probes run after that machinery; clean calibration, not panic-window totals, is the exact oracle.",
+    "Libtest is process-global; serial one-test invocation and successful calibration are evidence for this execution, not a guarantee against all harness noise."
+  ],
+  "prior_assessment": {
+    "path": "../counting-review/review-packet.md",
+    "sha256": "0fe3faa01107827ef0c90168965030ef806683d021d11f5dda0a10689d31175d"
+  },
+  "clean_worktree": true
+}

@@ -1,0 +1,88 @@
+{
+  "base_head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "limits": {
+    "total_seconds": 120,
+    "output_bytes": 134217728,
+    "minimum_free_bytes": 8589934592
+  },
+  "previous_verification_seconds": 7.55841275,
+  "elapsed_seconds": 6.293373333000001,
+  "combined_verification_seconds": 13.851786665999999,
+  "minimum_observed_free_bytes": 10515320832,
+  "final_free_bytes": 10515406848,
+  "total_evidence_bytes": 4494566,
+  "results": [
+    {
+      "name": "compile-fixed",
+      "command": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+        "--edition=2021",
+        "--test",
+        "-D",
+        "warnings",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/bench/overlay-count/src/counting.rs",
+        "-o",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/final-outputs/fixed-tests"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 4.543561917,
+      "free_bytes_after": 10516647936
+    },
+    {
+      "name": "run-fixed",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/final-outputs/fixed-tests",
+        "--exact",
+        "tests::window_ownership_and_calibration",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 0.5875179170000004,
+      "free_bytes_after": 10516598784
+    },
+    {
+      "name": "compile-old",
+      "command": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+        "--edition=2021",
+        "--test",
+        "-D",
+        "warnings",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/old_counting_with_tests.rs",
+        "-o",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/final-outputs/old-tests"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "seconds": 0.4343713340000006,
+      "free_bytes_after": 10515456000
+    },
+    {
+      "name": "run-old",
+      "command": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/counting-fix/final-outputs/old-tests",
+        "--exact",
+        "tests::window_ownership_and_calibration",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "expected_exit": 101,
+      "exit": 101,
+      "seconds": 0.4661945420000002,
+      "free_bytes_after": 10515406848
+    }
+  ],
+  "stop_reason": null,
+  "old_source_prefix_exact": true,
+  "identical_actual_test_suffix": true,
+  "sources_sha256": {
+    "old_counting_with_tests.rs": "280becdba38abbab041bed08176889907fdc8b173b5b2bf232acdd115a9cad5f",
+    "exact_test_suffix.rs": "4193c18b3b897e338f06fc897e17c31ea4a61948d753aef284deb62129284899",
+    "fixed_counting.rs": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+    "old_counting.rs": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2"
+  }
+}

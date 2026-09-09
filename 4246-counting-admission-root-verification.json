@@ -1,0 +1,21 @@
+{
+  "head": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+  "parent": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "verified_at": "2026-09-09T16:21:46.879553+00:00",
+  "worktree_clean": true,
+  "changed_files": [
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs"
+  ],
+  "exact_final_compiled_source_matches_commit": true,
+  "old_control_production_exact": true,
+  "identical_test_suffix": true,
+  "allocator_hot_path_byte_identical": true,
+  "core_workloads_and_declaration_unchanged": true,
+  "targeted_checks": "Finalactualmodulepass,oldsourcecompiledcontrolfailsintendedprobe,4clean calibrationsboth;targetedrustfmt/diffcheckpass. No fullCargoClippyorCIreachclaim.",
+  "resource_limits_pass": true,
+  "manifest_files_verified": 47,
+  "manifest_sha256": "9d2e29befdd78f7f39112ee54892103883b3c10ac1b6d25ce4a09cd3cacfda3b",
+  "frozen_packet_sha256": "00a63d3c493631d60073fbef1387fb764cc3298e110e0602d8a69d74d106c243",
+  "final_verified_at": "2026-09-09T16:24:46.942940+00:00"
+}

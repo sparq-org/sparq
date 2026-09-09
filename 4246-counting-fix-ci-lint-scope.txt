@@ -1,0 +1,78 @@
+.github/workflows/ci.yml SHA256 8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c
+1368:           # seeder argument are on the `build-archive` cache step above (the canonical
+1369:           # note); pinned by scripts/tests/test_mergequeue_cache_posture.py.
+1370:           save-if: ${{ github.ref == 'refs/heads/main' }}
+1371:       # GATES: the whole workspace (sparq-py included) is clippy-clean under -D warnings.
+1372:       # A new warning — from new code or a Rust-stable bump that adds a lint — fails CI.
+1373:       - name: clippy (deny warnings)
+1374:         run: cargo clippy --workspace --all-targets -- -D warnings
+1375:       # [OPUS-4.8] sq-4sbk: clippy -D warnings, WORKSPACE-WIDE, with `--all-features` — the
+1376:       # clippy sibling of the two-state rustdoc gate below. The default-features clippy above
+1377:       # NEVER compiles code inside default-OFF `#[cfg(feature = "…")]` modules (result-cache,
+1378:       # txn, vectorized, service, fedplan, fedclient, odrl-bridge, …), so a clippy lint inside
+1379:       # an opt-in feature module slips the central gate and only surfaces — if at all — via a
+1380:       # feature-matrix.yml leg that happens to enable that exact feature (the legs there clippy
+1381:       # per-crate `-p <crate> --features <set>`). This workspace-wide `--all-features` pass
+1382:       # catches such lints centrally AND the cross-crate feature-unification interactions that a
+1383:       # per-crate `-p` leg structurally cannot see (a default-feature edit that only mis-lints
+1384:       # once the unified all-features build turns another crate's feature on). VERIFIED SOUND on
+1385:       # main before being made gating (sq-4sbk crux check): the workspace has NO `compile_error!`
+1386:       # mutual-exclusion guard and NO `not(feature=…)` *compile-time* assert that breaks under
+1387:       # unification — `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+1388:       # compiles every opt-in crate (sparq-hdt/-gpu/-py/-fedplan-mpc included) and is CLEAN.
+1389:       # The network features (`live`/`embeddings`) only COMPILE reqwest here; no socket is
+1390:       # opened (clippy does not run tests), so they are safe in this lint-only pass. Cost: the
+1391:       # lint job already builds the workspace twice over (default clippy + two rustdoc passes);
+1392:       # this adds only the off-by-default feature code on a warm target dir — a modest increment,
+1393:       # not a second full build (the bulk of the dependency + first-party graph is already
+1394:       # compiled by the default-features clippy above).
+1395:       - name: clippy (deny warnings, workspace — all features)
+1396:         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+1397:       # [OPUS-4.8] sq-8gsv: rustdoc -D warnings, WORKSPACE-WIDE. A broken/private intra-doc
+1398:       # link (e.g. a public item linking to a crate-private const/fn, or an unresolved
+1399:       # `[`Foo`]` that renders as literal text) is a rustdoc warning — NOT a clippy/build
+1400:       # warning — so it slips past every other gate here and mis-renders the published docs.
+1401:       # This was previously scoped to sparq-solid (sq-z1rm) and sparq-mpc (sq-h1w2) only,
+1402:       # because the rest of the workspace carried ~174 pre-existing intra-doc-link warnings
+1403:       # across ~20 crates. sq-8gsv cleared that backlog, so the gate now covers the WHOLE
+1404:       # doc surface: any new public item that links to a private/unresolved one fails CI.
+1405:       # Two feature states cover the feature-gated doc surface (e.g. sparq-solid's
+1406:       # `odrl-bridge`/`count-enforcement` modules, sparq-mpc's `insecure-test-rng`,
+1407:       # sparq-prov's `reason` bridge): default features, then `--all-features`.
+1408:       - name: rustdoc (deny warnings, workspace — default features)
+1409:         run: cargo doc --workspace --no-deps
+1410:         env:
+1411:           RUSTDOCFLAGS: "-D warnings"
+1412:       - name: rustdoc (deny warnings, workspace — all features)
+1413:         run: cargo doc --workspace --no-deps --all-features
+1414:         env:
+1415:           RUSTDOCFLAGS: "-D warnings"
+1416:       # [OPUS-4.8] sq-hqmm: invoke the standalone bench/dict (dict-baseline) selftest from a CI
+1417:       # lane. bench/dict carries its OWN `[workspace]` table (the same isolation pattern as
+1418:       # bench/parse and bench/serve), so the `cargo clippy --workspace` + the workspace nextest
+1419:       # archive above NEVER reach it — its structural invariants (every dictionary term classified
+1420:       # exactly once, `Dict::into_blob` preserving the term count, positive footprints) live ONLY in
+1421:       # its `selftest` subcommand and were unchecked by any lane. This step clippy-gates the crate
+1422:       # (under -D warnings, since the workspace clippy can't) and runs `dict-baseline selftest` so a
+1423:       # harness regression (a composition miscount, an into_blob that drops terms) fails CI. It is
+1424:       # in-process + dataset-free + makes no wall-clock claim, so it is deterministic in CI (the
+1425:       # README documents `selftest` as the CI-runnable check; this is the lane that runs it). It is a
+1426:       # SEPARATE workspace (own target dir), so sparq-core compiles once more here in debug — but the
+1427:       # registry/git deps come warm from rust-cache, and a debug build keeps the added cost small.
+1428:       - name: bench/dict standalone selftest (clippy + invariant checks)
+1429:         run: |
+1430:           cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings
+1431:           cargo run --manifest-path bench/dict/Cargo.toml -- selftest
+1432:       # Informational until the deferred `cargo fmt --all` reformat lands (see rustfmt.toml).
+1433:       # The formatter VERSION is pinned by rust-toolchain.toml (channel + the `rustfmt`
+1434:       # component), so this check is reproducible in a local checkout even while it is
+1435:       # non-blocking — issue #2360 reported the opposite, a workspace-wide failure on
+1436:       # unchanged files under an ambient rustfmt. Echo the version so any future
+1437:       # disagreement between this log and a contributor's box names its own cause.
+1438:       - name: rustfmt (informational)
+1439:         run: |
+1440:           cargo fmt --version
+1441:           cargo fmt --all --check
+1442:         continue-on-error: true
+1443: 
+1444:   msrv:

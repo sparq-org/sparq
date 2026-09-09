@@ -1,0 +1,39 @@
+{
+  "base": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "changed_files": [
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs"
+  ],
+  "final_source_sha256": "65cd7693a9adb8a4c45f52d939db0b932892ceec4b4806423ee1472c061bc911",
+  "old_source_sha256": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+  "allocator_hot_path_byte_identical": true,
+  "calibrate_body_byte_identical": true,
+  "unchanged_context": [
+    {
+      "path": "bench/overlay-count/src/main.rs",
+      "sha256": "946188525809298d068450911e93b3d0c3bed2e9a7c6cbcd91b713a71e6c5e48",
+      "unchanged": true
+    },
+    {
+      "path": "bench/overlay-count/src/lifecycle.rs",
+      "sha256": "d02c77e89674cf79f351f419540f1a69d192adae16bdbbc23a8fbce97c587e2b",
+      "unchanged": true
+    },
+    {
+      "path": "bench/overlay-count/Cargo.toml",
+      "sha256": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040",
+      "unchanged": true
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "unchanged": true
+    },
+    {
+      "path": "bench/feature-off-declarations/6469.json",
+      "sha256": "dfbdf0cb231e671d136b01c8b6f8d1e89198f12c0177abb7a8e35c11733d71ed",
+      "unchanged": true
+    }
+  ],
+  "free_bytes": 10511970304
+}

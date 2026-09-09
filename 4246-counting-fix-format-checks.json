@@ -1,0 +1,22 @@
+[
+  {
+    "name": "rustfmt",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2021",
+      "--check",
+      "bench/overlay-count/src/counting.rs"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0
+  }
+]
