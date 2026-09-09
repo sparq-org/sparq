@@ -307,7 +307,7 @@ Caller tags are descriptive and cannot cause private-result input collisions.
 bucket, so removing a credential also removes its in-circuit signature check.
 The default `CredentialCapacity::Smallest` reveals the selected capacity; choose
 `prepare_result_with_options(..., ResultOptions { credential_capacity:
-CredentialCapacity::HideInTwo })` to keep the fixed two-slot policy. The verifier
+CredentialCapacity::HideInTwo, ..ResultOptions::default() })` to keep the fixed two-slot policy. The verifier
 checks the bounded issuer-slot shape and derives the member independently.
 
 [GPT-6] Explicit `planner::optimize_disclosure[_admitted]` jointly minimizes
@@ -317,3 +317,11 @@ released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
 admission and credential-capacity limits remain enforced. This is structural host
 selection, not a calibrated speed claim or cryptographic assurance; see
 [disclosure planning](references/disclosure-planner.md).
+
+[GPT-6] `prepare_result` defaults to joint `WitnessSelection::Optimize` with the
+backend's credential bound. Set `ResultOptions.witness_selection` to `FirstSuccess`
+for the baseline, and `max_search_steps` to bound candidate attempts. Inspect
+`PreparedResult::work().optimization`: an exhausted feasible incumbent is usable
+but has no established optimum; exhaustion without a feasible plan returns
+`ResultError::SearchExhausted`. Neither diagnostics nor private attributions enter
+the public presentation, and the independent verifier is unchanged.

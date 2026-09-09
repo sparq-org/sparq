@@ -102,3 +102,13 @@ across fixed released rows, minimizing authentication count and then shared
 membership count within explicit resource and credential-capacity bounds. Its
 report separates established structural optimality from budget exhaustion. This
 does not change the baseline selection policy or assert a measured runtime gain.
+
+[GPT-6] `prepare_result` now uses bounded joint optimization by default, enforcing
+credential capacity during selection. `ResultOptions::witness_selection` can
+select `FirstSuccess` for ablations; `max_search_steps` controls either search.
+An exhausted search uses a complete feasible incumbent if available, records
+`BudgetExhausted` in prover-local `work().optimization`, and otherwise returns
+`ResultError::SearchExhausted`. Results and authentication obligations are never
+truncated. Capacity selection applies to the chosen plan, so fewer selected
+credentials can choose the smaller signature circuit. Structural search metrics
+are local diagnostics; measured circuit costs are in the generated gate snapshot.

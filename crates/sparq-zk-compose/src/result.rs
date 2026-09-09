@@ -18,7 +18,8 @@
 use crate::driver::{CircuitProver, DriverError};
 use crate::manifest::{DisclosedTerm, FieldHex, StatusListSnapshot};
 use crate::planner::{
-    plan_disclosure_admitted, DisclosureQuery, PlannerLimits, QueryKind, QuerySlot,
+    optimize_disclosure_admitted, plan_disclosure_admitted, DisclosureQuery, MembershipRef,
+    OptimizationCompletion, OptimizationLimits, PlannerLimits, QueryKind, QuerySlot,
 };
 use crate::revocation::{
     accepted_set_root, accepted_set_witness, merkle_root, merkle_witness, AcceptedStatusEntry,
@@ -122,6 +123,11 @@ pub struct ResultWork {
     pub private_predicates: usize,
     /// Fixed signature slots actually checked by this bounded member.
     pub signature_checks: usize,
+    /// Joint search completion; absent for the explicit first-success baseline.
+    ///
+    /// BudgetExhausted means the returned complete plan is feasible, without an
+    /// established optimum. These diagnostics never enter the presentation.
+    pub optimization: Option<OptimizationCompletion>,
 }
 
 /// Prover-only preparation, including sensitive circuit inputs.
@@ -141,6 +147,8 @@ pub struct PreparedResult {
 pub enum ResultError {
     /// Malformed, unsupported, over-capacity, unauthenticated, or inconsistent input.
     Rejected(String),
+    /// Search ended before finding a complete feasible plan; infeasibility is unknown.
+    SearchExhausted,
     /// Prover/backend failure; never interpreted as successful verification.
     Driver(DriverError),
 }
@@ -149,6 +157,10 @@ impl std::fmt::Display for ResultError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Rejected(s) => write!(f, "successful-result rejected: {s}"),
+            Self::SearchExhausted => write!(
+                f,
+                "successful-result search exhausted without a feasible plan"
+            ),
             Self::Driver(e) => e.fmt(f),
         }
     }
@@ -486,11 +498,35 @@ pub enum CredentialCapacity {
     HideInTwo,
 }
 
-/// Prover-side choices that never waive independent verifier checks.
+/// Selects the local witness-search strategy for a fixed released result set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WitnessSelection {
+    /// Jointly minimize authentications then memberships within the search budget.
+    #[default]
+    Optimize,
+    /// Retain deterministic first-success selection for controlled comparisons.
+    FirstSuccess,
+}
+
+/// Prover-side choices that never waive independent verifier checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultOptions {
     /// Smallest is faster; HideInTwo retains the fixed two-slot disclosure policy.
     pub credential_capacity: CredentialCapacity,
+    /// Joint bounded optimization is the default; FirstSuccess provides a baseline.
+    pub witness_selection: WitnessSelection,
+    /// Maximum candidate triple attempts, including rejected candidates.
+    pub max_search_steps: usize,
+}
+
+impl Default for ResultOptions {
+    fn default() -> Self {
+        Self {
+            credential_capacity: CredentialCapacity::default(),
+            witness_selection: WitnessSelection::default(),
+            max_search_steps: PlannerLimits::default().max_search_steps,
+        }
+    }
 }
 
 /// Prepares private successful witnesses and removes irrelevant wallet credentials.
@@ -498,6 +534,9 @@ pub struct ResultOptions {
 /// # Errors
 /// Rejects unsupported syntax, unsubstantiated results, failed authentication or
 /// status, selected blank nodes, and inputs outside the fixed circuit capacity.
+/// Returns [`ResultError::SearchExhausted`] when the optimization budget ends
+/// without a complete feasible assignment. A complete feasible incumbent can be
+/// used after exhaustion; [`PreparedResult::work`] records that completion state.
 pub fn prepare_result(
     query: &str,
     credentials: &[ResultCredential],
@@ -574,32 +613,55 @@ pub fn prepare_result_with_options(
         })
         .collect();
     let graphs: Vec<_> = credentials.iter().map(|c| c.graph.clone()).collect();
-    let plan = plan_disclosure_admitted(
-        &parsed,
-        &graphs,
-        rows,
-        PlannerLimits::default(),
-        |pattern, witness, triple| {
-            if !eligible[witness.credential] {
+    let admit = |pattern: usize, witness: MembershipRef, triple: &Triple| {
+        if !eligible[witness.credential] {
+            return false;
+        }
+        term_parts(triple).iter().enumerate().all(|(slot, term)| {
+            if !matches!(term, Term::NamedNode(_) | Term::Literal(_)) {
                 return false;
             }
-            term_parts(triple).iter().enumerate().all(|(slot, term)| {
-                if !matches!(term, Term::NamedNode(_) | Term::Literal(_)) {
-                    return false;
+            if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
+                if !parsed.projection.contains(v) && parsed.filters.iter().any(|f| &f.variable == v)
+                {
+                    return crate::planner::canonical_integer(term)
+                        .is_some_and(|n| n <= MAX_PRIVATE_INTEGER);
                 }
-                if let QuerySlot::Variable(v) = &parsed.patterns[pattern][slot] {
-                    if !parsed.projection.contains(v)
-                        && parsed.filters.iter().any(|f| &f.variable == v)
-                    {
-                        return crate::planner::canonical_integer(term)
-                            .is_some_and(|n| n <= MAX_PRIVATE_INTEGER);
-                    }
-                }
-                true
-            })
-        },
-    )
-    .map_err(|e| reject(e.to_string()))?;
+            }
+            true
+        })
+    };
+    let limits = PlannerLimits {
+        max_patterns: P,
+        max_results: R,
+        max_search_steps: options.max_search_steps,
+    };
+    let (plan, optimization) = match options.witness_selection {
+        WitnessSelection::FirstSuccess => (
+            plan_disclosure_admitted(&parsed, &graphs, rows, limits, admit)
+                .map_err(|e| reject(e.to_string()))?,
+            None,
+        ),
+        WitnessSelection::Optimize => {
+            let report = optimize_disclosure_admitted(
+                &parsed,
+                &graphs,
+                rows,
+                OptimizationLimits {
+                    planner: limits,
+                    max_pattern_occurrences: P * R,
+                    max_authentications: MAX_CREDENTIALS,
+                },
+                admit,
+            )
+            .map_err(|e| reject(e.to_string()))?;
+            let plan = report.plan.ok_or_else(|| match report.completion {
+                OptimizationCompletion::BudgetExhausted => ResultError::SearchExhausted,
+                _ => reject("no feasible successful-result witness within credential capacity"),
+            })?;
+            (plan, Some(report.completion))
+        }
+    };
     let mut used: Vec<usize> = plan
         .rows
         .iter()
@@ -793,6 +855,7 @@ pub fn prepare_result_with_options(
         public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()),
         private_predicates: rows.len() * statement.hidden_filters.len(),
         signature_checks: used.len(),
+        optimization,
     };
     Ok(PreparedResult {
         presentation,
@@ -1006,6 +1069,158 @@ mod tests {
         (credentials, policy, nonce, rows)
     }
 
+    fn shared_alternative_fixture() -> (
+        Vec<ResultCredential>,
+        ResultPolicy,
+        VerifierNonce,
+        Vec<BTreeMap<String, Term>>,
+    ) {
+        let triples = vec![
+            triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            ),
+            triple("urn:alice", "urn:age", integer(42)),
+            triple("urn:alice", "urn:licensed", Term::NamedNode(iri("urn:yes"))),
+        ];
+        // Three early credentials force the baseline above K2. The final
+        // credential supports the same fixed answer using one authentication.
+        let mut credentials: Vec<_> = triples
+            .iter()
+            .enumerate()
+            .map(|(i, t)| credential(vec![t.clone()], 1, i as u64, "urn:status:people"))
+            .collect();
+        credentials.push(credential(triples, 1, 3, "urn:status:people"));
+        let (_, mut policy, nonce, rows) = fixture();
+        policy.trusted_issuers = vec![credentials[0].issuer];
+        (credentials, policy, nonce, rows)
+    }
+
+    #[test]
+    fn optimized_default_avoids_aggregate_capacity_failure_and_reports_budget_outcomes() {
+        let (credentials, policy, nonce, rows) = shared_alternative_fixture();
+        let baseline = prepare_result_with_options(
+            QUERY,
+            &credentials,
+            &rows,
+            &policy,
+            &nonce,
+            ResultOptions {
+                witness_selection: WitnessSelection::FirstSuccess,
+                ..ResultOptions::default()
+            },
+        );
+        assert!(baseline
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("selected credential capacity"));
+        let optimized = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(optimized.work.selected_credentials, 1);
+        assert_eq!(optimized.work.signature_checks, 1);
+        assert_eq!(
+            optimized.work.optimization,
+            Some(OptimizationCompletion::Optimal)
+        );
+        assert_eq!(optimized.package, "result_v1_k1_n16_p3_r4_f2");
+        let exhausted = prepare_result_with_options(
+            QUERY,
+            &credentials,
+            &rows,
+            &policy,
+            &nonce,
+            ResultOptions {
+                max_search_steps: 0,
+                ..ResultOptions::default()
+            },
+        );
+        assert!(matches!(exhausted, Err(ResultError::SearchExhausted)));
+
+        // Reach a feasible incumbent but stop before completing the search.
+        let parsed = DisclosureQuery::parse(QUERY).unwrap();
+        let graphs: Vec<_> = credentials.iter().map(|c| c.graph.clone()).collect();
+        let first_incumbent_budget = (1..500)
+            .find(|&steps| {
+                let report = optimize_disclosure_admitted(
+                    &parsed,
+                    &graphs,
+                    &rows,
+                    OptimizationLimits {
+                        planner: PlannerLimits {
+                            max_search_steps: steps,
+                            ..PlannerLimits::default()
+                        },
+                        max_authentications: MAX_CREDENTIALS,
+                        ..OptimizationLimits::default()
+                    },
+                    |_, _, _| true,
+                )
+                .unwrap();
+                report.completion == OptimizationCompletion::BudgetExhausted
+                    && report.plan.is_some()
+            })
+            .unwrap();
+        let feasible = prepare_result_with_options(
+            QUERY,
+            &credentials,
+            &rows,
+            &policy,
+            &nonce,
+            ResultOptions {
+                max_search_steps: first_incumbent_budget,
+                ..ResultOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            feasible.work.optimization,
+            Some(OptimizationCompletion::BudgetExhausted)
+        );
+        assert_eq!(feasible.presentation.rows.len(), rows.len());
+        assert_eq!(feasible.work.witness_uses, 3);
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; proves optimized witness selection reaches K1"]
+    fn result_real_joint_optimization_reaches_one_credential_member() {
+        pinned_toolchain().unwrap();
+        let (credentials, policy, nonce, rows) = shared_alternative_fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        assert_eq!(prepared.work.signature_checks, 1);
+        let driver = CircuitProver::from_crate_root();
+        let dir =
+            std::env::temp_dir().join(format!("sparq_result_optimized_{}", std::process::id()));
+        let presentation = prepared.prove(&driver, &dir, "optimized").unwrap();
+        let verified = verify_result(
+            QUERY,
+            &presentation,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(verified.rows, rows);
+        let mut tampered = presentation.clone();
+        tampered.rows[0].insert(
+            "name".into(),
+            disclosed(&Term::Literal(Literal::new_simple_literal("Mallory"))).unwrap(),
+        );
+        assert!(verify_result(
+            QUERY,
+            &tampered,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     fn prepared() -> PreparedResult {
         let (credentials, policy, nonce, rows) = fixture();
         prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap()
@@ -1054,6 +1269,7 @@ mod tests {
             &nonce,
             ResultOptions {
                 credential_capacity: CredentialCapacity::HideInTwo,
+                ..ResultOptions::default()
             },
         )
         .unwrap();
@@ -1301,6 +1517,7 @@ mod tests {
                     &nonce,
                     ResultOptions {
                         credential_capacity: capacity,
+                        ..ResultOptions::default()
                     },
                 )
                 .unwrap();
