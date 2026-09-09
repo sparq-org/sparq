@@ -107,6 +107,74 @@ fn deleted_cache_matches_rebuild_after_mixed_deltas() {
 }
 
 #[test]
+fn deleted_cache_survives_insert_only_and_noop_deltas() {
+    let mut reference = triples();
+    let mut store = TripleStore::from_triples(reference.clone());
+    store.apply_delta(&[], &[[1, 1, 2], [2, 2, 4]]);
+    reference.retain(|t| *t != [1, 1, 2] && *t != [2, 2, 4]);
+    sweep(&store, &reference);
+    let pointers: Vec<_> = BUILT
+        .iter()
+        .map(|&p| {
+            store.overlay.as_ref().unwrap().deleted_by_perm[p as usize]
+                .get()
+                .unwrap()
+                .as_ptr()
+        })
+        .collect();
+    for (inserts, deletes) in [
+        (vec![[20, 2, 22]], vec![]), // actual added-set change with tombstones present
+        (vec![[20, 2, 22], [3, 3, 6]], vec![[1, 1, 2], [99; 3]]), // all no-ops
+        (vec![], vec![[20, 2, 22]]), // retract an addition, not a base deletion
+        (vec![], vec![]),
+    ] {
+        store.apply_delta(&inserts, &deletes);
+        for (&perm, &pointer) in BUILT.iter().zip(&pointers) {
+            assert_eq!(
+                store.overlay.as_ref().unwrap().deleted_by_perm[perm as usize]
+                    .get()
+                    .expect("unchanged tombstones retain their projection")
+                    .as_ptr(),
+                pointer,
+            );
+        }
+        reference.retain(|t| !deletes.contains(t));
+        reference.extend(inserts);
+        reference.sort_unstable();
+        reference.dedup();
+        sweep(&store, &reference); // also pins the independent added-cache invalidation
+    }
+}
+
+#[test]
+fn deleted_cache_actual_tombstone_changes_invalidate_before_publication() {
+    let mut reference = triples();
+    let mut store = TripleStore::from_triples(reference.clone());
+    store.apply_delta(&[], &[[1, 1, 2]]);
+    reference.retain(|t| *t != [1, 1, 2]);
+    for (inserts, deletes) in [
+        (vec![], vec![[2, 2, 4]]),          // grow the deleted set
+        (vec![[1, 1, 2]], vec![]),          // undelete an existing tombstone
+        (vec![[3, 3, 6]], vec![[3, 3, 6]]), // changes during batch, even if net unchanged
+    ] {
+        sweep(&store, &reference);
+        store.apply_delta(&inserts, &deletes);
+        assert!(store
+            .overlay
+            .as_ref()
+            .unwrap()
+            .deleted_by_perm
+            .iter()
+            .all(|s| s.get().is_none()));
+        reference.retain(|t| !deletes.contains(t));
+        reference.extend(inserts);
+        reference.sort_unstable();
+        reference.dedup();
+        sweep(&store, &reference);
+    }
+}
+
+#[test]
 fn deleted_cache_inclusive_bounds_and_empty_ranges() {
     let mut ov = Overlay::default();
     ov.deleted.extend([[0, 1, 2], [2, 3, 4], [Id::MAX; 3]]);

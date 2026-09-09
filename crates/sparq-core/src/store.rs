@@ -175,6 +175,10 @@ struct Overlay {
     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
     /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the
     /// hash set above for merge membership; even SPO needs its own sorted projection.
+    /// Full use retains up to `BUILT.len()` vectors, each with `deleted.len()`
+    /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
+    /// production in-place mutator is `TripleStore::apply_delta`, which invalidates
+    /// these projections when a tombstone is inserted or removed.
     deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
 }
 
@@ -184,7 +188,7 @@ impl Overlay {
     ///
     /// Built LAZILY on the first scan that needs this permutation rather than eagerly
     /// for all six in [`TripleStore::apply_delta`]: a write batch then stays O(batch)
-    /// (it only drops the caches, see [`Overlay::invalidate_projections`]) instead of paying
+    /// (it only drops the caches, see [`Overlay::invalidate_added`]) instead of paying
     /// O(6·k log k) per call, and a store only ever materialises the projections its
     /// query mix actually scans — so the memory cost is bounded by the permutations in
     /// use, not a flat 6×. SPO needs no projection or sort at all: `added` is already
@@ -205,9 +209,16 @@ impl Overlay {
         })
     }
 
-    /// [GPT-6 Astra] Drops both sets of projections before any delta mutation.
-    fn invalidate_projections(&mut self) {
-        for slot in self.added_by_perm.iter_mut().chain(&mut self.deleted_by_perm) {
+    /// Drops added projections before any nonempty delta, preserving prior behavior.
+    fn invalidate_added(&mut self) {
+        for slot in &mut self.added_by_perm {
+            slot.take();
+        }
+    }
+
+    /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
+    fn invalidate_deleted(&mut self) {
+        for slot in &mut self.deleted_by_perm {
             slot.take();
         }
     }
@@ -216,6 +227,8 @@ impl Overlay {
     /// The first request costs O(d log d) and one additional vector; later requests
     /// use two binary searches. Clone copies initialized vectors by value, and
     /// apply_delta invalidates only the mutated overlay under exclusive access.
+    /// Concurrent first readers of the same permutation wait for its one sorting
+    /// initializer; the cold sort is serialized for that permutation.
     fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
         if self.deleted.is_empty() {
             return 0;
@@ -915,20 +928,21 @@ impl TripleStore {
             return;
         }
         let mut ov = self.overlay.take().unwrap_or_default();
-        // [GPT-6 Astra] Either delta set can change, so all cached projections are
-        // stale from here on. Dropping them up front (O(1) per permutation) keeps the
-        // write path O(batch) — the projections are rebuilt lazily by the next scan
-        // that needs them, and only for the permutations it actually scans.
-        ov.invalidate_projections();
+        // [GPT-6 Astra] Added projections retain the existing conservative reset.
+        // Preserve deletion projections across inserts/no-ops: only actual tombstone
+        // changes require another sort. No overlay read occurs before publication.
+        ov.invalidate_added();
+        let mut deleted_changed = false;
         for t in deletes {
             if let Ok(i) = ov.added.binary_search(t) {
                 ov.added.remove(i); // retract a pending insertion
             } else if self.base_contains(*t) {
-                ov.deleted.insert(*t);
+                deleted_changed |= ov.deleted.insert(*t);
             }
         }
         for t in inserts {
             if ov.deleted.remove(t) {
+                deleted_changed = true;
                 continue; // re-insert of a deleted base triple: just undelete
             }
             if self.base_contains(*t) {
@@ -937,6 +951,9 @@ impl TripleStore {
             if let Err(i) = ov.added.binary_search(t) {
                 ov.added.insert(i, *t);
             }
+        }
+        if deleted_changed {
+            ov.invalidate_deleted();
         }
         self.overlay = if ov.is_empty() { None } else { Some(ov) };
     }
