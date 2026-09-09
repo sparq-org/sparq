@@ -1,0 +1,13 @@
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index fdcf160e6..1b5e5b7c2 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -280,7 +280,7 @@ impl Overlay {
+     /// projection; [GPT-6 Astra] `deleted` uses the same lazy projection strategy.
+     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+         let add = self.added_rows(perm, lo, hi).len();
+-        let del = self.deleted_count(perm, lo, hi);
++        let order = perm.order(); let del = self.deleted.iter().filter(|t| { let r = [t[order[0]], t[order[1]], t[order[2]]]; r >= lo && r <= hi }).count();
+         (add, del)
+     }
+ 

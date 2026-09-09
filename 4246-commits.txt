@@ -1,0 +1,23 @@
+commit acfa31cf52ec0d2641dd4925d5b4f094a0a531fe
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 06:43:01 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 06:43:01 2026 +0100
+
+    perf(core): cache deleted overlay range projections [GPT-6 Astra]
+    
+    Reuse lazy per-permutation projections for exact deletion counts; retain hash-set merge membership, invalidate both cache families on delta, and account requested heap. Pin lazy use, inclusive bounds, mixed mutations, independent forks/snapshots and concurrent first reads.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>
+
+commit c8c9b730c6df3d5fc3ea9f0a8f4feef47a5bea6e
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 03:10:11 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 03:10:11 2026 +0100
+
+    bench: add bounded overlay range-count diagnostic [GPT-6 Astra]
+    
+    Baseline runtime is exact main a42a9e89; benchmark only, before issue #4246 production changes.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

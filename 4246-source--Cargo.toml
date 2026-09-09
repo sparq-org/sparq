@@ -1,0 +1,151 @@
+[workspace]
+resolver = "2"
+members = ["crates/sparq-core", "crates/sparq-engine", "crates/sparq-cli", "crates/sparq-bench", "crates/sparq-wasm", "crates/sparq-reason", "crates/sparq-reason-wasm", "crates/sparq-text-wasm", "crates/sparq-server", "crates/sparq-http3", "crates/sparq-serve", "crates/sparq-conformance", "crates/sparq-py", "crates/sparq-shacl", "crates/sparq-shacl-wasm", "crates/sparq-hdt", "crates/sparq-sim", "crates/sparq-geo", "crates/sparq-introspect", "crates/sparq-nlq", "crates/sparq-vectors", "crates/sparq-rsp", "crates/sparq-rsp-wasm", "crates/sparq-gpu", "crates/sparq-solid", "crates/sparq-policy", "crates/sparq-parse", "crates/sparq-text", "crates/sparq-canon", "crates/sparq-zk", "crates/sparq-zk-compose", "crates/sparq-mpc", "crates/sparq-prov", "crates/sparq-fedplan", "crates/sparq-fedplan-mpc", "crates/sparq-fedclient", "crates/sparq-algos", "crates/sparq-trust", "crates/sparq-kb", "crates/sparq-terse", "crates/sparq-reason-el", "crates/sparq-reason-ql", "crates/sparq-reason-dl", "crates/sparq-vc", "crates/sparq-mcp", "crates/sparq-arrow", "crates/sparq-substrate", "crates/sparq-jsonld", "crates/sparq-engine-serialize", "crates/sparq-engine-service", "crates/sparq-difftest", "crates/sparq-metamorph", "crates/sparq-reason-diff", "crates/sparq-acbench", "crates/sparq-lws-core", "crates/sparq-lws-wasm", "crates/sparq-forms", "crates/sparq-wac-oracle", "crates/sparq-jsonld-registry", "crates/sparq-wrapper", "crates/sparq-wrapper-shacl", "crates/sparq-wrapper-gen", "crates/sparq-wrapper-integration", "crates/sparq-shaclc", "crates/sparq-e2ee-ng", "crates/sparq-crdt", "crates/sparq-conformance-floors", "crates/sparq-secprop-vocab"]
+# `fuzz` is the cargo-fuzz harness (bead sq-ovnf): it requires a NIGHTLY toolchain
+# (libFuzzer codegen), so it is excluded from the workspace to keep the STABLE
+# `cargo build`/`cargo test`/`clippy --workspace` gate from ever trying to compile it.
+# Build/run it only via `cargo +nightly fuzz run <target>` from `fuzz/`. [OPUS-4.8]
+exclude = ["vendor/spargebra", "fuzz", "gui/src-tauri"]
+# `gui/src-tauri` (bead sq-2e93) is the Tauri 2 desktop GUI scaffold. It has its OWN
+# `[workspace]` table (a standalone crate root) AND is excluded here so Tauri's heavy,
+# webview-system-lib-dependent dependency tree (webkit2gtk / WebView2 / WKWebView) never
+# enters the required `cargo build --workspace` / `clippy --workspace` gate, which runs on
+# CI runners without those libs. The GUI is built/linted/typechecked in its own path-scoped
+# `.github/workflows/gui.yml` lane (which installs the system deps). [OPUS-4.8]
+
+# Vendored spargebra 0.4.6: six surgical W3C-conformance parser fixes (§1–§6, each
+# prepared as an upstream PR against oxigraph/oxigraph) plus four sparq-local patches
+# (§7–§10) — see vendor/spargebra/SPARQ-PATCHES.md and docs/upstream-proposals.md.
+#
+# Retirement is bead sq-98w7z.8; re-check upstream with
+# `python3 scripts/check-spargebra-release.py`. Last checked 2026-07-27: crates.io
+# still tops out at 0.4.6, so this patch stays. Dropping it is NOT a one-line change —
+# bench/* and zk/xpath/differential are separate workspaces this patch table does not
+# reach (they pin `path = ".../vendor/spargebra"` directly), the next upstream release
+# is a semver-major 0.5.0 that this `version = "0.4"` requirement will not resolve, and
+# §7–§10 have no upstream home (§8 is /sparql DoS hardening). Read the release-watch
+# section of SPARQ-PATCHES.md before starting.
+[patch.crates-io]
+spargebra = { path = "vendor/spargebra" }
+
+[workspace.package]
+version = "0.1.1"
+edition = "2021"
+license = "MIT"
+# [OPUS-4.8] (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
+# of sparq-geo) requires rustc 1.88, and the released oxigraph parser stack
+# (oxrdf/oxttl/oxrdfio/spargebra/… 0.2–0.4) requires 1.87. Verified empirically: the
+# MSRV-scope workspace (--exclude sparq-py --exclude sparq-hdt) fails on 1.87 with ONLY
+# `geo@0.33.1 requires rustc 1.88`, and builds clean on 1.88. Bump this AND the `msrv`
+# job's toolchain pin in .github/workflows/ci.yml together; lower it only if geo (and the
+# ox* stack) lower theirs.
+rust-version = "1.88"
+# Shared crates.io metadata (T20). Each publishable crate inherits these via
+# `<field>.workspace = true` and adds its own `description`.
+repository = "https://github.com/sparq-org/sparq"
+homepage = "https://github.com/sparq-org/sparq"
+keywords = ["rdf", "sparql", "semantic-web", "triplestore", "query-engine"]
+categories = ["database-implementations", "parsing", "science"]
+
+[workspace.dependencies]
+# Term model + parsers (best-in-class; we build the store + engine ourselves).
+oxrdf = { version = "0.3", features = ["rdf-12"] }
+oxttl = { version = "0.2", features = ["rdf-12"] }
+# JSON-LD parser (same oxigraph family as oxrdf/oxttl, pure-Rust + wasm-portable — no
+# native-only deps, so it is safe in the lean wasm bundle). [OPUS-4.8] sq-dvyi: the
+# engine-side JSON-LD ingest the browser REPL's upload/URL path needs.
+oxjsonld = { version = "0.2", features = ["rdf-12"] }
+# RDF/XML parser (same oxigraph family; the version sparq-server already pins for its GSP
+# request-body reader + conformance harness, so it is proven in-tree). [OPUS-4.8] sq-f47w1
+# (survey §B1): the engine-side RDF/XML ingest gap — OPT-IN behind sparq-core's `rdfxml`
+# feature so the lean default / wasm build never links it (it pulls `quick-xml`).
+oxrdfxml = { version = "0.2", features = ["rdf-12"] }
+# SPARQL syntax -> algebra (we build the planner + physical execution ourselves).
+spargebra = { version = "0.4", features = ["sparql-12", "sep-0006"] }
+# Fast hashing / maps. These are the NEWEST side of a duplicate pair in Cargo.lock;
+# the lagging copies are held by third-party crates. Blockers are surveyed once, in
+# `deny.toml` § [bans] (the duplicate-version blocker registry) — read that before
+# re-investigating a `multiple-versions` warning.
+rustc-hash = "2"
+hashbrown = "0.17"
+# Inline small rows (avoid a heap allocation per solution row).
+smallvec = "1"
+# Parallelism.
+rayon = "1"
+# SIMD byte search for the Turtle parallel-split terminator pre-scan (T2). Already in the
+# tree transitively (via oxttl); promoted to a direct dep behind sparq-core's `parallel`
+# feature so the wasm build (no `parallel`) does not pull it. [OPUS-4.8]
+memchr = "2"
+# Memory-mapped on-disk indexes (out-of-core, native only) — query datasets larger
+# than RAM by letting the OS page in only the working set.
+memmap2 = "0.9"
+# RAM / free-disk detection for the spillable-dictionary build budget (native only,
+# behind sparq-core's `dict-spill` feature — never reaches the wasm build).
+libc = "0.2"
+# HNSW approximate nearest-neighbour search (sparq-vectors only, GenAI phase 4).
+# Chosen over hnsw_rs: pure Rust, minimal dependency tree, maintained (InstantDomain).
+instant-distance = "0.6"
+
+# sparq-vectors' accuracy gate (HNSW recall@10 vs brute force on 50k vectors) runs as
+# an ordinary `cargo test`, but HNSW construction at opt-level 0 is minutes-slow. These
+# overrides optimise ONLY the vector crates in dev builds (integration tests link the
+# dev-profile lib); every other crate's dev build is untouched.
+[profile.dev.package.sparq-vectors]
+opt-level = 2
+[profile.dev.package.instant-distance]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+# [SONNET-4.6] sq-6vshe.10 — optimized correctness/smoke lanes do not need the
+# shipping profile's serial codegen and fat-LTO link tail. This profile is never
+# valid for benchmarks, perf ratchets, published measurements, or shipped artifacts.
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
+# Python extension wheels (T21): release optimisation but UNWINDING panics, so a Rust
+# panic inside the `sparq` Python module surfaces as `pyo3_runtime.PanicException`
+# instead of `panic = "abort"` killing the whole interpreter. Used by
+# `maturin build --profile python-release`; the default release profile is unchanged.
+[profile.python-release]
+inherits = "release"
+panic = "unwind"
+
+# [OPUS-4.8] sq-7d3dj.1 — WASM release profile that BUILDS THE SHIPPED BROWSER BUNDLE.
+# Inherits the tuned `release` profile (opt-level 3, fat LTO, codegen-units 1, panic=abort) so
+# the HOT engine/core query-eval crates keep their opt-level-3 + simd128 / core::simd FILTER
+# investment untouched, then makes only the COLD, run-once RDF/SPARQL PARSE crates build for
+# SIZE (opt-level "z") and strips local symbols. Pure parser code sits off every hot query
+# path, so this shrinks the wasm bundle with no runtime-perf change. Wired into BOTH the gated
+# measurement (scripts/ci-bench.sh -> the wasm_bundle_bytes ratchet) AND the shipped bundle
+# (js `build:wasm{,:lean}` -> `wasm-pack --profile release-wasm`), so the gate builds under the
+# same cargo profile as the shipped bundle (it ratchets the raw `cargo build` `.wasm`, not the
+# post-wasm-bindgen/wasm-opt npm artifact). Blanket opt-level "z" was REJECTED — it would deopt
+# the eval kernels.
+# NATIVE / non-wasm builds NEVER select this profile, so the default `release` profile — and
+# every engine opt-level — is byte-for-byte unchanged.
+[profile.release-wasm]
+inherits = "release"
+strip = "symbols"
+
+# Cold, run-once RDF/SPARQL parse crates only (spargebra = SPARQL query parser, oxiri = IRI
+# parser, oxttl = Turtle/N-Triples parser). They are reached once at load/parse time, never on
+# the hot query-eval loop, so size-optimising them costs no measurable runtime perf.
+[profile.release-wasm.package.spargebra]
+opt-level = "z"
+[profile.release-wasm.package.oxiri]
+opt-level = "z"
+[profile.release-wasm.package.oxttl]
+opt-level = "z"
+
+# A profile for benchmarking that keeps symbols for profiling.
+[profile.bench]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

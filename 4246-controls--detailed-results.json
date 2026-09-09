@@ -1,0 +1,49 @@
+[
+  {
+    "name": "remove_cache_use",
+    "exit": 101,
+    "killed": true,
+    "source_sha256": "3e60fcfa8c1af7db8a20125af8084d3f073680d7ebb6353e7b3d99ef13fa6254",
+    "failed_tests": [
+      "store::overlay_deleted_tests::deleted_cache_concurrent_first_reads_share_initialized_projection",
+      "store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent",
+      "store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted"
+    ],
+    "result_line": "test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.05s"
+  },
+  {
+    "name": "remove_deleted_invalidation",
+    "exit": 101,
+    "killed": true,
+    "source_sha256": "4bb15ced2d7c00e3e2b2f4a06c3affdc30dfd28338ce6a72f071202ec10567dd",
+    "failed_tests": [
+      "store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild",
+      "store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent",
+      "store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation",
+      "store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas"
+    ],
+    "result_line": "test result: FAILED. 3 passed; 4 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.02s"
+  },
+  {
+    "name": "exclude_upper_bound",
+    "exit": 101,
+    "killed": true,
+    "source_sha256": "596a991b9dbf4670a8318dd37f243fc1e700e2696dcab595107ec5011c075d03",
+    "failed_tests": [
+      "store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent",
+      "store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation",
+      "store::overlay_deleted_tests::deleted_cache_inclusive_bounds_and_empty_ranges"
+    ],
+    "result_line": "test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.04s"
+  },
+  {
+    "name": "omit_deleted_heap_accounting",
+    "exit": 101,
+    "killed": true,
+    "source_sha256": "41c1586819d4ef10c2a51ed0f8e7e2bc44b08bc0993429b34f99857fe76832ff",
+    "failed_tests": [
+      "store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted"
+    ],
+    "result_line": "test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.04s"
+  }
+]

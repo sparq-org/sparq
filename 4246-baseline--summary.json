@@ -1,0 +1,242 @@
+[
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 875.0,
+    "min": 708.0,
+    "max": 2250.0,
+    "n": 7
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 48.2959,
+    "min": 48.2791,
+    "max": 48.6541,
+    "n": 7
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 8125.0,
+    "min": 5667.0,
+    "max": 17833.0,
+    "n": 7
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 2631.67,
+    "min": 2620.42,
+    "max": 2660.42,
+    "n": 7
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 458.0,
+    "min": 375.0,
+    "max": 625.0,
+    "n": 7
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 93.4292,
+    "min": 93.1208,
+    "max": 93.55,
+    "n": 7
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 6375.0,
+    "min": 5416.0,
+    "max": 6500.0,
+    "n": 7
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 2690.0,
+    "min": 2684.58,
+    "max": 2715.84,
+    "n": 7
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 2666.0,
+    "min": 2541.0,
+    "max": 2708.0,
+    "n": 7
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 1609.225,
+    "min": 1601.8625,
+    "max": 1636.5667,
+    "n": 7
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 12166.0,
+    "min": 11167.0,
+    "max": 15125.0,
+    "n": 7
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 5790.42,
+    "min": 5770.0,
+    "max": 5830.0,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 24709.0,
+    "min": 24542.0,
+    "max": 25458.0,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 17208.1458,
+    "min": 16605.2834,
+    "max": 18413.7916,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 58250.0,
+    "min": 54791.0,
+    "max": 63458.0,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 39472.08,
+    "min": 38790.41,
+    "max": 39924.17,
+    "n": 7
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 96333.0,
+    "min": 95083.0,
+    "max": 96666.0,
+    "n": 7
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 86608.3875,
+    "min": 86173.9917,
+    "max": 87248.7916,
+    "n": 7
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 207542.0,
+    "min": 203792.0,
+    "max": 209666.0,
+    "n": 7
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 180172.08,
+    "min": 178220.41,
+    "max": 181761.25,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "scan",
+    "phase": "cold",
+    "ns_per_op_median": 625.0,
+    "min": 584.0,
+    "max": 1166.0,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "scan",
+    "phase": "warm",
+    "ns_per_op_median": 81.3083,
+    "min": 81.0416,
+    "max": 82.75,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "query",
+    "phase": "cold",
+    "ns_per_op_median": 7917.0,
+    "min": 6917.0,
+    "max": 10625.0,
+    "n": 7
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "query",
+    "phase": "warm",
+    "ns_per_op_median": 2689.16,
+    "min": 2675.42,
+    "max": 2696.25,
+    "n": 7
+  }
+]

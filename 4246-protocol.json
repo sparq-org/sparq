@@ -1,0 +1,167 @@
+{
+  "recorded_at": "2026-09-09T05:44:52.876374+00:00",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "baseline_harness_commit": "c8c9b730c6df3d5fc3ea9f0a8f4feef47a5bea6e",
+  "candidate_commit": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+  "cases": [
+    {
+      "delta": 0,
+      "added": false,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 0,
+      "added": false,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 0,
+      "added": false,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 0,
+      "added": false,
+      "workload": "query",
+      "phase": "warm"
+    },
+    {
+      "delta": 16,
+      "added": false,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 16,
+      "added": false,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 16,
+      "added": false,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 16,
+      "added": false,
+      "workload": "query",
+      "phase": "warm"
+    },
+    {
+      "delta": 1024,
+      "added": false,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 1024,
+      "added": false,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 1024,
+      "added": false,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 1024,
+      "added": false,
+      "workload": "query",
+      "phase": "warm"
+    },
+    {
+      "delta": 8192,
+      "added": false,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 8192,
+      "added": false,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 8192,
+      "added": false,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 8192,
+      "added": false,
+      "workload": "query",
+      "phase": "warm"
+    },
+    {
+      "delta": 32768,
+      "added": false,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 32768,
+      "added": false,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 32768,
+      "added": false,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 32768,
+      "added": false,
+      "workload": "query",
+      "phase": "warm"
+    },
+    {
+      "delta": 8192,
+      "added": true,
+      "workload": "scan",
+      "phase": "cold"
+    },
+    {
+      "delta": 8192,
+      "added": true,
+      "workload": "scan",
+      "phase": "warm"
+    },
+    {
+      "delta": 8192,
+      "added": true,
+      "workload": "query",
+      "phase": "cold"
+    },
+    {
+      "delta": 8192,
+      "added": true,
+      "workload": "query",
+      "phase": "warm"
+    }
+  ],
+  "points": 24,
+  "timing_repetitions": 7,
+  "count_repetitions": 3,
+  "warmups_per_point": 2,
+  "build_jobs": 2,
+  "rayon_threads": 1,
+  "profile": "opt-level3 ltofalse codegenunits16 debugfalse",
+  "build_cap_seconds": 900,
+  "measurement_order": [
+    "main-time",
+    "candidate-time",
+    "candidate-count",
+    "main-count"
+  ],
+  "note": "Full baseline matrix already executed before production edits. Paired repeat is predeclared once, not noisy-run hunting; all raw evidence retained."
+}

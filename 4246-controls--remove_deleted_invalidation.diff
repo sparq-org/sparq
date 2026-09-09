@@ -1,0 +1,13 @@
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index fdcf160e6..47f64d234 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -207,7 +207,7 @@ impl Overlay {
+ 
+     /// [GPT-6 Astra] Drops both sets of projections before any delta mutation.
+     fn invalidate_projections(&mut self) {
+-        for slot in self.added_by_perm.iter_mut().chain(&mut self.deleted_by_perm) {
++        for slot in self.added_by_perm.iter_mut() {
+             slot.take();
+         }
+     }

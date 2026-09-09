@@ -1,0 +1,20 @@
+{
+  "baseline_builds": [
+    "CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<private warm target> cargo build --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml",
+    "same command --features count-alloc; save binaries after each build"
+  ],
+  "baseline_execution": [
+    "binaries/main-time > baseline/time.jsonl",
+    "binaries/main-count > baseline/count.jsonl"
+  ],
+  "paired_commands": "paired/runs.json and builds/candidate-builds.json",
+  "test_commands": "tests/validation.json",
+  "control_driver": "controls/run_mutants.py",
+  "runtime_environment": {
+    "RAYON_NUM_THREADS": 1,
+    "CARGO_BUILD_JOBS": 2
+  },
+  "private_optimized_target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/target",
+  "private_test_target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+  "cache_policy": "reused existing task-local targets only; no shared target writes or installs; targets excluded from evidence"
+}

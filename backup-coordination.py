@@ -119,6 +119,10 @@ for evidence_name in ['overlay-cost-dedupe-query.json', 'overlay-cost-dedupe.jso
     FILES[evidence_name] = ROOT / evidence_name
 FILES['5983-final-no-go-comment.md'] = ROOT / 'direct-5983/final-no-go-comment.md'
 
+OVERLAY_4246 = ROOT / 'direct-4246'
+for evidence_name in [*json.loads((OVERLAY_4246 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['4246-' + evidence_name.replace('/', '--')] = OVERLAY_4246 / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

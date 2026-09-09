@@ -1,0 +1,1058 @@
+[
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 917.0,
+    "candidate_ns": 833.0,
+    "ratio": 0.9083969465648855,
+    "main_range_ns": [
+      666.0,
+      2125.0
+    ],
+    "candidate_range_ns": [
+      542.0,
+      1125.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44253184,
+      "process_peak_rss_after": 44253184
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44220416,
+      "process_peak_rss_after": 44220416
+    },
+    "main_mean_ns": 1131.0,
+    "main_stdev_ns": 582.6960328221453,
+    "candidate_mean_ns": 815.5714285714286,
+    "candidate_stdev_ns": 174.815004259605
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 48.3,
+    "candidate_ns": 48.5667,
+    "ratio": 1.0055217391304347,
+    "main_range_ns": [
+      48.2042,
+      48.9875
+    ],
+    "candidate_range_ns": [
+      48.5166,
+      48.8542
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44302336,
+      "process_peak_rss_after": 44302336
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44253184,
+      "process_peak_rss_after": 44253184
+    },
+    "estimated_total_reads_to_amortize_cold_extra": null,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 48.370842857142854,
+    "main_stdev_ns": 0.2780432631632638,
+    "candidate_mean_ns": 48.59762857142857,
+    "candidate_stdev_ns": 0.11513244133440037
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 12750.0,
+    "candidate_ns": 12584.0,
+    "ratio": 0.9869803921568627,
+    "main_range_ns": [
+      7250.0,
+      19125.0
+    ],
+    "candidate_range_ns": [
+      8250.0,
+      17083.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44335104,
+      "process_peak_rss_after": 44335104
+    },
+    "candidate-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44285952,
+      "process_peak_rss_after": 44285952
+    },
+    "main_mean_ns": 12666.57142857143,
+    "main_stdev_ns": 3687.4298572828407,
+    "candidate_mean_ns": 11654.857142857143,
+    "candidate_stdev_ns": 3201.862813455704
+  },
+  {
+    "delta": 0,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 2621.67,
+    "candidate_ns": 2630.41,
+    "ratio": 1.0033337529132194,
+    "main_range_ns": [
+      2613.33,
+      2731.66
+    ],
+    "candidate_range_ns": [
+      2607.09,
+      2740.83
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44466176,
+      "process_peak_rss_after": 44466176
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400000,
+      "store_heap_before": 14400000,
+      "store_heap_after": 14400000,
+      "process_peak_rss_before": 44400640,
+      "process_peak_rss_after": 44400640
+    },
+    "estimated_total_reads_to_amortize_cold_extra": null,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 2635.592857142857,
+    "main_stdev_ns": 42.623292424950634,
+    "candidate_mean_ns": 2643.3942857142856,
+    "candidate_stdev_ns": 44.031429251215066
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 666.0,
+    "candidate_ns": 625.0,
+    "ratio": 0.9384384384384384,
+    "main_range_ns": [
+      500.0,
+      1500.0
+    ],
+    "candidate_range_ns": [
+      541.0,
+      875.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400364,
+      "process_peak_rss_before": 44466176,
+      "process_peak_rss_after": 44466176
+    },
+    "candidate-count": {
+      "allocs": 3,
+      "reallocs": 0,
+      "requested_bytes": 210,
+      "peak_live_delta_bytes": 192,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400556,
+      "process_peak_rss_before": 44400640,
+      "process_peak_rss_after": 44400640
+    },
+    "main_mean_ns": 755.8571428571429,
+    "main_stdev_ns": 343.146435491433,
+    "candidate_mean_ns": 684.4285714285714,
+    "candidate_stdev_ns": 148.1056572663101
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 93.2792,
+    "candidate_ns": 69.7541,
+    "ratio": 0.7477990806096106,
+    "main_range_ns": [
+      93.1334,
+      93.7917
+    ],
+    "candidate_range_ns": [
+      68.7084,
+      69.7584
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400364,
+      "process_peak_rss_before": 44482560,
+      "process_peak_rss_after": 44482560
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400556,
+      "store_heap_after": 14400556,
+      "process_peak_rss_before": 44433408,
+      "process_peak_rss_after": 44433408
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 1,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 93.31252857142857,
+    "main_stdev_ns": 0.22355327265393968,
+    "candidate_mean_ns": 69.46608571428571,
+    "candidate_stdev_ns": 0.43608644948974506
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 8167.0,
+    "candidate_ns": 6875.0,
+    "ratio": 0.8418023754132484,
+    "main_range_ns": [
+      5291.0,
+      9875.0
+    ],
+    "candidate_range_ns": [
+      5958.0,
+      11958.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400364,
+      "process_peak_rss_before": 44498944,
+      "process_peak_rss_after": 44498944
+    },
+    "candidate-count": {
+      "allocs": 57,
+      "reallocs": 0,
+      "requested_bytes": 6043,
+      "peak_live_delta_bytes": 2363,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400556,
+      "process_peak_rss_before": 44433408,
+      "process_peak_rss_after": 44433408
+    },
+    "main_mean_ns": 8029.571428571428,
+    "main_stdev_ns": 1509.119153363186,
+    "candidate_mean_ns": 7601.285714285715,
+    "candidate_stdev_ns": 2007.4114106053526
+  },
+  {
+    "delta": 16,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 2672.08,
+    "candidate_ns": 2654.59,
+    "ratio": 0.9934545372893028,
+    "main_range_ns": [
+      2652.92,
+      3039.58
+    ],
+    "candidate_range_ns": [
+      2635.41,
+      2672.91
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400364,
+      "store_heap_after": 14400364,
+      "process_peak_rss_before": 44498944,
+      "process_peak_rss_after": 44498944
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14400364,
+      "store_heap_before": 14400556,
+      "store_heap_after": 14400556,
+      "process_peak_rss_before": 44433408,
+      "process_peak_rss_after": 44433408
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 1,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 2722.6785714285716,
+    "main_stdev_ns": 140.04946904916267,
+    "candidate_mean_ns": 2650.4742857142855,
+    "candidate_stdev_ns": 13.161781613371925
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 2958.0,
+    "candidate_ns": 20417.0,
+    "ratio": 6.902298850574713,
+    "main_range_ns": [
+      2708.0,
+      3541.0
+    ],
+    "candidate_range_ns": [
+      19458.0,
+      22208.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14423296,
+      "process_peak_rss_before": 44810240,
+      "process_peak_rss_after": 44810240
+    },
+    "candidate-count": {
+      "allocs": 3,
+      "reallocs": 0,
+      "requested_bytes": 12306,
+      "peak_live_delta_bytes": 12288,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14435584,
+      "process_peak_rss_before": 44728320,
+      "process_peak_rss_after": 44728320
+    },
+    "main_mean_ns": 3029.5714285714284,
+    "main_stdev_ns": 286.4145347469044,
+    "candidate_mean_ns": 20630.85714285714,
+    "candidate_stdev_ns": 980.6670227573728
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 1591.4292,
+    "candidate_ns": 77.2916,
+    "ratio": 0.04856741349222447,
+    "main_range_ns": [
+      1588.0291,
+      1604.1292
+    ],
+    "candidate_range_ns": [
+      77.2625,
+      78.2708
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14423296,
+      "process_peak_rss_before": 44859392,
+      "process_peak_rss_after": 44859392
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14435584,
+      "store_heap_after": 14435584,
+      "process_peak_rss_before": 44761088,
+      "process_peak_rss_after": 44761088
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 13,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 1594.5279714285714,
+    "main_stdev_ns": 6.77828382230448,
+    "candidate_mean_ns": 77.4482,
+    "candidate_stdev_ns": 0.36764294725543695
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 13292.0,
+    "candidate_ns": 26709.0,
+    "ratio": 2.009404152873909,
+    "main_range_ns": [
+      11458.0,
+      14833.0
+    ],
+    "candidate_range_ns": [
+      25208.0,
+      28250.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14423296,
+      "process_peak_rss_before": 44892160,
+      "process_peak_rss_after": 44892160
+    },
+    "candidate-count": {
+      "allocs": 57,
+      "reallocs": 0,
+      "requested_bytes": 18139,
+      "peak_live_delta_bytes": 14459,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14435584,
+      "process_peak_rss_before": 44777472,
+      "process_peak_rss_after": 44777472
+    },
+    "main_mean_ns": 13309.57142857143,
+    "main_stdev_ns": 1281.820431670372,
+    "candidate_mean_ns": 26791.714285714286,
+    "candidate_stdev_ns": 1132.6530381197522
+  },
+  {
+    "delta": 1024,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 5792.92,
+    "candidate_ns": 2698.34,
+    "ratio": 0.465799631274038,
+    "main_range_ns": [
+      5782.92,
+      5856.66
+    ],
+    "candidate_range_ns": [
+      2686.25,
+      2711.67
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14423296,
+      "store_heap_after": 14423296,
+      "process_peak_rss_before": 44892160,
+      "process_peak_rss_after": 44892160
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14423296,
+      "store_heap_before": 14435584,
+      "store_heap_after": 14435584,
+      "process_peak_rss_before": 44777472,
+      "process_peak_rss_after": 44777472
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 6,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 5803.632857142858,
+    "main_stdev_ns": 25.320761385528154,
+    "candidate_mean_ns": 2699.6428571428573,
+    "candidate_stdev_ns": 8.23128121717336
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 24875.0,
+    "candidate_ns": 252000.0,
+    "ratio": 10.130653266331658,
+    "main_range_ns": [
+      24417.0,
+      25084.0
+    ],
+    "candidate_range_ns": [
+      250125.0,
+      263375.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14586368,
+      "process_peak_rss_before": 49168384,
+      "process_peak_rss_after": 49168384
+    },
+    "candidate-count": {
+      "allocs": 3,
+      "reallocs": 0,
+      "requested_bytes": 98322,
+      "peak_live_delta_bytes": 98304,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14684672,
+      "process_peak_rss_before": 47038464,
+      "process_peak_rss_after": 47038464
+    },
+    "main_mean_ns": 24881.14285714286,
+    "main_stdev_ns": 228.67402459354565,
+    "candidate_mean_ns": 253982.0,
+    "candidate_stdev_ns": 4872.0807327739
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 16301.9584,
+    "candidate_ns": 80.5667,
+    "ratio": 0.004942148545784536,
+    "main_range_ns": [
+      16169.8125,
+      16969.225
+    ],
+    "candidate_range_ns": [
+      80.3958,
+      80.8458
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14586368,
+      "process_peak_rss_before": 49184768,
+      "process_peak_rss_after": 49184768
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14684672,
+      "store_heap_after": 14684672,
+      "process_peak_rss_before": 47038464,
+      "process_peak_rss_after": 47038464
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 16,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 16498.308957142857,
+    "main_stdev_ns": 356.4698725106598,
+    "candidate_mean_ns": 80.56191428571428,
+    "candidate_stdev_ns": 0.1680588927387395
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 58833.0,
+    "candidate_ns": 278250.0,
+    "ratio": 4.7294885523430725,
+    "main_range_ns": [
+      56416.0,
+      69625.0
+    ],
+    "candidate_range_ns": [
+      263042.0,
+      280667.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14586368,
+      "process_peak_rss_before": 49184768,
+      "process_peak_rss_after": 49184768
+    },
+    "candidate-count": {
+      "allocs": 57,
+      "reallocs": 0,
+      "requested_bytes": 104155,
+      "peak_live_delta_bytes": 100475,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14684672,
+      "process_peak_rss_before": 47038464,
+      "process_peak_rss_after": 47054848
+    },
+    "main_mean_ns": 61511.57142857143,
+    "main_stdev_ns": 5696.966908134622,
+    "candidate_mean_ns": 276226.14285714284,
+    "candidate_stdev_ns": 6053.832048891882
+  },
+  {
+    "delta": 8192,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 39676.67,
+    "candidate_ns": 2796.25,
+    "ratio": 0.07047592451685084,
+    "main_range_ns": [
+      39130.0,
+      40042.91
+    ],
+    "candidate_range_ns": [
+      2691.25,
+      2839.59
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14586368,
+      "store_heap_after": 14586368,
+      "process_peak_rss_before": 49184768,
+      "process_peak_rss_after": 49184768
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14586368,
+      "store_heap_before": 14684672,
+      "store_heap_after": 14684672,
+      "process_peak_rss_before": 47054848,
+      "process_peak_rss_after": 47054848
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 7,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 39578.74857142857,
+    "main_stdev_ns": 310.01582623196254,
+    "candidate_mean_ns": 2794.822857142857,
+    "candidate_stdev_ns": 51.56011627679085
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 95917.0,
+    "candidate_ns": 1135208.0,
+    "ratio": 11.835315950248653,
+    "main_range_ns": [
+      95750.0,
+      98083.0
+    ],
+    "candidate_range_ns": [
+      1132542.0,
+      1144917.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15145472,
+      "process_peak_rss_before": 50511872,
+      "process_peak_rss_after": 50511872
+    },
+    "candidate-count": {
+      "allocs": 3,
+      "reallocs": 0,
+      "requested_bytes": 393234,
+      "peak_live_delta_bytes": 393216,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15538688,
+      "process_peak_rss_before": 48431104,
+      "process_peak_rss_after": 48431104
+    },
+    "main_mean_ns": 96369.0,
+    "main_stdev_ns": 855.2249216823997,
+    "candidate_mean_ns": 1137529.857142857,
+    "candidate_stdev_ns": 4830.490983622383
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 86550.1292,
+    "candidate_ns": 86.9667,
+    "ratio": 0.001004813058095354,
+    "main_range_ns": [
+      85978.4375,
+      88318.0417
+    ],
+    "candidate_range_ns": [
+      86.9542,
+      88.0459
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15145472,
+      "process_peak_rss_before": 50511872,
+      "process_peak_rss_after": 50511872
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15538688,
+      "store_heap_after": 15538688,
+      "process_peak_rss_before": 48431104,
+      "process_peak_rss_after": 48431104
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 14,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 86808.18274285714,
+    "main_stdev_ns": 753.5554827077289,
+    "candidate_mean_ns": 87.31787142857144,
+    "candidate_stdev_ns": 0.46237062592068284
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 207541.0,
+    "candidate_ns": 1162583.0,
+    "ratio": 5.601702796074028,
+    "main_range_ns": [
+      204250.0,
+      220125.0
+    ],
+    "candidate_range_ns": [
+      1154167.0,
+      1199125.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15145472,
+      "process_peak_rss_before": 50511872,
+      "process_peak_rss_after": 50511872
+    },
+    "candidate-count": {
+      "allocs": 57,
+      "reallocs": 0,
+      "requested_bytes": 399067,
+      "peak_live_delta_bytes": 395387,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15538688,
+      "process_peak_rss_before": 48431104,
+      "process_peak_rss_after": 48431104
+    },
+    "main_mean_ns": 208988.14285714287,
+    "main_stdev_ns": 5274.1940751983275,
+    "candidate_mean_ns": 1166071.5714285714,
+    "candidate_stdev_ns": 15421.598034976172
+  },
+  {
+    "delta": 32768,
+    "added": false,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 179412.92,
+    "candidate_ns": 2737.91,
+    "ratio": 0.015260383700348892,
+    "main_range_ns": [
+      177944.58,
+      180277.09
+    ],
+    "candidate_range_ns": [
+      2730.84,
+      2760.42
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15145472,
+      "store_heap_after": 15145472,
+      "process_peak_rss_before": 50511872,
+      "process_peak_rss_after": 50511872
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 15145472,
+      "store_heap_before": 15538688,
+      "store_heap_after": 15538688,
+      "process_peak_rss_before": 48431104,
+      "process_peak_rss_after": 48431104
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 7,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 179228.81,
+    "main_stdev_ns": 867.7144079323243,
+    "candidate_mean_ns": 2744.82,
+    "candidate_stdev_ns": 12.326084806890876
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "scan",
+    "phase": "cold",
+    "main_ns": 834.0,
+    "candidate_ns": 875.0,
+    "ratio": 1.0491606714628297,
+    "main_range_ns": [
+      500.0,
+      1333.0
+    ],
+    "candidate_range_ns": [
+      458.0,
+      1167.0
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 50724864,
+      "process_peak_rss_after": 50724864
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 48578560,
+      "process_peak_rss_after": 48578560
+    },
+    "main_mean_ns": 904.7142857142857,
+    "main_stdev_ns": 259.70991143049986,
+    "candidate_mean_ns": 881.1428571428571,
+    "candidate_stdev_ns": 275.89939505275504
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "scan",
+    "phase": "warm",
+    "main_ns": 81.1083,
+    "candidate_ns": 80.9375,
+    "ratio": 0.9978941735925916,
+    "main_range_ns": [
+      81.0792,
+      81.6459
+    ],
+    "candidate_range_ns": [
+      80.8791,
+      84.3584
+    ],
+    "main-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 50741248,
+      "process_peak_rss_after": 50741248
+    },
+    "candidate-count": {
+      "allocs": 2,
+      "reallocs": 0,
+      "requested_bytes": 18,
+      "peak_live_delta_bytes": 18,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 48594944,
+      "process_peak_rss_after": 48594944
+    },
+    "estimated_total_reads_to_amortize_cold_extra": 242,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 81.26725714285715,
+    "main_stdev_ns": 0.2422532893284958,
+    "candidate_mean_ns": 81.46012857142857,
+    "candidate_stdev_ns": 1.2841161093845674
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "query",
+    "phase": "cold",
+    "main_ns": 9916.0,
+    "candidate_ns": 11417.0,
+    "ratio": 1.1513715207745059,
+    "main_range_ns": [
+      7417.0,
+      13416.0
+    ],
+    "candidate_range_ns": [
+      9333.0,
+      18292.0
+    ],
+    "main-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 50774016,
+      "process_peak_rss_after": 50774016
+    },
+    "candidate-count": {
+      "allocs": 56,
+      "reallocs": 0,
+      "requested_bytes": 5851,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 48594944,
+      "process_peak_rss_after": 48594944
+    },
+    "main_mean_ns": 10071.285714285714,
+    "main_stdev_ns": 1758.0982826419493,
+    "candidate_mean_ns": 12696.42857142857,
+    "candidate_stdev_ns": 3340.306116567904
+  },
+  {
+    "delta": 8192,
+    "added": true,
+    "workload": "query",
+    "phase": "warm",
+    "main_ns": 2705.84,
+    "candidate_ns": 2720.83,
+    "ratio": 1.0055398693196935,
+    "main_range_ns": [
+      2692.92,
+      2722.5
+    ],
+    "candidate_range_ns": [
+      2702.5,
+      2736.25
+    ],
+    "main-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 50774016,
+      "process_peak_rss_after": 50774016
+    },
+    "candidate-count": {
+      "allocs": 5402,
+      "reallocs": 0,
+      "requested_bytes": 583318,
+      "peak_live_delta_bytes": 2171,
+      "store_heap_cold": 14498304,
+      "store_heap_before": 14498304,
+      "store_heap_after": 14498304,
+      "process_peak_rss_before": 48594944,
+      "process_peak_rss_after": 48594944
+    },
+    "estimated_total_reads_to_amortize_cold_extra": null,
+    "amortization_note": "Derived from local medians, one cold plus repeated same-range warm operations; not a workload guarantee.",
+    "main_mean_ns": 2707.68,
+    "main_stdev_ns": 10.076647921473342,
+    "candidate_mean_ns": 2719.8785714285714,
+    "candidate_stdev_ns": 13.618153850126463
+  }
+]

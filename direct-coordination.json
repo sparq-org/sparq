@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T02:06:57.622869+00:00",
+  "updated_at": "2026-09-09T12:00:13.879900+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -61,19 +61,34 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": null,
-    "head": null,
-    "branch": null,
-    "worktree": null,
+    "head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+    "branch": "codex/overlay-deleted-projections",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Same Astra agent assigned existing issue4246 on a fresh isolated current-main worktree. Verify current premise and measure baseline before production change, then minimal lazy sorted deleted-projection cache if reproduced; no dormant top-k code.",
-    "phase": "Measure-first ordinary SPARQL overlay counting recovery",
+    "state": "Frozen cache candidate clean, root verified79 manifest entries and full.diff against exactbase. One actual Opus5xhigh independent whole-change review launched; collect existing session/output, never duplicate. Agent doing separate bounded read-only scheduled-failure triage while source remains frozen.",
+    "phase": "Independent Opus review of overlay cache and lifecycle costs",
     "contract": "Follow repo/Rustskills. Retain deleted hashset; lazily prepare only requested permutation caches. Correct invalidation for apply_delta/delete-reinsert/clones/forks/snapshots/concurrentreads. Scoped semantic and cache-use/invalidation negativecontrols; bounded cold/warm scan and ordinarySPARQL paired measurements plus addedmemory. One sequential optimized lane/twojobs/warmprivatetarget/15minbuildcap. No wider storage/publicAPIrewrite/fullworkspaceyet/networkinstalls/EC2/remote mutations/newagents/models. Freeze source/caller/cache/mutation context for actual Opusreview beforePRadmission.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
     "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
     "dedupe_file": "overlay-cost-dedupe.json",
     "issue_source_file": "overlay4246-read.json",
-    "scope_guard": "Agent must confirm on fresh main that premise remains present before implementing; do not transplant stopped top-k experiment."
+    "scope_guard": "Agent must confirm on fresh main that premise remains present before implementing; do not transplant stopped top-k experiment.",
+    "report_directory": "direct-4246",
+    "report": "direct-4246/report.json",
+    "validation": "44 test executions;4compiledassertionmutantskilled; scopedcoreclippyPASS. Baseline beforeproductionedits; paired24fixedpoints. Coldfirstuse and warmedfork cache-copy memory costs are explicit material tradeoffs. Fullworkspace/conformance/gates not yetrun. Localpreflight soleknownBash3mapfilefailure, no bypass.",
+    "review_runtime": {
+      "session_id": 62677,
+      "kind": "exec_command",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/review-packet.md",
+      "input_sha256": "789519e37efe27e4effcc9efc73ab88b376d9c7e4128a9902c2ebefec713ad13",
+      "input_bytes": 121478,
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/opus-review-acfa31cf.json",
+      "started_at": "2026-09-09T12:00:13.879900+00:00",
+      "completed": false,
+      "acceptance": "Require completed successfulJSON, is_errorfalse, actual modelUsage claude-opus-5 and exactreviewedhead. No duplicate or exhaustedquota retry."
+    },
+    "review_focus": "Deleted cache invalidation across mutation/clone/fork/snapshot/concurrentreads; bounds/permutations; heap/budgetaccounting; measurement/counter soundness; cold-after-write latency and warmed-cache copying. No unconditional performance/admission claim."
   },
   "prs": {
     "4300": {
@@ -360,8 +375,8 @@
     }
   },
   "next_actions": [
-    "Collect existing postmerge_ci issue4246 baseline/source/cache fix report and exact isolated worktree/head. Ensure freshmain premise holds and no top-k changes leak into newlane.",
-    "After concrete viable candidate/evidence, obtain actual Opus5xhigh independent whole-change review including cache invalidation/clone/read callers; resolve findings,requiredtests/Copilot and normal protected admission.",
+    "Collect existing actual Opus5xhigh review session62677/output for acfa31cf52...; do not restart. RequirevalidsuccessfulJSON/actualmodel/head. Resolve concrete findings before publication/admission.",
+    "Collect existing postmerge_ci bounded read-only triage of34299934012/34294635463/34283562709; no source/remote mutations assigned. Ifreviewrequireschanges, send exactfindings tosameagent aftertriage; ifcleared, run remainingauthoritativevalidation andnormalprotectedpublication/admission.",
     "Top-k recovery is stopped atd08295b6; preserve all frozen original/control evidence. Final finding is public6465; do not restart it or spend more measurement/review tokens without a new task decision.",
     "At a suitable agent break, bounded read-only triage of named scheduled alarm/triage failures and laternaturalnightly/sweeper effect. Originalnightlycancelled; no recovery writes proven by earliergreen sweeper. No manualprobes/retrystorms; registryOFF/ALLGREEN/holds/releasesunchanged.",
     "Keep checkpoints and confirmed artifacts in existing private local Git recovery ref."
@@ -655,6 +670,8 @@
         "name": "review-alarm"
       }
     ],
-    "scope": "Scheduled failures observed on newmain; causes uninspected. Inspect latest named errors before issue/action. Main aggregateSUCCESS. batch-merge34280482086/release-plz34280482037 alsofailed, prior hold-relatedcauses known but currentlogs unverified; neverrestore registrytoken orauthorize release to turngreen."
+    "scope": "Scheduled failures observed on newmain; causes uninspected. Inspect latest named errors before issue/action. Main aggregateSUCCESS. batch-merge34280482086/release-plz34280482037 alsofailed, prior hold-relatedcauses known but currentlogs unverified; neverrestore registrytoken orauthorize release to turngreen.",
+    "assigned_to": "/root/postmerge_ci",
+    "state": "Read-only existing-run triage assigned while realOpusreviewruns; noobserverretries/mutations/builds."
   }
 }

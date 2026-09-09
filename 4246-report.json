@@ -1,0 +1,53 @@
+{
+  "issue": "https://github.com/sparq-org/sparq/issues/4246",
+  "decision": "Review-ready for the repeated-read use case; cold-after-write and fork-memory tradeoffs require independent assessment before admission.",
+  "head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "scope": "One production file, private lazy per-permutation deleted projections. Hash-set membership retained; no storage/public API, query planner, top-k, dependency, workflow, or permission changes.",
+  "baseline_proof": "baseline/time.jsonl and baseline/count.jsonl executed and saved before production edits; checkpoint c8c9b730c contains harness only atop exact main.",
+  "validation": {
+    "default_store_pass": 17,
+    "default_store_existing_ignored_timing": 1,
+    "no_default_compact_store_pass": 17,
+    "compact_existing_ignored_timing": 1,
+    "snapshot_fork_integration_pass": 10,
+    "new_tests": 7,
+    "new_mutation_controls_killed": 4,
+    "mutation_compile_failures": 0,
+    "scoped_core_clippy": "pass",
+    "preflight": "only privacy-claims fails: existing Bash3 mapfile not found at scripts/check-privacy-claims.sh:92",
+    "git_diff_check": "pass",
+    "working_tree": "clean"
+  },
+  "measurements": {
+    "baseline_points": 24,
+    "paired_points_per_source": 24,
+    "baseline_samples": 240,
+    "paired_samples": 480,
+    "timing_repetitions": 7,
+    "allocation_repetitions": 3,
+    "warmups_per_point": 2,
+    "correctness": "Every process checks one independent generated row oracle on a separate fork per delta, then verifies measured result counts. Tests cover changed ranges and all built permutations.",
+    "candidate_optimized_build_seconds": 26.362208416999998,
+    "builds": "two jobs, offline/locked, warm private target; all compilation finishes before measurement; no retry or expanded matrix"
+  },
+  "results": "paired/summary.json includes every point, medians/ranges/means/sample standard deviations, allocation counts/bytes and store heap. Warm deletion growth is removed; cold sorting cost is substantial and is reported, not hidden.",
+  "memory": {
+    "vector": "one 12*D byte vector per requested permutation in these exact fixtures; hash set retained",
+    "largest_requested_vector_bytes": 393216,
+    "additional_fixed_metadata_bytes_per_existing_overlay": 192,
+    "metadata_evidence": "layout.json, computed by the actual Rust toolchain for [OnceLock<Vec<[u32;3]>>;6]",
+    "clone": "derived Overlay clone copies only initialized vectors by value; cold and warm forks and immutable Graph snapshots are tested independently",
+    "accounting_limit": "Existing TripleStore::heap_bytes omits the fixed boxed Overlay structure and uses an existing approximate hash-set charge. The new vector capacities are included; report the new 192-byte field separately. Measured query allocation windows exclude fork/delta setup.",
+    "rss": "process high-water RSS is cumulative across setup/cases, not resettable or attributable to query heap; requested live heap above the timing window baseline is separately instrumented"
+  },
+  "limitations": [
+    "Local generated data, single bound range and ordinary SELECT, fixed matrix, noncanonical results. No heavy benchmark sweep or workload SLA claim.",
+    "Cold caches sort all deletions once per requested permutation, including after nonempty no-op deltas because existing invalidation is conservative. Frequent writes with few reads can be slower; no threshold introduced.",
+    "Sequential one-thread query measurements do not establish concurrent throughput or contention. Two-reader tests establish deterministic results and shared initialization only.",
+    "Raw and compressed owned stores and compact-index were exercised; mapped I/O/WAL replay, full workspace, W3C/performance ratchets and Miri were not run in this bounded task.",
+    "No remote actions or independent review performed. Historical issue timings were not used as evidence.",
+    "The fixed new cache metadata and cloned warm projections increase per-overlay/per-generation memory; cold/warm requested vector traffic and the layout calculation are explicit."
+  ],
+  "next_step": "Actual Opus review of the whole change and the cold/memory tradeoff; root owns publication and authoritative merge gates. No further implementation or measurement iteration is proposed in this handoff."
+}

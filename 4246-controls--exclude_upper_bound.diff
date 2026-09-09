@@ -1,0 +1,13 @@
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index fdcf160e6..28a64e921 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -230,7 +230,7 @@ impl Overlay {
+             rows.sort_unstable();
+             rows
+         });
+-        rows.partition_point(|r| *r <= hi) - rows.partition_point(|r| *r < lo)
++        rows.partition_point(|r| *r < hi) - rows.partition_point(|r| *r < lo)
+     }
+ 
+     /// The `added` triples matching the inclusive `[lo, hi]` key range, as rows in

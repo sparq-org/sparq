@@ -1,0 +1,58 @@
+{
+  "recorded_at": "2026-09-09T05:51:13.735338+00:00",
+  "author": "OpenAI GPT-6 Astra",
+  "reasoning": "xhigh (inherited runtime)",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+  "harness_checkpoint": "c8c9b730c6df3d5fc3ea9f0a8f4feef47a5bea6e",
+  "branch": "codex/overlay-deleted-projections",
+  "runtime_diff": {
+    "files": 1,
+    "insertions": 39,
+    "deletions": 20
+  },
+  "changed_files": [
+    "bench/benchmarks.toml",
+    "bench/overlay-count/Cargo.lock",
+    "bench/overlay-count/Cargo.toml",
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs",
+    "bench/overlay-count/src/main.rs",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+  ],
+  "source_sha256": {
+    ".config/nextest.toml": "ace71d87e983d711167223fac9d8da82827ad79e6f9269f9303129a4115e6ef7",
+    ".github/workflows/ci.yml": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+    "AGENTS-worker-core.md": "d3db6fa0ccee33b3dd47c166fe3e1e543c2207ab6de243a6f4bd4e0c380f9d39",
+    "Cargo.lock": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+    "Cargo.toml": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+    "bench/benchmarks.toml": "2bd1851c08e8e0b14ba9f7c5f0930584931ac8259a1d2000ad64870926250b2d",
+    "bench/overlay-count/Cargo.lock": "b319e3eafeffff389ed020f2213f89dbc0f7041405a3dc9d42facec6e74681bf",
+    "bench/overlay-count/Cargo.toml": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040",
+    "bench/overlay-count/README.md": "8e5378fcef9ddf23c898aa1e6c26b706c01ed1c877b45e46714f5f3e899d32cb",
+    "bench/overlay-count/src/counting.rs": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "bench/overlay-count/src/main.rs": "fb9d835b29be73ae216f7a69471578327650eb250ac479586717c340d701fd7e",
+    "crates/sparq-core/Cargo.toml": "81b61ab780d45b36e188b5d5fc0ad9bb3c50ff2227fee6b650f34584a415a4df",
+    "crates/sparq-core/src/compress.rs": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+    "crates/sparq-core/src/lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+    "crates/sparq-core/src/store.rs": "a906aca463d79d08f3f171e404786048aab28f78690bfbd6e213c7794140a17e",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs": "afcf86cd1b5e538b43ae908c42211567e1e0d621ce7a7ed96cdf1b912cd1de49",
+    "crates/sparq-core/tests/fork_differential.rs": "aecdf2cb5903c9ad2887912b1d114841921fbd716a02fb8d32528af7804e6fd1",
+    "crates/sparq-core/tests/snapshot.rs": "97f95e517708842a8321122a2359ff43fe7b4623ab43f8efbe3909defeb43a26",
+    "crates/sparq-engine/Cargo.toml": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "crates/sparq-engine/src/exec.rs": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd",
+    "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+    "rust-toolchain.toml": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+  },
+  "baseline_store_sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+  "binary_sha256": {
+    "candidate-count": "8066accd57ef7f3de59a9a48cd88219600719dc790a861b66ebe0cc6eea1e804",
+    "candidate-time": "1496b883da7ba0f8e2d429611a23904f4c6f19882e411569f62a436ff8d1004d",
+    "main-time": "59636ec92a7203e933df744b9890d813c22d5c5d7567b35b7d472f1850981d17",
+    "main-count": "549658db76dad0dd4c83138bdc27dbf04af79df1991c9f38319223960b5d7fd4"
+  },
+  "harness_identical_across_baseline_and_candidate": true,
+  "harness_source_comparison": "git diff c8c9b730c..acfa31cf5 -- bench/overlay-count is empty",
+  "historical_attribution": "Existing added cache retains original sq-7d3dj.16 provenance. New cache/tests/harness authored by actual GPT-6 Astra; counting module reused byte-identically from prior Astra diagnostic. No dormant top-k runtime imported."
+}

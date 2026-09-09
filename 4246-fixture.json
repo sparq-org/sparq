@@ -1,0 +1,12 @@
+{
+  "base_turtle_sha256": "e9c699fc3218063da764b33b0380157078a9d102ae04b35992bb8595f5532757",
+  "subjects": 50000,
+  "predicates_per_subject": 4,
+  "triples": 200000,
+  "query": "SELECT ?o WHERE { <urn:s:49999> <urn:p:0> ?o }",
+  "query_expected": "urn:o:49999",
+  "scan_prefix": "S=urn:s:49999,P=urn:p:0",
+  "selected_permutation": "Spo (first built permutation with both bound columns leading)",
+  "deletion_generation": "first D triples, subject=i/4, predicate=i%4",
+  "insert_control": "same sequence starting at subject50000, 8192 triples"
+}
