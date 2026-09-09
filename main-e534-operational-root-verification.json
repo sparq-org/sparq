@@ -1,0 +1,8 @@
+{
+  "verified_at": "2026-09-09T21:52:29.965494+00:00",
+  "manifest_files": 22,
+  "manifest_sha256": "407a760a76471d066f02350d40428f1e220418694eebca55c2d41c484bd3924c",
+  "root_read": "Exact named batch and release failure excerpts inspected; report scoped to observed errors, no recovery claim",
+  "dedupe": "agent2focused searches plus root exact sparq-introspect/package search returned0",
+  "recommendation": "one deferred packaging issue; no ring recovery during registry pause; no release mutation"
+}

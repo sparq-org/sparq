@@ -1,0 +1,116 @@
+{
+  "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "created_at": "2026-09-09T21:45:49.101200+00:00",
+  "files": [
+    {
+      "path": "advisory-excerpts.txt",
+      "bytes": 3199,
+      "sha256": "ac2999b9faff6253e2f09ffeb5b01168e6503a9d205b3827f63ccbd65df517d7"
+    },
+    {
+      "path": "batch-failed-job-excerpts.txt",
+      "bytes": 1795,
+      "sha256": "aa3eacdb7d2131ed5761d9628fc7ad8d00a352db05f71b4b0ae2eb52dfeafceb"
+    },
+    {
+      "path": "batch-failed-job.log",
+      "bytes": 3564,
+      "sha256": "f92b2529879bfcc6e9f381fc22a4c75630fcb28cd8ac90d547bcef2f5dcc3214"
+    },
+    {
+      "path": "batch-jobs.json",
+      "bytes": 2249,
+      "sha256": "fa99999d840f819a0652daaa0259c96b7ad56158e082ef132831ff10211f3d38"
+    },
+    {
+      "path": "batch-run.json",
+      "bytes": 13249,
+      "sha256": "deb41e417e17fec8c918afd50c211281cefd3ec0e3405243033cf9dc756b6d8b"
+    },
+    {
+      "path": "budget.json",
+      "bytes": 299,
+      "sha256": "03f51be3aafed0d29fec6f057d3490c8d3feffcded9d231b5957fac8d6294e0f"
+    },
+    {
+      "path": "issue3337.json",
+      "bytes": 4137,
+      "sha256": "a7189504385f5184b2832fceabb321b4db908c1ea51d1e717ba6392df9928e0f"
+    },
+    {
+      "path": "issue3399.json",
+      "bytes": 5042,
+      "sha256": "6d3af04d7319a52b91f46837a889bacd00ceff1e8c0f718df600652dc9610262"
+    },
+    {
+      "path": "main-delta-files.txt",
+      "bytes": 57,
+      "sha256": "c9b95d0ffe90c87e1496a643e0f934458e898fe2b8e7bcdc4d05255aa8b13076"
+    },
+    {
+      "path": "release-dedupe.json",
+      "bytes": 20761,
+      "sha256": "13b5a5b32b9163322dc5acfd3e46bd48b1c46255ab3a512ba7b1a0570e41cb87"
+    },
+    {
+      "path": "release-failed-job-excerpts.txt",
+      "bytes": 11635,
+      "sha256": "b840807f968ef763789a55538ecb92d9952a6bf621944da6aa96a43851b8e070"
+    },
+    {
+      "path": "release-failed-job.log",
+      "bytes": 140874,
+      "sha256": "9ce995cd20915ce7b67db0532bb130645c3b3f59fbcdd4d6f7eec33153a2119b"
+    },
+    {
+      "path": "release-jobs.json",
+      "bytes": 5585,
+      "sha256": "243253c9dc29662f4a19e6510b1fd247577aee8f50a943933b451b184059f72a"
+    },
+    {
+      "path": "release-run.json",
+      "bytes": 13249,
+      "sha256": "9761d6bbe00bf1a45a0e27b22d138ad0e06b31ecb981cf9ace1b817a774417a2"
+    },
+    {
+      "path": "report.json",
+      "bytes": 4477,
+      "sha256": "d519beaf941dfece7a5eb0d9a6e573755a1f14cc8daaec544259b96c43cb2086"
+    },
+    {
+      "path": "ring-dedupe.json",
+      "bytes": 48374,
+      "sha256": "307a83ad3a19abd4fb590fa3511a5807cbc429e626009e978e833a37240c579a"
+    },
+    {
+      "path": "source/.github/advisory-registry.json",
+      "bytes": 24828,
+      "sha256": "f50f05c067201ec5820acb61f42a82d1cce50f7b1d3166316a85ce62a757e869"
+    },
+    {
+      "path": "source/.github/workflows/batch-merge.yml",
+      "bytes": 9320,
+      "sha256": "75c775703e957c182e51433c2609a5723554e2d0f4fda681590537a1bde28515"
+    },
+    {
+      "path": "source/.github/workflows/release-plz.yml",
+      "bytes": 28803,
+      "sha256": "ed87845c99a671f4dcbf7a7ba8e5d8f3f13bea7afe9bfe6d112b2bdfa7adc04f"
+    },
+    {
+      "path": "source/crates/sparq-engine/Cargo.toml",
+      "bytes": 39603,
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "source/crates/sparq-introspect/Cargo.toml",
+      "bytes": 4719,
+      "sha256": "5457f4a48ca617842d5929959c757e13118ed97d0061cba73e85d4a000df5ea9"
+    },
+    {
+      "path": "source/release-plz.toml",
+      "bytes": 11897,
+      "sha256": "67fef6b19fca6f7c9314c9abaaab6708f812661cf54d7a6bde8712356590edd0"
+    }
+  ]
+}

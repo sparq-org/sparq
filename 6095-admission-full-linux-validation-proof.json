@@ -1,0 +1,23 @@
+{
+  "verified_at": "2026-09-09T21:45:29.321438+00:00",
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "run": 34408213881,
+  "classifier_tests": 47,
+  "embedded": "SELF-TEST PASSED",
+  "docs_python": "3.12.14",
+  "privacy": "executed PASS",
+  "new_test_lines": [
+    "2026-09-09T21:42:00.6743140Z test_declaration_naming_no_real_crate_stays_parked (__main__.TestFailClosed.test_declaration_naming_no_real_crate_stays_parked) ... ok",
+    "2026-09-09T21:42:00.7073557Z test_a_declaration_shaped_string_in_prose_is_not_a_declaration (__main__.TestRuleTableHygiene.test_a_declaration_shaped_string_in_prose_is_not_a_declaration)",
+    "2026-09-09T21:42:00.7106957Z test_a_real_declaration_still_reaches_t0 (__main__.TestRuleTableHygiene.test_a_real_declaration_still_reaches_t0)",
+    "2026-09-09T21:42:00.7122621Z test_declaration_span_stops_at_the_sentence_break (__main__.TestRuleTableHygiene.test_declaration_span_stops_at_the_sentence_break)",
+    "2026-09-09T21:42:00.7132088Z test_scope_is_declared_and_only_ever_title_or_text (__main__.TestRuleTableHygiene.test_scope_is_declared_and_only_ever_title_or_text)"
+  ],
+  "log_sha256": "b1e91661c3f19158d0c6aa0387a3c665ee1ab560e2b6986e5c52fd31745908f6",
+  "gate_run": 34408213967,
+  "gate_job": 102656195505,
+  "gate_name": "gate",
+  "gate_state": "in_progress",
+  "gate_conclusion": null,
+  "gate_link": "https://github.com/sparq-org/sparq/actions/runs/34408213967/job/102656195505"
+}

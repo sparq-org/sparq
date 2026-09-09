@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T21:42:35.672146+00:00",
+  "updated_at": "2026-09-09T21:57:58.639121+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,7 +64,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Ready for review; full required CI and Copilot in progress; review:needs retained",
+    "phase": "Protected merge queue position1; merge-group checks running",
     "started_at": "2026-09-09T20:57:38.644034+00:00",
     "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
     "main": "e53464c73f31f7aca800f3867ac054c36408e346",
@@ -72,10 +72,10 @@
     "local_branch": "codex/pr6095-recovery",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
     "directory": "direct-6095/recovery",
-    "state": "86b8 published, actual Opus approve_for_validation and draft Linux47tests/privacy verified. Normal ready transition completed; no hold clear or arm.",
-    "constraints": "Existing reviewed two-file recovery only; retain review:needs and trust-surface until exact full gate15368 and all review/provenance requirements pass. No workflow/policy/budget/protection edits, releases or registry activation.",
+    "state": "Exact86b8 admitted by expectedHeadOid/jump=false after actual Opus/Copilot reviews and all173latestchecks terminal (52success/121skip). Historical bot gate-failed hold reconciled after freshgreen; trust-surface remains.",
+    "constraints": "No new source change/model review needed. Preserve live merge-group evidence and protections, ALLGREEN unchanged. Watch queue then verify reviewed two files onmain and commentbeforeclosing4567. RegistryOFF and releasespaused.",
     "assessment": "direct-6095/assessment-report.json",
-    "agent_state": "Source recovery completed; agent performing separate bounded read-only diagnosis of two main operational failures",
+    "agent_state": "completed/idle; bounded main operational diagnosis collected,22files verified",
     "recovery": {
       "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
       "parents": [
@@ -124,18 +124,21 @@
       "pr": 6095,
       "branch": "sparq-agent/issue-4567-33468488192-1",
       "draft": false,
-      "hold": "review:needs",
-      "verified": "direct-6095/admission/pr-after-ready.json",
+      "hold": null,
+      "verified": "direct-6095/admission/post-enqueue-state.json",
       "ready_receipt": "direct-6095/admission/ready-receipt.txt",
       "ready_at": "2026-09-09T21:40:28Z"
     },
     "linux_validation": {
-      "proof": "direct-6095/admission/draft-linux-validation-proof.json",
+      "proof": "direct-6095/admission/full-linux-validation-proof.json",
+      "run": 34408213881,
       "classifier_tests": 47,
       "docs_python": "3.12.14",
       "privacy": "executedPASS",
-      "migration_checks": 114,
-      "limitation": "draft diagnostics; full required gate and exact final full-CI evidence pending"
+      "required_gate": 34408213967,
+      "required_gate_job": 102656195505,
+      "integration_id": 15368,
+      "status": "full ready-for-review diagnostics and required gate verified"
     },
     "ci": {
       "evidence": "direct-6095/admission/pr-ready-runs.json",
@@ -146,7 +149,45 @@
       "routing": 34408214033,
       "copilot": 34408223107,
       "observed_at": "2026-09-09T21:42:35.672146+00:00",
-      "state": "full CI/Copilot in progress; draft gate complete but not admission evidence"
+      "state": "full PR CI completedSUCCESS; later label-triggered checks also allcomplete withoutfailure",
+      "final_checks": "direct-6095/admission/pre-queue-checks-final.json",
+      "copilot_state": "completedSUCCESS; exact-head approvalrecommended,0comments"
+    },
+    "hold_reconciliation": {
+      "removed_at": "2026-09-09T21:50:28Z",
+      "label": "review:needs",
+      "historical_actor": "sparq-orchestrator",
+      "reason": "stuck-arm gate-failed; unpark_when gate-green nowproven",
+      "complete_timeline": "direct-6095/admission/pre-hold-clear.json",
+      "gate_proof": "direct-6095/admission/pre-hold-gate.json",
+      "receipt": "direct-6095/admission/hold-clear-receipt.txt",
+      "verification": "direct-6095/admission/pre-queue-state-final.json",
+      "no_human_hold": true,
+      "comment": "https://github.com/sparq-org/sparq/pull/6095#issuecomment-5609218778",
+      "remaining_labels": [
+        "area:ci",
+        "trust-surface"
+      ]
+    },
+    "queue": {
+      "entry_id": "MQE_lQDOSz3qKM8AAAABBsbZfc4AA2w6zgLJ6CY",
+      "position": 1,
+      "state": "AWAITING_CHECKS",
+      "head": "2adb86d91345deb51e95b11af4e2b5572343c236",
+      "observed_at": "2026-09-09T21:57:58.639121+00:00",
+      "admission": "direct-6095/admission/admission-verification.json",
+      "receipt": "direct-6095/admission/enqueue-result.json",
+      "runs": "direct-6095/admission/queue-initial-runs.json",
+      "run_ids": {
+        "vectorized-feature-off": 34409423655,
+        "ci-summary": 34409423697,
+        "docs-quality": 34409423684,
+        "flow-on-gates": 34409423681,
+        "routing-self-tests": 34409423667,
+        "pr-area-label": 34409423653,
+        "CI": 34409424022,
+        "feature-matrix": 34409424033
+      }
     }
   },
   "prs": {
@@ -423,11 +464,11 @@
       }
     },
     "6095": {
-      "state": "OPEN_HELD_FULL_CI",
+      "state": "IN_PROTECTED_QUEUE",
       "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
       "issue": 4567,
       "draft": false,
-      "hold": "review:needs; machine gate-failed receipt, provenance to be freshly revalidated before any reconciliation",
+      "hold": null,
       "review": "Actual Opus5xhigh approve_for_validation, no blockers; originalOpus source composed unchanged withmain",
       "publication": {
         "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
@@ -440,12 +481,15 @@
         "ready_at": "2026-09-09T21:40:28Z"
       },
       "linux_validation": {
-        "proof": "direct-6095/admission/draft-linux-validation-proof.json",
+        "proof": "direct-6095/admission/full-linux-validation-proof.json",
+        "run": 34408213881,
         "classifier_tests": 47,
         "docs_python": "3.12.14",
         "privacy": "executedPASS",
-        "migration_checks": 114,
-        "limitation": "draft diagnostics; full required gate and exact final full-CI evidence pending"
+        "required_gate": 34408213967,
+        "required_gate_job": 102656195505,
+        "integration_id": 15368,
+        "status": "full ready-for-review diagnostics and required gate verified"
       },
       "ci": {
         "evidence": "direct-6095/admission/pr-ready-runs.json",
@@ -456,7 +500,45 @@
         "routing": 34408214033,
         "copilot": 34408223107,
         "observed_at": "2026-09-09T21:42:35.672146+00:00",
-        "state": "full CI/Copilot in progress; draft gate complete but not admission evidence"
+        "state": "full PR CI completedSUCCESS; later label-triggered checks also allcomplete withoutfailure",
+        "final_checks": "direct-6095/admission/pre-queue-checks-final.json",
+        "copilot_state": "completedSUCCESS; exact-head approvalrecommended,0comments"
+      },
+      "queue": {
+        "entry_id": "MQE_lQDOSz3qKM8AAAABBsbZfc4AA2w6zgLJ6CY",
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "head": "2adb86d91345deb51e95b11af4e2b5572343c236",
+        "observed_at": "2026-09-09T21:57:58.639121+00:00",
+        "admission": "direct-6095/admission/admission-verification.json",
+        "receipt": "direct-6095/admission/enqueue-result.json",
+        "runs": "direct-6095/admission/queue-initial-runs.json",
+        "run_ids": {
+          "vectorized-feature-off": 34409423655,
+          "ci-summary": 34409423697,
+          "docs-quality": 34409423684,
+          "flow-on-gates": 34409423681,
+          "routing-self-tests": 34409423667,
+          "pr-area-label": 34409423653,
+          "CI": 34409424022,
+          "feature-matrix": 34409424033
+        }
+      },
+      "hold_reconciliation": {
+        "removed_at": "2026-09-09T21:50:28Z",
+        "label": "review:needs",
+        "historical_actor": "sparq-orchestrator",
+        "reason": "stuck-arm gate-failed; unpark_when gate-green nowproven",
+        "complete_timeline": "direct-6095/admission/pre-hold-clear.json",
+        "gate_proof": "direct-6095/admission/pre-hold-gate.json",
+        "receipt": "direct-6095/admission/hold-clear-receipt.txt",
+        "verification": "direct-6095/admission/pre-queue-state-final.json",
+        "no_human_hold": true,
+        "comment": "https://github.com/sparq-org/sparq/pull/6095#issuecomment-5609218778",
+        "remaining_labels": [
+          "area:ci",
+          "trust-surface"
+        ]
       }
     }
   },
@@ -508,11 +590,13 @@
     }
   },
   "next_actions": [
-    "PR6095 is now ready_for_review at exact86b8, full CI34408214172/matrix34408214185/gate34408213967 and Copilot34408223107 in progress. Opus review2193 completed and collected; no duplicate review. Keep review:needs/trust-surface and do not arm.",
-    "After exact full gate15368green and all reviews/threads checked, freshly verify live label timeline to distinguish bot-owned gate-failed hold from any human intervention. Reconcile only when proven eligible, then normal expectedHeadOid protected queue admission; no fabricated canonical review:pass.",
-    "Collect bounded read-only main operational diagnosis from /root/postmerge_ci. Main core CI/matrix/aggregate for merged6473e534are ALLSUCCESS; no rechecking old successful heads or unauthorized releases.",
-    "Observe first ordinary scheduled classifier on e534 or descendant and eventual generator-label applications. Latest34395557649 still predates source merge; #5016 correctly planned but deferred. Registry staysOFF; no manual replay/newlabels.",
-    "Preserve ALLGREEN and existing6049/6055/registry2305approval holds. Keep source and explicit completed evidence durable in private localGit checkpoint; token-conscious one substantive lane."
+    "PR6095 is position1/AWAITING_CHECKS in normal protected queue; reviewedPRhead86b8, merge-group2adb86d91345deb51e95b11af4e2b5572343c236. Watch exact queue runs in direct-6095/admission/queue-initial-runs.json; no rerun/cancel/sourcechange/re-review needed while healthy.",
+    "After protected merge, verify actualmerge/main OID and exact reviewed two classifier files, actual merge-group47tests/privacy and allrequiredgate evidence. Post resolving-PR comment on issue4567 before closing it; then watch postmerge main CI. Do not claim merge from queue position or skip merge-group evidence.",
+    "Opus2193 review completed/collected once. Bot review:needs removed only after freshgreen requiredgate15368 and completebot-only timeline; publicrecoveryreceipt5609218778. Trust-surface preserved, no fabricatedreview:pass, all173latestchecks hadsettled beforequeue.",
+    "PR6473 main coreCI/matrix/aggregateALLSUCCESS. Operationalfailuresdiagnosed: batchringmissingtoken stayssuppressed; releasepackagingfailuretrackednew6474 and deferred. Agentpostmerge_ci idle; no releases/registryenable/reruns.",
+    "Observe first ordinary scheduled classifier on e534 ordescendant and eventual generator-label applications. Latest34395557649stillpredates source merge; #5016correctlyplanned butdeferred. No manualreplay/newlabels.",
+    "After6095lands, return to existing unheld SPARQLperformance frontier through repo readiness/partition process, respecting one substantive implementationlane and existing benchmark/disk limits. Do not restart declined top-k or latencyblocked6435without new evidence/access.",
+    "Preserve ALLGREEN and6049/6055/registry2305approval holds. RegistryActionsOFF freshlyverified; releaseauthorizationabsent. Keep durableprivateGitstate and scheduled10minute observations, yieldingbetweenexternalstages."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -1830,8 +1914,14 @@
       "conclusion": "success"
     },
     "unresolved_noncore_failures": [
-      34402964004,
-      34402964058
+      {
+        "run": 34402964058,
+        "diagnosed": "missing registry ringtoken; intentionalpause consistent, donotrestore"
+      },
+      {
+        "run": 34402964004,
+        "diagnosed": "packagingfailure tracked6474, deferredduringreleasepause"
+      }
     ],
     "release_authorized": false,
     "job_observation": {
@@ -1860,13 +1950,25 @@
     "next": "Observe first ordinary scheduled run containing merged source. Recheck every eventual area:sparq-wrapper-gen recipient and actual evidence; #5016 was correctly planned and deferred. No live replay or additional label creation."
   },
   "operational_diagnosis_e534": {
-    "agent": "/root/postmerge_ci",
-    "state": "running read-only max5min",
+    "agent": "completed/idle",
+    "state": "completed;22-filemanifestrootverified; one deferred packagingissueopened",
     "runs": [
       34402964058,
       34402964004
     ],
     "directory": "recovery-20260909/main-e534-operational",
-    "scope": "Named failed-job diagnostics and at most2dedupe searches only; no retries/mutations/models/releases"
+    "scope": "Named failed-job diagnostics and at most2dedupe searches only; no retries/mutations/models/releases",
+    "report": "recovery-20260909/main-e534-operational/report.json",
+    "root_verification": "recovery-20260909/main-e534-operational/root-verification.json",
+    "batch": "Missing REGISTRY_RING_TOKEN blocked ring beforedispatch; consistent with registry pause, closed4966records loudfailure; no recovery duringpause",
+    "release": "Genuine sparq-introspect cargo-package resolution failure on sparq-engine devdep; not known403 hold. Advisory, not main-requiredgate regression. No release/rerun authorized.",
+    "issue": 6474,
+    "url": "https://github.com/sparq-org/sparq/issues/6474",
+    "issue_verified": "recovery-20260909/main-e534-operational/release-issue-verified.json"
+  },
+  "registry_latest_pause": {
+    "observed_at": "2026-09-09T21:57:58.639121+00:00",
+    "enabled": false,
+    "evidence": "direct-6095/admission/registry-pause-2155.json"
   }
 }

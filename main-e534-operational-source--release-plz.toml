@@ -1,0 +1,310 @@
+# release-plz configuration for the sparq workspace.
+#
+# [OPUS-4.8] sq-v286.3 (child of the automated-semantic-release epic sq-v286).
+# Design record: research/release-ci-design.md (§2 tool selection, §5/§6 sequencing).
+#
+# 🤖 SPARQ agent. This file configures release-plz's version + changelog POLICY.
+# It was authored under sq-v286.3 as inert configuration; sq-v286.4 then added the
+# release-plz WORKFLOW (.github/workflows/release-plz.yml) that ACTIVATES it, plus the
+# two tag-only handoff keys near the bottom of [workspace] (git_release_enable = false,
+# publish = false) that this file's keys take effect through. It still does NOT touch
+# release.yml / dist.yml / publish.yml (those stay sibling-owned); the handoff is via the
+# `vX.Y.Z` tag only.
+#
+# Why this file exists — the one workspace decision release-plz forces
+# (design §2 "The one workspace decision release-plz forces"):
+# release-plz DEFAULTS TO INDEPENDENT per-crate versions, but sparq uses a
+# single LOCKED workspace version (every crate inherits
+# [workspace.package] version in the root Cargo.toml via
+# `version.workspace = true`). To preserve that locked model, every publishable
+# crate is placed in ONE `version_group` ("sparq") below: release-plz assigns
+# all packages that share a version_group the SAME (highest computed) next
+# version, so they keep bumping together — e.g. 0.1.0 -> 0.2.0 in lockstep —
+# instead of drifting to per-crate versions. Without this, adoption would
+# silently start versioning the 37 publishable crates independently.
+
+[workspace]
+# Automate the version + changelog that docs/release.md §1–§2 do by hand today
+# (the core argument for adoption: the hand-maintained CHANGELOG.md [Unreleased]
+# section has gone stale — design §1). changelog_update / git_release_enable /
+# semver_check default to true; set explicitly for clarity.
+changelog_update = true
+# Layer cargo-semver-checks API-break detection on top of conventional-commit
+# parsing (design §2 point 2) — catches a real API break shipped under a
+# fix:/feat: message.
+semver_check = true
+# One workspace-wide SemVer tag (NOT release-plz's multi-package default of
+# `{{ package }}-v{{ version }}`). A single `vX.Y.Z` tag is what the existing
+# release.yml / dist.yml fire on (their `tags: ['v*']` trigger) and matches the
+# locked single-version model. Disable tags by default because release-plz processes
+# each crate separately; otherwise all 37 crates try to create the same tag. The
+# dependency-final sparq-cli entry below is the sole tag anchor. [GPT-5.6]
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+
+# [OPUS-4.8] sq-owci — tolerate the four tracked-yet-gitignored artifacts on a fresh checkout.
+# WHY THIS EXISTS: on every `push: main`, `release-plz release-pr` (the Release-PR job in
+# .github/workflows/release-plz.yml) ABORTED its `determine next versions` step with
+#   "the working directory of this project has uncommitted changes. If these files are both
+#    committed and in .gitignore, either delete them or remove them from .gitignore.
+#    [".beads/interactions.jsonl", "bench/wikidata-8b/STATUS.md",
+#     "inference-conformance-report.md", "zk/compose/STATUS.md"]"
+# (live: run 27867775455). release-plz reuses cargo's VCS dirty-check, which treats a file that
+# is BOTH committed AND matched by a .gitignore rule as "uncommitted" — independently of any
+# real source change. On a fresh CI checkout those four files are the ONLY thing it flags, so the
+# Release-PR step failed on every main push, perennially marking this (non-gating) workflow red
+# and masking real CI signal (the `tag` job is unaffected — `release-plz release` does no such
+# check, hence it has always succeeded).
+#
+# allow_dirty = true makes `release-plz release-pr`/`update` proceed despite a dirty tree (per
+# release-plz config docs). It is SAFE here and does NOT mask a release regression: the four
+# offending paths are committed-but-ignored, so there is no diff content to fold into the
+# Release-PR — release-plz still computes versions from the conventional-commit history exactly
+# as before, it just stops treating the ignore-rule shadow as a blocker.
+#
+# [OPUS-4.8] sq-l8imt UPDATE: the root-cause repo-hygiene fix has now landed for 3 of the 4
+# paths — bench/wikidata-8b/STATUS.md and zk/compose/STATUS.md are untracked (git rm --cached,
+# still .gitignore'd as generated reports), and inference-conformance-report.md is removed from
+# .gitignore (AGENTS.md §"Conformance" says it IS committed). The 4th, .beads/interactions.jsonl,
+# is a runtime log under the orchestrator/maintainer-only .beads/ tree; untracking it (git rm
+# --cached .beads/interactions.jsonl) is left as a maintainer action. UNTIL that single remaining
+# untrack is done, this file is still committed-AND-ignored, so allow_dirty stays as the safety
+# net (harmless to keep — see sq-l8imt). After the maintainer untracks it, `git ls-files -ci
+# --exclude-standard` will be empty and allow_dirty may optionally be reverted.
+allow_dirty = true
+
+# --- Tag-only handoff to release.yml (activated by the release-plz WORKFLOW) -----------
+# [OPUS-4.8] sq-v286.4 (the workflow bead this file's header defers "activation" to;
+# .github/workflows/release-plz.yml). The two keys below are what make the `release-plz
+# release` command create the `vX.Y.Z` tag ONLY, so the tag hands off cleanly to the
+# existing release.yml (design §6 item 4: "scope release-plz to the tag only").
+#
+# git_release_enable = false — release.yml's `release` job already creates the GitHub
+#   Release (archives + CycloneDX SBOM/VEX + SHA256SUMS, via build-matrix.yml). Leaving
+#   release-plz's default `true` would make release-plz ALSO create a GitHub Release for
+#   the same tag → a collision (duplicate/empty release racing release.yml). Disable it:
+#   release-plz creates the tag, release.yml owns the Release.
+git_release_enable = false
+# publish = false — crates.io publish stays MANUAL for now. release-plz runs `cargo publish`
+#   BEFORE creating the tag, so with the default `true` and no working credential the publish
+#   step would fail and the tag would never be cut. Disabling publish lets `release-plz release`
+#   skip straight to tagging.
+#
+#   [OPUS-4.8] sq-v286.11: the crates.io FLIP is now a coordinated config-flip (no long-lived
+#   token needed — crates.io Trusted Publishing went GA 2025-07, RFC 3691). The CI side is
+#   pre-wired in .github/workflows/release-plz.yml (a commented `crates-io-auth-action` OIDC
+#   block on the `release-plz-release` job). To flip:
+#     (a) needs:user — register the crates.io Trusted Publisher for EACH publishable
+#         crate (owner `sparq-org`, repo `sparq`, workflow `release-plz.yml`); crates.io requires
+#         each crate to ALREADY EXIST (one bootstrap `cargo publish` per crate, leaf-first per
+#         docs/release.md §4), then enable trusted publishing on each crate's Settings page;
+#     (b) uncomment the auth-action block + its `id-token: write` permission in release-plz.yml;
+#     (c) set this key to `true`.
+#   release-plz then publishes in dep order with the short-lived OIDC token, and publish.yml's
+#   `crates` job reverts to attest-only over the .crate bytes — "the point of adoption".
+publish = false
+
+# [GPT-5.6] #3399 / first-release bootstrap: crates.io is still empty, but an abandoned
+# `v0.1.0` tag already exists. Use git tags as the version baseline until the first complete
+# registry publish, so release-plz proposes v0.1.1 without moving/reusing that public tag.
+# The post-bootstrap flip is atomic: `git_only = false` together with `publish = true` and
+# the pre-wired crates.io OIDC step in release-plz.yml.
+git_only = true
+
+# --- The locked version_group: the complete crates.io dependency closure -----
+# Every crates/* package without `publish = false` belongs here. The set includes the
+# implementation/capability crates reached by normal or optional dependencies of the public
+# front doors; Cargo cannot publish a crate whose registry manifest points at a workspace-only
+# dependency. `scripts/release-interval-guard.py` derives and verifies the exact set and order.
+#
+# Each entry pins `changelog_path = "CHANGELOG.md"` so all crates write to
+# the SINGLE root Keep-a-Changelog file (the locked model has one changelog,
+# not 37 per-crate ones); changelog_path is a per-package-only key.
+
+[[package]]
+name = "sparq-algos"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-arrow"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-canon"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-cli"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+# [GPT-5.6] Exactly one tag for the locked workspace release; every other crate
+# inherits workspace.git_tag_enable = false.
+git_tag_enable = true
+
+[[package]]
+name = "sparq-core"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-engine"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-engine-serialize"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-engine-service"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-fedplan"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-forms"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-geo"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-hdt"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-http3"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-introspect"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-jsonld"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-mcp"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-nlq"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-policy"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-reason"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-reason-el"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-reason-ql"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-rsp"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-secprop-vocab"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-serve"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-server"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-shacl"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-shaclc"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-sim"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-solid"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-substrate"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-terse"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-text"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-trust"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-vc"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-vectors"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-wrapper"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "sparq-zk"
+version_group = "sparq"
+changelog_path = "CHANGELOG.md"

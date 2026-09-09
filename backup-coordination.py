@@ -304,6 +304,12 @@ for evidence_name in ['opus-review-86b8dfa2.json', 'opus-review-result.json', 'd
 FILES["6468-main-runs-2141.json"] = ROOT / "direct-6468/followup-admission/main-runs-2141.json"
 FILES["6468-scheduled-runs-2141.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-2141.json"
 
+# PR6095 protected admission and completed main operational diagnosis.
+for evidence_name in ['pr-progress-2145.json', 'pr-runs-2145.json', 'full-docs-quality.log', 'full-gate-jobs.json', 'full-linux-validation-proof.json', 'hold-admission-query.json', 'hold-state-green.json', 'checks-2146.json', 'main-rules.json', 'recovery-admission-comment.md', 'pre-admission-proof.json', 'pre-comment-state.json', 'recovery-comment-url.txt', 'pre-hold-clear.json', 'pre-hold-gate.json', 'hold-clear-receipt.txt', 'pre-queue-state.json', 'pre-queue-checks.json', 'pre-queue-state-final.json', 'pre-queue-checks-final.json', 'admission-verification.json', 'enqueue-input.json', 'enqueue-result.json', 'post-enqueue-state.json', 'registry-pause-2155.json', 'queue-initial-runs.json', 'queue-monitor-query.json']:
+    FILES["6095-admission-" + evidence_name] = ROOT / "direct-6095/admission" / evidence_name
+for evidence_name in ['advisory-excerpts.txt', 'batch-failed-job-excerpts.txt', 'batch-failed-job.log', 'batch-jobs.json', 'batch-run.json', 'budget.json', 'issue3337.json', 'issue3399.json', 'main-delta-files.txt', 'release-dedupe.json', 'release-failed-job-excerpts.txt', 'release-failed-job.log', 'release-jobs.json', 'release-run.json', 'report.json', 'ring-dedupe.json', 'source/.github/advisory-registry.json', 'source/.github/workflows/batch-merge.yml', 'source/.github/workflows/release-plz.yml', 'source/crates/sparq-engine/Cargo.toml', 'source/crates/sparq-introspect/Cargo.toml', 'source/release-plz.toml', 'manifest.json', 'root-release-dedupe.json', 'root-verification.json', 'release-packaging-issue.md', 'release-issue-url.txt', 'release-issue-verified.json']:
+    FILES["main-e534-operational-" + evidence_name.replace("/", "--")] = ROOT / "recovery-20260909/main-e534-operational" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,72 @@
+{
+  "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "observed_runs": {
+    "batch": 34402964058,
+    "release": 34402964004
+  },
+  "identity": "Both push events, main branch, exact e534, attempt1, completed failure. Job metadata and each failing job log fetched once.",
+  "batch": {
+    "job": 102639043469,
+    "phase": "Ring jeswr/agent-account-registry dispatch",
+    "cause": "REGISTRY_RING_TOKEN empty; explicit missing-credential guard exits1 before gh workflow run. No ring sent.",
+    "classification": "Expected suppressed operation consistent with the user-authorized registry pause; not new classifier/main-source regression.",
+    "source": ".github/workflows/batch-merge.yml:148-170",
+    "log_lines": [
+      44,
+      46,
+      47
+    ],
+    "tracked": "Closed #4966 explicitly introduced loud missing-token reporting. Open search matches otherwise concern local jq harness prerequisites, not this live failure.",
+    "limits": "Workflow text claims a next cron pickup, but registry Actions are intentionally OFF: no automatic pickup is assumed. Later workflow_run success does not repair or execute the push-only ring; overflow job in this run was skipped."
+  },
+  "release": {
+    "job": 102639043680,
+    "phase": "Release-PR package/version determination; failing terminal step is the privileged-token containment check.",
+    "cause": "release-plz reports failed to determine next versions -> failed to run cargo package -> sparq-introspect v0.1.1 cannot resolve package sparq-engine from crates.io index. The failed package has a versioned dev-dependency on sparq-engine at Cargo.toml:78.",
+    "classification": "Genuine packaging/bootstrap failure, not the known Actions PR-creation403 hold and not proved transient. App token was successfully minted; release-pr failed before a PR could be opened by that command. Containment correctly exits1 for provisioned App/PAT failure.",
+    "source": [
+      "crates/sparq-introspect/Cargo.toml:75-78",
+      "release-plz.toml:105-112",
+      ".github/workflows/release-plz.yml:113-117"
+    ],
+    "log_lines": [
+      1060,
+      1063,
+      1116,
+      1122,
+      1124,
+      1131
+    ],
+    "policy": "Releases remain unauthorized; publish=false and git_only=true are configured. That policy does not make a cargo package error an expected permission-hold success.",
+    "limits": "No packaging reproduction, registry availability probe, tag-job log or artifact inspection. Sibling tag job metadata says success; this does not prove tag creation, publication or healthy release packaging. Exact dependency-cycle/order repair is unproven and deliberately not implemented."
+  },
+  "gate_impact": "Both exact failed job names are explicitly declared advisory in .github/advisory-registry.json:219 and226. Their failures do not establish aggregate/main-gate regression. The e534 merge changes only the two classifier Python files, not these workflows or Cargo/release metadata.",
+  "dedupe": {
+    "search_count": 2,
+    "queries": [
+      "repo:sparq-org/sparq is:issue \"sparq-engine\" \"release-plz\"",
+      "repo:sparq-org/sparq is:issue \"REGISTRY_RING_TOKEN\""
+    ],
+    "release_results": [
+      3718,
+      1135
+    ],
+    "ring_results": [
+      5108,
+      6227,
+      5342,
+      5182,
+      5401,
+      5106,
+      4966,
+      5853,
+      3474
+    ],
+    "exact_release_duplicate_found": false,
+    "related_issue3337": "OPEN; configure crates.io token/cargo owner. This is a broader prerequisite, not an exact report of the observed packaging failure.",
+    "source_comment3399": "The source comment cites #3399 as first-release bootstrap; exact issue read is CLOSED npm-name decision, so it is not evidence of this failure being tracked. No broad correction proposed.",
+    "limit": "Two targeted searches do not prove repository-wide absence of another duplicate."
+  },
+  "one_recommended_followup": "Root may record one deferred, tightly scoped release-bootstrap packaging finding (sparq-introspect versioned dev-dependency on unpublished sparq-engine), relating #3337 and attaching this failure evidence; verify final duplicate status before any new issue. Do not provision credentials, authorize publishing, rerun or weaken containment to address this observation.",
+  "actions": "Read-only GitHub API and local source/evidence reads only. No retries, mutations, workflow/model/build calls, release/registry changes. PR6095 worktree and its frozen recovery packet remain unchanged."
+}

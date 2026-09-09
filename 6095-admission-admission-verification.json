@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-09T21:53:40.570457+00:00",
+  "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "checks": 173,
+  "gate": 102656195505,
+  "integration": 15368,
+  "hold_clear": "exact own removal verified; no human hold",
+  "remaining_labels": [
+    "area:ci",
+    "trust-surface"
+  ],
+  "unresolved_threads": 0,
+  "required_review": "actual Opus5xhigh and Copilot current head verified",
+  "queue": {
+    "entries": {
+      "pageInfo": {
+        "hasNextPage": false
+      },
+      "nodes": []
+    }
+  },
+  "mutation": "normal expectedHeadOid and jump=false; no bypass",
+  "extra_label_triggered_checks": "all complete without failure; observed pending and waited"
+}
