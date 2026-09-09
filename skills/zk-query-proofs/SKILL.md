@@ -16,6 +16,11 @@ Zero-knowledge proofs that a SPARQL query result is correct over RDF held in nam
 > **Research-stage / experimental — NOT-yet-sound.** The composition verifier's soundness is the subject of an open audit (sq-qhy4 / sq-9hrn; remediation epic sq-1s2): a passing proof is NOT a guarantee the SPARQL statement holds under an adversarial prover. Read the "Honest scope" section before relying on a guarantee — only `Simple` entailment is proved; circuit members are fixed buckets. The query fragment covers BGP scans, integer FILTER (and the integer-valued `xsd:double` fragment), and a single-prover hidden cross-credential JOIN — the JOIN restricted to credentials sharing ONE issuer-signed revocation slot (sq-cuvmj; see "Honest scope").
 <!-- ANCHOR_END: scaffold-caveat -->
 
+For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, see
+[`zk/native-composition/README.md`](../../zk/native-composition/README.md). Its dedicated
+CI runs real proof tests; it provides no Noir linkage, RDF adapter, or credential-status
+integration and remains unaudited. [GPT-6]
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.

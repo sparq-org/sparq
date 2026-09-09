@@ -67,9 +67,9 @@
     "rayon_threads_environment": null
   },
   "local_smoke_timings_ms": {
-    "prove": 32.611666,
-    "setup": 27.936542000000003,
-    "verify": 11.069958
+    "prove": 33.305,
+    "setup": 32.812958,
+    "verify": 10.401083
   },
   "proof_bytes": 1289,
   "proof_system_version": "0.34.0",
