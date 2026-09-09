@@ -237,6 +237,14 @@ for evidence_name in ['bd-self-test-exact-head.log', 'bd-self-test.log', 'change
 for evidence_name in ['root-verification.json', 'opus-input.md', 'input-manifest.json', 'repository-visibility.json', 'payload-risk-audit.json']:
     FILES["6468-source-admission-" + evidence_name] = ROOT / "direct-6468/source-admission" / evidence_name
 
+for evidence_name in ["opus-review-5f758d2a.json", "opus-review-result.json", "opus-stderr.txt"]:
+    FILES["6468-source-admission-" + evidence_name] = ROOT / "direct-6468/source-admission" / evidence_name
+FILES["6468-label-maintenance-scheduled-runs-1920.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-1920.json"
+FILES["4246-perf-admission-main-runs-1920.json"] = ROOT / "direct-4246/perf-admission/main-runs-1920.json"
+
+for evidence_name in ["main-ci-jobs-1924.json", "main-matrix-jobs-1924.json"]:
+    FILES["4246-perf-admission-" + evidence_name] = ROOT / "direct-4246/perf-admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

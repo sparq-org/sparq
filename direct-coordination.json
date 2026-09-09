@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T19:05:17.131137+00:00",
+  "updated_at": "2026-09-09T19:25:35.231099+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Actual independentOpus5xhighsource review running on frozen5f758d2a",
+    "phase": "Focused Astra followup for nonblocking review test/diagnostic gaps; original5f758sourceapprovedforvalidation",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
     "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
@@ -111,8 +111,8 @@
       "next_scheduled": "Firstordinaryscheduledtriage-areaafter18:48create:cron25,55hourly;18:55nominalslotmaybedelayed. Observeactualrun,eventandcreatedtime; no manualtrigger.",
       "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5607067328",
       "latest_schedule_observation": {
-        "at": "2026-09-09T18:57:13.517567+00:00",
-        "evidence": "direct-6468/label-maintenance/scheduled-runs-after-create.json",
+        "at": "2026-09-09T19:24:49.903354+00:00",
+        "evidence": "direct-6468/label-maintenance/scheduled-runs-1920.json",
         "latest_run": 34378724521,
         "created_at": "2026-09-09T16:45:31Z",
         "conclusion": "failure",
@@ -154,7 +154,7 @@
     "branch": "codex/triage-area-unknown-diagnostics",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
     "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "state": "Exact2file6468repair committedand54filemanifestrootverified;44tests17classifier114migrationassertionsand8controls reported/verifiedartifactidentity. Source/harnessprivacyBash3limitationremainsLinuxCIobligation. ActualOpusreviewrunning, noPR/push/admissionyet. Singlelabelmaintenanceverified, firstordinaryscheduledpostcreateclassifiernotyetobserved.",
+    "state": "ActualOpus5xhighapprove_for_validation,no blockers,perf_affectingfalse. Authorizingoneboundedtwofilefollowup: ruleorderingfixture/control, explicitno-create-from-error/fetchedset caveat, fullscopectrlcalibration, escapingbehaviorassertionbeforeroundtrip,anddryrununknownpath. Alloriginal54fileevidence/reviewfrozen; no publication yet.",
     "documentation_followup": {
       "issue": 5412,
       "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
@@ -169,8 +169,8 @@
       "root_preface": "direct-6468/source-admission/review-preface-draft.md"
     },
     "source_review": {
-      "state": "running",
-      "completed": false,
+      "state": "completed",
+      "completed": true,
       "head": "5f758d2afed6524cf191820463934c2213ddcfda",
       "input": "direct-6468/source-admission/opus-input.md",
       "input_sha256": "0d5fd7a304064f45848960201140919345d19acd8d74d58e74519c99390b6780",
@@ -190,7 +190,35 @@
       "kind": "exec_command",
       "started_at": "2026-09-09T19:05:17.131137+00:00",
       "approval_resolution": "Initialauto-review incorrectlytreatedpacket asprivatesource andrequiredspecificexportpermission. No process/modelrequeststarted. ReadGitHubAPI provedPUBLIC repository;localmanifest/section/secretpatternauditfoundonlyreposource,taskauthored2filefixandgeneratedtestevidence,no credentialfiles/transcripts/secretmatches. SamecommandresubmittedwithnewriskfactsandexistingexplicituserOpusauthorization;automaticapprovalaccepted. Notalternativechannel/publicationworkaround or exhaustedmodelretry.",
-      "acceptance": "RequireouterJSONsubtypesuccess,is_errorfalse,modelUsageclaude-opus-5,exact5f758head. One actualmodelinvocationonly; no duplicate/exhaustedquotaretry."
+      "acceptance": "RequireouterJSONsubtypesuccess,is_errorfalse,modelUsageclaude-opus-5,exact5f758head. One actualmodelinvocationonly; no duplicate/exhaustedquotaretry.",
+      "collected_at": "2026-09-09T19:21:11.999773+00:00",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 341517,
+      "output_sha256": "5ce2cc0de3ed804025b42917d93a688af7bfee897d0dd1efb6e78d2261a1be59",
+      "verdict": "approve_for_validation",
+      "result": "direct-6468/source-admission/opus-review-result.json"
+    },
+    "followup": {
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "state": "running",
+      "parent": "5f758d2afed6524cf191820463934c2213ddcfda",
+      "directory": "direct-6468/followup",
+      "address": [
+        "NB1",
+        "NB2",
+        "NB3",
+        "NB5",
+        "NB6",
+        "NB7"
+      ],
+      "decline": "NB4recordcapdeferred:keepcompletefiniteoffenderrecordset;noadditionaltruncationpolicy",
+      "report_notes": [
+        "NB8realcratefixturecoupling",
+        "NB9localPythonversionandactualCIexecutiontobeverified"
+      ],
+      "additional_evidence": "Olderror-stringconsumersgitgrep;docs-qualityonblock;scheduledselftestsbeforeapply;bdactualoutput;frozen6095mechanicalcomposition."
     }
   },
   "prs": {
@@ -1531,14 +1559,14 @@
   "postmerge_watch": {
     "pr": 6469,
     "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "observed_at": "2026-09-09T18:57:13.517567+00:00",
-    "evidence": "direct-4246/perf-admission/main-runs-1859.json",
+    "observed_at": "2026-09-09T19:24:49.903354+00:00",
+    "evidence": "direct-4246/perf-admission/main-runs-1920.json",
     "push_runs": [
       {
         "id": 34390025043,
         "name": "Benchmarks",
-        "status": "in_progress",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "id": 34390022861,
@@ -1559,12 +1587,6 @@
         "conclusion": "success"
       },
       {
-        "id": 34390023354,
-        "name": "feature-matrix",
-        "status": "queued",
-        "conclusion": null
-      },
-      {
         "id": 34390022799,
         "name": "container-scan",
         "status": "completed",
@@ -1575,12 +1597,6 @@
         "name": "pkg-ingest",
         "status": "completed",
         "conclusion": "success"
-      },
-      {
-        "id": 34390023582,
-        "name": "fuzz",
-        "status": "in_progress",
-        "conclusion": null
       },
       {
         "id": 34390022915,
@@ -1615,12 +1631,18 @@
       {
         "id": 34390022784,
         "name": "pages",
-        "status": "queued",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
-        "id": 34390022510,
-        "name": "formal-verification",
+        "id": 34390023582,
+        "name": "fuzz",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 34390023354,
+        "name": "feature-matrix",
         "status": "queued",
         "conclusion": null
       },
@@ -1641,9 +1663,104 @@
         "name": "js",
         "status": "completed",
         "conclusion": "success"
+      },
+      {
+        "id": 34390022510,
+        "name": "formal-verification",
+        "status": "completed",
+        "conclusion": "success"
       }
     ],
-    "status": "CI/matrix/formal/pagesqueued;benchmark/fuzz/aggregateprogressing;completedcoreancillarychecksgreen. Batchmerge/release-plzfailuresundifferentiatedfromhistoricalfailures; no source-regression/health claim andno releaseauthorization/retry.",
-    "merged_worktree": "Keepissue4246untilagentfinishedreadingitandcleanupapprovedbyexactclean/inactive/sourcebackupevidence; donotreapwhileused."
+    "status": "Benchmark,formal,wasmfeature-off,docs,JS,Python,supplychain,container,fuzz,pages,routingsucceeded;CIandmatrixworkflowstatesqueued,aggregateprogressing. Actualjobprogressprobeinflight. Historicalbatchmerge/releaseplzremainfailed;notdiagnosedorchanged,norelease.",
+    "merged_worktree": "Keepissue4246untilagentfinishedreadingitandcleanupapprovedbyexactclean/inactive/sourcebackupevidence; donotreapwhileused.",
+    "actual_jobs": {
+      "main-ci-jobs-1924.json": {
+        "total": 36,
+        "states": {
+          "success": 24,
+          "skipped": 4,
+          "in_progress": 5,
+          "queued": 3
+        },
+        "active": [
+          {
+            "id": 102596805730,
+            "name": "coverage ratchet (shard 2/3)",
+            "started_at": "2026-09-09T19:14:17Z",
+            "runner": "GitHub Actions 1000075688",
+            "current_step": [
+              "Measure + enforce per-crate coverage (shard 2, max-remeasure gate)"
+            ]
+          },
+          {
+            "id": 102596805767,
+            "name": "coverage ratchet (shard 1/3)",
+            "started_at": "2026-09-09T19:18:33Z",
+            "runner": "GitHub Actions 1000075708",
+            "current_step": [
+              "Measure + enforce per-crate coverage (shard 1, max-remeasure gate)"
+            ]
+          },
+          {
+            "id": 102609618311,
+            "name": "test (load-aware shard bulk 2/3)",
+            "started_at": "2026-09-09T19:23:36Z",
+            "runner": "GitHub Actions 1000075730",
+            "current_step": [
+              "Rust (preinstalled stable)"
+            ]
+          },
+          {
+            "id": 102609618342,
+            "name": "test (load-aware shard heavy-hnsw)",
+            "started_at": "2026-09-09T19:23:36Z",
+            "runner": "GitHub Actions 1000075729",
+            "current_step": [
+              "Download nextest archive"
+            ]
+          },
+          {
+            "id": 102609618468,
+            "name": "test (load-aware shard bulk 3/3)",
+            "started_at": "2026-09-09T19:24:22Z",
+            "runner": "GitHub Actions 1000075733",
+            "current_step": [
+              "Free runner disk before download + test"
+            ]
+          }
+        ],
+        "failures": []
+      },
+      "main-matrix-jobs-1924.json": {
+        "total": 57,
+        "states": {
+          "success": 16,
+          "skipped": 1,
+          "queued": 38,
+          "in_progress": 2
+        },
+        "active": [
+          {
+            "id": 102607373747,
+            "name": "opt-in group (g12 sparq-server)",
+            "started_at": "2026-09-09T19:18:38Z",
+            "runner": "GitHub Actions 1000075709",
+            "current_step": [
+              "Run the group's legs (build -> test -> clippy; results to artifact)"
+            ]
+          },
+          {
+            "id": 102607373917,
+            "name": "opt-in group (g23 sparq-lws-core)",
+            "started_at": "2026-09-09T19:24:25Z",
+            "runner": "GitHub Actions 1000075734",
+            "current_step": [
+              "Fetch dependencies (retry transient crates.io fetch)"
+            ]
+          }
+        ],
+        "failures": []
+      }
+    }
   }
 }
