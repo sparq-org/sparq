@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T13:45:12.551692+00:00",
+  "updated_at": "2026-09-09T13:49:56.470777+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "ExactOpus-reviewedb86 branch published and draftPR6469created+body/head/baseverified. Normalworkflowsstarted; fullvalidation notyetpassed. BenchmarksrunaggregateSUCCESS onlydashboard+selector; actualbenchjobSKIPPEDunder draft-tier. Collectlocalaudit/clippy then normalready-for-review transition if needed toexercise fullgates; no dispatch/retry/cancel/merge yet.",
-    "phase": "Draft PR6469 normal Linux validation; audit draft-skipped gates",
+    "state": "b86 actualreview approvesvalidation and localall-targetsclippy passed. Normalreadytransition was considered but NOT EXECUTED: freshprecheckfound wasmexact-equalityfailure and dependentdraftaggregatefailure. PR6469stilldraft. Sameagentassignedboundedreadonly cause/proofdiagnosis; no retries, declarations, baseline/gate changes or source edits authorized yet.",
+    "phase": "Diagnose exact feature-off wasm equality failure on draft PR6469",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -178,6 +178,27 @@
       "verified_pr": "direct-4246/pr6469-initial.json",
       "initial_runs": "direct-4246/pr6469-runs-initial.json",
       "bench_jobs": "direct-4246/pr6469-bench-initial-jobs.json"
+    },
+    "full_validation_audit": {
+      "directory": "direct-4246/validation-b86",
+      "manifest_entries": 13,
+      "root_verified": true,
+      "all_targets_clippy": "PASS8.14s, sourceunchanged,diskabove10GiB",
+      "source_findings": "Defaultperf/memory/wasmsizegates do notenableexperiment. Whole-workspaceallfeatureclippy/docintentional. Newlegdynamicaggregatecoversgroupedtest/report; actualPRexecutionproofpending. Draftskipsbench/coverage/heavyrecall; ready_for_review wouldstartnormalfullsuccessors withoutlabels/dispatch."
+    },
+    "current_failure": {
+      "run": 34358709438,
+      "job": 102489885037,
+      "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+      "aggregate_run": 34358709393,
+      "aggregate_job": 102489884746,
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "observed": "Actualbase/headwasm1560241byteseach,binarydifferent;noV2declaration. Automaticreport-onlyderivationexit2. Rootcause notyetestablished; same-size notpass orproofsemantics.",
+      "logs": [
+        "direct-4246/pr6469-wasm-feature-off-failed.log",
+        "direct-4246/pr6469-draft-gate-failed.log"
+      ],
+      "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation."
     }
   },
   "prs": {
@@ -418,7 +439,7 @@
       "queue_effect_evidence": "All47 nightly freshness tests actually executed and passed in merge-group docs-quality34193891103. Log preserved direct-6436/followup/pr6464-queue-docs-quality.log."
     },
     "6469": {
-      "state": "DRAFT_VALIDATING",
+      "state": "DRAFT_CI_FAILURE",
       "head": "b86b5d5ad84bce900762defa094630eb358317a6",
       "url": "https://github.com/sparq-org/sparq/pull/6469",
       "issue": 4246,
@@ -428,7 +449,22 @@
       "aggregate": 34358709393,
       "docs_quality": 34358709436,
       "bench": 34358709884,
-      "bench_limit": "Actual run+trackbenchmarksjob102490081378SKIPPED; greenaggregate notperfevidence."
+      "bench_limit": "Actual run+trackbenchmarksjob102490081378SKIPPED; greenaggregate notperfevidence.",
+      "ready_transition_executed": false,
+      "failure": {
+        "run": 34358709438,
+        "job": 102489885037,
+        "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+        "aggregate_run": 34358709393,
+        "aggregate_job": 102489884746,
+        "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+        "observed": "Actualbase/headwasm1560241byteseach,binarydifferent;noV2declaration. Automaticreport-onlyderivationexit2. Rootcause notyetestablished; same-size notpass orproofsemantics.",
+        "logs": [
+          "direct-4246/pr6469-wasm-feature-off-failed.log",
+          "direct-4246/pr6469-draft-gate-failed.log"
+        ],
+        "diagnosis": "Assignedsameagent; inspect exactproofreason/source andonlyexistinguploadedartifacts afterbudgetcheck. No wasm builds/installs, sourcechanges, blinddeclaration/ratchetedits, dispatch/retry orreadymutation."
+      }
     }
   },
   "registry": {
@@ -479,8 +515,8 @@
     }
   },
   "next_actions": [
-    "Collect sameagent bounded localopt-in all-targetsclippy and sourceaudit (aggregate coverage, defaultperfgatefeatureactivation, draft-tierconditions). Exactb86 actualOpusreview completeapprovedforvalidation; no duplicate review. If no blocker, normalready-for-review is needed toexercise draft-skipped heavygates; revalidatehead/statebeforemutation.",
-    "Drive PR6469 full normalLinuxCI and actualCopilotreview; inspect executednewopt-inleg, fullworkspace/conformance/wasm/perf/preflight logs and aggregate. Green Benchmarks34358709884 is onlydashboard/selector, actualbenchskipped. No directdispatch/retry/protectionbypass; keepreviewedheadunless concretefailure requiresfocusedrepair+rereview.",
+    "Collect sameagent exactwasm feature-OFF equality/proofdiagnosis. KeepPR6469draft andb86frozen; no blinddeclaration, baselinechange, gateweakening, retry orreadytransition. Choose smallest evidenced repair and actualfocusedOpusreview beforepushingchangedhead.",
+    "After concretefailure repair/review, revalidate PR6469 and use normalready_for_review forfullLinuxgates. Inspect executed opt-inleg/groupartifact/perlegreport, fullworkspace/conformance/wasm/perf/preflight andactualCopilotreview. DraftBenchmarks success is onlydashboard/selector, actualbenchskipped.",
     "After active4246 terminal state, act on6468 narrow classifier/diagnostic proposal and separatelyreview generatorlabel/partition policy. No guessedexistingalias or labelcreation; preserve zero-write unknown-label guard.",
     "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
     "Observe ordinary eligible nightly/sweeper runs when relevant; no manualprobes, exhausted-budget retries or inference of successful writes from green aggregate. RegistryOFF, ALLGREEN, approval holds and release pause remain.",
@@ -508,12 +544,13 @@
     "observation_time": "Earlier in this turn, before issue6468 mutation; exact call timestamp not separately saved."
   },
   "actions_backlog": {
-    "observed_at": "2026-09-09T13:39:00Z",
     "before_pr6469": {
       "queued": 2,
       "in_progress": 1
     },
-    "limits": "Point observation from successful REST total_count beforepublication; not currentjob/fleetcapacity or runnerreserve proof."
+    "limits": "Point observation from successful REST total_count beforepublication; not currentjob/fleetcapacity or runnerreserve proof.",
+    "recorded_at": "2026-09-09T13:49:56.470777+00:00",
+    "time_scope": "Earlier in this turn beforePRpublication; exactcalltimestamp notseparatelyrecorded."
   },
   "postmerge_observations": {
     "observed_at": "2026-09-08T06:20:14.035146+00:00",

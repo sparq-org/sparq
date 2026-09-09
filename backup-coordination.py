@@ -139,6 +139,11 @@ for evidence_name in [*json.loads((VALIDATION_4246 / 'validation-readiness.json'
     FILES['4246-validation-readiness-' + evidence_name.replace('/', '--')] = VALIDATION_4246 / evidence_name
 for evidence_name in ['publication-precheck.json', 'publication-postpush.json', 'pr-body.md', 'pr-created.txt', 'pr6469-initial.json', 'pr6469-runs-initial.json', 'pr6469-bench-initial-jobs.json']:
     FILES['4246-' + evidence_name] = ROOT / 'direct-4246' / evidence_name
+VALIDATION_B86 = ROOT / 'direct-4246/validation-b86'
+for evidence_name in [*json.loads((VALIDATION_B86 / 'manifest-final.json').read_text())['files'], 'manifest-final.json', 'root-verification.json']:
+    FILES['4246-validation-b86-' + evidence_name.replace('/', '--')] = VALIDATION_B86 / evidence_name
+for evidence_name in ['pr6469-ready-precheck.json', 'pr6469-wasm-feature-off-failed.log', 'pr6469-draft-gate-failed.log']:
+    FILES['4246-' + evidence_name] = ROOT / 'direct-4246' / evidence_name
 
 TRIAGE_6468 = ROOT / 'direct-6468'
 for evidence_name in [*json.loads((TRIAGE_6468 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:

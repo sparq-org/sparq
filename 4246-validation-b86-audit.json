@@ -1,0 +1,332 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "completed_at": "2026-09-09T13:44:30.551520+00:00",
+  "result": "Authorized all-targets clippy PASS; both bounded source audits find no source defect or unintended performance-gate activation. Source/frozen evidence unchanged; live CI execution not observed in this task.",
+  "clippy": {
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
+    "environment_overrides": {
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "RAYON_NUM_THREADS": "2"
+    },
+    "timeout_seconds": 900,
+    "disk_floor_bytes": 10737418240,
+    "initial_free_bytes": 14579937280,
+    "started_at": "2026-09-09T13:39:32.036627+00:00",
+    "executed": true,
+    "exit": 0,
+    "stop_reason": null,
+    "elapsed_seconds": 8.136378166993381,
+    "minimum_observed_free_bytes": 14549905408,
+    "final_free_bytes": 14547034112,
+    "source_clean_after": true
+  },
+  "opt_in_required_check_audit": {
+    "registered_name": "opt-in sparq-core (overlay-deleted-projections)",
+    "golden_total_lines": 187,
+    "golden_exact_frozen_generated_bytes": true,
+    "discovery": [
+      {
+        "source": ".github/feature-matrix.d/sparq-core.yml:76-79",
+        "finding": "Exactly one new leg, features overlay-deleted-projections, test:true; no tier override."
+      },
+      {
+        "source": "scripts/assemble-feature-matrix.py:166-268,276-337,443-501",
+        "finding": "Fragment glob loads this entry; absent tier defaults to test, retained on PR/merge-group test tier. Selected mode keeps legs whose crate is in affected closure; other/malformed selection fails closed to full. Grouping preserves exact leg name/test/features. Root must verify actual selected artifact contains core/new leg; source registration alone does not prove execution."
+      },
+      {
+        "source": ".github/workflows/feature-matrix.yml:425-469,703,789-817; scripts/run-feature-matrix-group.py:179-277",
+        "finding": "Selected matrix and metadata artifacts emitted with same selection arguments as grouped matrix. GROUP_LEGS reaches run_leg; test:true performs cargo test after build, then clippy --all-targets. Each result records failed_step; any leg failure makes coarse group fail."
+      },
+      {
+        "source": ".github/workflows/feature-matrix-report.yml:74-214; scripts/run-feature-matrix-group.py:289-365,368-398,515-618",
+        "finding": "Normal workflow_run reporter uses default-branch code and validates artifact head against server workflow_run head. It uses run-specific selected artifact, so a new PR leg need not already be in default-branch fragments. Schema/completeness/duplicate checks precede reporting; name becomes opt-in <name>, success iff failed_step null. No static aggregator allowlist addition needed."
+      },
+      {
+        "source": ".github/workflows/ci-summary.yml:290-317; scripts/ci_summary_gate.py:2320-2333,1213-1235,1548-1730",
+        "finding": "ci-summary queries all check-runs on exact PR/merge-group SHA. These per-leg/group/report names have no advisory-registry declaration or platform-advisory exemption, so their nonpassing results gate. Draft gate has distinct name and does not authorize admission."
+      },
+      {
+        "source": "scripts/ci_summary_gate.py:1285-1466,1590-1625; scripts/run-feature-matrix-group.py:444-469",
+        "finding": "A real opt-in group makes feature-matrix report structurally required. Normal production correlation binds report external_id to latest group run ID from details_url. Missing/non-success report cannot pass aggregate. Existing legacy no-ID and zero-leg handling remains unchanged, not redesigned in this task."
+      }
+    ],
+    "root_live_evidence_to_inspect": [
+      "Exact feature-matrix head/event/attempt and successful selector/setup; selected-matrix artifact contains name sparq-core (overlay-deleted-projections), crate sparq-core, exact feature and test:true. Group number is dynamically packed: derive it from that run, never guess it.",
+      "Open that opt-in group log section headed opt-in sparq-core (overlay-deleted-projections): observe cargo build, nonzero executed test counts (including deletion projection tests), and all-targets clippy, all successful. Group success alone is insufficient detail.",
+      "Matching feature-matrix-results-<job-index> artifact has schema feature-matrix-group-results/v1 and exactly one row for new leg with failed_step:null; preserve actual group result.",
+      "Trusted reporter workflow_run identifies same triggering run/head; completeness passes and per-leg exact check succeeds; feature-matrix report is success with external_id equal to current group run ID. Inspect reporter failure/permission errors rather than inferring success from coarse job.",
+      "ci-summary aggregates those current exact-head checks. A draft-tier result is additional validation only; normal ready_for_review/full and merge-group evidence remain root-owned. No manual check fabrication, dispatch or hold bypass."
+    ],
+    "limits": "No live checks/logs/API or assembler/test execution performed in this audit. Existing reporter and aggregator unchanged from baseline; this verifies source wiring, not future CI completion."
+  },
+  "performance_feature_audit": {
+    "default_proof": {
+      "feature_definition": "crates/sparq-core/Cargo.toml:25 default=[parallel]; line35 overlay-deleted-projections=[]",
+      "cargo_manifest_mentions": [
+        "crates/sparq-core/Cargo.toml"
+      ],
+      "finding": "No workspace dependency or forwarding feature names this flag. Package-local --all-features on shacl-wasm enables that package features, not every dependency feature. Core docs.rs all-features metadata affects documentation builds only."
+    },
+    "default_state_gate_paths": [
+      {
+        "source": ".github/workflows/bench.yml:285,298,301,354-356",
+        "commands": [
+          "cargo build --release -p sparq-cli -p sparq-bench",
+          "bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json",
+          "bash scripts/ci-bench.sh 200000 bench-results.json",
+          "python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json --remeasure-cmd <existing parse-only command> --remeasure-k4"
+        ],
+        "finding": "No --all-features or experimental feature. Native memory/store/dict metrics use those default leaf binaries; leaf dependencies do not opt in. Existing performance policy unchanged."
+      },
+      {
+        "source": "scripts/ci-bench.sh:61-63,284-322,1068-1085; .cargo/config.toml:20-21",
+        "commands": [
+          "cargo build --profile release-wasm -q -p sparq-wasm --target wasm32-unknown-unknown",
+          "CARGO_PROFILE_RELEASE_WASM_STRIP=none cargo build --profile release-wasm -q -p sparq-wasm --target wasm32-unknown-unknown"
+        ],
+        "finding": "Hard wasm_bundle_bytes uses default sparq-wasm; later unstripped SIMD probe uses same features. Target cfg selects getrandom browser backend and SIMD128 only, not this Cargo feature. Capture emitted wasm metric; successful script alone can omit an unavailable/failed wasm build."
+      },
+      {
+        "source": ".github/workflows/vectorized-feature-off.yml:374-376,406",
+        "commands": [
+          "cargo build --profile release-wasm -p sparq-wasm --target wasm32-unknown-unknown --manifest-path base-tree/Cargo.toml",
+          "cargo build --profile release-wasm -p sparq-wasm --target wasm32-unknown-unknown"
+        ],
+        "finding": "Existing separate base/head wasm artifact-equality guard is feature-off too; no --all-features. Its vectorized declaration policy is unchanged and no bypass/exemption proposed."
+      }
+    ],
+    "intentional_feature_on_gates": [
+      {
+        "source": ".github/feature-matrix.d/sparq-core.yml:76-79; scripts/run-feature-matrix-group.py:179-206",
+        "finding": "Dedicated opt-in build/test/all-targets clippy explicitly enables it as requested."
+      },
+      {
+        "source": ".github/workflows/ci.yml:1396,1413",
+        "commands": [
+          "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+          "cargo doc --workspace --no-deps --all-features"
+        ],
+        "finding": "These whole-workspace correctness/documentation gates intentionally enable all core features, including the experiment. They are separate jobs/Cargo invocations from default-state perf/memory/wasm measurements; no exclusion needed."
+      }
+    ],
+    "no_implicit_activation_conclusion": "No inspected gating performance/wasm-size/memory build knowingly enables the experimental feature. No new threshold, baseline edit, exception, gate weakening, source correction or blanket audit follows.",
+    "limits": "Source/build-command audit only; not a measured feature graph or successful artifact-size/perf result. CI must provide clean actual artifacts. Local opt-in benchmark evidence remains diagnostic, never a default-state gate or admission claim."
+  },
+  "preservation": {
+    "source_clean": true,
+    "prior_manifest_files_verified": 88,
+    "golden_sha256": "ef6cd71a633787e1a7e819c8ca6a4eb67b25880705e63a33e83dd9279bcfcf53",
+    "frozen_packet_sha256": "1c026b68cd99768cc0d0674b2418044e62c4a1e7b4db0c5dd438813cfe674459"
+  },
+  "source_hashes": {
+    ".github/feature-matrix.d/sparq-core.yml": {
+      "sha256": "58ca6d0a460976a7a48e502dceeed203e8d8f9292d708a9bdb180dbbcf419e10",
+      "ranges": [
+        [
+          72,
+          79
+        ]
+      ]
+    },
+    "scripts/assemble-feature-matrix.py": {
+      "sha256": "d4679df18085a48d0cdadd78e45d9189f2b922b13fd6b510d4130cb81c503329",
+      "ranges": [
+        [
+          166,
+          337
+        ],
+        [
+          364,
+          501
+        ]
+      ]
+    },
+    ".github/workflows/feature-matrix.yml": {
+      "sha256": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+      "ranges": [
+        [
+          356,
+          476
+        ],
+        [
+          700,
+          739
+        ],
+        [
+          789,
+          825
+        ]
+      ]
+    },
+    ".github/workflows/feature-matrix-report.yml": {
+      "sha256": "e6fa2dc4f553ad544dc7c11fdf94ccd920975c09ef4cf9b5b14791c0d366cd2a",
+      "ranges": [
+        [
+          74,
+          214
+        ]
+      ]
+    },
+    "scripts/run-feature-matrix-group.py": {
+      "sha256": "9e02f873b46ec75c6e2e55f22d37d14387df92161117cc5a849fceb1daa4321f",
+      "ranges": [
+        [
+          179,
+          277
+        ],
+        [
+          289,
+          368
+        ],
+        [
+          368,
+          472
+        ],
+        [
+          515,
+          619
+        ]
+      ]
+    },
+    "scripts/ci_summary_gate.py": {
+      "sha256": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+      "ranges": [
+        [
+          1213,
+          1235
+        ],
+        [
+          1285,
+          1466
+        ],
+        [
+          1548,
+          1730
+        ],
+        [
+          2320,
+          2339
+        ]
+      ]
+    },
+    ".github/workflows/ci-summary.yml": {
+      "sha256": "be42f933e62ef681e9f45fc515afee8398bcf9d809d589d8b3c2bb9f9fa79884",
+      "ranges": [
+        [
+          277,
+          317
+        ]
+      ]
+    },
+    ".github/workflows/bench.yml": {
+      "sha256": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+      "ranges": [
+        [
+          203,
+          235
+        ],
+        [
+          283,
+          305
+        ],
+        [
+          347,
+          357
+        ]
+      ]
+    },
+    "scripts/ci-bench.sh": {
+      "sha256": "85a12328525acb7099ac37eb46b8701911948ad233e493e99a316d008b87c3b0",
+      "ranges": [
+        [
+          61,
+          65
+        ],
+        [
+          234,
+          246
+        ],
+        [
+          284,
+          322
+        ],
+        [
+          1068,
+          1085
+        ]
+      ]
+    },
+    ".github/workflows/vectorized-feature-off.yml": {
+      "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+      "ranges": [
+        [
+          368,
+          413
+        ]
+      ]
+    },
+    ".github/workflows/ci.yml": {
+      "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+      "ranges": [
+        [
+          1154,
+          1169
+        ],
+        [
+          1273,
+          1279
+        ],
+        [
+          1393,
+          1416
+        ]
+      ]
+    },
+    "crates/sparq-core/Cargo.toml": {
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "ranges": [
+        [
+          14,
+          35
+        ]
+      ]
+    },
+    ".cargo/config.toml": {
+      "sha256": "7e774dbbf635846929748cc9bd08dae2db8b4f947f2961ae28cdb875c092e171",
+      "ranges": [
+        [
+          1,
+          22
+        ]
+      ]
+    }
+  },
+  "actions_not_taken": [
+    "source edit",
+    "other build or tests",
+    "network/install/retry",
+    "disk reclamation",
+    "measurement",
+    "GitHub/API action",
+    "agent/model call",
+    "registry/release/EC2 action"
+  ]
+}

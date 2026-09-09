@@ -1,0 +1,79 @@
+[
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "wasm",
+    "step": "Build sparq-shacl-wasm for the browser target (all features)",
+    "command_line": "cargo build -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-features",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "wasm",
+    "step": "clippy (wasm32 target, sparq-shacl-wasm, all features, deny warnings)",
+    "command_line": "cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "wasm",
+    "step": "Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, all features)",
+    "command_line": "wasm-pack test --node --all-features",
+    "cwd": "crates/sparq-shacl-wasm"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "wasm",
+    "step": "Measure sparq-introspect wasm bundle size (informational)",
+    "command_line": "./scripts/introspect-wasm-size.sh | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "lint",
+    "step": "clippy (deny warnings, workspace \u2014 all features)",
+    "command_line": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "job": "lint",
+    "step": "rustdoc (deny warnings, workspace \u2014 all features)",
+    "command_line": "cargo doc --workspace --no-deps --all-features",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/vectorized-feature-off.yml",
+    "job": "artifact-exact-equality",
+    "step": "Build BASE-tree feature-OFF wasm (cache miss only)",
+    "command_line": "cargo build --profile release-wasm -p sparq-wasm --target wasm32-unknown-unknown \\",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/vectorized-feature-off.yml",
+    "job": "artifact-exact-equality",
+    "step": "Build BASE-tree feature-OFF wasm (cache miss only)",
+    "command_line": "BASE_WASM=$(find base-tree/target/wasm32-unknown-unknown/release-wasm -name \"sparq_wasm*.wasm\" | head -1)",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/vectorized-feature-off.yml",
+    "job": "artifact-exact-equality",
+    "step": "Build HEAD-tree feature-OFF wasm",
+    "command_line": "cargo build --profile release-wasm -p sparq-wasm --target wasm32-unknown-unknown",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/vectorized-feature-off.yml",
+    "job": "artifact-exact-equality",
+    "step": "Build HEAD-tree feature-OFF wasm",
+    "command_line": "HEAD_WASM=$(find target/wasm32-unknown-unknown/release-wasm -name \"sparq_wasm*.wasm\" | head -1)",
+    "cwd": null
+  },
+  {
+    "file": ".github/workflows/vectorized-feature-off.yml",
+    "job": "artifact-exact-equality",
+    "step": "Build HEAD-tree feature-OFF wasm",
+    "command_line": "  echo \"ERROR: no sparq_wasm*.wasm found under target/wasm32-unknown-unknown/release-wasm\" >&2",
+    "cwd": null
+  }
+]

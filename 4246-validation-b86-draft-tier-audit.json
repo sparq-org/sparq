@@ -1,0 +1,217 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "source_only": true,
+  "provided_live_context": "Root reports draft PR6469 with exact b86 and normal CI/feature-matrix/aggregate started; benchmark run34358709884 completed unusually quickly. Agent made no API read, so this report attributes source conditions, not actual job conclusions.",
+  "recommendation": "Do not wait for draft-skipped heavy evidence. After current review/validation state is acceptable, root can use the normal ready_for_review transition; all four relevant workflows subscribe. This patch changes .github/feature-matrix.d, a full-selection trigger, so no ci-full/bench-full toggle is needed to force affected closure. Root owns transition and verifies real execution; no dispatch or alternative admission path.",
+  "findings": [
+    {
+      "source": ".github/workflows/bench.yml:62,197-205",
+      "finding": "run + track benchmarks requires draft != true. ci-full/bench-full label admission is ANDed with the non-draft guard, so neither overrides draft skipping. A draft workflow success therefore cannot establish deterministic perf/wasm/memory execution. Actual run job metadata/logs still need inspection."
+    },
+    {
+      "source": ".github/workflows/ci.yml:779,817-823,3242-3246,3496-3500,3726-3730",
+      "finding": "Heavy vector recall shard step returns success without running on draft. coverage-measure, coverage-engine-run and aggregate coverage are guarded off on draft; instrumented measures also skip merge_group. Bulk workspace test shards, lint and the new opt-in test leg are not removed by that heavy-draft rule."
+    },
+    {
+      "source": ".github/workflows/ci.yml:44; bench.yml:62; feature-matrix.yml:176; ci-summary.yml:206",
+      "finding": "ready_for_review triggers fresh normal runs on the same head with draft false. CI, feature-matrix and aggregate also have merge_group; current bench.yml does not declare merge_group, so required executed perf evidence must be secured on the full PR/current main path, not inferred from queue-only success."
+    },
+    {
+      "source": ".github/workflows/ci-summary.yml:260-269; scripts/ci_summary_gate.py:1548-1589,1710-1730",
+      "finding": "Draft aggregate is gate, draft-tier, never required gate. A full-tier PR gate rejects unsuperseded per-workflow draft selector evidence. Root should inspect successor identity for each selecting workflow; one green selector cannot replace unrelated draft evidence."
+    },
+    {
+      "source": ".github/workflows/ci.yml:210-215; feature-matrix.yml:229-233; bench.yml:197-200; ci-select.yml:116,153-183",
+      "finding": "labeled/unlabeled events do real CI/feature-matrix work only for ci-full; benchmarks admit ci-full or bench-full. ci-full presence sends --full to selection, but draft guards remain. Other unrelated labels are guarded no-leg events. ci-summary itself has no labeled/unlabeled trigger. Avoid label toggles as substitute for ready_for_review."
+    },
+    {
+      "source": "scripts/ci_select.py:74-86,116-124,690-716",
+      "finding": "The .github/ prefix is a full-run trigger, with narrow orchestration exemptions that explicitly do not cover .github/feature-matrix.d. This patch touches that fragment, so normal selector is expected full irrespective of core reverse-dependency selection. Verify actual selector output rather than assuming it."
+    },
+    {
+      "source": ".github/workflows/ci.yml#nightly-gate/#coverage-nightly/#mutants-nightly-advisory",
+      "finding": "Nightly full coverage and mutation measurement remain scheduled/manual freshness-governed lanes, not newly required ready-for-review work. Mutation remains advisory. No new schedule/manual override or dispatch is proposed."
+    }
+  ],
+  "root_execution_checks": [
+    "After ready_for_review, verify exact b86 full selector for CI, feature-matrix, bench and new non-draft gate context; do not infer completion from superseded draft results.",
+    "Bench log must contain release build, deterministic-only emission including wasm_bundle_bytes and all memory metrics, then hard perf-gate result; ready itself is not evidence of a pass.",
+    "Coverage shard/engine measurement steps and both heavy recall test bodies must actually execute, with nonzero suites; retain ordinary job/floor conclusions.",
+    "New opt-in selected artifact/group/per-leg reporter proof is detailed in audit.json; grouping can change on the fresh full run, so bind all observations to that run/head."
+  ],
+  "raw_source_conditions": {
+    "ci.yml": {
+      "on": {
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "pull_request": {
+          "types": [
+            "opened",
+            "synchronize",
+            "reopened",
+            "labeled",
+            "unlabeled",
+            "ready_for_review"
+          ]
+        },
+        "merge_group": null,
+        "workflow_dispatch": null,
+        "schedule": [
+          {
+            "cron": "17 3 * * *"
+          }
+        ]
+      },
+      "jobs": {
+        "changes": {
+          "if": "github.event_name != 'pull_request' || !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) || github.event.label.name == 'ci-full'",
+          "name": "detect rust changes"
+        },
+        "test": {
+          "if": "needs.changes.outputs.rust_changed == 'true'",
+          "name": "test (load-aware shard ${{ matrix.name }})",
+          "needs": [
+            "changes",
+            "build-archive",
+            "select"
+          ]
+        },
+        "coverage-measure": {
+          "if": "github.event_name != 'schedule' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true) && needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')",
+          "name": "coverage ratchet (shard ${{ matrix.shard }}/3)",
+          "needs": [
+            "changes",
+            "coverage-floors",
+            "select"
+          ]
+        },
+        "coverage-engine-run": {
+          "if": "github.event_name != 'schedule' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true) && needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')",
+          "name": "coverage engine run (partition ${{ matrix.part }}/3)",
+          "needs": [
+            "changes",
+            "coverage-floors",
+            "select"
+          ]
+        },
+        "coverage": {
+          "if": "always() && github.event_name != 'schedule' && (github.event_name != 'pull_request' ||\n !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) ||\n github.event.label.name == 'ci-full') &&\n(github.event_name != 'pull_request' || github.event.pull_request.draft != true)",
+          "name": "coverage ratchet + test-presence gate (per-crate)",
+          "needs": [
+            "coverage-floors",
+            "coverage-measure",
+            "coverage-engine-run",
+            "coverage-engine-merge"
+          ]
+        },
+        "nightly-gate": {
+          "if": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+        }
+      }
+    },
+    "bench.yml": {
+      "on": {
+        "push": {
+          "branches": [
+            "main"
+          ],
+          "paths-ignore": [
+            "bench/perf-baseline.json"
+          ]
+        },
+        "pull_request": {
+          "types": [
+            "opened",
+            "synchronize",
+            "reopened",
+            "labeled",
+            "unlabeled",
+            "ready_for_review"
+          ]
+        },
+        "workflow_dispatch": null,
+        "schedule": [
+          {
+            "cron": "29 5 * * *"
+          }
+        ]
+      },
+      "jobs": {
+        "bench": {
+          "if": "(github.event_name != 'pull_request' ||\n !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) ||\n contains(fromJSON('[\"ci-full\",\"bench-full\"]'), github.event.label.name)) &&\n(github.event_name != 'pull_request' || github.event.pull_request.draft != true) && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-engine\"') ||\n contains(needs.select.outputs.affected, '\"sparq-cli\"') ||\n contains(needs.select.outputs.affected, '\"sparq-bench\"') ||\n contains(needs.select.outputs.affected, '\"sparq-wasm\"'))",
+          "name": "run + track benchmarks",
+          "needs": "select"
+        }
+      }
+    },
+    "feature-matrix.yml": {
+      "on": {
+        "push": {
+          "branches": [
+            "main"
+          ]
+        },
+        "pull_request": {
+          "types": [
+            "opened",
+            "synchronize",
+            "reopened",
+            "labeled",
+            "unlabeled",
+            "ready_for_review"
+          ]
+        },
+        "merge_group": null
+      },
+      "jobs": {
+        "changes": {
+          "if": "github.event_name != 'pull_request' || !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) || github.event.label.name == 'ci-full'",
+          "name": "detect rust changes (feature-matrix)"
+        },
+        "setup": {
+          "if": "needs.changes.outputs.rust_changed == 'true'",
+          "name": "assemble feature matrix",
+          "needs": [
+            "changes",
+            "select"
+          ]
+        },
+        "opt-in-features": {
+          "if": "needs.changes.outputs.rust_changed == 'true' && needs.setup.outputs.legs != '0'",
+          "name": "opt-in group (${{ matrix.group }})",
+          "needs": [
+            "changes",
+            "setup"
+          ]
+        }
+      }
+    },
+    "ci-summary.yml": {
+      "on": {
+        "pull_request": {
+          "types": [
+            "opened",
+            "synchronize",
+            "reopened",
+            "ready_for_review"
+          ]
+        },
+        "merge_group": null,
+        "push": {
+          "branches": [
+            "main"
+          ]
+        }
+      },
+      "jobs": {
+        "gate": {
+          "name": "gate${{ github.event.pull_request.draft == true && ', draft-tier' || '' }}"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-09-09T13:46:51.507824+00:00"
+}

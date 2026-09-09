@@ -1,0 +1,45 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "files": {
+    "audit.json": {
+      "sha256": "daa99e232431e738426eb39a2a256afc1c11f7d0ad8a043b18bd80e4f599fd95",
+      "bytes": 13516
+    },
+    "clippy-all-targets.log": {
+      "sha256": "11d5133f80bc9f0618512b9aa7eaadb8f8e09f325ad72867fc8d9ae8fec33878",
+      "bytes": 651
+    },
+    "clippy-command.json": {
+      "sha256": "dd8e39de69f6244a041cc8f1a1b15135d2c10bd2e036ded04ac460a254342673",
+      "bytes": 799
+    },
+    "clippy-result.json": {
+      "sha256": "7f6c426e695fff6dc30dadd337175c595b93e8cb0f0118fc38a3c0095e2fb5f7",
+      "bytes": 1006
+    },
+    "source/additional-functions.py": {
+      "sha256": "588673abc1c9da41d87180228fdb087310175d37fd17e062ecec400f6c6742ae",
+      "bytes": 4652
+    },
+    "source/assemble-feature-matrix-functions.py": {
+      "sha256": "11b7ce20892c09c4c62af4b461b6e55a29598d7a3af98874707d9d59518c0802",
+      "bytes": 13157
+    },
+    "source/ci_summary_gate-functions.py": {
+      "sha256": "0f51988e1f888ccc22a97f03ccea6bd001d2ed6f4fc6881bc83217399e5ac5d3",
+      "bytes": 21014
+    },
+    "source/line-evidence.md": {
+      "sha256": "87b99841c70206a5e5d8add0fd1fd53b99201b94897eb77713106639f86d56a1",
+      "bytes": 112180
+    },
+    "source/run-feature-matrix-group-functions.py": {
+      "sha256": "34bf9e18c651507e706ec96aafab4e8a5e603c5fc62ed41929a3ca369052f70f",
+      "bytes": 17209
+    },
+    "workflow-feature-command-inventory.json": {
+      "sha256": "3363eac3163764cafb5232f6b399c62f9b3ebf144fea5bc5305cb0617710ddd0",
+      "bytes": 3013
+    }
+  }
+}

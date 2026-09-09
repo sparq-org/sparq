@@ -1,0 +1,36 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "command": [
+    "/Users/jesght/.cargo/bin/cargo",
+    "clippy",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-core",
+    "--features",
+    "overlay-deleted-projections",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
+  "environment_overrides": {
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "RAYON_NUM_THREADS": "2"
+  },
+  "timeout_seconds": 900,
+  "disk_floor_bytes": 10737418240,
+  "initial_free_bytes": 14579937280,
+  "started_at": "2026-09-09T13:39:32.036627+00:00",
+  "executed": true,
+  "exit": 0,
+  "stop_reason": null,
+  "elapsed_seconds": 8.136378166993381,
+  "minimum_observed_free_bytes": 14549905408,
+  "final_free_bytes": 14547034112,
+  "source_clean_after": true
+}

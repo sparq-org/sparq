@@ -1,0 +1,18 @@
+    Checking errno v0.3.14
+    Checking bitflags v2.13.0
+    Checking fastrand v2.4.1
+    Checking rustix v1.1.4
+    Checking once_cell v1.21.4
+    Checking wait-timeout v0.2.1
+    Checking fnv v1.0.7
+    Checking quick-error v1.2.3
+    Checking bit-vec v0.8.0
+    Checking bit-set v0.8.0
+    Checking num-traits v0.2.19
+    Checking tempfile v3.27.0
+    Checking rusty-fork v0.3.1
+    Checking rand_xorshift v0.4.0
+    Checking unarray v0.1.4
+    Checking proptest v1.11.0
+    Checking sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-core)
+    Finished `dev` profile [unoptimized] target(s) in 7.52s
