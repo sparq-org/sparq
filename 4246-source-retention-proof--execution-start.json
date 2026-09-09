@@ -1,0 +1,25 @@
+{
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "command": [
+    "/opt/homebrew/bin/python3",
+    "-u",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof/run_original_protocol.py"
+  ],
+  "started_at": "2026-09-09T14:12:34.561420+00:00",
+  "limit_seconds": 900,
+  "disk_stop_margin_bytes": 11274289152,
+  "hard_disk_floor_bytes": 10737418240,
+  "initial_free_bytes": 13729923072,
+  "env_overrides": {
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_INCREMENTAL": "0",
+    "RUSTUP_TOOLCHAIN": "1.97.1",
+    "RAYON_NUM_THREADS": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334",
+    "FEATOFF_PROOF_EVIDENCE": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof",
+    "PATH": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof/shim:/Users/jesght/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  },
+  "removed_overrides": {}
+}

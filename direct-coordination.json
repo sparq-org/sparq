@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T14:18:16.146936+00:00",
+  "updated_at": "2026-09-09T14:38:19.162397+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "PR remains draft at b86. Local correction 6334b338 restores original default function and insert statement verbatim behind cfg-not; agent completing bounded validation and proof. Await frozen packet, root verification, then one focused actual Opus review.",
-    "phase": "Focused default-text preservation repair and bounded compiler proof",
+    "state": "Clean local 6334b338 correction and 79-file evidence verified by root. Both original compiler obligations passed. Actual Opus 5 xhigh review running once; public PR still draft b86. No declaration in source or push yet.",
+    "phase": "Focused actual Opus review of verified source correction and compiler proof",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -221,10 +221,29 @@
       "kind": "exec_command",
       "started_at": "2026-09-09T14:12:34.561420Z",
       "deadline": "2026-09-09T14:27:34.561420Z",
-      "active_at_report": true,
+      "active_at_report": false,
       "agent_report": "Base and head raw wasm both compiled, 1,560,265 bytes each with different hashes. Preparing addition-neutral. Separate private targets, offline/locked, proactive 10.5 GiB disk cutoff. Four off and nine on tests, six compiled controls, both all-targets core clippy configurations passed.",
       "verification_limit": "Agent progress report, final manifest/root verification and actual Opus review pending. Do not duplicate proof or directly poll the agent-owned session while the agent is active.",
-      "next": "Collect frozen report at the next heartbeat; verify exact source, binaries, comparison results, and shim/protocol provenance before one focused actual Opus review. No declaration or push yet."
+      "next": "Collect frozen report at the next heartbeat; verify exact source, binaries, comparison results, and shim/protocol provenance before one focused actual Opus review. No declaration or push yet.",
+      "completed": true,
+      "result": "Passed in 544.822 seconds, exit 0; neutral=head and deletion-neutral=base. No retry or disk cutoff."
+    },
+    "source_retention": {
+      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "directory": "direct-4246/source-retention",
+      "manifest_files": 79,
+      "root_verification": "direct-4246/source-retention/root-verification.json",
+      "validation": "13 targeted tests pass, six compiled controls killed, off/on all-targets core clippy pass. Original protocol compiler proof passed both obligations. Local environment only; corrected Linux CI pending."
+    },
+    "source_retention_review_runtime": {
+      "session_id": 20716,
+      "kind": "exec_command",
+      "started_at": "2026-09-09T14:38:19.162397+00:00",
+      "completed": false,
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/review-packet.md",
+      "input_sha256": "7d426a82683f1dc24133da3ab1214dcc344b3fc803ac3cb82452f103c78450b7",
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/opus-review-6334b338.json",
+      "acceptance": "Require success, is_error false, actual modelUsage claude-opus-5 and exact head. No duplicate or exhausted-budget retry. Review includes correcting generated historical [OPUS-5] attribution to actual Astra execution and local scope."
     }
   },
   "prs": {

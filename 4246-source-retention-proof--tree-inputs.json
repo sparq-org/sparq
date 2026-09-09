@@ -1,0 +1,90 @@
+{
+  "base": {
+    "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-trees-sx2mrvfi/base",
+    "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-trees-sx2mrvfi/base/target",
+    "files": {
+      "crates/sparq-core/src/store.rs": {
+        "sha256": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+        "bytes": 109130
+      },
+      "crates/sparq-core/Cargo.toml": {
+        "sha256": "81b61ab780d45b36e188b5d5fc0ad9bb3c50ff2227fee6b650f34584a415a4df",
+        "bytes": 11229
+      },
+      "Cargo.toml": {
+        "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+        "bytes": 9813
+      },
+      "Cargo.lock": {
+        "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+        "bytes": 176396
+      }
+    }
+  },
+  "head": {
+    "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-trees-sx2mrvfi/head",
+    "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-trees-sx2mrvfi/head/target",
+    "files": {
+      "crates/sparq-core/src/store.rs": {
+        "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+        "bytes": 112315
+      },
+      "crates/sparq-core/Cargo.toml": {
+        "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+        "bytes": 11422
+      },
+      "Cargo.toml": {
+        "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+        "bytes": 9813
+      },
+      "Cargo.lock": {
+        "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+        "bytes": 176396
+      }
+    }
+  },
+  "addition-neutral": {
+    "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree",
+    "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree/target",
+    "files": {
+      "crates/sparq-core/src/store.rs": {
+        "sha256": "a57ffdfa5e68b72303e7f0628033162960fe3cb8f1c260afc94da2b6d42b564a",
+        "bytes": 108450
+      },
+      "crates/sparq-core/Cargo.toml": {
+        "sha256": "81b61ab780d45b36e188b5d5fc0ad9bb3c50ff2227fee6b650f34584a415a4df",
+        "bytes": 11229
+      },
+      "Cargo.toml": {
+        "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+        "bytes": 9813
+      },
+      "Cargo.lock": {
+        "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+        "bytes": 176396
+      }
+    }
+  },
+  "deletion-neutral": {
+    "tree": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-delneutral-fibrbfhu/tree",
+    "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-delneutral-fibrbfhu/tree/target",
+    "files": {
+      "crates/sparq-core/src/store.rs": {
+        "sha256": "e44defa0675f88e48767c25bfede7334794640f1184be193dc89b64f4ee02c63",
+        "bytes": 108383
+      },
+      "crates/sparq-core/Cargo.toml": {
+        "sha256": "81b61ab780d45b36e188b5d5fc0ad9bb3c50ff2227fee6b650f34584a415a4df",
+        "bytes": 11229
+      },
+      "Cargo.toml": {
+        "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+        "bytes": 9813
+      },
+      "Cargo.lock": {
+        "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+        "bytes": 176396
+      }
+    }
+  }
+}

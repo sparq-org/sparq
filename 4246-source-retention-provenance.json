@@ -1,0 +1,31 @@
+{
+  "implementation_model": "OpenAI GPT-6 Astra",
+  "reasoning_effort": "xhigh (inherited active lane)",
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "previous_reviewed_head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "execution_platform": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "release": "25.6.0"
+  },
+  "rustc_verbose": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "cargo_version": "cargo 1.97.1 (c980f4866 2026-06-30)\n",
+  "protocol_source_sha256": "3dddd713b18754cf9d53b9f0ba8375e24e3d3a4eebf4d52a6816160b91c39456",
+  "protocol_unchanged_from_base_and_b86": true,
+  "cargo_shim_sha256": "8d692e63b5c897e47693c10c979efeba7aaec437dd4d684008cb7ee7ce12d915",
+  "run_original_protocol_sha256": "53fa4a1e62ad8782066831e9908d401d397e3f9112b392a7adee2829e5b1decd",
+  "original_protocol_semantics": "Original main -> decide -> cargo_wasm_builder, no injected builder/prebuilt bundles. Original copytree duplicates its own head/base target into distinct neutral directories; compiler logs show actual rebuilds including sparq-core. No unrelated/shared target reuse. Shim adds --locked only and records outputs/bytes. CARGO_NET_OFFLINE=true applies to all calls.",
+  "generated_template_attribution": "The exact unchanged declaration generator hard-codes [OPUS-5] in its reason. That string is preserved as raw generated evidence, not claimed as execution/review provenance. This proof was executed by GPT-6 Astra; actual independent Opus follow-up is pending.",
+  "declaration_location": "proof/declaration-proposal.json only; source tree has no6469 declaration.",
+  "native_environment": {
+    "CARGO_BUILD_JOBS": "2",
+    "RAYON_NUM_THREADS": "2",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0"
+  },
+  "proof_environment_and_limits": "proof/execution-result.json",
+  "no_remote_calls_in_this_revision": true,
+  "no_installs_or_unrelated_cleanup": true
+}

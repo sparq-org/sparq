@@ -1,0 +1,75 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-core)
+warning: method `invalidate_deleted` is never used
+   --> crates/sparq-core/src/store.rs:222:8
+    |
+186 | impl Overlay {
+    | ------------ method in this implementation
+...
+222 |     fn invalidate_deleted(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sparq-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 2.64s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_core-5d77b6001c8fb29f)
+
+running 9 tests
+test store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication ... FAILED
+test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... FAILED
+test store::overlay_deleted_tests::deleted_cache_concurrent_first_reads_share_initialized_projection ... ok
+test store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent ... FAILED
+test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... FAILED
+test store::overlay_deleted_tests::deleted_cache_inclusive_bounds_and_empty_ranges ... ok
+test store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted ... ok
+test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... FAILED
+test store::overlay_deleted_tests::deleted_cache_survives_insert_only_and_noop_deltas ... ok
+
+failures:
+
+---- store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication' (2549955) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:166:9:
+assertion failed: store.overlay.as_ref().unwrap().deleted_by_perm.iter().all(|s|
+        s.get().is_none())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild' (2549958) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:25:17:
+assertion `left == right` failed
+  left: 3
+ right: 4
+
+---- store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent' (2549964) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:270:9:
+assertion `left == right` failed
+  left: 1
+ right: 0
+
+---- store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation' (2549965) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:337:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+
+---- store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas' (2549968) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:25:17:
+assertion `left == right` failed
+  left: 3
+ right: 4
+
+
+failures:
+    store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication
+    store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild
+    store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent
+    store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation
+    store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas
+
+test result: FAILED. 4 passed; 5 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p sparq-core --lib`

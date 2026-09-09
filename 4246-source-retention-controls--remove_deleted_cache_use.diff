@@ -1,0 +1,28 @@
+--- store.rs
++++ remove_deleted_cache_use
+@@ -233,20 +233,11 @@
+     /// initializer; the cold sort is serialized for that permutation.
+     #[cfg(feature = "overlay-deleted-projections")]
+     fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
+-        if self.deleted.is_empty() {
+-            return 0;
+-        }
+-        let rows = self.deleted_by_perm[perm as usize].get_or_init(|| {
+-            let order = perm.order();
+-            let mut rows: Vec<[Id; 3]> = self
+-                .deleted
+-                .iter()
+-                .map(|t| [t[order[0]], t[order[1]], t[order[2]]])
+-                .collect();
+-            rows.sort_unstable();
+-            rows
+-        });
+-        rows.partition_point(|r| *r <= hi) - rows.partition_point(|r| *r < lo)
++        let order = perm.order();
++        self.deleted.iter().filter(|t| {
++            let row = [t[order[0]], t[order[1]], t[order[2]]];
++            row >= lo && row <= hi
++        }).count()
+     }
+ 
+     /// The `added` triples matching the inclusive `[lo, hi]` key range, as rows in

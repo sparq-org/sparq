@@ -1,0 +1,28 @@
+{
+  "at": "2026-09-09T14:37:04.849044+00:00",
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "manifest_files": 79,
+  "manifest_sha256": "e9fb9d60e6e003812c717f24adf223566feb85dfa6b9adfa26de5d2a93d41f10",
+  "packet_sha256": "7d426a82683f1dc24133da3ab1214dcc344b3fc803ac3cb82452f103c78450b7",
+  "source_files_verified": [
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    "scripts/feature_off_autodeclare.py",
+    ".github/workflows/vectorized-feature-off.yml",
+    "crates/sparq-core/Cargo.toml",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+  ],
+  "checks": [
+    "All 79 file hashes/sizes verified",
+    "Clean exact committed head",
+    "Both saved Git diffs byte-match",
+    "Full source copies byte-match",
+    "Proof source unchanged against base",
+    "Four successful raw builds with distinct target directories",
+    "Shim forwarded exact argv with only --locked addition",
+    "Binaries independently compare neutral=head and deletion-neutral=base; base/head differ 12 bytes",
+    "Test and negative-control log terminal assertions inspected"
+  ],
+  "limits": "Local proof only. Actual independent review and corrected-head Linux CI pending; no declaration in source."
+}

@@ -1,0 +1,32 @@
+{
+  "addition-neutral_vs_head": {
+    "left": "addition-neutral",
+    "right": "head",
+    "equal": true,
+    "differing_bytes": 0,
+    "left_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+    "right_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+    "left_bytes": 1560265,
+    "right_bytes": 1560265
+  },
+  "deletion-neutral_vs_base": {
+    "left": "deletion-neutral",
+    "right": "base",
+    "equal": true,
+    "differing_bytes": 0,
+    "left_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+    "right_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+    "left_bytes": 1560265,
+    "right_bytes": 1560265
+  },
+  "base_vs_head": {
+    "left": "base",
+    "right": "head",
+    "equal": false,
+    "differing_bytes": 12,
+    "left_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+    "right_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+    "left_bytes": 1560265,
+    "right_bytes": 1560265
+  }
+}

@@ -1,0 +1,5 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree/crates/sparq-core)
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree/crates/sparq-substrate)
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree/crates/sparq-engine)
+   Compiling sparq-wasm v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334/featoff-neutral-thbdftec/tree/crates/sparq-wasm)
+    Finished `release-wasm` profile [optimized] target(s) in 47.74s

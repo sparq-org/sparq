@@ -1,0 +1,13 @@
+    fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+        let order = perm.order();
+        let add = self.added_rows(perm, lo, hi).len();
+        let del = self
+            .deleted
+            .iter()
+            .filter(|t| {
+                let r = [t[order[0]], t[order[1]], t[order[2]]];
+                r >= lo && r <= hi
+            })
+            .count();
+        (add, del)
+    }

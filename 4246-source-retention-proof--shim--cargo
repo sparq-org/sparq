@@ -1,0 +1,24 @@
+#!/opt/homebrew/bin/python3
+from pathlib import Path
+import sys,os,subprocess,time,json,hashlib
+out=Path(os.environ['FEATOFF_PROOF_EVIDENCE'])
+args=sys.argv[1:];command=['/Users/jesght/.cargo/bin/cargo',*args]
+if args and args[0] in ['build','tree','metadata'] and '--locked' not in args:command.append('--locked')
+log=out/'cargo-invocations.jsonl';started=time.time()
+record={'cwd':os.getcwd(),'received_args':args,'actual_command':command,'started':started}
+with log.open('a') as f:f.write(json.dumps({'event':'start',**record})+'\n')
+if args and args[0]=='build':
+ tree=Path.cwd();parent=tree.parent.name
+ role='addition-neutral' if parent.startswith('featoff-neutral-') else 'deletion-neutral' if parent.startswith('featoff-delneutral-') else tree.name
+ r=subprocess.run(command,capture_output=True)
+ (out/(role+'-cargo.stdout')).write_bytes(r.stdout);(out/(role+'-cargo.stderr')).write_bytes(r.stderr)
+ sys.stdout.buffer.write(r.stdout);sys.stderr.buffer.write(r.stderr)
+ target=Path(args[args.index('--target-dir')+1]) if '--target-dir' in args else tree/'target'
+ wasm=target/'wasm32-unknown-unknown/release-wasm/sparq_wasm.wasm'
+ record.update(role=role,target=str(target),exit=r.returncode,ended=time.time())
+ if r.returncode==0 and wasm.is_file():
+  b=wasm.read_bytes();(out/'binaries'/(role+'.wasm')).write_bytes(b);record.update(wasm_bytes=len(b),wasm_sha256=hashlib.sha256(b).hexdigest())
+else:
+ r=subprocess.run(command);record.update(exit=r.returncode,ended=time.time())
+with log.open('a') as f:f.write(json.dumps({'event':'finish',**record})+'\n')
+sys.exit(r.returncode)

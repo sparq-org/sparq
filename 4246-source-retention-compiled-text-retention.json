@@ -1,0 +1,51 @@
+{
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "default_function_exact_base_text": true,
+  "default_tombstone_insert_exact_base_line": true,
+  "removed_nonblank_store_lines": [
+    {
+      "line": 191,
+      "text": "    /// `Sync`; a race just recomputes the same value and discards the loser."
+    },
+    {
+      "line": 205,
+      "text": "    /// Drops every cached projection \u2014 called whenever `added` is about to change, so a"
+    },
+    {
+      "line": 206,
+      "text": "    /// cache can never outlive the `added` it was derived from."
+    },
+    {
+      "line": 257,
+      "text": "    /// projection (O(log k), two binary searches); the `deleted` side is an unordered"
+    },
+    {
+      "line": 258,
+      "text": "    /// hash set and stays O(|deleted|)."
+    },
+    {
+      "line": 279,
+      "text": "        // aliases `added` and so never occupies a slot."
+    },
+    {
+      "line": 903,
+      "text": "        // `added` is about to change, so every cached perm-sorted projection of it is"
+    },
+    {
+      "line": 904,
+      "text": "        // stale from here on. Dropping them up front (O(1) per permutation) keeps the"
+    },
+    {
+      "line": 905,
+      "text": "        // write path O(batch) \u2014 the projections are rebuilt lazily by the next scan"
+    },
+    {
+      "line": 906,
+      "text": "        // that needs them, and only for the permutations it actually scans."
+    }
+  ],
+  "removed_compiled_store_lines": 0,
+  "actual_added_line_blanking_retains_original_default_function": true,
+  "limits": "Static prerequisites only; neither required compiler byte comparison inferred from these assertions."
+}

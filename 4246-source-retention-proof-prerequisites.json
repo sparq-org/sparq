@@ -1,0 +1,39 @@
+{
+  "tool_checks": [
+    {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustc",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustup",
+        "which",
+        "--toolchain",
+        "1.97.1",
+        "rustc"
+      ],
+      "exit": 0,
+      "stdout": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustup",
+        "target",
+        "list",
+        "--installed"
+      ],
+      "exit": 0,
+      "stdout": "aarch64-apple-darwin\nwasm32-unknown-unknown",
+      "stderr": ""
+    }
+  ],
+  "initial_disk_free_bytes": 14048661504,
+  "proof_needs": "Raw cargo, rustc/rust-lld, installed wasm32 std, cached packages and pinned Git dependency; no wasm-pack/Node/bindgen CLI. Existing readiness inventory found642/642 packages and exact Git revision cached.",
+  "protocol_policy": "Unchanged feature_off_autodeclare.py main/decide/cargo_wasm_builder, report-only; one900s attempt, CARGO_NET_OFFLINE=true, PATH cargo shim adds only --locked for build/tree/metadata. Each target remains inside its original task-owned exported or neutral tree. No injected prebuilt bundle, shared target, or unrelated target artifact. The original protocol itself copies its just-built head/base tree, including target, into each separate neutral tree; captured logs show actual recompilation of affected crates."
+}

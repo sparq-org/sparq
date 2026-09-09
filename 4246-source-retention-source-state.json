@@ -1,0 +1,10 @@
+{
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "status_porcelain": "",
+  "delta_files": [
+    "crates/sparq-core/src/store.rs"
+  ],
+  "all_other_tracked_files_including_tests_golden_workflows_manifests_docs_unchanged_from_b86": true,
+  "commit_model": "OpenAI GPT-6 Astra; inherited current xhigh lane; no external model call",
+  "source_policy": "No declaration file, gate change, runtime algorithm change, threshold, API, Clone/Arc redesign or default enablement."
+}

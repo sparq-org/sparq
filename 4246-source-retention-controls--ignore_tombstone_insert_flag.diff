@@ -1,0 +1,11 @@
+--- store.rs
++++ ignore_tombstone_insert_flag
+@@ -964,7 +964,7 @@
+                 ov.added.remove(i); // retract a pending insertion
+             } else if self.base_contains(*t) {
+                 #[cfg(feature = "overlay-deleted-projections")]
+-                { deleted_changed |= ov.deleted.insert(*t); }
++                { ov.deleted.insert(*t); }
+                 #[cfg(not(feature = "overlay-deleted-projections"))]
+                 ov.deleted.insert(*t);
+             }

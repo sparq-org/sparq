@@ -1,0 +1,12 @@
+{
+  "experimental": {
+    "files": 88,
+    "manifest_sha256": "c0ce2485c772011abf5dd1684d93c4920155a31659b8d868b2c9c06c71eac228",
+    "mismatches": []
+  },
+  "wasm-failure-b86": {
+    "files": 14,
+    "manifest_sha256": "c05d4ff763fde65988a4cd58c0c28c5d97b873681e0768a10721e69d09da97c6",
+    "mismatches": []
+  }
+}

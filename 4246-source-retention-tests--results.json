@@ -1,0 +1,80 @@
+[
+  {
+    "name": "semantic-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "store::overlay_deleted_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 9.349166208005045,
+    "summaries": [
+      "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.04s"
+    ]
+  },
+  {
+    "name": "semantic-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--lib",
+      "store::overlay_deleted_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 5.609907208010554,
+    "summaries": [
+      "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+    ]
+  },
+  {
+    "name": "clippy-off",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 3.41067587499856
+  },
+  {
+    "name": "clippy-on",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 3.061225541998283
+  }
+]

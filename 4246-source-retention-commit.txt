@@ -1,0 +1,11 @@
+commit 6334b338587fe5c635c69a09e134917ec35eaaca
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 15:08:37 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 15:08:37 2026 +0100
+
+    fix(core): preserve default overlay counting source under opt-in cfg
+    
+    Keep the original linear function and tombstone insert statement intact so the existing feature-off neutral-tree proof can evaluate the guarded additions. Preserve experimental behavior and accurate cache documentation; no gate or declaration change.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

@@ -1,0 +1,392 @@
+{
+  "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "previous_head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "decision": "Source correction and both real local compiler-backed obligations pass; ready for focused independent review. Declaration proposal remains outside source; no publication/admission or default-on claim.",
+  "source_scope": {
+    "files": [
+      "crates/sparq-core/src/store.rs"
+    ],
+    "insertions": 18,
+    "deletions": 13,
+    "change": "Retain the exact base default count_correction body under cfg-not; put cached feature-on correction in a mutually exclusive added function. Retain original standalone tombstone insert under cfg-not. Existing docs, opt-in policy, cache algorithm and invalidation remain unchanged.",
+    "compiled_text": "All original default compiled statements retained; remaining10 removed nonblank lines are comments. Actual original protocol blanks1123 added nonblank lines across14 files.",
+    "unchanged": "All other tracked files, including generated matrix golden, test source, manifests, scripts/workflows, docs and benchmark harness."
+  },
+  "prior_blocker": {
+    "run": 34358709438,
+    "job": 102489885037,
+    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "base_and_head_bytes": 1560241,
+    "differing_bytes": 12,
+    "autoderive_outcome": "neutral-build-failed",
+    "compiler_error": "E0425 undefined del in store.rs313 after added-line blanking; deletion-neutral obligation not reached.",
+    "authoritative_frozen_evidence": "../wasm-failure-b86/report.json; no log redownload or remote reread."
+  },
+  "native_validation": [
+    {
+      "name": "semantic-off",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 9.349166208005045,
+      "summaries": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.04s"
+      ]
+    },
+    {
+      "name": "semantic-on",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--lib",
+        "store::overlay_deleted_tests::",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "seconds": 5.609907208010554,
+      "summaries": [
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.11s"
+      ]
+    },
+    {
+      "name": "clippy-off",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 3.41067587499856
+    },
+    {
+      "name": "clippy-on",
+      "command": [
+        "/Users/jesght/.cargo/bin/cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-core",
+        "--features",
+        "overlay-deleted-projections",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 3.061225541998283
+    }
+  ],
+  "controls": {
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--features",
+      "overlay-deleted-projections",
+      "--lib",
+      "store::overlay_deleted_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "results": [
+      {
+        "name": "unconditional_deleted_invalidation",
+        "exit": 101,
+        "seconds": 4.422136207998847,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+        ]
+      },
+      {
+        "name": "remove_deleted_invalidation",
+        "exit": 101,
+        "seconds": 3.275726042003953,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 4 passed; 5 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.07s"
+        ]
+      },
+      {
+        "name": "ignore_tombstone_insert_flag",
+        "exit": 101,
+        "seconds": 3.1357505419873632,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.08s"
+        ]
+      },
+      {
+        "name": "ignore_tombstone_remove_flag",
+        "exit": 101,
+        "seconds": 2.946026167002856,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.10s"
+        ]
+      },
+      {
+        "name": "remove_deleted_cache_use",
+        "exit": 101,
+        "seconds": 4.375293917008094,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--features",
+          "overlay-deleted-projections",
+          "--lib",
+          "store::overlay_deleted_tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 5 passed; 4 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+        ]
+      },
+      {
+        "name": "force_cache_in_feature_off",
+        "exit": 101,
+        "seconds": 4.040687417000299,
+        "compiled": true,
+        "command": [
+          "/Users/jesght/.cargo/bin/cargo",
+          "test",
+          "--locked",
+          "--offline",
+          "-p",
+          "sparq-core",
+          "--lib",
+          "deleted_projection_feature_off_preserves_main_layout_and_heap",
+          "--",
+          "--test-threads=1"
+        ],
+        "summaries": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.00s"
+        ]
+      }
+    ]
+  },
+  "compiler_proof": {
+    "outcome": "declared",
+    "execution": {
+      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "command": [
+        "/opt/homebrew/bin/python3",
+        "-u",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof/run_original_protocol.py"
+      ],
+      "started_at": "2026-09-09T14:12:34.561420+00:00",
+      "limit_seconds": 900,
+      "disk_stop_margin_bytes": 11274289152,
+      "hard_disk_floor_bytes": 10737418240,
+      "initial_free_bytes": 13729923072,
+      "env_overrides": {
+        "CARGO_NET_OFFLINE": "true",
+        "CARGO_BUILD_JOBS": "2",
+        "CARGO_INCREMENTAL": "0",
+        "RUSTUP_TOOLCHAIN": "1.97.1",
+        "RAYON_NUM_THREADS": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334",
+        "FEATOFF_PROOF_EVIDENCE": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof",
+        "PATH": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/proof/shim:/Users/jesght/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "removed_overrides": {},
+      "executed": true,
+      "exit": 0,
+      "stop_reason": null,
+      "elapsed_seconds": 544.8218691670045,
+      "minimum_observed_free_bytes": 11595014144,
+      "final_free_bytes": 11602903040
+    },
+    "comparisons": {
+      "addition-neutral_vs_head": {
+        "left": "addition-neutral",
+        "right": "head",
+        "equal": true,
+        "differing_bytes": 0,
+        "left_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+        "right_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+        "left_bytes": 1560265,
+        "right_bytes": 1560265
+      },
+      "deletion-neutral_vs_base": {
+        "left": "deletion-neutral",
+        "right": "base",
+        "equal": true,
+        "differing_bytes": 0,
+        "left_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+        "right_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+        "left_bytes": 1560265,
+        "right_bytes": 1560265
+      },
+      "base_vs_head": {
+        "left": "base",
+        "right": "head",
+        "equal": false,
+        "differing_bytes": 12,
+        "left_sha256": "ffc6b9a50be3c44e19a12f93f2e0d8f2b0ad27cadba3cf900ad726c48889ac9e",
+        "right_sha256": "4aa13bda98ad594604c1392f7bf74a6f76656bcc2701ca14d99a3ee80a7851f5",
+        "left_bytes": 1560265,
+        "right_bytes": 1560265
+      }
+    },
+    "evidence": {
+      "base_bundle_bytes": 1560265,
+      "head_bundle_bytes": 1560265,
+      "size_delta_bytes": 0,
+      "differing_bytes": 12,
+      "closure_files_changed": [
+        ".github/feature-matrix.d/sparq-core.yml",
+        "bench/benchmarks.toml",
+        "bench/overlay-count/README.md",
+        "bench/overlay-count/src/counting.rs",
+        "bench/overlay-count/src/lifecycle.rs",
+        "bench/overlay-count/src/main.rs",
+        "crates/sparq-core/README.md",
+        "crates/sparq-core/src/store.rs",
+        "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+        "scripts/tests/feature-matrix-legnames.golden.txt",
+        "skills/sparql-query/SKILL.md"
+      ],
+      "manifest_files_changed": [
+        "bench/overlay-count/Cargo.lock",
+        "bench/overlay-count/Cargo.toml",
+        "crates/sparq-core/Cargo.toml"
+      ],
+      "files_in_compiled_closure": [
+        "crates/sparq-core/Cargo.toml",
+        "crates/sparq-core/README.md",
+        "crates/sparq-core/src/store.rs",
+        "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+      ],
+      "closure_dirs": [
+        "crates/sparq-core/",
+        "crates/sparq-engine/",
+        "crates/sparq-substrate/",
+        "crates/sparq-wasm/",
+        "vendor/spargebra/"
+      ],
+      "deleted_nonblank_lines": 10,
+      "added_nonblank_lines_blanked": 1123,
+      "neutral_tree_files_mutated": 14
+    },
+    "proposal_path": "proof/declaration-proposal.json",
+    "proposal_sha256": "1c4e4f758c7c964d34bdc0b9dc9bdd38e303c591ae5c7f7f2f7466824920af91",
+    "protocol_source_sha256": "3dddd713b18754cf9d53b9f0ba8375e24e3d3a4eebf4d52a6816160b91c39456",
+    "shim_sha256": "8d692e63b5c897e47693c10c979efeba7aaec437dd4d684008cb7ee7ce12d915"
+  },
+  "limits": [
+    "Local macOS/Apple-silicon raw wasm proof under pinned Rust1.97.1; all four bundles were freshly produced by the original protocol. Local bundles are24bytes larger than prior Linux b86 CI bundles, so no cross-host byte equality is asserted. Both required comparisons are within the same local protocol/environment.",
+    "The unchanged protocol attributes the12byte drift to line-position metadata only because both actual compiler comparisons passed. No byte-offset disassembly or independent alternative attribution method was run.",
+    "Native4feature-off and9feature-on semantic/layout/heap cases and six compiled controls are focused validation, not full-workspace Linux gates. All-target clippy passed in both states.",
+    "PR6469 remains published at b86; root owns the reviewed correction/declaration decision and subsequent normal CI. The local result does not change the live failed check.",
+    "Existing experimental cold-sort, first-reader synchronization, true-update, clone/discard and per-retained-generation memory costs remain unchanged and disclosed. No new timing, tuning, default enablement or performance-admission claim.",
+    "The exact generator proposal retains its historical [OPUS-5] template string; this execution was Astra, and independent follow-up review has not yet occurred.",
+    "No declaration, gate/ratchet/permission change, remote mutation, dispatch, install, alternate proof or retry was performed."
+  ],
+  "prior_integrity": {
+    "experimental": {
+      "files": 88,
+      "manifest_sha256": "c0ce2485c772011abf5dd1684d93c4920155a31659b8d868b2c9c06c71eac228",
+      "mismatches": []
+    },
+    "wasm-failure-b86": {
+      "files": 14,
+      "manifest_sha256": "c05d4ff763fde65988a4cd58c0c28c5d97b873681e0768a10721e69d09da97c6",
+      "mismatches": []
+    }
+  },
+  "next_step": "Root obtains focused actual Opus review of6334 and the exact generated outside-tree proposal. Only separately authorized publication/declaration can advance normal CI; keep opt-in default off."
+}

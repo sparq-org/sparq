@@ -1,0 +1,51 @@
+{
+  "crates/sparq-core/src/store.rs": {
+    "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+    "bytes": 112315,
+    "git_blob": "f965d738cce0bc296acb3df4de623a7c63dd665c",
+    "unchanged_from_b86": false,
+    "unchanged_from_base": false
+  },
+  "crates/sparq-core/src/store/overlay_deleted_tests.rs": {
+    "sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1",
+    "bytes": 14491,
+    "git_blob": "c5bb1aab20b8ba75e39c5991538eaa6bd3a67556",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": null
+  },
+  "crates/sparq-core/Cargo.toml": {
+    "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+    "bytes": 11422,
+    "git_blob": "860b41edf2f896fdb29ebfef8fa8d97ea1579765",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": false
+  },
+  "scripts/feature_off_autodeclare.py": {
+    "sha256": "3dddd713b18754cf9d53b9f0ba8375e24e3d3a4eebf4d52a6816160b91c39456",
+    "bytes": 38921,
+    "git_blob": "d7e9caac5be7321055c16811175cbfde3e30ec92",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": true
+  },
+  "Cargo.toml": {
+    "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+    "bytes": 9813,
+    "git_blob": "ee48e62dcb029c5960265fd2a21b2bb310cc1662",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": true
+  },
+  "rust-toolchain.toml": {
+    "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37",
+    "bytes": 10596,
+    "git_blob": "91fd6184cd5390bcd746de0c7a082e47fa7b7b22",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": true
+  },
+  ".github/workflows/vectorized-feature-off.yml": {
+    "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+    "bytes": 28349,
+    "git_blob": "2ce4ee29d6d0b02d46a27021f8624bb1766dff9b",
+    "unchanged_from_b86": true,
+    "unchanged_from_base": true
+  }
+}
