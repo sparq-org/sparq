@@ -46,16 +46,19 @@ independently. It returns released mappings after checking the canonical circuit
 key, public-input reconstruction and the proof. It does not assert answer
 completeness, wallet completeness, absence or holder identity.
 
-The fixed capacity is two credential slots, sixteen triples per credential, three
-patterns, four released rows, six variables and two private predicates. A single
-credential repeats a private credential slot; this does not assert two distinct
-credentials. Private integers are bounded by `MAX_PRIVATE_INTEGER`; public
+The circuit family admits one or two credential slots, sixteen triples per credential, three
+patterns, four released rows, six variables and two private predicates.
+`prepare_result` chooses the smallest credential bucket. This removes a signature
+check for one-credential answers and reveals the smaller supporting capacity.
+`prepare_result_with_options` with `CredentialCapacity::HideInTwo` keeps two
+slots, privately repeating a single credential when needed; this does not assert
+two distinct credentials. Private integers are bounded by `MAX_PRIVATE_INTEGER`; public
 predicates use the shared planner semantics. Selected blank nodes are rejected
 in-circuit. Public predicates choose the `f0` member without numeric circuitry;
 the `f2` member binds private numeric values back to canonical literal encodings.
 Measured member costs live in `tests/gate_count_snapshot.json`.
 
-The presentation contains only version, query, released RDF terms, challenge, two
+The presentation contains only version, query, released RDF terms, challenge, one or two
 issuer key slots and proof bytes. Its reconstructed public inputs additionally
 contain the accepted status-policy root and query-derived layout. Graph roots,
 sizes, salts, credential status references, signatures, selected sources and hidden

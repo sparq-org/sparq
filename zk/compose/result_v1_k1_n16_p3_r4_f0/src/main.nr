@@ -3,8 +3,8 @@
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
 // Declaration order is the Rust public-input reconstruction contract.
 use sparq_zk_compose_core::result::{result_check, N, P, R, V, STATUS_DEPTH, POLICY_DEPTH};
-global K: u32 = 2;
-global F: u32 = 2;
+global K: u32 = 1;
+global F: u32 = 0;
 
 fn main(
     challenge: pub Field, // fresh verifier challenge
@@ -18,9 +18,6 @@ fn main(
     result_count: pub u32,
     results: pub [[Field; V]; R],
     filter_count: pub u32,
-    filter_vars: pub [u32; F],
-    filter_ops: pub [u32; F],
-    filter_bounds: pub [u64; F],
     counts: [u32; K],
     salts: [Field; K],
     enc: [[[Field; 3]; N]; K],
@@ -37,8 +34,7 @@ fn main(
     values: [[Field; V]; R],
     selected_types: [[[u32; 3]; P]; R],
     selected_hashes: [[[Field; 3]; P]; R],
-    filter_values: [[u8; F]; R],
 ) {
     let _ = challenge;
-    result_check::<K, F>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, filter_vars, filter_ops, filter_bounds, counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, filter_values);
+    result_check::<K, F>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, [], [], [], counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, [[]; R]);
 }

@@ -2,7 +2,8 @@
 // PUBLIC: challenge, query/result layout, issuer slots, accepted status-policy root.
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
 // Declaration order is the Rust public-input reconstruction contract.
-use sparq_zk_compose_core::result::{result_check, K, N, P, R, V, STATUS_DEPTH, POLICY_DEPTH};
+use sparq_zk_compose_core::result::{result_check, N, P, R, V, STATUS_DEPTH, POLICY_DEPTH};
+global K: u32 = 2;
 global F: u32 = 0;
 
 fn main(
@@ -35,5 +36,5 @@ fn main(
     selected_hashes: [[[Field; 3]; P]; R],
 ) {
     let _ = challenge;
-    result_check::<F>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, [], [], [], counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, [[]; R]);
+    result_check::<K, F>(version, accepted_root, issuer_keys, pattern_count, pattern_vars, pattern_constants, projection, result_count, results, filter_count, [], [], [], counts, salts, enc, status_lists, status_versions, status_indices, status_roots, status_siblings, policy_indices, policy_siblings, signatures, selected_graphs, selected_leaves, values, selected_types, selected_hashes, [[]; R]);
 }

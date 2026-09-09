@@ -302,3 +302,10 @@ wallet/leaf indices and is private preparation, never a verifier trust decision.
 selecting witnesses. Each proof uses an internally unique private witness directory;
 canonical-key generation and verification also isolate concurrent scratch files.
 Caller tags are descriptive and cannot cause private-result input collisions.
+
+[GPT-6] Successful-result proofs now select a one- or two-credential circuit
+bucket, so removing a credential also removes its in-circuit signature check.
+The default `CredentialCapacity::Smallest` reveals the selected capacity; choose
+`prepare_result_with_options(..., ResultOptions { credential_capacity:
+CredentialCapacity::HideInTwo })` to keep the fixed two-slot policy. The verifier
+checks the bounded issuer-slot shape and derives the member independently.

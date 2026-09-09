@@ -120,6 +120,12 @@
     },
     "result_v1_k2_n16_p3_r4_f2": {
       "circuit_size": 95775
+    },
+    "result_v1_k1_n16_p3_r4_f0": {
+      "circuit_size": 32288
+    },
+    "result_v1_k1_n16_p3_r4_f2": {
+      "circuit_size": 68963
     }
   },
   "result_members_measured_at": "2026-09-09",

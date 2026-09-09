@@ -3,7 +3,7 @@
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
 // Declaration order is the Rust public-input reconstruction contract.
 use sparq_zk_compose_core::result::{result_check, N, P, R, V, STATUS_DEPTH, POLICY_DEPTH};
-global K: u32 = 2;
+global K: u32 = 1;
 global F: u32 = 2;
 
 fn main(

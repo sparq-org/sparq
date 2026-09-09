@@ -8,7 +8,7 @@
 //! Selected blank nodes are rejected in-circuit. Canonical string encodings retain
 //! lexical identity; numeric predicates open that same encoding in-circuit.
 //!
-//! Cost is dominated by two Schnorr checks and, for the F=2 member, bounded
+//! Cost is dominated by K Schnorr checks and, for the F=2 member, bounded
 //! integer token hashing. The F=0 member eliminates hidden predicate circuitry.
 
 use crate::hashes::{commit_fold, h2, h3, h4, TYPE_CODE_LITERAL};
@@ -16,7 +16,6 @@ use crate::issuer::{schnorr_verify, Point};
 use crate::revoke::revoke_unset_check;
 use crate::filter_int::filter_int_check;
 
-pub global K: u32 = 2;
 pub global N: u32 = 16;
 pub global P: u32 = 3;
 pub global R: u32 = 4;
@@ -39,7 +38,7 @@ pub fn small_integer_check(operand: Field, op: u32, bound: u64, value: u8) {
 }
 
 /// Checks the selected result witnesses under the fixed-capacity public statement.
-pub fn result_check<let F: u32>(
+pub fn result_check<let K: u32, let F: u32>(
     version: Field,
     accepted_root: Field,
     issuer_keys: [[Field; 2]; K],

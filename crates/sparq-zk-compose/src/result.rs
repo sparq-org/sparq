@@ -5,7 +5,7 @@
 //! the legacy complete-scan verifier. It proves only support for released distinct
 //! answers, not complete query answers, absence, wallet contents, or holder identity.
 //! The public transcript contains the query, released terms, a fresh challenge,
-//! two issuer key slots and the verifier's accepted status-policy root. Graph
+//! one or two issuer key slots and the verifier's accepted status-policy root. Graph
 //! roots, sizes, salts, status references and selected witness attributions are
 //! private circuit inputs. Issuer identities, fixed capacities and result size
 //! remain visible. Selected blank nodes and triple terms are rejected.
@@ -39,7 +39,7 @@ use std::process::Command;
 
 /// Maximum private integer value in this first bounded circuit lane.
 pub const MAX_PRIVATE_INTEGER: u64 = 99;
-const K: usize = 2;
+const MAX_CREDENTIALS: usize = 2;
 const N: usize = 16;
 const P: usize = 3;
 const R: usize = 4;
@@ -101,8 +101,8 @@ pub struct ResultPresentation {
     pub rows: Vec<BTreeMap<String, DisclosedTerm>>,
     /// Fresh relying-party challenge.
     pub challenge: FieldHex,
-    /// Fixed public issuer slots; a single credential repeats its issuer slot.
-    pub issuer_slots: [String; K],
+    /// Public capacity bucket: one or two issuer slots, selected by prover policy.
+    pub issuer_slots: Vec<String>,
     /// Barretenberg proof bytes under the explicitly ZK `noir-recursive` target.
     pub proof: Vec<u8>,
 }
@@ -204,11 +204,13 @@ impl ResultPolicy {
     }
 }
 
-fn package(hidden_filters: usize) -> &'static str {
-    if hidden_filters == 0 {
-        "result_v1_k2_n16_p3_r4_f0"
-    } else {
-        "result_v1_k2_n16_p3_r4_f2"
+fn package(credentials: usize, hidden_filters: usize) -> Result<&'static str, ResultError> {
+    match (credentials, hidden_filters == 0) {
+        (1, true) => Ok("result_v1_k1_n16_p3_r4_f0"),
+        (1, false) => Ok("result_v1_k1_n16_p3_r4_f2"),
+        (2, true) => Ok("result_v1_k2_n16_p3_r4_f0"),
+        (2, false) => Ok("result_v1_k2_n16_p3_r4_f2"),
+        _ => Err(reject("unsupported credential capacity bucket")),
     }
 }
 
@@ -290,6 +292,9 @@ fn public_statement(
     if p.version != VERSION || p.challenge != nonce.as_field_hex() {
         return Err(reject("version or challenge mismatch"));
     }
+    if p.issuer_slots.is_empty() || p.issuer_slots.len() > MAX_CREDENTIALS {
+        return Err(reject("unsupported credential capacity bucket"));
+    }
     let query = DisclosureQuery::parse(&p.query).map_err(|e| reject(e.to_string()))?;
     // Keep ASK out of this first wire contract; no accidental false/absence claim.
     if query.kind != QueryKind::SelectDistinct {
@@ -370,7 +375,7 @@ fn public_statement(
         let (x, y) = key.coords().ok_or_else(|| reject("identity issuer key"))?;
         keys.push([field_to_hex(&x), field_to_hex(&y)]);
     }
-    if p.issuer_slots[0] > p.issuer_slots[1] {
+    if p.issuer_slots.windows(2).any(|pair| pair[0] > pair[1]) {
         return Err(reject("noncanonical issuer slot order"));
     }
     let mut pattern_vars = [[0u32; 3]; P];
@@ -471,6 +476,23 @@ fn public_bytes(fields: &[(&str, Value)]) -> Result<Vec<u8>, ResultError> {
     Ok(out)
 }
 
+/// Selects the public credential-capacity bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CredentialCapacity {
+    /// Use one signature slot when possible, revealing that smaller capacity.
+    #[default]
+    Smallest,
+    /// Always use two slots, repeating a private credential when necessary.
+    HideInTwo,
+}
+
+/// Prover-side choices that never waive independent verifier checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ResultOptions {
+    /// Smallest is faster; HideInTwo retains the fixed two-slot disclosure policy.
+    pub credential_capacity: CredentialCapacity,
+}
+
 /// Prepares private successful witnesses and removes irrelevant wallet credentials.
 ///
 /// # Errors
@@ -482,6 +504,28 @@ pub fn prepare_result(
     rows: &[BTreeMap<String, Term>],
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
+) -> Result<PreparedResult, ResultError> {
+    prepare_result_with_options(
+        query,
+        credentials,
+        rows,
+        policy,
+        nonce,
+        ResultOptions::default(),
+    )
+}
+
+/// Prepares a result with an explicit public capacity-disclosure choice.
+///
+/// # Errors
+/// Returns the same fail-closed errors as [`prepare_result`].
+pub fn prepare_result_with_options(
+    query: &str,
+    credentials: &[ResultCredential],
+    rows: &[BTreeMap<String, Term>],
+    policy: &ResultPolicy,
+    nonce: &VerifierNonce,
+    options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
     let parsed = DisclosureQuery::parse(query).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
@@ -563,12 +607,14 @@ pub fn prepare_result(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    if used.is_empty() || used.len() > K {
+    if used.is_empty() || used.len() > MAX_CREDENTIALS {
         return Err(reject("selected credential capacity"));
     }
     used.sort_by_key(|&i| sig::public_key_to_hex(&credentials[i].issuer));
     let selected_credentials = used.len();
-    while used.len() < K {
+    while options.credential_capacity == CredentialCapacity::HideInTwo
+        && used.len() < MAX_CREDENTIALS
+    {
         used.push(used[0]);
     }
     let presentation = ResultPresentation {
@@ -583,16 +629,19 @@ pub fn prepare_result(
                     .collect()
             })
             .collect::<Result<_, ResultError>>()?,
-        issuer_slots: std::array::from_fn(|i| sig::public_key_to_hex(&credentials[used[i]].issuer)),
+        issuer_slots: used
+            .iter()
+            .map(|&i| sig::public_key_to_hex(&credentials[i].issuer))
+            .collect(),
         proof: Vec::new(),
     };
     let statement = public_statement(&presentation, policy, nonce)?;
     let public_inputs = public_bytes(&statement.fields)?;
     let mut fields = statement.fields.clone();
     let zero = field_to_hex(&Fr::from(0u64));
-    let mut counts = [0usize; K];
+    let mut counts = vec![0usize; used.len()];
     let mut salts = Vec::new();
-    let mut enc = vec![vec![vec![zero.clone(); 3]; N]; K];
+    let mut enc = vec![vec![vec![zero.clone(); 3]; N]; used.len()];
     let mut status_lists = Vec::new();
     let mut status_versions = Vec::new();
     let mut status_indices = Vec::new();
@@ -743,11 +792,11 @@ pub fn prepare_result(
         witness_uses: rows.len() * parsed.patterns.len(),
         public_predicates: rows.len() * (parsed.filters.len() - statement.hidden_filters.len()),
         private_predicates: rows.len() * statement.hidden_filters.len(),
-        signature_checks: K,
+        signature_checks: used.len(),
     };
     Ok(PreparedResult {
         presentation,
-        package: package(statement.hidden_filters.len()),
+        package: package(used.len(), statement.hidden_filters.len())?,
         toml,
         public_inputs,
         work,
@@ -843,7 +892,10 @@ pub fn verify_result(
     }
     let inputs = public_bytes(&statement.fields)?;
     let vk = prover.canonical_package_vk(
-        package(statement.hidden_filters.len()),
+        package(
+            presentation.issuer_slots.len(),
+            statement.hidden_filters.len(),
+        )?,
         &work_dir.join("canonical"),
     )?;
     if !prover.verify_with(&presentation.proof, &inputs, &vk, &work_dir.join("verify"))? {
@@ -978,19 +1030,41 @@ mod tests {
         assert_eq!(p.work.public_predicates, 1);
         assert_eq!(p.work.private_predicates, 0);
         assert_eq!(p.work.selected_credentials, 1);
-        assert_eq!(p.work.signature_checks, 2);
-        assert_eq!(p.package, "result_v1_k2_n16_p3_r4_f0");
+        assert_eq!(p.work.signature_checks, 1);
+        assert_eq!(p.package, "result_v1_k1_n16_p3_r4_f0");
         assert!(!p.toml.contains("filter_values"));
-        assert_eq!(
-            p.presentation.issuer_slots[0],
-            p.presentation.issuer_slots[1]
-        );
+        assert_eq!(p.presentation.issuer_slots.len(), 1);
         let mut bad = p.presentation.clone();
         bad.rows[0].insert("age".into(), disclosed(&integer(12)).unwrap());
         assert!(public_statement(&bad, &policy, &nonce)
             .unwrap_err()
             .to_string()
             .contains("public FILTER is false"));
+    }
+
+    #[test]
+    fn explicit_padding_retains_two_slot_policy_without_a_distinct_count_claim() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = vec![BTreeMap::from([("age".into(), integer(42))])];
+        let prepared = prepare_result_with_options(
+            PUBLIC_QUERY,
+            &credentials,
+            &rows,
+            &policy,
+            &nonce,
+            ResultOptions {
+                credential_capacity: CredentialCapacity::HideInTwo,
+            },
+        )
+        .unwrap();
+        assert_eq!(prepared.work.selected_credentials, 1);
+        assert_eq!(prepared.work.signature_checks, 2);
+        assert_eq!(prepared.presentation.issuer_slots.len(), 2);
+        assert_eq!(
+            prepared.presentation.issuer_slots[0],
+            prepared.presentation.issuer_slots[1]
+        );
+        assert_eq!(prepared.package, "result_v1_k2_n16_p3_r4_f0");
     }
 
     #[test]
@@ -1201,6 +1275,69 @@ mod tests {
                 "malicious witness {name} unexpectedly satisfied the circuit"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires pinned nargo and bb; validates every public capacity/member combination"]
+    fn result_real_capacity_and_predicate_member_matrix() {
+        pinned_toolchain().unwrap();
+        let (credentials, policy, nonce, _) = fixture();
+        let hidden_query =
+            "SELECT DISTINCT ?person WHERE { ?person <urn:age> ?age FILTER(?age >= 18) }";
+        let hidden_rows = vec![BTreeMap::from([(
+            "person".into(),
+            Term::NamedNode(iri("urn:alice")),
+        )])];
+        let public_rows = vec![BTreeMap::from([("age".into(), integer(42))])];
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!("sparq_result_matrix_{}", std::process::id()));
+        for (q, rows) in [(hidden_query, &hidden_rows), (PUBLIC_QUERY, &public_rows)] {
+            for capacity in [CredentialCapacity::Smallest, CredentialCapacity::HideInTwo] {
+                let prepared = prepare_result_with_options(
+                    q,
+                    &credentials,
+                    rows,
+                    &policy,
+                    &nonce,
+                    ResultOptions {
+                        credential_capacity: capacity,
+                    },
+                )
+                .unwrap();
+                let tag = format!("matrix_{}", prepared.package);
+                let p = prepared.prove(&driver, &dir.join(&tag), &tag).unwrap();
+                let got = verify_result(
+                    q,
+                    &p,
+                    &policy,
+                    &nonce,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &dir.join("verify"),
+                )
+                .unwrap();
+                assert_eq!(&got.rows, rows);
+                let mut wrong_bucket = p.clone();
+                if wrong_bucket.issuer_slots.len() == 1 {
+                    wrong_bucket
+                        .issuer_slots
+                        .push(wrong_bucket.issuer_slots[0].clone());
+                } else {
+                    wrong_bucket.issuer_slots.pop();
+                }
+                assert!(verify_result(
+                    q,
+                    &wrong_bucket,
+                    &policy,
+                    &nonce,
+                    &InMemorySeenNonces::default(),
+                    &driver,
+                    &dir.join("wrong_bucket")
+                )
+                .is_err());
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Full proofs anchor ABI reconstruction, proof mode, independent policy and request binding.
