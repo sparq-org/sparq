@@ -1,0 +1,65 @@
+[
+  {
+    "runtime": "rust",
+    "budget": "default",
+    "types": {
+      "rdfc:RDFC10EvalTest": {
+        "total": 64,
+        "pass": 64
+      },
+      "rdfc:RDFC10MapTest": {
+        "total": 21,
+        "pass": 21
+      },
+      "rdfc:RDFC10NegativeEvalTest": {
+        "total": 1,
+        "pass": 1
+      }
+    },
+    "skips": 0,
+    "external_timeouts": 0,
+    "nonJSON_errors": 0
+  },
+  {
+    "runtime": "js",
+    "budget": "default",
+    "types": {
+      "rdfc:RDFC10EvalTest": {
+        "total": 64,
+        "pass": 46
+      },
+      "rdfc:RDFC10MapTest": {
+        "total": 21,
+        "pass": 21
+      },
+      "rdfc:RDFC10NegativeEvalTest": {
+        "total": 1,
+        "pass": 1
+      }
+    },
+    "skips": 0,
+    "external_timeouts": 0,
+    "nonJSON_errors": 0
+  },
+  {
+    "runtime": "js",
+    "budget": "4000",
+    "types": {
+      "rdfc:RDFC10EvalTest": {
+        "total": 64,
+        "pass": 64
+      },
+      "rdfc:RDFC10MapTest": {
+        "total": 21,
+        "pass": 21
+      },
+      "rdfc:RDFC10NegativeEvalTest": {
+        "total": 1,
+        "pass": 1
+      }
+    },
+    "skips": 0,
+    "external_timeouts": 0,
+    "nonJSON_errors": 0
+  }
+]

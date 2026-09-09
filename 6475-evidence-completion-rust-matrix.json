@@ -1,0 +1,146 @@
+[
+  {
+    "labeling": "original",
+    "order": [
+      0,
+      1,
+      2
+    ],
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "original",
+    "order": [
+      0,
+      2,
+      1
+    ],
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n_:b4 <http://ex/p> _:b0 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "original",
+    "order": [
+      1,
+      0,
+      2
+    ],
+    "input": "_:b4 <http://ex/p> _:b0 .\n_:b4 <http://ex/q> _:b2 _:b3 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "original",
+    "order": [
+      1,
+      2,
+      0
+    ],
+    "input": "_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n_:b4 <http://ex/q> _:b2 _:b3 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "original",
+    "order": [
+      2,
+      0,
+      1
+    ],
+    "input": "_:b0 <http://ex/q> _:b3 _:b2 .\n_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "original",
+    "order": [
+      2,
+      1,
+      0
+    ],
+    "input": "_:b0 <http://ex/q> _:b3 _:b2 .\n_:b4 <http://ex/p> _:b0 .\n_:b4 <http://ex/q> _:b2 _:b3 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      0,
+      1,
+      2
+    ],
+    "input": "_:zz5 <http://ex/q> _:zz4 _:zz3 .\n_:zz5 <http://ex/p> _:zz0 .\n_:zz0 <http://ex/q> _:zz3 _:zz4 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      0,
+      2,
+      1
+    ],
+    "input": "_:zz5 <http://ex/q> _:zz4 _:zz3 .\n_:zz0 <http://ex/q> _:zz3 _:zz4 .\n_:zz5 <http://ex/p> _:zz0 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      1,
+      0,
+      2
+    ],
+    "input": "_:zz5 <http://ex/p> _:zz0 .\n_:zz5 <http://ex/q> _:zz4 _:zz3 .\n_:zz0 <http://ex/q> _:zz3 _:zz4 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      1,
+      2,
+      0
+    ],
+    "input": "_:zz5 <http://ex/p> _:zz0 .\n_:zz0 <http://ex/q> _:zz3 _:zz4 .\n_:zz5 <http://ex/q> _:zz4 _:zz3 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      2,
+      0,
+      1
+    ],
+    "input": "_:zz0 <http://ex/q> _:zz3 _:zz4 .\n_:zz5 <http://ex/q> _:zz4 _:zz3 .\n_:zz5 <http://ex/p> _:zz0 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "order": [
+      2,
+      1,
+      0
+    ],
+    "input": "_:zz0 <http://ex/q> _:zz3 _:zz4 .\n_:zz5 <http://ex/p> _:zz0 .\n_:zz5 <http://ex/q> _:zz4 _:zz3 .\n",
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  }
+]

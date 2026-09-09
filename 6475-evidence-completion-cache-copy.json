@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/bin/cp",
+    "-cR",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/target",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/target"
+  ],
+  "exit": 0,
+  "stderr": "",
+  "free_after": 6627852288
+}

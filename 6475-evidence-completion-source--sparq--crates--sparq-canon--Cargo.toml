@@ -1,0 +1,101 @@
+[package]
+name = "sparq-canon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "RDFC-1.0 (RDF Dataset Canonicalization / URDNA2015 successor) as a small, opt-in public API over sparq's oxrdf 0.3 term model"
+readme = "README.md"
+
+# OPT-IN, single-sourced canonicalizer. NOTHING in the workspace's default
+# build depends on this crate: it is a standalone member (like `sparq-zk`), so
+# `sparq-core`'s default build and the wasm artifact are byte-identical with or
+# without it. `sparq-zk` depends on it for the ZK commitment pipeline; consumers
+# who don't need canonicalization never pull `rdf-canon`/arkworks-free this dep.
+#
+# The RDFC-1.0 ALGORITHM itself is the maintained zkp-ld `rdf-canon` crate
+# (W3C rdf-canon-test-suite validated). This crate is the clean PUBLIC SURFACE:
+# it owns the single oxrdf-0.3 <-> oxrdf-0.2 bridge that every sparq consumer
+# (the ZK layer, and now any caller) shares, so the bridge lives in exactly one
+# place. [OPUS-4.8] sq-0qip (ex-epic sq-3183).
+
+[dependencies]
+# sparq term model (oxrdf 0.3 re-export) + store Graph.
+# [OPUS-4.8] sq-1dd5t: `default-features = false` so a wasm consumer (sparq-wasm's
+# opt-in `canon` feature, surfacing RDFC-1.0 to the @sparq-org/sparq RDF/JS Dataset)
+# can pull this crate WITHOUT forcing `sparq-core`'s default `parallel` (rayon) on —
+# rayon has no wasm32 threads. NATIVE callers keep parallelism via this crate's own
+# default `parallel` feature below (which forwards to `sparq-core/parallel`), so
+# Cargo feature unification still turns rayon on for every native build exactly as
+# before. The RDFC-1.0 algorithm itself (`rdf-canon`) is single-threaded regardless.
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+oxrdf = { workspace = true }
+oxttl = { workspace = true }
+
+# RDFC-1.0 (W3C RDF Dataset Canonicalization). Maintained zkp-ld implementation;
+# it speaks oxrdf 0.2, so we bridge from sparq's oxrdf 0.3 via canonical N-Quads
+# text (the interchange form the RDFC10 spec is defined over — lossless by
+# construction, and exercised end-to-end by the W3C suite).
+rdf-canon = "0.15.3"
+oxrdf02 = { package = "oxrdf", version = "0.2.4" }
+oxttl01 = { package = "oxttl", version = "0.1.8" }
+# RDFC-1.0's hash-function trait, re-exported as `sparq_canon::Digest` so callers
+# of the `*_with` profile functions can name a hasher without a direct dep.
+# [OPUS-4.8] Pinned to 0.10 to match rdf-canon 0.15.3's `Digest` bound (see sha2 note below).
+digest = "0.10"
+
+# [OPUS-4.8] sq-hslb: SHA-256 backing the OPT-IN, OFF-BY-DEFAULT non-standard
+# `rdf12-triple-terms` profile (native HNDQ over oxrdf-0.3 triple terms), and the
+# SHA-256/384/512 outer digests of the equally opt-in `concept` verifier. Only
+# compiled in when one of those features is on, so the default build is
+# byte-identical.
+# Pinned to 0.10 alongside the suite's `sha2` dev-dep (rdf-canon 0.15.3 / digest
+# 0.10 — lift only when rdf-canon publishes a digest-0.11 release).
+sha2 = { version = "0.10", optional = true }
+
+# [OPUS-4.8] sq-1dd5t: `parallel` is DEFAULT-ON so a plain `sparq-canon` (native)
+# build is byte-identical to before — it forwards to `sparq-core/parallel` (rayon),
+# which the crate's `sparq-core` dep now disables by default (see the dep note). A
+# wasm consumer pulls `sparq-canon` with `default-features = false` to drop rayon.
+[features]
+# Re-enable `sparq-core`'s default parallel index construction (rayon). DEFAULT-ON
+# for native; a wasm consumer disables it via `default-features = false`.
+default = ["parallel"]
+parallel = ["sparq-core/parallel"]
+# [GPT-5.6] sq-occip: reuse one N-Quads bridge buffer instead of allocating a
+# temporary String for every serialized quad. OFF by default; text is identical.
+bridge-lowcopy = []
+# NON-STANDARD, OFF BY DEFAULT. RDF-1.2 triple-term canonicalization: a native
+# RDFC-1.0 re-implementation over oxrdf-0.3 whose Hash-N-Degree-Quads descent
+# reaches blank nodes nested inside `Term::Triple` objects. This is NOT W3C
+# RDFC-1.0; W3C has published no RDF-1.2 dataset canonicalization specification.
+# With this OFF the crate is byte-identical to before and the standard paths
+# still reject triple terms with `CanonError::TripleTerm`.
+rdf12-triple-terms = ["dep:sha2"]
+# OFF BY DEFAULT. `urn:concept:` record verification (GitHub #1746): the
+# multibase/multihash envelope plus the recompute-and-byte-compare guard over
+# this crate's RDFC-1.0 digest. Deliberately does NOT define which quads make up
+# a concept record — the caller supplies them; the scope-extraction rule is owned
+# by the concept-hash definition (#1683) and its profile freeze (#1746), neither
+# vendored here (`research/genai-urn-concept-verifier-design.md`). With this OFF
+# the crate is byte-identical to before.
+concept = ["dep:sha2"]
+
+[dev-dependencies]
+sparq-engine = { path = "../sparq-engine" }
+serde_json = "1"
+# [FABLE-5] sq-3dyje.8: property-based RDFC-1.0 determinism suite
+# (tests/proptest_canon_determinism.rs). DEV/TEST-ONLY — covered by the
+# workspace-wide dev-only proptest supply-chain exemption (sq-3dyje program);
+# not in the shipped or wasm build.
+proptest = "1"
+# SHA-384 parameterized-hash cases of the W3C rdf-canon suite (test075).
+# [OPUS-4.8] Pinned to 0.10 (NOT 0.11): rdf-canon 0.15.3 exposes a `Digest` bound
+# from digest 0.10, and the suite feeds `sha2::Sha384` straight into
+# canonicalize_quads_with::<D>. Lift only once rdf-canon publishes a digest-0.11
+# release. See sparq-zk's Cargo.toml note / Dependabot PR #17.
+sha2 = "0.10"

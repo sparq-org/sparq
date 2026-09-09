@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-09T23:45:29.908311+00:00",
+  "manifest_files": 396,
+  "manifest_sha256": "65a70653291e7e746321b50b6529025e0398dfa77e67f094b5aedbc948a8af0d",
+  "packet_sha256": "0f943bfa5b625e878be443586d0f4758da4612fd85737f23d499161f7538cd1f",
+  "root_checks": "All396hash/bytes; harness/parser/API/hashoptions/negativeexpectations read; per-fixture cardinality and output equality recomputed; all280command exits/stderr verified; 12matrixcases2outputs/1perlabel verified; production source stateclean in frozen evidence.",
+  "scope": "All86packaged cases, not latestremote suite or fullSparqworkspace. JS defaultworkfactor adds1s cap;4000is explicitdiagnostic option.",
+  "cache_reclamation": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/trace/target",
+    "kind": "completed task-owned instrumented diagnostic build cache only",
+    "manifest_excludes_target": true,
+    "standalone_frozen_binary_verified": true,
+    "no_cargo_or_diagnostic_process": "escalated pgrep exact process-name query returned1 with empty stderr/output immediately before this mutation",
+    "free_before": 6353653760,
+    "free_after": 6444466176,
+    "production_or_global_cache_changed": false
+  }
+}

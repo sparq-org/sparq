@@ -1,0 +1,14 @@
+{
+  "suite": "all86 entries of packaged rdf-canon0.15.3 tests/manifest.jsonld",
+  "rust": "upstream defaults:4000 global HNDQ calls",
+  "js_modes": [
+    "default work factor1",
+    "diagnostic fixed4000 deep iterations"
+  ],
+  "js_case_timeout_ms": 1000,
+  "subprocess_timeout_seconds": 2,
+  "whole_execution_cap_seconds": 120,
+  "floor_bytes": 6442450944,
+  "retries": 0,
+  "note": "JS baseline default work factor is retained; an explicit1s case timeout is added and separately reported."
+}

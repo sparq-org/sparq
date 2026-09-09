@@ -1,0 +1,327 @@
+{
+  "issue": 6475,
+  "author": "OpenAI GPT-6 Astra, actual inherited xhigh lane",
+  "scope": "Evidence completion only; no production edit, commit or remote mutation",
+  "completed": [
+    "B1 source seam/pins/property/consumer inventory",
+    "B5 default/global budget and exact0..4 probes",
+    "B7 complete12-case Rust matrix",
+    "All86 packaged W3C manifest entries on unmodified Rust and JS5 in two fixed budget modes",
+    "B6 brief source-only issuer-order assessment"
+  ],
+  "B1": {
+    "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "pr_head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+    "merge_group": "2adb86d91345deb51e95b11af4e2b5572343c236",
+    "failed_source_job": "run34409424033/job102661090898, opt-in group g20, cargo test -p sparq-canon --features concept",
+    "property": "canonical_output_invariant_under_bnode_relabeling at tests/proptest_canon_determinism.rs:370\u2013384;256cases unchanged; materialize preserves quad order and component roles with injective label map.",
+    "seam": "canonicalize_quads(lib.rs310) -> serialize_quads/default435 or feature-lowcopy -> parse_02(495) -> rdf_canon::canonicalize_quads; default HNDQ budget retained.",
+    "dependency": "Cargo.toml declares compatible version constraints0.15.3/0.2.4/0.1.8, not exact-equals pins. Cargo.lock locks registry rdf-canon0.15.3,oxrdf0.2.4,oxttl0.1.8. Sparq native models use oxrdf0.3.3/oxttl0.2.3. No relevant source patch override found in root Cargo.toml/.cargo.",
+    "identity": "Three seam/test/manifest files byte-identical to frozen failing CI source."
+  },
+  "B5": {
+    "default": 4000,
+    "semantics": "SimpleHndqCallCounter increments a single global counter on entering hash_n_degree_quads; counter>limit errors. None/default selects4000; the public API uses Simple, not PerNode. This is a call bound, not a deadline/strict full-work bound.",
+    "error": "CanonicalizationError::HndqCallLimitExceeded(usize); Sparq maps it to CanonError::Canonicalization(String), losing enum detail but propagating failure.",
+    "counterexample": "Both renamings require exactly4 HNDQ entry calls: limits0..3 error,4/default succeed. An ambiguity rejection is demonstrably a new rejection for this accepted input.",
+    "accepted_set_limit": "Current acceptance characterized for this fixed matrix and all packaged fixtures, not an exhaustive mathematical set of all inputs."
+  },
+  "B6": {
+    "finding": "Source restores temporary issuer order by BTreeMap keyed on bN strings, although issuer map is HashMap and issuance uses integer counter. At11+ labels lexical b10 precedes b2, differing from chronological issuance.",
+    "status": "Independent source lead warrants a dedicated small fixture if root prioritizes it. No11+ temporary-issuer counterexample was constructed in this phase; not asserted as the cause of6475 or a demonstrated output failure. All packaged baseline fixtures still passed."
+  },
+  "N2": "Pure bijective relabeling with the quad sequence held fixed preserves abstract first-appearance order. No fabricated relabeling was used to claim otherwise; JS order dependence remains the distinct test.",
+  "matrix": {
+    "cases": 12,
+    "accepted_under_Rust_defaults": 12,
+    "quad_order_invariant_for_this_pair": true,
+    "relabel_invariant_for_this_pair": false,
+    "canonical_outputs": {
+      "original": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+      "renamed": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    },
+    "budget_threshold": {
+      "each_renaming_limits0through3": "HndqCallLimitExceeded(limit)",
+      "limit4": "success",
+      "default": "success at global limit4000"
+    },
+    "generalization": "Only this concrete pair tested; no general order-invariance proof."
+  },
+  "W3C_summary": {
+    "rust-default": {
+      "total": 86,
+      "passed": 86,
+      "failed_or_limited": []
+    },
+    "js-default": {
+      "total": 86,
+      "passed": 68,
+      "failed_or_limited": [
+        {
+          "id": "#test021c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (2).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test022c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (2).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test023c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test024c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test025c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test026c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test027c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test028c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test029c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test044c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (12).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test045c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (12).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test046c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (12).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test064c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test065c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test066c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test067c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test068c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        },
+        {
+          "id": "#test069c",
+          "type": "rdfc:RDFC10EvalTest",
+          "result": {
+            "error": "Maximum deep iterations exceeded (3).",
+            "error_debug": "Error"
+          }
+        }
+      ]
+    },
+    "js-4000": {
+      "total": 86,
+      "passed": 86,
+      "failed_or_limited": []
+    }
+  },
+  "W3C_counts": [
+    {
+      "runtime": "rust",
+      "budget": "default",
+      "types": {
+        "rdfc:RDFC10EvalTest": {
+          "total": 64,
+          "pass": 64
+        },
+        "rdfc:RDFC10MapTest": {
+          "total": 21,
+          "pass": 21
+        },
+        "rdfc:RDFC10NegativeEvalTest": {
+          "total": 1,
+          "pass": 1
+        }
+      },
+      "skips": 0,
+      "external_timeouts": 0,
+      "nonJSON_errors": 0
+    },
+    {
+      "runtime": "js",
+      "budget": "default",
+      "types": {
+        "rdfc:RDFC10EvalTest": {
+          "total": 64,
+          "pass": 46
+        },
+        "rdfc:RDFC10MapTest": {
+          "total": 21,
+          "pass": 21
+        },
+        "rdfc:RDFC10NegativeEvalTest": {
+          "total": 1,
+          "pass": 1
+        }
+      },
+      "skips": 0,
+      "external_timeouts": 0,
+      "nonJSON_errors": 0
+    },
+    {
+      "runtime": "js",
+      "budget": "4000",
+      "types": {
+        "rdfc:RDFC10EvalTest": {
+          "total": 64,
+          "pass": 64
+        },
+        "rdfc:RDFC10MapTest": {
+          "total": 21,
+          "pass": 21
+        },
+        "rdfc:RDFC10NegativeEvalTest": {
+          "total": 1,
+          "pass": 1
+        }
+      },
+      "skips": 0,
+      "external_timeouts": 0,
+      "nonJSON_errors": 0
+    }
+  ],
+  "validation_limits": [
+    "Custom baseline drivers call the unmodified production APIs; upstream Rust unit-test module and Sparq engine/workspace were not built.",
+    "Complete means86entries in the immutable packaged rdf-canon0.15.3 manifest, not a claim about a freshly downloaded latestW3C suite.",
+    "JS default mode retains work-factor1 but adds an explicit1s case timeout; diagnostic mode fixes4000 iterations and1s. Outer processes are bounded2s. No timeouts, unknown types or skipped entries observed.",
+    "No broad randomized differential corpus, arbitrary-input correctness proof, new algorithm candidate or accepted erratum.",
+    "No fullAPI dependency graph or downstream deployment exploitability analysis; input exposure distinctions are explicit."
+  ],
+  "options": [
+    {
+      "option": "Bounded comparison of complete equal-hash candidate outcomes at the shared canonicalizer",
+      "assessment": "Most directly aligned with preserving the existing success/invariance property, but still a design proposal. Preserve all distinct-hash behavior and genuine symmetry. When tied complete candidate issuers produce distinct full canonical documents, a deterministic document-order choice could remove input-order dependence. Partial issuers/ties across later groups need a sound completion strategy under the existing budget; do not improvise a local original-label tie break.",
+      "compatibility": "This is a canonical-output extension for an underdetermined case, not a proven existing RDFC1.0 requirement. Must test byte preservation over this baseline, property matrix, issuer/output consistency, poison limits, then obtain actual patch review. No source is approved or changed."
+    },
+    {
+      "option": "Detect divergent complete tied outcomes and return a typed ambiguity error",
+      "assessment": "Could prevent inconsistent canonical bytes and preserve genuine symmetric outputs; requires complete-outcome proof and bounded work. A blanket equal-hash rejection is disproved as a safe policy by successful symmetric W3C controls.",
+      "compatibility": "Changes currently accepted input to error. Current Sparq property calls expect success, so this alone would NOT repair the gate. No relaxation, exception or quarantine of that property is authorized."
+    },
+    {
+      "option": "Replace or switch canonicalizer",
+      "assessment": "Not evidence-supported as a small fix: JS5 shares the underdetermination and its default budget also rejects18 positive W3C fixtures. A separate complete canonical-labelling algorithm would be larger and could change standard bytes.",
+      "compatibility": "Do not switch implementation merely to make this one relabeling order pass."
+    }
+  ],
+  "recommended_next_step": "Choose one bounded actual repair-design/implementation boundary around complete equal-hash outcomes, with partial-issuer correctness and compatibility assessed before code is admitted. Retain the baseline, exact counterexample, all success properties and existing budgets. Root owns prior-art/upstream reporting and independent actual Opus review; no owner-signoff/quarantine workaround is proposed.",
+  "resources": {
+    "build": {
+      "name": "build",
+      "argv": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+        "build",
+        "--locked",
+        "--offline"
+      ],
+      "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness",
+      "exit": 0,
+      "expected_exit": 0,
+      "free_before": 6613487616,
+      "free_after": 6586970112,
+      "elapsed_total_seconds": 10.349155917,
+      "limit": null
+    },
+    "cases": {
+      "elapsed_seconds": 16.078462917,
+      "free_bytes": 6582198272,
+      "command_count": 280
+    },
+    "free_bytes": 6509555712
+  },
+  "holds": "6095review:changes and5357review:needs-user preserved; all prior evidence and production gates unchanged."
+}

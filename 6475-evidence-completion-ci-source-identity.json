@@ -1,0 +1,17 @@
+{
+  "crates/sparq-canon/src/lib.rs": {
+    "current_sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55",
+    "failing_ci_source_sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55",
+    "identical": true
+  },
+  "crates/sparq-canon/tests/proptest_canon_determinism.rs": {
+    "current_sha256": "64787c32306bbf81f97c9753f35a2d18ad43aa5bb81b37a8863ac04f67ac4011",
+    "failing_ci_source_sha256": "64787c32306bbf81f97c9753f35a2d18ad43aa5bb81b37a8863ac04f67ac4011",
+    "identical": true
+  },
+  "crates/sparq-canon/Cargo.toml": {
+    "current_sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7",
+    "failing_ci_source_sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7",
+    "identical": true
+  }
+}

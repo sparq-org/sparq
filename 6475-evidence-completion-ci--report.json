@@ -1,0 +1,61 @@
+{
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "reviewed_pr_head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+  "merge_group_head": "2adb86d91345deb51e95b11af4e2b5572343c236",
+  "gate": {
+    "run": 34409423697,
+    "job": 102660112366,
+    "event": "merge_group",
+    "attempt": 1,
+    "conclusion": "failure",
+    "reason": "Fail-fast on concluded opt-in group (g20 sparq-vectors) failure after immediate grace re-poll (poll40 then41), while29 siblings were still running. Not missing-report evidence or timeout."
+  },
+  "source_failure": {
+    "run": 34409424033,
+    "job": 102661090898,
+    "group": "opt-in group (g20 sparq-vectors)",
+    "actual_leg": "opt-in sparq-canon (concept \u2014 content-addressed record envelope + recompute guard)",
+    "command": "cargo test -p sparq-canon --features concept",
+    "test": "canonical_output_invariant_under_bnode_relabeling",
+    "assertion_file": "crates/sparq-canon/tests/proptest_canon_determinism.rs:379",
+    "test_binary_counts": {
+      "passed": 8,
+      "failed": 1,
+      "ignored": 0
+    },
+    "group_failed_legs": 1,
+    "group_total_legs": 4,
+    "times": {
+      "job_start": "2026-09-09T22:00:04Z",
+      "test_failure": "2026-09-09T22:07:45Z",
+      "job_completed": "2026-09-09T22:07:50Z"
+    },
+    "successful_result_artifact": {
+      "id": 10127065896,
+      "name": "feature-matrix-results-19",
+      "note": "Upload success is in failing-job log; artifact not downloaded."
+    }
+  },
+  "property_soundness": "The failure is valid evidence of a production canonicalization contract violation. materialize applies the same label function to every subject/object/graph blank-node position and leaves predicates/default graph unchanged. The logged permutation is a bijection of0..5, and used nodes map b0\u2192zz0,b2\u2192zz4,b3\u2192zz3,b4\u2192zz5 without collisions. The datasets are isomorphic by explicit global renaming. The property compares the actual canonicalize_quads outputs; no independently fabricated expected canonical string is involved. A pure structural check confirmed both source-derived input transcriptions have exactly this renaming. The logged two canonical strings differ.",
+  "localization_limits": "canonicalize_quads calls bridge_to_02 then rdf_canon::canonicalize_quads; lockfile pins rdf-canon0.15.3/oxrdf0.2.4. This run demonstrates the exposed production path defect, but does not isolate the bridge versus the upstream canonicalizer. No Rust compile/reproduction, hash-map nondeterminism diagnosis, upstream-source investigation or new test was performed. Random generation discovered the case; that does not justify dismissing a valid shrunk counterexample as infrastructure noise.",
+  "source_composition": "GitHub compare e534\u21922adb returns only the two classifier Python files. The failed Rust module/test, crate metadata and workflow/runner sources are byte-identical between local reviewed86b8 and main e534. This is inherited main behavior exercised by6095, not a new6095 source change. Local MG git object absent; authoritative API comparison supplies exact MG delta rather than claiming local checkout proof.",
+  "ejection_attribution": "The required gate failed for this confirmed source-check failure; that is the evidenced queue-blocking condition. No queue-event/audit record was fetched, so a distinct human/queue actor attribution is not asserted solely from the gate conclusion.",
+  "live_evidence": "At the single dependent metadata snapshot CI34409424022 remained in_progress and feature-matrix34409424033 queued overall; completed g20 failure coexisted with live g19. No polling loop or cancellation performed, and later siblings cannot erase the captured failing assertion.",
+  "dedupe": {
+    "queries": [
+      "repo:sparq-org/sparq is:issue canonical_output_invariant_under_bnode_relabeling",
+      "repo:sparq-org/sparq is:issue \"sparq-canon\" \"relabeling\""
+    ],
+    "results": [
+      0,
+      0
+    ],
+    "incomplete_results": [
+      false,
+      false
+    ],
+    "conclusion": "No exact match found within these two focused searches; not proof against different terminology."
+  },
+  "one_safe_next_step": "Root should track this counterexample as a narrowly scoped canonicalization defect and authorize deterministic replay of the saved three-quads under exact main, then localize bridge versus rdf-canon before choosing a repair. Preserve gate/test strength and all live evidence; do not rerun/requeue6095 to seek a lucky randomized pass.",
+  "unchanged": "PR6095 source/worktree and frozen recovery packet unchanged. No source/remote mutations, builds, models, releases, registry changes, retries/reruns/requeue or live-run cancellation."
+}

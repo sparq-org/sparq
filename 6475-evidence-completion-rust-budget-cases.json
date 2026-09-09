@@ -1,0 +1,80 @@
+[
+  {
+    "labeling": "original",
+    "limit": 0,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 0.",
+      "error_debug": "HndqCallLimitExceeded(0)"
+    }
+  },
+  {
+    "labeling": "original",
+    "limit": 1,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 1.",
+      "error_debug": "HndqCallLimitExceeded(1)"
+    }
+  },
+  {
+    "labeling": "original",
+    "limit": 2,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 2.",
+      "error_debug": "HndqCallLimitExceeded(2)"
+    }
+  },
+  {
+    "labeling": "original",
+    "limit": 3,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 3.",
+      "error_debug": "HndqCallLimitExceeded(3)"
+    }
+  },
+  {
+    "labeling": "original",
+    "limit": 4,
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "limit": 0,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 0.",
+      "error_debug": "HndqCallLimitExceeded(0)"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "limit": 1,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 1.",
+      "error_debug": "HndqCallLimitExceeded(1)"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "limit": 2,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 2.",
+      "error_debug": "HndqCallLimitExceeded(2)"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "limit": 3,
+    "result": {
+      "error": "The number of calls to the Hash N-degree Quads algorithm have exceeded the limit of 3.",
+      "error_debug": "HndqCallLimitExceeded(3)"
+    }
+  },
+  {
+    "labeling": "renamed",
+    "limit": 4,
+    "result": {
+      "value": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+    }
+  }
+]

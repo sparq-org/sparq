@@ -1,0 +1,6 @@
+     Locking 5 packages to latest Rust 1.85 compatible versions
+      Adding itoa v1.0.18
+      Adding memchr v2.8.3
+      Adding oxttl v0.1.8 (available: v0.2.4, requires Rust 1.87)
+      Adding serde_json v1.0.150 (available: v1.0.151)
+      Adding zmij v1.0.23

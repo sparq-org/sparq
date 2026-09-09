@@ -1,0 +1,66 @@
+crates/sparq-canon/src/concept.rs:42://!   final line among them (see [`digest_quads_with`]).
+crates/sparq-canon/src/concept.rs:60://! provide independence from RDFC-1.0 itself — `sparq-canon` delegates the
+crates/sparq-canon/src/concept.rs:83://! use sparq_canon::concept::{concept_urn, verify_concept_urn, ConceptHash, Multibase};
+crates/sparq-canon/src/concept.rs:98:use crate::{digest_quads_with, CanonError};
+crates/sparq-canon/src/concept.rs:275:            ConceptHash::Sha256 => digest_quads_with::<sha2::Sha256>(record),
+crates/sparq-canon/src/concept.rs:276:            ConceptHash::Sha512 => digest_quads_with::<sha2::Sha512>(record),
+crates/sparq-canon/src/concept.rs:277:            ConceptHash::Sha384 => digest_quads_with::<sha2::Sha384>(record),
+crates/sparq-canon/src/concept.rs:383:    /// use sparq_canon::concept::ConceptUrn;
+crates/sparq-canon/src/concept.rs:460:/// use sparq_canon::concept::{concept_multihash, ConceptHash};
+crates/sparq-canon/src/concept.rs:518:/// use sparq_canon::concept::{concept_urn, verify_concept_urn, ConceptHash, Multibase};
+crates/sparq-canon/src/concept.rs:1095:            &digest_quads_with::<sha2::Sha256>(&record()).unwrap()[..]
+crates/sparq-canon/src/concept.rs:1177:        let digest = digest_quads_with::<sha2::Sha256>(&record()).unwrap();
+crates/sparq-bench/src/update_fuzz.rs:70://! canonical form (`sparq_canon`) before comparison, which decides RDF isomorphism.
+crates/sparq-bench/src/update_fuzz.rs:761:    sparq_canon::parse_nquads(&doc)
+crates/sparq-bench/src/update_fuzz.rs:779:    let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+crates/sparq-vc/src/lib.rs:9://! already has in [`sparq_canon`].
+crates/sparq-vc/src/lib.rs:38://! ## The canonical unit — single-sourced through `sparq-canon`
+crates/sparq-vc/src/lib.rs:41://! of the document. This crate reuses [`sparq_canon`]'s single RDFC-1.0 bridge
+crates/sparq-vc/src/suite.rs:9://!    RDFC-1.0 ([`sparq_canon`]) → the canonical N-Quads `transformedDocument`.
+crates/sparq-vc/src/suite.rs:175:    Canon(sparq_canon::CanonError),
+crates/sparq-vc/src/suite.rs:204:impl From<sparq_canon::CanonError> for VcError {
+crates/sparq-vc/src/suite.rs:205:    fn from(e: sparq_canon::CanonError) -> Self {
+crates/sparq-vc/src/suite.rs:241:/// [`sparq_canon::graph_triples`] and delegates to [`sign`] — the resulting proof is
+crates/sparq-vc/src/suite.rs:248:    let triples = sparq_canon::graph_triples(graph)?;
+crates/sparq-vc/src/suite.rs:299:    let triples = sparq_canon::graph_triples(graph)?;
+crates/sparq-vc/src/suite.rs:310:    let doc_canon = sparq_canon::canonicalize_triples(triples)?;
+crates/sparq-vc/src/suite.rs:312:    let cfg_canon = sparq_canon::canonicalize_triples(&cfg_triples)?;
+crates/sparq-zk/src/trace.rs:104:/// canonical `c14nN` label). Single-sourced via the [`sparq_canon`] public API
+crates/sparq-zk/src/trace.rs:107:    sparq_canon::issue_triples(triples)
+crates/sparq-zk/src/vc_bridge.rs:318:pub(crate) fn canonical_nquads(
+crates/sparq-zk/src/vc_bridge.rs:322:    let cred_canon = crate::canon::canonicalize_triples(credential)
+crates/sparq-zk/src/vc_bridge.rs:324:    let proof_canon = crate::canon::canonicalize_triples(proof_config)
+crates/sparq-zk/src/vc_bridge.rs:343:    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+crates/sparq-zk/src/vc_bridge.rs:355:    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+crates/sparq-zk/src/vc_bridge.rs:993:        let cfg_nquads = crate::canon::canonicalize_triples(&cfg).unwrap().to_nquads();
+crates/sparq-wasm/src/canon.rs:7://! It is a thin wrapper over [`sparq_canon::canonicalize_nquads`] (the single-
+crates/sparq-wasm/src/canon.rs:10://! (the ZK commitment pipeline, the native `sparq-canon` API) produces.
+crates/sparq-wasm/src/canon.rs:31:pub fn canonicalize_nquads(input: &str) -> Result<String, JsError> {
+crates/sparq-wasm/src/canon.rs:32:    sparq_canon::canonicalize_nquads(input).map_err(|e| JsError::new(&e.to_string()))
+crates/sparq-wasm/src/canon.rs:40:    // assert against the `sparq_canon` function the export delegates to; the real
+crates/sparq-wasm/src/canon.rs:41:    // wasm32 export is exercised in tests/web.rs::canonicalize_nquads_isomorphic).
+crates/sparq-wasm/src/canon.rs:47:        let ca = sparq_canon::canonicalize_nquads(a).unwrap();
+crates/sparq-wasm/src/canon.rs:48:        let cb = sparq_canon::canonicalize_nquads(b).unwrap();
+crates/sparq-wasm/src/canon.rs:58:            sparq_canon::canonicalize_nquads(a).unwrap(),
+crates/sparq-wasm/src/canon.rs:59:            sparq_canon::canonicalize_nquads(b).unwrap()
+crates/sparq-wasm/src/canon.rs:65:        assert!(sparq_canon::canonicalize_nquads("_:b0 <http://ex/p>").is_err());
+crates/sparq-zk/src/vc_bridge_sd.rs:147:    pub fn canonical_nquads(&self) -> Result<(String, String), VcBridgeError> {
+crates/sparq-zk/src/vc_bridge_sd.rs:148:        crate::vc_bridge::canonical_nquads(self.disclosed_credential, self.proof_config)
+crates/sparq-zk/src/vc_bridge_sd.rs:620:    fn canonical_nquads_is_order_invariant_and_proof_config_first() {
+crates/sparq-zk/src/vc_bridge_sd.rs:624:        let (cfg_nq, cred_nq) = p.canonical_nquads().unwrap();
+crates/sparq-zk/src/vc_bridge_sd.rs:629:        let (cfg_nq2, cred_nq2) = p2.canonical_nquads().unwrap();
+crates/sparq-zk/src/canon.rs:10://! [`sparq_canon`] crate (the public canonicalization surface). This module is
+crates/sparq-zk/src/canon.rs:16://! guard is kept at `sparq_canon`'s default, and limit hits surface as
+crates/sparq-zk/src/canon.rs:23:pub use sparq_canon::{
+crates/sparq-zk/src/canon.rs:24:    canonicalize_graph_content, canonicalize_triples, graph_triples, CanonError, CanonicalGraph,
+crates/sparq-zk/src/dual_leaf.rs:90:use crate::canon::{self, CanonError, CanonicalGraph};
+crates/sparq-zk/src/dual_leaf.rs:633:    pub canonical: CanonicalGraph,
+crates/sparq-zk/src/dual_leaf.rs:652:    commit_canonical_dual(canon::canonicalize_triples(triples)?, salt)
+crates/sparq-zk/src/dual_leaf.rs:662:    commit_canonical_dual(canon::canonicalize_graph_content(g)?, salt)
+crates/sparq-zk/src/dual_leaf.rs:666:    canonical: CanonicalGraph,
+crates/sparq-wasm/src/lib.rs:131:pub use canon::canonicalize_nquads;
+crates/sparq-zk/src/commit.rs:14:use crate::canon::{self, CanonError, CanonicalGraph};
+crates/sparq-zk/src/commit.rs:210:    pub canonical: CanonicalGraph,
+crates/sparq-zk/src/commit.rs:240:    let canonical = canon::canonicalize_triples(triples)?;
+crates/sparq-zk/src/commit.rs:246:    let canonical = canon::canonicalize_graph_content(g)?;
+crates/sparq-zk/src/commit.rs:250:fn commit_canonical(canonical: CanonicalGraph, salt: Fr) -> Result<GraphCommitment, CommitError> {

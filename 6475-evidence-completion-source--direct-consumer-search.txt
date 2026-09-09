@@ -1,0 +1,48 @@
+crates/sparq-vc/src/suite.rs:175:    Canon(sparq_canon::CanonError),
+crates/sparq-vc/src/suite.rs:204:impl From<sparq_canon::CanonError> for VcError {
+crates/sparq-vc/src/suite.rs:205:    fn from(e: sparq_canon::CanonError) -> Self {
+crates/sparq-vc/src/suite.rs:241:/// [`sparq_canon::graph_triples`] and delegates to [`sign`] — the resulting proof is
+crates/sparq-vc/src/suite.rs:248:    let triples = sparq_canon::graph_triples(graph)?;
+crates/sparq-vc/src/suite.rs:299:    let triples = sparq_canon::graph_triples(graph)?;
+crates/sparq-vc/src/suite.rs:310:    let doc_canon = sparq_canon::canonicalize_triples(triples)?;
+crates/sparq-vc/src/suite.rs:312:    let cfg_canon = sparq_canon::canonicalize_triples(&cfg_triples)?;
+crates/sparq-wasm/src/canon.rs:7://! It is a thin wrapper over [`sparq_canon::canonicalize_nquads`] (the single-
+crates/sparq-wasm/src/canon.rs:32:    sparq_canon::canonicalize_nquads(input).map_err(|e| JsError::new(&e.to_string()))
+crates/sparq-wasm/src/canon.rs:47:        let ca = sparq_canon::canonicalize_nquads(a).unwrap();
+crates/sparq-wasm/src/canon.rs:48:        let cb = sparq_canon::canonicalize_nquads(b).unwrap();
+crates/sparq-wasm/src/canon.rs:58:            sparq_canon::canonicalize_nquads(a).unwrap(),
+crates/sparq-wasm/src/canon.rs:59:            sparq_canon::canonicalize_nquads(b).unwrap()
+crates/sparq-wasm/src/canon.rs:65:        assert!(sparq_canon::canonicalize_nquads("_:b0 <http://ex/p>").is_err());
+crates/sparq-difftest/src/iso.rs:267:    let options = rdf_canon::CanonicalizationOptions {
+crates/sparq-difftest/src/iso.rs:270:    rdf_canon::canonicalize_quads_with::<Sha256>(quads, &options)
+crates/sparq-bench/src/update_fuzz.rs:761:    sparq_canon::parse_nquads(&doc)
+crates/sparq-bench/src/update_fuzz.rs:779:    let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+crates/sparq-zk/src/canon.rs:23:pub use sparq_canon::{
+crates/sparq-canon/src/concept.rs:83://! use sparq_canon::concept::{concept_urn, verify_concept_urn, ConceptHash, Multibase};
+crates/sparq-canon/src/concept.rs:383:    /// use sparq_canon::concept::ConceptUrn;
+crates/sparq-canon/src/concept.rs:460:/// use sparq_canon::concept::{concept_multihash, ConceptHash};
+crates/sparq-canon/src/concept.rs:518:/// use sparq_canon::concept::{concept_urn, verify_concept_urn, ConceptHash, Multibase};
+crates/sparq-zk/src/trace.rs:107:    sparq_canon::issue_triples(triples)
+crates/sparq-canon/src/lib.rs:106:/// let canon = sparq_canon::canonicalize_nquads(doc).unwrap();
+crates/sparq-canon/src/lib.rs:110:/// assert_eq!(canon, sparq_canon::canonicalize_nquads(doc2).unwrap());
+crates/sparq-canon/src/lib.rs:301:/// let canon = sparq_canon::canonicalize(&[q]).unwrap();
+crates/sparq-canon/src/lib.rs:309:/// name (mirrors [`rdf_canon::canonicalize_quads`]).
+crates/sparq-canon/src/lib.rs:312:    rdf_canon::canonicalize_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))
+crates/sparq-canon/src/lib.rs:320:    let opts = rdf_canon::CanonicalizationOptions::default();
+crates/sparq-canon/src/lib.rs:321:    rdf_canon::canonicalize_quads_with::<D>(&quads02, &opts)
+crates/sparq-canon/src/lib.rs:343:    let opts = rdf_canon::CanonicalizationOptions::default();
+crates/sparq-canon/src/lib.rs:344:    let map = rdf_canon::issue_quads_with::<D>(&quads02, &opts)
+crates/sparq-canon/src/lib.rs:356:/// Alias of [`issued_identifiers`] (mirrors [`rdf_canon::issue_quads`]).
+crates/sparq-canon/src/lib.rs:359:    let map = rdf_canon::issue_quads(&quads02)
+crates/sparq-canon/src/lib.rs:378:    let canonical = rdf_canon::canonicalize_quads(&quads02)
+crates/sparq-canon/src/lib.rs:399:    let map = rdf_canon::issue_quads(&quads02)
+crates/sparq-canon/src/lib.rs:579:            let default_canonical = rdf_canon::canonicalize_quads(&default_quads).unwrap();
+crates/sparq-canon/examples/canon_bench.rs:65:    let quads = match sparq_canon::parse_nquads(&input) {
+crates/sparq-canon/examples/canon_bench.rs:76:        sparq_canon::canonicalize_quads_with::<sha2::Sha384>(&quads)
+crates/sparq-canon/examples/canon_bench.rs:78:        sparq_canon::canonicalize_quads(&quads)
+crates/sparq-canon/examples/canon_compare.rs:207:    let quads03 = sparq_canon::parse_nquads(&text)
+crates/sparq-canon/examples/canon_compare.rs:234:        sparq_canon::canonicalize_quads_with::<sha2::Sha384>(quads)
+crates/sparq-canon/examples/canon_compare.rs:236:        sparq_canon::canonicalize_quads(quads)
+crates/sparq-canon/examples/canon_compare.rs:244:        let opts = rdf_canon::CanonicalizationOptions::default();
+crates/sparq-canon/examples/canon_compare.rs:245:        rdf_canon::canonicalize_quads_with::<sha2::Sha384>(quads, &opts)
+crates/sparq-canon/examples/canon_compare.rs:247:        rdf_canon::canonicalize_quads(quads)

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T23:27:46.453047+00:00",
+  "updated_at": "2026-09-09T23:47:40.761930+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,15 +63,15 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Bounded evidence completion after independent Opus review",
+    "phase": "One bounded JS scratch experiment comparing complete tied outcomes",
     "started_at": "2026-09-09T22:22:32.104545+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/canon-relabel-invariance",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
     "directory": "direct-6475/replay",
-    "state": "Opus review collected once. No patch yet; complete Sparq seam/consumers, Rust work limits and 12-case matrix, affordable offline W3C baseline.",
+    "state": "Root verified396evidence-completionfiles; Rust86packagedcasesPASS, exactpair12cases2outputs; JS86PASS atfixeddiagnosticbudget. Investigatecompletecandidatechoice including recursive/partialties; no productionpatch.",
     "inputs": "direct-6095/queue-incident/manifest.json",
-    "constraints": "OneactiveAstra xhigh lane in ownissue6475worktree. Keep>=6GiBfree, noengine/workspacebuild/toolchain/globalinstall/cachemutation/productionpatchyet. Preserve6095review:changesand5357review:needs-user. Tracefreeze beforeactualOpus5xhigh soundnessreview. No remotererun/requeue/cancel/release/registryenable.",
+    "constraints": "OneAstra xhigh lane, ownissue6475worktree; >=6GiBfloor, JSprototype<=8MiB,noRust/engine/workspacebuild/globalinstall/cachemutation/productionpatchyet. Preserve6095review:changes/5357review:needs-user, all tests/profiles/limits/holds. No remote rerun/requeue/cancel/release/registryenable.",
     "review_requirement": "Actual independent Opus5 xhigh reviewed evidence only, no production change approved; actual future repair needs independent patch review and protected validation.",
     "replay": {
       "state": "completed_frozen_root_verified",
@@ -82,7 +82,7 @@
       "report": "direct-6475/replay/report.json",
       "result": "Exactpair directlyfailsunmodifiedrdf-canon0.15.3/oxrdf0.2.4; oneedgepositivecontrolPASS; no Sparq/bridge/parser/engine/proptestlinked",
       "scope": "Onefixedpair+control, no broadconformanceorperfclaim",
-      "target": "direct-6475/replay/target",
+      "target": "Completed task-owned target removed afterfrozenbinary/hashverification; use replay/binary/canon-relabel-replay.",
       "disk_free_after_bytes": 6836699136,
       "build_floor_bytes": 6442450944,
       "public_issue_updated": "direct-6475/replay/issue-update-verified.json"
@@ -135,13 +135,28 @@
       "production_change_approved": false,
       "public_progress": "https://github.com/sparq-org/sparq/issues/6475#issuecomment-5610159807"
     },
-    "agent_state": "postmerge_ci running bounded evidence completion; no review process active",
+    "agent_state": "postmerge_ci running single JS scratch candidate; no Rustbuild/modelcall",
     "evidence_completion": {
-      "state": "running",
+      "state": "completed_frozen_root_verified",
       "agent": "/root/postmerge_ci",
       "scope": "B1 Sparq seam/consumers, B5 default work limits, B7 fullRust12cases, affordable offline packagedW3C baseline; no productionedit",
       "time_bound_minutes": 15,
-      "prior_art": "direct-6475/source-admission/prior-art-assessment.json"
+      "prior_art": "direct-6475/source-admission/prior-art-assessment.json",
+      "directory": "direct-6475/evidence-completion",
+      "manifest_files": 396,
+      "manifest_sha256": "65a70653291e7e746321b50b6529025e0398dfa77e67f094b5aedbc948a8af0d",
+      "packet_sha256": "0f943bfa5b625e878be443586d0f4758da4612fd85737f23d499161f7538cd1f",
+      "root_verification": "direct-6475/source-admission/evidence-completion-root-verification.json",
+      "result": "Rust86/86packagedcases and12/12counterexampleaccepted,2outputsbylabel. JS86/86at4000diagnosticiterations+1scap;defaultworkfactor+1scap68passes/18worklimiterrors. Rustglobaldefault4000HNDQcalls,pairrequires4. Error-onlyguardcannotrepaircurrentsuccessproperty."
+    },
+    "tie_candidate": {
+      "state": "running",
+      "directory": "direct-6475/tie-candidate",
+      "agent": "/root/postmerge_ci",
+      "limit_minutes": 20,
+      "disk_budget_bytes": 8388608,
+      "scope": "One JSscratch prototype for complete equalhashoutcomes; include recursive discardedties,partialissuers/latergroups, preserve outputmapconsistency and symmetric baseline; finitebudget/smallcorpus; no productionedits",
+      "disk_state": "Recovered6556930048bytes bydeletingonlycompletedtaskowned6475targets; no Rustcompile/targetcopy permitted; check>=6GiB beforewrites/runs."
     }
   },
   "prs": {
@@ -578,7 +593,7 @@
     }
   },
   "next_actions": [
-    "Continue single Astra xhigh agent on bounded evidence completion B1/B5/B7 and offline W3C baseline if affordable; all earlier bundles frozen, no production edit. Opus session21832 completed/collected: do not poll/relaunch. Prior-art read-only search and public progress update via root.",
+    "Collect one bounded JS tie-candidate experiment from sameAstra xhigh agent. Rootverified396baselinefiles; noactualcandidateyet. Use completeoutcome/recursivepartialtie reasoning and unchanged86fixturebytes; avoid treating error-onlyguard as gate repair. Preservefrozenbinaries;6475completedtargetsremovedfor diskreserve. No duplicate Opusreview:21832completed.",
     "PR6095 waits on6475 with review:changes retained. Gate34409423697/job102660112366failed on real canonicalization invariant in matrix34409424033/job102661090898 (g20sparq-vectors groupscanon asleg4). Original reviewedPythonhead86b8unchanged; no lucky requeue or cancellationofremainingliveMG2adb evidence.",
     "Before eventual6095hold reconciliation, freshlyread currentlabeltimeline/humaninterventions, repairmergedmainandnewexactreview/checkevidence. Then normalprotectedqueue only. Afteractual6095merge verifytwofiles/queue47tests/gate, commentbeforeclosing4567 andwatchmain.",
     "First ordinary scheduled classifier containing6473 fix is34409971933(e534,22:00:34Z),SUCCESS; actual45tests and150writes verified. Onlyremainingmaintenancewatch is eventualgenerator-label recipients:5016correctlyplannedDEFERRED,0currentrecipients. No manualreplay/newlabels.",

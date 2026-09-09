@@ -1,0 +1,65 @@
+[
+  {
+    "name": "toolchain",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "-Vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6614384640,
+    "free_after": 6614323200,
+    "elapsed_total_seconds": 0.263308667,
+    "limit": null
+  },
+  {
+    "name": "format",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2024",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness/src/main.rs"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6614188032,
+    "free_after": 6614167552,
+    "elapsed_total_seconds": 0.520726417,
+    "limit": null
+  },
+  {
+    "name": "resolve",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6614167552,
+    "free_after": 6613487616,
+    "elapsed_total_seconds": 1.3080700829999998,
+    "limit": null
+  },
+  {
+    "name": "build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--locked",
+      "--offline"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/harness",
+    "exit": 0,
+    "expected_exit": 0,
+    "free_before": 6613487616,
+    "free_after": 6586970112,
+    "elapsed_total_seconds": 10.349155917,
+    "limit": null
+  }
+]

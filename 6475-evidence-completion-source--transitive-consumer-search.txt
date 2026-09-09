@@ -1,0 +1,18 @@
+crates/sparq-zk/src/dual_leaf.rs:652:    commit_canonical_dual(canon::canonicalize_triples(triples)?, salt)
+crates/sparq-zk/src/dual_leaf.rs:662:    commit_canonical_dual(canon::canonicalize_graph_content(g)?, salt)
+crates/sparq-zk/src/canon.rs:24:    canonicalize_graph_content, canonicalize_triples, graph_triples, CanonError, CanonicalGraph,
+crates/sparq-zk/src/vc_bridge.rs:318:pub(crate) fn canonical_nquads(
+crates/sparq-zk/src/vc_bridge.rs:322:    let cred_canon = crate::canon::canonicalize_triples(credential)
+crates/sparq-zk/src/vc_bridge.rs:324:    let proof_canon = crate::canon::canonicalize_triples(proof_config)
+crates/sparq-zk/src/vc_bridge.rs:343:    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+crates/sparq-zk/src/vc_bridge.rs:355:    let (proof_nq, cred_nq) = canonical_nquads(credential, proof_config)?;
+crates/sparq-zk/src/vc_bridge.rs:993:        let cfg_nquads = crate::canon::canonicalize_triples(&cfg).unwrap().to_nquads();
+crates/sparq-zk/src/vc_bridge_sd.rs:147:    pub fn canonical_nquads(&self) -> Result<(String, String), VcBridgeError> {
+crates/sparq-zk/src/vc_bridge_sd.rs:148:        crate::vc_bridge::canonical_nquads(self.disclosed_credential, self.proof_config)
+crates/sparq-zk/src/vc_bridge_sd.rs:620:    fn canonical_nquads_is_order_invariant_and_proof_config_first() {
+crates/sparq-zk/src/vc_bridge_sd.rs:624:        let (cfg_nq, cred_nq) = p.canonical_nquads().unwrap();
+crates/sparq-zk/src/vc_bridge_sd.rs:629:        let (cfg_nq2, cred_nq2) = p2.canonical_nquads().unwrap();
+crates/sparq-zk/src/commit.rs:240:    let canonical = canon::canonicalize_triples(triples)?;
+crates/sparq-zk/src/commit.rs:246:    let canonical = canon::canonicalize_graph_content(g)?;
+crates/sparq-vc/src/suite.rs:310:    let doc_canon = sparq_canon::canonicalize_triples(triples)?;
+crates/sparq-vc/src/suite.rs:312:    let cfg_canon = sparq_canon::canonicalize_triples(&cfg_triples)?;

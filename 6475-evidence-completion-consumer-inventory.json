@@ -1,0 +1,64 @@
+{
+  "scope": "Tracked source references and named aliases, with test/example matches separated by manual source inspection; not a dynamic whole-workspace call graph or external consumer census.",
+  "queries": [
+    "rg -n sparq_canon::|use sparq_canon|rdf_canon:: crates --glob *.rs --glob !**/tests/**",
+    "rg -n canonicalize_triples|canonicalize_graph_content|canonical_nquads crates --glob *.rs --glob !**/tests/**",
+    "rg -n canonicalize_nquads|canonicalizeNQuads --glob *.ts --glob *.js --glob *.mjs"
+  ],
+  "consumers": [
+    {
+      "path": "crates/sparq-canon/src/lib.rs",
+      "lines": "112\u2013114,310\u2013352,365\u2013412",
+      "role": "Public dataset canonical bytes, digest of exact canonical bytes, and issuer maps delegate through shared bridge to rdf-canon. SHA256 default; parameterized profiles share algorithm.",
+      "input": "General RDF1.1 quads including blank graph names; saved shape reachable."
+    },
+    {
+      "path": "crates/sparq-canon/src/concept.rs",
+      "lines": "272\u2013279",
+      "role": "Opt-in concept record digest/URN verification hashes canonical record bytes through digest_quads_with.",
+      "input": "Caller-supplied quads; canonical-byte/error contract matters."
+    },
+    {
+      "path": "crates/sparq-wasm/src/canon.rs; js/src/dataset.ts",
+      "lines": "31\u201332;283,397\u2013398",
+      "role": "Optional wasm canonicalizeNQuads forwards errors as JsError; RDF/JS Dataset.equals compares canonical strings and toCanonical returns them.",
+      "input": "General datasets; actual exported path affected. Native/wasm execution not rerun here."
+    },
+    {
+      "path": "crates/sparq-vc/src/suite.rs",
+      "lines": "309\u2013320",
+      "role": "hash_data signs/verifies SHA256(canonical proof configuration)||SHA256(canonical document).",
+      "input": "Per-document triples only; this exact mixed-graph counterexample is not demonstrated reachable."
+    },
+    {
+      "path": "crates/sparq-zk/src/canon.rs; commit.rs; dual_leaf.rs",
+      "lines": "23\u201325;239\u2013258;648\u2013680",
+      "role": "Reexported graph canonicalization defines canonical triple order, leaf order and Poseidon2 commitment inputs.",
+      "input": "Per-graph triples; current dataset counterexample not a demonstrated exploit or reachability result."
+    },
+    {
+      "path": "crates/sparq-zk/src/trace.rs",
+      "lines": "82\u2013107",
+      "role": "Issued canonical labels map source triples to committed canonical leaf indices.",
+      "input": "Per-graph triples; output/map agreement must be preserved."
+    },
+    {
+      "path": "crates/sparq-zk/src/vc_bridge.rs; vc_bridge_sd.rs",
+      "lines": "318\u2013340;147\u2013148",
+      "role": "Canonical proof/document strings feed signature hashData and selective-disclosure host verifier interface.",
+      "input": "Triples; same qualification as VC above."
+    },
+    {
+      "path": "crates/sparq-difftest/src/iso.rs",
+      "lines": "61,266\u2013271",
+      "role": "Separate direct rdf-canon caller for differential isomorphism checks, bypasses Sparq bridge with explicit100000-call budget.",
+      "input": "Comparison encoding; a Sparq seam-only repair would not repair this independent algorithm consumer."
+    },
+    {
+      "path": "crates/sparq-bench/src/update_fuzz.rs; crates/sparq-canon/src/rdf12.rs",
+      "lines": "774\u2013784;195\u2013197,318\u2013332",
+      "role": "Update-fuzz comparison uses the separate nonstandard RDF1.2 implementation via ground-term guard, not upstream rdf-canon.",
+      "input": "Separate implementation; standard dependency repair will not automatically change it. This phase did not replay the failure there."
+    }
+  ]
+}

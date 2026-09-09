@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-09T23:46:41.073203+00:00",
+  "free_before": 6439559168,
+  "removed": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/replay/target",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6475/evidence-completion/target"
+  ],
+  "purpose": "Reclaim completed task-owned build caches after evidence freeze; active agent instructed to use separate frozen binaries and stop writes.",
+  "free_after": 6556930048
+}

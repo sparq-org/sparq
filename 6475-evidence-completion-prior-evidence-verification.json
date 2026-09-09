@@ -1,0 +1,20 @@
+[
+  {
+    "name": "replay",
+    "manifest_sha256": "74d15beb79d48793ed3416e9e7d8f9aefd14d667ab9b1f129b2b8803877ea666",
+    "files": 48,
+    "verified": true
+  },
+  {
+    "name": "trace",
+    "manifest_sha256": "f0ce2f9c48fabcb7faadc32762d641a99afdf73f588be4b054c3088f4cbe6f1c",
+    "files": 365,
+    "verified": true
+  },
+  {
+    "name": "reference-v5",
+    "manifest_sha256": "3c93d0609db1301217da76750615c4db44fc3d0f3a29ab1686c7b9e59c6b0dd6",
+    "files": 41,
+    "verified": true
+  }
+]

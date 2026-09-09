@@ -1,0 +1,16 @@
+{
+  "cases": 12,
+  "accepted_under_Rust_defaults": 12,
+  "quad_order_invariant_for_this_pair": true,
+  "relabel_invariant_for_this_pair": false,
+  "canonical_outputs": {
+    "original": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+    "renamed": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n"
+  },
+  "budget_threshold": {
+    "each_renaming_limits0through3": "HndqCallLimitExceeded(limit)",
+    "limit4": "success",
+    "default": "success at global limit4000"
+  },
+  "generalization": "Only this concrete pair tested; no general order-invariance proof."
+}

@@ -1,0 +1,162 @@
+{
+  "rust-default": {
+    "total": 86,
+    "passed": 86,
+    "failed_or_limited": []
+  },
+  "js-default": {
+    "total": 86,
+    "passed": 68,
+    "failed_or_limited": [
+      {
+        "id": "#test021c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (2).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test022c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (2).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test023c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test024c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test025c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test026c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test027c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test028c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test029c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test044c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (12).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test045c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (12).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test046c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (12).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test064c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test065c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test066c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test067c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test068c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      },
+      {
+        "id": "#test069c",
+        "type": "rdfc:RDFC10EvalTest",
+        "result": {
+          "error": "Maximum deep iterations exceeded (3).",
+          "error_debug": "Error"
+        }
+      }
+    ]
+  },
+  "js-4000": {
+    "total": 86,
+    "passed": 86,
+    "failed_or_limited": []
+  }
+}

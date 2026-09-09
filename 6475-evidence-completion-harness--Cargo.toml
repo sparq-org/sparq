@@ -1,0 +1,20 @@
+[package]
+name = "canon-relabel-replay"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+
+[dependencies]
+rdf-canon = "=0.15.3"
+oxrdf = "=0.2.4"
+oxttl = "=0.1.8"
+sha2 = "=0.10.9"
+serde_json = "=1.0.150"
+serde = "=1.0.228"
+
+[profile.dev]
+debug = 0
+incremental = false

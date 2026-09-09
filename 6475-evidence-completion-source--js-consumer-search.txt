@@ -1,0 +1,8 @@
+packages/sparq-client/src/generated/sparq_wasm.d.ts:556:export function canonicalizeNQuads(input: string): string;
+packages/sparq-client/src/generated/sparq_wasm.d.ts:565:    readonly canonicalizeNQuads: (a: number, b: number) => [number, number, number, number];
+js/src/dataset.ts:40:import { canonicalizeNQuads } from './wasm.js';
+js/src/dataset.ts:283:    return this.toCanonical() === canonicalizeNQuads(quadsToNQuads(otherQuads));
+js/src/dataset.ts:394:   * `canonicalizeNQuads` binding — no longer the label-sensitive sorted-N-Quads approximation.
+js/src/dataset.ts:398:    return canonicalizeNQuads(quadsToNQuads(this.toArray()));
+js/src/wasm.ts:19:import initWasm, { Store as WasmStore, canonicalizeNQuads } from '../wasm/sparq_wasm.js';
+js/src/wasm.ts:49:export { WasmStore, canonicalizeNQuads };
