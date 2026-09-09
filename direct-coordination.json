@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T14:46:36.408914+00:00",
+  "updated_at": "2026-09-09T15:11:19.399302+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": 6469,
-    "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+    "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Actual Opus-approved source-only 6334 pushed normally and PR body verified. PR remains draft. Collect Linux feature-OFF advisory derivation before committing the per-PR declaration; no further source edit or local proof retry.",
-    "phase": "Reviewed source correction published; waiting for normal Linux proof",
+    "state": "Published declaration-only fa371 after actual Linux proof. PR is now non-draft, body verified. Full ready_for_review wasm gate34367934418 passed with actual leg2 and both tripwire steps successful. Remaining full CI, benchmark/coverage/conformance and Copilot feedback pending; no merge admission yet.",
+    "phase": "Ready for review; full CI and Copilot review running",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -201,7 +201,9 @@
       "concrete_cause": "Neutral line-blanking removes newlyadded replacementdelbinding becauseoriginalcompiledbinding wasdeleted; E0425delundefined atstore313. All20nonblankdeletedlinesin store,10compiled+10comments. Auto proof never reached neutral/headcomparison or deletion-neutral/base obligation.",
       "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof.",
       "repair_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
-      "repair_state": "Local source correction committed; new proof pending. Public CI failure remains at b86."
+      "repair_state": "Local source correction committed; new proof pending. Public CI failure remains at b86.",
+      "resolved_on_head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "resolution": "Full ready_for_review wasm artifact-equality gate passed in34367934418; original b86/6334 failures remain historical evidence."
     },
     "wasm_repair_contract": "Restoreexactoriginaldefaultcount_correction underaddedcfg-not; addmutuallyexclusivecfg-on fn; retaindefaultov.deleted.insert statementverbatim and separatefeaturebookkeeping. Keepaccuratecommentchanges. Targetedoff/onlayout/semantic/controltests andoff/onalltargetclippy. Singleexistingreport-onlyproofattempt ifinstalledrawcargotooling/caches suffice,offline/locked/noinstalls,privatepertreetargets,allwasmoptimizedbuilds15mincap anddisk10GiBstop. No substitution/retry, declaration, gateorbaselinechange, remoteaction, newmodels orEC2. Ifproofsuccess, keepgeneratedproposaloutsidecodeforreview; requirebothcomparisons.",
     "latest_check_snapshot": {
@@ -274,7 +276,9 @@
       "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
       "run": 34365605984,
       "instruction": "Wait for natural completed run, collect exact artifact-equality job log and report-only derivation. Expected leg2 remains failed until declaration; distinguish successful derivation from gate pass. If both obligations pass on Linux, preserve its exact generated proposal and proof provenance, apply required truthful attribution/head/environment scope edits under existing actual review, commit only declaration, then normal full validation. Do not claim new JSON-line counts are re-derived or repeat optimized local builds.",
-      "review": "direct-4246/source-retention/opus-review-result.json"
+      "review": "direct-4246/source-retention/opus-review-result.json",
+      "completed": true,
+      "result": "declared in normal Linux run34365605984, job102513392880; root verified exact generated output and both obligation outcomes. Saved linux6334-proof-verification.json."
     },
     "b86_new_feature_execution_verified": {
       "at": "2026-09-09T14:46:36.408914+00:00",
@@ -295,7 +299,48 @@
       "summary_external_id": "34358709776",
       "app_id": 15368,
       "limits": "This verifies the earlier b86 draft run only, not corrected-head or full-tier admission. Earlier g01 log was a different core group; the actual experimental leg is g02. Correlation lives on the summary check, while individual check external_id is blank by design."
-    }
+    },
+    "declaration_publication": {
+      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "source_parent": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "draft": false,
+      "file": "bench/feature-off-declarations/6469.json",
+      "only_final_commit_change": true,
+      "root_verification": "direct-4246/linux6334-proof-verification.json",
+      "generated_proposal": "direct-4246/linux6334-declaration-generated.json",
+      "committed_declaration": "direct-4246/linux6334-declaration-reviewed.json",
+      "prepush": "direct-4246/declaration-prepush.json",
+      "ready_precheck": "direct-4246/declaration-ready-precheck.json",
+      "ready_verified": "direct-4246/fa371-ready-verified.json",
+      "body": "direct-4246/pr-body-declaration.md"
+    },
+    "full_validation_runs": {
+      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "ready_event_at": "2026-09-09T15:05:25Z",
+      "CI": 34367934853,
+      "Benchmarks": 34367935174,
+      "feature_matrix": 34367934926,
+      "ci_summary": 34367934318,
+      "vectorized_feature_off": 34367934418,
+      "wasm_gate": "SUCCESS, actual leg2 and both comparator/derivation tripwires ran successfully",
+      "copilot_code_review": 34367948623,
+      "copilot_state": "in_progress as of final run inventory; reviewer lists may remain empty while dynamic review runs",
+      "inventory": "direct-4246/fa371-full-runs.json",
+      "wasm_status": "direct-4246/fa371-wasm-full-status.json",
+      "limit": "Earlier same-head draft runs were cancelled by normal workflow supersession following ready_for_review; root did not call cancellation. Only the full successors count for admission."
+    },
+    "copilot_request": {
+      "required_by": "AGENTS.md contribution workflow",
+      "method": "POST requested_reviewers with copilot-pull-request-reviewer[bot], supported by official GitHub documentation",
+      "docs": "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review",
+      "response": "success but requested_reviewers empty; actual dynamic Copilot run34367948623 is independently observed. Do not issue duplicate request; watch the existing run.",
+      "evidence": [
+        "direct-4246/copilot-precheck-fa371.json",
+        "direct-4246/copilot-request-result-fa371.json",
+        "direct-4246/copilot-followup-fa371.json"
+      ]
+    },
+    "next": "Collect full ready_for_review CI and actual Copilot feedback on fa371. Address substantive findings through existing Astra lane and real review as needed. No broad repeated local gates, new benchmarks, duplicate Copilot/Opus requests, registry re-enable, dispatch or release. Only protected exact-head admission once checks and conversations resolve."
   },
   "prs": {
     "4300": {

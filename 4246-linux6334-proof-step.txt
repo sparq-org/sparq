@@ -1,0 +1,111 @@
+##[group]Run set -uo pipefail
+[36;1mset -uo pipefail[0m
+[36;1mpython3 scripts/feature_off_autodeclare.py \[0m
+[36;1m  --repo . --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr "$PR_NUMBER" \[0m
+[36;1m  --base-wasm base-wasm/base.wasm --head-wasm head.wasm --report-only[0m
+shell: /usr/bin/bash -e {0}
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+  PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+  Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+  Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+  Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+  LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+  CARGO_HOME: /home/runner/.cargo
+  CARGO_INCREMENTAL: 0
+  CACHE_ON_FAILURE: false
+  BASE_SHA: a42a9e89dec485f6a319c47cb3635c59cb5a2270
+  HEAD_SHA: 6334b338587fe5c635c69a09e134917ec35eaaca
+  PR_NUMBER: 6469
+##[endgroup]
+FEATURE-OFF-CENSUS pr=6469 outcome=declared size_delta=0 differing_bytes=12 reason='every added line was proved to emit nothing (neutral bundle == head bundle) and every deleted line was proved to have emitted nothing (base-neutral bundle == ba'
+[autodeclare] outcome: declared
+[autodeclare] every added line was proved to emit nothing (neutral bundle == head bundle) and every deleted line was proved to have emitted nothing (base-neutral bundle == base bundle); the drift is line-position metadata only
+[autodeclare] evidence: {
+  "base_bundle_bytes": 1560241,
+  "head_bundle_bytes": 1560241,
+  "size_delta_bytes": 0,
+  "differing_bytes": 12,
+  "closure_files_changed": [
+    ".github/feature-matrix.d/sparq-core.yml",
+    "bench/benchmarks.toml",
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs",
+    "bench/overlay-count/src/lifecycle.rs",
+    "bench/overlay-count/src/main.rs",
+    "crates/sparq-core/README.md",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+    "scripts/tests/feature-matrix-legnames.golden.txt",
+    "skills/sparql-query/SKILL.md"
+  ],
+  "manifest_files_changed": [
+    "bench/overlay-count/Cargo.lock",
+    "bench/overlay-count/Cargo.toml",
+    "crates/sparq-core/Cargo.toml"
+  ],
+  "files_in_compiled_closure": [
+    "crates/sparq-core/Cargo.toml",
+    "crates/sparq-core/README.md",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+  ],
+  "closure_dirs": [
+    "crates/sparq-core/",
+    "crates/sparq-engine/",
+    "crates/sparq-substrate/",
+    "crates/sparq-wasm/",
+    "vendor/spargebra/"
+  ],
+  "deleted_nonblank_lines": 10,
+  "added_nonblank_lines_blanked": 1123,
+  "neutral_tree_files_mutated": 14
+}
+{
+  "pr": 6469,
+  "date": "2026-09-09",
+  "reason": "[OPUS-5] #6469: DERIVED declaration (scripts/feature_off_autodeclare.py). The feature-OFF bundle moved 12 of 1560241 bytes at a size delta of +0, and the drift was proved to carry no compiled code. Specifically: rebuilding the head tree with all 1123 added non-blank line(s) blanked produced a BYTE-IDENTICAL bundle, and rebuilding the base tree with all 10 deleted non-blank line(s) blanked left the base bundle unchanged. Both directions were covered. What moved is line-position metadata (core::panic::Location line numbers shift when lines above them move); no always-compiled code entered or left the default build. Bundle SIZE remains governed separately by the wasm_bundle_bytes ratchet.",
+  "derived": true,
+  "evidence": {
+    "base_bundle_bytes": 1560241,
+    "head_bundle_bytes": 1560241,
+    "size_delta_bytes": 0,
+    "differing_bytes": 12,
+    "closure_files_changed": [
+      ".github/feature-matrix.d/sparq-core.yml",
+      "bench/benchmarks.toml",
+      "bench/overlay-count/README.md",
+      "bench/overlay-count/src/counting.rs",
+      "bench/overlay-count/src/lifecycle.rs",
+      "bench/overlay-count/src/main.rs",
+      "crates/sparq-core/README.md",
+      "crates/sparq-core/src/store.rs",
+      "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "scripts/tests/feature-matrix-legnames.golden.txt",
+      "skills/sparql-query/SKILL.md"
+    ],
+    "manifest_files_changed": [
+      "bench/overlay-count/Cargo.lock",
+      "bench/overlay-count/Cargo.toml",
+      "crates/sparq-core/Cargo.toml"
+    ],
+    "files_in_compiled_closure": [
+      "crates/sparq-core/Cargo.toml",
+      "crates/sparq-core/README.md",
+      "crates/sparq-core/src/store.rs",
+      "crates/sparq-core/src/store/overlay_deleted_tests.rs"
+    ],
+    "closure_dirs": [
+      "crates/sparq-core/",
+      "crates/sparq-engine/",
+      "crates/sparq-substrate/",
+      "crates/sparq-wasm/",
+      "vendor/spargebra/"
+    ],
+    "deleted_nonblank_lines": 10,
+    "added_nonblank_lines_blanked": 1123,
+    "neutral_tree_files_mutated": 14
+  }
+}

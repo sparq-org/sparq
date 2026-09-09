@@ -1,0 +1,7 @@
+chore(core): record compiler-derived feature-off metadata drift for #6469
+
+The unchanged proof completed both obligations on reviewed source 6334b338 in Linux CI run34365605984/job102513392880. Add its per-PR V2 declaration without changing runtime source, workflow protections, scalar token or size ratchet.
+
+The generator output is preserved except for exactly two reason-string edits: replace the historical [OPUS-5] prefix with [GPT-6 Astra], and append the actual Linux job, measured source/base and toolchain scope. All evidence fields and derived:true remain unchanged. Actual Claude Opus5 xhigh reviewed the correction and declaration protocol; final protected CI remains required.
+
+Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

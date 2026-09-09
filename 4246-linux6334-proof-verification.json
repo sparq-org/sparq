@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-09T15:01:37.837032+00:00",
+  "source_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "run": 34365605984,
+  "job": 102513392880,
+  "proof_outcome": "declared",
+  "job_conclusion": "failure: original leg2 stays red until a declaration is committed",
+  "actual_proof_step": "success",
+  "comparisons": "Both addition-neutral=head and deletion-neutral=base passed under unchanged protocol; Linux log does not export raw paired binaries. Independent local paired binaries remain preserved separately.",
+  "source_log_sha256": "c9db3e63b4921a3e4e34c13fbe9fe696c6b1f6a1105f898af17972c14162dca6",
+  "generated_declaration_sha256": "70d2b2c611a1b3c013a9ac7515df271efcff00e9e455ed9c0ec4e56b391544a1",
+  "reviewed_declaration_sha256": "dfbdf0cb231e671d136b01c8b6f8d1e89198f12c0177abb7a8e35c11733d71ed",
+  "reason_edits": [
+    "Historical [OPUS-5] generator prefix changed to actual [GPT-6 Astra] authorship.",
+    "Appended Linux CI job, exact measured source/base, pinned toolchain and source-before-declaration scope."
+  ],
+  "unchanged": "Every non-reason field, including measured evidence and derived:true, is unchanged from the actual Linux generator output. Runtime source is unchanged from reviewed6334; no gate, size floor, workflow, scalar token or default feature edit.",
+  "independent_review": "Actual Opus 5 xhigh6334 review approved declaration content conditional on attribution/scope edits and Linux validation; root verified resulting mechanical edits."
+}
