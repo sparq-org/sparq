@@ -1049,6 +1049,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
+- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
+  direct core dependency:
+
+  ```toml
+  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
+  ```
+
+  Cargo unifies this feature for engine queries using that same core package.
+  No engine, CLI or runtime flag is required or added. It is off in default builds,
+  which keep linear deletion counting and no deletion-cache state. The experiment
+  sorts all tombstones on first use of each permutation; actual tombstone changes
+  invalidate projections, and concurrent first readers share a blocking initializer.
+  Each requested vector retains twelve bytes per tombstone plus capacity slack,
+  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
+  retained generations multiply this cost. No cap or eviction is provided. Cold
+  reads and update/read cycles can regress; measure the intended workload using
+  `bench/overlay-count` before choosing this opt-in. No universal crossover or
+  canonical speedup is claimed.
 - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
   it can be shared across the async handlers of an axum/actix/tower server directly with

@@ -50,6 +50,19 @@ assert_eq!(count, 1);
 - **Incremental updates** — start from `Graph::new()` / `Graph::default()` (an empty graph) and
   `insert_triple(s, p, o)` / `remove_triple(s, p, o)` a single triple from `oxrdf` terms, or apply
   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
+- **Experimental deletion projections** — [GPT-6 Astra] enable the default-off
+  `overlay-deleted-projections` Cargo feature on `sparq-core` to cache sorted
+  tombstone projections for repeated range counts. The default uses the original
+  linear deletion scan and carries no deletion projection slots. Each requested
+  permutation first sorts the full tombstone set; an actual tombstone change
+  invalidates those projections, and concurrent first readers wait for the same
+  initializer. Each initialized vector retains twelve bytes per deleted triple
+  plus capacity slack, alongside the deletion hash set; up to all built
+  permutations may be retained. Forks and snapshots deep-copy initialized vectors,
+  so memory grows with each retained generation. There is no deletion-count cap
+  or eviction policy. This experiment can regress cold reads and update/read
+  cycles; opt-in is not a general performance recommendation. Reproduce local
+  lifecycle measurements with `bench/overlay-count`; results are noncanonical.
 - **Out-of-core store** — query datasets larger than RAM from a memory-mapped on-disk store,
   with optional block compression and near-zero resident heap. The opt-in `block-bloom` feature
   adds per-block Bloom filters on high-NDV columns to skip the block decode on equality-bound
