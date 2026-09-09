@@ -148,6 +148,8 @@ WASM_FAILURE_B86 = ROOT / 'direct-4246/wasm-failure-b86'
 for evidence_name in [*json.loads((WASM_FAILURE_B86 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-wasm-failure-b86-' + evidence_name.replace('/', '--')] = WASM_FAILURE_B86 / evidence_name
 FILES['4246-pr6469-checks-1405.json'] = ROOT / 'direct-4246/pr6469-checks-1405.json'
+for evidence_name in ['source-retention/opus-review-6334b338.json', 'source-retention/opus-review-result.json', 'pr6469-checks-1438.json', 'pr6469-matrix-1438.json', 'pr6469-core-group-g02-b86.log', 'pr6469-deleted-feature-check-b86.json', 'pr6469-matrix-artifacts-b86.json', 'pr6469-matrix-selected-b86.zip', 'pr6469-matrix-results-1-b86.zip', 'pr6469-matrix-report-check-b86.json', 'pr6469-new-leg-b86-verification.json', '6334-prepush.json', '6334-postpush.json', 'pr-body-6334.md', '6334-body-verified.json', 'pr6469-runs-6334.json']:
+    FILES['4246-' + evidence_name.replace('/', '--')] = ROOT / 'direct-4246' / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name

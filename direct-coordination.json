@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T14:38:19.162397+00:00",
+  "updated_at": "2026-09-09T14:46:36.408914+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": 6469,
-    "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+    "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Clean local 6334b338 correction and 79-file evidence verified by root. Both original compiler obligations passed. Actual Opus 5 xhigh review running once; public PR still draft b86. No declaration in source or push yet.",
-    "phase": "Focused actual Opus review of verified source correction and compiler proof",
+    "state": "Actual Opus-approved source-only 6334 pushed normally and PR body verified. PR remains draft. Collect Linux feature-OFF advisory derivation before committing the per-PR declaration; no further source edit or local proof retry.",
+    "phase": "Reviewed source correction published; waiting for normal Linux proof",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -239,11 +239,62 @@
       "session_id": 20716,
       "kind": "exec_command",
       "started_at": "2026-09-09T14:38:19.162397+00:00",
-      "completed": false,
+      "completed": true,
       "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/review-packet.md",
       "input_sha256": "7d426a82683f1dc24133da3ab1214dcc344b3fc803ac3cb82452f103c78450b7",
       "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/source-retention/opus-review-6334b338.json",
-      "acceptance": "Require success, is_error false, actual modelUsage claude-opus-5 and exact head. No duplicate or exhausted-budget retry. Review includes correcting generated historical [OPUS-5] attribution to actual Astra execution and local scope."
+      "acceptance": "Require success, is_error false, actual modelUsage claude-opus-5 and exact head. No duplicate or exhausted-budget retry. Review includes correcting generated historical [OPUS-5] attribution to actual Astra execution and local scope.",
+      "collected_at": "2026-09-09T14:43:45.573698+00:00",
+      "output_sha256": "b6d80b0cd5fc174ed019bb883662589f194088807d89d5de259954a92d49f72f",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 225361
+    },
+    "source_retention_review_verdict": "approve_for_validation; no source blockers. Declaration content supported after truthful Astra attribution and local-scope edits. Final Linux validation remains required.",
+    "declaration_decision": {
+      "choice": "Push reviewed correction alone as draft, let normal Linux failure-triggered advisory derive evidence, then evaluate declaration.",
+      "reason": "Existing normal workflow derives only when leg2 fails. Adding declaration now would skip Linux derivation requested by reviewer. No workflow/gate edit or manual dispatch.",
+      "local_proposal": "direct-4246/source-retention/proof/declaration-proposal.json",
+      "required_edits": [
+        "Replace historical [OPUS-5] reason prefix with actual [GPT-6 Astra] execution provenance.",
+        "Append exact measured head/environment scope and disclose reason-only edits.",
+        "Keep evidence unchanged; do not present local bytes as Linux bytes."
+      ],
+      "schema_audit": "Existing V2 gate compares numeric declaration filenames; does not parse reason or compare evidence with re-derivation. README supports reviewed per-PR declaration. Adding JSON alone does not alter source layout; final Linux gate still required."
+    },
+    "source_correction_publication": {
+      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "draft": true,
+      "precheck": "direct-4246/6334-prepush.json",
+      "postpush": "direct-4246/6334-postpush.json",
+      "body": "direct-4246/pr-body-6334.md",
+      "verified_body": "direct-4246/6334-body-verified.json",
+      "runs": "direct-4246/pr6469-runs-6334.json"
+    },
+    "linux_proof_pending": {
+      "head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "run": 34365605984,
+      "instruction": "Wait for natural completed run, collect exact artifact-equality job log and report-only derivation. Expected leg2 remains failed until declaration; distinguish successful derivation from gate pass. If both obligations pass on Linux, preserve its exact generated proposal and proof provenance, apply required truthful attribution/head/environment scope edits under existing actual review, commit only declaration, then normal full validation. Do not claim new JSON-line counts are re-derived or repeat optimized local builds.",
+      "review": "direct-4246/source-retention/opus-review-result.json"
+    },
+    "b86_new_feature_execution_verified": {
+      "at": "2026-09-09T14:46:36.408914+00:00",
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "run": 34358709776,
+      "new_leg": "sparq-core (overlay-deleted-projections)",
+      "selected_test": true,
+      "actual_group": "g02 sparq-core",
+      "job": 102491249176,
+      "targeted_tests_passed": 9,
+      "artifact": {
+        "id": 10107270520,
+        "name": "feature-matrix-results-1",
+        "failed_step": null
+      },
+      "per_leg_check": 102505586986,
+      "summary_check": 102506358342,
+      "summary_external_id": "34358709776",
+      "app_id": 15368,
+      "limits": "This verifies the earlier b86 draft run only, not corrected-head or full-tier admission. Earlier g01 log was a different core group; the actual experimental leg is g02. Correlation lives on the summary check, while individual check external_id is blank by design."
     }
   },
   "prs": {

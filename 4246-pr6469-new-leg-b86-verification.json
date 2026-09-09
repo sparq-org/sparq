@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-09T14:46:36.408914+00:00",
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "run": 34358709776,
+  "new_leg": "sparq-core (overlay-deleted-projections)",
+  "selected_test": true,
+  "actual_group": "g02 sparq-core",
+  "job": 102491249176,
+  "targeted_tests_passed": 9,
+  "artifact": {
+    "id": 10107270520,
+    "name": "feature-matrix-results-1",
+    "failed_step": null
+  },
+  "per_leg_check": 102505586986,
+  "summary_check": 102506358342,
+  "summary_external_id": "34358709776",
+  "app_id": 15368,
+  "limits": "This verifies the earlier b86 draft run only, not corrected-head or full-tier admission. Earlier g01 log was a different core group; the actual experimental leg is g02. Correlation lives on the summary check, while individual check external_id is blank by design."
+}
