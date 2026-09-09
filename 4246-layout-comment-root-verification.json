@@ -1,0 +1,11 @@
+{
+  "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "parent": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+  "manifest_files_verified": 6,
+  "exact_approved_comment_replacement": true,
+  "only_changed_file": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+  "executable_code_and_declaration_unchanged": true,
+  "worktree_clean": true,
+  "diff_check": "pass",
+  "new_build_or_test": "none, comment-only change"
+}

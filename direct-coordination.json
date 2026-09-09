@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T15:37:35.272360+00:00",
+  "updated_at": "2026-09-09T15:47:11.127882+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T15:28:35.865108+00:00",
-    "evidence": "direct-4246/review-fa371-1522.json"
+    "observed_at": "2026-09-09T15:47:11.127882+00:00",
+    "evidence": "direct-4246/layout-comment/final-verified.json"
   },
   "rules": {
     "required_check": "gate",
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": 6469,
-    "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+    "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Final fa371 has no observed failed full-tier checks. Benchmark job, workspace clippy and listed conformance checks passed; tests/coverage/feature-matrix/aggregate still running or queued. One unresolved Copilot COMMENTED thread questions layout-test portability; same Astra agent assigned bounded assessment and metadata-only negative control, source frozen.",
-    "phase": "Full CI progressing; assess one Copilot layout-test comment",
+    "state": "PR6469 open non-draft at5757, no review holds, all current review threads resolved. Exact comment-only correction independently approved by actual Opus5xhigh and mechanically verified; runtime and declaration unchanged. Normal exact-head full CI has started; no new-head merge admission yet.",
+    "phase": "Reviewed comment-only correction published; normal full CI pending on5757",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -347,44 +347,225 @@
       "comment": 3970001492,
       "url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970001492",
       "finding": "size_of/align_of assertions assume repr(Rust) layout/no-padding and may fail across compiler versions/targets without semantic regression.",
-      "assessment": "Root verified all16files/source/test/compiledcontrol. Actual no-padding language overstated; proposed comment-only empirical footprint clarification, assertions preserved. Focused independent Opus review pending.",
+      "assessment": "Actual Opus confirms misleading no-padding prose; approves exact comment-only empirical footprint clarification with size/alignment assertions preserved. No runtime defect demonstrated. Single-host control and stable/nightly target limits retained.",
       "rust_reference": "https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation",
       "agent": "/root/postmerge_ci",
       "scope": "Read-only assessment plus one compiled metadata-only default-off control in private copy, warm private target and two jobs; no source change, optimized builds, remote action or new review calls.",
       "evidence": "direct-4246/review-fa371-1522.json",
-      "root_verification": "direct-4246/layout-review/root-verification.json"
+      "root_verification": "direct-4246/layout-review/root-verification.json",
+      "correction": "Only approved two-line prose replaced by four-line empirical footprint explanation. Assertions/test/executable code and declaration bytes unchanged. No new local build/test.",
+      "resolved": true,
+      "resolution_head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+      "resolution_url": "https://github.com/sparq-org/sparq/pull/6469#discussion_r3970364418",
+      "resolution_verification": "direct-4246/layout-comment/final-verified.json"
     },
     "full_validation_progress": {
-      "at": "2026-09-09T15:28:35.865108+00:00",
-      "head": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
-      "benchmarks": {
-        "run": 34367935174,
-        "job": 102521969633,
-        "conclusion": "success",
-        "generated_metrics": "All five deterministic storage/dictionary/wasm values equal main according to benchmark-action review on this exact head; no timing speedup inference."
+      "at": "2026-09-09T15:47:11.127882+00:00",
+      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+      "state": "Normal full-tier runs triggered by synchronize; no manual dispatch/retry/cancellation. Priorfa371 passes are historical, not exact-head admission.",
+      "checks": "direct-4246/layout-comment/initial-checks.json",
+      "rollup": {
+        "IN_PROGRESS": 7,
+        "SUCCESS": 21,
+        "QUEUED": 24,
+        "SKIPPED": 5
       },
-      "workspace_clippy": "success",
-      "listed_conformance_checks": "SPARQL, SHACL, GeoSPARQL, Solid WAC/ACP, ODRL, JSON-LD and inference success on full run34367934853.",
-      "remaining": "Test archive/wasm/coverage/feature matrix and aggregate continue; no failed current full check observed. Raw rollup also contains obsolete cancelled draft checks; do not mistake those for current failures.",
-      "checks": "direct-4246/checks-fa371-1522.json",
-      "review": "direct-4246/review-fa371-1522.json"
+      "failed_checks": 0,
+      "runs": [
+        {
+          "id": 34372377412,
+          "name": "pr-title",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:45:50Z"
+        },
+        {
+          "id": 34372094775,
+          "name": "Running Copilot Code Review",
+          "event": "dynamic",
+          "status": "in_progress",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:18Z"
+        },
+        {
+          "id": 34372087676,
+          "name": "CI",
+          "event": "pull_request",
+          "status": "queued",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087172,
+          "name": "Changed-code mutation review",
+          "event": "pull_request",
+          "status": "in_progress",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087963,
+          "name": "feature-matrix",
+          "event": "pull_request",
+          "status": "queued",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087168,
+          "name": "formal-verification",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372086977,
+          "name": "routing-self-tests",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087336,
+          "name": "pr-title",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087257,
+          "name": "flow-on-gates",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087051,
+          "name": "container-scan",
+          "event": "pull_request",
+          "status": "in_progress",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087222,
+          "name": "supply-chain",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087074,
+          "name": "vectorized-feature-off",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087643,
+          "name": "Benchmarks",
+          "event": "pull_request",
+          "status": "queued",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087246,
+          "name": "ci-summary",
+          "event": "pull_request",
+          "status": "in_progress",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087809,
+          "name": "fuzz",
+          "event": "pull_request",
+          "status": "queued",
+          "conclusion": null,
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087072,
+          "name": "pr-area-label",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        },
+        {
+          "id": 34372087000,
+          "name": "docs-quality",
+          "event": "pull_request",
+          "status": "completed",
+          "conclusion": "success",
+          "head_sha": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+          "created_at": "2026-09-09T15:43:14Z"
+        }
+      ],
+      "remaining": "Wait for final full workspace/tests/coverage/conformance/bench/featurematrix/wasm and aggregate gate. Inspect actual new feature-leg execution and run-bound aggregate before ordinary protected enqueue. Recheck review threads/holds/head/main immediately before any mutation."
     },
     "disk_hold": {
       "free_bytes_after_control": 6418264064,
-      "action": "No further builds. Freeze/back up before task-owned cleanup. No unrelated caches/worktrees touched."
+      "action": "No further builds. Freeze/back up before task-owned cleanup. No unrelated caches/worktrees touched.",
+      "cleanup": "direct-4246/layout-review/cleanup-result.json",
+      "free_bytes_after_cleanup": 7497883648,
+      "status": "No further builds; frozen source/log/binary evidence preserved and verified against private Git backup."
     },
     "layout_review_runtime": {
       "session_id": 8482,
       "kind": "exec_command",
-      "completed": false,
+      "completed": true,
       "input": "direct-4246/layout-review/opus-input.md",
       "input_sha256": "776b7338fe09cc58c21c75786bea326ee241c7c37e9643b555f35dbf2af22813",
       "output": "direct-4246/layout-review/opus-review-fa371.json",
       "started_at": "2026-09-09T15:38:05.925841+00:00",
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
-      "scope": "One Copilot finding plus proposed comment-only clarification; no general implementation re-review."
-    }
+      "scope": "One Copilot finding plus proposed comment-only clarification; no general implementation re-review.",
+      "collected_at": "2026-09-09T15:40:45.147431+00:00",
+      "actual_model_verified": "claude-opus-5",
+      "duration_ms": 76825,
+      "output_sha256": "84549991127b2a27176878ec4d6179c78cfde3c44f94a68021fcd6a9e6eda5ff",
+      "verdict": "approve_comment_only_fix_for_validation"
+    },
+    "layout_comment_publication": {
+      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+      "parent": "fa3712df77e8acda4c447c6d0d4f87bc3376cc12",
+      "root_verification": "direct-4246/layout-comment/root-verification.json",
+      "manifest_files_verified": 6,
+      "prepush": "direct-4246/layout-comment/prepush-remote.json",
+      "postpush": "direct-4246/layout-comment/postpush-remote.json",
+      "public_body": "direct-4246/layout-comment/pr-body.md",
+      "review_reply": "direct-4246/layout-comment/review-reply-result.json",
+      "threads_resolved": true,
+      "runs": "direct-4246/layout-comment/initial-runs.json",
+      "checks": "direct-4246/layout-comment/initial-checks.json"
+    },
+    "next_heartbeat": "Read this checkpoint first, check rate budget, inspect existing5757 full CI and reviews; no duplicate implementation/review/dispatch. On actionable failure diagnose only exact current run. If pending return quiet. If allrequired green, verify newfeature actualtests+aggregate and protected exact-head admission. Registry staysOFF; release/heldPRs remainheld; no localbuilds underdiskthreshold."
   },
   "prs": {
     "4300": {
@@ -1084,5 +1265,10 @@
       "actual_feature_leg_evidence": "Not yet collected. gh run view refused logs while parent run is in progress; no retry. Wait for ordinary completion and inspect actual test/report evidence.",
       "evidence": "direct-4246/pr6469-checks-1418.json"
     }
+  },
+  "registry_pause": {
+    "enabled": false,
+    "verified_at": "2026-09-09T15:40:45.147431+00:00",
+    "evidence": "recovery-20260909/registry-pause-1538.json"
   }
 }

@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-09T15:39:43.764258+00:00",
+  "paths_removed": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/layout-metadata-control-fa371",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/proof-trees-6334"
+  ],
+  "scope": "Only finished task-owned exported sources/wasm proof targets; no Git worktree, unrelated cache, live process or frozen evidence removed. Control source/test/log/binary and all79proof evidence files preserved and backed up.",
+  "backup_commit": "08fbfd2a5300ae519f59f9b5c72856cb8d42c82e",
+  "free_before": 6535843840,
+  "free_after": 7497883648,
+  "build_hold": "Remains; no further builds below established free-disk threshold."
+}

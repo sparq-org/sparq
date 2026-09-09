@@ -1,0 +1,29 @@
+{
+  "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+  "files": {
+    "after.rs": {
+      "bytes": 14664,
+      "sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688"
+    },
+    "before.rs": {
+      "bytes": 14491,
+      "sha256": "f51cb2e74a1af411517b9f744260f2cb69986d724e772e8b22d6c0deaf05c5b1"
+    },
+    "commit.txt": {
+      "bytes": 522,
+      "sha256": "9c9937f0c44a60afe961bbe8863f3c35763e7160f425bc457cd73b750a07e8db"
+    },
+    "delta.diff": {
+      "bytes": 1143,
+      "sha256": "48f65fa725db36d8ec7958cfe43b12f9111b9fc541539030ab44a0c3e7c25d35"
+    },
+    "verification-precommit.json": {
+      "bytes": 687,
+      "sha256": "6d0129725a30358ec9f90732b80c6614b8b79568d1e5469ad409d020714f4058"
+    },
+    "verification.json": {
+      "bytes": 1414,
+      "sha256": "39c31a1f12a92cc6642399733e54e0b865f7909ae81b47fbae4e9729b9807e6b"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+commit 5757e70be09ed95bcbc2831cec7850fa29fdf620
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 16:41:23 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 16:41:23 2026 +0100
+
+    docs(core): clarify empirical overlay footprint budget
+    
+    Apply the independently reviewed comment-only correction. Preserve every executable line and the feature-off declaration.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

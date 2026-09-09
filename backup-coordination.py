@@ -157,6 +157,13 @@ for evidence_name in ['review-fa371-1522-query.json', 'review-fa371-1522.json', 
 LAYOUT_REVIEW = ROOT / 'direct-4246/layout-review'
 for evidence_name in [*json.loads((LAYOUT_REVIEW / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json', 'control-binary', 'opus-input.md']:
     FILES['4246-layout-review-' + evidence_name.replace('/', '--')] = LAYOUT_REVIEW / evidence_name
+for evidence_name in ['opus-review-fa371.json', 'opus-review-result.json', 'opus-stderr.txt', 'cleanup-result.json']:
+    FILES['4246-layout-review-' + evidence_name] = LAYOUT_REVIEW / evidence_name
+FILES['4246-checks-fa371-1538.json'] = ROOT / 'direct-4246/checks-fa371-1538.json'
+FILES['registry-pause-1538.json'] = ROOT / 'recovery-20260909/registry-pause-1538.json'
+LAYOUT_COMMENT = ROOT / 'direct-4246/layout-comment'
+for evidence_name in [*json.loads((LAYOUT_COMMENT / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json', 'prepush-remote.json', 'postpush-remote.json', 'pr-body.md', 'review-reply.json', 'resolve-thread.json', 'reply-precheck.json', 'review-reply-result.json', 'body-precheck.json', 'body-edit-result.txt', 'resolve-precheck.json', 'resolve-result.json', 'final-verified.json', 'initial-runs.json', 'initial-checks.json']:
+    FILES['4246-layout-comment-' + evidence_name.replace('/', '--')] = LAYOUT_COMMENT / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name
