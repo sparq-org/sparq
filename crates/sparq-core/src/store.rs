@@ -295,21 +295,26 @@ impl Overlay {
     /// correction to a base range count. The `added` side rides the cached perm-sorted
     /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
     /// default; the experimental feature opts into lazy sorted projections.
+    #[cfg(not(feature = "overlay-deleted-projections"))]
+    fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+        let order = perm.order();
+        let add = self.added_rows(perm, lo, hi).len();
+        let del = self
+            .deleted
+            .iter()
+            .filter(|t| {
+                let r = [t[order[0]], t[order[1]], t[order[2]]];
+                r >= lo && r <= hi
+            })
+            .count();
+        (add, del)
+    }
+
+    /// [GPT-6 Astra] Experimental range correction using cached deletion projections.
+    #[cfg(feature = "overlay-deleted-projections")]
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
         let add = self.added_rows(perm, lo, hi).len();
-        #[cfg(feature = "overlay-deleted-projections")]
         let del = self.deleted_count(perm, lo, hi);
-        #[cfg(not(feature = "overlay-deleted-projections"))]
-        let del = {
-            let order = perm.order();
-            self.deleted
-                .iter()
-                .filter(|t| {
-                    let r = [t[order[0]], t[order[1]], t[order[2]]];
-                    r >= lo && r <= hi
-                })
-                .count()
-        };
         (add, del)
     }
 
@@ -961,7 +966,7 @@ impl TripleStore {
                 #[cfg(feature = "overlay-deleted-projections")]
                 { deleted_changed |= ov.deleted.insert(*t); }
                 #[cfg(not(feature = "overlay-deleted-projections"))]
-                { ov.deleted.insert(*t); }
+                ov.deleted.insert(*t);
             }
         }
         for t in inserts {
