@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T12:53:37.457699+00:00",
+  "updated_at": "2026-09-09T13:05:19.603042+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -105,12 +105,14 @@
       "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
     },
     "latest_agent_status": {
-      "at": "2026-09-09T12:27:56.353594+00:00",
-      "revision_head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+      "at": "2026-09-09T13:05:19.603042+00:00",
+      "revision_head": "b86b5d5ad84bce900762defa094630eb358317a6",
       "source_commit_exists_verified": true,
-      "evidence_status": "Preliminary agent report only; root has not yet verified frozen revised manifest or raw summaries.",
-      "measurements": "Identical-harness main/candidate lifecycle runs completed; four optimized builds within cap. Agent reports620 recorded windows, no retries. Warm insert into an overlay already holding deletions preserves cache; warmedfork copies projection memory. True-tombstone-update fork/read, multi-pattern cold and concurrentcold remain slower than main. Exact generated summaries/ranges/heap attribution pending packet.",
-      "remaining": "Already scoped compiled controls, tests and context packet. No additional matrix, Clone/Arc redesign or admission. Root will verify and decide one focused actual Opus5xhigh followup."
+      "evidence_status": "Agent progress report only; final feature-stage manifest not frozen or root-verified. Prior cb638 review/evidence remain verified and complete.",
+      "implementation": "Core-only overlay-deleted-projections Cargo feature defaultOFF; no dependency/forwarded enablement. Agent reports new fields/counting/flag/accounting compile out when off. Dedicated feature-matrix test leg and generated golden included; pending independent review.",
+      "validation": "Agent reports four identical default fixtures on main/candidate, layout/heap checks pass; five feature-on compiled controls killed; forcing cache into default-off build fails retained-heap assertion. Full scoped off/on/compact tests and clippy still running.",
+      "measurement": "No new timing yet. Fixed sole extension D32768,6 initially warmed permutations,4 retained generations, R={1,2,4,8,16}; identical main/opt-in harness.",
+      "remaining": "Complete current scoped checks and fixed measurement, freeze exact source/manifests/packet. No restart, additional design, extra timing points or second model review before freeze."
     },
     "revision_report": "direct-4246/revision/report.json",
     "revision_root_verification": "direct-4246/revision/root-verification.json",
