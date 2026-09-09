@@ -1,0 +1,10 @@
+{
+  "verified_at": "2026-09-09T20:56:03.587407+00:00",
+  "reviewed_head": "afa9c6489db0351855acd9297a6aa2c845434106",
+  "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "files": {
+    "scripts/triage-area.py": "88e997b1202fb4b3d2dd3e8ec3c02c9303eaac6776b4efe0bbf1539bd23287cb",
+    "scripts/tests/test_triage_area.py": "d2d0e76f3100f77f5680535a989ed1600274095b29d1d14f89e8ed7301e70243"
+  },
+  "byte_identical": true
+}

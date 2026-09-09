@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T20:43:41.326445+00:00",
+  "updated_at": "2026-09-09T21:00:20.209690+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -45,9 +45,9 @@
     ]
   },
   "live_main": {
-    "oid": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "observed_at": "2026-09-09T18:49:09.588264+00:00",
-    "evidence": "direct-6468/label-maintenance/precreate-heads1.json"
+    "oid": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "observed_at": "2026-09-09T20:57:38.644034+00:00",
+    "evidence": "direct-6468/followup-admission/state-2055.json"
   },
   "rules": {
     "required_check": "gate",
@@ -59,255 +59,22 @@
   },
   "admission_policy": "An independent GitHub account is not an extra direct-admission requirement. OWNER/MEMBER/COLLABORATOR noncontributor verdict restrictions govern automated label promotion. Actual independent Opus source review + green required CI + resolved threads permit direct protected queue admission. review:unreviewed is informational; review:needs is a real hold. Never write a fabricated canonical VERDICT:pass as jeswr.",
   "active_lane": {
-    "issue": 6468,
+    "issue": 4567,
+    "pr": 6095,
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6473 admitted normal queue, merge-group checks pending",
-    "started_at": "2026-09-09T18:04:24.354143+00:00",
-    "current_issue": "direct-6468/current-1802.json",
-    "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
-    "design": {
-      "path": "direct-6468/next-design/report.json",
-      "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7",
-      "manifest_verified": true,
-      "source_verified": true
-    },
-    "maintenance_review": {
-      "state": "completed_conditional_approve",
-      "input": "direct-6468/label-maintenance/opus-input.md",
-      "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
-      "input_bytes": 42793,
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "completed": true,
-      "scope": {
-        "name": "area:sparq-wrapper-gen",
-        "color": "c5def5",
-        "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
-      },
-      "session_id": 54894,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T18:22:35.446630+00:00",
-      "output": "direct-6468/label-maintenance/opus-review.json",
-      "acceptance": "One actual Opus5xhigh invocation; require outer successfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5 and exact action. No duplicate or exhausted-budget retry.",
-      "collected_at": "2026-09-09T18:37:51.640517+00:00",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 248771,
-      "output_sha256": "e942ae3adfdc169dcdcec710916d1855f91f7338a469319d0caa61d1e6fcd23c",
-      "result": "direct-6468/label-maintenance/opus-review-result.json",
-      "verdict": "approve for exact one label create only after all15preconditions; key newpreconditionP7completeopenPRchangedpathcheckrequired beforemutation"
-    },
-    "agent_state": "Completed/idle; no pending agent commands",
-    "maintenance": {
-      "state": "exact_one_label_created_verified",
-      "evidence": "direct-6468/label-maintenance/maintenance-verified.json",
-      "created_at": "2026-09-09T18:49:09.588264+00:00",
-      "label_id": 12123212987,
-      "name": "area:sparq-wrapper-gen",
-      "review": "actualOpus5xhighconditionalapprove; allprewriteconditionsdischarged; mandatorypostrunobservationpending",
-      "preconditions": "166openPRs/1691completechangedpaths; no generatorpathhits/renames;headsetstable;all11reviewedsourcesunchangedonnewmain;freshREST404;registryOFF",
-      "scope": "No issue/PRlabelsapplied,nocode/workflow/protectionchanges,replay/dispatch,forceorretry. Explicitmaintenance knowinglydiffersfromblanketriageremedy745forrealexistingcrate; classifierautoprovisioningstillforbidden.",
-      "next_scheduled": "Firstordinaryscheduledtriage-areaafter18:48create:cron25,55hourly;18:55nominalslotmaybedelayed. Observeactualrun,eventandcreatedtime; no manualtrigger.",
-      "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5607067328",
-      "latest_schedule_observation": {
-        "at": "2026-09-09T19:50:57.176167+00:00",
-        "run": 34395557649,
-        "created_at": "2026-09-09T19:31:23Z",
-        "conclusion": "success",
-        "before_create": false,
-        "postcreate_run_observed": true,
-        "evidence": "direct-6468/label-maintenance/postcreate-scheduled-verification.json",
-        "applied": 150,
-        "new_label_recipients": 0,
-        "new_label_5016": "correct T2 classification, deferred by write budget; eventual application still to observe",
-        "checked_again_at": "2026-09-09T20:18:26.480094+00:00",
-        "no_new_run_evidence": "direct-6468/label-maintenance/scheduled-runs-2018.json"
-      }
-    },
-    "conflict_assessment": {
-      "agent": "/root/postmerge_ci",
-      "state": "completed",
-      "prs": [
-        5457,
-        6095
-      ],
-      "directory": "direct-6468/conflict-assessment",
-      "constraints": "read-only max10min; no source/build/model/remote mutations; respectmanualholds; determine nonoverlap or recover existingchain",
-      "report": "direct-6468/conflict-assessment/report.json",
-      "manifest_verified": 19,
-      "conclusion": "Separateproductionhunks;inactiveolderdraftsnotprerequisite; leaveallholdsandhistoricalsourceintact."
-    },
-    "implementation": {
-      "agent": "/root/postmerge_ci",
-      "actual_model": "GPT-6 Astra",
-      "effort": "xhigh",
-      "state": "completed_frozen_root_verified",
-      "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
-      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
-      "branch": "codex/triage-area-unknown-diagnostics",
-      "directory": "direct-6468/implementation",
-      "contract": "Exactlytriage-area.pyandtests;title-onlyrule/ANCHORED_ONLY;rowlabeltierdiagnostic;globalzero-writeguardbeforebudgetpreserved. NoT0_DECL,census,workflows,policy/budgets,oldPRsource,remotemutations/models/buildinstalls. ScopedPython/selftests/negativecontrolsandcompositioncheck;commitreportfrozenpacket;rootreviews/publishes.",
-      "head": "5f758d2afed6524cf191820463934c2213ddcfda",
-      "manifest_files": 54,
-      "report": "direct-6468/implementation/report.json",
-      "root_verification": "direct-6468/source-admission/root-verification.json"
-    },
-    "model": "GPT-6 Astra",
-    "pr": 6473,
-    "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-    "branch": "codex/triage-area-unknown-diagnostics",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
-    "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "state": "Afa9source unchanged; Opus approved; Linux45tests andprivacy gate executedSUCCESS. Matrix GitHubdiff transient recovered attempt2. Aggregate retry accepted once; awaitingnormaladmission.",
-    "documentation_followup": {
-      "issue": 5412,
-      "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
-      "reason": "SameAGENTSentry alreadyhasPLAN/CLAIMdriftissue;addedconfirmedcategoricalnevercreatesvsnewcratewitnessexceptioninstead ofduplicateissue",
-      "verified": "direct-6468/label-maintenance/docs-drift-comment-verified.json"
-    },
-    "latest_agent_report": {
-      "state": "Completed frozen source and70files root verified",
-      "report": "direct-6468/followup/report.json"
-    },
-    "source_review": {
-      "state": "completed",
-      "completed": true,
-      "head": "5f758d2afed6524cf191820463934c2213ddcfda",
-      "input": "direct-6468/source-admission/opus-input.md",
-      "input_sha256": "0d5fd7a304064f45848960201140919345d19acd8d74d58e74519c99390b6780",
-      "input_bytes": 93839,
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "output": "direct-6468/source-admission/opus-review-5f758d2a.json",
-      "session_id": 85170,
-      "rejection": "Historical initial automatic-approval rejection, resolved with new verified PUBLIC-repository risk facts; see approval_resolution. No pending approval.",
-      "risk_audit": "direct-6468/source-admission/payload-risk-audit.json",
-      "repo_visibility": {
-        "full_name": "sparq-org/sparq",
-        "html_url": "https://github.com/sparq-org/sparq",
-        "private": false,
-        "visibility": "public"
-      },
-      "kind": "exec_command",
-      "started_at": "2026-09-09T19:05:17.131137+00:00",
-      "approval_resolution": "Initialauto-review incorrectlytreatedpacket asprivatesource andrequiredspecificexportpermission. No process/modelrequeststarted. ReadGitHubAPI provedPUBLIC repository;localmanifest/section/secretpatternauditfoundonlyreposource,taskauthored2filefixandgeneratedtestevidence,no credentialfiles/transcripts/secretmatches. SamecommandresubmittedwithnewriskfactsandexistingexplicituserOpusauthorization;automaticapprovalaccepted. Notalternativechannel/publicationworkaround or exhaustedmodelretry.",
-      "acceptance": "RequireouterJSONsubtypesuccess,is_errorfalse,modelUsageclaude-opus-5,exact5f758head. One actualmodelinvocationonly; no duplicate/exhaustedquotaretry.",
-      "collected_at": "2026-09-09T19:21:11.999773+00:00",
-      "actual_model_verified": "claude-opus-5",
-      "duration_ms": 341517,
-      "output_sha256": "5ce2cc0de3ed804025b42917d93a688af7bfee897d0dd1efb6e78d2261a1be59",
-      "verdict": "approve_for_validation",
-      "result": "direct-6468/source-admission/opus-review-result.json"
-    },
-    "followup": {
-      "agent": "/root/postmerge_ci",
-      "actual_model": "GPT-6 Astra",
-      "effort": "xhigh",
-      "state": "completed_frozen_root_verified",
-      "parent": "5f758d2afed6524cf191820463934c2213ddcfda",
-      "directory": "direct-6468/followup",
-      "address": [
-        "NB1",
-        "NB2",
-        "NB3",
-        "NB5",
-        "NB6",
-        "NB7"
-      ],
-      "decline": "NB4recordcapdeferred:keepcompletefiniteoffenderrecordset;noadditionaltruncationpolicy",
-      "report_notes": [
-        "NB8realcratefixturecoupling",
-        "NB9localPythonversionandactualCIexecutiontobeverified"
-      ],
-      "additional_evidence": "Olderror-stringconsumersgitgrep;docs-qualityonblock;scheduledselftestsbeforeapply;bdactualoutput;frozen6095mechanicalcomposition.",
-      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "manifest_files": 70,
-      "root_verification": "direct-6468/followup-admission/root-verification.json"
-    },
-    "followup_review": {
-      "state": "completed",
-      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "input": "direct-6468/followup-admission/opus-input.md",
-      "input_sha256": "05ab0997f531de5caa9622cad9e37c010bb71a70da43a516448ad9b38bacb2c1",
-      "input_bytes": 62257,
-      "expected_model": "claude-opus-5",
-      "effort": "xhigh",
-      "output": "direct-6468/followup-admission/opus-review-afa9c648.json",
-      "session_id": 37673,
-      "kind": "exec_command",
-      "started_at": "2026-09-09T19:49:28.992457+00:00",
-      "completed": true,
-      "acceptance": "One actual Opus5xhigh invocation. Require successful outer JSON, actual modelUsage and exact afa9 head; no duplicate or exhausted-budget retry.",
-      "actual_model_verified": "claude-opus-5",
-      "collected_at": "2026-09-09T19:51:48.068504+00:00",
-      "duration_ms": 96986,
-      "output_sha256": "58b405c9018ef10c161b37c32517cb2c88de284506b057e69e2342b69c4000d4",
-      "result": "direct-6468/followup-admission/opus-review-result.json",
-      "verdict": "approve_for_validation"
-    },
-    "publication": {
-      "pr": 6473,
-      "url": "https://github.com/sparq-org/sparq/pull/6473",
-      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "base": "main",
-      "draft": false,
-      "body": "direct-6468/followup-admission/pr-body.md"
-    },
-    "ci_recovery": {
-      "at": "2026-09-09T19:57:56.230176+00:00",
-      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "run": 34397783877,
-      "job": 102621666118,
-      "cause": "dorny paths-filter: GitHub diff temporarily unavailable due to heavy server load, resource PullRequest field diff code not_available. Not a rate-budget exhaustion.",
-      "proof": "direct-6468/followup-admission/pr6473-matrix-detect-failed.log",
-      "revalidation": "Exact head/OPEN main/nohold; terminal run attempt1; same RESTfiles endpoint now returns exactly2reviewedfiles.",
-      "action": "One POST /actions/jobs/102621666118/rerun acceptedHTTP201",
-      "attempts": 1,
-      "receipt": "direct-6468/followup-admission/matrix-retry-receipt.txt",
-      "next": "Observe attempt2; only after matrix recovery and freshtargetcheck rerun failed aggregate once. No repeat storm.",
-      "matrix_recovered": true,
-      "matrix_attempt": 2,
-      "matrix_conclusion": "success",
-      "aggregate_run": 34397783664,
-      "aggregate_job": 102621664513,
-      "aggregate_retry": "attempt2SUCCESS; completed20:00:44Z, job102623664012",
-      "aggregate_receipt": "direct-6468/followup-admission/gate-retry-receipt.txt"
-    },
-    "linux_validation": {
-      "proof": "direct-6468/followup-admission/linux-validation-proof.json",
-      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "run": 34397783624,
-      "suite_tests": 45,
-      "privacy": "executedPASS",
-      "python": "3.12.14"
-    },
-    "queue": {
-      "entry_id": "MQE_lQDOSz3qKM8AAAABC44lCc4AA2w6zgLJmhw",
-      "position": 1,
-      "state": "AWAITING_CHECKS",
-      "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-      "admitted_at": "2026-09-09T20:15:02.031948+00:00",
-      "proof": "direct-6468/followup-admission/admission-verification.json",
-      "latest_runs": "direct-6468/followup-admission/queue-initial-runs.json",
-      "required_gate": 34399858325,
-      "docs_quality": 34399858346,
-      "CI": 34399858588,
-      "feature_matrix": 34399858565,
-      "validation": "direct-6468/followup-admission/queue-validation-proof.json",
-      "latest_observation": {
-        "at": "2026-09-09T20:43:41.326445+00:00",
-        "state": "AWAITING_CHECKS",
-        "position": 1,
-        "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-        "evidence": "direct-6468/followup-admission/queue-runs-2043.json",
-        "matrix": "SUCCESS",
-        "CI": "in_progress",
-        "aggregate": "in_progress",
-        "failures": 0,
-        "mutation": "none"
-      }
-    }
+    "phase": "Bounded local recovery of existing PR6095 onto stable main; remote hold preserved",
+    "started_at": "2026-09-09T20:57:38.644034+00:00",
+    "head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+    "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "remote_branch": "sparq-agent/issue-4567-33468488192-1",
+    "local_branch": "codex/pr6095-recovery",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6095",
+    "directory": "direct-6095/recovery",
+    "state": "Astra agent locally composing/testing, no remote changes authorized",
+    "constraints": "Keep draft and review:needs; preserve historicalOpusandnew6473code. AtmosttwoPythonfiles. No workflow/census/policy/budgets; no builds/install/EC2/models/remote writes. ~15min boundedfreeze; rootactualOpusreviewbeforepublication.",
+    "assessment": "direct-6095/assessment-report.json"
   },
   "prs": {
     "4300": {
@@ -559,7 +326,7 @@
     "6473": {
       "issue": 6468,
       "head": "afa9c6489db0351855acd9297a6aa2c845434106",
-      "state": "QUEUED",
+      "state": "MERGED",
       "url": "https://github.com/sparq-org/sparq/pull/6473",
       "branch": "codex/triage-area-unknown-diagnostics",
       "review": "Actual Opus5xhigh original5f758 and finalafa9 approve_for_validation, no blockers, perf_affectingfalse",
@@ -569,31 +336,17 @@
       "gate": "34397783664attempt2SUCCESS,app15368",
       "copilot": "34397789869SUCCESS; exactheadapprovalrecommended,0comments",
       "review_threads": 0,
-      "queue": {
-        "entry_id": "MQE_lQDOSz3qKM8AAAABC44lCc4AA2w6zgLJmhw",
-        "position": 1,
-        "state": "AWAITING_CHECKS",
+      "queue": null,
+      "merged_at": "2026-09-09T20:45:32Z",
+      "merge_commit": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "source_verified": "direct-6468/followup-admission/main-source-proof.json",
+      "issue_state": "CLOSED",
+      "resolution_comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5608643584",
+      "queue_gate": {
+        "id": 34399858325,
+        "event": "merge_group",
         "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-        "admitted_at": "2026-09-09T20:15:02.031948+00:00",
-        "proof": "direct-6468/followup-admission/admission-verification.json",
-        "latest_runs": "direct-6468/followup-admission/queue-initial-runs.json",
-        "required_gate": 34399858325,
-        "docs_quality": 34399858346,
-        "CI": 34399858588,
-        "feature_matrix": 34399858565,
-        "validation": "direct-6468/followup-admission/queue-validation-proof.json",
-        "latest_observation": {
-          "at": "2026-09-09T20:43:41.326445+00:00",
-          "state": "AWAITING_CHECKS",
-          "position": 1,
-          "head": "e53464c73f31f7aca800f3867ac054c36408e346",
-          "evidence": "direct-6468/followup-admission/queue-runs-2043.json",
-          "matrix": "SUCCESS",
-          "CI": "in_progress",
-          "aggregate": "in_progress",
-          "failures": 0,
-          "mutation": "none"
-        }
+        "conclusion": "success"
       }
     },
     "6095": {
@@ -610,7 +363,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-09T19:50:57.176167+00:00",
+    "observed_at": "2026-09-09T21:00:20.209690+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -619,7 +372,7 @@
       "review": "Actual Opus,127 tests5 controls",
       "hold": "Required gate absent while global Actions OFF. User question for gate-only CI pending, no answer. If authorized: globalOFF inventory/disable all nongate incl dynamic Copilot324900308 before enabling only gate315366433. No bypass."
     },
-    "evidence": "direct-6468/label-maintenance/registry-pause-1945.json"
+    "evidence": "direct-6468/followup-admission/registry-pause-2100.json"
   },
   "sweeper_health": {
     "observed_at": "2026-09-08T19:25:17.637992+00:00",
@@ -655,11 +408,11 @@
     }
   },
   "next_actions": [
-    "Observe PR6473 position1 merge-group e53464c73f31f7aca800f3867ac054c36408e346: feature-matrix34399858565 nowSUCCESS; only CI34399858588 and aggregate34399858325 remain inprogress. No failure or capacityincident. Preserve allcurrentruns; no reenqueue or old-head reruns.",
-    "After6473merge, verify two reviewed files onmain, actualmerge-group tests, postmergeCI, then linkresolvingPRonissue6468 and closeonlywhencriteria met. Continue ordinaryschedulednewlabel5016andnewsourceobservation; no manualclassifierreplay.",
-    "Next existing6095: boundedread nowidentified actualoldfailure(auto-arm33926979672cancelledattempt2), no humanholdonsource4567, botgate-greenholdstillactive. Afterstable6473main compose existinghistoricalOpusbranchwithcurrentmain, narrowAstraimplementation/testingifneeded, onefreshactualOpusreview; preservebotreview:needs untilalladmissionrequirements. No restartregistry/replayautoarm/clonePRorholdescape.",
-    "PR6469mainCI/matrix/aggregate alreadyverifiedSUCCESS. RegistryOFF, ALLGREEN and pending6049/6055/2305holds and releasepause unchanged.",
-    "Savecheckpoint/evidenceprivateGitref andyieldbetweenexternalstages; one substantive lane, no idle model sessions."
+    "Collect the existing Astra agent /root/postmerge_ci recovery of PR6095 under direct-6095/recovery. It is running with a bounded local composition/test/freeze brief; do not duplicate, push, rearm or clear review:needs. Verify exact committed head/parents and manifest before one actual Opus5 xhigh review.",
+    "PR6473 is merged as e53464c7; issue6468 closed with verified resolving-PR comment. Watch main CI34402964231, matrix34402964196 and aggregate34402964040. Merge-group workflows all succeeded; exact reviewed files and queue45tests/privacy were already verified.",
+    "Observe first ordinary scheduled classifier on e534 or descendant and any eventual generator-label applications. Latest34395557649 predates source merge but proves earlier maintenance recovery and150writes; #5016 deferred. Registry staysOFF; no manual replay/newlabels.",
+    "PR6095 remote draft and bot review:needs must stay until its actual gate-green condition and all normal admission requirements are proven. Preserve old Opus authorship, avoid replacing the PR or replaying failed auto-arm to escape holds.",
+    "Preserve ALLGREEN and existing6049/6055/registry2305approval holds. No release or new EC2 authorization. Source/work/evidence stay durable; one substantive lane and cheap observations."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -1691,28 +1444,305 @@
         "issue_closed_evidence": "direct-4246/perf-admission/issue4246-closed-verified.json",
         "issue_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5606962270"
       }
+    },
+    "6468": {
+      "issue": 6468,
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "phase": "PR6473 merged; issue6468 closed with verified resolution evidence",
+      "started_at": "2026-09-09T18:04:24.354143+00:00",
+      "current_issue": "direct-6468/current-1802.json",
+      "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
+      "design": {
+        "path": "direct-6468/next-design/report.json",
+        "sha256": "3a5135bbcfb01ff5d83d38119bc92546d57ad45caafcfe900f65f07bdd81fdd7",
+        "manifest_verified": true,
+        "source_verified": true
+      },
+      "maintenance_review": {
+        "state": "completed_conditional_approve",
+        "input": "direct-6468/label-maintenance/opus-input.md",
+        "input_sha256": "e42da558d5d1327dc06a59c1a79891e6eb254f4721e21db25735822703d4e800",
+        "input_bytes": 42793,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "completed": true,
+        "scope": {
+          "name": "area:sparq-wrapper-gen",
+          "color": "c5def5",
+          "description": "Scheduler conflict partition for existing crates/sparq-wrapper-gen (reviewed maintenance)."
+        },
+        "session_id": 54894,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T18:22:35.446630+00:00",
+        "output": "direct-6468/label-maintenance/opus-review.json",
+        "acceptance": "One actual Opus5xhigh invocation; require outer successfulJSON,is_errorfalse,actualmodelUsageclaude-opus-5 and exact action. No duplicate or exhausted-budget retry.",
+        "collected_at": "2026-09-09T18:37:51.640517+00:00",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 248771,
+        "output_sha256": "e942ae3adfdc169dcdcec710916d1855f91f7338a469319d0caa61d1e6fcd23c",
+        "result": "direct-6468/label-maintenance/opus-review-result.json",
+        "verdict": "approve for exact one label create only after all15preconditions; key newpreconditionP7completeopenPRchangedpathcheckrequired beforemutation"
+      },
+      "agent_state": "Completed/idle; no pending agent commands",
+      "maintenance": {
+        "state": "exact_one_label_created_verified",
+        "evidence": "direct-6468/label-maintenance/maintenance-verified.json",
+        "created_at": "2026-09-09T18:49:09.588264+00:00",
+        "label_id": 12123212987,
+        "name": "area:sparq-wrapper-gen",
+        "review": "actualOpus5xhighconditionalapprove; allprewriteconditionsdischarged; mandatorypostrunobservationpending",
+        "preconditions": "166openPRs/1691completechangedpaths; no generatorpathhits/renames;headsetstable;all11reviewedsourcesunchangedonnewmain;freshREST404;registryOFF",
+        "scope": "No issue/PRlabelsapplied,nocode/workflow/protectionchanges,replay/dispatch,forceorretry. Explicitmaintenance knowinglydiffersfromblanketriageremedy745forrealexistingcrate; classifierautoprovisioningstillforbidden.",
+        "next_scheduled": "Firstordinaryscheduledtriage-areaafter18:48create:cron25,55hourly;18:55nominalslotmaybedelayed. Observeactualrun,eventandcreatedtime; no manualtrigger.",
+        "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5607067328",
+        "latest_schedule_observation": {
+          "at": "2026-09-09T19:50:57.176167+00:00",
+          "run": 34395557649,
+          "created_at": "2026-09-09T19:31:23Z",
+          "conclusion": "success",
+          "before_create": false,
+          "postcreate_run_observed": true,
+          "evidence": "direct-6468/label-maintenance/postcreate-scheduled-verification.json",
+          "applied": 150,
+          "new_label_recipients": 0,
+          "new_label_5016": "correct T2 classification, deferred by write budget; eventual application still to observe",
+          "checked_again_at": "2026-09-09T20:18:26.480094+00:00",
+          "no_new_run_evidence": "direct-6468/label-maintenance/scheduled-runs-2018.json"
+        }
+      },
+      "conflict_assessment": {
+        "agent": "/root/postmerge_ci",
+        "state": "completed",
+        "prs": [
+          5457,
+          6095
+        ],
+        "directory": "direct-6468/conflict-assessment",
+        "constraints": "read-only max10min; no source/build/model/remote mutations; respectmanualholds; determine nonoverlap or recover existingchain",
+        "report": "direct-6468/conflict-assessment/report.json",
+        "manifest_verified": 19,
+        "conclusion": "Separateproductionhunks;inactiveolderdraftsnotprerequisite; leaveallholdsandhistoricalsourceintact."
+      },
+      "implementation": {
+        "agent": "/root/postmerge_ci",
+        "actual_model": "GPT-6 Astra",
+        "effort": "xhigh",
+        "state": "completed_frozen_root_verified",
+        "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+        "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
+        "branch": "codex/triage-area-unknown-diagnostics",
+        "directory": "direct-6468/implementation",
+        "contract": "Exactlytriage-area.pyandtests;title-onlyrule/ANCHORED_ONLY;rowlabeltierdiagnostic;globalzero-writeguardbeforebudgetpreserved. NoT0_DECL,census,workflows,policy/budgets,oldPRsource,remotemutations/models/buildinstalls. ScopedPython/selftests/negativecontrolsandcompositioncheck;commitreportfrozenpacket;rootreviews/publishes.",
+        "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+        "manifest_files": 54,
+        "report": "direct-6468/implementation/report.json",
+        "root_verification": "direct-6468/source-admission/root-verification.json"
+      },
+      "model": "GPT-6 Astra",
+      "pr": 6473,
+      "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "branch": "codex/triage-area-unknown-diagnostics",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
+      "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
+      "state": "Merged20:45:32Z as e534;allmerge_groupworkflowsSUCCESS;two reviewedfilesbyteidenticalonmain",
+      "documentation_followup": {
+        "issue": 5412,
+        "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
+        "reason": "SameAGENTSentry alreadyhasPLAN/CLAIMdriftissue;addedconfirmedcategoricalnevercreatesvsnewcratewitnessexceptioninstead ofduplicateissue",
+        "verified": "direct-6468/label-maintenance/docs-drift-comment-verified.json"
+      },
+      "latest_agent_report": {
+        "state": "Completed frozen source and70files root verified",
+        "report": "direct-6468/followup/report.json"
+      },
+      "source_review": {
+        "state": "completed",
+        "completed": true,
+        "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+        "input": "direct-6468/source-admission/opus-input.md",
+        "input_sha256": "0d5fd7a304064f45848960201140919345d19acd8d74d58e74519c99390b6780",
+        "input_bytes": 93839,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "output": "direct-6468/source-admission/opus-review-5f758d2a.json",
+        "session_id": 85170,
+        "rejection": "Historical initial automatic-approval rejection, resolved with new verified PUBLIC-repository risk facts; see approval_resolution. No pending approval.",
+        "risk_audit": "direct-6468/source-admission/payload-risk-audit.json",
+        "repo_visibility": {
+          "full_name": "sparq-org/sparq",
+          "html_url": "https://github.com/sparq-org/sparq",
+          "private": false,
+          "visibility": "public"
+        },
+        "kind": "exec_command",
+        "started_at": "2026-09-09T19:05:17.131137+00:00",
+        "approval_resolution": "Initialauto-review incorrectlytreatedpacket asprivatesource andrequiredspecificexportpermission. No process/modelrequeststarted. ReadGitHubAPI provedPUBLIC repository;localmanifest/section/secretpatternauditfoundonlyreposource,taskauthored2filefixandgeneratedtestevidence,no credentialfiles/transcripts/secretmatches. SamecommandresubmittedwithnewriskfactsandexistingexplicituserOpusauthorization;automaticapprovalaccepted. Notalternativechannel/publicationworkaround or exhaustedmodelretry.",
+        "acceptance": "RequireouterJSONsubtypesuccess,is_errorfalse,modelUsageclaude-opus-5,exact5f758head. One actualmodelinvocationonly; no duplicate/exhaustedquotaretry.",
+        "collected_at": "2026-09-09T19:21:11.999773+00:00",
+        "actual_model_verified": "claude-opus-5",
+        "duration_ms": 341517,
+        "output_sha256": "5ce2cc0de3ed804025b42917d93a688af7bfee897d0dd1efb6e78d2261a1be59",
+        "verdict": "approve_for_validation",
+        "result": "direct-6468/source-admission/opus-review-result.json"
+      },
+      "followup": {
+        "agent": "/root/postmerge_ci",
+        "actual_model": "GPT-6 Astra",
+        "effort": "xhigh",
+        "state": "completed_frozen_root_verified",
+        "parent": "5f758d2afed6524cf191820463934c2213ddcfda",
+        "directory": "direct-6468/followup",
+        "address": [
+          "NB1",
+          "NB2",
+          "NB3",
+          "NB5",
+          "NB6",
+          "NB7"
+        ],
+        "decline": "NB4recordcapdeferred:keepcompletefiniteoffenderrecordset;noadditionaltruncationpolicy",
+        "report_notes": [
+          "NB8realcratefixturecoupling",
+          "NB9localPythonversionandactualCIexecutiontobeverified"
+        ],
+        "additional_evidence": "Olderror-stringconsumersgitgrep;docs-qualityonblock;scheduledselftestsbeforeapply;bdactualoutput;frozen6095mechanicalcomposition.",
+        "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+        "manifest_files": 70,
+        "root_verification": "direct-6468/followup-admission/root-verification.json"
+      },
+      "followup_review": {
+        "state": "completed",
+        "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+        "input": "direct-6468/followup-admission/opus-input.md",
+        "input_sha256": "05ab0997f531de5caa9622cad9e37c010bb71a70da43a516448ad9b38bacb2c1",
+        "input_bytes": 62257,
+        "expected_model": "claude-opus-5",
+        "effort": "xhigh",
+        "output": "direct-6468/followup-admission/opus-review-afa9c648.json",
+        "session_id": 37673,
+        "kind": "exec_command",
+        "started_at": "2026-09-09T19:49:28.992457+00:00",
+        "completed": true,
+        "acceptance": "One actual Opus5xhigh invocation. Require successful outer JSON, actual modelUsage and exact afa9 head; no duplicate or exhausted-budget retry.",
+        "actual_model_verified": "claude-opus-5",
+        "collected_at": "2026-09-09T19:51:48.068504+00:00",
+        "duration_ms": 96986,
+        "output_sha256": "58b405c9018ef10c161b37c32517cb2c88de284506b057e69e2342b69c4000d4",
+        "result": "direct-6468/followup-admission/opus-review-result.json",
+        "verdict": "approve_for_validation"
+      },
+      "publication": {
+        "pr": 6473,
+        "url": "https://github.com/sparq-org/sparq/pull/6473",
+        "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+        "base": "main",
+        "draft": false,
+        "body": "direct-6468/followup-admission/pr-body.md"
+      },
+      "ci_recovery": {
+        "at": "2026-09-09T19:57:56.230176+00:00",
+        "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+        "run": 34397783877,
+        "job": 102621666118,
+        "cause": "dorny paths-filter: GitHub diff temporarily unavailable due to heavy server load, resource PullRequest field diff code not_available. Not a rate-budget exhaustion.",
+        "proof": "direct-6468/followup-admission/pr6473-matrix-detect-failed.log",
+        "revalidation": "Exact head/OPEN main/nohold; terminal run attempt1; same RESTfiles endpoint now returns exactly2reviewedfiles.",
+        "action": "One POST /actions/jobs/102621666118/rerun acceptedHTTP201",
+        "attempts": 1,
+        "receipt": "direct-6468/followup-admission/matrix-retry-receipt.txt",
+        "next": "Observe attempt2; only after matrix recovery and freshtargetcheck rerun failed aggregate once. No repeat storm.",
+        "matrix_recovered": true,
+        "matrix_attempt": 2,
+        "matrix_conclusion": "success",
+        "aggregate_run": 34397783664,
+        "aggregate_job": 102621664513,
+        "aggregate_retry": "attempt2SUCCESS; completed20:00:44Z, job102623664012",
+        "aggregate_receipt": "direct-6468/followup-admission/gate-retry-receipt.txt"
+      },
+      "linux_validation": {
+        "proof": "direct-6468/followup-admission/linux-validation-proof.json",
+        "head": "afa9c6489db0351855acd9297a6aa2c845434106",
+        "run": 34397783624,
+        "suite_tests": 45,
+        "privacy": "executedPASS",
+        "python": "3.12.14"
+      },
+      "queue": {
+        "entry_id": "MQE_lQDOSz3qKM8AAAABC44lCc4AA2w6zgLJmhw",
+        "position": 1,
+        "state": "AWAITING_CHECKS",
+        "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+        "admitted_at": "2026-09-09T20:15:02.031948+00:00",
+        "proof": "direct-6468/followup-admission/admission-verification.json",
+        "latest_runs": "direct-6468/followup-admission/queue-initial-runs.json",
+        "required_gate": 34399858325,
+        "docs_quality": 34399858346,
+        "CI": 34399858588,
+        "feature_matrix": 34399858565,
+        "validation": "direct-6468/followup-admission/queue-validation-proof.json",
+        "latest_observation": {
+          "at": "2026-09-09T20:43:41.326445+00:00",
+          "state": "AWAITING_CHECKS",
+          "position": 1,
+          "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+          "evidence": "direct-6468/followup-admission/queue-runs-2043.json",
+          "matrix": "SUCCESS",
+          "CI": "in_progress",
+          "aggregate": "in_progress",
+          "failures": 0,
+          "mutation": "none"
+        }
+      },
+      "closure": {
+        "issue": 6468,
+        "state": "CLOSED",
+        "closed_at": "2026-09-09T20:58:36Z",
+        "comment": "https://github.com/sparq-org/sparq/issues/6468#issuecomment-5608643584",
+        "verified": "direct-6468/followup-admission/issue-closed-verified.json",
+        "remaining_observation": "First ordinary scheduled run on merged source and eventual #5016 label application remain under monitoring; missing-label abort recovery already observed before source merge."
+      }
     }
   },
   "postmerge_watch": {
-    "head": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "observed_at": "2026-09-09T19:57:56.230176+00:00",
-    "evidence": "direct-4246/perf-admission/main-runs-2001.json",
+    "head": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "pr": 6473,
+    "observed_at": "2026-09-09T20:57:38.644034+00:00",
+    "evidence": "direct-6468/followup-admission/runs-2055.json",
     "CI": {
-      "id": 34390023351,
-      "conclusion": "success"
+      "id": 34402964231,
+      "state": "queued"
     },
     "feature_matrix": {
-      "id": 34390023354,
-      "conclusion": "success"
+      "id": 34402964196,
+      "state": "queued"
     },
     "aggregate": {
-      "id": 34390022530,
+      "id": 34402964040,
+      "state": "in_progress"
+    },
+    "docs_quality": {
+      "id": 34402963993,
       "conclusion": "success"
     },
     "unresolved_noncore_failures": [
-      34390022720,
-      34390022861
+      34402964004,
+      34402964058
     ],
     "release_authorized": false
+  },
+  "classifier_watch": {
+    "issue": 6468,
+    "issue_state": "CLOSED",
+    "fix_pr": 6473,
+    "source_head": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "latest_scheduled_run": 34395557649,
+    "latest_scheduled_created": "2026-09-09T19:31:23Z",
+    "latest_scheduled_conclusion": "success",
+    "latest_run_predates_source_merge": true,
+    "checked_at": "2026-09-09T21:00:20.209690+00:00",
+    "evidence": "direct-6468/label-maintenance/scheduled-runs-2100.json",
+    "next": "Observe first ordinary scheduled run containing merged source. Recheck every eventual area:sparq-wrapper-gen recipient and actual evidence; #5016 was correctly planned and deferred. No live replay or additional label creation."
   }
 }

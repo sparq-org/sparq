@@ -279,6 +279,12 @@ for evidence_name in ['state-2030.json', 'queue-runs-2030.json', 'queue-matrix-j
 for evidence_name in ["state-2043.json", "queue-runs-2043.json"]:
     FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
 
+# PR6473 merged-source proof, issue closure and active6095 handoff.
+for evidence_name in ['postmerge-query.json', 'state-2055.json', 'runs-2055.json', 'issue-preclose.json', 'main-source-proof.json', 'issue-resolution-comment.md', 'issue-resolution-comment-url.txt', 'issue-before-close.json', 'registry-pause-2100.json', 'issue-close-result.txt', 'issue-closed-verified.json']:
+    FILES["6468-followup-admission-" + evidence_name] = ROOT / "direct-6468/followup-admission" / evidence_name
+FILES["6468-label-maintenance-scheduled-runs-2100.json"] = ROOT / "direct-6468/label-maintenance/scheduled-runs-2100.json"
+FILES["6095-pr-prerecovery.json"] = ROOT / "direct-6095/pr-prerecovery.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
