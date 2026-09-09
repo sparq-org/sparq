@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T16:25:26.022731+00:00",
+  "updated_at": "2026-09-09T16:29:11.577632+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,7 +68,7 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "SameAstraagentauthorizedminimaldiagnosticguardrepairandtinyregression. Rootsourceinventoryshowsonewindowcoordinatorincludingconcurrentreaders. CurrentPRheadremains5757,allrequiredCIstillpending,nofailureobserved. No mergeadmission untilnewreviewfindingresolved.",
+    "state": "Astra benchmark-window guard repair is committed locally atccded1b4898cf5b317a6591f6ff6108ced23123c;rootverified47frozenfilesandexactcompiledsource/control. ActualOpus5xhighreviewrunning inexecsession38346. PublicPR6469 remains5757; lastchecks91success/9running/12queued/8skipped/1neutral,zero failures;mainunchanged/queueempty/noholdlabels/allinline threadsresolved, allocatorreviewbodyawaitsresponse. No pushes or publicresponse to newfindingyet.",
     "phase": "Exactccded counter repair under actual independent Opus review;public5757CIpending",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
@@ -360,15 +360,15 @@
       "resolution_verification": "direct-4246/layout-comment/final-verified.json"
     },
     "full_validation_progress": {
-      "at": "2026-09-09T16:00:28.425186+00:00",
+      "at": "2026-09-09T16:29:11.577632+00:00",
       "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
       "state": "Normal full-tier runs triggered by synchronize; no manual dispatch/retry/cancellation. Priorfa371 passes are historical, not exact-head admission.",
-      "checks": "direct-4246/layout-comment/checks-1558.json",
+      "checks": "direct-4246/counting-admission/checks-1627.json",
       "rollup": {
-        "IN_PROGRESS": 8,
-        "SUCCESS": 52,
-        "SKIPPED": 6,
-        "QUEUED": 45,
+        "IN_PROGRESS": 9,
+        "SUCCESS": 91,
+        "SKIPPED": 8,
+        "QUEUED": 12,
         "NEUTRAL": 1
       },
       "failed_checks": 0,
@@ -527,8 +527,8 @@
           "created_at": "2026-09-09T15:43:14Z"
         }
       ],
-      "remaining": "Workspacearchive/coverage/featurematrix/aggregatepending. Newallocatorfindingmustbeassessedbeforeadmission.",
-      "review": "direct-4246/layout-comment/review-1558.json"
+      "remaining": "Existing5757CIprogressing; allocatorrepairreview/publication takespriority. Do notadmit5757 while own repairawaitsreview.",
+      "review": "direct-4246/counting-admission/state-1627.json"
     },
     "disk_hold": {
       "free_bytes_after_control": 6418264064,
@@ -567,7 +567,7 @@
       "runs": "direct-4246/layout-comment/initial-runs.json",
       "checks": "direct-4246/layout-comment/initial-checks.json"
     },
-    "next_heartbeat": "Read this checkpoint first, check rate budget, inspect existing5757 full CI and reviews; no duplicate implementation/review/dispatch. On actionable failure diagnose only exact current run. If pending return quiet. If allrequired green, verify newfeature actualtests+aggregate and protected exact-head admission. Registry staysOFF; release/heldPRs remainheld; no localbuilds underdiskthreshold.",
+    "next_heartbeat": "First collect existingexecsession38346 usingwrite_stdin; it ownsactualOpusreviewforlocalccded. Do notlaunchduplicateorretryexhaustedquota. RequireouterJSONsuccess,is_errorfalse,actualmodelUsageclaude-opus-5,exactccdedreviewedhead. Onapproval recordresult; rootalreadyverified47filesandactualcompiledsource. RevalidatePRstill5757/open/noholds andcurrentmain immediatelybeforeordinaryfastforwardpushccded. Publicbodydraft/review-comment-draft in counting-admission have explicitpendingreviewtext: update accurately fromactualverdict beforepublishing. NewfindingisonCopilotreviewbodyonly, noinline thread; postdedupedgeneralPRcomment afterfreshcomments/headcheck; previouslayoutthreadstaysresolved. Keepcore/declaration/oldbenchmarkdataunchanged. ObserveexistingnormalnewheadCI,no dispatch/retry/cancellation; waitallfullgates+actualnewfeaturetest/aggregate beforeexact-headprotectedenqueue. RegistryOFF,noreleases,heldPRsremainheld;no newimplementationorbenchmatrix.",
     "allocator_window_finding": {
       "review": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
       "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",

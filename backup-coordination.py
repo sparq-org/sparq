@@ -175,6 +175,8 @@ for evidence_name in [*[item['path'] for item in json.loads((COUNTING_FIX / 'man
 COUNTING_ADMISSION = ROOT / 'direct-4246/counting-admission'
 for evidence_name in ['root-verification.json', 'head.diff', 'review-preface.md', 'opus-input.md']:
     FILES['4246-counting-admission-' + evidence_name] = COUNTING_ADMISSION / evidence_name
+for evidence_name in ['pr-body-draft.md', 'review-comment-draft.md', 'publication-query.json', 'checks-1627.json', 'state-1627.json']:
+    FILES['4246-counting-admission-' + evidence_name] = COUNTING_ADMISSION / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name
