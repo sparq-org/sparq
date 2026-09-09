@@ -164,6 +164,8 @@ FILES['registry-pause-1538.json'] = ROOT / 'recovery-20260909/registry-pause-153
 LAYOUT_COMMENT = ROOT / 'direct-4246/layout-comment'
 for evidence_name in [*json.loads((LAYOUT_COMMENT / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json', 'prepush-remote.json', 'postpush-remote.json', 'pr-body.md', 'review-reply.json', 'resolve-thread.json', 'reply-precheck.json', 'review-reply-result.json', 'body-precheck.json', 'body-edit-result.txt', 'resolve-precheck.json', 'resolve-result.json', 'final-verified.json', 'initial-runs.json', 'initial-checks.json']:
     FILES['4246-layout-comment-' + evidence_name.replace('/', '--')] = LAYOUT_COMMENT / evidence_name
+for evidence_name in ['checks-1558.json', 'review-1558.json']:
+    FILES['4246-layout-comment-' + evidence_name] = LAYOUT_COMMENT / evidence_name
 SOURCE_RETENTION = ROOT / 'direct-4246/source-retention'
 for evidence_name in [*json.loads((SOURCE_RETENTION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-source-retention-' + evidence_name.replace('/', '--')] = SOURCE_RETENTION / evidence_name

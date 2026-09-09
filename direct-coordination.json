@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T15:47:11.127882+00:00",
+  "updated_at": "2026-09-09T16:00:28.425186+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "PR6469 open non-draft at5757, no review holds, all current review threads resolved. Exact comment-only correction independently approved by actual Opus5xhigh and mechanically verified; runtime and declaration unchanged. Normal exact-head full CI has started; no new-head merge admission yet.",
-    "phase": "Reviewed comment-only correction published; normal full CI pending on5757",
+    "state": "Exact5757 nofailedCIchecks; current oldthreadresolved, butnewCopilotreviewbody flags ACTIVE.swap(false) inbench-onlycounting.rs. This is a substantive review item even though no new inline thread was emitted. SameAstraagent doingread-onlycaller/evidenceassessment; no newsource/test/reviewyet.",
+    "phase": "Assess new Copilot allocator-window finding while5757 full CI progresses",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -360,15 +360,16 @@
       "resolution_verification": "direct-4246/layout-comment/final-verified.json"
     },
     "full_validation_progress": {
-      "at": "2026-09-09T15:47:11.127882+00:00",
+      "at": "2026-09-09T16:00:28.425186+00:00",
       "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
       "state": "Normal full-tier runs triggered by synchronize; no manual dispatch/retry/cancellation. Priorfa371 passes are historical, not exact-head admission.",
-      "checks": "direct-4246/layout-comment/initial-checks.json",
+      "checks": "direct-4246/layout-comment/checks-1558.json",
       "rollup": {
-        "IN_PROGRESS": 7,
-        "SUCCESS": 21,
-        "QUEUED": 24,
-        "SKIPPED": 5
+        "IN_PROGRESS": 8,
+        "SUCCESS": 52,
+        "SKIPPED": 6,
+        "QUEUED": 45,
+        "NEUTRAL": 1
       },
       "failed_checks": 0,
       "runs": [
@@ -526,7 +527,8 @@
           "created_at": "2026-09-09T15:43:14Z"
         }
       ],
-      "remaining": "Wait for final full workspace/tests/coverage/conformance/bench/featurematrix/wasm and aggregate gate. Inspect actual new feature-leg execution and run-bound aggregate before ordinary protected enqueue. Recheck review threads/holds/head/main immediately before any mutation."
+      "remaining": "Workspacearchive/coverage/featurematrix/aggregatepending. Newallocatorfindingmustbeassessedbeforeadmission.",
+      "review": "direct-4246/layout-comment/review-1558.json"
     },
     "disk_hold": {
       "free_bytes_after_control": 6418264064,
@@ -565,7 +567,16 @@
       "runs": "direct-4246/layout-comment/initial-runs.json",
       "checks": "direct-4246/layout-comment/initial-checks.json"
     },
-    "next_heartbeat": "Read this checkpoint first, check rate budget, inspect existing5757 full CI and reviews; no duplicate implementation/review/dispatch. On actionable failure diagnose only exact current run. If pending return quiet. If allrequired green, verify newfeature actualtests+aggregate and protected exact-head admission. Registry staysOFF; release/heldPRs remainheld; no localbuilds underdiskthreshold."
+    "next_heartbeat": "Read this checkpoint first, check rate budget, inspect existing5757 full CI and reviews; no duplicate implementation/review/dispatch. On actionable failure diagnose only exact current run. If pending return quiet. If allrequired green, verify newfeature actualtests+aggregate and protected exact-head admission. Registry staysOFF; release/heldPRs remainheld; no localbuilds underdiskthreshold.",
+    "allocator_window_finding": {
+      "review": "PRR_kwDOSz3qKM8AAAABM1xJkQ",
+      "head": "5757e70be09ed95bcbc2831cec7850fa29fdf620",
+      "file": "bench/overlay-count/src/counting.rs",
+      "finding": "begin clears ACTIVE before asserting, leaves counter-reset interval open to competing begin; potential overlap/measurement corruption on invalid usage.",
+      "evidence": "direct-4246/layout-comment/review-1558.json",
+      "scope": "SameAstraagent read-only assessment of all begin/end callers, historical measurement validity, minimal correction and actual-module regression/control design; no source/build/remote changes authorized yet.",
+      "root_source_observation": "Current harness appears single coordinator: main sequential loop and lifecycle::measure; concurrent-cold starts/joinstwo workers inside one measuredclosure,workersdo notbegin/end. Need fullinventory/evidencescope before concluding prior data unaffected."
+    }
   },
   "prs": {
     "4300": {
