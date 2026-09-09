@@ -31,9 +31,9 @@ rl-oracle = ["dep:sparq-reason", "dep:sparq-core"]
 [dependencies]
 # The engine under test, via its PUBLIC API only (default features: the parallel
 # fixpoint, exactly what a library consumer gets). OPTIONAL — linked only by `rl-oracle`.
-sparq-reason = { path = "../sparq-reason", version = "0.1.0", optional = true }
+sparq-reason = { path = "../sparq-reason", version = "0.1.1", optional = true }
 # Dict/Id + the N-Triples parser (Graph::parse_to_triples) + oxrdf Term rendering.
-sparq-core = { path = "../sparq-core", version = "0.1.0", optional = true }
+sparq-core = { path = "../sparq-core", version = "0.1.1", optional = true }
 
 # The differential test itself. Compiled only with the feature it exercises, so default
 # `--all-targets` builds carry none of it (the sparq-reason [[test]] posture).

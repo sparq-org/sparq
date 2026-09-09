@@ -25,10 +25,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 # The SHACL shapes model (ShapesModel/Shape/Component/Path) + GraphView. Base features
 # only: forms derivation needs no SHACL-AF rules and no SCS parser.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", default-features = false }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 serde = { version = "1", features = ["derive"] }
 
@@ -43,4 +43,4 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 # Golden-file tests serialize FormDescription to canonical pretty JSON.
 proptest = "1"
 serde_json = "1"
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }

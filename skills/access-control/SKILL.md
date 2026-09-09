@@ -4,7 +4,7 @@ description: "Graph-level Solid-style access control over a sparq RDF dataset wi
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-solid — graph-level WAC/ACP access control
@@ -189,6 +189,26 @@ Materialize the authorization view from the access-control documents, then enfor
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
   auto-re-materialize on `.acl`/`.acr` writes.
+- `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
+  `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
+  `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
+  agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0. The budget reaches both places an
+  update evaluates SPARQL — the authorization check's `GRAPH ?var` binding SELECT (an
+  exhausted budget there is a **deny**, nothing mutated) and the apply's
+  `DELETE`/`INSERT … WHERE`. It does **not** bound the remaining operations, and a
+  request-size cap does not cover all of them: `INSERT`/`DELETE DATA` carry their triples
+  inline (a text cap *does* bound those; `CREATE` adds one empty-graph entry), but
+  `CLEAR`/`DROP` cost whatever
+  the targeted graphs already hold — their bound is authorization, since `NAMED`/`ALL`
+  escalates to the all-graphs wildcard and a targeted `CLEAR GRAPH <g>` needs write on `g` —
+  and `LOAD` reads a file whose size is independent of the update text (refused entirely
+  unless an allowlisted base is installed via `sparq_engine::with_load_base`). A caller
+  wanting a hard ceiling on those must add it itself. A budget can only add a failure mode,
+  never widen authorization; an unlimited budget is byte-for-byte `update_as`. Failure
+  semantics are `update_as`'s, including its engine-inherited **non-atomicity on error**
+  across a `;`-separated multi-operation request (a single operation's WHERE is fully
+  evaluated before any of its delta lands, so the common over-budget case mutates
+  nothing).
 - `store.put_acl(acl_iri, content, format) -> AclWriteOutcome` /
   `store.delete_acl(acl_iri)` (+ `…_acp` variants) — **authoritative ACL write-through**
   ([OPUS-4.8] issue #992 FR-3, sq-snopa.5): the LDP `PUT`/`DELETE /resource.acl` STORAGE
@@ -316,7 +336,7 @@ Materialize the authorization view from the access-control documents, then enfor
   inheritance can never disagree; `None` ⇒ un-protected ⇒ fail closed. Feeds `decide`'s
   `governing_acl`/`scope`, which `WacDecision::acl_link_header()` turns into the FR-5
   `Link: rel="acl"` surface (above). **Honest scope:** Phase-1 implements
-  the WAC `accessTo` + container-`default` subset of [issue #992](https://github.com/jeswr/sparq/issues/992)
+  the WAC `accessTo` + container-`default` subset of [issue #992](https://github.com/sparq-org/sparq/issues/992)
   (FR-1/6/7) — the per-resource decision + fail-closed contract + ACL walk. The **HTTP shell**
   over this library surface (FR-4, sq-snopa.6) has LANDED as `sparq-server`'s opt-in
   `solid-authz` feature — `POST /authz/decide`+`/wac-allow`+`/query`, a fail-closed thin wrapper
@@ -723,8 +743,8 @@ public surface is `sparq_trust::{vocab, policy, admit, wire, delegation}` (+ the
 `delegation_prov` / `did` / `store` / `secprop` / `framework_vocab` modules) — see
 [`crates/sparq-trust/README.md`](../../crates/sparq-trust/README.md) and the design record
 `research/solid-trust-graph-authz-design.md` §6.0 (tracked in
-[issue #940](https://github.com/jeswr/sparq/issues/940); landing via design PR
-<https://github.com/jeswr/sparq/pull/951>).
+[issue #940](https://github.com/sparq-org/sparq/issues/940); landing via design PR
+<https://github.com/sparq-org/sparq/pull/951>).
 
 **Trust-document storage / authoring model** (the **opt-in `store` feature**, `sq-pfae.5`,
 design §3.2). `sparq_trust::store::TrustStore` decides *where* trust rules live and *which
@@ -867,7 +887,7 @@ single-use) plus the machine-reasonable **assurance / audit-status axis** that t
 `const &str` registry + the canonical [`secprop-ext.ttl`](../../crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl),
 pinned together by a drift test) — it is **not** an ODRL profile or a per-method annotation graph
 (those are the downstream Phase 3/4 beads `sq-bevd3`/`sq-uor3g`). Since
-[#3705](https://github.com/jeswr/sparq/issues/3705) the registry, the Turtle and that one drift
+[#3705](https://github.com/sparq-org/sparq/issues/3705) the registry, the Turtle and that one drift
 test live in the **dependency-free `sparq-secprop-vocab` leaf crate**, and `sparq_trust::secprop`
 re-exports it — so the import path above is unchanged, and `sparq_policy::secprop`'s `DIM_*` and
 `sparq_zk::secprop`'s `secx:` terms are now aliases of the SAME constants rather than three copies

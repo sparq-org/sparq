@@ -1,7 +1,7 @@
 <!-- [OPUS-4.8] sq-inzv: full-template README — the published sparq-rdf Python bindings. -->
 # sparq (Python bindings)
 
-Python bindings for the [sparq](https://github.com/jeswr/sparq) RDF + SPARQL engine:
+Python bindings for the [sparq](https://github.com/sparq-org/sparq) RDF + SPARQL engine:
 a dictionary-encoded triplestore with six permutation indexes, a SPARQL 1.1 query
 engine (SELECT / ASK / CONSTRUCT / DESCRIBE), SPARQL Update over the full dataset
 (named graphs included), opt-in RDFS / OWL-RL / Notation3 reasoning with OWL

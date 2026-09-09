@@ -1,7 +1,7 @@
 # Design — an access-controlled-query benchmark (WAC + ACP + ODRL) with built-in correctness oracles, plus the sparq evaluation and the paper
 
 > 🤖 **SPARQ agent** — decomposition design record for maintainer issue
-> [#1613](https://github.com/jeswr/sparq/issues/1613) (epic `sq-i6du2`). [FABLE]
+> [#1613](https://github.com/sparq-org/sparq/issues/1613) (epic `sq-i6du2`). [FABLE]
 > DESIGN only: this PR changes no crate code. It surveys the estate + the literature,
 > answers the six design questions the directive poses, and decomposes the program into
 > file-disjoint child beads the fleet can implement in parallel.

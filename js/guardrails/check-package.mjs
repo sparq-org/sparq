@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Publish guardrail + git-pin verification for the `@jeswr/sparq` npm binding.
+// Publish guardrail + git-pin verification for the `@sparq-org/sparq` npm binding.
 // [OPUS-4.8] sq-bkag (follow-up to #623 / sq-c4ej).
 //
 // WHY THIS EXISTS
 // ----------------
-// `@jeswr/sparq` is not yet on npm under its settled name, so the only way a
+// `@sparq-org/sparq` is not yet on npm under its settled name, so the only way a
 // consumer (e.g. PSS) can depend on it today is to PIN A GIT BUILD:
 //
-//     "@jeswr/sparq": "github:jeswr/sparq#<sha>"   # with package.json `directory: "js"`
+//     "@sparq-org/sparq": "github:sparq-org/sparq#<sha>"   # with package.json `directory: "js"`
 //
 // A git-pinned install does NOT ship `dist/` or `wasm/` (both are .gitignored).
 // npm rebuilds them by running the package's `prepare` lifecycle script on
@@ -22,7 +22,7 @@
 //   2. The publish allowlist (`files`) names `dist`, `wasm` and `wasm-node`.
 //   3. The packed tarball actually contains the JS entrypoint (`main`), the
 //      type entrypoint (`types`), and the wasm artifact (`wasm/*_bg.wasm`).
-//   4. The package self-identifies as `@jeswr/sparq` (settled name guard).
+//   4. The package self-identifies as `@sparq-org/sparq` (settled name guard).
 //   5. The CommonJS engine (`--target nodejs`, sq-2hk) is shipped AND usable:
 //      the `./wasm-node` export condition is wired, the glue + wasm bytes are in
 //      the tarball, and `wasm-node/package.json` re-scopes that directory to
@@ -35,7 +35,7 @@
 //
 // As a git-pin verification step a CONSUMER runs (after `npm install` resolves
 // the git pin) to prove the engine landed:
-//   node -e "import('@jeswr/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
+//   node -e "import('@sparq-org/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { parsePackJson } from './pack-json.mjs';
 
 const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const EXPECTED_NAME = '@jeswr/sparq';
+const EXPECTED_NAME = '@sparq-org/sparq';
 
 const failures = [];
 const fail = (msg) => failures.push(msg);
@@ -77,14 +77,14 @@ for (const required of ['dist', 'wasm', 'wasm-node']) {
   }
 }
 
-// (5a) the CommonJS engine is reachable: `require('@jeswr/sparq/wasm-node')` only
+// (5a) the CommonJS engine is reachable: `require('@sparq-org/sparq/wasm-node')` only
 //      resolves if the subpath export declares a `require` condition (the root
 //      `exports` field makes every undeclared subpath unreachable).
 const wasmNodeExport = pkg.exports?.['./wasm-node'];
 if (!wasmNodeExport) {
   fail(
     'package.json `exports` has no "./wasm-node" subpath — CommonJS consumers cannot ' +
-      "`require('@jeswr/sparq/wasm-node')` (an `exports` field blocks every undeclared subpath)",
+      "`require('@sparq-org/sparq/wasm-node')` (an `exports` field blocks every undeclared subpath)",
   );
 } else if (typeof wasmNodeExport.require !== 'string') {
   fail('the "./wasm-node" export has no `require` condition, so `require()` of it fails to resolve');

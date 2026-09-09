@@ -230,7 +230,7 @@ NG MUST NOT be described as hiding access patterns, membership, volume, or timin
    or wasm `Store`. An implementation may incrementally update a private local store,
    but the normative result is the deterministic dataset at the accepted frontier.
 6. **Query.** The application passes SPARQL directly to local `sparq-engine` or
-   `@jeswr/sparq`. No query protocol message is defined. Results remain local unless
+   `@sparq-org/sparq`. No query protocol message is defined. Results remain local unless
    the application explicitly exports them.
 7. **Edit/publish.** Local edits become CRDT operations, then a signed commit. The client
    encrypts/chunks it, uploads absent blocks, and sends `PublishEvent`. The broker checks

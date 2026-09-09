@@ -9,7 +9,7 @@
 //     redirect keeps it working, but R4 migrates every such reference to
 //     github.com/sparq-org/sparq so the site never advertises the stale name.
 // This spec greps the source tree and FAILS the moment either string is reintroduced, so
-// the regression can never silently re-land. NOTE: the `@jeswr/sparq` npm package name is
+// the regression can never silently re-land. NOTE: the `@sparq-org/sparq` npm package name is
 // unrelated and stays — the github.com/ anchor on the repo pattern excludes it.
 // Design of record: research/site-home-app-download-residuals.md §4 R4.
 //
@@ -32,8 +32,8 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url));
 
 // The stale origins. Each is kept deliberately broad (host + repo segment) so ANY link
 // shape — https://jeswr.github.io/sparq, github.com/jeswr/sparq/actions, a bare reference
-// — is caught. The `github.com/` anchor on the repo pattern means the live `@jeswr/sparq`
-// npm package name (and other bare `jeswr/sparq` mentions) is NOT flagged.
+// — is caught. The `github.com/` anchor on the repo pattern means the live `@sparq-org/sparq`
+// npm package name (and other bare `sparq-org/sparq` mentions) is NOT flagged.
 const STALE_ORIGINS = ["jeswr.github.io/sparq", "github.com/jeswr/sparq"];
 
 // Paths (relative to site/src, POSIX-style) exempted until their owning bead lands.

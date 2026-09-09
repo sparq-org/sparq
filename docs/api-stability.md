@@ -7,8 +7,8 @@ depend on sparq in production: **which parts of the API will not break under me,
 what notice?**
 
 It is filed against the Solid-server track's P0 consumer requirement — a *frozen,
-semver-stable public API surface* ([#1346](https://github.com/jeswr/sparq/issues/1346),
-[#1248](https://github.com/jeswr/sparq/issues/1248)). A consumer that git-pins an
+semver-stable public API surface* ([#1346](https://github.com/sparq-org/sparq/issues/1346),
+[#1248](https://github.com/sparq-org/sparq/issues/1248)). A consumer that git-pins an
 *unstable* embedded API (as [`solid-server-rs`](https://github.com/jeswr/solid-server-rs)
 does today, ADR 0001) takes on breakage risk on every revision bump. This document
 **proposes** the tier-1 surface and the guarantees attached to it so that the freeze — the
@@ -17,8 +17,8 @@ governance act — has one well-defined shape to ratify.
 ## Status: PROPOSED, not yet in force
 
 > **The tier-1 semver freeze is NOT active.** Declaring it active is the maintainer's
-> (@jeswr's) governance call ([#1346](https://github.com/jeswr/sparq/issues/1346) P0,
-> [#1248](https://github.com/jeswr/sparq/issues/1248) items 1+2). Until that ratification,
+> (@jeswr's) governance call ([#1346](https://github.com/sparq-org/sparq/issues/1346) P0,
+> [#1248](https://github.com/sparq-org/sparq/issues/1248) items 1+2). Until that ratification,
 > **every crate here is pre-`1.0` and API-unstable**, and a minor pre-`1.0` release MAY
 > still change any surface — tier-1 included. This document is the *proposal that tees up
 > the ratification*, together with the in-code markers that annotate the proposed surface.
@@ -59,7 +59,7 @@ surfaces; it just does so without the stability guarantee, and should pin an exa
 Note that `sparq-server`'s **Rust** surface being tier-2 is distinct from its **HTTP wire**
 surface: what the server speaks over the network to an HTTP-only consumer has its own
 proposed-frozen contract — [`docs/http-wire-contract.md`](http-wire-contract.md)
-([#1416](https://github.com/jeswr/sparq/issues/1416)) — with the same
+([#1416](https://github.com/sparq-org/sparq/issues/1416)) — with the same
 proposed-until-ratified status as this document.
 
 Opt-in, feature-gated capability crates remain tier-2 regardless of this policy: keeping the
@@ -74,8 +74,8 @@ tier-1 (proposed-stable) marker that links back to this document.
 
 The documented facade an external host uses to call the engine **in-process** instead of
 over the SPARQL-1.1-over-HTTP transport (the seam landed for
-[#1248](https://github.com/jeswr/sparq/issues/1248) items 1+2; the generation ring is
-[#1250](https://github.com/jeswr/sparq/issues/1250)). Every entry point is a thin
+[#1248](https://github.com/sparq-org/sparq/issues/1248) items 1+2; the generation ring is
+[#1250](https://github.com/sparq-org/sparq/issues/1250)). Every entry point is a thin
 re-export or one-line wrapper over an already-public engine path — no new behaviour.
 
 - **Read / probe** (over `&Graph`): `query_json`, `query_json_with_budget`, `query`,
@@ -89,8 +89,8 @@ re-export or one-line wrapper over an already-public engine path — no new beha
 ### 2. The per-resource access-control decision API — `sparq_solid`
 
 The point-query authorization surface an LDP resource server calls per request (issue
-[#992](https://github.com/jeswr/sparq/issues/992) FR-1/5/6/7; the fail-closed decision
-contract is [#1193](https://github.com/jeswr/sparq/issues/1193)). This is the
+[#992](https://github.com/sparq-org/sparq/issues/992) FR-1/5/6/7; the fail-closed decision
+contract is [#1193](https://github.com/sparq-org/sparq/issues/1193)). This is the
 **authorization-decision** surface only — it answers *"may principal X do mode M on
 resource R?"* over an already-loaded dataset. It does **not** authenticate, and it makes no
 cryptographic guarantee; a `Session` is a caller-asserted claim (see the `sparq-solid`
@@ -168,8 +168,8 @@ Activating the freeze is a governance decision. When @jeswr elects to ratify:
    the freeze in `CHANGELOG.md`.
 3. Flip the in-code markers and the [Status](#status-proposed-not-yet-in-force) section
    from *proposed* to *in force*.
-4. Note the ratification on [#1248](https://github.com/jeswr/sparq/issues/1248) /
-   [#1346](https://github.com/jeswr/sparq/issues/1346) so the consumer can pin the stable
+4. Note the ratification on [#1248](https://github.com/sparq-org/sparq/issues/1248) /
+   [#1346](https://github.com/sparq-org/sparq/issues/1346) so the consumer can pin the stable
    line.
 
 Until step 3, the tier-1 guarantee is **not** in force.
@@ -183,7 +183,7 @@ Until step 3, the tier-1 guarantee is **not** in force.
 - `crates/sparq-serve/README.md` — the `embed` seam narrative.
 - `crates/sparq-solid/README.md` / the `access-control` skill — the decision surface (and
   its explicit *does-not-authenticate* boundary).
-- [#1346](https://github.com/jeswr/sparq/issues/1346) (consumer requirements) ·
-  [#1248](https://github.com/jeswr/sparq/issues/1248) (embed + decision surface) ·
-  [#1250](https://github.com/jeswr/sparq/issues/1250) (generation ring) ·
-  [#1193](https://github.com/jeswr/sparq/issues/1193) (fail-closed decision contract).
+- [#1346](https://github.com/sparq-org/sparq/issues/1346) (consumer requirements) ·
+  [#1248](https://github.com/sparq-org/sparq/issues/1248) (embed + decision surface) ·
+  [#1250](https://github.com/sparq-org/sparq/issues/1250) (generation ring) ·
+  [#1193](https://github.com/sparq-org/sparq/issues/1193) (fail-closed decision contract).

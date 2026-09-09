@@ -85,7 +85,7 @@ use std::collections::HashMap;
 // Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
 // document is the interchange form RDFC-1.0 is defined over, so a `&str` ->
 // `String` entry point is the natural seam for callers that already hold
-// serialized RDF (the @jeswr/sparq RDF/JS `Dataset` wasm binding) and do not
+// serialized RDF (the @sparq-org/sparq RDF/JS `Dataset` wasm binding) and do not
 // want to reconstruct oxrdf term graphs across a language boundary.
 // ---------------------------------------------------------------------------
 
@@ -890,7 +890,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] sq-1dd5t: the text-in/text-out `canonicalize_nquads` entry point
-    /// (what the @jeswr/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
+    /// (what the @sparq-org/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
     /// documents that are RDF-isomorphic but differ in blank-node labels AND quad
     /// order canonicalize to byte-identical output; a label-only diff that is NOT
     /// isomorphic (an extra edge) does not.

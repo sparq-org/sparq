@@ -1,4 +1,4 @@
-// [OPUS-4.8] #1047 — the FULL RDF/JS `Dataset` algebra on `@jeswr/sparq`'s `Dataset`, exercised
+// [OPUS-4.8] #1047 — the FULL RDF/JS `Dataset` algebra on `@sparq-org/sparq`'s `Dataset`, exercised
 // against the built dist/. Two halves:
 //   1. the set algebra / iteration / materialisation members beyond `DatasetCore`; and
 //   2. the INTEROP requirement (the maintainer's hard ask): the binary set ops must work whether

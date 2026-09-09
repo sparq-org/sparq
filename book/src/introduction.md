@@ -28,8 +28,8 @@ mount). -->
 - [Capabilities at a glance](./getting-started/capabilities.md) — what each opt-in surface does.
 
 Per-surface how-to guides live in the
-[usage skills](https://github.com/jeswr/sparq/blob/main/skills/SKILL.md) router, and the full crate
-map is in [`AGENTS.md`](https://github.com/jeswr/sparq/blob/main/AGENTS.md). Live per-commit
+[usage skills](https://github.com/sparq-org/sparq/blob/main/skills/SKILL.md) router, and the full crate
+map is in [`AGENTS.md`](https://github.com/sparq-org/sparq/blob/main/AGENTS.md). Live per-commit
 performance metrics are on the
 [benchmarks dashboard](https://sparq.jeswr.org/dev/bench) — numbers are deliberately **not**
 baked into these docs, because they drift.

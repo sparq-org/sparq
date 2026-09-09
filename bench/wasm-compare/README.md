@@ -13,7 +13,7 @@ bash run.sh --quick          # smoke tier for the latency stage
 ```
 
 **(a) Bundle bytes — the deterministic, canonical-capable metric** (`bundle.mjs`).
-Compares the shipped `@jeswr/sparq` web bundle (`js/ build:wasm` output;
+Compares the shipped `@sparq-org/sparq` web bundle (`js/ build:wasm` output;
 not yet on npm, so the pin is the repo commit + recorded wasm-pack version)
 against `npm pack oxigraph@<pin>` — an immutable, integrity-checked registry
 artifact. Raw `.wasm`/glue byte counts are exactly reproducible on any box
@@ -30,7 +30,7 @@ generators, query shapes, and expected-row-count formulas from
 
 | column | stack | runtimes |
 |---|---|---|
-| `sparq` | shipped `@jeswr/sparq` web bundle | node, chromium |
+| `sparq` | shipped `@sparq-org/sparq` web bundle | node, chromium |
 | `oxigraph` | official `oxigraph` npm WASM (node + web builds) | node, chromium |
 | `n3js-quadstore` | N3.js parse + quadstore(memory-level) + quadstore-comunica SPARQL | node only (browser needs a bundler — skipped WITH NOTICE) |
 

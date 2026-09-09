@@ -1,6 +1,6 @@
 //! CONFORMANCE RUNNER for the trust-expression verifier-to-holder contract
 //! (bead `sq-6syab.6`, epic `sq-6syab`, issue
-//! [#1592](https://github.com/jeswr/sparq/issues/1592); design record
+//! [#1592](https://github.com/sparq-org/sparq/issues/1592); design record
 //! `research/trust-expression-spec.md` §6).
 //!
 //! Drives every entry of `tests/trust-expression/manifest.ttl` through the public

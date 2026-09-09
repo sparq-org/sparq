@@ -10,7 +10,7 @@
 //! namespace to make the semantics concrete); a WG would rename/rehome them.
 //!
 //! The canonical, machine-readable form of this vocabulary is
-//! [`ontologies/trust/trust.ttl`](https://github.com/jeswr/sparq/blob/main/crates/sparq-trust/ontologies/trust/trust.ttl)
+//! [`ontologies/trust/trust.ttl`](https://github.com/sparq-org/sparq/blob/main/crates/sparq-trust/ontologies/trust/trust.ttl)
 //! (Turtle, with `rdfs:label`/`rdfs:comment`/`rdfs:domain`/`rdfs:range`), and its
 //! two-stratum semantics — admission/derivation, the degenerate-`.acl` equivalence,
 //! and the strict-additivity property (G6) — are pinned in the companion

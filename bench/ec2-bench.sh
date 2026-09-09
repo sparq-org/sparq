@@ -56,7 +56,7 @@ PROFILE="${AWS_PROFILE:-pss}"
 REGION="${AWS_REGION:-eu-west-2}"
 WATCHDOG_SECS="${WATCHDOG_SECS:-2700}"            # 45 min absolute self-terminate cap
 VOLUME_GB="${VOLUME_GB:-40}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 TOML="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/benchmarks.toml"
 TAGSPEC='ResourceType=instance,Tags=[{Key=purpose,Value=sparq-bench},{Key=Name,Value=sparq-bench-run}]'
 AWS="aws --profile $PROFILE --region $REGION"

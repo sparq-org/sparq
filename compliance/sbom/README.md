@@ -37,7 +37,7 @@ open gaps + remediation beads are `gap-register.md`.
 The WASM/JS client surface (`crates/sparq-wasm`, `js/`) is a build artifact of the same workspace;
 its npm-published dependency surface is also covered by the npm/JS Dependabot ecosystem
 (`.github/dependabot.yml`). A **dedicated JS-lockfile SBOM** now exists for the published npm client
-`@jeswr/sparq` (`scripts/gen-js-sbom.sh`, CycloneDX 1.5; GS-3 RESOLVED, sq-toze.27); the `site/` demo
+`@sparq-org/sparq` (`scripts/gen-js-sbom.sh`, CycloneDX 1.5; GS-3 RESOLVED, sq-toze.27); the `site/` demo
 (`"private": true`, never published) is intentionally out of the release SBOM.
 
 ## Honesty posture (one-paragraph summary)
@@ -64,7 +64,7 @@ component honestly (crates.io-published → `crates.io`; first-party workspace c
 vendored upstream → `crates.io`; otherwise omitted, none today), so `supplier.name` is on **every**
 component (166/166, 174/174), schema-valid, CI-gated `supply-chain.yml#sbom-supplier` ([OPUS-4.8]);
 (GS-3 / sq-toze.27) the
-**npm/JS-lockfile** SBOM for the published WASM client `@jeswr/sparq` — `scripts/gen-js-sbom.sh`
+**npm/JS-lockfile** SBOM for the published WASM client `@sparq-org/sparq` — `scripts/gen-js-sbom.sh`
 (CycloneDX 1.5, runtime + full-tree views), schema-validated, wired GATING `supply-chain.yml#js-sbom`
 + per-release `release.yml#sbom` ([OPUS-4.8]); (GS-4 / sq-toze.28) spec
 version — the SBOM is now emitted as CycloneDX **1.5** (matching the VEX), with `metadata.lifecycles`

@@ -9,7 +9,7 @@ This is the **worker-tier core** (≤32 KiB) loaded by codex. For the full refer
 sparq is a from-scratch **RDF triplestore and SPARQL 1.1 engine in Rust** — dictionary-encoded, six sorted permutation indexes, parallel + streaming execution, RDFS/OWL-RL/N3 inference, an out-of-core (mmap) mode with a compressed on-disk format, a WebAssembly build, and a W3C-conformant HTTP server. The engine is published across several surfaces:
 
 - **Rust crates** (crates.io): `sparq-core`, `sparq-engine` (core), `sparq-cli`, `sparq-server`, plus opt-in capability crates. `sparq-reason-el` is a **separate** opt-in crate — an OWL 2 EL consequence-based classifier — see [`skills/inference/SKILL.md`](skills/inference/SKILL.md).
-- **npm**: `@jeswr/sparq` — RDF/JS-typed API over the wasm build.
+- **npm**: `@sparq-org/sparq` — RDF/JS-typed API over the wasm build.
 - **PyPI**: `sparq-rdf` (import name `sparq`) — pyo3/maturin bindings.
 
 Status: experimental research engine; the API is unstable.
@@ -38,7 +38,7 @@ Usage instructions for each public surface are packaged as Agent Skills under [`
 - a `pub` item in a crate's public surface (a published crate's exported types, traits, functions, or their signatures);
 - a CLI flag, subcommand, or its behavior in `sparq-cli`;
 - an HTTP route, query/body parameter, or response shape in `sparq-server`;
-- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@jeswr/sparq`).
+- a Python binding (the `sparq` package) or a JS/RDF-JS binding (`@sparq-org/sparq`).
 
 Then edit the corresponding `skills/<surface>/SKILL.md` so its instructions and examples still compile and run against the new surface. Do not split this across a follow-up PR — a skill that documents a removed flag or a changed signature is worse than no skill. If the change spans surfaces, update every affected `SKILL.md`.
 

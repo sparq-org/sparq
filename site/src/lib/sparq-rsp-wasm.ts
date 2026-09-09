@@ -7,7 +7,7 @@
 // strategy as the lean bundle (and the sibling W-reason bundle, src/lib/reason-wasm.ts):
 // the glue never enters the page bundle and the wasm bytes' URL is passed explicitly
 // (basePath-prefixed for GitHub Pages). Its wasm-pack output stays in the crate's own
-// pkg/ (it is NOT part of the published @jeswr/sparq package); the prebuild sync-wasm
+// pkg/ (it is NOT part of the published @sparq-org/sparq package); the prebuild sync-wasm
 // step copies it into public/wasm/rsp/.
 //
 // The browser tab drives the logical clock: `sparq-rsp` reads no wall clock and runs no

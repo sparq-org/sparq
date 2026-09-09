@@ -3,7 +3,7 @@
   "schema": "sparq-openssf-bestpractices-selfcert/v1",
   "project": {
     "name": "sparq",
-    "repo": "github.com/jeswr/sparq",
+    "repo": "github.com/sparq-org/sparq",
     "badge_app": "https://www.bestpractices.dev",
     "target_level": "passing",
     "filed": false,
@@ -30,7 +30,7 @@
     {"id": "english", "family": "basics", "status": "Met", "justification": "all docs in English; Preferred-Languages: en in security.txt", "evidence": [".well-known/security.txt"]},
     {"id": "maintained", "family": "basics", "status": "Met w/justification", "justification": "live signal — active commit/PR cadence on main + declared posture; same signal Scorecard's Maintained check reads at scan time (true only while cadence holds)", "evidence": ["SECURITY.md"]},
 
-    {"id": "repo_public", "family": "change_control", "status": "Met", "justification": "public GitHub repo jeswr/sparq", "evidence": ["README.md"]},
+    {"id": "repo_public", "family": "change_control", "status": "Met", "justification": "public GitHub repo sparq-org/sparq", "evidence": ["README.md"]},
     {"id": "repo_track", "family": "change_control", "status": "Met", "justification": "git history", "evidence": ["README.md"]},
     {"id": "repo_interim", "family": "change_control", "status": "Met", "justification": "interim commits land on main between releases (no long-lived release branches)", "evidence": ["AGENTS.md"]},
     {"id": "repo_distributed", "family": "change_control", "status": "Met", "justification": "git (distributed VCS)", "evidence": ["README.md"]},

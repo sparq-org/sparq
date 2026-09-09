@@ -173,7 +173,7 @@ export const GROUPS: SurfaceGroup[] = [
         slug: "javascript-wasm",
         href: "/surface/javascript-wasm",
         title: "JavaScript / WASM",
-        blurb: "The @jeswr/sparq browser & Node API — streaming cursors, match, applyDelta.",
+        blurb: "The @sparq-org/sparq browser & Node API — streaming cursors, match, applyDelta.",
         tier: "live",
         icon: Boxes,
         built: true,

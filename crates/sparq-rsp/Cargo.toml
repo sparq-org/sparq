@@ -42,8 +42,8 @@ window-aggregate = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
 # [FABLE-5] sq-2n1q3.4: the shared zero-overhead eval substrate. The Delta/Snapshot
 # windowed-materialisation slide (the ISTREAM/DSTREAM-shaped consecutive-window diff in
 # `eval.rs`) drives `join::delta::DeltaTable` + `rows` — the same semi-naive Δ-vs-full
@@ -53,7 +53,7 @@ sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features =
 # `sparq-wasm` bundle graph is unaffected (it never pulls sparq-rsp; it already carried
 # sparq-substrate via sparq-engine); the opt-in tier-b `sparq-rsp-wasm` bundle wraps
 # this crate and now carries the (wasm-safe, pure-Rust) `join` module with it.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, features = ["join"] }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.1", default-features = false, features = ["join"] }
 oxrdf.workspace = true
 # Register-time validation only (SELECT-form check); already in the tree via sparq-engine.
 spargebra.workspace = true

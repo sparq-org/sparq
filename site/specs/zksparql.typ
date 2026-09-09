@@ -1335,5 +1335,5 @@ policy — it is not, and must not be presented as, an independent cryptographic
     LNCS 3152, Springer, 2004. (Origin of the BBS/BBS+ multi-message signature line used for
     selective disclosure.)]),
   ("SPARQ", [The sparq project. #emph[sparq: an RDF + SPARQL engine with a zero-knowledge
-    query-proof estate (reference implementation)]. https://github.com/jeswr/sparq.]),
+    query-proof estate (reference implementation)]. https://github.com/sparq-org/sparq.]),
 ))

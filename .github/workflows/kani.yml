@@ -180,6 +180,18 @@ jobs:
     strategy:
       # One crate's OOM/timeout must NOT cancel the other crate's proofs.
       fail-fast: false
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION. Every suite in the matrix still
+      # runs (the suite list is unchanged, and D3 in scripts/check-fv-manifest.py still pins
+      # it against ci/formal-verification.toml); at most 2 suites are ADMITTED to a hosted
+      # runner at a time. This lane's proofs are long-lived and it overlaps the miri window
+      # whenever either run is delayed, so in the PR-throughput incident that filed #6349 the
+      # two scheduled safety lanes together held most of the account's standard-runner
+      # admissions while PR-head checks queued. Each suite keeps its own 90-minute backstop,
+      # its per-harness KANI_HARNESS_TIMEOUT and its KANI_STEP_BUDGET, so verdict semantics
+      # are untouched; only the ADMISSION rate changes (worst case 3 waves x 90 min = 4.5 h,
+      # well inside the nightly cycle). The per-workflow and combined miri+kani ceilings are
+      # machine-checked by scripts/tests/test_nightly_runner_reservation.py.
+      max-parallel: 2
       matrix:
         # ADD A SUITE = ONE ENTRY (see header). harnesses = space-separated `#[kani::proof]`
         # fn names in that crate; features = extra cargo features the harnesses need.

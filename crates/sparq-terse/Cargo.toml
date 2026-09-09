@@ -14,16 +14,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Opt-in, verifiable LLM-ergonomic SPARQL surface for sparq: a pre-parse transpiler that always emits canonical SPARQL (never forks the parser), with V(\"phrase\") lexical-first concept resolution behind a soundness envelope (echo IRI+score+runner-up+confidence, confidence-gate, mandatory staleness guard) and a silent-rewrite canary"
+description = "Opt-in LLM-oriented shorthand transpiler that emits canonical SPARQL with verifiable concept resolution"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# Research prototype (epic sq-2m6zm dogfooding). NOT published — broad adoption is gated
-# on the design's §5 token/quality A/B verdict (a future bead). Per the repo's
-# opt-in-feature discipline, the surface stays additive and measurement-gated.
-publish = false
+# Research prototype (epic sq-2m6zm dogfooding); broad adoption is gated on the
+# design's §5 token/quality A/B verdict. [GPT-5.6] Published because sparq-cli and
+# sparq-server expose it behind default-off features; maturity remains explicit.
 
 # [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg so the `vectors`-gated
 # items render on the docs.rs front page.
@@ -55,13 +54,13 @@ vectors = ["dep:sparq-core", "dep:sparq-nlq", "dep:sparq-vectors", "dep:oxrdf"]
 spargebra.workspace = true
 # The engine graph the lexical/vector resolution reads (only behind `vectors`).
 # default-features=false keeps it lean.
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false, optional = true }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false, optional = true }
 # The deterministic, no-model, no-network LEXICAL entity linker reused for V() (design
 # §6.4 "lexical-first"). Only behind `vectors`.
-sparq-nlq = { path = "../sparq-nlq", version = "0.1.0", optional = true }
+sparq-nlq = { path = "../sparq-nlq", version = "0.1.1", optional = true }
 # The staleness-guarded nearest-term search (the §6.5 mandatory staleness guard) for the
 # V() vector fallback. Only behind `vectors`.
-sparq-vectors = { path = "../sparq-vectors", version = "0.1.0", optional = true }
+sparq-vectors = { path = "../sparq-vectors", version = "0.1.1", optional = true }
 # Term types for the resolution surface (Resolution.iri is an oxrdf NamedNode). Only
 # behind `vectors`; workspace-pinned so the term type is byte-identical to sparq-core's.
 oxrdf = { workspace = true, optional = true }

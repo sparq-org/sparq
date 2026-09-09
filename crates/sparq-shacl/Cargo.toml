@@ -26,7 +26,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 oxttl.workspace = true
 # Algebra-level pre-binding of $this (a VALUES injection on the parsed sh:select) — more
@@ -45,10 +45,10 @@ regex = "1"
 # OFF so rayon never leaks in (wasm-deps-guard) and the bundle stays lean. sparq-engine
 # does NOT depend on sparq-shacl, so there is no dependency cycle either way.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
 
 [features]
 default = []

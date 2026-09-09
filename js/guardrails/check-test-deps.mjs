@@ -9,7 +9,7 @@
 // (used by test/solid-differential.test.mjs; the first two are repo-ROOT
 // devDependencies, rdflib is hoisted transitively via @solid/acl-check). They live
 // outside this manifest on purpose: the js-sbom lane derives the published
-// @jeswr/sparq SBOM from js/package.json, and test-only deps there would pollute the
+// @sparq-org/sparq SBOM from js/package.json, and test-only deps there would pollute the
 // runtime component list (sq-f04e / sq-pl1p).
 //
 // The consequence is that `npm ci` run INSIDE js/ installs only this member's own

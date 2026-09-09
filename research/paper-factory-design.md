@@ -96,7 +96,7 @@ to subagents per the project's delegation discipline.
   │  PDF : typst compile paper.typ public/papers/<slug>.pdf \                          │
   │          --input data="$(cat site/src/data/benchmarks.generated.json)"             │
   │  HTML: typst.ts (@myriaddreamin/typst.react) renders the SAME .typ at /papers/<slug>│
-  │  anonymized-build toggle (--input anon=true) strips jeswr/sparq identity for        │
+  │  anonymized-build toggle (--input anon=true) strips sparq-org/sparq identity for        │
   │  double-blind venues                                                               │
   └─────────────────────────────────────┬────────────────────────────────────────────┘
         ▼

@@ -90,7 +90,7 @@ into pkg:Finding; reuses PROV-O, SKOS, DCAT, DQV, FaBiO/FRBR/DC, CiTO, schema.or
 nanopublications. Companion: PROVENANCE.md (reuse table + live-ontology alignment
 verification) and research/dogfooding-sparq-knowledge-graph.md (design record, PR
 #1063); DQV is a W3C Working Group Note (see PROVENANCE.md)."""@en-GB ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/1063> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/1063> ;
   rdfs:comment "sparq-local namespace; the net-new terms would be rehomed by a standardisation pass."@en-GB .
 
 # =============================================================================

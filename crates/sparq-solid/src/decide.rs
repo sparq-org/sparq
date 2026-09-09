@@ -20,7 +20,7 @@
 //! This is the authorization-**decision** surface only — it does not authenticate and makes
 //! no cryptographic claim (a `Session` is a caller-asserted claim; see the crate README).
 //!
-//! [API stability & deprecation policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+//! [API stability & deprecation policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 //!
 //! # Security posture — fail-CLOSED, never fail-OPEN (FR-6, sq-snopa.2)
 //!
@@ -159,7 +159,7 @@ pub struct EffectiveAcl {
 /// **API tier-1 (proposed-stable)** — the return type of the proposed semver-stable
 /// per-resource decision surface; see the module docs and the [API stability policy].
 ///
-/// [API stability policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+/// [API stability policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 ///
 /// # Examples
 ///

@@ -9,7 +9,7 @@
 // [OPUS-4.8] sq-jpki.2 (SBOM fix): the conformance file's `@sparq/client/wasm-store` import is
 // resolved here by a tsconfig `paths` mapping pointing DIRECTLY at `@sparq/client`'s tracked
 // generated d.ts — NOT by a `package.json` dependency on `@sparq/client`. That keeps the
-// `js/` (`@jeswr/sparq`) manifest free of any `@sparq/client` dependency edge, so the
+// `js/` (`@sparq-org/sparq`) manifest free of any `@sparq/client` dependency edge, so the
 // published-client CycloneDX SBOM (`scripts/gen-js-sbom.sh` → `npm ls … --omit=dev
 // --workspaces=false`) never sees an unresolved workspace-link edge (which crashed npm-ls with
 // `Cannot read properties of undefined (reading 'extraneous')`, exit 254). The dev-only,

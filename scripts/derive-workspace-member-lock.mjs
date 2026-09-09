@@ -8,7 +8,7 @@
 // requires a lockfile co-located with `js/package.json` AND must NOT hit the network (the
 // supply-chain `js-sbom` lane is deliberately install-free + deterministic). This script
 // projects the member's dependency CLOSURE out of the committed root lock into a temporary
-// standalone lockfile whose root component is the member itself (e.g. `@jeswr/sparq`), so
+// standalone lockfile whose root component is the member itself (e.g. `@sparq-org/sparq`), so
 // the SBOM stays anchored at the published client — exactly as it did pre-migration with a
 // committed per-package lock — while preserving the EXACT versions the root lock pins (no
 // `^`-range re-resolution, no registry call). The emitted lock is TRANSIENT scratch (the

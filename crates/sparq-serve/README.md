@@ -37,7 +37,7 @@ re-export of the runtime-agnostic concurrency wrapper (`GenerationRing` +
 embedder reuses sparq's *tested* fork → update → publish + generation-pinning model).
 It is the proposed **API tier-1 (proposed-stable)** embedding surface (the
 [API stability policy](../../docs/api-stability.md)) — but **NOT yet frozen**: the
-semver freeze is the maintainer's to ratify ([#1248](https://github.com/jeswr/sparq/issues/1248)),
+semver freeze is the maintainer's to ratify ([#1248](https://github.com/sparq-org/sparq/issues/1248)),
 and until then a minor pre-`1.0` release MAY still change it.
 
 ## 🚀 Quickstart

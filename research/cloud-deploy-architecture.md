@@ -16,7 +16,7 @@ The epic asks for turnkey deploys of **two deployable servers**:
 1. **`sparq-server`** — the W3C SPARQL 1.1 Protocol HTTP server (`crates/sparq-server`).
 2. **The native Solid/LWS server** — `crates/sparq-lws-core`'s binary (`sparq-lws-core`,
    `src/main.rs`). This is the **native** deployable, distinct from the loopback
-   `@jeswr/solid-server` wasm/npm development host produced by the sq-6xasp epic (that npm
+   `@sparq-org/solid-server` wasm/npm development host produced by the sq-6xasp epic (that npm
    package is a `npx`-spin-up dev convenience, NOT the cloud-deploy target — the container
    ships the native binary).
 
@@ -33,7 +33,7 @@ The epic asks for turnkey deploys of **two deployable servers**:
   `github.com/sparq-org/sparq`, so `${{ github.repository_owner }}` resolves to
   **`sparq-org`** and the canonical ref is **`ghcr.io/sparq-org/sparq-server`**. Several
   in-tree comments (root `Dockerfile` header, `scripts/docker-smoke.sh`) still say
-  `ghcr.io/jeswr/sparq-server` from before the org move — templates MUST use the
+  `ghcr.io/sparq-org/sparq-server` from before the org move — templates MUST use the
   `sparq-org` ref (parameterised; see §1). Flagged as an open question for the maintainer.
 - ⏳ **LWS image is NOT yet published.** `sq-lmz40` (child of `sq-fqrv4`) is OPEN and already
   carries a detailed, correct spec: new `crates/sparq-lws-core/Dockerfile`, port **3000**
@@ -43,7 +43,7 @@ The epic asks for turnkey deploys of **two deployable servers**:
   in §1 — the per-provider templates depend on it. The "wasm build wrinkle that timed out"
   is a red herring for the *container*: the container ships the **native** `sparq-lws-core`
   binary (a normal `cargo build --release`), NOT a wasm build. The wasm timeout belongs to
-  the `@jeswr/solid-server` npm path (sq-6xasp), which is a separate PaaS-ish story (§3.6),
+  the `@sparq-org/solid-server` npm path (sq-6xasp), which is a separate PaaS-ish story (§3.6),
   not the container substrate.
 - ✅ **No deploy assets exist yet** — no `deploy/`, no `*.tf`, no `Chart.yaml`, no `fly.toml`.
   This is greenfield template work. The site has a `/download` page (precedent for a
@@ -280,7 +280,7 @@ user deploys one or the other with the same template family.
 - **Health:** Fly `[[http_service.checks]]` / Render `healthCheckPath` / Railway healthcheck
   → `/health` or `/readyz` (R7).
 - **User sets:** the token, `server` choice (two configs or one parameterised), LWS
-  issuer/base-URL. **Note:** the `@jeswr/solid-server` **npm** path (sq-6xasp) is a separate,
+  issuer/base-URL. **Note:** the `@sparq-org/solid-server` **npm** path (sq-6xasp) is a separate,
   even-lower-friction dev spin-up (`npx`) and is **out of scope for this container-based PaaS
   child** — link it from the site (§3.7) but do not conflate the wasm dev host with the
   native PaaS container.

@@ -4,7 +4,7 @@ description: "Experimental GPU (wgpu / WGSL) compute kernels for sparq's hot-pat
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-gpu — experimental GPU compute kernels (T24d, parked)

@@ -34,7 +34,7 @@ js-sys = { version = "0.3", optional = true }
 sparq-shacl = { path = "../sparq-shacl", default-features = false, optional = true }
 
 # [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) to the
-# @jeswr/sparq RDF/JS `Dataset` (toCanonical / equals / contains), OPT-IN behind the
+# @sparq-org/sparq RDF/JS `Dataset` (toCanonical / equals / contains), OPT-IN behind the
 # `canon` feature (OFF by default). `default-features = false` drops `sparq-core`'s
 # `parallel` (rayon — no wasm threads); the RDFC-1.0 algorithm itself (`rdf-canon`) is
 # single-threaded. The DEFAULT bundle carries zero canonicalization code so the lean
@@ -57,7 +57,7 @@ serde_json = { version = "1", optional = true }
 # default). PROBE scope: proves wasm32 compat + gives the bundle-delta measurement a
 # reachable parse→evaluate→conflict path behind two EXPERIMENTAL free functions
 # (`policyEvaluate` / `policyConflicts`); the full JS API awaits a maintainer
-# public-contract decision, and the published `@jeswr/sparq` bundle (js `build:wasm`)
+# public-contract decision, and the published `@sparq-org/sparq` bundle (js `build:wasm`)
 # does NOT enable it — the lean default bundle links zero policy code and stays
 # byte-identical. `default-features = false` keeps the stateful `count-enforcement`
 # store (Mutex/lockfile usage counters — meaningless in a single-threaded browser tab
@@ -153,11 +153,11 @@ regex = ["sparq-engine/regex"]
 # adds no new external dependency, and stays OFF the lean default bundle.
 serialize-rdf = ["sparq-engine/serialize-rdf", "dep:js-sys"]
 # [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) as the
-# `canonicalizeNQuads(nquads)` free function the @jeswr/sparq RDF/JS `Dataset` uses for
+# `canonicalizeNQuads(nquads)` free function the @sparq-org/sparq RDF/JS `Dataset` uses for
 # blank-node-isomorphism-aware `toCanonical` / `equals` / `contains`. Pulls `sparq-canon`
 # (single-sourced RDFC-1.0 over `rdf-canon`) and the getrandom-0.2 browser-backend shim
 # its oxrdf-0.2 bridge needs on wasm. OFF by default so the lean bundle is byte-identical;
-# the published `@jeswr/sparq` bundle (js `build:wasm`) turns it on.
+# the published `@sparq-org/sparq` bundle (js `build:wasm`) turns it on.
 canon = ["dep:sparq-canon", "dep:getrandom02"]
 # [FABLE-5] sq-586sh: the ODRL usage-control wasm32 probe (see the sparq-policy
 # dependency note above). OFF by default; NOT enabled by the published bundle build.

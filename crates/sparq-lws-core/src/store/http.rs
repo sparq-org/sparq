@@ -8,7 +8,7 @@
 //! application/sparql-update` (success → `204 No Content`). Every untrusted IRI/literal flows through
 //! the injection-safe builders in [`super::sparql`] — never string-concatenated.
 //!
-//! ## Verified SPARQ HTTP surface (against `jeswr/sparq` `crates/sparq-server`, local `52224c4`)
+//! ## Verified SPARQ HTTP surface (against `sparq-org/sparq` `crates/sparq-server`, local `52224c4`)
 //!
 //! `sparq-server` is described as a *"W3C-conformant HTTP server exposing the sparq query engine
 //! (SPARQL 1.1 Protocol + Graph Store HTTP Protocol read side)."* Its `/sparql` route accepts:

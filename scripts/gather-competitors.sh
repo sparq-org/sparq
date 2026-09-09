@@ -366,7 +366,7 @@ fi
 #                  (count sh:result, read sh:conforms) so #violations is directly
 #                  comparable to sparq's report.results.len().  [REQUIRED by sq-7iai]
 #   js-lib       : in-process Node/RDF-JS harness (rdf-validate-shacl, shacl-engine,
-#                  sparq's own @jeswr/sparq WASM SHACL) — same count semantics.
+#                  sparq's own @sparq-org/sparq WASM SHACL) — same count semantics.
 #   http-sparql  : POST query -> parse SPARQL-JSON -> count (Fuseki/Virtuoso + the
 #                  QLever HTTP path). End-to-end gather-only (needs a live server);
 #                  parser fixture-verified here.

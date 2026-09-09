@@ -1,5 +1,5 @@
 // [OPUS-4.8] sq-iwhl8 (#1116) — runs the contributable RDF/JS conformance harness
-// (`@rdfjs-test/conformance`, packages/rdfjs-conformance) against `@jeswr/sparq` ITSELF, so the
+// (`@rdfjs-test/conformance`, packages/rdfjs-conformance) against `@sparq-org/sparq` ITSELF, so the
 // SAME spec-derived suites that pass for N3.js (see the harness's own test/n3-parity.test.mjs)
 // also pass for sparq. This is the maintainer's "should pass the test suites defined for other
 // RDF/JS conformant libraries" requirement, met by sharing one runner across libraries.
@@ -23,14 +23,14 @@ import {
 } from '../dist/index.js';
 
 // --- DataFactory + Term hierarchy (synchronous; no engine needed) --------------------------------
-await runDataFactoryTests({ factory: DataFactory, label: '@jeswr/sparq' });
+await runDataFactoryTests({ factory: DataFactory, label: '@sparq-org/sparq' });
 
 // --- DatasetCore + Dataset algebra (engine up; synchronous factory) ------------------------------
 await init();
 await runDatasetTests({
   factory: DataFactory,
   datasetFactory: (quads) => datasetFactory.dataset(quads),
-  label: '@jeswr/sparq',
+  label: '@sparq-org/sparq',
 });
 
 // --- Stream / Source / Sink ----------------------------------------------------------------------
@@ -39,10 +39,10 @@ const sourceStore = await SparqStore.fromString(
   'ntriples',
 );
 const source = sourceStore.asSource();
-await runStreamTests({ source, sink: source, factory: DataFactory, label: '@jeswr/sparq' });
+await runStreamTests({ source, sink: source, factory: DataFactory, label: '@sparq-org/sparq' });
 
 // --- a focused smoke that the Source/Sink adapter round-trips through the engine -----------------
-test('@jeswr/sparq Source/Sink round-trips quads through the engine', async () => {
+test('@sparq-org/sparq Source/Sink round-trips quads through the engine', async () => {
   const store = await SparqStore.fromString('', 'ntriples');
   const src = new SparqSource(store);
   const q = DataFactory.quad(

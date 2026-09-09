@@ -13,28 +13,28 @@
 #                   default — v3/v4 binaries exist on the release page for newer CPUs)
 class Sparq < Formula
   desc "From-scratch RDF triplestore and SPARQL engine (dictionary-encoded, parallel)"
-  homepage "https://github.com/jeswr/sparq"
+  homepage "https://github.com/sparq-org/sparq"
   version "0.1.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/jeswr/sparq/releases/download/v#{version}/sparq-cli-v#{version}-arm64-darwin.tar.gz"
+      url "https://github.com/sparq-org/sparq/releases/download/v#{version}/sparq-cli-v#{version}-arm64-darwin.tar.gz"
       sha256 "REPLACE_WITH_SHA256_arm64-darwin"
     end
     on_intel do
-      url "https://github.com/jeswr/sparq/releases/download/v#{version}/sparq-cli-v#{version}-x64-darwin.tar.gz"
+      url "https://github.com/sparq-org/sparq/releases/download/v#{version}/sparq-cli-v#{version}-x64-darwin.tar.gz"
       sha256 "REPLACE_WITH_SHA256_x64-darwin"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/jeswr/sparq/releases/download/v#{version}/sparq-cli-v#{version}-arm64-linux.tar.gz"
+      url "https://github.com/sparq-org/sparq/releases/download/v#{version}/sparq-cli-v#{version}-arm64-linux.tar.gz"
       sha256 "REPLACE_WITH_SHA256_arm64-linux"
     end
     on_intel do
-      url "https://github.com/jeswr/sparq/releases/download/v#{version}/sparq-cli-v#{version}-x64-v2.tar.gz"
+      url "https://github.com/sparq-org/sparq/releases/download/v#{version}/sparq-cli-v#{version}-x64-v2.tar.gz"
       sha256 "REPLACE_WITH_SHA256_x64-v2"
     end
   end

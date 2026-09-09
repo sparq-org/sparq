@@ -2,7 +2,7 @@
   "name": "sparq-wasm-compare-browser",
   "private": true,
   "version": "0.0.0",
-  "description": "Cross-engine BROWSER wasm measurement harness for the shipped @jeswr/sparq bundle (sq-3ul2n.1): per-phase timings on Chromium/Firefox/WebKit via Playwright + a plain-Node baseline. Self-contained — not a repo-root npm workspace member, so its Playwright dependency never perturbs the site/js builds.",
+  "description": "Cross-engine BROWSER wasm measurement harness for the shipped @sparq-org/sparq bundle (sq-3ul2n.1): per-phase timings on Chromium/Firefox/WebKit via Playwright + a plain-Node baseline. Self-contained — not a repo-root npm workspace member, so its Playwright dependency never perturbs the site/js builds.",
   "type": "module",
   "scripts": {
     "run": "node run.mjs",

@@ -3,7 +3,7 @@
 // `?lib=` selects the library; both are wasm-bindgen web-target modules
 // instantiated the same way, then driven through the SAME reduced workload
 // (compare-workload.mjs → the sq-3ul2n.1 generators + query shapes + oracle):
-//   sparq    — the shipped @jeswr/sparq bundle (/js/wasm/).
+//   sparq    — the shipped @sparq-org/sparq bundle (/js/wasm/).
 //   oxigraph — the pinned npm package's web build, served from the harness
 //              dir's gather-only node_modules (/nm/oxigraph/web.js).
 // n3js-quadstore is a Node-runtime column (per bench/competitors.json): the

@@ -241,7 +241,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.version }}
         run: scripts/gen-sbom-vex.sh
       # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: per-release CycloneDX SBOMs for
-      # `@jeswr/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
+      # `@sparq-org/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
       # Runtime + full build trees land in sbom/, so the attestation glob below covers all four.
       # [OPUS-4.8] sq-gl3cf: gen-js-sbom.sh ALSO reads GITHUB_REF_NAME for the version-stamped
       # filenames, so it needs the same VERSION thread for the dispatch path to name JS SBOMs right.
@@ -507,7 +507,7 @@ jobs:
       # resolves `next`/`cross-env` from root .bin. This is EXACTLY the install the proven-green
       # gui.yml `gui-app` ("Install workspace dependencies") + `tauri-e2e` jobs use.
       # (`npm install`, not `npm ci`, matches gui.yml — tolerant of a not-yet-regenerated lock.)
-      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @jeswr/sparq workspace
+      # The Windows `npm install` ENOENT/EPERM (run 27890097353) was the @sparq-org/sparq workspace
       # member's `prepare` hook (js/guardrails/prepare-build.mjs) calling `execFileSync('npm',…)`
       # WITHOUT `shell:true`, so `npm.cmd` did not resolve on Windows (`spawnSync npm ENOENT`),
       # whose crash then triggered npm's rollback `EPERM rmdir node_modules/next` cleanup warnings.
@@ -1246,7 +1246,7 @@ jobs:
   # scripts/tests/test_release_slsa_l3_provenance.py; runtime behaviour is not evidence until a
   # tag produces it. Verify a published image with (ghcr.io needs `GH_TOKEN` exported):
   #   slsa-verifier verify-image ghcr.io/<owner>/sparq-server@<digest> \
-  #     --source-uri github.com/jeswr/sparq
+  #     --source-uri github.com/sparq-org/sparq
   provenance-container:
     needs: [docker]
     permissions:

@@ -626,6 +626,14 @@ jobs:
         run: |
           python3 scripts/triage-area.py --self-test
           python3 scripts/tests/test_triage_area.py
+      # [OPUS-5] #5425: scripts/promote.py is the fourth member of that family — it decides
+      # whether third-party content leaves QUARANTINE, so a regression here is a security
+      # regression, not a labelling one. Its own cron (promote-on-approval.yml) self-tests only
+      # the default-branch copy every 10 minutes, i.e. after the change has merged; this PR-time
+      # gate reds the offending PR instead. Hermetic (stdlib only, no gh/network: the reaction
+      # fixtures are pure, and the quarantine fetch runs against an injected gh stub).
+      - name: Self-test promote.py (trust-promotion predicate + quarantine fetch)
+        run: python3 scripts/promote.py --self-test
       # [FABLE-5] #3759 / registry#563 item 4: the transient-tolerant gh READ retry
       # helper (scripts/gh_retry.py — bounded, transient-5xx-only, fail-closed
       # read-allow-list so mutations/arm calls can never be wrapped) and the two arm
@@ -721,6 +729,9 @@ jobs:
         run: python3 scripts/check-dashboard-publish-wiring.py --self-test
       - name: "Enforce every served bench/dashboard asset is wired into the Pages publisher — GATING"
         run: python3 scripts/check-dashboard-publish-wiring.py
+      # [GPT-6-ASTRA] Exercise the actual publisher shell with file-only Git races.
+      - name: Test bounded dashboard publication recovery (local Git)
+        run: python3 scripts/tests/test_bench_dashboard_publish.py
       # [OPUS-5] issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
       # one deploy slot, so the guide has no workflow of its own — docs.yml VALIDATES it on PRs
       # and pages.yml BUILDS + OVERLAYS it into the single Pages artifact at out/guide/. Three
@@ -1059,6 +1070,25 @@ jobs:
       # leave CI.
       - name: Self-test the CI execution-latency alarm (3 choke modes + YAML seam)
         run: python3 scripts/tests/test_ci_execution_latency_alarm.py
+      # [OPUS-5] issue #6349 — HOSTED-RUNNER RESERVATION for the scheduled safety lanes.
+      # miri.yml (24 shards + a doctest job) and kani.yml (per-suite proofs) used to admit
+      # their WHOLE matrices at once, and their jobs are long-lived by construction, so a
+      # nightly burst parked most of the account's standard-runner admissions while current
+      # PR-head checks queued waiting for a runner. Both strategies now declare a bounded
+      # `max-parallel`; this suite reads BOTH workflow files and reds if either cap
+      # disappears, if one lane's footprint outgrows its per-lane ceiling, or if the
+      # COMBINED footprint eats into the majority of the allowance reserved for PR and
+      # merge-group checks. It also pins what the cap must not be paid for with —
+      # `fail-fast: false`, the full shard partition, and no PR-head trigger. Hermetic
+      # fixtures + a mutation pass over the REAL parsed workflows, so a rule that stopped
+      # detecting anything reds here rather than going quietly green. Needs PyYAML
+      # (installed in the shared setup above).
+      - name: Hosted-runner reservation for the miri/kani nightly lanes (issue 6349)
+        run: python3 scripts/tests/test_nightly_runner_reservation.py
+      # [GPT-6 Astra] #6436: exercise the actual nightly admission helper and
+      # mutation evidence producer offline, including green skipped follow-ups.
+      - name: Heavy nightly completion freshness (issue 6436)
+        run: python3 scripts/tests/test_ci_nightly_freshness.py
       # [OPUS-5] sq-6vshe.7 phase 4: the HEAVY-set DRIFT alarm
       # (scripts/heavy_set_alarm.py, .github/workflows/heavy-set-alarm.yml). Hermetic
       # (no cargo, no gh, no network) and stdlib-only. Runs the script's own fixture

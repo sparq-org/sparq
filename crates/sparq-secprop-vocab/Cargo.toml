@@ -26,13 +26,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Shared sec-prop:/secx: security-property IRI constants + the canonical secprop-ext.ttl (dependency-free leaf)."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Shared sec-prop:/secx: security-property IRI constants and canonical vocabulary"
 readme = "README.md"
 # Research-stage vocabulary for an externally UNAUDITED ZK estate (sq-qhy4): it
 # RECORDS security-property claims + their epistemic basis and asserts none of
-# them. Kept out of releases alongside its consumers (sparq-trust / sparq-policy
-# / sparq-zk are all `publish = false`).
-publish = false
+# them. [GPT-5.6] Published as the dependency-free leaf shared by its consumers.
 
 # [OPUS-5] docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]

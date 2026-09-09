@@ -22,7 +22,7 @@ import { DataFactory, Quad, Variable } from './terms.js';
 import { init, WasmStore } from './wasm.js';
 
 // [OPUS-4.8] sq-dvyi: `'jsonld'` added — the engine parses JSON-LD (oxjsonld) when the
-// wasm bundle is built with the OPT-IN `jsonld` feature, which the published `@jeswr/sparq`
+// wasm bundle is built with the OPT-IN `jsonld` feature, which the published `@sparq-org/sparq`
 // bundle and the site REPL both enable (js `build:wasm`). The JS surface accepts it like
 // the other syntaxes; the default lean wasm bundle leaves oxjsonld out (perf-gate floor).
 export type RdfFormat = 'turtle' | 'ntriples' | 'nquads' | 'trig' | 'jsonld';
@@ -512,7 +512,7 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * `[[prefix, iri], …]` map driving `@prefix`/`@context` compaction (omit for the engine
    * defaults). An unrecognised `format` (or a malformed `prefixes`) throws.
    *
-   * Requires a `serialize-rdf`-enabled wasm bundle (the published `@jeswr/sparq` ships one);
+   * Requires a `serialize-rdf`-enabled wasm bundle (the published `@sparq-org/sparq` ships one);
    * a `serialize-rdf`-less custom build throws a clear error here rather than a cryptic
    * "not a function". (The full W3C JSON-LD 1.1 Compaction against a caller `@context` is the
    * sibling raw-`Store` `serializeCompact` binding — see the javascript-wasm SKILL.)
@@ -560,7 +560,7 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * documents (~10–100 triples); validate large graphs server-side via the
    * `sparq-server` HTTP `validate` path instead (the other half of #162).
    *
-   * Requires a `shacl`-enabled wasm bundle (the published `@jeswr/sparq` ships
+   * Requires a `shacl`-enabled wasm bundle (the published `@sparq-org/sparq` ships
    * one); a `shacl`-less custom build throws a clear error here rather than a
    * cryptic "not a function".
    */

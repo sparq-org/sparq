@@ -26,7 +26,7 @@ export default function ShaclSurfacePage() {
           graph against SHACL Core + SHACL-SPARQL constraints and returns a W3C
           validation report (conformance plus per-violation results); the playground
           above runs the validator in your tab via the SHACL-enabled wasm bundle that{" "}
-          <code className="font-mono text-foreground">@jeswr/sparq</code> ships.
+          <code className="font-mono text-foreground">@sparq-org/sparq</code> ships.
         </p>
       }
       capabilities={[

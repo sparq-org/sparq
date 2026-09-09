@@ -76,7 +76,7 @@ python3 scripts/unsafe-gate.py --check # the unsafe-count ratchet
 cargo +nightly miri test -p sparq-core # UB lane (needs nightly + miri component)
 
 # Provenance verification of a published release artifact
-gh attestation verify <archive> --repo jeswr/sparq
+gh attestation verify <archive> --repo sparq-org/sparq
 
 # Read the embedded dependency manifest of a released binary
 cargo audit bin <path-to-sparq-cli>

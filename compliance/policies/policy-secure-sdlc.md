@@ -114,7 +114,7 @@ The checks in §3 are **automatically enforced** by the CI/branch-protection wir
 indexed in [`../ssdf/evidence.md`](../ssdf/evidence.md) (by-artifact, with local-reproduction
 commands) and [`../ssdf/controls.md`](../ssdf/controls.md) (per-task status). A reviewer can
 spot-check any change against the `ci-summary / gate` result and verify a release with
-`gh attestation verify <file> --repo jeswr/sparq`. This policy does **not** restate that evidence —
+`gh attestation verify <file> --repo sparq-org/sparq`. This policy does **not** restate that evidence —
 it points to the single source so the two never drift.
 
 ## 6. Maintenance & review (org completes)

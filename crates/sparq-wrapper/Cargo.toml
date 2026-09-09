@@ -38,5 +38,5 @@ proposed-observe = []
 proposed-typed-focus = []
 
 [dependencies]
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf.workspace = true

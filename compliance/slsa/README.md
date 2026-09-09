@@ -12,7 +12,7 @@ Build track + Source/Provenance/Verification dimensions.
 > provenance (`actions/attest-build-provenance` / buildkit `provenance: mode=max`). sparq does
 > **not** claim Build L3 (provenance is generated in-band with the build, not by an isolated
 > trusted builder). The `dist.yml` tiered binaries are now attested (GX-9 closed). The
-> `@jeswr/sparq` **npm** package now carries native Sigstore provenance (`publish.yml#npm`) and
+> `@sparq-org/sparq` **npm** package now carries native Sigstore provenance (`publish.yml#npm`) and
 > the crates.io `.crate` bytes get an out-of-band attestation (`publish.yml#crates`); **crates.io
 > has no native provenance-link mechanism upstream**. The **PyPI `sparq-rdf`** lane is now CI-wired
 > for native PEP-740 attestations via Trusted Publishing (`publish.yml#pypi-*`) — it activates once
@@ -65,7 +65,7 @@ tokens); consumer-side verification documentation.
 
 | Posture | Detail |
 |---|---|
-| **Implemented & verified** | Build L2 for release archives + container **+ the `dist.yml` tiered binaries** **+ the `@jeswr/sparq` npm package** (native Sigstore `npm publish --provenance` + `npm audit signatures` gate, `publish.yml#npm`, GX-10/sq-toze.24) (signed provenance, hosted runner, cargo-auditable, attested SBOM/VEX; GX-9 closed via sq-toze.23); source-track integrity (pinned+locked deps, cargo-vet + cargo-deny GATING, least-privilege tokens, security.txt). |
+| **Implemented & verified** | Build L2 for release archives + container **+ the `dist.yml` tiered binaries** **+ the `@sparq-org/sparq` npm package** (native Sigstore `npm publish --provenance` + `npm audit signatures` gate, `publish.yml#npm`, GX-10/sq-toze.24) (signed provenance, hosted runner, cargo-auditable, attested SBOM/VEX; GX-9 closed via sq-toze.23); source-track integrity (pinned+locked deps, cargo-vet + cargo-deny GATING, least-privilege tokens, security.txt). |
 | **Audit-ready** | Two-person review + protected-branch ruleset (configured out-of-repo, recorded in `docs/branch-protection.md`); consumer verification policy (operator-enforced); the SLSA-level certificate (external assessor). |
 | **Gap** | published-package provenance PARTIAL (GX-10/sq-toze.24 + sq-toze.37): **npm CLOSED** (`publish.yml#npm`), **crates.io** has an out-of-band `.crate` attestation but the **registry-native link is external/OPEN**, **PyPI `sparq-rdf`** PEP-740 lane WIRED in CI (`publish.yml#pypi-*`, Trusted Publishing + native attestations) but awaits a one-time maintainer PyPI Trusted-Publisher registration; reproducible-build CHARACTERISED not enforced (GX-8/sq-toze.9 — `reproducible-build.md`: 22-byte single-cause diff documented, CI rebuild-and-diff ratchet remaining); Build L3 not met — NARROWED TWICE (GX-11/sq-toze.25 then #4570): every `release.yml`/`dist.yml` artifact but the container image now routes provenance through the isolated `slsa-github-generator` trusted builder — `release.yml#provenance` (archives), `release.yml#provenance-artifacts` (GUI bundles, SBOM/VEX, conformance report) and `dist.yml#provenance` (tiered binaries), each a separate job with digests threaded across the boundary and `release` `needs:`-ing both of its lanes — but **no lane is exercised** (tag/dispatch-triggered) and the **ghcr container image** is still in-band L2, so the published level stays **L2**. *(GX-9 dist.yml binaries — CLOSED, now SLSA Build L2 / sq-toze.23.)* |
 

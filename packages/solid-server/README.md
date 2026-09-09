@@ -1,5 +1,5 @@
 <!-- [GPT-5.6] sq-6xasp.9/.10: honest public-package README for the Node wasm host. -->
-# @jeswr/solid-server
+# @sparq-org/solid-server
 
 A local-development [Solid](https://solidproject.org/) LDP + WAC server backed by
 sparq WebAssembly. Node owns the loopback HTTP listener; one long-lived wasm
@@ -14,7 +14,7 @@ sparq WebAssembly. Node owns the loopback HTTP listener; one long-lived wasm
 The published npm package includes its wasm artifact:
 
 ```sh
-npx @jeswr/solid-server \
+npx @sparq-org/solid-server \
   --port 3000 \
   --base-url http://127.0.0.1:3000 \
   --owner-webid https://id.example/alice#me
@@ -23,14 +23,14 @@ npx @jeswr/solid-server \
 From a source checkout, build the artifact first:
 
 ```sh
-npm --workspace @jeswr/solid-server run build:lws-wasm
+npm --workspace @sparq-org/solid-server run build:lws-wasm
 npx --yes --package ./packages/solid-server solid-server --port 3000
 ```
 
 Use it from Node:
 
 ```js
-import { startSolidServer } from '@jeswr/solid-server';
+import { startSolidServer } from '@sparq-org/solid-server';
 
 const server = await startSolidServer({
   port: 3000,
@@ -90,7 +90,7 @@ body bytes unparsed for wasm, and maps the body-limit error to the host 413 shap
 
 ```js
 import Fastify from 'fastify';
-import { solidPod } from '@jeswr/solid-server/fastify';
+import { solidPod } from '@sparq-org/solid-server/fastify';
 
 const fastify = Fastify();
 await fastify.register(solidPod, { baseUrl, ownerWebid });

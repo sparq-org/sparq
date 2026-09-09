@@ -643,6 +643,8 @@ cargo build -p sparq-cli --features serialize-rdf
   free disk aborts cleanly through the spill pipeline's resource gate, and a spill-built store
   reloads via `Graph::open` (and re-saves raw/compressed) to identical content. External build
   folds N-Quads/TriG named graphs into the default graph (only `load_dataset` preserves them).
+  [GPT-6] All store writers emit `predstats.bin` in ascending predicate-ID order, so equal
+  statistics serialize identically after reload. Older unordered files remain readable.
 - **HDT is opt-in and native-only.** `sparq-hdt` MSRV is **1.87** (the wrapped `hdt` crate),
   above the workspace's 1.85 — in the CLI it is gated behind `--features hdt`. It carries
   zero code into the wasm build. Compression containers are detected by **magic bytes, not

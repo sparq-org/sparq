@@ -177,7 +177,7 @@ jobs:
             *)     tar czf "$PKG.tar.gz" "$PKG" ;;
           esac
       # IN-BAND provenance (SLSA Build L2). Retained deliberately: it is what
-      # `gh attestation verify <archive> --repo jeswr/sparq` reads, and the release notes point
+      # `gh attestation verify <archive> --repo sparq-org/sparq` reads, and the release notes point
       # consumers at that command. It is NOT the basis of the L3 claim — see the digest step
       # below + release.yml#provenance (sq-toze.25 / GX-11).
       - name: Attest build provenance (archives)
@@ -247,7 +247,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/sparq-cli${{ matrix.ext }}" "dist/sparq-cli-${{ matrix.tier }}${{ matrix.ext }}"
           cp "target/${{ matrix.target }}/release/sparq-server${{ matrix.ext }}" "dist/sparq-server-${{ matrix.tier }}${{ matrix.ext }}"
       # IN-BAND provenance (SLSA Build L2), retained for the same reason the archive lane keeps
-      # its own: it is what `gh attestation verify <binary> --repo jeswr/sparq` reads. It is NOT
+      # its own: it is what `gh attestation verify <binary> --repo sparq-org/sparq` reads. It is NOT
       # the basis of the L3 claim — see the digest step below + dist.yml#provenance (#4570).
       - name: Attest build provenance (dist binaries)
         if: inputs.mode == 'binary'

@@ -47,7 +47,7 @@ npm run test:e2e   # Playwright — headless browser smoke tests (see below)
 
 `public/wasm/` is generated (git-ignored): `scripts/sync-wasm.mjs` copies the
 wasm-pack `--target web` output from `js/wasm/`, then `scripts/bundle-wasm-esm.mjs`
-([`esbuild`](https://esbuild.github.io/)) bundles the `@jeswr/sparq` RDF/JS surface
+([`esbuild`](https://esbuild.github.io/)) bundles the `@sparq-org/sparq` RDF/JS surface
 (`js/src`) into a single self-hosted `public/wasm/sparq.js` (see below). The `prebuild`
 script runs both automatically before `next build`.
 
@@ -73,7 +73,7 @@ layers — the page paints and becomes interactive before any of it has finished
    re-paying a cold start — and never calls into an uninitialised wasm.
 
 **Self-hosted ESM `<script type="module">` import — named `Dataset` (#981, `sq-55w5a`).**
-`scripts/bundle-wasm-esm.mjs` bundles the `@jeswr/sparq` RDF/JS surface into a single
+`scripts/bundle-wasm-esm.mjs` bundles the `@sparq-org/sparq` RDF/JS surface into a single
 self-contained `public/wasm/sparq.js`, published into the static export — so the named
 `Dataset` entry can be imported directly from this project's **own** GitHub Pages origin, with
 **no third-party CDN**. The bundle keeps the ~MB engine `.wasm` **external** (it re-exports the
@@ -89,8 +89,8 @@ import line — the #981 lazy-load posture:
 </script>
 ```
 
-The same named entry is also available from an ESM CDN (the published `@jeswr/sparq` npm
-package): `import { Dataset } from "https://esm.sh/@jeswr/sparq"`.
+The same named entry is also available from an ESM CDN (the published `@sparq-org/sparq` npm
+package): `import { Dataset } from "https://esm.sh/@sparq-org/sparq"`.
 
 **Low-level glue (`Store`).** The wasm-pack `--target web` glue is itself a real ESM module, so
 the engine `Store` class can be imported directly — instantiate it (its default `init`) before

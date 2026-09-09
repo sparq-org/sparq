@@ -6,7 +6,7 @@
 #       vX.Y.Z, which fires the EXISTING release.yml unchanged").
 #
 # WHAT THIS DOES — the two-step release-plz flow, anchored on release-plz.toml
-# (#789 / sq-v286.3: the version_group over the 17 publishable crates that keeps the
+# (#789 / sq-v286.3: the version_group over the 37 publishable crates that keeps the
 # locked single-version model):
 #
 #   1. release-pr  — on every push to main, release-plz reads the conventional-commit

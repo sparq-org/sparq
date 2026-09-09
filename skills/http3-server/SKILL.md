@@ -4,7 +4,7 @@ description: Embed sparq's internal opt-in HTTP/3-over-QUIC bridge into an axum 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq HTTP/3 server bridge

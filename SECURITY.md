@@ -15,7 +15,7 @@ Two private channels, either is fine:
 
 1. **GitHub Security Advisories (preferred).** Open a private report via the repository's
    **Security → Advisories → "Report a vulnerability"** page
-   (<https://github.com/jeswr/sparq/security/advisories/new>). This keeps the report,
+   (<https://github.com/sparq-org/sparq/security/advisories/new>). This keeps the report,
    discussion, and fix coordination private until a coordinated disclosure.
 2. **Email.** Write to **jesse@jeswr.org** with a clear subject line (e.g.
    `[sparq security] <short summary>`). If you want to encrypt, say so in a first
@@ -42,7 +42,7 @@ not contractual SLAs — this is a volunteer research project.
 `sparq` is **pre-1.0 and experimental; the API is unstable** (see [`AGENTS.md`](./AGENTS.md)).
 We do not maintain long-term support branches. Security fixes are made against the
 **`main`** branch and shipped in the **next release** of the affected published artifact
-(the `sparq-*` crates on crates.io, `@jeswr/sparq` on npm, and `sparq` on PyPI).
+(the `sparq-*` crates on crates.io, `@sparq-org/sparq` on npm, and `sparq` on PyPI).
 
 | Version line | Supported for security fixes |
 |---|---|

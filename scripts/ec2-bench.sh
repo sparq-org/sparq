@@ -14,7 +14,7 @@ REGION="${AWS_REGION:-eu-west-2}"
 ITYPE="${BENCH_INSTANCE_TYPE:-c7g.4xlarge}"     # arm64 spot; 16 vCPU, far more than a GH runner
 SCALE="${BENCH_SCALE:-2000000}"                 # ~10x the in-CI scale
 SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 TAGSPEC='ResourceType=instance,Tags=[{Key=purpose,Value=sparq-ci-bench}]'
 # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) OUTPUT + FULL-SUITE knobs so the nightly lane can reuse
 # this SAME script (single source of truth) instead of a forked copy:

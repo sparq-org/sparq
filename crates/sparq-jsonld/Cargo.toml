@@ -13,12 +13,9 @@ keywords.workspace = true
 categories.workspace = true
 description = "Native, dependency-free W3C JSON-LD 1.1 document pipeline for sparq (Json AST + error registry + processing options + deny-by-default document loader)"
 readme = "README.md"
-# [GPT-5.6] sq-ci15w — `publish = false` is the current internal-release posture, not a
-# scaffold marker: compaction and framing are implemented, and the pinned W3C framing
-# lane passes all 92 cases. `to_rdf` and the high-level `api` facade remain documented
-# placeholders. Revisit publication, governance, and benchmark registration in the
-# epic's closing bead (sq-oy1f.36); usage already lives in skills/jsonld/SKILL.md.
-publish = false
+# [GPT-5.6] Compaction and framing are implemented, while `to_rdf` and the high-level
+# `api` facade remain documented placeholders. Publication is required by
+# sparq-engine-serialize's crates.io dependency closure; maturity stays explicit in the API docs.
 
 # Render the README as the docs.rs front page (src/lib.rs `#![doc = include_str!(...)]`).
 [package.metadata.docs.rs]

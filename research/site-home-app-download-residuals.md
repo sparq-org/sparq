@@ -22,7 +22,7 @@ epic was written, the ground moved four times:
   root. The epic's `jeswr.github.io/sparq/...` URLs are dead (live-verified 404), which also
   means any *remaining in-site links* to that origin are dead links (§4, R4).
 - **The repo moved to `sparq-org/sparq`**. GitHub's rename redirect keeps
-  `github.com/jeswr/sparq` links working, but ~50 references across `site/src` (including
+  `github.com/sparq-org/sparq` links working, but ~50 references across `site/src` (including
   the download page's `REPO_URL`/`API_LATEST`) point at the old name.
 - **Only a pre-release exists** (`v0.1.0-dev.3`, 2026-06-21, prerelease=true — predating the
   current release pipeline), so `releases/latest` 404s. Release PR **#1084 (v0.1.0)** is
@@ -145,7 +145,7 @@ R4 only for a link-string sweep and both PRs are already on `origin/main`).
 | R1 | site | sonnet | `site/src/components/command-palette.tsx`, `site/e2e/command-palette.spec.ts` | Cmd-K "App" soft-navs (`router.push`) across the two Next builds — the last live txt-redirect path; stale "coming soon" blurb; dead `"try"` special case; no e2e guard for the hard-nav rule in the palette |
 | R2 | ci-infra | sonnet | `.github/workflows/release.yml`, `scripts/check-release-aliases.sh` (new) | Version-stable alias assets never published; must be fail-closed against the site's alias usage (§3) and land **before** the v0.1.0 tag (#1084) |
 | R3 | site | sonnet | `site/src/app/download/download-client.tsx`, `site/e2e/download-page.spec.ts` | Prerelease fallback + per-card fail-closed asset matching (§3); drop the sourceless `sparq-server-*` aliases for one honest combined CLI+server card; `REPO_URL`/`API_LATEST` → `sparq-org/sparq` |
-| R4 | site | haiku | The ~23 `site/src` files with stale origins **excluding** the two owned above, + a new static guard test | Dead `jeswr.github.io/sparq` links (live 404) and stale `github.com/jeswr/sparq` references → `sparq.jeswr.org` / `sparq-org/sparq`; guard test keeps the dead origin from returning |
+| R4 | site | haiku | The ~23 `site/src` files with stale origins **excluding** the two owned above, + a new static guard test | Dead `jeswr.github.io/sparq` links (live 404) and stale `github.com/sparq-org/sparq` references → `sparq.jeswr.org` / `sparq-org/sparq`; guard test keeps the dead origin from returning |
 
 Invariants and acceptance tests are carried on each bead (bd); the shared gate for the site
 beads is the epic's: green static export + lint + typecheck + e2e.

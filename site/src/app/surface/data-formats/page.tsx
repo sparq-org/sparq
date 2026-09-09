@@ -52,7 +52,7 @@ export default function DataFormatsSurfacePage() {
           body: "Serialize back out to Turtle / TriG / N-Quads / JSON-LD (engine serialize-rdf feature; N-Triples always on).",
         },
       ]}
-      runsNote="Live in your tab for the four text formats and JSON-LD — the demo runs the same loaders that ship in @jeswr/sparq; gzip/zip decode with the browser's native DecompressionStream, and a .zst upload fetches a small zstd decoder on demand (a lazy chunk, never in the page's first-load bundle). No server."
+      runsNote="Live in your tab for the four text formats and JSON-LD — the demo runs the same loaders that ship in @sparq-org/sparq; gzip/zip decode with the browser's native DecompressionStream, and a .zst upload fetches a small zstd decoder on demand (a lazy chunk, never in the page's first-load bundle). No server."
       reproduce="cargo test -p sparq-core"
       caveat={
         <p>

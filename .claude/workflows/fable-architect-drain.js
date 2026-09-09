@@ -232,7 +232,7 @@ function diskGuardPrompt() {
 function architectPrompt(epic) {
   const t = 'fable'
   return 'You are the FABLE ARCHITECT for the Fable collaboration tier (umbrella #1111 "revisit-with-fable"). ' +
-    'Decompose epic ' + epic + ' of `jeswr/sparq` into (a) a design record under `research/` and (b) N DISJOINT implementation beads a cheap Sonnet fleet can build in PARALLEL. ' +
+    'Decompose epic ' + epic + ' of `sparq-org/sparq` into (a) a design record under `research/` and (b) N DISJOINT implementation beads a cheap Sonnet fleet can build in PARALLEL. ' +
     '`export PATH=$PATH:/home/ubuntu/.local/bin && bd show ' + epic + '` and read the linked design records / code first. ' +
     'HARD constraint — the beads MUST have NON-OVERLAPPING file/crate surfaces (curated disjoint-crate wave pattern): at most one bead per crate/module so parallel worktrees NEVER conflict. If the epic cannot be cut into disjoint pieces, say so in `notes` and emit fewer beads. ' +
     'For each bead give a crisp `spec` (what to build + acceptance criteria) and a `disjoint_surface` (the exact files/crate it owns). New capability => opt-in/feature-gated (keep sparq-core/engine lean). ' +

@@ -178,12 +178,20 @@ jobs:
   # `scripts/ci_select.py --classify-only` — the IDENTICAL `classify_change()` path the
   # `select` pre-job runs on this event, so the two layers cannot disagree on a resolved
   # diff (no duplicated path lists; ci_select.py stays the single source of truth).
-  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false
-  # (sound: every path in the dorny `rust`/`docker` filter sets classifies `engine`, so
-  # those classes PROVE both filters would be false — same trust model as the PR-level
-  # gate, a pure function of the authoritative diff). Any OTHER class, an unresolvable
-  # SHA pair, or ANY classifier error => true/true (fail-safe = full run, cost never
-  # soundness).
+  # A class on ci_select.py `_INERT_CLASSES` => rust_changed=false + docker_changed=false.
+  # SOUNDNESS: an inert class means every changed path is on an AUDITED inert surface —
+  # the orchestration/deploy allowlists (whose script/workflow entries the inertness tests
+  # in scripts/tests/test_ci_select.py pin by grepping the Rust-CI workflows) or an
+  # ownership-map `safe = true` verdict (re-verified every run by scripts/ci_audit_inputs.py,
+  # which FAILS the moment a crate reads a safe-listed path). THAT is the load-bearing
+  # proof, not the dorny `rust`/`docker` filters, which are a coarser extension-level
+  # proxy: an audited-inert tree may legitimately hold a `.rs`/`Cargo.toml` those filters
+  # would flag — research/hardware/wgpu-spike (no CI lane builds it) and
+  # site/test/fixtures/policy-evaluator (built only by site-e2e.yml, a workflow this
+  # gate does not touch) — while no lane gated here compiles either. Same trust model as
+  # the PR-level gate otherwise: a pure function of the authoritative diff. Any OTHER
+  # class, an unresolvable SHA pair, or ANY classifier error => true/true (fail-safe =
+  # full run, cost never soundness).
   # [OPUS-5] sq-g25hr widened `_INERT_CLASSES` from {docs-only, orchestration-only} to
   # also cover `deploy-only` (deploy/** + the deploy lint workflows) and `inert-mixed`
   # (a diff confined to inert surfaces that SPANS more than one of them — previously
@@ -297,9 +305,11 @@ jobs:
               # (pinned by scripts/tests/test_ci_select_wiring.py so the two cannot drift).
               # deploy-only = deploy/** + the deploy lint workflows; inert-mixed = a diff
               # confined to inert surfaces that SPANS more than one of them (the observed
-              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml).
+              # cloud-deploy batch: manifests + their READMEs + deploy-*.yml);
+              # [OPUS-5] #5249: map-safe = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
               case "${cls}" in
-                docs-only|orchestration-only|deploy-only|inert-mixed) rust=false; docker=false ;;
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false; docker=false ;;
                 *) rust=true; docker=true ;;
               esac
             else
@@ -1181,7 +1191,7 @@ jobs:
         with:
           node-version: 20
       # [OPUS-5] #5771: this pin must stay EQUAL to the one the `js` lane
-      # (.github/workflows/js.yml) builds + packs the @jeswr/sparq wasm artifact with.
+      # (.github/workflows/js.yml) builds + packs the @sparq-org/sparq wasm artifact with.
       # It was v0.13.1 here while js.yml pinned v0.15.0, so any wasm-pack/wasm-bindgen
       # behaviour change between those releases was exercised only in that BUILD lane
       # and never here — in the lane that actually RUNS the headless suites. Unified on
@@ -3863,12 +3873,11 @@ jobs:
           fi
 
   nightly-gate:
-    # [OPUS-4.8] Freshness gate for ALL nightly (schedule-triggered) jobs: run them
-    # only if HEAD changed since the last nightly run — so the heavy nightly tier does
-    # not re-run on an unchanged repo. Compares github.sha to the head_sha of the most
-    # recent COMPLETED schedule-triggered run of this workflow (ci.yml). A manual
-    # workflow_dispatch always passes; if the lookup fails or no prior nightly exists,
-    # we FAIL-OPEN (run) so a transient API error never silently disables the nightly.
+    # [GPT-6 Astra] #6436: skip only with verified heavy completion at this head.
+    # A green skipped follow-up is not proof. Incomplete work remains eligible on
+    # the next ordinary schedule; unreadable history blocks admission. Manual force
+    # remains explicit. No rerun API, shard retry or polling loop is introduced.
+    # The helper bounds history and job reads and never retries an API failure.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -3877,22 +3886,14 @@ jobs:
     outputs:
       fresh: ${{ steps.gate.outputs.fresh }}
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
       - id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"; echo "manual dispatch — running nightly"; exit 0
-          fi
-          CUR='${{ github.sha }}'
-          PREV=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?event=schedule&status=completed&per_page=1" \
-                   --jq '.workflow_runs[0].head_sha' 2>/dev/null || echo "")
-          echo "current HEAD=$CUR ; last nightly HEAD=${PREV:-<none>}"
-          if [ -z "$PREV" ] || [ "$PREV" != "$CUR" ]; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"; echo "new commit(s) since last nightly — running"
-          else
-            echo "fresh=false" >> "$GITHUB_OUTPUT"; echo "no new commit since last nightly ($PREV) — skipping"
-          fi
+        run: python3 scripts/ci_nightly_freshness.py
 
   coverage-nightly:
     # [OPUS-4.8] NIGHTLY heavy-coverage tier (sq-hbg7). Runs the FULL per-crate
@@ -3908,7 +3909,7 @@ jobs:
     # while the per-commit `coverage` job still gates the cheaper test-only `floor`. The
     # gate driver reads the summary's `tier` and applies nightly_floor automatically.
     # Triggered by the `schedule:` cron (or manual dispatch), and only when the
-    # nightly-gate says HEAD changed since the last nightly.
+    # nightly-gate finds no verified heavy completion at this HEAD (or manual force).
     name: coverage (nightly, full incl. heavy vectors)
     needs: nightly-gate
     if: needs.nightly-gate.outputs.fresh == 'true'
@@ -4411,9 +4412,18 @@ jobs:
           feat=()
           [ -n "$FEATURES" ] && feat=(--features "$FEATURES")
           echo "::group::cargo-mutants $CRATE ${feat[*]}${SHARD:+ --shard $SHARD}"
+          # [GPT-6 Astra] Preserve advisory handling, but do not let a masked command
+          # failure become evidence for skipping later heavy work at the same head.
+          mutation_exit=0
           cargo mutants -p "$CRATE" "${feat[@]}" "${shard_args[@]}" -o "$output_dir" \
-            || echo "WARN: cargo-mutants $CRATE did not complete cleanly (advisory)"
+            || mutation_exit=$?
+          if [ "$mutation_exit" -ne 0 ]; then
+            echo "WARN: cargo-mutants $CRATE did not complete cleanly (advisory)"
+          fi
           echo "::endgroup::"
+          # [GPT-6 Astra] Counts must cover the prewritten planned mutant list.
+          # Exit 2 (missed) / 3 (mutant timeouts) can be complete advisory results.
+          python3 scripts/ci_nightly_freshness.py --mutation-complete "$mutation_exit" "$output_dir/mutants.out"
           # Run the ratchet --check on THIS crate's outcomes. --check NEVER fails on an
           # UNSEEDED crate (it reports it for the next --seed); it exits 1 only if a SEEDED
           # crate now has MORE survivors than its committed ceiling. While advisory
@@ -4429,6 +4439,13 @@ jobs:
             echo "no outcomes produced for $CRATE${SHARD:+ shard=$SHARD} — nothing to check" \
               | tee -a "$GITHUB_STEP_SUMMARY"
           fi
+      # [GPT-6 Astra] This separate step is server-visible proof: continue-on-error
+      # may green the job, but cannot manufacture a successful completion marker.
+      # A complete measurement may still fail the advisory ratchet; do not change
+      # that policy or hide its original step result. Cancellation supplies no proof.
+      - name: Nightly mutation work completed
+        if: ${{ !cancelled() && steps.run_mutants.outputs.measurement_completed == 'true' }}
+        run: echo "Mutation measurement completed; advisory ratchet verdict remains separate."
       - name: Upload mutation outcomes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

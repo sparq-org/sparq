@@ -20,7 +20,7 @@ cross-library agreement gate EVERY timing row — no row without agreement).
   `f1f449efd747a7355840bc78bddfda10d1a859d22949153eee6a37c814bbbb99`.
 - **n3js-quadstore** = n3 2.1.1 + quadstore 15.4.1 + quadstore-comunica 6.3.1
   + memory-level 3.1.0 (in-memory backend — the stack is not charged disk I/O).
-- **sparq** = shipped `@jeswr/sparq` web bundle (`js/ build:wasm`, full feature
+- **sparq** = shipped `@sparq-org/sparq` web bundle (`js/ build:wasm`, full feature
   set `shacl,jsonld,serialize-rdf,scs,canon`), commit `beb0429d2`,
   wasm-pack 0.15.0. Not yet published to npm → the pin is commit + toolchain.
 

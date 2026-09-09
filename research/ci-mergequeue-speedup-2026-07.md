@@ -168,6 +168,31 @@ KEEP-list entry only binds if PR #3427 re-enables the workflow**), and ONE
 warm — note today's cache freshness already depends on whichever push wave survives
 cancellation, so a small always-completing primer is a strict improvement.
 
+> **KEEP-list addition — the COVERAGE legs, and this one is load-bearing, not a
+> preference.** [OPUS-5] (issue #5149, added after §3.4a landed as sq-6vshe.17.)
+> The instrumented coverage legs — `coverage-measure`, `coverage-engine-run`,
+> `coverage-engine-merge` — must be **EXEMPT** from this skip. They are not re-validation
+> on main: the MEASUREMENT was demoted off `merge_group` by sq-6vshe.17, and the *only*
+> reason that demotion is sound is that push-to-main remains the enforcement point for the
+> batch-stacking case (two PRs each ≥ floor merging to a tree < floor). Skip them here and
+> the ratchet loses its last enforcement point silently — a strictly larger safety change
+> than this lever's fail-open design claims to make. They are also off the queue's critical
+> path by construction (that is what the demotion did), so exempting them costs this lever
+> none of its estimated saving. `coverage-floors` is the cheap no-compile companion: under
+> a minute, no instrumented build, and it is what keeps the `coverage` aggregate meaningful
+> on main — keep it too; there is nothing to win by skipping it.
+>
+> **How to implement the exemption:** whatever `queue-validated` guard the pure-validation
+> legs take, do NOT add it to those jobs — neither as an `if:` conjunct nor as a `needs:`
+> entry (a `push`-event pre-job is conditional, and a skip propagates through `needs:` to a
+> dependent that uses no status function, which these do not). Both shapes are pinned for
+> the three measure legs by
+> `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion` — its frozen
+> `ALLOWED_UPSTREAM` REDs on either, so landing this lever over them fails a test rather
+> than rotting silently; widen that set only with the exemption decided. Enforcement
+> topology of record: `docs/branch-protection.md` §*Coverage MEASUREMENT off the merge
+> queue*.
+
 **Safety: SAFE** (fail-open guard + explicit keep-list + the nightly full-matrix
 backstop and sq-va7at selection alarm are untouched).
 **Est. saved:** ~200–400 runner-min per merged PR of pool load; −0.5–2 m median entry

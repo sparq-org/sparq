@@ -23,7 +23,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Tauri 2 desktop shell for the sparq RDF + SPARQL engine (MVP scaffold)."
-repository = "https://github.com/jeswr/sparq"
+repository = "https://github.com/sparq-org/sparq"
 # Inherit the workspace MSRV floor so the GUI can't silently require a newer toolchain
 # than the engine it links.
 rust-version = "1.88"

@@ -76,7 +76,7 @@ fi
 step "rust + clone + build sparq-cli @$SHA_PIN (overlapped with download)"
 X "command -v cargo >/dev/null || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1"
 X ". '$HOME/.cargo/env'"
-X "git clone -q https://github.com/jeswr/sparq.git '$HOME/sparq'"
+X "git clone -q https://github.com/sparq-org/sparq.git '$HOME/sparq'"
 X "cd '$HOME/sparq' && git checkout -q '$SHA_PIN' && git rev-parse HEAD > '$R/sha.txt'"
 # dict-spill is a DEFAULT sparq-cli feature post-merge, so the plain build compiles the
 # spill path; $CARGO_FEATURES is empty unless an A/B run overrides it (e.g. to add a feature).

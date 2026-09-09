@@ -17,11 +17,9 @@ readme = "README.md"
 # the existing N3/EYE reasoner + the sparq-solid WAC/ACP allow/deny enforcement model.
 # Design: research/feature-research-odrl-policy.md (epic sq-3183, candidate #1).
 #
-# NOT published to crates.io yet: the single-node ODRL base case is complete, but the
-# headline federated-disclosure / ODRL→MPC composition (research doc §2) is deferred
-# (gated on ZK soundness remediation). `publish = false` keeps it out of releases until
-# that scope question is settled.
-publish = false
+# The single-node ODRL base case is complete; the headline federated-disclosure /
+# ODRL→MPC composition (research doc §2) remains deferred. [GPT-5.6] This crate is
+# published because sparq-server and sparq-solid expose it behind default-off features.
 
 # [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]
@@ -30,14 +28,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `secprop-leftoperands` feature only (sq-3705). The shared `secx:` IRI
 # constants, single-sourced in a ZERO-dependency leaf so this crate's `DIM_*` are the
 # SAME strings `sparq-trust` and `sparq-zk` use without any of them depending on each
 # other. It has no dependencies of its own, so the lean graph above is unchanged.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.1", optional = true }
 
 [features]
 # [OPUS-4.8] sq-zi5w: STATEFUL `odrl:count` constraint enforcement — a usage-counter

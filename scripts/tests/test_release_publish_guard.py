@@ -33,9 +33,11 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -54,6 +56,7 @@ RELEASE_JOB_ID = "release-plz-release"
 # every other job in that workflow depends on it.
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_SETUP_JOB_ID = "setup"
+PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish.yml"
 
 # The guard step's `run:` is pinned EXACTLY, not by substring. Four mutants applied to
 # this step survived a substring/identity reading (reported on PR #4192):
@@ -94,6 +97,52 @@ def _load(name: str, filename: str):
 sys.path.insert(0, str(SCRIPTS))
 release_pr_guard = _load("release_pr_guard", "release_pr_guard.py")
 interval_guard = _load("release_interval_guard", "release-interval-guard.py")
+
+
+class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
+    """The locked workspace has one public tag, even though 37 crates release together."""
+
+    def test_only_the_dependency_final_anchor_enables_git_tags(self) -> None:
+        # release-plz processes every package independently. If the workspace default is
+        # enabled, all 37 packages try to create the same `v{{ version }}` tag. [GPT-5.6]
+        config = tomllib.loads(
+            (REPO_ROOT / "release-plz.toml").read_text(encoding="utf-8")
+        )
+        workspace = config["workspace"]
+        self.assertFalse(workspace.get("git_tag_enable"))
+        self.assertEqual(workspace.get("git_tag_name"), "v{{ version }}")
+
+        anchors = [
+            package["name"]
+            for package in config.get("package", [])
+            if package.get("git_tag_enable") is True
+        ]
+        self.assertEqual(
+            anchors,
+            ["sparq-cli"],
+            "exactly the dependency-final sparq-cli package must create the shared tag",
+        )
+
+
+class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
+    """A missing `.crate` must stop provenance generation, not merely warn."""
+
+    def test_packaging_collects_failures_and_refuses_incomplete_output(self) -> None:
+        workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["crates"]["steps"]
+        matches = [step for step in steps if step.get("name") == "Package publishable crates"]
+        self.assertEqual(len(matches), 1)
+
+        step = matches[0]
+        self.assertNotIn("continue-on-error", step)
+        run = step["run"]
+        self.assertIn("cargo metadata --no-deps --format-version 1", run)
+        self.assertIn("select(.publish != [])", run)
+        self.assertIn("failures=()", run)
+        self.assertIn('failures+=("$pkg")', run)
+        self.assertIn('if [ "${#failures[@]}" -ne 0 ]; then', run)
+        self.assertIn('if [ "$packaged" -ne "$expected" ]; then', run)
+        self.assertGreaterEqual(run.count("exit 1"), 2)
 
 
 def _workflow() -> dict:
@@ -844,8 +893,40 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
     def test_unreachable_crates_io_refuses(self) -> None:
         with self.assertRaises(interval_guard.GuardRefusal):
             interval_guard.crates_io_last_publish(
-                ["sparq-core"], fetch=lambda _u: (None, "HTTP 503")
+                ["sparq-core"],
+                fetch=lambda _u: (None, "HTTP 503"),
+                retry_sleep=lambda _seconds: None,
             )
+
+    def test_transient_crates_io_failure_is_retried_but_remains_fail_closed(self) -> None:
+        responses = iter(
+            [(None, "request failed: TLS EOF"), (None, "HTTP 503"), (None, None)]
+        )
+        sleeps: list[float] = []
+        self.assertIsNone(
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"],
+                fetch=lambda _url: next(responses),
+                retry_sleep=sleeps.append,
+            )
+        )
+        self.assertEqual(sleeps, list(interval_guard.CRATES_IO_RETRY_DELAYS))
+
+        calls = 0
+
+        def always_fails(_url):
+            nonlocal calls
+            calls += 1
+            return None, "HTTP 503"
+
+        with self.assertRaises(interval_guard.GuardRefusal) as ctx:
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"],
+                fetch=always_fails,
+                retry_sleep=lambda _seconds: None,
+            )
+        self.assertEqual(calls, 3)
+        self.assertIn("after 3 attempt(s)", str(ctx.exception))
 
     def test_a_definitive_404_is_NOT_an_unknown(self) -> None:
         # The discriminating counterpart: a successful "this crate does not exist" must
@@ -923,8 +1004,21 @@ def _make_test_repo(
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@e",
     }
+    # [GPT-5.6] Keep the fixture hermetic when a maintainer signs commits/tags globally.
     git = lambda *a: subprocess.run(  # noqa: E731
-        ["git", "-C", str(root), *a], check=True, capture_output=True, env=env
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+            "-C",
+            str(root),
+            *a,
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
     )
     git("init", "-q", "-b", "main")
     git("add", "-A")
@@ -934,7 +1028,18 @@ def _make_test_repo(
             continue
         env["GIT_COMMITTER_DATE"] = when.isoformat()
         subprocess.run(
-            ["git", "-C", str(root), "tag", "-a", name, "-m", "r"],
+            [
+                "git",
+                "-c",
+                "tag.gpgsign=false",
+                "-C",
+                str(root),
+                "tag",
+                "-a",
+                name,
+                "-m",
+                "r",
+            ],
             check=True,
             capture_output=True,
             env=env,
@@ -1199,7 +1304,7 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
             root = _make_test_repo(Path(tmp), tag_at=now - dt.timedelta(days=5))
             # Retag as the CURRENT workspace version so the push is a no-op.
             subprocess.run(
-                ["git", "-C", str(root), "tag", "v0.2.0"],
+                ["git", "-c", "tag.gpgsign=false", "-C", str(root), "tag", "v0.2.0"],
                 check=True,
                 capture_output=True,
             )
@@ -1242,6 +1347,75 @@ class TestGuardOnARealGitRepository(unittest.TestCase):
             )
             self.assertEqual(code, 0, "\n".join(log))
             self.assertTrue(any("::warning" in line for line in log), log)
+
+
+class TestPublishableDependencyClosure(unittest.TestCase):
+    """A registry package cannot retain workspace-only dependency edges."""
+
+    def test_release_runbook_order_matches_the_live_dependency_graph(self) -> None:
+        crates = interval_guard.publishable_crates(REPO_ROOT)
+        expected = [crate.name for crate in interval_guard.publish_order(crates)]
+        documented = re.findall(
+            r"^cargo publish -p ([A-Za-z0-9_-]+)$",
+            (REPO_ROOT / "docs" / "release.md").read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+        self.assertEqual(documented, expected)
+
+    @staticmethod
+    def _fixture(
+        root: Path, *, dependency_publishable: bool, dependency_version: str | None
+    ) -> None:
+        (root / "crates" / "a").mkdir(parents=True)
+        (root / "crates" / "b").mkdir(parents=True)
+        (root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/a", "crates/b"]\n'
+            '[workspace.package]\nversion = "0.2.0"\n',
+            encoding="utf-8",
+        )
+        version = (
+            f', version = "{dependency_version}"' if dependency_version is not None else ""
+        )
+        (root / "crates" / "a" / "Cargo.toml").write_text(
+            '[package]\nname = "a"\nversion.workspace = true\n'
+            f'[dependencies]\nb = {{ path = "../b"{version} }}\n',
+            encoding="utf-8",
+        )
+        private = "" if dependency_publishable else "publish = false\n"
+        (root / "crates" / "b" / "Cargo.toml").write_text(
+            '[package]\nname = "b"\nversion.workspace = true\n' + private,
+            encoding="utf-8",
+        )
+
+    def test_public_to_private_workspace_dependency_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-private-dep-") as tmp:
+            root = Path(tmp)
+            self._fixture(
+                root, dependency_publishable=False, dependency_version="0.2.0"
+            )
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "unpublished workspace crate"
+            ):
+                interval_guard.publishable_crates(root)
+
+    def test_path_dependency_without_registry_version_refuses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-unversioned-dep-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version=None)
+            with self.assertRaisesRegex(
+                interval_guard.GuardRefusal, "no registry version requirement"
+            ):
+                interval_guard.publishable_crates(root)
+
+    def test_versioned_publishable_dependency_enters_publish_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="sparq-publish-closed-deps-") as tmp:
+            root = Path(tmp)
+            self._fixture(root, dependency_publishable=True, dependency_version="0.2.0")
+            crates = interval_guard.publishable_crates(root)
+            self.assertEqual(
+                [crate.name for crate in interval_guard.publish_order(crates)],
+                ["b", "a"],
+            )
 
 
 class TestDryRunIsInert(unittest.TestCase):

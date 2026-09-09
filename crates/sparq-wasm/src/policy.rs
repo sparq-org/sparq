@@ -9,7 +9,7 @@
 //! per-duty status, purpose/party/asset taxonomies, request time) is DRAFTED in
 //! the sq-586sh maintainer report and awaits a public-contract decision — these
 //! two exports are EXPERIMENTAL and may be renamed/reshaped by that decision.
-//! The published `@jeswr/sparq` bundle (js `build:wasm`) does NOT enable this
+//! The published `@sparq-org/sparq` bundle (js `build:wasm`) does NOT enable this
 //! feature, so nothing here is a published contract.
 //!
 //! Behind the non-default `policy` Cargo feature: the lean default bundle links

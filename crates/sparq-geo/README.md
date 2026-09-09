@@ -7,7 +7,7 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-Opt-in GeoSPARQL 1.0/1.1 core for [sparq](https://github.com/jeswr/sparq):
+Opt-in GeoSPARQL 1.0/1.1 core for [sparq](https://github.com/sparq-org/sparq):
 geometry-literal parsing and serialisation, `geof:` functions, and an R-tree `GeoIndex`.
 
 A **separate crate** by design — no other sparq crate (nor the wasm build) depends on

@@ -36,7 +36,7 @@ set -euo pipefail
 BRANCH="${1:?usage: gather-ec2.sh <branch> [region]}"
 REGION="${2:-${AWS_REGION:-eu-west-2}}"
 ITYPE="c7g.xlarge"                       # 4 vCPU arm64 (c7g.2xlarge FAILED VcpuLimitExceeded)
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 SCALE="${GATHER_SCALE:-50000}"
 ITERS="${GATHER_ITERS:-4}"
 TAGSPEC='ResourceType=instance,Tags=[{Key=purpose,Value=sparq-bench}]'

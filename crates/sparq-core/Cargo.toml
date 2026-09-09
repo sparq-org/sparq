@@ -30,6 +30,9 @@ parallel = ["dep:rayon", "dep:memchr"]
 # pattern is still answered by one of them, but some merge joins fall back to hashing.
 # ~halves index memory (36 vs 72 B/triple) — for the memory-constrained browser target.
 compact-index = []
+# [GPT-6 Astra] Experimental lazy tombstone projections. OFF by default: cold
+# reads sort and allocate; forks copy retained projections. See the crate README.
+overlay-deleted-projections = []
 # Out-of-core querying: persist the indexes and memory-map them (native only).
 mmap = ["dep:memmap2"]
 # [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV

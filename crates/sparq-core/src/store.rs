@@ -173,6 +173,14 @@ struct Overlay {
     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`
     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].
     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
+    /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the
+    /// hash set above for merge membership; even SPO needs its own sorted projection.
+    /// Full use retains up to `BUILT.len()` vectors, each with `deleted.len()`
+    /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
+    /// production in-place mutator is `TripleStore::apply_delta`, which invalidates
+    /// these projections when a tombstone is inserted or removed.
+    #[cfg(feature = "overlay-deleted-projections")]
+    deleted_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
 }
 
 impl Overlay {
@@ -188,7 +196,7 @@ impl Overlay {
     /// canonical-SPO sorted, so that permutation ALIASES it and costs nothing.
     ///
     /// `OnceLock` (not `RefCell`) because scans take `&self` and `TripleStore` must stay
-    /// `Sync`; a race just recomputes the same value and discards the loser.
+    /// `Sync`; concurrent readers share the synchronized initialization.
     fn added_sorted(&self, perm: Perm) -> &[[Id; 3]] {
         let order = perm.order();
         if order == [0, 1, 2] {
@@ -202,12 +210,43 @@ impl Overlay {
         })
     }
 
-    /// Drops every cached projection — called whenever `added` is about to change, so a
-    /// cache can never outlive the `added` it was derived from.
+    /// Drops added projections before any nonempty delta, preserving prior behavior.
     fn invalidate_added(&mut self) {
         for slot in &mut self.added_by_perm {
             slot.take();
         }
+    }
+
+    /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
+    #[cfg(feature = "overlay-deleted-projections")]
+    fn invalidate_deleted(&mut self) {
+        for slot in &mut self.deleted_by_perm {
+            slot.take();
+        }
+    }
+
+    /// [GPT-6 Astra] Counts deletions using a lazily sorted projection (#4246).
+    /// The first request costs O(d log d) and one additional vector; later requests
+    /// use two binary searches. Clone copies initialized vectors by value, and
+    /// apply_delta invalidates only the mutated overlay under exclusive access.
+    /// Concurrent first readers of the same permutation wait for its one sorting
+    /// initializer; the cold sort is serialized for that permutation.
+    #[cfg(feature = "overlay-deleted-projections")]
+    fn deleted_count(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> usize {
+        if self.deleted.is_empty() {
+            return 0;
+        }
+        let rows = self.deleted_by_perm[perm as usize].get_or_init(|| {
+            let order = perm.order();
+            let mut rows: Vec<[Id; 3]> = self
+                .deleted
+                .iter()
+                .map(|t| [t[order[0]], t[order[1]], t[order[2]]])
+                .collect();
+            rows.sort_unstable();
+            rows
+        });
+        rows.partition_point(|r| *r <= hi) - rows.partition_point(|r| *r < lo)
     }
 
     /// The `added` triples matching the inclusive `[lo, hi]` key range, as rows in
@@ -254,8 +293,9 @@ impl Overlay {
 
     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
     /// correction to a base range count. The `added` side rides the cached perm-sorted
-    /// projection (O(log k), two binary searches); the `deleted` side is an unordered
-    /// hash set and stays O(|deleted|).
+    /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
+    /// default; the experimental feature opts into lazy sorted projections.
+    #[cfg(not(feature = "overlay-deleted-projections"))]
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
         let order = perm.order();
         let add = self.added_rows(perm, lo, hi).len();
@@ -270,19 +310,32 @@ impl Overlay {
         (add, del)
     }
 
+    /// [GPT-6 Astra] Experimental range correction using cached deletion projections.
+    #[cfg(feature = "overlay-deleted-projections")]
+    fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
+        let add = self.added_rows(perm, lo, hi).len();
+        let del = self.deleted_count(perm, lo, hi);
+        (add, del)
+    }
+
     fn is_empty(&self) -> bool {
         self.added.is_empty() && self.deleted.is_empty()
     }
 
     fn heap_bytes(&self) -> usize {
         // The cached perm-sorted projections are part of the overlay's footprint; SPO
-        // aliases `added` and so never occupies a slot.
+        // aliases `added`; [GPT-6 Astra] deleted projections own all requested perms.
         let cached: usize = self
             .added_by_perm
             .iter()
             .filter_map(|slot| slot.get())
             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
             .sum();
+        #[cfg(feature = "overlay-deleted-projections")]
+        let cached = cached + self.deleted_by_perm.iter()
+            .filter_map(|slot| slot.get())
+            .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
+            .sum::<usize>();
         self.added.capacity() * std::mem::size_of::<[Id; 3]>()
             + self.deleted.capacity() * 13
             + cached
@@ -688,15 +741,24 @@ impl TripleStore {
         self.save_pred_stats(dir)
     }
 
-    /// Persists the per-predicate stats so `open` need not RE-SCAN the POS/PSO indexes
+    /// Persists per-predicate statistics in ascending predicate-ID order.
+    ///
+    /// This lets `open` avoid re-scanning the POS/PSO indexes
     /// (a ~2-permutation read — the dominant out-of-core open cost + resident RSS once the
     /// dict is mmap'd). Small: a handful of fields per distinct predicate.
+    ///
+    /// # Errors
+    /// Returns an error if creating, writing, or flushing the statistics file fails.
     #[cfg(feature = "mmap")]
     pub fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
-        for (&p, s) in self.pred_stats.iter() {
+        // [GPT-6] Hash-map iteration can change after loading/reserving identical stats.
+        // Canonicalize the shared writer so external builds and re-saves agree bytewise.
+        let mut entries: Vec<_> = self.pred_stats.iter().collect();
+        entries.sort_unstable_by_key(|&(&p, _)| p);
+        for (&p, s) in entries {
             w.write_all(&p.to_le_bytes())?;
             w.write_all(&(s.count as u64).to_le_bytes())?;
             w.write_all(&(s.ndv_subj as u64).to_le_bytes())?;
@@ -891,20 +953,26 @@ impl TripleStore {
             return;
         }
         let mut ov = self.overlay.take().unwrap_or_default();
-        // `added` is about to change, so every cached perm-sorted projection of it is
-        // stale from here on. Dropping them up front (O(1) per permutation) keeps the
-        // write path O(batch) — the projections are rebuilt lazily by the next scan
-        // that needs them, and only for the permutations it actually scans.
+        // [GPT-6 Astra] Added projections retain the existing conservative reset.
+        // Preserve deletion projections across inserts/no-ops: only actual tombstone
+        // changes require another sort. No overlay read occurs before publication.
         ov.invalidate_added();
+        #[cfg(feature = "overlay-deleted-projections")]
+        let mut deleted_changed = false;
         for t in deletes {
             if let Ok(i) = ov.added.binary_search(t) {
                 ov.added.remove(i); // retract a pending insertion
             } else if self.base_contains(*t) {
+                #[cfg(feature = "overlay-deleted-projections")]
+                { deleted_changed |= ov.deleted.insert(*t); }
+                #[cfg(not(feature = "overlay-deleted-projections"))]
                 ov.deleted.insert(*t);
             }
         }
         for t in inserts {
             if ov.deleted.remove(t) {
+                #[cfg(feature = "overlay-deleted-projections")]
+                { deleted_changed = true; }
                 continue; // re-insert of a deleted base triple: just undelete
             }
             if self.base_contains(*t) {
@@ -913,6 +981,10 @@ impl TripleStore {
             if let Err(i) = ov.added.binary_search(t) {
                 ov.added.insert(i, *t);
             }
+        }
+        #[cfg(feature = "overlay-deleted-projections")]
+        if deleted_changed {
+            ov.invalidate_deleted();
         }
         self.overlay = if ov.is_empty() { None } else { Some(ov) };
     }
@@ -1135,6 +1207,10 @@ fn lower_bound(rows: &[[Id; 3]], key: &[Id; 3]) -> usize {
 fn upper_bound(rows: &[[Id; 3]], key: &[Id; 3]) -> usize {
     rows.partition_point(|row| row <= key)
 }
+
+#[cfg(test)]
+#[path = "store/overlay_deleted_tests.rs"]
+mod overlay_deleted_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1747,6 +1823,61 @@ mod tests {
             .expect("persisted predstats.bin must load, not fall back to a POS+PSO re-scan");
         assert_eq!(loaded, *store.pred_stats, "loaded pred stats must equal the saved ones");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// [GPT-6] Persisted bytes depend on statistics, not hash-map layout or reloads.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn pred_stats_serialization_is_canonical_across_map_layouts() {
+        // The same records had different iteration orders after external-build reload.
+        let records: [(Id, PredStat); 4] = [
+            (1, PredStat { count: 400, ndv_subj: 400, ndv_obj: 140 }),
+            (2, PredStat { count: 400, ndv_subj: 400, ndv_obj: 400 }),
+            (182, PredStat { count: 400, ndv_subj: 400, ndv_obj: 400 }),
+            (424, PredStat { count: 400, ndv_subj: 400, ndv_obj: 90 }),
+        ];
+        // Independent format oracle: u64 record count, then u32 ID + three u64 values.
+        let mut expected = 4u64.to_le_bytes().to_vec();
+        for (id, stats) in &records {
+            expected.extend_from_slice(&id.to_le_bytes());
+            for value in [stats.count, stats.ndv_subj, stats.ndv_obj] {
+                expected.extend_from_slice(&(value as u64).to_le_bytes());
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("sparq_predstats_order_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("predstats.bin");
+        for capacity in [0, 4, 64, 1024] {
+            for order in [[0, 1, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]] {
+                let mut stats = FxHashMap::default();
+                stats.reserve(capacity);
+                for i in order {
+                    stats.insert(records[i].0, records[i].1);
+                }
+                let mut store = TripleStore::from_triples(Vec::new());
+                store.pred_stats = std::sync::Arc::new(stats);
+                store.save_pred_stats(&dir).unwrap();
+                assert_eq!(
+                    std::fs::read(&path).unwrap(),
+                    expected,
+                    "capacity {capacity}, order {order:?}"
+                );
+                let loaded = TripleStore::load_pred_stats(&dir).unwrap();
+                assert_eq!(loaded, *store.pred_stats);
+                store.pred_stats = std::sync::Arc::new(loaded);
+                store.save_pred_stats(&dir).unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), expected, "reload must preserve exact bytes");
+            }
+        }
+        // Existing files need not already be ordered: read compatibility is unchanged.
+        let mut legacy = expected[..8].to_vec();
+        for record in expected[8..].chunks_exact(28).rev() {
+            legacy.extend_from_slice(record);
+        }
+        std::fs::write(&path, legacy).unwrap();
+        let loaded = TripleStore::load_pred_stats(&dir).unwrap();
+        assert_eq!(loaded, records.into_iter().collect::<FxHashMap<_, _>>());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The delta-overlay must be INVISIBLE in results: a store with an overlay must answer

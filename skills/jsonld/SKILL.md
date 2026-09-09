@@ -4,7 +4,7 @@ description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with spa
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq JSON-LD 1.1
@@ -213,7 +213,7 @@ serialiser shape, **not** the full W3C Compaction Algorithm (that lives in
 profile-specific variant ETag exactly when the bytes differ
 (`NegotiatedFormat::serves_stored_verbatim` / `variant_suffix`).
 
-### wasm / npm (`@jeswr/sparq`, JSON-LD opt-in)
+### wasm / npm (`@sparq-org/sparq`, JSON-LD opt-in)
 
 The lean wasm bundle keeps JSON-LD **opt-in** (the `jsonld` / `serialize-rdf` cargo
 features on `sparq-wasm`) so the default browser byte-floor stays small. When built with

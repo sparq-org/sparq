@@ -52,14 +52,14 @@ query-policy = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1" }
 # Structural entity/relation linking (T7, GenAI phase 3 — research/genai-nl-to-sparql.md
 # §2.6/§8.3): maps question mentions to concrete IRIs in the store's dictionary, then
 # expands each linked entity with its structurally-similar siblings via the store's
 # permutation indexes. Read-only over the public sparq-core API; no model, no network.
-sparq-sim = { path = "../sparq-sim", version = "0.1.0" }
+sparq-sim = { path = "../sparq-sim", version = "0.1.1" }
 # Term types for two surfaces: the entity/relation linking surface (entities/relations
 # are oxrdf NamedNodes/Terms, sq-uw40) and the N2 dictionary-grounded constraint
 # (`constrain.rs`, sq-9yjp — build oxrdf NamedNode/Term to probe the live dictionary via

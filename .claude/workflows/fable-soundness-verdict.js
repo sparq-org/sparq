@@ -117,7 +117,7 @@ function enumeratePrompt() {
       'Summarise the diff in one or two sentences, list the tests it adds/changes, list any audit/threat-model/research docs it touches (e.g. research/threat-model.md, an audit record), and set zk_mpc_surface / touches_sq_qhy4 (true if it touches the ZK/MPC estate or the PENDING external-audit surface sq-qhy4). ' +
       'Return {prs:[{number,url,surface,title,evidence:{diff_summary,tests,audit_docs,zk_mpc_surface,touches_sq_qhy4}}]}.'
   }
-  return 'Enumerate the OPEN honesty/soundness-sensitive PRs on `jeswr/sparq` and assemble a compact evidence pack for each. ' +
+  return 'Enumerate the OPEN honesty/soundness-sensitive PRs on `sparq-org/sparq` and assemble a compact evidence pack for each. ' +
     'READ-ONLY (findings only; do NOT git-checkout, open no PR). List candidates with `gh pr list --state open --json number,url,title,labels,headRefName` and select the ones whose labels or titles indicate honesty/soundness/ZK/MPC/security review is needed (labels: ' + JSON.stringify(LABELS) + '; or a title/diff making a soundness or privacy claim). ' +
     'For each selected PR: `gh pr diff <url> --name-only` (+ read the load-bearing hunks), summarise the diff in one or two sentences, list the tests it adds/changes, list any audit/threat-model/research docs it touches, and set zk_mpc_surface / touches_sq_qhy4 (true if it touches the ZK/MPC estate or the PENDING external-audit surface sq-qhy4). ' +
     'Keep the pack SMALL — Fable will read the pack, not the whole diff. If none qualify, return {prs:[]}. ' +

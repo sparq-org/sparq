@@ -1,7 +1,7 @@
 # Trust-graph authorisation for Solid/LWS — 2026-07 estate audit + remaining-scope decomposition
 
 Status: **design-for-review decomposition record** (epic `sq-pfae`, issue
-[#940](https://github.com/jeswr/sparq/issues/940)). This record does NOT restate the model
+[#940](https://github.com/sparq-org/sparq/issues/940)). This record does NOT restate the model
 design — that is [`research/solid-trust-graph-authz-design.md`](solid-trust-graph-authz-design.md)
 (merged, maintainer-reviewed, `sq-pfae.1`). Its job is three things: (1) an honest audit of
 what the epic has ALREADY shipped versus what the brief's "trust-graph authorisation" still

@@ -74,7 +74,7 @@ makes "an ODRL gate in front of a query" feasible rather than hand-wavy:
   comes from [ODRL IM 2.2 §conflict](https://www.w3.org/TR/odrl-model/#conflict) — not from the CG
   report. sparq's evaluator hard-wires the `prohibit` (deny-overrides) strategy instead; that
   divergence is deliberate and disclosed (crate README's ODRL conformance note, issue
-  [#1375](https://github.com/jeswr/sparq/issues/1375), odrl-policy-bridge paper Limitation #1).
+  [#1375](https://github.com/sparq-org/sparq/issues/1375), odrl-policy-bridge paper Limitation #1).
 - **Evaluation and Comparison Semantics for ODRL** (arXiv 2025) — a clean **query-answering
   semantics**: the state of the world is a relation of *events*, an ODRL rule is a boolean query over
   it, policy comparison/refinement is **query containment**. Reference impl `ODRL2SHACL` (deployed in

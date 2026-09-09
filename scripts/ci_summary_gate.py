@@ -407,6 +407,13 @@ UNSAT_HOLD_REMEDY = (
 # sees them). Their presence therefore PROVES the reporter must post
 # `feature-matrix report`; its absence keeps the gate polling (still-settling)
 # until the loop's own timeout, then FAILS CLOSED — never a conclude-by-timing.
+# [GPT-5.6] #6299: `workflow_run` executes on the default branch, so the
+# reporter itself never creates a non-terminal check on the target head; its
+# manually posted summary appears only when reporting finishes. If the final
+# ordinary sibling completes at the absolute poll cap, give only this
+# structurally required reporter one short, bounded post-cap grace. The grace
+# neither infers a verdict nor extends ordinary pending siblings, and expiry
+# still reaches the same fail-closed reporter belt below.
 FM_GROUP_PREFIX = "opt-in group ("
 FM_REPORT_NAME = "feature-matrix report"
 # [FABLE-5] PR #3511 finding 2 (same-SHA stale-report race): an `opt-in group (…)`
@@ -433,6 +440,10 @@ class Config:
     base_polls: int = 110       # base budget: 110 x 20s ~= 37 min (the old hard cap)
     sat_interval: int = 40      # slower poll cadence during the saturation extension
     max_total_polls: int = 155  # absolute cap: 45 extension polls x 40s = +30 min
+    # [GPT-5.6] #6299: one-shot reporter-only tail after the ordinary cap. Fifteen
+    # normal-cadence polls are about five minutes, including room for the normal
+    # two-poll settle, while the job's 80-minute hard timeout remains the outer bound.
+    reporter_grace_polls: int = 15
     sat_queue_min: int = 5      # queued workflow-runs in the repo => saturation
     progress_window: int = 15   # polls over which a completed-count rise = progress
     # [OPUS-5] #3781: consecutive polls the UNSATISFIABLE-HOLD state must persist before
@@ -445,7 +456,14 @@ class Config:
 
 
 class FetchError(RuntimeError):
-    """A poll's API fetch failed (transient or otherwise)."""
+    """An API fetch failed without a recognized fatal rate-limit refusal."""
+
+
+class RateLimitError(RuntimeError):
+    """[GPT-6-ASTRA] An explicit API rate-limit refusal forbids further requests.
+
+    Deliberately separate from retryable FetchError, including inside a poll.
+    """
 
 
 class SupersededLegsError(RuntimeError):
@@ -458,7 +476,8 @@ class TierContext:
     re-read the PR's live draft state at conclusion time. run_tier is computed from
     the trigger payload (pull_request + draft == true => "draft"; every other
     event/state => "full"). fetch_pr_draft() -> bool (current draft state), raising
-    FetchError on API failure; None when the run has no PR (push/merge_group)."""
+    FetchError on generic API failure or fatal RateLimitError on explicit rate
+    refusal; None when the run has no PR (push/merge_group)."""
 
     run_tier: str = "full"  # "draft" | "full"
     event_name: str = ""
@@ -1454,6 +1473,17 @@ def _emit(line: str, summary_path: str = "") -> None:
             fh.write(line + "\n")
 
 
+def _rate_limit_verdict(exc: RateLimitError, summary_path: str = "") -> int:
+    """[GPT-6-ASTRA] Fail closed without any follow-up quota/probe request."""
+    _emit(
+        "### ci-summary: UNDETERMINED — explicit GitHub rate-limit response; "
+        f"stopping without further API requests ({exc}). No check failure is inferred.",
+        summary_path,
+    )
+    print("::error::ci-summary rate limit reached — no further polling or recovery.")
+    return 1
+
+
 def _bounded_draft_read(
     tier_ctx: TierContext | None,
 ) -> tuple[bool | None, Exception | None]:
@@ -1461,7 +1491,8 @@ def _bounded_draft_read(
     transient FetchError. Returns (state, last_error); state is None when there is no
     fetcher wired or every attempt failed. Shared by the conclusion-time re-check
     (_draft_recheck) and the #3781 unsatisfiable-hold detector so both read the state
-    exactly the same way — the CALLERS decide what an unreadable state means."""
+    exactly the same way — the CALLERS decide what an unreadable state means.
+    Explicit RateLimitError propagates immediately, without bounded retries."""
     still_draft: bool | None = None
     last_err: Exception | None = None
     if tier_ctx is not None and tier_ctx.fetch_pr_draft is not None:
@@ -1486,7 +1517,10 @@ def _draft_recheck(tier_ctx: TierContext | None, summary_path: str = "") -> int:
     violation. Returns 0 (ok to pass) or 1 (fail). Full-tier runs: always 0."""
     if not tier_ctx or tier_ctx.run_tier != "draft":
         return 0
-    still_draft, last_err = _bounded_draft_read(tier_ctx)
+    try:
+        still_draft, last_err = _bounded_draft_read(tier_ctx)
+    except RateLimitError as exc:
+        return _rate_limit_verdict(exc, summary_path)
     if still_draft is None:
         _emit(
             "### ci-summary: FAILED — draft-tier run could not confirm the PR's "
@@ -1779,12 +1813,21 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
     ff_suspect: tuple | None = None
     # [OPUS-5] #3781: consecutive polls the UNSATISFIABLE-HOLD state has persisted.
     unsat_polls = 0
+    # [GPT-5.6] #6299: `poll_limit` may grow exactly once, and only for an
+    # unresolved feature-matrix report after every ordinary sibling is terminal.
+    reporter_grace_started = False
+    # [GPT-6-ASTRA] #6437: cached eligibility licenses only re-observation after
+    # a cap fetch failure; it is never evidence for a passing reporter verdict.
+    reporter_grace_eligible = False
+    poll_limit = cfg.max_total_polls
 
     attempt = 0
-    while attempt < cfg.max_total_polls:
+    while attempt < poll_limit:
         attempt += 1
         try:
             raw = fetch_runs()
+        except RateLimitError as exc:
+            return _rate_limit_verdict(exc, cfg.summary_path)
         except SupersededLegsError as exc:
             _emit(
                 f"### ci-summary: FAILED — {exc}. The gate did not treat the "
@@ -1806,7 +1849,29 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
                 f"attempt {attempt}: check-run fetch failed ({exc}) — skipping this poll "
                 f"({consec_fetch_failures}/{cfg.max_consec_fetch_failures} consecutive)."
             )
-            sleep_fn(cfg.sat_interval if extension_started else cfg.interval)
+            # [GPT-6-ASTRA] A failed cap poll cannot evaluate fresh eligibility.
+            # Reuse only the last successfully observed reporter-only state to
+            # arm the SAME fixed tail. Errors consume its polls; the next fresh
+            # observation still faces the ordinary/full-work stop and settle.
+            if (
+                not reporter_grace_started
+                and attempt == cfg.max_total_polls
+                and reporter_grace_eligible
+            ):
+                reporter_grace_started = True
+                poll_limit = cfg.max_total_polls + cfg.reporter_grace_polls
+                print(
+                    "::notice::ci-summary cap fetch recovery: the last observed "
+                    "sibling set was reporter-only eligible. Granting one bounded "
+                    f"reporter-only grace of {cfg.reporter_grace_polls} poll(s) "
+                    "to re-observe it; failed fetches consume the tail, and fresh "
+                    "correlation, ordinary-work and settle checks still apply (#6437)."
+                )
+            sleep_fn(
+                cfg.interval
+                if reporter_grace_started
+                else (cfg.sat_interval if extension_started else cfg.interval)
+            )
             continue
         consec_fetch_failures = 0
 
@@ -1827,6 +1892,15 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         ]
         total = len(runs)
         pending = sum(1 for r in runs if r.get("status") != "completed")
+        # A present reporter check may itself be non-terminal. It is the only
+        # pending check the reporter-only grace may wait for; every other pending
+        # check remains governed by the ordinary absolute cap.
+        non_reporter_pending = sum(
+            1
+            for r in runs
+            if r.get("status") != "completed"
+            and not is_fm_report(r.get("name", ""))
+        )
         # [FABLE-5] Draft-tier CI: on a FULL-tier pull_request run, a draft-tier-
         # assembled selection with no full-tier successor means the ready_for_review
         # re-run has not registered yet — treat the set as STILL-SETTLING (hold the
@@ -1847,7 +1921,8 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         # draft-tier awaiting_full. A "failed" reporter does NOT hold (it is
         # terminal and must conclude RED). Budget exhaustion while still awaiting
         # FAILS CLOSED via render_verdict's reporter belt — never conclude-by-timing.
-        awaiting_report = fm_report_status(runs) == "pending"
+        report_state = fm_report_status(runs)
+        awaiting_report = report_state == "pending"
         completed_hist.append(total - pending)
         # Settle is a POST-TERMINAL window re-armed ONLY by pending work (sq-ipkku):
         # already-terminal injections must not starve convergence.
@@ -1863,6 +1938,40 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
             f"all-terminal stable for {stable}/{cfg.settle_polls} poll(s){changed}{extra}",
             flush=True,
         )
+
+        # [GPT-5.6] #6299: the trusted reporter starts only after feature-matrix
+        # completes, and its workflow_run is attached to the default branch rather
+        # than this head. Therefore an absent target-head report plus zero pending
+        # ordinary checks can still mean a healthy reporter is in flight. At the
+        # ordinary cap, arm one fixed tail only for that exact state. A report that
+        # first lands on the cap also gets the tail solely to complete the normal
+        # settle window. The current-run external_id correlation remains inside
+        # fm_report_status; the tail merely gives that already-required verdict time
+        # to appear and settle.
+        # [GPT-6-ASTRA] Refresh after EVERY successful observation, including
+        # ineligible states, so an older reporter-only snapshot cannot linger.
+        reporter_grace_eligible = (
+            (awaiting_report or (report_state == "ok" and stable < cfg.settle_polls))
+            and not awaiting_full
+            and non_reporter_pending == 0
+            and cfg.reporter_grace_polls > 0
+        )
+        if (
+            not reporter_grace_started
+            and attempt == cfg.max_total_polls
+            and reporter_grace_eligible
+        ):
+            reporter_grace_started = True
+            poll_limit = cfg.max_total_polls + cfg.reporter_grace_polls
+            print(
+                "::notice::ci-summary ordinary poll cap reached after every "
+                "non-reporter sibling became terminal, but the structurally required "
+                "current feature-matrix report is unresolved or has not completed "
+                "the normal settle window. Granting one "
+                f"bounded reporter-only grace of {cfg.reporter_grace_polls} poll(s) "
+                f"at the normal {cfg.interval}s cadence (#6299); it cannot re-arm or "
+                "extend an ordinary pending sibling, and expiry remains fail-closed."
+            )
 
         # [FABLE-5] FAIL-FAST (header §FAIL-FAST): a concluded gating failure in
         # the (already forgiveness-filtered) sibling set decides the verdict now
@@ -1947,7 +2056,10 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         ):
             unsat_polls += 1
             if unsat_polls >= cfg.unsat_confirm_polls:
-                still_draft, draft_err = _bounded_draft_read(tier_ctx)
+                try:
+                    still_draft, draft_err = _bounded_draft_read(tier_ctx)
+                except RateLimitError as exc:
+                    return _rate_limit_verdict(exc, cfg.summary_path)
                 if still_draft is True:
                     stale = draft_selects_unsuperseded(runs)
                     _emit(
@@ -1992,6 +2104,22 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         else:
             unsat_polls = 0
 
+        # The grace is licensed only by the all-ordinary-terminal state at the
+        # ordinary cap. If an ordinary sibling or the separate full-tier hold
+        # appears afterward, stop immediately rather than lending it this tail.
+        if (
+            reporter_grace_started
+            and attempt > cfg.max_total_polls
+            and (non_reporter_pending > 0 or awaiting_full)
+        ):
+            _emit(
+                "::notice::ci-summary reporter-only grace stopped because ordinary "
+                "pending work or the full-tier hold appeared; those states do not "
+                "receive post-cap time (#6299).",
+                cfg.summary_path,
+            )
+            break
+
         # Clean convergence: everything terminal, held for the settle, past the floor.
         if attempt >= cfg.min_polls and pending == 0 and stable >= cfg.settle_polls:
             return render_verdict(runs, cfg.summary_path, tier_ctx)
@@ -1999,7 +2127,7 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
         # ADAPTIVE SATURATION BUDGET (sq-90cv4): at/after the base budget with work
         # still pending, extend ONLY while the evidence says throughput-starvation
         # (deep queue) or live progress — otherwise it's a genuine hang: RED.
-        if attempt >= cfg.base_polls and pending > 0:
+        if attempt >= cfg.base_polls and pending > 0 and not reporter_grace_started:
             progressing = (
                 len(completed_hist) > cfg.progress_window
                 and completed_hist[-1] > completed_hist[-1 - cfg.progress_window]
@@ -2010,6 +2138,8 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
             # extension on depth alone (None → saturated = False, conservative branch).
             try:
                 depth = fetch_queue_depth()
+            except RateLimitError as exc:
+                return _rate_limit_verdict(exc, cfg.summary_path)
             except Exception as exc:
                 print(f"  (queue-depth fetch raised {exc!r} — treating depth as unknown)")
                 depth = None
@@ -2055,10 +2185,38 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
                 sleep_fn(cfg.sat_interval)
             continue
 
-        if attempt < cfg.max_total_polls:
+        if attempt < poll_limit:
             sleep_fn(cfg.interval)
 
-    # Absolute budget exhausted.
+    # [GPT-5.6] #6299: reporter grace exhaustion never infers success. A still-
+    # unresolved current report takes the existing reporter failure belt. A report
+    # that first became green on the final grace poll also cannot bypass the normal
+    # settle window merely because the bounded tail ended.
+    if reporter_grace_started and non_reporter_pending == 0 and not awaiting_full:
+        report_state = fm_report_status(runs)
+        if report_state == "pending":
+            print(
+                "::notice::ci-summary bounded reporter-only grace exhausted without "
+                "a terminal verdict for the current feature-matrix run — rendering "
+                "the unchanged fail-closed reporter verdict (#6299)."
+            )
+            return render_verdict(runs, cfg.summary_path, tier_ctx)
+        if report_state == "ok" and stable < cfg.settle_polls:
+            _emit(
+                "### ci-summary: UNDETERMINED (not a test failure) — the current "
+                "feature-matrix reporter concluded successfully at the end of its "
+                "bounded post-cap grace, but the normal all-terminal settle window "
+                f"reached only {stable}/{cfg.settle_polls} poll(s). Fail-closed: a "
+                "reporter verdict never bypasses the normal settle requirement.",
+                cfg.summary_path,
+            )
+            print(
+                "::error::ci-summary UNDETERMINED — reporter grace ended before the "
+                "normal settle window completed (#6299)."
+            )
+            return 1
+
+    # Absolute budget (plus the one-shot reporter tail, when armed) exhausted.
     if pending == 0:
         # The #997 graceful timeout: everything IS terminal, we just never got a
         # full quiet settle — render the real verdict, never a blind RED.
@@ -2115,15 +2273,40 @@ def run_gate(cfg: Config, fetch_runs, fetch_queue_depth, sleep_fn=time.sleep,
 # ----------------------------- live (gh-backed) wiring -----------------------------
 
 
+def _raise_if_rate_limited(proc: subprocess.CompletedProcess) -> None:
+    """[GPT-6-ASTRA] Recognize explicit failed-response diagnostics only.
+
+    These gh calls do not expose response headers: no remaining-quota value is
+    inferred, and a generic 401/403/5xx is not evidence of rate exhaustion.
+    """
+    if proc.returncode == 0:
+        return
+    messages = [proc.stderr or ""]
+    try:
+        body = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        body = None
+    if isinstance(body, dict) and isinstance(body.get("message"), str):
+        messages.append(body["message"])
+    for message in messages:
+        if re.search(
+            r"\brate limit exceeded\b|\bsecondary rate limit\b|\bHTTP 429\b|\btoo many requests\b",
+            message,
+            re.IGNORECASE,
+        ):
+            raise RateLimitError("GitHub explicitly refused a rate-limited request")
+
+
 def _gh_json_lines(args: list[str]) -> list[dict]:
     # [SONNET-4.6] Wrap subprocess.run so FileNotFoundError / TimeoutExpired / OSError
     # (e.g. `gh` not on PATH) are converted into FetchError, routing them into the
     # existing bounded-retry / skip-this-poll tolerance in run_gate exactly as a
-    # non-zero exit code does — no raw crash, no false pass.
+    # generic non-zero exit does. Explicit rate-limit refusals instead stop below.
     try:
         proc = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         raise FetchError(f"subprocess raised: {exc}") from exc
+    _raise_if_rate_limited(proc)
     if proc.returncode != 0:
         raise FetchError(proc.stderr.strip()[:300] or f"gh api exited {proc.returncode}")
     out = []
@@ -2231,6 +2414,7 @@ def make_redispatch_workflow(repo: str):
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
             raise FetchError(f"redispatch subprocess raised: {exc}") from exc
+        _raise_if_rate_limited(proc)
         if proc.returncode != 0:
             raise FetchError(
                 proc.stderr.strip()[:300] or f"redispatch gh api exited {proc.returncode}"
@@ -2254,7 +2438,8 @@ def make_fetch_pr_draft(repo: str, pr_number: str):
     """[FABLE-5] Draft-tier CI: the conclusion-time PR draft-state reader. Returns
     a () -> bool fetcher (True == still a draft) that raises FetchError on any
     API/parse failure — the caller (render_verdict via _draft_recheck) bounded-
-    retries and fail-closes to RED, never to a pass."""
+    retries and fail-closes to RED, never to a pass. Explicit RateLimitError
+    bypasses retries and stops the gate immediately."""
 
     def fetch() -> bool:
         try:
@@ -2265,6 +2450,7 @@ def make_fetch_pr_draft(repo: str, pr_number: str):
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
             raise FetchError(f"subprocess raised: {exc}") from exc
+        _raise_if_rate_limited(proc)
         if proc.returncode != 0:
             raise FetchError(proc.stderr.strip()[:300] or f"gh api exited {proc.returncode}")
         val = proc.stdout.strip().lower()
@@ -2279,8 +2465,9 @@ def make_fetch_pr_draft(repo: str, pr_number: str):
 
 def make_fetch_queue_depth(repo: str):
     """Queued workflow-run count for the repo — the saturation signal. Returns None
-    (unknown) on any failure so a permissions/API blip degrades to progress-only,
-    never crashes the gate. Needs `actions: read` on the workflow token."""
+    (unknown) on a generic failure so a permissions/API blip degrades to progress-only.
+    Explicit RateLimitError instead stops the gate; it cannot license more requests.
+    Needs `actions: read` on the workflow token."""
 
     def fetch():
         proc = subprocess.run(
@@ -2294,6 +2481,7 @@ def make_fetch_queue_depth(repo: str):
             capture_output=True,
             text=True,
         )
+        _raise_if_rate_limited(proc)
         if proc.returncode != 0:
             print(f"  (queue-depth fetch failed: {proc.stderr.strip()[:200]} — treating as unknown)")
             return None

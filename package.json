@@ -2,7 +2,7 @@
   "name": "sparq-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "Repo-root npm workspaces for the sparq JS surfaces (the published @jeswr/sparq WASM client, the shared @sparq/client, the GitHub-Pages showcase site, the DISTINCT operational GUI frontend, and the Tauri GUI e2e harness). NOT a published package — it exists only to give CI a single root install + lockfile across the workspace members. Deliberately has NO \"type\" field so repo-root CommonJS scripts (scripts/*.js, bench/dashboard/*.js) keep resolving as CJS.",
+  "description": "Repo-root npm workspaces for the sparq JS surfaces (the published @sparq-org/sparq WASM client, the shared @sparq/client, the GitHub-Pages showcase site, the DISTINCT operational GUI frontend, and the Tauri GUI e2e harness). NOT a published package — it exists only to give CI a single root install + lockfile across the workspace members. Deliberately has NO \"type\" field so repo-root CommonJS scripts (scripts/*.js, bench/dashboard/*.js) keep resolving as CJS.",
   "workspaces": [
     "packages/*",
     "js",

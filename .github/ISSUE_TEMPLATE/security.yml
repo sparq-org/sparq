@@ -15,18 +15,18 @@ body:
         ## How to report privately
 
         1. **GitHub Security Advisories (preferred):**
-           [Report a vulnerability](https://github.com/jeswr/sparq/security/advisories/new)
+           [Report a vulnerability](https://github.com/sparq-org/sparq/security/advisories/new)
            — keeps the report and fix coordination private.
         2. **Email:** jesse@jeswr.org with subject `[sparq security] <short summary>`.
 
-        See [SECURITY.md](https://github.com/jeswr/sparq/blob/main/SECURITY.md) for the
+        See [SECURITY.md](https://github.com/sparq-org/sparq/blob/main/SECURITY.md) for the
         full policy, response expectations, and supported versions.
 
         ## Already-known limitations (no report needed)
 
         The `sparq-zk*` and `sparq-mpc` crates are **research scaffolds with no security
         guarantee** — the v1 ZK verifier is not sound (see
-        [research/zk-soundness-audit.md](https://github.com/jeswr/sparq/blob/main/research/zk-soundness-audit.md))
+        [research/zk-soundness-audit.md](https://github.com/sparq-org/sparq/blob/main/research/zk-soundness-audit.md))
         and MPC cryptography is deferred. These gaps are documented; you do not need to
         report them. Reports of *new* failure classes, or of a gap in a part we claim is
         sound, are very welcome — through the private channels above.

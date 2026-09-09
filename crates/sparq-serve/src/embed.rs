@@ -37,8 +37,8 @@
 //! shape. No behaviour here is new: every call is the same engine path `sparq-server`
 //! already exercises in production.
 //!
-//! [API stability & deprecation policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
-//! [issue #1248]: https://github.com/jeswr/sparq/issues/1248
+//! [API stability & deprecation policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
+//! [issue #1248]: https://github.com/sparq-org/sparq/issues/1248
 //!
 //! # Example — embed one resource graph behind the generation ring
 //!

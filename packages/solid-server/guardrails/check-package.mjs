@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// [GPT-5.6] sq-hcy7c: refuse to pack @jeswr/solid-server without its wasm runtime.
+// [GPT-5.6] sq-hcy7c: refuse to pack @sparq-org/solid-server without its wasm runtime.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const expectedName = '@jeswr/solid-server';
+const expectedName = '@sparq-org/solid-server';
 const failures = [];
 const fail = (message) => failures.push(message);
 const manifest = JSON.parse(readFileSync(resolve(packageDir, 'package.json'), 'utf8'));

@@ -895,7 +895,7 @@ shapeClass ex:Person {
 // `sparq_canon` fn the export delegates to — `JsError::new` panics off-wasm), so they
 // never touch the actual `#[wasm_bindgen]` free function. These drive the genuine wasm32
 // export through the JS boundary: the `String -> String` marshalling and the `Err`
-// (JsError) path the @jeswr/sparq RDF/JS `Dataset` relies on for toCanonical/equals/contains.
+// (JsError) path the @sparq-org/sparq RDF/JS `Dataset` relies on for toCanonical/equals/contains.
 #[cfg(feature = "canon")]
 mod canon {
     use super::*;

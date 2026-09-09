@@ -629,7 +629,7 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
     matchMedia: function () { return { matches: false }; },
     __SPARQ_DASHBOARD_TEST__: true,   // [OPUS-4.8] expose paintSummary so we can drive a real relabel
     BENCHMARK_DATA: {
-      lastUpdate: Date.now(), repoUrl: 'https://github.com/jeswr/sparq',
+      lastUpdate: Date.now(), repoUrl: 'https://github.com/sparq-org/sparq',
       entries: { 'sparq engine': [{
         commit: { id: 'deadbeefcafe', message: 'dom sim', url: '#' }, date: Date.now(),
         benches: [

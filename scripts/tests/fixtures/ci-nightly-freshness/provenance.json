@@ -1,0 +1,31 @@
+{
+  "_provenance": "[GPT-6 Astra] Original GitHub Actions artifact ZIPs, downloaded read-only by root; not synthetic fixtures or new measurements. No logs used to infer an observed process exit.",
+  "repository": "sparq-org/sparq",
+  "run_id": 34099890455,
+  "run_attempt": 1,
+  "head_sha": "4d880d6a4a37b7d28a4259dfdbceea4a8db07eb0",
+  "workflow": ".github/workflows/ci.yml",
+  "cargo_mutants_version": "25.3.1 (pinned by workflow at the recorded head)",
+  "fixtures": [
+    {
+      "file": "mutants-parse-10010502882.zip",
+      "artifact_id": 10010502882,
+      "sha256": "7d60fdfa6ce36bdf3f5d5105c476ebf7fa61c273a5735f53b15e7b0eeea0aa63",
+      "planned_and_completed": 102,
+      "shard": null
+    },
+    {
+      "file": "mutants-engine-10036242958.zip",
+      "artifact_id": 10036242958,
+      "sha256": "77bc3dd50465d6c7987141b49eb9d4b656add76129ca0e79ac4734f597673752",
+      "planned_and_completed": 197,
+      "shard": "23/24"
+    }
+  ],
+  "sources": [
+    "https://github.com/sparq-org/sparq/actions/runs/34099890455",
+    "https://github.com/sourcefrog/cargo-mutants/blob/v25.3.1/src/outcome.rs",
+    "https://github.com/sourcefrog/cargo-mutants/blob/v25.3.1/src/main.rs",
+    "https://github.com/sourcefrog/cargo-mutants/blob/v25.3.1/src/lab.rs"
+  ]
+}

@@ -32,7 +32,7 @@ function groupResponseHeaders(flat) {
  * Fastify plugin: mount one in-memory wasm Solid pod on this Fastify context.
  *
  * ```js
- * import { solidPod } from '@jeswr/solid-server/fastify';
+ * import { solidPod } from '@sparq-org/solid-server/fastify';
  * await fastify.register(solidPod, { baseUrl, ownerWebid, oidc });
  * ```
  *

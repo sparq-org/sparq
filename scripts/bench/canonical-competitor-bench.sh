@@ -34,7 +34,7 @@ set -euo pipefail
 REGION="${REGION:-eu-west-2}"
 ITYPE="${ITYPE:-c6i.4xlarge}"
 BRANCH="${1:-${BRANCH:-main}}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"
 WATDIV_SF="${WATDIV_SF:-1}"
 ITERS="${ITERS:-3}"

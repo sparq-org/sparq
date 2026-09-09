@@ -102,7 +102,7 @@ def canon_purl:
 #   * path+file://<abs>/crates/sparq-*#<ver>
 #       -> a FIRST-PARTY workspace crate this project authors and ships. Supplier = the
 #          project, matching the top-level supplier in supply-chain/vex.cdx.json
-#          ({name:"Jesse Wright", url:["https://github.com/jeswr/sparq"]}).
+#          ({name:"Jesse Wright", url:["https://github.com/sparq-org/sparq"]}).
 #   * path+file://<abs>/vendor/<name>#<ver>
 #       -> a VENDORED UPSTREAM crate (today only `spargebra`, a [patch.crates-io] PATH
 #          replacement of a crates.io-published crate). Its supplier-of-record is crates.io
@@ -140,7 +140,7 @@ def derive_supplier($author):
       {name: "crates.io", url: [cratesio_url]}
     elif ($ref | test("^path\\+file://.*/crates/sparq")) then
       # first-party workspace crate -> the project (matches the VEX top-level supplier)
-      {name: "Jesse Wright", url: ["https://github.com/jeswr/sparq"]}
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^git\\+https://github\\.com/jeswr/")) then
       # [FABLE-5] sq-gg0qq.2 (GS-1): a GIT dependency pinned to the MAINTAINER'S OWN
       # repository (today only solid-oidc-verifier; deny.toml's sources allow-list keeps

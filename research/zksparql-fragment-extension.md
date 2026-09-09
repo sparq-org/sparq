@@ -317,4 +317,4 @@ encoding (belongs to `sq-1s2.1`), and per-query circuit synthesis (belongs to
   diverge from accepted syntax; the bench/catalog bead re-grounds the catalog on the
   post-extension gate.
 
-[#1591]: https://github.com/jeswr/sparq/issues/1591
+[#1591]: https://github.com/sparq-org/sparq/issues/1591

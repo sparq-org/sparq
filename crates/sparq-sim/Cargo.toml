@@ -53,7 +53,7 @@ lexical = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 oxrdf.workspace = true
 rustc-hash.workspace = true
 

@@ -37,7 +37,7 @@ and the http-server/python/CLI hosts are NOT in wasm.** That is a deliberate "le
 bundle" choice (`sparq-wasm` depends only on `sparq-core` + `sparq-engine`). So "live
 everywhere" is achieved by a **three-tier live strategy**, not by one magic wasm blob:
 
-1. **Tier-1 live** — the lean wasm bundle already shipped (`@jeswr/sparq`, ~886 KB).
+1. **Tier-1 live** — the lean wasm bundle already shipped (`@sparq-org/sparq`, ~886 KB).
 2. **Tier-2 live** — *new optional wasm bundles* we build for the surfaces that are pure-Rust
    and wasm-portable but simply not in the default bundle (SHACL, reasoning, RSP, full-text;
    each a separate `wasm-pack` artifact, lazy-loaded only on that demo page).
@@ -153,7 +153,7 @@ Core engine
                            `Store.explainAnalyze` over `sparq_engine::explain*` (sq-ncvq.14 / #269),
                            so plan introspection is in-tab live in the lean default bundle)
   /surface/data-formats   Turtle / N-Triples / N-Quads / TriG + compressed ingest
-  /surface/javascript-wasm  The @jeswr/sparq browser/Node API (streaming, match, applyDelta)
+  /surface/javascript-wasm  The @sparq-org/sparq browser/Node API (streaming, match, applyDelta)
 
 Reasoning & validation
   /surface/inference      RDFS / OWL 2 RL / N3 closure + proof trees (why())
@@ -199,7 +199,7 @@ Legend: **(a)** existing wasm · **(b)** new wasm bundle · **(c)** bb.js · **(
 |---|---|---|---|
 | **sparql-query** | **(a) LIVE** | The shipped wasm Store: SELECT/ASK/CONSTRUCT/UPDATE, BGP+WCOJ, FILTER, OPTIONAL, UNION, MINUS, BIND, VALUES, aggregates, paths, sub-SELECT, RDF 1.2 triple terms. | REGEX/REPLACE are compiled out of the lean bundle; QueryBudget deadline is native-only (row-cap only in wasm). |
 | **data-formats** | **(a) LIVE** | `load`/`loadDataset` over the 4 text formats; gzip/zstd-compressed RDF ingest via `SparqStore.fromCompressed()` (JS-side decompress → `fromString`). (`loadCompressed` is unrelated — it stores the *index* block-compressed, not a gzip/zstd input decoder.) | HDT, mmap/external-memory, parallel fast paths are native-only → walkthrough for those. |
-| **javascript-wasm** | **(a) LIVE** | This *is* the engine; the page documents the `@jeswr/sparq` API (streaming cursors, `match()`, `count`, `applyDelta`) by calling it. | — |
+| **javascript-wasm** | **(a) LIVE** | This *is* the engine; the page documents the `@sparq-org/sparq` API (streaming cursors, `match()`, `count`, `applyDelta`) by calling it. | — |
 | **inference** | **(b) NEW wasm bundle** | `sparq-reason` is pure-Rust forward-chaining; a `sparq-reason-wasm` bundle (RDFS/OWL2RL/N3 closure + `why()` proof tree) is portable. Pulls `regex` → larger bundle, lazy-loaded on this page only. | If the regex/rule-engine wasm size is unacceptable, fall back to **(e)** hosted/walkthrough. Confirm wasm-portability as a build spike. |
 | **shacl** | **(b) NEW wasm bundle** | `sparq-shacl` is pure-Rust over `sparq-engine` (already wasm-portable); a `sparq-shacl-wasm` bundle validates data+shapes → W3C report in-tab. | SHACL-SPARQL constraints need the engine's REGEX (compiled out of lean bundle) — include it in this bundle or note the gap. |
 | **streaming-rsp** | **(b) NEW wasm bundle** | `sparq-rsp` is documented "wasm-safe" (pure, no clock/async) — a small `sparq-rsp-wasm` bundle can run windows live with a UI-driven logical clock. | Not in any shipped bundle today; needs the build-change spike to confirm. |
@@ -378,7 +378,7 @@ bundle), explicitly **not** a prerequisite.
   matching §1, **statically exported** (`output: 'export'`) to `out/`.
 - **Pages base path:** the repo's Pages site is served at **`https://sparq.jeswr.org/`**
   (project page, not a user page), so set **`basePath: '/sparq'`** + matching `assetPrefix` and
-  load all wasm/bb.js assets through the base path. (Confirmed: `gh api repos/jeswr/sparq/pages`
+  load all wasm/bb.js assets through the base path. (Confirmed: `gh api repos/sparq-org/sparq/pages`
   → `html_url: https://sparq.jeswr.org/`.)
 - **Co-hosting with `/dev/bench`:** today Pages is served from the **`benchmark-data` branch**
   at `/` (`build_type: legacy`), whose tree is `index.html` + `dev/` — i.e. the benchmark

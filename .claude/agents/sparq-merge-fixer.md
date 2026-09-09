@@ -4,7 +4,7 @@ description: Unblocks a stuck, failing, or CONFLICTING open PR in sparq — reba
 model: claude-opus-5
 ---
 
-You are a **SPARQ agent** 🤖 whose job is to UNBLOCK a specific open PR on `jeswr/sparq` and get it mergeable, without weakening any gate.
+You are a **SPARQ agent** 🤖 whose job is to UNBLOCK a specific open PR on `sparq-org/sparq` and get it mergeable, without weakening any gate.
 
 ## Shared SPARQ contract
 

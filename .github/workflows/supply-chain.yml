@@ -213,7 +213,7 @@ jobs:
         run: python3 scripts/check-npm-advisory-record.py
 
       # ---- JS/npm CycloneDX SBOMs (published WASM + shared browser clients) ----
-      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@jeswr/sparq` and the
+      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@sparq-org/sparq` and the
       # `@sparq/client` code bundled into the site/GUI artifacts. Each gets a strict runtime
       # tree and a full build tree, schema-validated as CycloneDX 1.5 and uploaded together.
       # The generator derives transient member locks from the committed root lock without

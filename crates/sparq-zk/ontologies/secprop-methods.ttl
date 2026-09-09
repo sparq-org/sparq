@@ -63,10 +63,10 @@ zk:poseidon2-rdfc10-v1
     # positive — Claimed (the in-circuit knowledge-soundness claim; unaudited)
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:auditEvidence <https://github.com/jeswr/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
+      secx:auditEvidence <https://github.com/sparq-org/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
     [ secx:property secx:Soundness ; secx:level secx:KnowledgeSound ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:auditEvidence <https://github.com/jeswr/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
+      secx:auditEvidence <https://github.com/sparq-org/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
     [ secx:property secx:Completeness ; secx:level secx:Complete ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
     [ secx:property secx:UnlinkabilityScope ; secx:level secx:PerPresentation ;
@@ -105,7 +105,7 @@ zk:poseidon2-dualleaf-v1
     [ secx:property secx:Soundness ; secx:level secx:KnowledgeSound ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
       secx:assumption secx:IssuerHonesty ;
-      secx:auditEvidence <https://github.com/jeswr/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
+      secx:auditEvidence <https://github.com/sparq-org/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
     [ secx:property secx:Completeness ; secx:level secx:Complete ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
     [ secx:property secx:UnlinkabilityScope ; secx:level secx:PerPresentation ;
@@ -138,7 +138,7 @@ zk:poseidon2-schnorr-v1
     [ secx:property secx:Soundness ; secx:level secx:Sound ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
       secx:assumption secx:DiscreteLog ;
-      secx:auditEvidence <https://github.com/jeswr/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
+      secx:auditEvidence <https://github.com/sparq-org/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
     [ secx:property secx:PostQuantumForgery ; secx:level secx:PQForgeable ;
       secx:assurance secx:Proven ;
       sig-impl:justification "Schnorr over Baby-JubJub is discrete-log; recoverable by a CRQC — a settled NEGATIVE result, matching the vendored sig-impl: PostQuantumForgery verdict for a DL signature"@en-GB ] ,

@@ -6,8 +6,8 @@ parameters, request/response media types, content-negotiation rules, status code
 shape an **HTTP-only consumer** (one that talks to sparq exclusively over the network, e.g.
 [solid-server-rs / PSS](https://github.com/jeswr/solid-server-rs)) may rely on. It is the HTTP
 counterpart of [`docs/api-stability.md`](api-stability.md), which covers the **in-process
-embedding** surface ([#1248](https://github.com/jeswr/sparq/issues/1248)); this document covers
-the ask in [#1416](https://github.com/jeswr/sparq/issues/1416).
+embedding** surface ([#1248](https://github.com/sparq-org/sparq/issues/1248)); this document covers
+the ask in [#1416](https://github.com/sparq-org/sparq/issues/1416).
 
 Everything in [The frozen v1 surface](#the-frozen-v1-surface) is enumerated **as-implemented**
 and pinned end-to-end by `crates/sparq-server/tests/wire_contract.rs` (the served-surface
@@ -247,7 +247,7 @@ Served today, **NOT covered by the v1 freeze** — may change or disappear in an
 2. Cut the release line that carries it (see [`docs/release.md`](release.md)) and record the
    freeze in `CHANGELOG.md`.
 3. Flip this document's [Status](#status-v1-proposed-not-yet-ratified) from *PROPOSED* to
-   *in force*, and note it on [#1416](https://github.com/jeswr/sparq/issues/1416) so PSS can
+   *in force*, and note it on [#1416](https://github.com/sparq-org/sparq/issues/1416) so PSS can
    pin the release line.
 
 ## Related
@@ -257,6 +257,6 @@ Served today, **NOT covered by the v1 freeze** — may change or disappear in an
 - `crates/sparq-server/src/status_contract.rs` — the versioned retry contract (rustdoc).
 - [`skills/http-server/SKILL.md`](../skills/http-server/SKILL.md) — the full operational
   endpoint + hardening reference (superset; not a stability contract).
-- [#1416](https://github.com/jeswr/sparq/issues/1416) (PSS HTTP-freeze ask) ·
-  [#1248](https://github.com/jeswr/sparq/issues/1248) (embedding freeze) ·
-  [#50](https://github.com/jeswr/sparq/issues/50) (transient-vs-permanent contract).
+- [#1416](https://github.com/sparq-org/sparq/issues/1416) (PSS HTTP-freeze ask) ·
+  [#1248](https://github.com/sparq-org/sparq/issues/1248) (embedding freeze) ·
+  [#50](https://github.com/sparq-org/sparq/issues/50) (transient-vs-permanent contract).

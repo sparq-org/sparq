@@ -1,0 +1,5 @@
+{
+  "pr": 6054,
+  "date": "2026-09-01",
+  "reason": "PR #6054 intentionally changes release metadata from 0.1.0 to 0.1.1 across the Rust workspace and updates the published npm/repository identity from @jeswr/sparq and github.com/jeswr/sparq to @sparq-org/sparq and github.com/sparq-org/sparq. The feature-OFF sparq-wasm artifact remains exactly the same length in CI (1,558,972 bytes; delta 0) but differs byte-for-byte because Cargo crate identity/source metadata and same-line Rust comments changed. No executable Rust logic, default feature, dependency edge, vectorized gate, or feature-OFF code path is added or enabled; the byte change is an intentional consequence of release and ownership metadata only."
+}

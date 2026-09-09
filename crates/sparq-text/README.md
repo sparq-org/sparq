@@ -8,7 +8,7 @@
 </p>
 
 Opt-in **full-text search over literals** for the
-[sparq](https://github.com/jeswr/sparq) RDF engine: a small, owned BM25 inverted index
+[sparq](https://github.com/sparq-org/sparq) RDF engine: a small, owned BM25 inverted index
 over a `Graph`'s string literals, prefix completion over IRIs and common RDF labels,
 plus `text:` **magic predicates** that run text search inside plain SPARQL.
 

@@ -2232,8 +2232,8 @@ class TestWorkflowWiring(unittest.TestCase):
         with write permissions), plus `pull_request_target`, which additionally hands a
         privileged token to a run about untrusted head code.
 
-        `issue_comment`, `pull_request_review` and `workflow_run` are NOT in this set:
-        GitHub resolves all three from the DEFAULT BRANCH, and the checkout step below is
+        `issue_comment` and `workflow_run` are NOT in this set: GitHub resolves both from the
+        DEFAULT BRANCH, and the checkout step below is
         separately pinned to the default branch, so no candidate code or candidate
         workflow definition can execute here.
         """
@@ -2244,6 +2244,11 @@ class TestWorkflowWiring(unittest.TestCase):
             )
         self.assertIn("schedule", on)
         self.assertIn("workflow_dispatch", on)
+        self.assertNotIn(
+            "pull_request_review", on,
+            "#6311: Copilot reviews create approval-held action_required runs with zero jobs; "
+            "the scheduled reconciliation owns the review-body withholding path",
+        )
 
     def test_the_cron_backstop_survives_the_event_conversion(self):
         """CONSTRAINT: the event trigger is ADDITIVE. Deleting the cron converts a
@@ -2263,10 +2268,6 @@ class TestWorkflowWiring(unittest.TestCase):
             sorted(on["issue_comment"]["types"]),
             ["created", "edited"],
             "an EDITED comment can add or retract a verdict just as a new one can",
-        )
-        self.assertEqual(
-            sorted(on["pull_request_review"]["types"]),
-            ["dismissed", "edited", "submitted"],
         )
         self.assertEqual(on["workflow_run"]["workflows"], ["ci-summary"])
         self.assertEqual(on["workflow_run"]["types"], ["completed"])
@@ -2298,10 +2299,10 @@ class TestWorkflowWiring(unittest.TestCase):
         bridge_pr = " ".join(str(step["env"]["BRIDGE_PR"]).split())
         for source in (
             "github.event.issue.number",
-            "github.event.pull_request.number",
             "github.event.workflow_run.pull_requests[0].number",
         ):
             self.assertIn(source, bridge_pr, f"{source} would never scope its event")
+        self.assertNotIn("github.event.pull_request.number", bridge_pr)
         self.assertTrue(bridge_pr.startswith("${{") and bridge_pr.endswith("}}"))
 
     def test_the_mode_expression_makes_exactly_the_cron_paths_fail_soft(self):
@@ -2315,7 +2316,6 @@ class TestWorkflowWiring(unittest.TestCase):
             ("schedule", "sweep"),
             ("workflow_dispatch", "sweep"),
             ("issue_comment", "event"),
-            ("pull_request_review", "event"),
             ("workflow_run", "event"),
         ):
             with self.subTest(event=event_name):
@@ -2493,9 +2493,11 @@ class TestJobConditionAdmission(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertFalse(self.admits(self.comment_event(body)))
 
-    def test_a_pull_request_review_is_admitted(self):
-        self.assertTrue(
-            self.admits(payload("pull_request_review", pull_request={"number": 4324}))
+    def test_a_pull_request_review_is_refused(self):
+        self.assertFalse(
+            self.admits(payload("pull_request_review", pull_request={"number": 4324})),
+            "#6311: a review event must not re-enter through a stale job condition even though "
+            "the workflow trigger itself is absent",
         )
 
     def ci_event(self, conclusion="success", pulls=({"number": 4324},)):
@@ -2522,7 +2524,8 @@ class TestJobConditionAdmission(unittest.TestCase):
     def test_an_unknown_event_is_refused(self):
         """Adding a trigger without extending this condition must not fall through to an
         unscoped sweep."""
-        for event_name in ("pull_request", "push", "issues", "check_suite"):
+        for event_name in ("pull_request", "pull_request_review", "push", "issues",
+                           "check_suite"):
             with self.subTest(event=event_name):
                 self.assertFalse(self.admits(payload(event_name)))
 
@@ -2554,15 +2557,12 @@ class TestConcurrencyGrouping(unittest.TestCase):
         b = self.group_for(payload("issue_comment", issue={"number": 4325}))
         self.assertNotEqual(a, b)
 
-    def test_events_about_the_SAME_pr_share_a_group_across_channels(self):
+    def test_events_about_the_SAME_pr_share_a_group_across_live_channels(self):
         comment = self.group_for(payload("issue_comment", issue={"number": 4324}))
-        review = self.group_for(
-            payload("pull_request_review", pull_request={"number": 4324})
-        )
         ci = self.group_for(
             payload("workflow_run", workflow_run={"pull_requests": [{"number": 4324}]})
         )
-        self.assertEqual({comment, review, ci}, {comment})
+        self.assertEqual({comment, ci}, {comment})
 
     def test_schedule_and_dispatch_share_the_single_sweep_group(self):
         self.assertEqual(

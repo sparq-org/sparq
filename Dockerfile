@@ -87,9 +87,9 @@ FROM gcr.io/distroless/cc-debian12:nonroot@sha256:adcd20c7b4c988b73cbfbddb26d2ee
 
 LABEL org.opencontainers.image.title="sparq-server" \
       org.opencontainers.image.description="W3C SPARQL 1.1 Protocol server for the sparq RDF triplestore (dictionary-encoded, six permutation indexes, parallel execution)" \
-      org.opencontainers.image.source="https://github.com/jeswr/sparq" \
+      org.opencontainers.image.source="https://github.com/sparq-org/sparq" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.documentation="https://github.com/jeswr/sparq#readme"
+      org.opencontainers.image.documentation="https://github.com/sparq-org/sparq#readme"
 
 COPY --from=builder /build/target/release/sparq-server /usr/local/bin/sparq-server
 

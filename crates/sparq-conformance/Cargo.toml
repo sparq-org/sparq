@@ -309,7 +309,7 @@ sparq-reason = { path = "../sparq-reason" }
 # conclusion. OFF by default (optional, behind `rif-wg-core`) so the default harness build
 # links zero substrate code — the lean opt-in posture. `default-features = false` +
 # the `numeric` slice only (no rows/join/compare kernels).
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, optional = true }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.1", default-features = false, optional = true }
 # [OPUS-4.8] sq-kuvu3 — the EXPERIMENTAL OWL 2 QL query-rewriting reasoner, used ONLY
 # by the `ql-experimental` arm to rewrite each QL-tagged entailment test's conjunctive
 # query into a certain-answer UCQ. OFF by default (optional, behind `ql-experimental`)

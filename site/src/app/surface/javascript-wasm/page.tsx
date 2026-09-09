@@ -9,7 +9,7 @@ import { withBasePath } from "@/lib/base-path";
 export const metadata: Metadata = {
   title: "JavaScript / WASM",
   description:
-    "Use the sparq engine from JavaScript/TypeScript via @jeswr/sparq — an idiomatic RDF/JS surface (SparqStore + a named Dataset DatasetCore entry, importable from a <script type=module>) over the ~886 KB WebAssembly build, in Node or the browser.",
+    "Use the sparq engine from JavaScript/TypeScript via @sparq-org/sparq — an idiomatic RDF/JS surface (SparqStore + a named Dataset DatasetCore entry, importable from a <script type=module>) over the ~886 KB WebAssembly build, in Node or the browser.",
 };
 
 // [OPUS-4.8] sq-vw3ax.8 — condensed to the scan-first template: demo first, one-line lead,
@@ -21,11 +21,11 @@ export default function JavascriptWasmSurfacePage() {
     <SurfaceContent
       icon={Boxes}
       title="JavaScript / WASM"
-      statement="The @jeswr/sparq RDF/JS API — the Rust engine compiled to a single ~886 KB wasm artifact."
+      statement="The @sparq-org/sparq RDF/JS API — the Rust engine compiled to a single ~886 KB wasm artifact."
       tier="live"
       intro={
         <p>
-          <code className="font-mono text-foreground">@jeswr/sparq</code> wraps the Rust
+          <code className="font-mono text-foreground">@sparq-org/sparq</code> wraps the Rust
           triplestore + SPARQL engine — compiled to a single ~886 KB (≈314 KB gzipped)
           wasm artifact — in an idiomatic{" "}
           {/* [FABLE-5] persistent underline: distinguishable without color (link-in-text-block, sq-0rbfn) */}
@@ -65,7 +65,7 @@ export default function JavascriptWasmSurfacePage() {
         },
       ]}
       runsNote="This is the engine — every live demo on this site calls this API; in Node it loads the same wasm binary, and in the browser it streams it on first use, never on import."
-      reproduce="npm i @jeswr/sparq"
+      reproduce="npm i @sparq-org/sparq"
       caveat={
         <p>
           The <code className="font-mono">SparqStore.query()</code> wrapper covers
@@ -83,8 +83,8 @@ export default function JavascriptWasmSurfacePage() {
       links={[
         { href: withBasePath("/app/"), label: "Open the SPARQL workbench", external: true },
         {
-          href: "https://www.npmjs.com/package/@jeswr/sparq",
-          label: "@jeswr/sparq on npm",
+          href: "https://www.npmjs.com/package/@sparq-org/sparq",
+          label: "@sparq-org/sparq on npm",
           external: true,
         },
       ]}

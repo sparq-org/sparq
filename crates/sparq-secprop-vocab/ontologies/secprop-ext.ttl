@@ -63,7 +63,7 @@ a proof of any property. The default assurance for a sparq ZK property is `Claim
 and the audit status is `ExternalSignOffPending` (the ZK estate is unaudited,
 sq-qhy4); no sparq ZK method may be labelled `Proven` while that audit is open."""@en-GB ;
   owl:imports <https://w3id.org/zkp-sparql/sec-prop> ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/972> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/972> ;
   rdfs:comment "sparq extension; reused terms keep the vendored IRIs (design §4.1)."@en-GB .
 
 # ─────────────────────── annotation shape (§4.2.2) ───────────────────────────

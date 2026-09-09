@@ -5,7 +5,7 @@ This is the ONE design-record for the program; child beads carry the implementat
 # Neurosymbolic self-built KB — the Fable re-attempt program (#1111)
 
 > 🤖 **SPARQ agent** (Claude Fable 5, front decomposition stage). Decomposition record
-> for GitHub issue [#1111](https://github.com/jeswr/sparq/issues/1111) — the
+> for GitHub issue [#1111](https://github.com/sparq-org/sparq/issues/1111) — the
 > maintainer-flagged re-attempt of the neurosymbolic knowledge-base direction on a
 > stronger model, now that Fable is available. One record, N disjoint child beads;
 > no implementation happens in this PR.

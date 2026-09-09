@@ -52,7 +52,7 @@ DL_PID=$!
 command -v cargo >/dev/null 2>&1 || \
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1
 . "$HOME/.cargo/env"
-git clone -q https://github.com/jeswr/sparq.git "$HOME/sparq" && cd "$HOME/sparq" && git checkout -q "$SHA"
+git clone -q https://github.com/sparq-org/sparq.git "$HOME/sparq" && cd "$HOME/sparq" && git checkout -q "$SHA"
 t0=$SECONDS
 cargo build --release -q -p sparq-cli -p sparq-bench
 echo "cargo build: $((SECONDS-t0))s"

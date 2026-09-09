@@ -55,7 +55,7 @@ csv = ["arrow"]
 # The SELECT result we project (`QueryResult { vars, rows }`). Always present — the
 # crate's whole job is to read it. default-features=false keeps the edge lean (we need
 # only the result type + its `oxrdf::Term` rows, no engine features).
-sparq-engine = { path = "../sparq-engine", version = "0.1.0", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1", default-features = false }
 # The RDF term model (`Term`, `Literal`, `NamedNode`, …). workspace-pinned so the term
 # type is byte-identical to sparq-engine's. Always present (used to classify each cell).
 oxrdf.workspace = true

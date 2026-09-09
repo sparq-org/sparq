@@ -9,7 +9,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "RDFC-1.0 (RDF Dataset Canonicalization / URDNA2015 successor) as a small, opt-in public API over sparq's oxrdf 0.3 term model"
-publish = false
+readme = "README.md"
 
 # OPT-IN, single-sourced canonicalizer. NOTHING in the workspace's default
 # build depends on this crate: it is a standalone member (like `sparq-zk`), so
@@ -26,13 +26,13 @@ publish = false
 [dependencies]
 # sparq term model (oxrdf 0.3 re-export) + store Graph.
 # [OPUS-4.8] sq-1dd5t: `default-features = false` so a wasm consumer (sparq-wasm's
-# opt-in `canon` feature, surfacing RDFC-1.0 to the @jeswr/sparq RDF/JS Dataset)
+# opt-in `canon` feature, surfacing RDFC-1.0 to the @sparq-org/sparq RDF/JS Dataset)
 # can pull this crate WITHOUT forcing `sparq-core`'s default `parallel` (rayon) on —
 # rayon has no wasm32 threads. NATIVE callers keep parallelism via this crate's own
 # default `parallel` feature below (which forwards to `sparq-core/parallel`), so
 # Cargo feature unification still turns rayon on for every native build exactly as
 # before. The RDFC-1.0 algorithm itself (`rdf-canon`) is single-threaded regardless.
-sparq-core = { path = "../sparq-core", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
 oxrdf = { workspace = true }
 oxttl = { workspace = true }
 

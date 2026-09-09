@@ -131,14 +131,14 @@ shacl = ["dep:sparq-shacl", "dep:sparq-forms"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1" }
 # [OPUS-4.8] sq-jxjgr: the NL→SPARQL loop powering the opt-in `ask` tool. OPTIONAL — pulled
 # in ONLY by the `nlq` feature (default off), so the default build never compiles it and the
 # core/engine stay lean. A reviewed cargo-vet exemption covers the new edge (sparq-mcp ->
 # sparq-nlq under the feature).
-sparq-nlq = { path = "../sparq-nlq", version = "0.1.0", optional = true }
+sparq-nlq = { path = "../sparq-nlq", version = "0.1.1", optional = true }
 # [SONNET-4.6] sq-sj1f9: the SPARQL parser the translate-only `nl_query` tool validates
 # with (and hands to `sparq_nlq::guard::forbidden_constructs`, which takes parsed algebra).
 # OPTIONAL, pulled in only by the `nlq` feature. ZERO supply-chain delta: it is the
@@ -147,16 +147,16 @@ spargebra = { workspace = true, optional = true }
 # [FABLE-5] sq-u16eq: the pod store + WAC/ACP authorization view backing the opt-in
 # `solid` feature's LDP resource tools. OPTIONAL — pulled in ONLY by that feature, so the
 # default build never compiles it (in-workspace path dep; no supply-chain delta).
-sparq-solid = { path = "../sparq-solid", version = "0.1.0", optional = true }
+sparq-solid = { path = "../sparq-solid", version = "0.1.1", optional = true }
 # [FABLE-5] sq-lsp7k.10: the BM25 literal index behind the opt-in `text` feature's
 # `text_search` tool. OPTIONAL + lean (`default-features = false`: pure index only — no
 # engine rewrite seam, no rayon), so the default build never compiles it.
-sparq-text = { path = "../sparq-text", version = "0.1.0", optional = true, default-features = false }
+sparq-text = { path = "../sparq-text", version = "0.1.1", optional = true, default-features = false }
 # [GPT-5.6] sq-lsp7k.22: optional validator behind the `shacl` tool feature.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", optional = true }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", optional = true }
 # [FABLE-5] sq-lsp7k.1.6: headless FormDescription derivation behind the SAME `shacl`
 # feature (the `describe_form` tool). OPTIONAL — the default build never compiles it.
-sparq-forms = { path = "../sparq-forms", version = "0.1.0", optional = true }
+sparq-forms = { path = "../sparq-forms", version = "0.1.1", optional = true }
 # [SONNET-4.6] sq-sjey1: UNCONDITIONAL, and deliberately so — the `resources/list`
 # surface must read `Graph::named`, whose keys are `oxrdf::Term`s, in the DEFAULT build.
 # This adds no compilation and no supply-chain delta: `oxrdf` is already an unconditional

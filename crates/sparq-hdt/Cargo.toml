@@ -58,7 +58,7 @@ zlib-ng = ["flate2/zlib-ng"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 oxrdf = { workspace = true, optional = true }
 # Read path uses NO features (id-level translation, no sophia adapter). The `write`
 # feature (above) turns on `hdt/nt` to reach `Hdt::read_nt`; `Hdt::write` is

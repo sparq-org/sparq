@@ -36,7 +36,7 @@ ITYPE="c6i.4xlarge"   # MANDATORY: same arch+class as 2026-07-07 canonical basel
 ITYPE_FB="c6i.2xlarge"  # fallback (same arch, half the vCPUs)
 # x86_64 Ubuntu Noble AMI (matches the canonical c6i.4xlarge box)
 AMI_NAME="${GATHER_AMI_NAME:-ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"   # canonical scale
 ITERS="${GATHER_ITERS:-5}"              # canonical min-of-5
 

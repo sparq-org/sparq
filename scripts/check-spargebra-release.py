@@ -36,7 +36,7 @@ import urllib.request
 BASELINE = (0, 4, 6)
 # crates.io sparse index. Path layout for a >=4-char crate name is `<a><b>/<c><d>/<name>`.
 INDEX_URL = "https://index.crates.io/sp/ar/spargebra"
-USER_AGENT = "sparq-upstream-watch (https://github.com/jeswr/sparq)"
+USER_AGENT = "sparq-upstream-watch (https://github.com/sparq-org/sparq)"
 TIMEOUT_S = 30
 
 

@@ -6,7 +6,7 @@
 </p>
 
 The **proof-of-concept** for trust-graph authorisation over [sparq-solid](../sparq-solid/README.md)
-(design record §6.0; [issue #940](https://github.com/jeswr/sparq/issues/940); epic `sq-pfae`). It
+(design record §6.0; [issue #940](https://github.com/sparq-org/sparq/issues/940); epic `sq-pfae`). It
 adds the **admission stratum** ahead of the shipped WAC/ACP derivation stratum: *"is this
 externally-attested fact from a source I trust for this statement-type?"* — and on success injects
 the issuer-tagged fact so the existing N3 reasoner merges it with the `.acr` rules to derive access.
@@ -77,10 +77,10 @@ view; `--features trust-graph-did` forwards the DID issuer-key binding (`sq-pfae
   `trust:issuerDid` instead of `trust:issuerKey` hex (`DidKeyResolver` decodes `did:key` offline; `DidWebResolver`
   reads `did:web` via a **pluggable** fetcher). **Narrows** the forgery vector D′ (no absolute anchor).
 - **Security properties** (`secprop` / `admissibility`, **opt-in `secprop-vocab` / `secprop-admissibility`**, `sq-5oru9` / `sq-ufsi9`) — the sparq **`sec-prop:` extension**
-  ([`secprop-ext.ttl`](../sparq-secprop-vocab/ontologies/secprop-ext.ttl), owned by the dependency-free [`sparq-secprop-vocab`](../sparq-secprop-vocab) leaf since [#3705](https://github.com/jeswr/sparq/issues/3705); proof-system dimensions + the **assurance / audit-status axis** the vendored ontology lacks) and the §4.3 ODRL → admissible-proof-set reduction as a RUNNABLE N3 ruleset on `sparq-reason` (Rust **default-deny**). Reasons over ANNOTATIONS, not crypto (`sq-qhy4`). Three VENDORED dimension IRIs used as `secx:property` values (`SEC_PROP_POST_QUANTUM_FORGERY` / `_SNOOPING` / `SEC_PROP_SIGNATURE_TYPE_LEAKAGE`) are re-asserted verbatim as `sec-prop:SecurityProperty` subjects and listed in `ALL_SECPROP_IRIS` ([#3441](https://github.com/jeswr/sparq/issues/3441)).
-- **`trustx:` certification-scope vocabulary** (`framework_vocab`, **opt-in `framework-vocab`**, `sq-6syab.2` / [#1592](https://github.com/jeswr/sparq/issues/1592)) —
+  ([`secprop-ext.ttl`](../sparq-secprop-vocab/ontologies/secprop-ext.ttl), owned by the dependency-free [`sparq-secprop-vocab`](../sparq-secprop-vocab) leaf since [#3705](https://github.com/sparq-org/sparq/issues/3705); proof-system dimensions + the **assurance / audit-status axis** the vendored ontology lacks) and the §4.3 ODRL → admissible-proof-set reduction as a RUNNABLE N3 ruleset on `sparq-reason` (Rust **default-deny**). Reasons over ANNOTATIONS, not crypto (`sq-qhy4`). Three VENDORED dimension IRIs used as `secx:property` values (`SEC_PROP_POST_QUANTUM_FORGERY` / `_SNOOPING` / `SEC_PROP_SIGNATURE_TYPE_LEAKAGE`) are re-asserted verbatim as `sec-prop:SecurityProperty` subjects and listed in `ALL_SECPROP_IRIS` ([#3441](https://github.com/sparq-org/sparq/issues/3441)).
+- **`trustx:` certification-scope vocabulary** (`framework_vocab`, **opt-in `framework-vocab`**, `sq-6syab.2` / [#1592](https://github.com/sparq-org/sparq/issues/1592)) —
   the trust-expression layer for **framework-certified-issuer** trust: a verifier→holder trust-requirements graph, two modes (enumerated `trustsIssuer` OR framework-certified), positive status attestation. Turtle ([`trust-framework.ttl`](ontologies/trust/trust-framework.ttl)) extends `trust:` + references vendored `sec-req:` eIDAS/UK-DVS individuals (no fork). **Anchored, not proven** (`sq-qhy4`).
-- **Holder-side trust-expression evaluation + conformance suite** (`expression`, **opt-in `expression`**, `sq-6syab.4`/`.3`/`.6` / [#1592](https://github.com/jeswr/sparq/issues/1592)) —
+- **Holder-side trust-expression evaluation + conformance suite** (`expression`, **opt-in `expression`**, `sq-6syab.4`/`.3`/`.6` / [#1592](https://github.com/sparq-org/sparq/issues/1592)) —
   the CLEAR-path verifier→holder contract: `parse_request` (query `Q` + trust-requirements graph `TR` + nonce), the §3.1 reference rewrite `Q → Q'` (issuer membership, positive status-attestation validity at *t*, certification-scope conformance; the two modes compose by `UNION`), evaluation via `sparq-engine`, and a provenance-encoded response in BOTH design-§4 encodings (RDF 1.2 reifier + the runnable-today named-graph/PROV-O mapping `verify_response` re-checks). **Fail-closed:** no admissible derivation ⇒ no binding AND zero disclosed bundles. The W3C-manifest [conformance suite](tests/trust-expression/manifest.ttl) drives all ten cases of design §6 through that API, with zero known-failing entries. Spec-conformance only — **not** a soundness or privacy claim (`sq-qhy4`).
 - **Certification-edge trust-graph closure + store composition** (`graph` + `store`, **opt-in `cert-graph`**, `sq-pfae.15`/`sq-pfae.16`) — `derive_effective_rules`: depth-bounded (v1 depth-1), **attenuation-ONLY, fail-closed** closure from signed `trustx:Certification` edges AHEAD of the UNCHANGED admit gate. `TrustDocument::with_certifications` attaches edges to the document; `TrustStore::effective_rules_at` pipes them through the SAME server-ceiling + per-`.acr` narrowing path. **Cache-safety:** `policy_version` folds certifier IRI + certified-issuer IRI + validity window per edge — revoking a cert OR re-authoring its validity window changes `AdmissionCacheKey`. Wall-clock expiry of an unchanged cert propagates by re-materialise / epoch-bump, bounded by the host epoch cadence (residue tracked by `sq-l5og`). Zero certs ⇒ byte-identical to `TrustDocument::new`.
 - **Property-admissibility pre-check** (`admit_with_precheck`, **opt-in `secprop-precheck`**, `sq-dt5hv` Ph 5 / `sq-nrwqs` / `sq-ddbm8`) — an OPTIONAL pre-admission check: the caller
@@ -112,7 +112,7 @@ view; `--features trust-graph-did` forwards the DID issuer-key binding (`sq-pfae
 - Machine-readable [`trust.ttl`](ontologies/trust/trust.ttl) + [`SEMANTICS.md`](ontologies/trust/SEMANTICS.md)
   (`sq-pfae.2`) + [`secprop-ext.ttl`](../sparq-secprop-vocab/ontologies/secprop-ext.ttl); design record
   `research/solid-trust-graph-authz-design.md` (§3.2 storage; §4 delegation; §6.0 PoC) —
-  [#940](https://github.com/jeswr/sparq/issues/940). `cargo doc -p sparq-trust --all-features`.
+  [#940](https://github.com/sparq-org/sparq/issues/940). `cargo doc -p sparq-trust --all-features`.
 
 ## License
 

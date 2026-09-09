@@ -207,7 +207,7 @@ command = "python3 scripts/mdbook-rewrite-links.py"
 
 [output.html]
 site-url = "/guide/"
-git-repository-url = "https://github.com/jeswr/sparq"
+git-repository-url = "https://github.com/sparq-org/sparq"
 """
 
 _PAGES_OK = """\

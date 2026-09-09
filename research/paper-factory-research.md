@@ -278,7 +278,7 @@ top-venue full paper:
 - **Artifact evaluation is near-universal** at the strong venues (§3). sparq's open-source,
   multi-binding, conformance-suite-backed nature is a major asset — lead with it.
 - **Double-blind** is standard at SIGMOD/VLDB/ICDE/WWW/CCS/S&P → the factory **must support an
-  anonymized build** (strip jeswr/sparq identity, anonymize the artifact link). ISWC/ESWC
+  anonymized build** (strip sparq-org/sparq identity, anonymize the artifact link). ISWC/ESWC
   blinding varies by track/year.
 - **Resource track (ISWC/ESWC)** is the single best structural fit for "sparq the engine."
 - **Rolling cadence** (PVLDB monthly, PoPETs quarterly, SIGMOD multi-round) → the factory
@@ -587,7 +587,7 @@ delegation discipline.
    │           --input data="$(cat site/src/data/benchmarks.generated.json)"         │
    │  HTML: typst.ts (@myriaddreamin/typst.react) renders the SAME .typ into a       │
    │        Next.js route /papers/<slug>, JSON bound as React props                  │
-   │  • anonymized-build toggle (strip jeswr/sparq identity) for double-blind venues │
+   │  • anonymized-build toggle (strip sparq-org/sparq identity) for double-blind venues │
    │  • artifact: Zenodo DOI snapshot + digest-pinned Docker/Nix + ctuning appendix  │
    └──────────────────────────────────────┬───────────────────────────────────────┘
    ┌──────────────────────────────────────┴───────────────────────────────────────┐

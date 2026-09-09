@@ -452,69 +452,69 @@ odrl-authz = ["solid-authz", "sparq-solid/odrl-bridge", "dep:sparq-policy"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0" }
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
 # [OPUS-4.8] (sq-o5bi, sq-0g6g) The swappable serving core (ring + writer) lives behind an
 # `ArcSwap` so an online restore can atomically install a rehydrated core while readers load
 # lock-free — the same arc-swap the ring uses internally. `backup`-feature ONLY: the default
 # serving path holds ring/writer directly (byte-identical to pre-#941), so without `backup` the
 # server never depends on arc-swap. The serialiser-only build and the wasm graph never see it.
 arc-swap = { version = "1", optional = true }
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
 # The concurrent-serving core (Wave A, research/concurrent-serving.md §6): the
 # lock-free generation ring pins read snapshots; the single sequenced writer
 # group-commits SPARQL Updates. Server-feature only — the serialiser-only build
 # and the wasm graph never see it (`cargo tree -p sparq-wasm -e normal | grep -c
 # serve` must stay 0).
-sparq-serve = { path = "../sparq-serve", version = "0.1.0", optional = true }
+sparq-serve = { path = "../sparq-serve", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-d3d8) Behind the opt-in `federation-descriptors` feature only: the VoID /
 # Service-Description generator (`Introspection::to_void`). Light — it depends only on
 # sparq-core + serde (no async, no heavy deps), and is already in the workspace tree
 # (sparq-engine / sparq-nlq use it). OFF by default, so it adds nothing to the standard build.
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.0", optional = true }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.1", optional = true }
 # [GPT-5.6] sq-lsp7k.9.3: pure prefix-completion index for the default-OFF `complete` HTTP
 # feature. Disable sparq-text's defaults so this edge does not pull its engine rewrite or rayon;
 # sparq-server already owns the queried Graph and needs only CompletionIndex.
-sparq-text = { path = "../sparq-text", version = "0.1.0", optional = true, default-features = false }
+sparq-text = { path = "../sparq-text", version = "0.1.1", optional = true, default-features = false }
 # Behind the opt-in `geo` feature only (geof_registry; its own default `engine`
 # feature is this same sparq-engine, so the graph gains just the georust stack).
-sparq-geo = { path = "../sparq-geo", version = "0.1.0", optional = true }
+sparq-geo = { path = "../sparq-geo", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-r868) Behind the opt-in `shacl` feature only: SHACL Core + SHACL-SPARQL
 # validation (`sparq_shacl::validate` → `ValidationReport`) for the `POST /shacl/validate`
 # endpoint. It transitively pulls sparq-engine (already a dependency here) for `sh:sparql`;
 # its OWN `oxrdf` is the same workspace 0.3 the server resolves, so terms flow through. OFF
 # by default — a build without the `shacl` feature carries zero SHACL code.
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.0", optional = true }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.1", optional = true }
 # [OPUS-4.8] (sq-vczh2) Behind the opt-in `terse` feature only: the verifiable LLM-ergonomic
 # transpiler (`sparq_terse::terse_to_sparql` → `Expansion { canonical_sparql, keywords, ... }`)
 # for the `POST /terse/transpile` endpoint. Pulled WITHOUT its `vectors` feature, so this is the
 # LEAN build: it depends only on `spargebra` (already a server dependency) — no model, no
 # sparq-core/-engine/-nlq/-vectors. OFF by default — a build without the `terse` feature carries
 # zero terse code.
-sparq-terse = { path = "../sparq-terse", version = "0.1.0", optional = true }
+sparq-terse = { path = "../sparq-terse", version = "0.1.1", optional = true }
 # [FABLE-5] (sq-snopa.6, issue #992 FR-4) Behind the opt-in `solid-authz` feature only: the Solid
 # WAC/ACP library authoriser (`sparq_solid::PodStore::decide` / `wac_allow` / `query_json_as` ->
 # `WacDecision`) for the `POST /authz/*` endpoints. It transitively pulls sparq-engine (already a
 # dependency here) + sparq-reason; its OWN `oxrdf` is the same workspace 0.3 the server resolves,
 # so terms flow through. OFF by default — a build WITHOUT the `solid-authz` feature carries ZERO
 # Solid/access-control code (the standard server build never sees sparq-solid or sparq-reason).
-sparq-solid = { path = "../sparq-solid", version = "0.1.0", optional = true }
+sparq-solid = { path = "../sparq-solid", version = "0.1.1", optional = true }
 # [SONNET-4.6] (sq-pfae.17) Behind the opt-in `solid-authz-trust` feature only: the trust-graph
 # authorisation admission gate (`sparq_trust::derive_effective_rules` + `sparq_trust::admit`),
 # with the `cert-graph` feature for the certification-edge closure. OFF by default — a build
 # WITHOUT the `solid-authz-trust` feature carries ZERO trust-graph code.
-sparq-trust = { path = "../sparq-trust", version = "0.1.0", optional = true, features = ["cert-graph"] }
+sparq-trust = { path = "../sparq-trust", version = "0.1.1", optional = true, features = ["cert-graph"] }
 # [SONNET-4.6] (sq-pfae.17) Behind `solid-authz-trust` only: the ZK signature primitive used to
 # parse verifying keys from hex (`sparq_zk::sig::public_key_from_hex`). The `sparq-trust`
 # crate already pulls `sparq-zk` transitively, but `sparq-server` needs it directly so the
 # handler code can import `public_key_from_hex` without an extra re-export layer.
-sparq-zk = { path = "../sparq-zk", version = "0.1.0", optional = true }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1", optional = true }
 # [FABLE-5] (sq-lrtc3.1) Behind the opt-in `odrl-authz` feature only: the typed ODRL 2.2
 # model/parser/evaluator (`sparq_policy::parse_policy` / `Request` / `conflict_admissibility`)
 # the `/authz/query` ODRL lane feeds into the sparq-solid bridge. `sparq-solid/odrl-bridge`
 # already pulls it transitively, but the handler names `sparq_policy` types directly (the
 # bridge entry points take `&sparq_policy::Policy`), so the server needs the direct edge.
 # OFF by default — the standard build never compiles sparq-policy.
-sparq-policy = { path = "../sparq-policy", version = "0.1.0", optional = true }
+sparq-policy = { path = "../sparq-policy", version = "0.1.1", optional = true }
 oxrdf.workspace = true
 # [OPUS-4.8] sq-rt6v: prefix-compacting Turtle + RDF/XML graph serialisation, and RDF/XML
 # request-body parsing, for the GSP read/write + CONSTRUCT/DESCRIBE surface. Both crates are
@@ -591,7 +591,7 @@ flate2 = { version = "1", optional = true }
 # `rustls-pemfile` (RUSTSEC-2025-0134) leaves the graph. Still no TLS path on the TCP listener.
 quinn = { version = "0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"], optional = true }
-sparq-http3 = { path = "../sparq-http3", optional = true, features = ["server"] }
+sparq-http3 = { path = "../sparq-http3", version = "0.1.1", optional = true, features = ["server"] }
 
 mimalloc = "0.1"
 
@@ -602,8 +602,8 @@ mimalloc = "0.1"
 # behind the `solid-authz-trust` feature, which already enables sparq-trust/sparq-zk as
 # optional deps; the dev-dep is unconditional so the test binary can import the helpers
 # regardless of which feature set the dev ran (tests are #[cfg(feature="solid-authz-trust")]).
-sparq-trust = { path = "../sparq-trust", version = "0.1.0", features = ["cert-graph"] }
-sparq-zk = { path = "../sparq-zk", version = "0.1.0" }
+sparq-trust = { path = "../sparq-trust", version = "0.1.1", features = ["cert-graph"] }
+sparq-zk = { path = "../sparq-zk", version = "0.1.1" }
 oxrdf = { workspace = true }
 oxttl = { workspace = true }
 # [OPUS-4.8] Reference SPARQL-results parser (oxigraph's) for the serializer oracle

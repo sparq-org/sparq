@@ -29,7 +29,7 @@ exclude = ["vendor/spargebra", "fuzz", "gui/src-tauri"]
 spargebra = { path = "vendor/spargebra" }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 # [OPUS-4.8] (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep

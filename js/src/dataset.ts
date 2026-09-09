@@ -3,7 +3,7 @@
  * complete set algebra, not just `DatasetCore`) over the sparq wasm engine, so the import the
  * issue's `<script type="module">` snippet uses by name —
  *
- *     import { Dataset } from "https://esm.sh/@jeswr/sparq"
+ *     import { Dataset } from "https://esm.sh/@sparq-org/sparq"
  *
  * — resolves to a real, spec-shaped entry, not just the low-level `Store` class. It is a thin
  * wrapper over {@link SparqStore} (which already wraps the engine): the `DatasetCore` members

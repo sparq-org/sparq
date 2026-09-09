@@ -68,7 +68,7 @@ for (const f of files) {
 // [OPUS-4.8] sq-tp1m (#757) — also sync the tier-b "W-reason" bundle that powers the Inference
 // tool (crates/sparq-reason-wasm, built with `--features explain` by `js/`'s `build:reason-wasm`,
 // exactly as the marketing site syncs it). Its wasm-pack output stays in the crate's own pkg/
-// (it is NOT part of the published @jeswr/sparq package), so we copy it from there into
+// (it is NOT part of the published @sparq-org/sparq package), so we copy it from there into
 // public/wasm/reason/. This bundle is OPTIONAL: if it has not been built (e.g. a `next dev` that
 // skips it, or the gated CI build), we WARN and skip rather than fail — the Inference tool then
 // surfaces a clear "reasoner unavailable" state at runtime, and (rather than silently running
