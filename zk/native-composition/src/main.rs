@@ -7,7 +7,7 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::rand::{rngs::StdRng, RngCore, SeedableRng};
 use bbs_plus::prelude::{KeypairG2, PublicKeyG2, SignatureG1, SignatureParamsG1};
-use blake2::Blake2b512;
+use blake2::{Blake2b512, Digest};
 use legogroth16::{
     circom::{CircomCircuit, R1CS},
     ProvingKey, VerifyingKey,
@@ -34,6 +34,51 @@ const INCOME_SCHEMA: u64 = 1001;
 const RENT_SCHEMA: u64 = 1002;
 const CONTEXT: &[u8] = b"sparq/native-composition/research/v1:income-12*rent>=threshold;u32";
 const BACKEND: &str = "dock-legogroth16-bls12-381";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RejectionStage {
+    BackendSelection,
+    Construction,
+    Decoding,
+    Verification,
+}
+
+impl RejectionStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::BackendSelection => "backend_selection",
+            Self::Construction => "construction",
+            Self::Decoding => "decoding",
+            Self::Verification => "verification",
+        }
+    }
+}
+
+#[derive(Default)]
+struct Checks {
+    passed: BTreeMap<String, bool>,
+    rejection_stages: BTreeMap<String, &'static str>,
+}
+
+impl Checks {
+    fn accept(&mut self, name: &str) {
+        self.passed.insert(name.to_owned(), true);
+    }
+
+    fn reject(
+        &mut self,
+        name: &str,
+        result: std::result::Result<(), RejectionStage>,
+    ) -> Result<()> {
+        let stage = result
+            .err()
+            .ok_or_else(|| format!("negative case unexpectedly accepted: {name}"))?;
+        self.passed.insert(name.to_owned(), true);
+        self.rejection_stages
+            .insert(name.to_owned(), stage.as_str());
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 struct TrustedIssuer {
@@ -118,7 +163,7 @@ fn issue(
 fn required_links() -> MetaStatements {
     let mut links = MetaStatements::new();
     for refs in [
-        [(0, SUBJECT), (1, SUBJECT)], // Same holder in both credentials.
+        [(0, SUBJECT), (1, SUBJECT)], // Same subject identifier in both credentials.
         [(0, AMOUNT), (2, 0)],        // Signed income = circuit income.
         [(1, AMOUNT), (2, 1)],        // Signed rent = circuit rent.
     ] {
@@ -237,26 +282,69 @@ fn verify_bytes(
     key: &VerifyingKey<Bls12_381>,
     request: &Request,
     encoded: &[u8],
-) -> Result<()> {
+) -> std::result::Result<(), RejectionStage> {
     // A bounded experiment envelope, not a production network parser.
     if encoded.len() > 65_536 {
-        return Err("presentation exceeds the experiment envelope limit".to_owned());
+        return Err(RejectionStage::Decoding);
     }
     let mut remaining = encoded;
     let proof = CompositeProof::deserialize_compressed(&mut remaining)
-        .map_err(|_| "invalid proof encoding")?;
+        .map_err(|_| RejectionStage::Decoding)?;
     if !remaining.is_empty() {
-        return Err("trailing bytes after proof".to_owned());
+        return Err(RejectionStage::Decoding);
     }
-    verify(rng, key, request, proof)
+    verify(rng, key, request, proof).map_err(|_| RejectionStage::Verification)
 }
 
-fn reject(checks: &mut BTreeMap<String, bool>, name: &str, result: Result<()>) -> Result<()> {
-    if result.is_ok() {
-        return Err(format!("negative case unexpectedly accepted: {name}"));
-    }
-    checks.insert(name.to_owned(), true);
-    Ok(())
+fn verify_attempt(
+    rng: &mut StdRng,
+    key: &VerifyingKey<Bls12_381>,
+    request: &Request,
+    candidate: Result<CompositeProof>,
+) -> std::result::Result<(), RejectionStage> {
+    let proof = candidate.map_err(|_| RejectionStage::Construction)?;
+    verify(rng, key, request, proof).map_err(|_| RejectionStage::Verification)
+}
+
+fn capabilities() -> Value {
+    json!({
+        "status": "research_spike_not_externally_audited",
+        "supported": {
+            "signature": "Dock BBS+ signed message tuples",
+            "curve_and_scalar_field": "BLS12-381",
+            "residual_route": "Circom R1CS via Dock LegoGroth16",
+            "same_witness_binding": "Dock EqualWitnesses in one composite proof",
+            "relation": "income - 12 * rent >= threshold; unsigned 32-bit values"
+        },
+        "unsupported": [
+            "Noir/Barretenberg BN254 linkage", "RDF credential adapter",
+            "W3C bbs-2023 wire format", "credential status or revocation",
+            "credential validity periods", "complete SPARQL query verification"
+        ],
+        "setup": {
+            "kind": "fresh local circuit-specific experimental setup",
+            "included_in_run": true,
+            "timed_separately_from_presentation": true,
+            "timing_field": "local_smoke_timings_ms.setup",
+            "production_setup_ceremony": false
+        }
+    })
+}
+
+fn artifact_digests() -> Value {
+    // Compile-time bytes identify the build inputs even if the checkout changes
+    // before this binary runs. These are provenance hashes, not proof inputs.
+    json!({
+        "algorithm": "blake2b-512",
+        "circuit_source": {
+            "path": "circuits/eligibility.circom",
+            "digest": format!("{:x}", Blake2b512::digest(include_bytes!("../circuits/eligibility.circom")))
+        },
+        "cargo_lock": {
+            "path": "Cargo.lock",
+            "digest": format!("{:x}", Blake2b512::digest(include_bytes!("../Cargo.lock")))
+        }
+    })
 }
 
 fn exercise(rng: &mut StdRng) -> Result<Value> {
@@ -294,10 +382,11 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         .serialize_compressed(&mut encoded)
         .map_err(|_| "proof serialization failed")?;
     let start = Instant::now();
-    verify_bytes(rng, &setup.key.vk, &request, &encoded)?;
+    verify_bytes(rng, &setup.key.vk, &request, &encoded)
+        .map_err(|stage| format!("valid presentation rejected during {}", stage.as_str()))?;
     let verify_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let mut checks = BTreeMap::new();
-    checks.insert("valid_two_issuer_composition".to_owned(), true);
+    let mut checks = Checks::default();
+    checks.accept("valid_two_issuer_composition");
 
     for (name, changed) in [
         ("changed_threshold", {
@@ -326,10 +415,9 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
             r
         }),
     ] {
-        reject(
-            &mut checks,
+        checks.reject(
             name,
-            verify(rng, &setup.key.vk, &changed, proof.clone()),
+            verify_attempt(rng, &setup.key.vk, &changed, Ok(proof.clone())),
         )?;
     }
     for (name, circuit_values) in [
@@ -343,9 +431,8 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
             &credentials,
             circuit_values,
             required_links(),
-        )
-        .and_then(|p| verify(rng, &setup.key.vk, &request, p));
-        reject(&mut checks, name, result)?;
+        );
+        checks.reject(name, verify_attempt(rng, &setup.key.vk, &request, result))?;
     }
     let unlinked = prove(
         rng,
@@ -368,14 +455,10 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
             Default::default(),
         )
         .map_err(|_| "unlinked attack control should verify its weaker statement")?;
-    checks.insert(
-        "unlinked_control_verifies_only_the_weaker_statement".to_owned(),
-        true,
-    );
-    reject(
-        &mut checks,
+    checks.accept("unlinked_control_verifies_only_the_weaker_statement");
+    checks.reject(
         "same_nonce_without_witness_links",
-        verify(rng, &setup.key.vk, &request, unlinked),
+        verify_attempt(rng, &setup.key.vk, &request, Ok(unlinked)),
     )?;
     let second = prove(
         rng,
@@ -388,13 +471,12 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
     verify(rng, &setup.key.vk, &request, second.clone())?;
     let mut spliced_proof = proof.clone();
     spliced_proof.statement_proofs[2] = second.statement_proofs[2].clone();
-    reject(
-        &mut checks,
+    checks.reject(
         "spliced_valid_residual_proof",
-        verify(rng, &setup.key.vk, &request, spliced_proof),
+        verify_attempt(rng, &setup.key.vk, &request, Ok(spliced_proof)),
     )?;
 
-    // Each credential is authentic, but the holder subjects do not match.
+    // Each credential is authentic, but the subject identifiers do not match.
     let (other_issuer, other_rent) = issue(rng, RENT_SCHEMA, 8, 2_000)?;
     let mut different_subject = request.clone();
     different_subject.issuers[1] = other_issuer;
@@ -405,9 +487,11 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         &[credentials[0].clone(), other_rent],
         values,
         required_links(),
-    )
-    .and_then(|p| verify(rng, &setup.key.vk, &different_subject, p));
-    reject(&mut checks, "different_authenticated_subjects", result)?;
+    );
+    checks.reject(
+        "different_authenticated_subjects",
+        verify_attempt(rng, &setup.key.vk, &different_subject, result),
+    )?;
 
     let mut invalid_signature = credentials.clone();
     invalid_signature[0].signature = credentials[1].signature.clone();
@@ -418,9 +502,11 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         &invalid_signature,
         values,
         required_links(),
-    )
-    .and_then(|p| verify(rng, &setup.key.vk, &request, p));
-    reject(&mut checks, "swapped_issuer_signature", result)?;
+    );
+    checks.reject(
+        "swapped_issuer_signature",
+        verify_attempt(rng, &setup.key.vk, &request, result),
+    )?;
 
     let mut boundary = request.clone();
     boundary.threshold = Fr::from(36_000u64);
@@ -433,7 +519,7 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         required_links(),
     )?;
     verify(rng, &setup.key.vk, &boundary, boundary_proof)?;
-    checks.insert("exact_eligibility_boundary".to_owned(), true);
+    checks.accept("exact_eligibility_boundary");
     boundary.threshold += Fr::from(1u64);
     let result = prove(
         rng,
@@ -442,9 +528,11 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         &credentials,
         values,
         required_links(),
-    )
-    .and_then(|p| verify(rng, &setup.key.vk, &boundary, p));
-    reject(&mut checks, "negative_residual_does_not_wrap", result)?;
+    );
+    checks.reject(
+        "negative_residual_does_not_wrap",
+        verify_attempt(rng, &setup.key.vk, &boundary, result),
+    )?;
 
     // An authentic signature is not permission to bypass the circuit's domain.
     let (large_issuer, large_income) = issue(rng, INCOME_SCHEMA, 7, u64::from(u32::MAX) + 1)?;
@@ -458,26 +546,25 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
         &[large_income, credentials[1].clone()],
         large_values,
         required_links(),
-    )
-    .and_then(|p| verify(rng, &setup.key.vk, &outside_domain, p));
-    reject(&mut checks, "signed_income_exceeds_u32", result)?;
+    );
+    checks.reject(
+        "signed_income_exceeds_u32",
+        verify_attempt(rng, &setup.key.vk, &outside_domain, result),
+    )?;
 
     let mut appended = encoded.clone();
     appended.push(0);
-    reject(
-        &mut checks,
+    checks.reject(
         "trailing_proof_bytes",
         verify_bytes(rng, &setup.key.vk, &request, &appended),
     )?;
-    reject(
-        &mut checks,
+    checks.reject(
         "truncated_proof",
         verify_bytes(rng, &setup.key.vk, &request, &encoded[..encoded.len() / 2]),
     )?;
-    reject(
-        &mut checks,
+    checks.reject(
         "unsupported_noir_link",
-        select_backend("noir-bn254"),
+        select_backend("noir-bn254").map_err(|_| RejectionStage::BackendSelection),
     )?;
 
     Ok(json!({
@@ -490,7 +577,10 @@ fn exercise(rng: &mut StdRng) -> Result<Value> {
             "rayon_threads_environment": std::env::var("RAYON_NUM_THREADS").ok() },
         "proof_bytes": encoded.len(), "r1cs_constraints": setup.r1cs.constraints.len(),
         "local_smoke_timings_ms": { "setup": setup_ms, "prove": prove_ms, "verify": verify_ms },
-        "checks": checks,
+        "checks": checks.passed,
+        "rejection_stages": checks.rejection_stages,
+        "capabilities": capabilities(),
+        "build_input_digests": artifact_digests(),
     }))
 }
 
@@ -523,6 +613,26 @@ mod tests {
         let report = exercise(&mut StdRng::seed_from_u64(19)).expect("cryptographic checks");
         let checks = report["checks"].as_object().expect("named checks");
         assert!(checks.values().all(|value| value == &Value::Bool(true)));
+        // These cases already have a concrete proof; their failures must be
+        // attributed to verification rather than the holder's construction.
+        for name in [
+            "changed_threshold",
+            "changed_disclosure",
+            "changed_nonce",
+            "changed_context",
+            "wrong_issuer",
+            "same_nonce_without_witness_links",
+            "spliced_valid_residual_proof",
+        ] {
+            assert_eq!(report["rejection_stages"][name], "verification", "{name}");
+        }
+        for name in ["trailing_proof_bytes", "truncated_proof"] {
+            assert_eq!(report["rejection_stages"][name], "decoding", "{name}");
+        }
+        assert_eq!(
+            report["rejection_stages"]["unsupported_noir_link"],
+            "backend_selection"
+        );
     }
 
     #[test]
