@@ -125,6 +125,12 @@ for evidence_name in [*json.loads((OVERLAY_4246 / 'manifest.json').read_text())[
 
 FILES['4246-opus-review-acfa31cf.json'] = ROOT / 'direct-4246/opus-review-acfa31cf.json'
 
+OPERATIONAL_TRIAGE = ROOT / 'recovery-20260909/operational-triage'
+for evidence_name in [*json.loads((OPERATIONAL_TRIAGE / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['operational-triage-' + evidence_name.replace('/', '--')] = OPERATIONAL_TRIAGE / evidence_name
+for evidence_name in ['operational-triage-root-query.json', 'operational-triage-root-read.json', 'registry-pause-revalidated.json', 'triage-missing-area-issue.md', 'triage-missing-area-created.txt', 'triage-missing-area-issue-verified.json']:
+    FILES[evidence_name] = ROOT / 'recovery-20260909' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

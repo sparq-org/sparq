@@ -1,0 +1,25 @@
+{
+  "source": "first gh api rate_limit read, before run/job/log reads",
+  "core": {
+    "limit": 5000,
+    "used": 113,
+    "remaining": 4887,
+    "reset": 1788956661
+  },
+  "search": {
+    "limit": 30,
+    "used": 0,
+    "remaining": 30,
+    "reset": 1788955258
+  },
+  "graphql": {
+    "limit": 5000,
+    "remaining": 5000
+  },
+  "observer_retries": 0,
+  "log_downloads": {
+    "102304479961": 1,
+    "102288473433": 1,
+    "102253795704": 1
+  }
+}

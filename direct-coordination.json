@@ -1,13 +1,15 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T12:06:15.356833+00:00",
+  "updated_at": "2026-09-09T12:15:56.335100+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
     "id": "monitor-sparq-pr-throughput",
     "cadence_minutes": 10,
     "active": true,
-    "quiet_when_unchanged": true
+    "quiet_when_unchanged": true,
+    "verified_at": "2026-09-09T12:15:56.335100+00:00",
+    "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation."
   },
   "constraints": [
     "Implementation: actual GPT-6 Astra xhigh, never Sol; independent review/security/soundness: actual Claude Opus 5 xhigh.",
@@ -44,7 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T02:06:57.622869+00:00"
+    "observed_at": "2026-09-09T12:12:30.660568+00:00",
+    "evidence": "recovery-20260909/operational-triage-root-read.json"
   },
   "rules": {
     "required_check": "gate",
@@ -100,6 +103,12 @@
       "B2": "Warmed overlay clone/fork deep-copies initialized caches; absent lifecycle measurement. Measure warmedfork/snapshot\u2192apply_delta\u2192read/publish and retained-generation heap before deciding on clone/cache redesign.",
       "B3": "Missingstore327-851 and workspace mutation/access/replacement inventory. Verify all deleted-set mutators/WAL/compaction/persist paths and document sole-mutator invariant if true.",
       "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
+    },
+    "latest_agent_status": {
+      "at": "2026-09-09T12:15:56.335100+00:00",
+      "revision_head": "b01dcf54a42f0978e73cff4075b8ba646f87fc0c",
+      "B1": "Agent reports insert-into-tombstones test red on acfa and green on revision,19 focused passes; split invalidation on actual deleted set changes. Root has not yet verified revised manifest.",
+      "B2_B3": "Mutation inventory and missing context captured; fixed lifecycle/multi-permutation/concurrent-cold harness in preparation. Measurements and focused independent followup pending."
     }
   },
   "prs": {
@@ -343,7 +352,7 @@
   "registry": {
     "repo": "jeswr/agent-account-registry",
     "actions_enabled": false,
-    "observed_at": "2026-09-09T02:06:57.622869+00:00",
+    "observed_at": "2026-09-09T12:12:27.819056+00:00",
     "dispatch": "OFF",
     "pr2298": "MERGED beb0efd2, issue2297 closed, actual Opus124 tests.",
     "pr2305": {
@@ -351,7 +360,8 @@
       "state": "TEST_ONLY_CI_APPROVAL_PENDING",
       "review": "Actual Opus,127 tests5 controls",
       "hold": "Required gate absent while global Actions OFF. User question for gate-only CI pending, no answer. If authorized: globalOFF inventory/disable all nongate incl dynamic Copilot324900308 before enabling only gate315366433. No bypass."
-    }
+    },
+    "evidence": "recovery-20260909/registry-pause-revalidated.json"
   },
   "sweeper_health": {
     "observed_at": "2026-09-08T19:25:17.637992+00:00",
@@ -387,11 +397,12 @@
     }
   },
   "next_actions": [
-    "Collect same postmerge_ci focusedB1/B2/B3revision and frozenre-reviewpacket; do not repeat firstOpus review. Actual acfa reviewrequest_changes artifact is complete andverified.",
-    "Collect pending operational triage ifnotyetreported; then actual Opus5xhigh focusedfollowup once repairedsource andlifecycle evidence areconcrete. No approval/merge untilblockersresolved andrequiredvalidation/Copilot/protections satisfied.",
-    "Top-k recovery is stopped atd08295b6; preserve all frozen original/control evidence. Final finding is public6465; do not restart it or spend more measurement/review tokens without a new task decision.",
-    "At a suitable agent break, bounded read-only triage of named scheduled alarm/triage failures and laternaturalnightly/sweeper effect. Originalnightlycancelled; no recovery writes proven by earliergreen sweeper. No manualprobes/retrystorms; registryOFF/ALLGREEN/holds/releasesunchanged.",
-    "Keep checkpoints and confirmed artifacts in existing private local Git recovery ref."
+    "Collect the existing postmerge_ci focused4246 revision and frozen evidence. Verify manifest/source/tests/lifecycle results, then run one actual Opus5 xhigh focused followup. Never repeat the completed acfa review.",
+    "Resolve remaining4246 findings and run required full validation, actual Copilot and protected exact-head admission only after sound review. Preserve baseline/candidate evidence and cold/memory tradeoffs.",
+    "After4246 lane reaches its next terminal state, assess narrow actionable6468 classification repair; identify actual originating row and supported owner area. Keep unknown-label guard, do not create labels or replay live work for diagnosis.",
+    "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
+    "Observe ordinary eligible nightly/sweeper runs when relevant; no manualprobes, exhausted-budget retries or inference of successful writes from green aggregate. RegistryOFF, ALLGREEN, approval holds and release pause remain.",
+    "Preserve checkpoint and frozen evidence in the private local Git recovery ref. Reuse agents/worktrees and stay quiet when unchanged."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -407,10 +418,12 @@
     "pr": 6463
   },
   "budget": {
-    "remaining": 4989,
-    "resetAt": "2026-09-09T02:37:37Z",
-    "observed_at": "2026-09-09T02:06:57.622869+00:00",
-    "exhausted": false
+    "remaining": 4874,
+    "resetAt": "2026-09-09T12:24:21+00:00",
+    "exhausted": false,
+    "scope": "Core before this bounded triage/create batch; not a current remaining count. Search30 and GraphQL5000 were available. Check fresh before later mutation.",
+    "recorded_at": "2026-09-09T12:16:18.487533+00:00",
+    "observation_time": "Earlier in this turn, before issue6468 mutation; exact call timestamp not separately saved."
   },
   "actions_backlog": {
     "observed_at": "2026-09-08T05:37:04.689961+00:00",
@@ -510,6 +523,16 @@
       "url": "https://github.com/sparq-org/sparq/issues/4246",
       "takeover_comment": "https://github.com/sparq-org/sparq/issues/4246#issuecomment-5594653369",
       "purpose": "Existing deletion projection/counting performance issue selected after exact dedupe; no newduplicateissue."
+    },
+    "6468": {
+      "state": "OPEN",
+      "url": "https://github.com/sparq-org/sparq/issues/6468",
+      "purpose": "Confirmed classifier/live-label incompatibility aborts the complete area-classification plan before writes. Preserve unknown-label guard; identify exact input before narrow mapping repair.",
+      "dedupe": "Exact search zero; broader19 fully returned. Related6335 is an enumeration issue and does not explain exact label absence.",
+      "source_head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+      "observed_at": "2026-09-09T12:15:56.335100+00:00",
+      "issue_body_verified": true,
+      "implementation": "Queued after active4246 lane; no routing mutation or second implementation agent."
     }
   },
   "usage_observation": {
@@ -682,8 +705,15 @@
         "name": "review-alarm"
       }
     ],
-    "scope": "Scheduled failures observed on newmain; causes uninspected. Inspect latest named errors before issue/action. Main aggregateSUCCESS. batch-merge34280482086/release-plz34280482037 alsofailed, prior hold-relatedcauses known but currentlogs unverified; neverrestore registrytoken orauthorize release to turngreen.",
+    "scope": "Three named scheduled failures investigated; current main aggregate known green. No observation-driven retry, dispatch, claim, cancellation or routing mutation.",
     "assigned_to": "/root/postmerge_ci",
-    "state": "Read-only existing-run triage assigned while realOpusreviewruns; noobserverretries/mutations/builds."
+    "state": "COMPLETED; root verified26 manifest files and filed fresh-deduplicated6468.",
+    "report": "recovery-20260909/operational-triage/report.json",
+    "root_verification": "recovery-20260909/operational-triage/root-verification.json",
+    "result": {
+      "triage-area": 6468,
+      "ci-latency-alarm": "Existing5153; scheduled-delivery deficit does not prove scheduler/runner/source failure. No duplicate.",
+      "review-alarm": "Existing4554; expected census-policy failure, no authorization to bypass6049 or pausedregistry. No duplicate."
+    }
   }
 }

@@ -1,0 +1,95 @@
+# ci-latency-alarm — the CI EXECUTION-LATENCY alarm ([OPUS-5] bead sq-1lc4i).
+# 🤖 SPARQ agent.
+#
+# WHAT: maintainer-requested 2026-07-28 — "alerting for when runners are not picked up for
+# crons or delayed for other dispatches on both repos. This is an indicator that you are
+# choking on runner availability." scripts/ci_execution_latency_alarm.py runs hourly and
+# checks two DISTINCT choke modes, because they have different signatures and only one of
+# them is runner availability proper:
+#
+#   M1 a scheduled lane firing far below what its own `cron:` expects. This mode produces
+#      NO ARTIFACT — a cron that never fires leaves no run, no conclusion, no check-run —
+#      so it is invisible to anything that inspects runs, and can only be caught by
+#      computing the expectation and comparing.
+#   -- queue wait is NOT detected: a deliberate, documented gap (see the script's
+#      QUEUE WAIT note). The variable never moved across 44,190 completed runs.
+#      MEASURED known-positive: jeswr/agent-account-registry queued 7 `pr-gate` runs for
+#      12.8-99.5 minutes inside a single 00:58-02:24Z window on 2026-07-28.
+#   M3 a run `in_progress` far past its own lane's measured duration. It consumes capacity
+#      while looking perfectly healthy — no red, no alert, no artifact. MEASURED
+#      known-positive: nightly ci.yml ran 17.33h on 2026-07-27 against an 8.35h p90.
+#
+# WHY THIS IS NOT sparq-org/sparq#4368. That PR's `cron_lane_liveness.py` watches CRON-ONLY
+# lanes (every `on:` key in {schedule, workflow_dispatch}) and asks "is this lane DEAD?"
+# from run CONCLUSIONS. M1 here is the EXACT SET COMPLEMENT, computed with the same
+# predicate rather than listed, so the two partition the scheduled workflows and can never
+# both raise on one lane. The complement is where the throughput-critical lanes live:
+# ci.yml, auto-arm.yml, batch-merge.yml, verdict-bridge.yml and 9 more all carry a
+# `schedule:` PLUS other triggers, so #4368 structurally cannot see any of them. M3 keys
+# on live run STATE, which #4368 does not read in any scope.
+#
+# NOT A GATE (same posture as review-alarm.yml / formal-alarm.yml): scheduled on main,
+# files issues, blocks NO merge. That holds because this job is DECLARED in
+# `.github/advisory-registry.json` — since #3773 the ONLY thing that can make a check-run
+# non-gating. It is NOT true because of where the check-run lands: ci-summary.yml also runs
+# on `push: branches: [main]`, so a scheduled run on main puts its check-run on the very
+# head SHA the gate polls. The registry entry, not the trigger type, is what makes this
+# lane safe to RED. Pinned by scripts/tests/test_alarm_lanes_non_gating.py.
+#
+# NO ARMING AUTHORITY, STRUCTURALLY: this job holds `issues: write`, `actions: read` and
+# `contents: read` and nothing else — no `pull-requests: write` (it cannot label, promote
+# or un-draft), no `contents: write` (it cannot push). It is a detector.
+#
+# FAIL-LOUD: a detector-infrastructure error (gh failure, unparseable workflow YAML, an
+# EMPTY scan set) exits 2 so THIS run goes red and a human notices the detector itself is
+# broken. Reporting health over an empty population is the one thing it must never do.
+#
+# All actions are SHA-pinned. The script self-tests hermetically as the FIRST step of every
+# run (a detector is never trusted to watch anything before it has proved itself on this
+# tick's code), and its suite also gates every PR via docs-quality.yml.
+name: ci-latency-alarm
+
+on:
+  # Hourly at :26 — explicit (no */N) so it is auditable, and offset off every existing
+  # sub-hourly lane: auto-arm (4,14,…), verdict-bridge (1,11,…), rearm-sweeper (8,18,…),
+  # batch-merge (7,22,37,52), merge-group-watchdog (2,7,12,…). Hourly is well inside the
+  # 24h M1 window, and M3 reads live state, so a missed tick cannot hide a choke.
+  schedule:
+    - cron: "26 * * * *"
+  # Manual run for validation / triage.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-latency-alarm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  alarm:
+    name: CI execution-latency alarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read # list workflow runs + live run state
+      issues: write # file the alarm issue (idempotent, labelled)
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # M1 derives each lane's expectation from the workflow files themselves, so the
+          # workflows directory is an INPUT, not incidental. Omitting it would make every
+          # lane read as `not-scheduled` — a silent total blind spot rather than an error.
+          sparse-checkout: |
+            scripts/ci_execution_latency_alarm.py
+            .github/workflows
+          sparse-checkout-cone-mode: false
+      - name: Self-test the CI execution-latency alarm (hermetic fixtures)
+        run: python3 scripts/ci_execution_latency_alarm.py --self-test
+      - name: Check cron delivery, queue wait, and execution overrun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/ci_execution_latency_alarm.py

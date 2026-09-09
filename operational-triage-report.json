@@ -1,0 +1,60 @@
+{
+  "scope": "Three designated completed scheduled failures only; no build, replay, dispatch, rerun, cancellation, claim, label, queue, registry, release, or remote issue mutation by this observer.",
+  "source_head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "metadata_verified": "All three: event schedule, branch main, exact a42a9e89, attempt1, completed/failure.",
+  "main_gate_context": "Root separately verified ci-summary34280482031 and CI34280482521 SUCCESS. These scheduled alarm/configuration failures are not evidence of a main aggregate/source regression.",
+  "runs": [
+    {
+      "run": 34299934012,
+      "job": 102304479961,
+      "workflow": "triage-area",
+      "phase": "Classify the needs:area backlog (step4)",
+      "selftests": "17 named internal fixtures and37 independent tests passed before live phase",
+      "exit": 2,
+      "cause": "The generated live plan contained area:sparq-wrapper-gen, absent from live_area_labels. main aborts the entire plan before its write loop.",
+      "log_evidence": "102304479961.log:149-252; exact failure250-252",
+      "writes": "Zero classification/unpark writes: scripts/triage-area.py unknown-label guard returns2 before writable/ apply_row loop.",
+      "classification": "Confirmed classifier/live-label configuration incompatibility, fail-closed; no upstream HTTP failure is logged. Cannot attribute when/why the label became absent.",
+      "current_metadata": "One exact GET /labels/area%3Asparq-wrapper-gen returned404; no retry.",
+      "dedupe": "Exact-label search0; broader triage-area+label search19. Open6335 addresses the same consumer's500-label truncation but does not account for a label currently returning404. No exact existing issue/PR found in these bounded searches.",
+      "suggested_issue": "triage-area aborts the entire classification pass on emitted area:sparq-wrapper-gen missing from repository labels",
+      "smallest_safe_followup": "Identify the generating issue/classification path and intended existing owner area; add a narrow supported mapping/fixture if appropriate. Retain unknown-label fail-closed behavior; no automatic label creation, broad routing change or replay. Existing6335 remains a separate enumeration repair."
+    },
+    {
+      "run": 34294635463,
+      "job": 102288473433,
+      "workflow": "ci-latency-alarm",
+      "phase": "Check cron delivery, queue wait, and execution overrun (step4)",
+      "selftests": "Passed. The earlier not-a-slug error annotation is emitted by its intentional self-test negative control, followed by all checks passed; it is not the live failure.",
+      "exit": 1,
+      "cause": "Three M1-cron-firing-deficit findings: auto-arm.yml, batch-merge.yml, verdict-bridge.yml. No M3 execution-overrun finding; one active run remained within threshold.",
+      "log_evidence": "102288473433.log:153-181",
+      "writes": "Existing alarm issue5153 updated, as logged179; no claim/rerun/label writes evidenced.",
+      "classification": "Alarm fired on below-threshold scheduled delivery history. This alone does not prove GitHub scheduling outage, queue starvation, cancellation cause, or a source defect. Disabled workflows are explicitly excluded by source.",
+      "dedupe": "Existing open5153 is the correct tracking issue; current issue body is newer than this run and must not substitute its later counts for historical logs.",
+      "smallest_safe_followup": "Retain occurrence on5153. If operational recovery is prioritized, inspect the three lanes' bounded timestamp census and enable-state/history independently; no dispatch or threshold weakening from this report."
+    },
+    {
+      "run": 34283562709,
+      "job": 102253795704,
+      "workflow": "review-alarm",
+      "phase": "Enumerate PRs no review producer can reach (step4)",
+      "selftests": "Passed",
+      "exit": 1,
+      "cause": "Census164 openPRs:16 blind spots, including5983 and6049, without a countable current verdict and outside its recognized producer/label routes.",
+      "log_evidence": "102253795704.log:151-195",
+      "writes": "Existing alarm issue4554 updated, as logged193; no review, approval, label, claim, rerun, or registry dispatch evidenced.",
+      "classification": "Expected alarm-policy outcome for this backlog. Registry-lane eligibility is based on author/ref metadata, not proof that paused registry Actions can run. Session-level holds and direct coordination are not inferred from missing public verdict markers.",
+      "dedupe": "Existing open4554; no new issue proposed.",
+      "smallest_safe_followup": "Handle only individually authorized review work under4554. Preserve the explicit6049 approval hold and registry pause. A blind-spot alarm cannot authorize verdict fabrication, self-review admission, rerun or removal of a hold."
+    }
+  ],
+  "crosscutting_limits": [
+    "Only the three named job logs were downloaded, once each. No agent transcript/log source was read.",
+    "No unlogged prior/following run was inferred healthy or faulty; no observer retries, including after exact-label404.",
+    "Issue bodies can change after a run; stored current snapshots have their own updated_at and are supplementary evidence. Titles5153/4554 currently disagree with body counts; not investigated as a new defect in this bounded scope.",
+    "triage-area does not print the offending issue/classification path before its global guard, so the precise originating row and intended replacement area remain unknown.",
+    "The existing500-label truncation in6335 is real source evidence, but this occurrence is not attributed to it without proof.",
+    "No evidence here changes the reviewed4246 candidate or frozen manifest."
+  ]
+}
