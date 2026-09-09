@@ -566,6 +566,11 @@ pub fn prepare_result_with_options(
     nonce: &VerifierNonce,
     options: ResultOptions,
 ) -> Result<PreparedResult, ResultError> {
+    // [GPT-6] Reject the wallet shape before authentication or graph cloning;
+    // empty and ineligible credentials still count toward resource admission.
+    if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
+        return Err(reject("input credentials exceed disclosure planning limit"));
+    }
     let parsed = DisclosureQuery::parse(query).map_err(|e| reject(e.to_string()))?;
     let entries = policy.entries()?;
     let eligible: Vec<bool> = credentials
@@ -1095,6 +1100,26 @@ mod tests {
         let (_, mut policy, nonce, rows) = fixture();
         policy.trusted_issuers = vec![credentials[0].issuer];
         (credentials, policy, nonce, rows)
+    }
+
+    #[test]
+    fn supplied_credential_limit_precedes_authentication_and_query_parsing() {
+        let template = credential(Vec::new(), 1, 0, "urn:status:people");
+        let credentials: Vec<_> = (0..=crate::planner::MAX_DISCLOSURE_CREDENTIALS)
+            .map(|_| ResultCredential {
+                graph: template.graph.clone(),
+                issuer: template.issuer,
+                signature: template.signature,
+                status_list: template.status_list.clone(),
+                status_version: template.status_version,
+                status_index: template.status_index,
+            })
+            .collect();
+        let (_, policy, nonce, rows) = fixture();
+        let err = prepare_result("invalid query", &credentials, &rows, &policy, &nonce)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("input credentials exceed"));
     }
 
     #[test]

@@ -342,3 +342,7 @@ minimum are preserved.
 [GPT-6] Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
 supplied slice before traversing credentials; empty and ineligible graphs count.
 This input bound is independent of candidate-triple search fuel.
+
+[GPT-6] Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
+before its authentication prepass. Its graph contract is string-canonical only;
+the generated gate matrix records dual-leaf and value-only pairs as unsupported.

@@ -35,7 +35,10 @@
 #     operand via the committed `value_component`) are LEGAL only against a method
 #     that committed a value handle: `dual-leaf` and the `value-only` research
 #     dial. ILLEGAL against `string-canonical` (no value handle — unprovable).
-#   * STRING-LANE members (everything else — scan, join, path, revoke, issuer,
+#   * [GPT-6] Successful-result result_v1_* members admit string-canonical
+#     graphs only. Their complete-root authentication does not use the legacy
+#     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
+#   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
 #     holder, and the blake3-token `filter_*` FILTER lanes) read the
 #     string-canonical / lexical leaf, so they are LEGAL against `string-canonical`
 #     and `dual-leaf` (whose `lexical_component` preserves term identity), ILLEGAL
@@ -147,9 +150,13 @@ def lane_of(member: str) -> str:
     return "value" if member.startswith(VALUE_LANE_PREFIX) else "string"
 
 
-def legality(method_key: str, lane: str) -> dict:
-    """The (method, lane) -> legal/illegal cell, mirroring dispatch::resolve_circuit."""
-    if lane == "value":
+def legality(method_key: str, lane: str, member: str = "") -> dict:
+    """Admit the result contract or mirror the legacy lane dispatch rule."""
+    if member.startswith("result_v1_"):
+        # [GPT-6] Additive successful-result relation uses complete signed
+        # string-canonical graphs; lexical-handle reuse is not its contract.
+        legal = method_key == "string-canonical"
+    elif lane == "value":
         # value-lane: legal only where a value handle was committed.
         legal = method_key in ("dual-leaf", "value-only")
     else:
@@ -169,7 +176,7 @@ def main() -> int:
     for member in sorted(members):
         size = members[member]
         lane = lane_of(member)
-        configs = {m["key"]: legality(m["key"], lane) for m in METHODS}
+        configs = {m["key"]: legality(m["key"], lane, member) for m in METHODS}
         matrix[member] = {
             "circuit_size": size,
             "lane": lane,
@@ -227,7 +234,7 @@ def main() -> int:
         "crates/sparq-zk-compose/tests/bb_gates_matrix.rs. circuit_size is JOINED "
         "from the regression-gated snapshot "
         "(crates/sparq-zk-compose/tests/gate_count_snapshot.json); legality mirrors "
-        "the fail-closed dispatch rule (crates/sparq-zk-compose/src/dispatch.rs, "
+        "the fail-closed legacy dispatch rule (crates/sparq-zk-compose/src/dispatch.rs, "
         "sq-cfmv). Re-run gate_counts.sh + this generator after an intentional "
         "circuit change. Do NOT hand-edit.",
         "_honesty": "NON-CANONICAL bb-gates measured on the work-box — a comparison "

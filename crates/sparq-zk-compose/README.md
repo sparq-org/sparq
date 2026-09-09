@@ -125,3 +125,8 @@ locking semantics, and deleting the cache during a job are outside that contract
 
 [GPT-6] Both planner paths reject oversized credential slices before traversal,
 including empty or ineligible graphs, via `MAX_DISCLOSURE_CREDENTIALS`.
+
+[GPT-6] Successful-result preparation applies the same credential-slice cap before
+signature authentication or graph cloning. The generated commitment-method gate
+matrix lists every result capacity member as string-canonical only; it does not
+inherit dual-leaf compatibility from the legacy lexical-handle dispatch rule.
