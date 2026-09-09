@@ -47,6 +47,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:  # the parsed-regex API moved in 3.11
     from re import _parser as sre_parser
@@ -171,6 +172,123 @@ TEXT_SCOPED_RULES = frozenset({
 # TestScopeDiscipline.setUp so it can never quietly acquire an area and turn the
 # per-rule property into a tautology.
 NEUTRAL_TITLE = "Recurring chore: worktree disk-hygiene sweep"
+
+
+class TestTriageAreaDiagnostics(unittest.TestCase):
+    """[GPT-6 Astra] #6468: real routing and the global prewrite failure boundary."""
+
+    DIAGNOSTIC = "triage-area aborts the classification pass on missing area:sparq-wrapper-gen label"
+    GENERATOR = "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)"
+
+    @staticmethod
+    def issue(number, title, *labels, body=""):
+        return {"number": number, "title": title, "body": body,
+                "labels": [{"name": name} for name in labels]}
+
+    def run_main(self, issues, known, *args):
+        """Drive the actual CLI, poisoning every unmocked GitHub call."""
+        calls, out, err = [], io.StringIO(), io.StringIO()
+
+        def gh(argv):
+            if argv[:2] != ["issue", "edit"]:
+                raise AssertionError(f"unexpected GitHub call: {argv}")
+            calls.append(list(argv))
+            return ""
+
+        with patch.object(TA, "candidate_issues", return_value=issues), \
+                patch.object(TA, "live_area_labels", return_value=set(known)), \
+                patch.object(TA, "_gh", side_effect=gh), \
+                patch.object(TA, "_sleep") as sleep, \
+                patch.object(sys, "argv", ["triage-area.py", "--apply", *args]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = TA.main()
+        return code, calls, out.getvalue(), err.getvalue(), sleep.call_count
+
+    @staticmethod
+    def records(stderr):
+        return [json.loads(line.removeprefix("UNKNOWN_AREA "))
+                for line in stderr.splitlines() if line.startswith("UNKNOWN_AREA ")]
+
+    def test_captured_titles_and_existing_area(self):
+        self.assertEqual(areas(self.DIAGNOSTIC), ["ci"])
+        self.assertTrue(evidence(self.DIAGNOSTIC).startswith("T1 triage-area:"))
+        for title in ("triage-area.py: identify missing labels", "triage-area"):
+            self.assertEqual(areas(title), ["ci"])
+        self.assertEqual(areas(self.GENERATOR), ["sparq-wrapper-gen"])
+        self.assertEqual(areas("sparq-wrapper: improve generated bindings"), ["sparq-wrapper"])
+        row = TA.plan([self.issue(6468, self.DIAGNOSTIC, "area:ci")], CRATES)[0]
+        self.assertEqual(row[1:], ([], "SKIP already carries an area: label"))
+
+    def test_title_scope_and_t0_priority(self):
+        for title, body in ((NEUTRAL_TITLE, "triage-area: inspect routing"),
+                            ("Investigate triage-area diagnostics", ""),
+                            ("triage-area-other: inspect routing", "")):
+            self.assertEqual(TA.classify(title, body, CRATES), ([], ""))
+        self.assertEqual(TA.classify(self.DIAGNOSTIC, "crate_or_surface: sparq-core", CRATES),
+                         (["sparq-core"], "T0 author-declared crate_or_surface/crates field"))
+
+    def test_unknown_later_row_blocks_all_writes_even_outside_budget(self):
+        issues = [self.issue(5016, self.GENERATOR, TA.PARK_LABEL),
+                  self.issue(1, self.DIAGNOSTIC, TA.PARK_LABEL)]
+        for args in ((), ("--max-writes", "1"), ("--json",)):
+            code, calls, out, err, sleeps = self.run_main(issues, {"area:ci"}, *args)
+            self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+            self.assertEqual(self.records(err), [{
+                "number": 5016, "label": "area:sparq-wrapper-gen",
+                "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+            self.assertIn("separately reviewed label provisioning", err)
+            self.assertIn("This classifier never creates labels.", err)
+
+    def test_offenders_keep_row_label_tier_association_and_order(self):
+        issues = [self.issue(5016, self.GENERATOR),
+                  self.issue(19, NEUTRAL_TITLE, body="crates: sparq-core + sparq-engine"),
+                  self.issue(6468, self.DIAGNOSTIC)]
+        result = self.run_main(issues, {"area:ci"})
+        self.assertEqual((result[0], result[1], result[4]), (2, [], 0))
+        self.assertEqual(self.records(result[3]), [
+            {"number": 19, "label": "area:sparq-core",
+             "evidence": "T0 author-declared crate_or_surface/crates field"},
+            {"number": 19, "label": "area:sparq-engine",
+             "evidence": "T0 author-declared crate_or_surface/crates field"},
+            {"number": 5016, "label": "area:sparq-wrapper-gen",
+             "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+        self.assertEqual(result, self.run_main(list(reversed(issues)), {"area:ci"}))
+
+    def test_diagnostic_escapes_records_without_dumping_issue_body(self):
+        # A synthetic plan probes serialization only; the preceding tests exercise
+        # real classification. Never execute these strings as workflow commands.
+        why = 'T2 evidence\n::error::forged\r\t"quoted"'
+        label = 'area:missing\nsecond-line'
+        row = self.issue(7, "unprinted title", body="private fixture body")
+        with patch.object(TA, "plan", return_value=[(row, [label], why)]):
+            code, calls, out, err, sleeps = self.run_main([], set())
+        self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+        self.assertEqual(self.records(err), [{"number": 7, "label": label, "evidence": why}])
+        self.assertFalse(any(line.startswith("::") for line in err.splitlines()))
+        self.assertNotIn("private fixture body", err)
+        self.assertNotIn("unprinted title", err)
+
+    def test_supported_label_uses_normal_add_and_unpark_path(self):
+        issues = [self.issue(5016, self.GENERATOR, TA.PARK_LABEL),
+                  self.issue(1, self.DIAGNOSTIC),
+                  self.issue(6468, self.DIAGNOSTIC, "area:ci")]
+        code, calls, _out, err, sleeps = self.run_main(
+            issues, {"area:ci", "area:sparq-wrapper-gen"})
+        self.assertEqual((code, err, sleeps), (0, "", 1))
+        self.assertEqual([c[2] for c in calls], ["1", "5016"])
+        self.assertIn("area:ci", calls[0])
+        self.assertNotIn("--remove-label", calls[0])
+        self.assertEqual(calls[1][-4:], ["--remove-label", TA.PARK_LABEL,
+                                         "--add-label", "area:sparq-wrapper-gen"])
+
+    def test_unrelated_unknown_still_blocks_after_generator_provisioning(self):
+        issues = [self.issue(1, self.GENERATOR),
+                  self.issue(19, NEUTRAL_TITLE, body="crate: sparq-core")]
+        code, calls, out, err, sleeps = self.run_main(issues, {"area:sparq-wrapper-gen"})
+        self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+        self.assertEqual(self.records(err), [{
+            "number": 19, "label": "area:sparq-core",
+            "evidence": "T0 author-declared crate_or_surface/crates field"}])
 
 
 class TestFailClosed(unittest.TestCase):
@@ -743,7 +861,7 @@ class TestScopeDiscipline(unittest.TestCase):
     #: dropping a `^` moves a rule OUT of this set, which reds this test and
     #: simultaneously brings the rule under the per-rule assertion below.
     ANCHORED_ONLY = {"difftest-normaliser", "difftest-harness", "kani-harness",
-                     "site-page", "deploy-demo"}
+                     "site-page", "deploy-demo", "triage-area"}
 
     def setUp(self):
         # Anti-tautology: the carrier title must itself classify to nothing, or
