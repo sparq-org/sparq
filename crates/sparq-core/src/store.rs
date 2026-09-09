@@ -2104,3 +2104,8 @@ mod tests {
         }
     }
 }
+
+// [GPT-6 Astra] Test-only identical default-off fixture against exact main runtime.
+#[cfg(test)]
+#[path = "store/overlay_deleted_tests.rs"]
+mod overlay_deleted_tests;
