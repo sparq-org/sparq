@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T12:15:56.335100+00:00",
+  "updated_at": "2026-09-09T12:27:56.353594+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,7 +68,7 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "One actual Opus review completed request_changes. Same Astra agent instructed to finish bounded existing operational triage, then focused cache invalidation revision, lifecycle measurements and missing-context proof. Preserve frozen acfa source/evidence; no publication or admission.",
+    "state": "Same Astra worker continues focused Opus-requested revision. B1 and lifecycle harness committed; bounded measurements completed, controls/tests/frozen followup packet pending. No admission approval.",
     "phase": "Focused Opus-requested invalidation and lifecycle revision",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
@@ -105,10 +105,12 @@
       "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
     },
     "latest_agent_status": {
-      "at": "2026-09-09T12:15:56.335100+00:00",
-      "revision_head": "b01dcf54a42f0978e73cff4075b8ba646f87fc0c",
-      "B1": "Agent reports insert-into-tombstones test red on acfa and green on revision,19 focused passes; split invalidation on actual deleted set changes. Root has not yet verified revised manifest.",
-      "B2_B3": "Mutation inventory and missing context captured; fixed lifecycle/multi-permutation/concurrent-cold harness in preparation. Measurements and focused independent followup pending."
+      "at": "2026-09-09T12:27:56.353594+00:00",
+      "revision_head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+      "source_commit_exists_verified": true,
+      "evidence_status": "Preliminary agent report only; root has not yet verified frozen revised manifest or raw summaries.",
+      "measurements": "Identical-harness main/candidate lifecycle runs completed; four optimized builds within cap. Agent reports620 recorded windows, no retries. Warm insert into an overlay already holding deletions preserves cache; warmedfork copies projection memory. True-tombstone-update fork/read, multi-pattern cold and concurrentcold remain slower than main. Exact generated summaries/ranges/heap attribution pending packet.",
+      "remaining": "Already scoped compiled controls, tests and context packet. No additional matrix, Clone/Arc redesign or admission. Root will verify and decide one focused actual Opus5xhigh followup."
     }
   },
   "prs": {
