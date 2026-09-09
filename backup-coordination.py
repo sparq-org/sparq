@@ -133,6 +133,12 @@ FILES['4246-opus-review-cb638a42.json'] = OVERLAY_4246_REVISION / 'opus-review-c
 OVERLAY_4246_EXPERIMENTAL = ROOT / 'direct-4246/experimental'
 for evidence_name in [*json.loads((OVERLAY_4246_EXPERIMENTAL / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-experimental-' + evidence_name.replace('/', '--')] = OVERLAY_4246_EXPERIMENTAL / evidence_name
+FILES['4246-opus-review-b86b5d5a.json'] = OVERLAY_4246_EXPERIMENTAL / 'opus-review-b86b5d5a.json'
+VALIDATION_4246 = ROOT / 'direct-4246/validation-readiness'
+for evidence_name in [*json.loads((VALIDATION_4246 / 'validation-readiness.json').read_text())['evidence_files'], 'validation-readiness.json']:
+    FILES['4246-validation-readiness-' + evidence_name.replace('/', '--')] = VALIDATION_4246 / evidence_name
+for evidence_name in ['publication-precheck.json', 'publication-postpush.json', 'pr-body.md', 'pr-created.txt', 'pr6469-initial.json', 'pr6469-runs-initial.json', 'pr6469-bench-initial-jobs.json']:
+    FILES['4246-' + evidence_name] = ROOT / 'direct-4246' / evidence_name
 
 TRIAGE_6468 = ROOT / 'direct-6468'
 for evidence_name in [*json.loads((TRIAGE_6468 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:

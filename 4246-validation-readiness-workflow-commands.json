@@ -1,0 +1,1365 @@
+{
+  "ci.yml": {
+    "test": {
+      "name": "test (load-aware shard ${{ matrix.name }})",
+      "needs": [
+        "changes",
+        "build-archive",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true'",
+      "runs-on": "ubuntu-latest",
+      "env": {
+        "HEAVY": "test(=diskann_recall_at_10_vs_brute_force_on_50k) | test(=hnsw_recall_at_10_vs_brute_force_on_50k)"
+      },
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "name": "heavy-diskann",
+              "filter": "test(=diskann_recall_at_10_vs_brute_force_on_50k)",
+              "rayon_threads": "1",
+              "crate": "sparq-vectors"
+            },
+            {
+              "name": "heavy-hnsw",
+              "filter": "test(=hnsw_recall_at_10_vs_brute_force_on_50k)",
+              "rayon_threads": "1",
+              "crate": "sparq-vectors"
+            },
+            {
+              "name": "bulk 1/3",
+              "partition": "count:1/3",
+              "crate": ""
+            },
+            {
+              "name": "bulk 2/3",
+              "partition": "count:2/3",
+              "crate": ""
+            },
+            {
+              "name": "bulk 3/3",
+              "partition": "count:3/3",
+              "crate": ""
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Free runner disk before download + test",
+          "run": "./scripts/ci-free-disk.sh"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "name": "Install cargo-nextest",
+          "uses": "taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68",
+          "with": {
+            "tool": "nextest"
+          }
+        },
+        {
+          "name": "Download nextest archive",
+          "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+          "with": {
+            "name": "nextest-archive"
+          }
+        },
+        {
+          "name": "Test (nextest, shard ${{ matrix.name }})",
+          "env": {
+            "RAYON_NUM_THREADS": "${{ matrix.rayon_threads }}",
+            "SELECT_MODE": "${{ needs.select.outputs.mode }}",
+            "SELECT_AFFECTED": "${{ needs.select.outputs.affected }}",
+            "SELECT_FILTERSET": "${{ needs.select.outputs.filterset }}",
+            "SHARD_CRATE": "${{ matrix.crate }}",
+            "SHARD_FILTER": "${{ matrix.filter }}",
+            "IS_DRAFT_PR": "${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}"
+          },
+          "run": "set -euo pipefail\n# [OPUS-4.8] sq-6vshe.6 (research/ci-structural-speedup.md \u00a77, round 2):\n# DEMOTE the two heavy sparq-vectors recall shards (heavy-diskann/heavy-hnsw)\n# off the merge_group ref. WHY it is SAFE (per-leg cross-PR-interaction\n# analysis): each heavy shard runs exactly ONE deterministic, self-contained,\n# single-crate accuracy gate ({diskann,hnsw}_recall_at_10_vs_brute_force_on_50k\n# in crates/sparq-vectors/tests/, fixed seeds, `approx-ann` feature). Its\n# outcome is a pure function of sparq-vectors' ANN impl + its pinned\n# instant-distance dep \u2014 NOTHING else in the workspace. A squash-merge group\n# re-running it on the combined tree reproduces the identical result each PR\n# already gated, so it carries no cross-PR-interaction signal (unlike the bulk\n# workspace-unification build+test, which stays). FULL FORM is UNCHANGED: the\n# heavy shards still run at PR level AND on push-to-main (both force\n# rust_changed=true and neither hits this guard), so the recall floors gate\n# every PR + the canonical main build exactly as before. A post-merge\n# regression is caught by the push-to-main heavy run (this same job on the\n# `push` event) + the dedicated `heavy-recall-demoted-filer` job below, which\n# auto-files a P1 bead + GitHub issue if a heavy shard fails on main. This ONLY\n# affects the merge_group ref, and reports `success` (exit 0) so the ci-summary gate is\n# satisfied (the poller discovers whatever check-runs exist; an absent-by-design\n# sub-result never hangs it). Mirrors the selection skip idiom directly below.\nif [ \"${{ github.event_name }}\" = \"merge_group\" ] && [ -n \"$SHARD_FILTER\" ]; then\n  echo \"heavy shard '${{ matrix.name }}' DEMOTED off merge_group (sq-6vshe.6):\"\n  echo \"  deterministic single-crate recall gate \u2014 no cross-PR interaction;\"\n  echo \"  full form runs at PR level + push-to-main. Reporting success.\"\n  exit 0\nfi\n# [FABLE-5] Draft-tier CI: ALSO demote the heavy recall shards on DRAFT\n# pull_request heads (docs/branch-protection.md \u00a7Draft-tier CI). Safe for\n# the same reason as the merge_group demotion above \u2014 deterministic\n# single-crate gates \u2014 plus the draft-tier invariant: un-drafting fires\n# ready_for_review, which re-runs this job at FULL tier on the same head\n# SHA, and a draft-tier gate result can never admit a PR to the merge\n# queue (scripts/ci_summary_gate.py refuses it). Bulk shards are NEVER\n# demoted (SHARD_FILTER is empty there); non-draft PRs and push-to-main\n# keep the full form.\nif [ \"$IS_DRAFT_PR\" = \"true\" ] && [ -n \"$SHARD_FILTER\" ]; then\n  echo \"heavy shard '${{ matrix.name }}' DEMOTED on this DRAFT head (draft-tier CI):\"\n  echo \"  the full form re-runs at ready_for_review + push-to-main; a draft-tier\"\n  echo \"  gate result can never admit a PR to the merge queue. Reporting success.\"\n  exit 0\nfi\n# [FABLE-5] sq-fmx4u.3 (design \u00a75.2): single-crate shard skip guard.\n# FAIL-CLOSED: only the exact mode 'selected' AND a non-empty SHARD_CRATE\n# AND a definite non-membership ('\"<crate>\"' absent from the affected\n# JSON \u2014 the quote delimiters prevent substring-crate collisions) can\n# skip; empty/missing selection outputs always fall through to a run.\nif [ \"$SELECT_MODE\" = \"selected\" ] && [ -n \"$SHARD_CRATE\" ]; then\n  case \"$SELECT_AFFECTED\" in\n    *\"\\\"$SHARD_CRATE\\\"\"*) : ;;  # in the affected closure -> run the shard\n    *)\n      echo \"shard '${{ matrix.name }}' SKIPPED by change-based selection:\"\n      echo \"  $SHARD_CRATE is not in the affected closure $SELECT_AFFECTED\"\n      exit 0\n      ;;\n  esac\nfi\ncommon=(--archive-file nextest.tar.zst --workspace-remap . \\\n        --extract-to . --extract-overwrite --profile ci)\nif [ -n \"${{ matrix.filter }}\" ]; then\n  # Dedicated heavy shard: intersect HEAVY with this shard's single test so\n  # the shard's set is provably a SUBSET of HEAVY (belt-and-braces: if the\n  # test is ever renamed in only one place, the shard runs empty rather than\n  # silently re-including it in bulk).\n  args=(\"${common[@]}\" -E '( ${{ env.HEAVY }} ) & ( ${{ matrix.filter }} )')\nelif [ \"$SELECT_MODE\" = \"selected\" ] && [ -n \"$SELECT_FILTERSET\" ]; then\n  # [FABLE-5] sq-fmx4u.3: bulk shard under ENFORCED selection \u2014 NARROW\n  # (never skip) the cross-crate partition to the affected closure\n  # (design \u00a75.2): intersect the not-heavy set with the package()\n  # filterset. The count partition applies AFTER filtering, so the three\n  # bulk shards still partition the narrowed set exactly. A package()\n  # naming no archived package fails loud (nextest errors), so a stale\n  # filterset cannot silently select nothing; --no-tests=pass is needed\n  # because a legitimately-narrowed shard CAN match zero tests (e.g. an\n  # affected crate whose only tests are heavy/feature-gated) \u2014 full and\n  # shadow runs keep the strict no-tests-is-an-error behaviour.\n  args=(\"${common[@]}\" --no-tests=pass --partition ${{ matrix.partition }} \\\n        -E \"( not ( $HEAVY ) ) & ( $SELECT_FILTERSET )\")\nelse\n  # Bulk shard: everything that is NOT a known-heavy test, count-partitioned.\n  args=(\"${common[@]}\" --partition ${{ matrix.partition }} -E 'not ( ${{ env.HEAVY }} )')\nfi\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::nextest shard '${{ matrix.name }}' \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  # Capture the exit code EXPLICITLY. `cargo \u2026 || rc=$?` is `set -e`-safe (the\n  # `||` makes the failure non-fatal) AND captures nextest's REAL exit code \u2014\n  # unlike `if cargo \u2026; then`, where `$?` after the `if` is the `if` statement's\n  # own status (always 0) and a genuine failure would silently exit 0, wrongly\n  # passing the gate. `rc` is reset to 0 each attempt before the run.\n  rc=0\n  cargo nextest run \"${args[@]}\" || rc=$?\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"shard '${{ matrix.name }}' passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::shard '${{ matrix.name }}' failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::shard '${{ matrix.name }}' attempt $attempt failed (exit $rc) \u2014 reclaiming disk and retrying once (sq-c76x transient self-heal).\"\n  # Reclaim disk again in case the first attempt was a `No space left` race\n  # that left partial extraction/diagnostics behind; the script is best-effort.\n  ./scripts/ci-free-disk.sh || true\n  attempt=$((attempt + 1))\ndone\n"
+        }
+      ]
+    },
+    "wasm": {
+      "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm + sparq-solid)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-wasm\"') ||\n contains(needs.select.outputs.affected, '\"sparq-reason-wasm\"') ||\n contains(needs.select.outputs.affected, '\"sparq-rsp-wasm\"') ||\n contains(needs.select.outputs.affected, '\"sparq-text-wasm\"') ||\n contains(needs.select.outputs.affected, '\"sparq-shacl-wasm\"') ||\n contains(needs.select.outputs.affected, '\"sparq-introspect\"') ||\n contains(needs.select.outputs.affected, '\"sparq-solid\"') ||\n contains(needs.select.outputs.affected, '\"sparq-vectors\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "uses": "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+          "with": {
+            "targets": "wasm32-unknown-unknown"
+          }
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Build sparq-wasm for the browser target",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (shacl feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features shacl"
+        },
+        {
+          "name": "clippy (wasm32 target, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "clippy (wasm32 target, shacl feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features shacl -- -D warnings"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (jsonld feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features jsonld"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (shacl + jsonld, the site bundle)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features shacl,jsonld"
+        },
+        {
+          "name": "clippy (wasm32 target, jsonld feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features jsonld -- -D warnings"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (jsonld-contexts feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features jsonld-contexts"
+        },
+        {
+          "name": "clippy (wasm32 target, jsonld-contexts feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features jsonld-contexts -- -D warnings"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (policy feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features policy"
+        },
+        {
+          "name": "clippy (wasm32 target, policy feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features policy -- -D warnings"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (explain-json feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features explain-json"
+        },
+        {
+          "name": "clippy (wasm32 target, explain-json feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features explain-json -- -D warnings"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (native-ttl feature)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features native-ttl"
+        },
+        {
+          "name": "clippy (wasm32 target, native-ttl feature, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features native-ttl -- -D warnings"
+        },
+        {
+          "name": "Resolve the published wasm feature list (js/package.json build:wasm)",
+          "run": "python3 - <<'PY' >> \"$GITHUB_ENV\"\nimport json\nimport re\nimport sys\n\nscript = json.load(open(\"js/package.json\"))[\"scripts\"][\"build:wasm\"]\nmatch = re.search(r\"--features\\s+(\\S+)\", script)\nif match is None:\n    sys.exit(\"js/package.json build:wasm carries no --features list\")\nprint(\"PUBLISHED_WASM_FEATURES=\" + match.group(1))\nPY\n"
+        },
+        {
+          "name": "Build sparq-wasm for the browser target (published bundle features)",
+          "run": "cargo build -p sparq-wasm --target wasm32-unknown-unknown --features \"$PUBLISHED_WASM_FEATURES\""
+        },
+        {
+          "name": "clippy (wasm32 target, published bundle features, deny warnings)",
+          "run": "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets --features \"$PUBLISHED_WASM_FEATURES\" -- -D warnings"
+        },
+        {
+          "name": "Build sparq-reason-wasm for the browser target",
+          "run": "cargo build -p sparq-reason-wasm --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "Build sparq-reason-wasm for the browser target (explain feature)",
+          "run": "cargo build -p sparq-reason-wasm --target wasm32-unknown-unknown --features explain"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-reason-wasm, deny warnings)",
+          "run": "cargo clippy -p sparq-reason-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-reason-wasm, explain feature, deny warnings)",
+          "run": "cargo clippy -p sparq-reason-wasm --target wasm32-unknown-unknown --all-targets --features explain -- -D warnings"
+        },
+        {
+          "name": "Build sparq-rsp-wasm for the browser target",
+          "run": "cargo build -p sparq-rsp-wasm --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-rsp-wasm, deny warnings)",
+          "run": "cargo clippy -p sparq-rsp-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "Build sparq-text-wasm for the browser target",
+          "run": "cargo build -p sparq-text-wasm --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-text-wasm, deny warnings)",
+          "run": "cargo clippy -p sparq-text-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "Build sparq-shacl-wasm for the browser target",
+          "run": "cargo build -p sparq-shacl-wasm --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "Build sparq-shacl-wasm for the browser target (shacl-af feature)",
+          "run": "cargo build -p sparq-shacl-wasm --target wasm32-unknown-unknown --features shacl-af"
+        },
+        {
+          "name": "Build sparq-shacl-wasm for the browser target (stateful feature)",
+          "run": "cargo build -p sparq-shacl-wasm --target wasm32-unknown-unknown --features stateful"
+        },
+        {
+          "name": "Build sparq-shacl-wasm for the browser target (all features)",
+          "run": "cargo build -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-features"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-shacl-wasm, deny warnings)",
+          "run": "cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-shacl-wasm, shacl-af feature, deny warnings)",
+          "run": "cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --features shacl-af -- -D warnings"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-shacl-wasm, stateful feature, deny warnings)",
+          "run": "cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --features stateful -- -D warnings"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-shacl-wasm, all features, deny warnings)",
+          "run": "cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings"
+        },
+        {
+          "name": "Guard the wasm dependency graph (no native-only deps)",
+          "run": "./scripts/wasm-deps-guard.sh"
+        },
+        {
+          "uses": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+          "with": {
+            "node-version": 20
+          }
+        },
+        {
+          "name": "Install wasm-pack",
+          "uses": "jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa",
+          "with": {
+            "version": "v0.15.0"
+          }
+        },
+        {
+          "name": "Headless wasm tests (wasm-pack test --node)",
+          "working-directory": "crates/sparq-wasm",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Headless wasm tests (wasm-pack test --node, shacl feature)",
+          "working-directory": "crates/sparq-wasm",
+          "run": "wasm-pack test --node --features shacl"
+        },
+        {
+          "name": "Headless wasm tests (wasm-pack test --node, jsonld feature)",
+          "working-directory": "crates/sparq-wasm",
+          "run": "wasm-pack test --node --features jsonld"
+        },
+        {
+          "name": "Headless wasm tests (wasm-pack test --node, jsonld-contexts feature)",
+          "working-directory": "crates/sparq-wasm",
+          "run": "wasm-pack test --node --features jsonld-contexts"
+        },
+        {
+          "name": "Headless wasm tests (sparq-reason-wasm, wasm-pack test --node)",
+          "working-directory": "crates/sparq-reason-wasm",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Headless wasm tests (sparq-reason-wasm, wasm-pack test --node, explain feature)",
+          "working-directory": "crates/sparq-reason-wasm",
+          "run": "wasm-pack test --node --features explain"
+        },
+        {
+          "name": "Headless wasm tests (wasm-pack test --node, explain-json feature)",
+          "working-directory": "crates/sparq-wasm",
+          "run": "wasm-pack test --node --features explain-json"
+        },
+        {
+          "name": "Headless wasm tests (sparq-rsp-wasm, wasm-pack test --node)",
+          "working-directory": "crates/sparq-rsp-wasm",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Headless wasm tests (sparq-text-wasm, wasm-pack test --node)",
+          "working-directory": "crates/sparq-text-wasm",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node)",
+          "working-directory": "crates/sparq-shacl-wasm",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, shacl-af feature)",
+          "working-directory": "crates/sparq-shacl-wasm",
+          "run": "wasm-pack test --node --features shacl-af"
+        },
+        {
+          "name": "Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, stateful feature)",
+          "working-directory": "crates/sparq-shacl-wasm",
+          "run": "wasm-pack test --node --features stateful"
+        },
+        {
+          "name": "Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, all features)",
+          "working-directory": "crates/sparq-shacl-wasm",
+          "run": "wasm-pack test --node --all-features"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-introspect, deny warnings)",
+          "run": "cargo clippy -p sparq-introspect --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "Headless wasm tests (sparq-introspect, wasm-pack test --node)",
+          "working-directory": "crates/sparq-introspect",
+          "run": "wasm-pack test --node"
+        },
+        {
+          "name": "Measure sparq-introspect wasm bundle size (informational)",
+          "run": "./scripts/introspect-wasm-size.sh | tee -a \"$GITHUB_STEP_SUMMARY\""
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-solid, deny warnings)",
+          "run": "cargo clippy -p sparq-solid --target wasm32-unknown-unknown --all-targets -- -D warnings"
+        },
+        {
+          "name": "Headless wasm tests (sparq-solid materialize, wasm-pack test --node)",
+          "run": "wasm-pack test --node crates/sparq-solid"
+        },
+        {
+          "name": "Build sparq-vectors for the wasm32 target",
+          "run": "cargo build -p sparq-vectors --target wasm32-unknown-unknown"
+        },
+        {
+          "name": "Assert memmap2 is absent from the sparq-vectors wasm32 graph",
+          "run": "if cargo tree -p sparq-vectors --target wasm32-unknown-unknown -e normal | grep -q memmap2; then\n  echo \"::error::memmap2 leaked into the sparq-vectors wasm32 dependency graph\"\n  exit 1\nfi\n"
+        },
+        {
+          "name": "clippy (wasm32 target, sparq-vectors, deny warnings)",
+          "run": "cargo clippy -p sparq-vectors --target wasm32-unknown-unknown -- -D warnings"
+        }
+      ]
+    },
+    "lint": {
+      "name": "clippy (gate) + fmt (non-blocking)",
+      "needs": "changes",
+      "if": "needs.changes.outputs.rust_changed == 'true'",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable, rustfmt+clippy)",
+          "run": "rustup default stable\nrustup component add rustfmt clippy\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "clippy (deny warnings)",
+          "run": "cargo clippy --workspace --all-targets -- -D warnings"
+        },
+        {
+          "name": "clippy (deny warnings, workspace \u2014 all features)",
+          "run": "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+        },
+        {
+          "name": "rustdoc (deny warnings, workspace \u2014 default features)",
+          "run": "cargo doc --workspace --no-deps",
+          "env": {
+            "RUSTDOCFLAGS": "-D warnings"
+          }
+        },
+        {
+          "name": "rustdoc (deny warnings, workspace \u2014 all features)",
+          "run": "cargo doc --workspace --no-deps --all-features",
+          "env": {
+            "RUSTDOCFLAGS": "-D warnings"
+          }
+        },
+        {
+          "name": "bench/dict standalone selftest (clippy + invariant checks)",
+          "run": "cargo clippy --manifest-path bench/dict/Cargo.toml --all-targets -- -D warnings\ncargo run --manifest-path bench/dict/Cargo.toml -- selftest\n"
+        },
+        {
+          "name": "rustfmt (informational)",
+          "run": "cargo fmt --version\ncargo fmt --all --check\n",
+          "continue-on-error": true
+        }
+      ]
+    },
+    "conformance": {
+      "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Fetch W3C test suites (pinned)",
+          "run": "./scripts/fetch-conformance.sh"
+        },
+        {
+          "name": "Run conformance suites",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::W3C SPARQL conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance || rc=$?\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"W3C SPARQL conformance suites completed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::W3C SPARQL conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression produces a report and trips the ratchet floor below; a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::W3C SPARQL conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before the report was written).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "NT/NQ/TriG syntax ratchets + parser differential gate (sq-tonhr.2)",
+          "run": "cargo test --profile release-fast -p sparq-conformance \\\n  --test rdf_line_syntax_ratchet --test parser_differential -- --nocapture\n"
+        },
+        {
+          "name": "Consolidated conformance scoreboard (all suites + floors)",
+          "run": "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard\ncat conformance-scoreboard.md >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Summarize",
+          "run": "cat conformance-report.md >> \"$GITHUB_STEP_SUMMARY\""
+        },
+        {
+          "name": "Enforce ratchet (pass+divergence count must not regress)",
+          "run": "RATCHET=1229\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish \"report\n# never produced\" (an infra/build flake aborted the run before\n# conformance-report.md was written) from a GENUINE regression, so a\n# missing/empty report is never mis-reported as \"conformance regressed below\n# the ratchet (0 < 1229)\" \u2014 the exact phantom that jammed the queue (#1242).\n# With the step-level retry above this should not happen, but if it does we\n# fail with an HONEST, distinct diagnostic instead of a false regression.\nif [ ! -s conformance-report.md ] || ! grep -qE '^## Overall' conformance-report.md; then\n  echo \"::error::SPARQL conformance report is missing/empty \u2014 the run produced no '## Overall' section. This is an INFRA/build failure (e.g. a transient crates.io download aborting the run), NOT a conformance regression. Re-run the job; inspect the 'Run conformance suites' step output above.\"\n  exit 1\nfi\n# The Overall section emits:\n# **<N> pass / <M> fail / <D> documented divergence / <K> skip \u2014 ...**\n# (group subtotals use the same shape, so parse the line after \"## Overall\")\nOVERALL=$(grep -A2 '^## Overall' conformance-report.md | grep -E '\\*\\*[0-9]+ pass /')\nPASS=$(echo \"$OVERALL\" | grep -oE '[0-9]+ pass' | grep -oE '[0-9]+' | head -1)\nDIV=$(echo \"$OVERALL\" | grep -oE '[0-9]+ documented divergence' | grep -oE '[0-9]+' | head -1)\nTOTAL=$(( ${PASS:-0} + ${DIV:-0} ))\necho \"pass: ${PASS:-unknown} + documented divergences: ${DIV:-0} = $TOTAL (ratchet: $RATCHET)\"\n[ -n \"$PASS\" ] && [ \"$TOTAL\" -ge \"$RATCHET\" ] || { echo \"::error::conformance regressed below the ratchet ($TOTAL < $RATCHET)\"; exit 1; }\n"
+        },
+        {
+          "name": "Upload report",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "conformance-report",
+            "path": "conformance-report.md"
+          }
+        }
+      ]
+    },
+    "shacl-conformance": {
+      "name": "W3C SHACL conformance (ratchet \u2014 core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-shacl\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Fetch W3C SHACL test suite (pinned)",
+          "run": "./crates/sparq-shacl/fetch-shacl-tests.sh"
+        },
+        {
+          "name": "Run SHACL core + SHACL-SPARQL suites",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::SHACL conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  # `tee` would mask cargo's exit code via the pipe, so capture it from\n  # PIPESTATUS[0] (cargo), not the pipeline's last command (tee).\n  cargo test -p sparq-shacl --test w3c_core --test w3c_sparql -- --nocapture \\\n    | tee shacl-conformance.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"SHACL conformance suites passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::SHACL conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. Inspect the cargo/test output above (a real conformance regression trips the runner's own assert!(pass >= floor); a 'curl failed'/download error is an infra flake, not a conformance change).\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::SHACL conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before any test ran).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Run FULL W3C SHACL 1.2 suites (core / sparql / node-expr, both feature states)",
+          "run": "set -uo pipefail\nSHACL12_TESTS=\"--test w3c_core_full_shacl12 --test w3c_sparql_shacl12 --test w3c_node_expr --test w3c_node_expr_constraints\"\necho \"::group::SHACL 1.2 \u2014 default features\"\ncargo test -p sparq-shacl $SHACL12_TESTS -- --nocapture \\\n  | tee -a shacl-conformance.out\nrc_default=${PIPESTATUS[0]}\necho \"::endgroup::\"\necho \"::group::SHACL 1.2 \u2014 shacl-af feature\"\ncargo test -p sparq-shacl --features shacl-af $SHACL12_TESTS -- --nocapture \\\n  | tee -a shacl-conformance.out\nrc_af=${PIPESTATUS[0]}\necho \"::endgroup::\"\nif [ \"$rc_default\" -ne 0 ] || [ \"$rc_af\" -ne 0 ]; then\n  echo \"::error::FULL SHACL 1.2 suite regressed (default rc=$rc_default, shacl-af rc=$rc_af) \u2014 a runner's pinned ratchet floor/ceiling tripped. Inspect the per-category scoreboard above; see research/shacl12-conformance-gap.md. The floors are never weakened \u2014 closing a gap moves a FAIL to PASS and bumps the floor in the same commit.\"\n  exit 1\nfi\n"
+        },
+        {
+          "name": "Enforce ratchet (pass counts must not regress)",
+          "run": "CORE_FLOOR=98\nSPARQL_FLOOR=5\n# [OPUS-4.8] sq-shacl-flake: distinguish \"scoreboard never produced\"\n# (the test step did not emit a TOTAL line \u2014 e.g. an infra/compile\n# flake) from a GENUINE pass-count regression, so an empty scoreboard\n# is never mis-reported as \"conformance regressed below the ratchet\"\n# (the phantom `? < 98` that jammed the queue). With the step-level\n# retry above this should not happen, but if it does we fail with an\n# HONEST, distinct diagnostic instead of a false regression claim.\nif ! grep -qE '^TOTAL ' shacl-conformance.out; then\n  echo \"::error::SHACL conformance scoreboard is missing/empty \u2014 the test step produced no 'TOTAL' line. This is an INFRA/build failure (e.g. a transient crates.io download), NOT a conformance regression. Re-run the job; inspect the 'Run SHACL core + SHACL-SPARQL suites' step output above.\"\n  exit 1\nfi\n# core runner prints: \"TOTAL  <pass> <fail> <skip>\"\nCORE_PASS=$(grep -E '^TOTAL ' shacl-conformance.out | awk '{print $2}' | head -1)\n# sparql runner prints: \"pass <n> / fail <m> / skip <k>\"\nSPARQL_PASS=$(grep -oE 'pass [0-9]+ / fail' shacl-conformance.out | grep -oE '[0-9]+' | head -1)\necho \"SHACL core pass: ${CORE_PASS:-unknown} (floor $CORE_FLOOR); SHACL-SPARQL pass: ${SPARQL_PASS:-unknown} (floor $SPARQL_FLOOR)\"\n[ -n \"$CORE_PASS\" ] && [ \"$CORE_PASS\" -ge \"$CORE_FLOOR\" ] || { echo \"::error::SHACL core regressed below the ratchet (${CORE_PASS:-?} < $CORE_FLOOR)\"; exit 1; }\n[ -n \"$SPARQL_PASS\" ] && [ \"$SPARQL_PASS\" -ge \"$SPARQL_FLOOR\" ] || { echo \"::error::SHACL-SPARQL regressed below the ratchet (${SPARQL_PASS:-?} < $SPARQL_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Upload scoreboard",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "shacl-conformance",
+            "path": "shacl-conformance.out"
+          }
+        }
+      ]
+    },
+    "geo-conformance": {
+      "name": "W3C/OGC GeoSPARQL conformance (ratchet \u2014 topology >= 119, query-rewrite >= 38)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-geo\"') ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Run OGC GeoSPARQL topology compliance ratchet",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::OGC GeoSPARQL conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo test -p sparq-geo --test ogc_compliance_ratchet -- --nocapture \\\n    | tee geo-conformance.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"OGC GeoSPARQL conformance suite passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::OGC GeoSPARQL conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression trips the runner's own assert!(pass >= floor)/fail==0; a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::OGC GeoSPARQL conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before any test ran).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Enforce ratchet (topology pass count must not regress)",
+          "run": "GEO_FLOOR=119\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish\n# \"scoreboard never produced\" (an infra/compile flake left the .out with no\n# pass line) from a GENUINE regression, so an empty scoreboard is never\n# mis-reported as \"regressed below the ratchet\". With the step-level retry\n# above this should not happen, but if it does we fail with an HONEST,\n# distinct diagnostic instead of a false regression claim.\nif ! grep -qE 'pass [0-9]+ / fail' geo-conformance.out; then\n  echo \"::error::OGC GeoSPARQL conformance scoreboard is missing/empty \u2014 the test step produced no 'pass N / fail M' line. This is an INFRA/build failure (e.g. a transient crates.io download), NOT a conformance regression. Re-run the job; inspect the 'Run OGC GeoSPARQL topology compliance ratchet' step output above.\"\n  exit 1\nfi\n# runner prints: \"pass <n> / fail <m> (floor <f>)\"\nGEO_PASS=$(grep -oE 'pass [0-9]+ / fail' geo-conformance.out | grep -oE '[0-9]+' | head -1)\necho \"OGC GeoSPARQL topology pass: ${GEO_PASS:-unknown} (floor $GEO_FLOOR)\"\n[ -n \"$GEO_PASS\" ] && [ \"$GEO_PASS\" -ge \"$GEO_FLOOR\" ] || { echo \"::error::OGC GeoSPARQL regressed below the ratchet (${GEO_PASS:-?} < $GEO_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run OGC GeoSPARQL query-rewrite extension ratchet",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::OGC GeoSPARQL query-rewrite conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo test -p sparq-geo --features geosparql_rewrite --test ogc_query_rewrite_ratchet -- --nocapture \\\n    | tee geo-query-rewrite.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"OGC GeoSPARQL query-rewrite suite passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::OGC GeoSPARQL query-rewrite run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression trips the runner's own assert!(pass >= floor)/fail==0.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::OGC GeoSPARQL query-rewrite attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Enforce ratchet (query-rewrite pass count must not regress)",
+          "run": "GEO_QR_FLOOR=38\nif ! grep -qE 'pass [0-9]+ / fail' geo-query-rewrite.out; then\n  echo \"::error::OGC GeoSPARQL query-rewrite scoreboard is missing/empty \u2014 the test step produced no 'pass N / fail M' line. This is an INFRA/build failure, NOT a conformance regression. Re-run the job.\"\n  exit 1\nfi\nGEO_QR_PASS=$(grep -oE 'pass [0-9]+ / fail' geo-query-rewrite.out | grep -oE '[0-9]+' | head -1)\necho \"OGC GeoSPARQL query-rewrite pass: ${GEO_QR_PASS:-unknown} (floor $GEO_QR_FLOOR)\"\n[ -n \"$GEO_QR_PASS\" ] && [ \"$GEO_QR_PASS\" -ge \"$GEO_QR_FLOOR\" ] || { echo \"::error::OGC GeoSPARQL query-rewrite regressed below the ratchet (${GEO_QR_PASS:-?} < $GEO_QR_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Emit consolidated conformance scoreboard",
+          "run": "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard\ncat conformance-scoreboard.md >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Upload scoreboard",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "geo-conformance",
+            "path": "geo-conformance.out\ngeo-query-rewrite.out\nconformance-scoreboard.md\n"
+          }
+        }
+      ]
+    },
+    "solid-conformance": {
+      "name": "Solid WAC/ACP conformance (ratchet \u2014 wac >= 13, acp >= 13)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-solid\"') ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Run Solid WAC + ACP decision-parity suites",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::Solid WAC/ACP conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo test -p sparq-solid --test conformance_wac --test conformance_acp -- --nocapture \\\n    | tee solid-conformance.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"Solid WAC/ACP conformance suites passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::Solid WAC/ACP conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression trips the runners' own assert!(pass >= floor); a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::Solid WAC/ACP conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before any test ran).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Enforce ratchet (scenario counts must not regress)",
+          "run": "# [GPT-5.6] sq-61uvs raised both corpora with control-document vectors.\nWAC_FLOOR=13\nACP_FLOOR=13\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish \"scoreboard\n# never produced\" (an infra/compile flake) from a GENUINE regression, so an\n# empty scoreboard is never mis-reported as \"regressed below the ratchet\".\nif ! grep -qE '(WAC|ACP) scenarios pass [0-9]+ / fail' solid-conformance.out; then\n  echo \"::error::Solid WAC/ACP conformance scoreboard is missing/empty \u2014 the test step produced no 'scenarios pass N / fail M' line. This is an INFRA/build failure (e.g. a transient crates.io download), NOT a conformance regression. Re-run the job; inspect the 'Run Solid WAC + ACP decision-parity suites' step output above.\"\n  exit 1\nfi\n# runners print: \"<WAC|ACP> scenarios pass <n> / fail <m> (floor <f>)\"\nWAC_PASS=$(grep -oE 'WAC scenarios pass [0-9]+ / fail' solid-conformance.out | grep -oE '[0-9]+' | head -1)\nACP_PASS=$(grep -oE 'ACP scenarios pass [0-9]+ / fail' solid-conformance.out | grep -oE '[0-9]+' | head -1)\necho \"Solid WAC scenarios: ${WAC_PASS:-unknown} (floor $WAC_FLOOR); Solid ACP scenarios: ${ACP_PASS:-unknown} (floor $ACP_FLOOR)\"\n[ -n \"$WAC_PASS\" ] && [ \"$WAC_PASS\" -ge \"$WAC_FLOOR\" ] || { echo \"::error::Solid WAC regressed below the ratchet (${WAC_PASS:-?} < $WAC_FLOOR)\"; exit 1; }\n[ -n \"$ACP_PASS\" ] && [ \"$ACP_PASS\" -ge \"$ACP_FLOOR\" ] || { echo \"::error::Solid ACP regressed below the ratchet (${ACP_PASS:-?} < $ACP_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Emit consolidated conformance scoreboard",
+          "run": "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard\ncat conformance-scoreboard.md >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Upload scoreboard",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "solid-conformance",
+            "path": "solid-conformance.out\nconformance-scoreboard.md\n"
+          }
+        }
+      ]
+    },
+    "odrl-conformance": {
+      "name": "SolidLab ODRL conformance (ratchet \u2014 pass >= 59)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-policy\"') ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Fetch SolidLab ODRL Test Suite (pinned)",
+          "run": "bash scripts/fetch-odrl-suite.sh"
+        },
+        {
+          "name": "Run SolidLab ODRL decision-parity suite",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::SolidLab ODRL conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo test -p sparq-policy --test odrl_test_suite -- --nocapture \\\n    | tee odrl-conformance.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"SolidLab ODRL conformance suite passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::SolidLab ODRL conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression trips the runner's own assert!(pass >= floor); a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::SolidLab ODRL conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before any test ran).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Enforce ratchet (pass count must not regress)",
+          "run": "ODRL_FLOOR=59\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish \"scoreboard\n# never produced\" (an infra/compile flake) from a GENUINE regression, so an\n# empty scoreboard is never mis-reported as \"regressed below the ratchet\".\nif ! grep -qE 'ODRL suite scenarios pass [0-9]+ / fail' odrl-conformance.out; then\n  echo \"::error::SolidLab ODRL conformance scoreboard is missing/empty \u2014 the test step produced no 'ODRL suite scenarios pass N / fail M' line. This is an INFRA/build failure (e.g. a transient crates.io download), NOT a conformance regression. Re-run the job; inspect the 'Run SolidLab ODRL decision-parity suite' step output above.\"\n  exit 1\nfi\n# runner prints: \"ODRL suite scenarios pass <n> / fail <m> / not-implemented <k> (floor <f>)\"\nODRL_PASS=$(grep -oE 'ODRL suite scenarios pass [0-9]+ / fail' odrl-conformance.out | grep -oE '[0-9]+' | head -1)\necho \"SolidLab ODRL scenarios pass: ${ODRL_PASS:-unknown} (floor $ODRL_FLOOR)\"\n[ -n \"$ODRL_PASS\" ] && [ \"$ODRL_PASS\" -ge \"$ODRL_FLOOR\" ] || { echo \"::error::SolidLab ODRL regressed below the ratchet (${ODRL_PASS:-?} < $ODRL_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Emit consolidated conformance scoreboard",
+          "run": "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard\ncat conformance-scoreboard.md >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Upload scoreboard",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "odrl-conformance",
+            "path": "odrl-conformance.out\nconformance-scoreboard.md\n"
+          }
+        }
+      ]
+    },
+    "jsonld-conformance": {
+      "name": "W3C JSON-LD 1.1 conformance (ratchet \u2014 toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Fetch W3C JSON-LD 1.1 API test suite (toRdf/fromRdf/compact, pinned)",
+          "run": "./scripts/fetch-jsonld-tests.sh"
+        },
+        {
+          "name": "Fetch W3C JSON-LD 1.1 Framing test suite (frame, pinned)",
+          "run": "./scripts/fetch-jsonld-framing-tests.sh"
+        },
+        {
+          "name": "Run JSON-LD toRdf + fromRdf + compact + frame suites (jsonld-suite feature ON)",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::JSON-LD conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo test -p sparq-conformance --features jsonld-suite --test jsonld_suite -- --nocapture \\\n    | tee jsonld-conformance.out\n  rc=${PIPESTATUS[0]}\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"JSON-LD conformance suites passed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::JSON-LD conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression trips the runner's own assert!(pass >= FLOOR); a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::JSON-LD conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before any test ran).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Enforce ratchet (pass counts must not regress)",
+          "run": "# [FABLE-5] sq-oy1f.40 \u2014 the six floors are SOURCED from the LIB-SIDE\n# single source `crates/sparq-conformance/src/floors/<lane>.rs`\n# (`pub const FLOOR: usize = N;`) instead of hard-coded here. That kills\n# the #1463 floor-DRIFT class structurally: the runner's `assert!`, the\n# `scoreboard::SUITES` `ratchet_floor`, AND this belt-and-braces grep gate\n# now all read the SAME number, so this gate can never disagree with the\n# runner (a lowered lib const lowers ALL three at once, and the runner's\n# own `assert!(pass >= FLOOR)` still reds the job). The helper greps the\n# first `const FLOOR: usize = N;` out of a floor module.\nfloor_of() {\n  local lane=\"$1\"\n  local f=\"crates/sparq-conformance/src/floors/${lane}.rs\"\n  local n\n  n=$(grep -oE 'const FLOOR: usize = [0-9]+' \"$f\" | grep -oE '[0-9]+' | head -1)\n  if [ -z \"$n\" ]; then\n    echo \"::error::could not read the JSON-LD ${lane} floor from ${f} (expected 'const FLOOR: usize = N;')\" >&2\n    exit 1\n  fi\n  echo \"$n\"\n}\nTORDF_FLOOR=$(floor_of to_rdf)\nFROMRDF_FLOOR=$(floor_of from_rdf)\nCOMPACT_FLOOR=$(floor_of compact)\nFRAME_FLOOR=$(floor_of frame)\nEXPAND_FLOOR=$(floor_of expand)\nFLATTEN_FLOOR=$(floor_of flatten)\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish \"scoreboard\n# never produced\" (an infra/compile flake left the .out with no TOTAL line)\n# from a GENUINE regression, so an empty scoreboard is never mis-reported as\n# \"regressed below the ratchet\".\nif ! grep -qE '^TOTAL (toRdf|fromRdf|compact|frame|expand|flatten) ' jsonld-conformance.out; then\n  echo \"::error::JSON-LD conformance scoreboard is missing/empty \u2014 the test step produced no 'TOTAL toRdf|fromRdf|compact|frame|expand|flatten' line. This is an INFRA/build failure (e.g. a transient crates.io download), NOT a conformance regression. Re-run the job; inspect the 'Run JSON-LD ... suites' step output above.\"\n  exit 1\nfi\n# runner prints: \"TOTAL toRdf <pass> <fail> <skip> (floor F)\"\nTORDF_PASS=$(grep -E '^TOTAL toRdf ' jsonld-conformance.out | awk '{print $3}' | head -1)\nFROMRDF_PASS=$(grep -E '^TOTAL fromRdf ' jsonld-conformance.out | awk '{print $3}' | head -1)\nCOMPACT_PASS=$(grep -E '^TOTAL compact ' jsonld-conformance.out | awk '{print $3}' | head -1)\nFRAME_PASS=$(grep -E '^TOTAL frame ' jsonld-conformance.out | awk '{print $3}' | head -1)\nEXPAND_PASS=$(grep -E '^TOTAL expand ' jsonld-conformance.out | awk '{print $3}' | head -1)\nFLATTEN_PASS=$(grep -E '^TOTAL flatten ' jsonld-conformance.out | awk '{print $3}' | head -1)\necho \"JSON-LD toRdf pass: ${TORDF_PASS:-unknown} (floor $TORDF_FLOOR); fromRdf pass: ${FROMRDF_PASS:-unknown} (floor $FROMRDF_FLOOR); compact pass: ${COMPACT_PASS:-unknown} (floor $COMPACT_FLOOR); frame pass: ${FRAME_PASS:-unknown} (floor $FRAME_FLOOR); expand pass: ${EXPAND_PASS:-unknown} (floor $EXPAND_FLOOR); flatten pass: ${FLATTEN_PASS:-unknown} (floor $FLATTEN_FLOOR)\"\n[ -n \"$TORDF_PASS\" ] && [ \"$TORDF_PASS\" -ge \"$TORDF_FLOOR\" ] || { echo \"::error::JSON-LD toRdf regressed below the ratchet (${TORDF_PASS:-?} < $TORDF_FLOOR)\"; exit 1; }\n[ -n \"$FROMRDF_PASS\" ] && [ \"$FROMRDF_PASS\" -ge \"$FROMRDF_FLOOR\" ] || { echo \"::error::JSON-LD fromRdf regressed below the ratchet (${FROMRDF_PASS:-?} < $FROMRDF_FLOOR)\"; exit 1; }\n[ -n \"$COMPACT_PASS\" ] && [ \"$COMPACT_PASS\" -ge \"$COMPACT_FLOOR\" ] || { echo \"::error::JSON-LD compact regressed below the ratchet (${COMPACT_PASS:-?} < $COMPACT_FLOOR)\"; exit 1; }\n[ -n \"$FRAME_PASS\" ] && [ \"$FRAME_PASS\" -ge \"$FRAME_FLOOR\" ] || { echo \"::error::JSON-LD frame regressed below the ratchet (${FRAME_PASS:-?} < $FRAME_FLOOR)\"; exit 1; }\n[ -n \"$EXPAND_PASS\" ] && [ \"$EXPAND_PASS\" -ge \"$EXPAND_FLOOR\" ] || { echo \"::error::JSON-LD expand regressed below the ratchet (${EXPAND_PASS:-?} < $EXPAND_FLOOR)\"; exit 1; }\n[ -n \"$FLATTEN_PASS\" ] && [ \"$FLATTEN_PASS\" -ge \"$FLATTEN_FLOOR\" ] || { echo \"::error::JSON-LD flatten regressed below the ratchet (${FLATTEN_PASS:-?} < $FLATTEN_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Emit consolidated conformance scoreboard",
+          "run": "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard\ncat conformance-scoreboard.md >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Upload scoreboard",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "jsonld-conformance",
+            "path": "jsonld-conformance.out\nconformance-scoreboard.md\n"
+          }
+        }
+      ]
+    },
+    "service-federation-conformance": {
+      "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Clippy the gated harness surface (service-loopback feature ON)",
+          "run": "cargo clippy -p sparq-conformance --all-targets --features service-loopback -- -D warnings"
+        },
+        {
+          "name": "Run the in-process SERVICE-federation smoke test (feature ON)",
+          "run": "cargo test -p sparq-conformance --features service-loopback --test service_loopback -- --nocapture"
+        },
+        {
+          "name": "Clippy the service-evaluation lane (service feature ON)",
+          "run": "cargo clippy -p sparq-conformance --all-targets --features service -- -D warnings"
+        },
+        {
+          "name": "Fetch W3C SPARQL test suites (pinned)",
+          "run": "./scripts/fetch-conformance.sh"
+        },
+        {
+          "name": "Run sparql11/service evaluation lane (service feature ON) + enforce floor",
+          "run": "set -o pipefail\ncargo test -p sparq-conformance --features service --test service_eval_suite -- --nocapture \\\n  | tee service-eval-conformance.out\nif ! grep -qE '^TOTAL service ' service-eval-conformance.out; then\n  echo \"::error::sparql11/service lane produced no 'TOTAL service' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\nPASS=$(grep -E '^TOTAL service ' service-eval-conformance.out | awk '{print $3}' | head -1)\nFLOOR=5\necho \"sparql11/service evaluation pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::service evaluation regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Clippy the SPARQL-Protocol lane (http-protocol feature ON)",
+          "run": "cargo clippy -p sparq-conformance --all-targets --features http-protocol -- -D warnings"
+        },
+        {
+          "name": "Run SPARQL 1.1 Protocol (HTTP) lane (http-protocol feature ON) + enforce floor",
+          "run": "set -o pipefail\ncargo test -p sparq-conformance --features http-protocol --test http_protocol_suite -- --nocapture \\\n  | tee http-protocol-conformance.out\nif ! grep -qE '^TOTAL http-protocol ' http-protocol-conformance.out; then\n  echo \"::error::SPARQL-Protocol lane produced no 'TOTAL http-protocol' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\nPASS=$(grep -E '^TOTAL http-protocol ' http-protocol-conformance.out | awk '{print $3}' | head -1)\n# [OPUS-4.8] sq-406acc: raised 20\u219221 when the present-but-unsatisfiable Accept 406\n# (Oxigraph parity, w3c/sparql-protocol#40) flipped from a divergence to a genuine PASS.\nFLOOR=21\necho \"SPARQL 1.1 Protocol (HTTP) pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::SPARQL-Protocol lane regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Clippy the SD/GSP lane (federation-descriptors feature ON)",
+          "run": "cargo clippy -p sparq-conformance --all-targets --features federation-descriptors -- -D warnings"
+        },
+        {
+          "name": "Run SD + Graph Store Protocol lane (federation-descriptors feature ON) + enforce floor",
+          "run": "set -o pipefail\ncargo test -p sparq-conformance --features federation-descriptors --test sd_gsp_suite -- --nocapture \\\n  | tee sd-gsp-conformance.out\nif ! grep -qE '^TOTAL sd-gsp ' sd-gsp-conformance.out; then\n  echo \"::error::SD/GSP lane produced no 'TOTAL sd-gsp' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\nPASS=$(grep -E '^TOTAL sd-gsp ' sd-gsp-conformance.out | awk '{print $3}' | head -1)\nFLOOR=39\necho \"SD + Graph Store Protocol pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::SD/GSP lane regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Clippy the served-conformance report emitter (both served-surface features ON)",
+          "run": "cargo clippy -p sparq-conformance --all-targets --features http-protocol,federation-descriptors -- -D warnings"
+        },
+        {
+          "name": "Emit served-surface conformance report (JSON, fail-closed)",
+          "env": {
+            "SPARQ_CONFORMANCE_COMMIT": "${{ github.sha }}",
+            "SPARQ_CONFORMANCE_VERSION": "${{ github.ref_name }}",
+            "SPARQ_CONFORMANCE_RUN_URL": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          },
+          "run": "set -o pipefail\n# Debug (no --release): reuses the both-features artifacts the clippy step above already\n# compiled; the report is a quick in-process run, so optimisation buys nothing here.\ncargo run -p sparq-conformance \\\n  --features http-protocol,federation-descriptors \\\n  --bin served-conformance-report -- --out served-conformance.json 2>&1 \\\n  | tee served-conformance.log\n{\n  echo \"### Served-surface SPARQL 1.1 Protocol conformance report\"\n  grep -E 'pass /' served-conformance.log || true\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
+        },
+        {
+          "name": "Upload served-surface conformance report",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "served-conformance-report",
+            "path": "served-conformance.json",
+            "if-no-files-found": "error"
+          }
+        }
+      ]
+    },
+    "inference-conformance": {
+      "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-conformance\"'))",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Restore the pinned OWL 2 / RIF corpora",
+          "id": "inference-corpus-cache",
+          "uses": "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "tests/w3c/owl2\ntests/w3c/rif-core\n",
+            "key": "inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}"
+          }
+        },
+        {
+          "name": "Fetch inference test suites (pinned)",
+          "run": "./scripts/fetch-inference-suites.sh"
+        },
+        {
+          "name": "Save the pinned OWL 2 / RIF corpora (main-scoped runs)",
+          "if": "github.ref == 'refs/heads/main' && steps.inference-corpus-cache.outputs.cache-hit != 'true'",
+          "uses": "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "tests/w3c/owl2\ntests/w3c/rif-core\n",
+            "key": "inference-corpus-v1-${{ runner.os }}-${{ hashFiles('scripts/fetch-inference-suites.sh') }}"
+          }
+        },
+        {
+          "name": "Run inference suites",
+          "run": "set -uo pipefail\nMAX_ATTEMPTS=2\nattempt=1\nwhile true; do\n  echo \"::group::Inference conformance \u2014 attempt $attempt/$MAX_ATTEMPTS\"\n  rc=0\n  cargo run --profile release-fast -p sparq-conformance --bin sparq-inference-conformance || rc=$?\n  echo \"::endgroup::\"\n  if [ \"$rc\" -eq 0 ]; then\n    echo \"Inference conformance suites completed on attempt $attempt\"\n    break\n  fi\n  if [ \"$attempt\" -ge \"$MAX_ATTEMPTS\" ]; then\n    echo \"::error::Inference conformance run failed after $attempt attempt(s) (exit $rc) \u2014 genuine failure, not a single transient. A real regression produces a report and trips the ratchet floor below; a 'curl failed'/download error is an infra flake, not a conformance change.\"\n    exit \"$rc\"\n  fi\n  echo \"::warning::Inference conformance attempt $attempt failed (exit $rc) \u2014 retrying once (sq-shacl-flake transient self-heal: most often a transient crates.io download hiccup before the report was written).\"\n  attempt=$((attempt + 1))\ndone\n"
+        },
+        {
+          "name": "Summarize",
+          "run": "cat inference-conformance-report.md >> \"$GITHUB_STEP_SUMMARY\""
+        },
+        {
+          "name": "Enforce ratchet (pass+divergence count must not regress)",
+          "run": "RATCHET=1967\n# [OPUS-4.8] sq-shacl-flake (generalized from #1236): distinguish \"report\n# never produced\" (an infra/build flake aborted the run before the report was\n# written) from a GENUINE regression, so a missing/empty report is never\n# mis-reported as \"inference conformance regressed below the ratchet\n# (0 < 1967)\". With the step-level retry above this should not happen, but if\n# it does we fail with an HONEST, distinct diagnostic.\nif [ ! -s inference-conformance-report.md ] || ! grep -qE '^## Overall \\(all inference suites\\)' inference-conformance-report.md; then\n  echo \"::error::Inference conformance report is missing/empty \u2014 the run produced no '## Overall (all inference suites)' section. This is an INFRA/build failure (e.g. a transient crates.io download aborting the run), NOT a conformance regression. Re-run the job; inspect the 'Run inference suites' step output above.\"\n  exit 1\nfi\n# The Overall section emits:\n# **<N> pass / <M> fail / <D> documented divergence / <K> out-of-scope \u2014 ...**\n# (suite subtotals use the same shape, so parse the line after the\n# final \"## Overall (all inference suites)\")\nOVERALL=$(grep -A2 '^## Overall (all inference suites)' inference-conformance-report.md | grep -E '\\*\\*[0-9]+ pass /')\nPASS=$(echo \"$OVERALL\" | grep -oE '[0-9]+ pass' | grep -oE '[0-9]+' | head -1)\nDIV=$(echo \"$OVERALL\" | grep -oE '[0-9]+ documented divergence' | grep -oE '[0-9]+' | head -1)\nTOTAL=$(( ${PASS:-0} + ${DIV:-0} ))\necho \"pass: ${PASS:-unknown} + documented divergences: ${DIV:-0} = $TOTAL (ratchet: $RATCHET)\"\n[ -n \"$PASS\" ] && [ \"$TOTAL\" -ge \"$RATCHET\" ] || { echo \"::error::inference conformance regressed below the ratchet ($TOTAL < $RATCHET)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run D-entailment lane (d-entail feature ON) + enforce floor",
+          "run": "set -uo pipefail\ncargo test -p sparq-conformance --features d-entail --test d_entail_suite -- --nocapture \\\n  | tee d-entail-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::D-entailment lane test failed (exit $rc)\"; exit \"$rc\"; }\nif ! grep -qE '^TOTAL d-entail ' d-entail-conformance.out; then\n  echo \"::error::D-entailment lane produced no 'TOTAL d-entail' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\nFLOOR=1\nPASS=$(grep -E '^TOTAL d-entail ' d-entail-conformance.out | awk '{print $3}' | head -1)\necho \"D-entailment pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::D-entailment regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run RIF WG Core conformance lane (rif-wg-core feature ON) + enforce floor",
+          "run": "set -uo pipefail\ncargo test -p sparq-conformance --features rif-wg-core --test rif_wg_core_suite -- --nocapture \\\n  | tee rif-wg-core-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::RIF WG Core lane test failed (exit $rc)\"; exit \"$rc\"; }\nif ! grep -qE '^TOTAL rif-wg-core ' rif-wg-core-conformance.out; then\n  echo \"::error::RIF WG Core lane produced no 'TOTAL rif-wg-core' line \u2014 infra/build issue (or the fetched Core_v1.22 archive is absent), not a conformance change. Re-run the job.\"\n  exit 1\nfi\nFLOOR=0\nPASS=$(grep -E '^TOTAL rif-wg-core ' rif-wg-core-conformance.out | awk '{print $3}' | head -1)\necho \"RIF WG Core pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::RIF WG Core regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run RIF-Core expressivity lane (rif-core feature ON) + enforce floor",
+          "run": "set -uo pipefail\ncargo test -p sparq-conformance --features rif-core --test rif_core_suite -- --nocapture \\\n  | tee rif-core-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::RIF-Core lane test failed (exit $rc)\"; exit \"$rc\"; }\nif ! grep -qE '^RIF-Core expressivity assertions ' rif-core-conformance.out; then\n  echo \"::error::RIF-Core lane produced no 'RIF-Core expressivity assertions' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\nFLOOR=47\nASSERTS=$(grep -E '^RIF-Core expressivity assertions ' rif-core-conformance.out | awk '{print $4}' | head -1)\necho \"RIF-Core expressivity assertions: ${ASSERTS:-unknown} (floor: $FLOOR)\"\n[ -n \"$ASSERTS\" ] && [ \"$ASSERTS\" -ge \"$FLOOR\" ] || { echo \"::error::RIF-Core expressivity regressed below the ratchet ($ASSERTS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run OWL 2 EL classification lane (el-suite feature ON) + enforce floor",
+          "run": "set -uo pipefail\n# [FABLE-5] sq-wy3i6: `el-suite-par` ADDS the parallel-saturation differential\n# (classify_graph_par at 1/2/8 threads must reproduce the sequential closure on\n# every selected W3C EL case). Floor accounting is unchanged \u2014 the ratchet still\n# runs on the sequential engine; a par divergence panics the case, turning the lane red.\ncargo test -p sparq-conformance --features el-suite,el-suite-par --test el_suite -- --nocapture \\\n  | tee el-suite-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::OWL 2 EL lane test failed (exit $rc)\"; exit \"$rc\"; }\nif ! grep -qE '^OWL 2 EL ratchet pass ' el-suite-conformance.out; then\n  echo \"::error::OWL 2 EL lane produced no 'OWL 2 EL ratchet pass' line \u2014 infra/build issue, not a conformance change. Re-run the job.\"\n  exit 1\nfi\n# [SONNET-4.6] Read EL_SUITE_FLOOR from source so the CI step cannot drift\n# from the in-runner const (Fix 4 \u2014 Copilot thread).\nFLOOR=$(grep -E '^\\s+pub const EL_SUITE_FLOOR\\s*:\\s*usize\\s*=' \\\n  crates/sparq-conformance/tests/el_suite.rs \\\n  | grep -oE '[0-9]+' | head -1)\nif [ -z \"$FLOOR\" ]; then\n  echo \"::error::Could not parse EL_SUITE_FLOOR from el_suite.rs \u2014 check the const declaration\"\n  exit 1\nfi\nPASS=$(grep -E '^OWL 2 EL ratchet pass ' el-suite-conformance.out | awk '{print $6}' | head -1)\necho \"OWL 2 EL classification pass: ${PASS:-unknown} (floor: $FLOOR)\"\n[ -n \"$PASS\" ] && [ \"$PASS\" -ge \"$FLOOR\" ] || { echo \"::error::OWL 2 EL classification regressed below the ratchet ($PASS < $FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Run OWL 2 QL lanes (ql-experimental feature ON) + enforce the pinned floor",
+          "run": "set -uo pipefail\ncargo test -p sparq-conformance --features ql-experimental --test ql_entailment_floor --test ql_dllite_suite --test ql_experimental_arm -- --nocapture \\\n  | tee ql-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::OWL 2 QL lane tests failed (exit $rc)\"; exit \"$rc\"; }\nif ! grep -qE '^QL entailment graduated floor ' ql-conformance.out; then\n  echo \"::error::QL lane produced no 'QL entailment graduated floor' line \u2014 the pinned-floor runner self-skipped or did not run. This job fetches the fixtures, so that is an infra issue, not a conformance change.\"\n  exit 1\nfi\nFLOOR=$(grep -E '^\\s+pub const QL_ENTAILMENT_FLOOR\\s*:\\s*usize\\s*=' \\\n  crates/sparq-conformance/tests/ql_entailment_floor.rs \\\n  | grep -oE '[0-9]+' | head -1)\nif [ -z \"$FLOOR\" ]; then\n  echo \"::error::Could not parse QL_ENTAILMENT_FLOOR from ql_entailment_floor.rs \u2014 check the const declaration\"\n  exit 1\nfi\nGRADUATED=$(grep -E '^QL entailment graduated floor ' ql-conformance.out | awk '{print $5}' | head -1)\necho \"OWL 2 QL entailment graduated subset: ${GRADUATED:-unknown} (pinned floor: $FLOOR)\"\n[ -n \"$GRADUATED\" ] && [ \"$GRADUATED\" -ge \"$FLOOR\" ] || { echo \"::error::OWL 2 QL graduated subset regressed below the pinned floor ($GRADUATED < $FLOOR)\"; exit 1; }\nif ! grep -qE '^QL DL-Lite_R sound-and-complete ' ql-conformance.out; then\n  echo \"::error::QL lane produced no 'QL DL-Lite_R sound-and-complete' line \u2014 the sq-qo1a9 oracle ratchet did not run.\"\n  exit 1\nfi\n"
+        },
+        {
+          "name": "Run OWL 2 Direct-Semantics arm (dl-direct feature ON) + enforce the pinned floors",
+          "run": "set -uo pipefail\ncargo test --profile release-fast -p sparq-conformance --features dl-direct --test dl_suite -- --nocapture \\\n  | tee dl-direct-conformance.out\nrc=${PIPESTATUS[0]}\n[ \"$rc\" -eq 0 ] || { echo \"::error::OWL 2 Direct-Semantics arm test failed (exit $rc)\"; exit \"$rc\"; }\nfor lane in \"profile-identification\" \"direct\"; do\n  if ! grep -qE \"^OWL 2 DL ${lane} ratchet pass \" dl-direct-conformance.out; then\n    echo \"::error::DL arm produced no 'OWL 2 DL ${lane} ratchet pass' line \u2014 the runner self-skipped or did not run. This job fetches the fixtures, so that is an infra issue, not a conformance change.\"\n    exit 1\n  fi\ndone\nPROFILE_FLOOR=$(grep -E '^\\s+pub const DL_PROFILE_FLOOR\\s*:\\s*usize\\s*=' \\\n  crates/sparq-conformance/tests/dl_suite.rs | grep -oE '[0-9]+' | head -1)\nDIRECT_FLOOR=$(grep -E '^\\s+pub const DL_DIRECT_FLOOR\\s*:\\s*usize\\s*=' \\\n  crates/sparq-conformance/tests/dl_suite.rs | grep -oE '[0-9]+' | head -1)\nif [ -z \"$PROFILE_FLOOR\" ] || [ -z \"$DIRECT_FLOOR\" ]; then\n  echo \"::error::Could not parse DL_PROFILE_FLOOR / DL_DIRECT_FLOOR from dl_suite.rs \u2014 check the const declarations\"\n  exit 1\nfi\nPROFILE_PASS=$(grep -E '^OWL 2 DL profile-identification ratchet pass ' dl-direct-conformance.out | awk '{print $7}' | head -1)\nDIRECT_PASS=$(grep -E '^OWL 2 DL direct ratchet pass ' dl-direct-conformance.out | awk '{print $7}' | head -1)\necho \"OWL 2 DL profile-identification pass: ${PROFILE_PASS:-unknown} (pinned: $PROFILE_FLOOR); direct pass: ${DIRECT_PASS:-unknown} (pinned: $DIRECT_FLOOR)\"\n[ -n \"$PROFILE_PASS\" ] && [ \"$PROFILE_PASS\" -ge \"$PROFILE_FLOOR\" ] || { echo \"::error::OWL 2 DL profile-identification regressed below the pinned floor ($PROFILE_PASS < $PROFILE_FLOOR)\"; exit 1; }\n[ -n \"$DIRECT_PASS\" ] && [ \"$DIRECT_PASS\" -ge \"$DIRECT_FLOOR\" ] || { echo \"::error::OWL 2 DL direct lane regressed below the pinned floor ($DIRECT_PASS < $DIRECT_FLOOR)\"; exit 1; }\n"
+        },
+        {
+          "name": "Upload report",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "always()",
+          "with": {
+            "name": "inference-conformance-report",
+            "path": "inference-conformance-report.md"
+          }
+        }
+      ]
+    },
+    "build-archive": {
+      "name": "build + archive test binaries (+ doctests once)",
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "name": "Free runner disk before build + archive",
+          "run": "./scripts/ci-free-disk.sh"
+        },
+        {
+          "name": "Rust (preinstalled stable)",
+          "run": "rustup default stable\nrustup show active-toolchain\n"
+        },
+        {
+          "name": "Cache cargo + target",
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "shared-key": "test-workspace",
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Install cargo-nextest",
+          "uses": "taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68",
+          "with": {
+            "tool": "nextest"
+          }
+        },
+        {
+          "name": "Build + archive test binaries (nextest archive)",
+          "run": "cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst"
+        },
+        {
+          "name": "Upload nextest archive",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "nextest-archive",
+            "path": "nextest.tar.zst",
+            "retention-days": 1,
+            "if-no-files-found": "error",
+            "compression-level": 0
+          }
+        },
+        {
+          "name": "Doctests (nextest does not run these; run once, off the warm build)",
+          "run": "cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc"
+        }
+      ]
+    }
+  },
+  "feature-matrix.yml": {
+    "opt-in-features": {
+      "needs": [
+        "changes",
+        "setup"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true' && needs.setup.outputs.legs != '0'",
+      "name": "opt-in group (${{ matrix.group }})",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "contents": "read"
+      },
+      "strategy": {
+        "fail-fast": false,
+        "matrix": "${{ fromJSON(needs.setup.outputs.matrix) }}"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "with": {
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Rust (preinstalled stable + clippy)",
+          "run": "rustup default stable\nrustup component add clippy\nrustup show active-toolchain\n"
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32",
+          "with": {
+            "shared-key": "feature-matrix-${{ matrix.cache_crate }}",
+            "save-if": "${{ github.ref == 'refs/heads/main' }}"
+          }
+        },
+        {
+          "name": "Fetch dependencies (retry transient crates.io fetch)",
+          "run": "set -euo pipefail\nn=0\nuntil cargo fetch --locked; do\n  n=$((n+1))\n  if [ \"$n\" -ge 3 ]; then\n    echo \"::error::cargo fetch failed after $n attempts (registry outage?)\" >&2\n    exit 1\n  fi\n  echo \"cargo fetch attempt $n failed; retrying in 10s...\" >&2\n  sleep 10\ndone\n"
+        },
+        {
+          "name": "Run the group's legs (build -> test -> clippy; results to artifact)",
+          "env": {
+            "GROUP_LEGS": "${{ matrix.legs }}",
+            "GROUP_NAME": "${{ matrix.group }}",
+            "FMG_RESULTS": "fmg-results/results.json"
+          },
+          "run": "python3 scripts/run-feature-matrix-group.py"
+        },
+        {
+          "name": "Upload per-leg results for the trusted reporter",
+          "if": "${{ !cancelled() }}",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "feature-matrix-results-${{ strategy.job-index }}",
+            "path": "fmg-results/results.json",
+            "retention-days": 1,
+            "if-no-files-found": "error",
+            "overwrite": true
+          }
+        }
+      ]
+    },
+    "setup": {
+      "needs": [
+        "changes",
+        "select"
+      ],
+      "if": "needs.changes.outputs.rust_changed == 'true'",
+      "name": "assemble feature matrix",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "contents": "read"
+      },
+      "outputs": {
+        "matrix": "${{ steps.assemble.outputs.matrix }}",
+        "legs": "${{ steps.assemble.outputs.legs }}"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "with": {
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install PyYAML",
+          "run": "pip install --require-hashes -r .github/requirements/docs-quality.txt"
+        },
+        {
+          "name": "Self-test the assembler + gate-critical leg-name preservation",
+          "run": "python3 scripts/tests/test_feature_matrix_assemble.py"
+        },
+        {
+          "name": "Enforce tier ratchet + sq-vya1 guard (feature-matrix-tiers.py --enforce)",
+          "run": "python3 scripts/feature-matrix-tiers.py --enforce"
+        },
+        {
+          "name": "Structural guard C1 \u2014 feature-gated test execution (sq-qcnn.31)",
+          "run": "set -euo pipefail\npython3 scripts/check-feature-test-execution.py --self-test\npython3 scripts/check-feature-test-execution.py --check\n"
+        },
+        {
+          "name": "Assemble matrix from .github/feature-matrix.d/*.yml",
+          "id": "assemble",
+          "env": {
+            "SELECT_MODE": "${{ needs.select.outputs.mode }}",
+            "SELECT_AFFECTED": "${{ needs.select.outputs.affected }}"
+          },
+          "run": "set -euo pipefail\n# [FABLE-5] CI-economy: --grouped emits ONE matrix entry per bin-packed\n# GROUP of legs (see the opt-in-features job note); `legs` is the TOTAL\n# leg count across groups, so the skip-on-zero contract is unchanged.\nMATRIX=\"$(python3 scripts/assemble-feature-matrix.py --grouped --event \"${{ github.event_name }}\" --select-mode \"${SELECT_MODE:-}\" --affected \"${SELECT_AFFECTED:-}\")\"\necho \"matrix=$MATRIX\" >> \"$GITHUB_OUTPUT\"\nLEGS=\"$(echo \"$MATRIX\" | python3 -c 'import json,sys; m=json.load(sys.stdin)[\"include\"]; print(sum(g[\"count\"] for g in m))')\"\nNGROUPS=\"$(echo \"$MATRIX\" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)[\"include\"]))')\"\necho \"legs=$LEGS\" >> \"$GITHUB_OUTPUT\"\necho \"Assembled $LEGS opt-in leg(s) into $NGROUPS group(s) (select mode: ${SELECT_MODE:-<unset>}, event ${{ github.event_name }}). Full leg-name set:\"\npython3 scripts/assemble-feature-matrix.py --names\n"
+        },
+        {
+          "name": "Emit the SELECTED leg set + metadata for the trusted reporter",
+          "if": "needs.changes.outputs.rust_changed == 'true'",
+          "env": {
+            "SELECT_MODE": "${{ needs.select.outputs.mode }}",
+            "SELECT_AFFECTED": "${{ needs.select.outputs.affected }}",
+            "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "EVENT_NAME": "${{ github.event_name }}"
+          },
+          "run": "set -euo pipefail\nmkdir -p fmg-selected fmg-metadata\npython3 scripts/assemble-feature-matrix.py \\\n  --event \"${EVENT_NAME}\" --select-mode \"${SELECT_MODE:-}\" \\\n  --affected \"${SELECT_AFFECTED:-}\" > fmg-selected/selected-matrix.json\npython3 -c 'import json,os; json.dump({\"head_sha\": os.environ[\"HEAD_SHA\"], \"event\": os.environ[\"EVENT_NAME\"]}, open(\"fmg-metadata/metadata.json\",\"w\"))'\n"
+        },
+        {
+          "name": "Upload the selected-matrix artifact (reporter completeness ground truth)",
+          "if": "needs.changes.outputs.rust_changed == 'true' && steps.assemble.outputs.legs != '0'",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "feature-matrix-selected",
+            "path": "fmg-selected/selected-matrix.json",
+            "retention-days": 1,
+            "if-no-files-found": "error"
+          }
+        },
+        {
+          "name": "Upload the run metadata artifact (head SHA + event for the reporter)",
+          "if": "needs.changes.outputs.rust_changed == 'true' && steps.assemble.outputs.legs != '0'",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "feature-matrix-metadata",
+            "path": "fmg-metadata/metadata.json",
+            "retention-days": 1,
+            "if-no-files-found": "error"
+          }
+        },
+        {
+          "name": "Loud failure attribution \u2014 the opt-in matrix was NOT generated",
+          "if": "failure()",
+          "run": "set -euo pipefail\necho \"::error title=opt-in feature matrix NOT generated::The 'assemble feature matrix' job failed, so NO 'opt-in *' matrix legs were spawned for this commit. Every required 'opt-in <crate> (...)' check is therefore MISSING, not failing \u2014 a missing leg is not a failing leg, and this is NOT a regression in any single opt-in leg. Fix the failing step in THIS job first. Common causes: golden leg-name drift (a new opt-in leg without a matching line in scripts/tests/feature-matrix-legnames.golden.txt), the C1 feature-gated-test-execution guard (scripts/check-feature-test-execution.py), the tier ratchet (scripts/feature-matrix-tiers.py), or a malformed .github/feature-matrix.d fragment.\"\n{\n  echo \"## opt-in feature matrix NOT generated\"\n  echo\n  echo \"This \\`assemble feature matrix\\` job **failed**, so the matrix JSON was never produced and **no \\`opt-in *\\` check-runs were spawned** for this commit.\"\n  echo\n  echo \"**Every required \\`opt-in <crate> (\u2026)\\` check on this PR is MISSING, not failing.** A missing leg is not a failing leg \u2014 do not triage individual opt-in legs, and do not suspect a cross-PR / main regression in one of them.\"\n  echo\n  echo \"Fix the failing step above first. Common causes:\"\n  echo\n  echo \"- **Golden leg-name drift** \u2014 a new opt-in leg was added without updating \\`scripts/tests/feature-matrix-legnames.golden.txt\\` (the assembler self-test).\"\n  echo \"- **Structural guard C1** \u2014 a feature-gated test with no CI executor and no allowlist entry (\\`scripts/check-feature-test-execution.py --check\\`).\"\n  echo \"- **Tier ratchet** \u2014 \\`scripts/feature-matrix-tiers.py --enforce\\`.\"\n  echo \"- **Malformed fragment** \u2014 a broken or duplicate-name leg in \\`.github/feature-matrix.d/<crate>.yml\\`.\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
+        }
+      ]
+    },
+    "premerge-c1": {
+      "needs": [
+        "changes"
+      ],
+      "if": "github.event_name == 'pull_request' && needs.changes.outputs.rust_changed == 'true'",
+      "name": "pre-merge C1 (feature-gated test execution)",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "contents": "read"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+          "with": {
+            "persist-credentials": false,
+            "ref": "${{ github.event.pull_request.head.sha }}",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install PyYAML",
+          "run": "pip install --require-hashes -r .github/requirements/docs-quality.txt"
+        },
+        {
+          "name": "Test-merge the current base tip into the PR head",
+          "id": "merge",
+          "env": {
+            "BASE_REF": "${{ github.event.pull_request.base.ref }}",
+            "HEAD_SHA": "${{ github.event.pull_request.head.sha }}"
+          },
+          "run": "set -euo pipefail\n# FAIL CLOSED on a broken assumption: if the base branch is not in the local\n# repo, the checkout above did not do what this job depends on, and the merge\n# would \"fail\" for a reason that has nothing to do with the PR. Red, never a\n# silent skip.\ngit rev-parse --verify --quiet \"origin/${BASE_REF}^{commit}\" > /dev/null || {\n  echo \"::error title=pre-merge C1 could not run::origin/${BASE_REF} is missing from the checkout \u2014 the fetch-depth: 0 checkout in this job is a precondition of the test merge.\"\n  exit 1\n}\n# FAIL CLOSED ON THE OTHER HALF OF THE ASSUMPTION (PR #5253 review round 2).\n# The merge must START at the PR head, not at the event-time\n# `refs/pull/N/merge` a default pull_request checkout would leave here; the\n# checkout above pins `ref` to HEAD_SHA precisely so that holds. Verify it\n# instead of trusting it \u2014 if HEAD is anything else, the merge's first parent\n# is not the PR head and the tree graded below is not the one this job reports.\nACTUAL_HEAD=\"$(git rev-parse HEAD)\"\nif [ \"${ACTUAL_HEAD}\" != \"${HEAD_SHA}\" ]; then\n  echo \"::error title=pre-merge C1 could not run::HEAD is ${ACTUAL_HEAD}, not the PR head ${HEAD_SHA} \u2014 the test merge would start from the wrong commit (most likely the event-time refs/pull/N/merge), so its result would not be the PR head merged with the current base.\"\n  exit 1\nfi\n# RECORD THE BASE THIS VERDICT IS ABOUT (PR #5253 review round 1). The check-run\n# this job produces goes stale the moment the base advances \u2014 GitHub re-runs\n# nothing for an open PR when its base moves \u2014 so publish the exact SHA graded\n# instead of leaving \"the current base tip\" to mean \"whenever you happened to\n# look\". A reader (or a merge-fixer triaging an old green) can then tell a\n# verdict about today's base from one about a base three merges ago.\nBASE_SHA=\"$(git rev-parse \"origin/${BASE_REF}\")\"\necho \"base_sha=${BASE_SHA}\" >> \"$GITHUB_OUTPUT\"\n{\n  echo \"## pre-merge C1 \u2014 the tree this run is about\"\n  echo\n  echo \"PR head \\`${HEAD_SHA}\\` \u2295 base \\`${BASE_REF}\\` @ \\`${BASE_SHA}\\` \u2014 graded below unless the test merge conflicts, in which case nothing was graded and a \\`::warning\\` says so.\"\n  echo\n  echo \"**Any conclusion this job reaches is about that base SHA only.** If \\`${BASE_REF}\\` has advanced since this run, no PR event re-ran this job, so its conclusion says nothing about the tree the PR would produce now. The C1 verdict that cannot go stale is the \\`assemble feature matrix\\` job's run on the \\`merge_group\\` ref, whose SHA contains the latest base by construction.\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n# `--no-commit` leaves the merged tree in the working directory (all we need);\n# an unchanged base is \"Already up to date.\" and exits 0, which simply re-runs\n# the guard on the same tree `setup` saw. A non-zero exit here is a CONFLICT.\nif git -c user.name=sparq-ci -c user.email=sparq-ci@users.noreply.github.com \\\n     merge --no-commit --no-ff \"origin/${BASE_REF}\"; then\n  echo \"merged=true\" >> \"$GITHUB_OUTPUT\"\nelse\n  echo \"merged=false\" >> \"$GITHUB_OUTPUT\"\n  git merge --abort || true\n  echo \"::warning title=pre-merge C1 not evaluated::This PR conflicts with origin/${BASE_REF}, so the merged tree could not be built and the pre-merge C1 guard did not run. Merge the base branch in (or rebase); the guard re-evaluates on the next push, and the merge queue checks the batch-merged tree regardless.\"\nfi\n"
+        },
+        {
+          "name": "Structural guard C1 on the merged tree",
+          "if": "steps.merge.outputs.merged == 'true'",
+          "env": {
+            "BASE_SHA": "${{ steps.merge.outputs.base_sha }}"
+          },
+          "run": "set -euo pipefail\nif ! python3 scripts/check-feature-test-execution.py --check; then\n  echo \"::error title=pre-merge C1 failed on the MERGED tree::The C1 structural guard FAILS on the tree this PR produces when merged with base ${BASE_SHA}. (The 'assemble feature matrix' job grades the event-time merge ref instead, so it can be green while this is red \u2014 the violation lives in the merge, not in either side.) A feature-gated test and the CI executor that runs it \u2014 a .github/feature-matrix.d leg, a scripts/coverage.sh case arm, or an allowlist entry \u2014 are on opposite sides of it. Add the missing leg in THIS PR: merging as-is reds C1 on main, which withholds the whole opt-in matrix on every branch (sq-nd4yj).\"\n  exit 1\nfi\n"
+        }
+      ]
+    }
+  },
+  "bench.yml": {
+    "select": {
+      "name": "select",
+      "uses": "./.github/workflows/ci-select.yml",
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    "dashboard-labels": {
+      "name": "dashboard labels (lint + drift)",
+      "if": "github.event_name != 'pull_request' || !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) || contains(fromJSON('[\"ci-full\",\"bench-full\"]'), github.event.label.name)",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "uses": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+          "with": {
+            "node-version": 22
+          }
+        },
+        {
+          "name": "Validate metric-labels.json",
+          "run": "python3 -c \"import json; json.load(open('bench/dashboard/metric-labels.json')); print('metric-labels.json is valid JSON')\""
+        },
+        {
+          "name": "Drift gate (regenerate + diff)",
+          "run": "python3 scripts/gen-metric-labels.py --check"
+        },
+        {
+          "name": "Syntax-check dashboard.js",
+          "run": "node --check bench/dashboard/dashboard.js"
+        },
+        {
+          "name": "Dashboard smoke test",
+          "run": "node scripts/dashboard-smoke.js"
+        }
+      ]
+    },
+    "bench": {
+      "name": "run + track benchmarks",
+      "needs": "select",
+      "if": "(github.event_name != 'pull_request' ||\n !contains(fromJSON('[\"labeled\",\"unlabeled\"]'), github.event.action) ||\n contains(fromJSON('[\"ci-full\",\"bench-full\"]'), github.event.label.name)) &&\n(github.event_name != 'pull_request' || github.event.pull_request.draft != true) && (needs.select.outputs.mode != 'selected' ||\n contains(needs.select.outputs.affected, '\"sparq-engine\"') ||\n contains(needs.select.outputs.affected, '\"sparq-cli\"') ||\n contains(needs.select.outputs.affected, '\"sparq-bench\"') ||\n contains(needs.select.outputs.affected, '\"sparq-wasm\"'))",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "contents": "write",
+        "deployments": "write",
+        "pull-requests": "write",
+        "issues": "write"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+        },
+        {
+          "uses": "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+          "with": {
+            "targets": "wasm32-unknown-unknown"
+          }
+        },
+        {
+          "uses": "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
+        },
+        {
+          "name": "Install binaryen (wasm-opt for shipped-size trend metric)",
+          "run": "sudo apt-get update -q && sudo apt-get install -y binaryen"
+        },
+        {
+          "name": "Install well-known-suite toolchains (main + bench-full PRs)",
+          "if": "github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'bench-full')",
+          "run": "sudo apt-get update && sudo apt-get install -y libboost-all-dev default-jdk raptor2-utils unzip"
+        },
+        {
+          "name": "Cache sp2b generator + corpus",
+          "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "/tmp/sp2b",
+            "key": "bench-sp2b-${{ runner.os }}-${{ hashFiles('bench/sp2b/gen.sh') }}"
+          }
+        },
+        {
+          "name": "Cache watdiv generator + corpus",
+          "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "/tmp/watdiv",
+            "key": "bench-watdiv-${{ runner.os }}-${{ hashFiles('bench/watdiv/gen.sh', 'bench/watdiv/files/words.txt') }}"
+          }
+        },
+        {
+          "name": "Cache bsbm generator + corpus",
+          "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "/tmp/bsbm",
+            "key": "bench-bsbm-${{ runner.os }}-${{ hashFiles('bench/bsbm/gen.sh') }}"
+          }
+        },
+        {
+          "name": "Cache lubm generator + corpus",
+          "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "/tmp/lubm",
+            "key": "bench-lubm-${{ runner.os }}-${{ hashFiles('bench/lubm/gen.sh') }}"
+          }
+        },
+        {
+          "name": "Cache dbpsb pinned slice + cut",
+          "uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+          "with": {
+            "path": "/tmp/dbpsb",
+            "key": "bench-dbpsb-${{ runner.os }}-${{ hashFiles('bench/dbpsb/fetch.sh') }}"
+          }
+        },
+        {
+          "name": "Build release binaries",
+          "run": "cargo build --release -p sparq-cli -p sparq-bench"
+        },
+        {
+          "name": "Run benchmarks (PR \u2014 deterministic byte-count ratchet only)",
+          "if": "github.event_name == 'pull_request'",
+          "run": "bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json"
+        },
+        {
+          "name": "Run benchmarks (full suite \u2014 main / schedule / dispatch)",
+          "if": "github.event_name != 'pull_request'",
+          "run": "bash scripts/ci-bench.sh 200000 bench-results.json"
+        },
+        {
+          "name": "Unit-test the hard-gate ratchet logic",
+          "run": "python3 scripts/perf-gate.py --self-test"
+        },
+        {
+          "name": "Fetch previous benchmark series (for the noise-metric sustained-improvement check)",
+          "id": "prev_series",
+          "run": "set -euo pipefail\nif git fetch --depth=20 origin benchmark-data 2>/dev/null; then\n  git show FETCH_HEAD:dev/bench/data.js > prev-data.js 2>/dev/null \\\n    && echo \"fetched previous benchmark-data/dev/bench/data.js\" \\\n    || echo \"benchmark-data branch has no dev/bench/data.js yet.\"\nelse\n  echo \"benchmark-data branch not present yet (first run).\"\nfi\n"
+        },
+        {
+          "name": "Hard gate \u2014 perf regression (deterministic strict; timing best-of-N robust)",
+          "env": {
+            "PERF_GATE_ALLOW": "${{ vars.PERF_GATE_ALLOW }}"
+          },
+          "run": "python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json \\\n  --remeasure-cmd 'bash scripts/ci-bench.sh --parse-only /tmp/perf-remeasure.json >/dev/null 2>&1 && cat /tmp/perf-remeasure.json' \\\n  --remeasure-k 4\n"
+        },
+        {
+          "name": "Auto-ratchet the perf floor (commit improvements back to main)",
+          "if": "github.event_name != 'schedule' && github.ref == 'refs/heads/main'",
+          "env": {
+            "PERF_GATE_ALLOW": "${{ vars.PERF_GATE_ALLOW }}",
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          },
+          "run": "set -euo pipefail\nRECENT_ARG=()\n[ -f prev-data.js ] && RECENT_ARG=(--recent-data prev-data.js)\nset +e\npython3 scripts/perf-gate.py --update-baseline bench-results.json bench/perf-baseline.json \"${RECENT_ARG[@]}\"\nrc=$?\nset -e\nif [ \"$rc\" = \"3\" ]; then\n  echo \"perf floor unchanged \u2014 nothing to commit.\"\n  exit 0\nelif [ \"$rc\" != \"0\" ]; then\n  echo \"::error::perf-gate --update-baseline failed (exit $rc)\"; exit \"$rc\"\nfi\nif git diff --quiet -- bench/perf-baseline.json; then\n  echo \"no diff in bench/perf-baseline.json despite update \u2014 nothing to commit.\"; exit 0\nfi\ngit config user.name 'github-actions[bot]'\ngit config user.email '41898282+github-actions[bot]@users.noreply.github.com'\ngit add bench/perf-baseline.json\ngit commit -m \"chore(bench): auto-ratchet perf floor to new best-ever [skip ci]\" \\\n           -m \"Lowered by the bench workflow after a measured improvement (sq-52e perf ratchet).\"\n# FETCH-REBASE the floor-only commit onto the latest origin/main tip so the push survives the\n# non_fast_forward race (main moves ahead during the long bench job). bench/perf-baseline.json\n# is written by nothing else, so this rebase never conflicts; if it somehow does, fail soft.\nif git fetch origin main 2>/dev/null && git rebase FETCH_HEAD 2>/dev/null; then\n  echo \"rebased the floor-only commit onto the latest origin/main tip.\"\nelse\n  git rebase --abort 2>/dev/null || true\n  echo \"::warning title=perf-floor rebase skipped::Could not rebase the floor commit onto origin/main (fetch or rebase failed); attempting push as-is.\"\nfi\n# Best-effort push. A protected-branch ruleset rejection (GH013) or a residual non_fast_forward\n# race must NOT fail this non-gating main-only commit-back. Disable errexit only around the push\n# so we can inspect its status and fail soft (the measurement + perf-gate above are untouched).\nset +e\ngit push \"https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\" HEAD:main\npush_rc=$?\nset -e\nif [ \"$push_rc\" -ne 0 ]; then\n  echo \"::warning title=perf-floor push declined::Could not push the tightened perf floor to protected main (git push exit ${push_rc}; likely a non_fast_forward race or the GH013 ruleset rejection \u2014 the bypass list contains only the repository-administrator role, not the github-actions bot). Best-effort no-op: the perf measurement + hard gate ran and the floor WAS computed, but the bench/perf-baseline.json update was NOT landed. Resolve by adding the github-actions bot to the main ruleset bypass list (owner-only; sq-llxc/sq-roe3 needs:user) or folding the baseline update into the periodic .beads / data-sync PR (sq-2xdg). The floor only tightens via a human/orchestrator commit in the meantime.\"\n  exit 0\nfi\necho \"committed + pushed tightened perf floor to main.\"\n"
+        },
+        {
+          "name": "Ensure benchmark-data history branch exists",
+          "if": "github.event_name != 'schedule' && github.ref == 'refs/heads/main'",
+          "env": {
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          },
+          "run": "set -euo pipefail\nif git ls-remote --exit-code --heads origin benchmark-data >/dev/null 2>&1; then\n  echo \"benchmark-data branch already exists on origin \u2014 nothing to do.\"\nelse\n  echo \"benchmark-data branch missing on origin \u2014 creating an orphan branch.\"\n  tmp=\"$(mktemp -d)\"\n  git -C \"$tmp\" init -q\n  git -C \"$tmp\" checkout -q --orphan benchmark-data\n  git -C \"$tmp\" -c user.name=github-actions[bot] \\\n                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \\\n                commit -q --allow-empty -m \"chore(bench): initialise benchmark-data history branch\"\n  git -C \"$tmp\" push -q \\\n    \"https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\" \\\n    benchmark-data:benchmark-data\n  echo \"Created and pushed orphan benchmark-data branch.\"\nfi\n"
+        },
+        {
+          "name": "Hard zone \u2014 median-of-history regression gate (main pushes only)",
+          "if": "github.event_name != 'schedule' && github.ref == 'refs/heads/main'",
+          "run": "set -euo pipefail\npython3 scripts/bench_hardzone.py --self-test\npython3 scripts/bench_hardzone.py \\\n  --results bench-results.json \\\n  --prev-data prev-data.js \\\n  --suite 'sparq engine' \\\n  --report-out bench-hardzone-report.json \\\n  --remeasure-cmd 'bash scripts/ci-bench.sh 200000 bench-results-remeasure.json' \\\n  --remeasure-out bench-results-remeasure.json \\\n  --remeasure-k 1\n"
+        },
+        {
+          "name": "Clean bench-induced tracked churn before history switch",
+          "run": "set -euo pipefail\ndirty=\"$(git diff --name-only)\"\nif [ -z \"$dirty\" ]; then\n  echo \"Working tree clean \u2014 no tracked churn to restore.\"\nelse\n  unknown=0\n  while IFS= read -r f; do\n    case \"$f\" in\n      bench/*/Cargo.lock)\n        echo \"Restoring known bench-induced churn: $f\"\n        git checkout -- \"$f\"\n        ;;\n      *)\n        echo \"::error title=unknown tracked churn::'$f' is modified but is NOT known bench-induced churn (bench/**/Cargo.lock) \u2014 refusing to discard it.\"\n        unknown=1\n        ;;\n    esac\n  done <<< \"$dirty\"\n  if [ \"$unknown\" = \"1\" ]; then\n    echo \"::error::Unknown tracked modifications after the bench run (listed above). Unknown churn means something unexpected wrote to tracked paths \u2014 investigate; this step never silently discards it.\"\n    git status --porcelain\n    exit 1\n  fi\nfi\ngit status --porcelain\n"
+        },
+        {
+          "name": "Store + compare against history",
+          "uses": "benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba",
+          "with": {
+            "name": "sparq engine",
+            "tool": "customSmallerIsBetter",
+            "output-file-path": "bench-results.json",
+            "github-token": "${{ secrets.GITHUB_TOKEN }}",
+            "auto-push": "${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}",
+            "gh-pages-branch": "benchmark-data",
+            "benchmark-data-dir-path": "dev/bench",
+            "max-items-in-chart": 20,
+            "comment-always": true,
+            "summary-always": true,
+            "alert-threshold": "175%",
+            "comment-on-alert": true,
+            "fail-on-alert": false
+          }
+        },
+        {
+          "name": "Soft-zone triage (file a deduped bench-flake issue; no @mentions)",
+          "if": "always() && github.repository == 'sparq-org/sparq'",
+          "env": {
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          },
+          "run": "set -uo pipefail\nif [ ! -f bench-results.json ]; then\n  echo \"no bench-results.json (bench did not run to completion) \u2014 nothing to triage.\"\n  exit 0\nfi\n# Build the normalized comparison from THIS run's results + the previously-published point\n# (prev-data.js fetched by the \"Fetch previous benchmark series\" step; absent on first run).\npython3 scripts/bench-triage.py --mode build-comparison \\\n  --results bench-results.json \\\n  --prev-data-js prev-data.js \\\n  --suite 'sparq engine' \\\n  --out bench-comparison.json || { echo \"::warning::comparison build failed (non-fatal)\"; exit 0; }\n# Thresholds MUST match the github-action-benchmark step above (derived by\n# scripts/bench-thresholds.py from the benchmark-data history).\npython3 scripts/bench-triage.py --mode soft \\\n  --comparison bench-comparison.json \\\n  --hardzone-report bench-hardzone-report.json \\\n  --soft 175 --hard 200 \\\n  --run-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" \\\n  || echo \"::warning::soft-zone triage filer failed (non-fatal)\"\n"
+        },
+        {
+          "name": "Seed Pages dashboard onto benchmark-data (if absent)",
+          "if": "github.event_name != 'schedule' && github.ref == 'refs/heads/main'",
+          "env": {
+            "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+          },
+          "run": "set -euo pipefail\n# [GPT-6-ASTRA] Retry only a verified concurrent fast-forward. Rebuild\n# the asset-only commit on the fetched tip; never rebase/force-push data.js.\nexport LC_ALL=C\nsrc=\"$GITHUB_WORKSPACE/bench/dashboard\"\ntmp=\"$(mktemp -d)\"\ntrap 'rm -rf \"$tmp\"' EXIT\ngit -C \"$tmp\" init -q\ngit -C \"$tmp\" remote add origin \\\n  \"https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git\"\ngit -C \"$tmp\" fetch -q --depth=1 origin benchmark-data\ntip=\"$(git -C \"$tmp\" rev-parse FETCH_HEAD)\"\nfor attempt in 1 2 3; do\n  git -C \"$tmp\" checkout -q -B benchmark-data \"$tip\"\n  mkdir -p \"$tmp/dev/bench\"\n  changed=0\n  # [OPUS-4.8] metric-labels.json (sq-ocuf) is part of the served dashboard \u2014 copy it\n  # alongside index.html/dashboard.js/dashboard.css so dashboard.js can fetch it.\n  # [OPUS-4.8] vendor/Chart.min.js (sq-0rv3) is loaded by index.html now that the\n  # CDN dep is dropped \u2014 seed it (in its subdir) so the published Pages dashboard\n  # doesn't 404. The path has a dirname, so mkdir -p before copying.\n  # [OPUS-4.8] competitors.json (sq-kehk) is FETCHED by dashboard.js boot() (sq-rltn / #200)\n  # as the single competitor-data sink \u2014 copy it alongside metric-labels.json so the live\n  # fetch resolves instead of 404ing into the empty embedded COMPETITORS_DATA mirror.\n  for f in index.html dashboard.js dashboard.css metric-labels.json competitors.json vendor/Chart.min.js; do\n    if [ ! -f \"$tmp/dev/bench/$f\" ] || ! cmp -s \"$src/$f\" \"$tmp/dev/bench/$f\"; then\n      mkdir -p \"$(dirname \"$tmp/dev/bench/$f\")\"\n      cp \"$src/$f\" \"$tmp/dev/bench/$f\"\n      changed=1\n    fi\n  done\n  # [OPUS-4.8] root redirect (sq-pages-root): the bare Pages root would 404 because the\n  # dashboard lives under dev/bench/. Seed bench/dashboard/root-redirect.html to the\n  # benchmark-data branch ROOT as index.html so https://sparq.jeswr.org/ bounces to\n  # dev/bench/. github-action-benchmark only writes data.js + dev/bench/index.html (never a\n  # root index.html), so this coexists with its data and is preserved across runs.\n  if [ ! -f \"$tmp/index.html\" ] || ! cmp -s \"$src/root-redirect.html\" \"$tmp/index.html\"; then\n    cp \"$src/root-redirect.html\" \"$tmp/index.html\"\n    changed=1\n  fi\n  if [ \"$changed\" = \"0\" ]; then\n    echo \"dev/bench dashboard already up to date \u2014 nothing to seed.\"\n    exit 0\n  fi\n  git -C \"$tmp\" -c user.name='github-actions[bot]' \\\n                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \\\n                add index.html dev/bench/index.html dev/bench/dashboard.js dev/bench/dashboard.css \\\n                    dev/bench/metric-labels.json dev/bench/competitors.json dev/bench/vendor/Chart.min.js\n  git -C \"$tmp\" -c user.name='github-actions[bot]' \\\n                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \\\n                commit -q -m \"chore(bench): seed/update Pages dashboard (dev/bench + root redirect) [skip ci]\"\n  if git -C \"$tmp\" push --porcelain origin benchmark-data:benchmark-data \\\n      >\"$tmp/.git/push.stdout\" 2>\"$tmp/.git/push.stderr\"; then\n    echo \"Seeded/updated the custom Pages dashboard on benchmark-data.\"\n    exit 0\n  else\n    push_rc=$?\n  fi\n  cat \"$tmp/.git/push.stdout\"\n  cat \"$tmp/.git/push.stderr\" >&2\n  # Porcelain's exact ref/status record excludes hook/auth/transport\n  # failures. A changed tip alone never makes an arbitrary error retryable.\n  push_status=\"$(grep $'\\t' \"$tmp/.git/push.stdout\" || true)\"\n  case \"$push_status\" in\n    $'!\\trefs/heads/benchmark-data:refs/heads/benchmark-data\\t[rejected] (fetch first)'|\\\n    $'!\\trefs/heads/benchmark-data:refs/heads/benchmark-data\\t[rejected] (non-fast-forward)') ;;\n    *)\n      echo \"::error::Dashboard push failed without a single retryable non-fast-forward rejection.\"\n      exit \"$push_rc\" ;;\n  esac\n  if [ \"$attempt\" -eq 3 ]; then\n    echo \"::error::Dashboard publication exhausted its bounded push attempts.\"\n    exit \"$push_rc\"\n  fi\n  # Do not repeat --depth=1: retain the fetched ancestry back to tip so\n  # the old snapshot must be an ancestor, not merely a different object.\n  git -C \"$tmp\" fetch -q origin benchmark-data\n  next_tip=\"$(git -C \"$tmp\" rev-parse FETCH_HEAD)\"\n  if [ \"$next_tip\" = \"$tip\" ] || ! git -C \"$tmp\" merge-base --is-ancestor \"$tip\" \"$next_tip\"; then\n    echo \"::error::Dashboard rejection was not followed by a verified branch advance.\"\n    exit \"$push_rc\"\n  fi\n  tip=\"$next_tip\"\n  echo \"::notice::Concurrent benchmark-data advance verified; rebuilding the dashboard commit.\"\ndone\n"
+        }
+      ]
+    }
+  }
+}

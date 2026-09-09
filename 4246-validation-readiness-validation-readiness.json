@@ -1,0 +1,145 @@
+{
+  "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+  "mode": "Read-only readiness only: no build, test, gate, fetch, install or remote action executed. Version commands and bounded filesystem/source inspection only.",
+  "captured_at": "2026-09-09T13:26:04.457688+00:00",
+  "frozen_source_clean": true,
+  "frozen_88_manifest_files_unchanged": true,
+  "authority": {
+    "contract": "AGENTS-worker-core.md:25-32 and83; AGENTS.md:225: full-workspace build/tests/clippy plus conformance/perf; orchestrator owns authoritative merge gate.",
+    "local_vs_ci": "Worker command permits --exclude sparq-py for clippy, but actual ci.yml lint includes every workspace crate, both default and --all-features. Do not label the excluded local command equivalent to the CI job.",
+    "fmt": "Informational in lint; do not run workspace formatter or change source.",
+    "raw_jobs": "workflow-commands.json preserves exact selected job bodies, step env, working-directory, conditional fetch/retry/reporting steps. This is evidence, not an instruction to execute mutation/upload/retry steps."
+  },
+  "local_environment": {
+    "toolchain": "Pinned rustc1.97.1, clippy/rustfmt installed; native aarch64-apple-darwin and wasm32-unknown-unknown targets installed.",
+    "cache": "642/642 registry packages in workspace Cargo.lock found as source or crate archive; pinned solid-oidc-verifier89c896249a726398b78302fd2f65eef0a82af681 checkout exists. Static presence, not active-resolution/build success proof.",
+    "private_targets": [
+      {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+        "size_observed": "1.7GiB",
+        "profiles": [
+          "debug"
+        ]
+      },
+      {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/target",
+        "size_observed": "424MiB",
+        "profiles": [
+          "release"
+        ]
+      }
+    ],
+    "disk_free_bytes": 14555447296,
+    "disk_limit": "About13.6GiB free on the shared data volume; neither private target has a warm wasm build. Full workspace/all-features artifact growth is unmeasured. Do not assume it fits or reclaim unrelated caches.",
+    "bash": "Only /bin/bash3.2.57 found. No Bash>=4 at Homebrew/usr-local bin and opt paths, Homebrew Cellar/bash, or /opt/local/bin/bash. Preflight mapfile blocker remains; no replacement/install attempted.",
+    "python": "/opt/homebrew/bin/python3 Python3.14.5/PyYAML6.0.3 available; system Python lacks required YAML for matrix tools.",
+    "wasm": "wasm-pack0.15.0 matches CI. Node absent from PATH/standard bin paths; bundled Codex Node24.19.0 available, whereas CI pins Node20. Required wasm-bindgen CLI0.2.122 was not found at checked known cache executable paths; an old0.2.85 CLI exists. wasm-pack may otherwise install/download; do not invoke it offline on an assumption.",
+    "unavailable_at_checked_locations": [
+      "cargo-nextest",
+      "cargo-llvm-cov",
+      "cargo-mutants",
+      "maturin",
+      "typos"
+    ],
+    "limits": "No broader home/cache scan; no credentials read. No speculative runtime/disk estimate. Full native/system dependency closure and sandbox socket/process behavior remain unexecuted."
+  },
+  "checks": [
+    {
+      "scope": "Full-workspace lint/doc/build",
+      "authority": ".github/workflows/ci.yml#lint; AGENTS-worker-core.md:25-32",
+      "commands": [
+        "cargo clippy --workspace --all-targets -- -D warnings",
+        "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+        "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps",
+        "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --all-features",
+        "cargo build --workspace"
+      ],
+      "readiness": "Can attempt native offline when authorized using existing package/tool caches, private target, two jobs; success/full build closure not established. Exact Linux clean CI remains required. No arbitrary --exclude or feature reductions."
+    },
+    {
+      "scope": "Full-workspace tests",
+      "commands": [
+        "cargo test --workspace",
+        "cargo test --workspace --features approx-ann,filtered-ann,vec-predicate --doc"
+      ],
+      "ci_authority": ".github/workflows/ci.yml#build-archive and#test: cargo nextest archive --workspace --all-targets --features approx-ann,filtered-ann,vec-predicate --archive-file nextest.tar.zst; three bulk count shards plus two named recall shards.",
+      "readiness": "Native cargo test can be attempted offline when authorized, but is not the exact archived nextest/CI feature configuration. Local nextest absent. External-corpus self-skips must not be called conformance passes; use normal Linux CI for exact archive/shards."
+    },
+    {
+      "scope": "New opt-in full matrix leg",
+      "authority": ".github/feature-matrix.d/sparq-core.yml entry sparq-core (overlay-deleted-projections), test:true; golden187names; .github/workflows/feature-matrix.yml#setup/#opt-in-features -> scripts/run-feature-matrix-group.py::run_leg",
+      "commands": [
+        "cargo build -p sparq-core --features overlay-deleted-projections",
+        "cargo test -p sparq-core --features overlay-deleted-projections",
+        "cargo clippy -p sparq-core --features overlay-deleted-projections --all-targets -- -D warnings"
+      ],
+      "readiness": "Can execute locally offline with existing dependencies after authorization; prior scoped lib tests/clippy are not the complete all-targets job. Execute one pass, not the runner retry wrapper; grouped Linux CI/report correlation remains authoritative."
+    },
+    {
+      "scope": "Conformance ratchets",
+      "authority": ".github/workflows/ci.yml jobs conformance/shacl-conformance/geo-conformance/solid-conformance/odrl-conformance/jsonld-conformance/service-federation-conformance/inference-conformance. Exact commands and floor parsing in workflow-commands.json.",
+      "primary_commands": [
+        "cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance",
+        "cargo run --profile release-fast -p sparq-conformance --bin sparq-inference-conformance",
+        "cargo test -p sparq-geo --test ogc_compliance_ratchet -- --nocapture",
+        "cargo test -p sparq-geo --features geosparql_rewrite --test ogc_query_rewrite_ratchet -- --nocapture",
+        "cargo test -p sparq-solid --test conformance_wac --test conformance_acp -- --nocapture"
+      ],
+      "floors": "SPARQL1229; inference1967; SHACL98/5 plus1.2 in-runner floors; Geo119/38; WAC/ACP13/13; ODRL59; JSONLD floor extraction and additional inference/service floors retained exactly in raw jobs.",
+      "readiness": "Eight pinned external corpus destinations absent (fixtures.json), so full SPARQL/inference/SHACL/ODRL/JSONLD/service-evaluation ratchets cannot be truthfully validated offline here. Normal CI fetch/cache required, or separately authorized fixture provisioning. Embedded Geo/WAC/ACP suites are candidates for local execution; no runs performed."
+    },
+    {
+      "scope": "Wasm",
+      "authority": ".github/workflows/ci.yml#wasm, full combinations/cwds in workflow-commands.json",
+      "minimum_commands": [
+        "cargo build -p sparq-wasm --target wasm32-unknown-unknown",
+        "cargo clippy -p sparq-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings",
+        "bash scripts/wasm-deps-guard.sh"
+      ],
+      "readiness": "Target/toolchain and crate caches permit build/clippy/dependency-guard attempts offline after authorization. Full headless wasm-pack test --node lanes need matching0.2.122 tooling and CI Node20; normal Linux CI is the concrete existing route. Do not silently download tools. A base wasm build alone is not all feature combinations."
+    },
+    {
+      "scope": "Deterministic perf ratchet",
+      "authority": ".github/workflows/bench.yml#bench, scripts/ci-bench.sh deterministic-only, scripts/perf-gate.py",
+      "commands": [
+        "cargo build --release -p sparq-cli -p sparq-bench",
+        "bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json",
+        "python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json"
+      ],
+      "readiness": "Native/wasm build prerequisites mostly present, but no full deterministic run executed. Prefer normal Linux PR/merge-group benchmark job for authoritative baseline architecture. Local reproduction needs private WT target/ path because script hardcodes target/release binaries and target/wasm32 paths; CARGO_TARGET_DIR alone would miss outputs. Do not alter source or shared targets. Verify all required metrics emitted, including wasm; script can skip failed/absent wasm build. Do not update baseline or use optional retry/publishing steps.",
+      "policy": "Deterministic byte metrics hard; wall-clock parse metric advisory. No full timing suite or new performance claim needed for this readiness task."
+    },
+    {
+      "scope": "Preflight/coverage/mutation",
+      "commands": [
+        "python3 scripts/preflight.py --base a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+      ],
+      "readiness": "Preflight blocked by Bash3mapfile, not a content failure or passed gate. Coverage instrumentation and cargo-mutants tools absent; existing normal workflow tiers retain their policy. No local install or automatic rerun proposed."
+    }
+  ],
+  "bounded_next_plan": [
+    "Wait for root authorization after actual Opus review; preserve b86 source and all frozen artifacts.",
+    "Use one sequential task-private lane, CARGO_BUILD_JOBS=2 and explicit offline/locked Cargo, remeasure free disk before each broad stage; stop/report actual resolution, disk or tool failure without installs/retries/exclusions.",
+    "First native workspace default/all-feature lint and rustdoc, complete new opt-in build/test/all-targets clippy; then authorized cargo test workspace and doctests. These are additional local evidence, not replacement for clean Linux CI.",
+    "Then authorized wasm build/clippy/dependency guard and embedded conformance suites if disk remains adequate. Full external-corpus, exact nextest, Node20/wasm-pack, preflight Bash>=4 and authoritative deterministic perf validation belong to normal existing Linux CI under root publication control.",
+    "Do not run Linux disk-cleanup scripts, workflow auto-ratchet/update/upload/issue/reporting phases, remote actions, dispatches or installs locally."
+  ],
+  "evidence_files": {
+    "dependency-cache.json": {
+      "sha256": "cca8370f30703d5130f434f1d1bd34ee35516addfd079980f7fb68dc6761cae6",
+      "bytes": 553
+    },
+    "fixtures.json": {
+      "sha256": "2e0eb4d5db813a428dab384986e99a4d2120eaac46128b23d438bbf6c19bea17",
+      "bytes": 287
+    },
+    "tool-readiness.json": {
+      "sha256": "3b0f59e9ca567531b91644ad2af563ab8eb536775bd926594a54a3bbec6d2655",
+      "bytes": 4717
+    },
+    "workflow-commands.json": {
+      "sha256": "51dd63f5b573a65fc999723f6a886f1f46b4fe4e18f8bdf7bcd1dc0bcf6beadd",
+      "bytes": 113436
+    }
+  }
+}

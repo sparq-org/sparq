@@ -1,0 +1,10 @@
+{
+  "tests/w3c/rdf-tests": false,
+  "tests/w3c/n3": false,
+  "tests/w3c/owl2/all.rdf": false,
+  "tests/w3c/rif-core": false,
+  "tests/w3c/json-ld-api": false,
+  "tests/w3c/json-ld-framing": false,
+  "tests/odrl-test-suite": false,
+  "crates/sparq-shacl/tests/shacl/data-shapes": false
+}

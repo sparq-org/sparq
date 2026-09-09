@@ -1,0 +1,186 @@
+{
+  "tools": {
+    "bash": {
+      "known_location_files": [
+        "/bin/bash"
+      ],
+      "path_resolution": "/bin/bash"
+    },
+    "cargo-nextest": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "cargo-llvm-cov": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "cargo-mutants": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "wasm-pack": {
+      "known_location_files": [
+        "/Users/jesght/.cargo/bin/wasm-pack"
+      ],
+      "path_resolution": "/Users/jesght/.cargo/bin/wasm-pack"
+    },
+    "wasm-bindgen": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "wasm-bindgen-test-runner": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "wasmtime": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "node": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "npm": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "maturin": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "clang": {
+      "known_location_files": [
+        "/usr/bin/clang"
+      ],
+      "path_resolution": "/usr/bin/clang"
+    },
+    "clang++": {
+      "known_location_files": [
+        "/usr/bin/clang++"
+      ],
+      "path_resolution": "/usr/bin/clang++"
+    },
+    "pkg-config": {
+      "known_location_files": [
+        "/opt/homebrew/bin/pkg-config"
+      ],
+      "path_resolution": null
+    },
+    "actionlint": {
+      "known_location_files": [
+        "/opt/homebrew/bin/actionlint"
+      ],
+      "path_resolution": null
+    },
+    "typos": {
+      "known_location_files": [],
+      "path_resolution": null
+    },
+    "bash_cellar": []
+  },
+  "versions": {
+    "rustc": {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustc",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "stderr": ""
+    },
+    "targets": {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustup",
+        "target",
+        "list",
+        "--installed"
+      ],
+      "exit": 0,
+      "stdout": "aarch64-apple-darwin\nwasm32-unknown-unknown",
+      "stderr": ""
+    },
+    "components": {
+      "command": [
+        "/Users/jesght/.cargo/bin/rustup",
+        "component",
+        "list",
+        "--installed"
+      ],
+      "exit": 0,
+      "stdout": "cargo-aarch64-apple-darwin\nclippy-aarch64-apple-darwin\nrust-docs-aarch64-apple-darwin\nrust-std-aarch64-apple-darwin\nrust-std-wasm32-unknown-unknown\nrustc-aarch64-apple-darwin\nrustfmt-aarch64-apple-darwin",
+      "stderr": ""
+    },
+    "node": {
+      "unavailable": "/opt/homebrew/bin/node"
+    },
+    "python-yaml": {
+      "command": [
+        "/opt/homebrew/bin/python3",
+        "-c",
+        "import sys,yaml; print(sys.version); print(yaml.__version__)"
+      ],
+      "exit": 0,
+      "stdout": "3.14.5 (main, May 10 2026, 10:21:34) [Clang 21.0.0 (clang-2100.0.123.102)]\n6.0.3",
+      "stderr": ""
+    },
+    "bundled-node": {
+      "command": [
+        "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "v24.19.0"
+    }
+  },
+  "disk": {
+    "total_bytes": 994662584320,
+    "used_bytes": 980107137024,
+    "free_bytes": 14555447296
+  },
+  "additional_known_locations": {
+    "/opt/homebrew/opt/bash/bin/bash": {
+      "exists": false
+    },
+    "/usr/local/opt/bash/bin/bash": {
+      "exists": false
+    },
+    "/opt/local/bin/bash": {
+      "exists": false
+    },
+    "/Users/jesght/Library/Caches/.wasm-pack": {
+      "exists": true,
+      "immediate_children": [
+        "wasm-bindgen-cargo-install-0.2.122",
+        "wasm-opt-24f8fc61db1aa99c",
+        "wasm-opt-50385c9e73ccee70",
+        ".wasm-bindgen-89981469555a8fb6.lock",
+        "wasm-bindgen-89981469555a8fb6",
+        "wasm-bindgen-cargo-install-0.2.106",
+        "wasm-bindgen-cargo-install-0.2.100",
+        ".wasm-opt-24f8fc61db1aa99c.lock",
+        ".wasm-opt-50385c9e73ccee70.lock"
+      ]
+    },
+    "/Users/jesght/.cache/.wasm-pack": {
+      "exists": false
+    },
+    "/Users/jesght/.cache/wasm-pack": {
+      "exists": false
+    }
+  },
+  "wasm_bindgen_cache": {
+    "lock_version": "0.2.122",
+    "observed": [
+      {
+        "path": "/Users/jesght/Library/Caches/.wasm-pack/wasm-bindgen-89981469555a8fb6/wasm-bindgen",
+        "exit": 0,
+        "version": "wasm-bindgen 0.2.85 (a459f5abf)"
+      },
+      {
+        "path": "/Users/jesght/Library/Caches/.wasm-pack/wasm-bindgen-89981469555a8fb6/wasm-bindgen-test-runner",
+        "exit": 1,
+        "version": ""
+      }
+    ]
+  }
+}

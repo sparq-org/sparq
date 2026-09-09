@@ -1,0 +1,12 @@
+{
+  "registry_packages_present_as_source_or_archive": 642,
+  "registry_packages_missing": [],
+  "git_dependencies": [
+    {
+      "name": "solid-oidc-verifier",
+      "version": "0.1.0",
+      "source": "git+https://github.com/jeswr/solid-oidc-verifier?rev=89c896249a726398b78302fd2f65eef0a82af681#89c896249a726398b78302fd2f65eef0a82af681"
+    }
+  ],
+  "limitation": "Static whole-lock inventory includes target/feature-inactive packages; not proof of the active full-workspace resolution. No metadata resolution, download, unpack or build executed."
+}
