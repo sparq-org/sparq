@@ -1,0 +1,73 @@
+159:/// Pending updates layered over the immutable base indexes (the T17 delta-overlay):
+166:/// `Clone` because [`TripleStore::fork`] carries the overlay into the forked store
+167:/// BY VALUE (O(overlay), bounded by the compaction policy) while the base indexes are
+218:    /// apply_delta invalidates only the mutated overlay under exclusive access.
+247:    /// Merges the (perm-sorted) base rows with the overlay for one scan: base rows whose
+278:    /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
+292:        // The cached perm-sorted projections are part of the overlay's footprint; SPO
+322:    // The delta-overlay of pending updates, `None` when there are none — so the scan
+324:    // NOTE: `pred_stats` is not overlay-adjusted (planner estimates only); `estimate`
+326:    overlay: Option<Box<Overlay>>,
+469:        TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None }
+494:        TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None }
+551:    /// delta-overlay and save/open all read the same rows, in the same order, out of Vecs of
+601:    /// what keeps scan/lookup/estimate, the delta-overlay and save/open untouched. Gated by
+680:            // A pending delta-overlay is FOLDED into every BUILT permutation on save, so
+682:            // stay empty). The in-memory overlay is untouched (`save` takes `&self`).
+683:            let rows: std::borrow::Cow<[[Id; 3]]> = match &self.overlay {
+810:        Ok(TripleStore { perms: std::sync::Arc::new(perms), pred_stats: std::sync::Arc::new(pred_stats), overlay: None })
+862:        match &self.overlay {
+872:    /// Whether a delta-overlay of pending updates exists (i.e. updates were applied
+874:    pub fn has_overlay(&self) -> bool {
+875:        self.overlay.is_some()
+889:    /// Whether the store (base merged with any overlay) contains the canonical triple.
+891:        match &self.overlay {
+900:    /// Whether the immutable BASE (ignoring the overlay) contains the canonical triple —
+908:    /// (SPARQL's DELETE/INSERT order), each O(log n + batch · overlay) — instead of the
+911:    /// overlay nets out to nothing it is dropped entirely, so an untouched (or fully
+917:        let mut ov = self.overlay.take().unwrap_or_default();
+941:        self.overlay = if ov.is_empty() { None } else { Some(ov) };
+964:    /// planner stats are SHARED (Arc bumps, O(1)); the pending delta-overlay is
+965:    /// carried by value (O(overlay), bounded by the compaction policy). The fork and
+972:            overlay: self.overlay.clone(),
+976:    /// Number of pending overlay entries (insertions + deletions) — the input to a
+978:    pub fn overlay_len(&self) -> usize {
+979:        self.overlay.as_ref().map_or(0, |ov| ov.added.len() + ov.deleted.len())
+986:            + self.overlay.as_ref().map_or(0, |ov| ov.heap_bytes())
+1090:        // The single overlay branch on the scan hot path: with no pending updates the
+1091:        // base range is returned untouched (borrowed, zero copies); with an overlay the
+1095:        // ZERO-COPY FAST PATH (sq-7d3dj.3) [OPUS-4.8]: even WITH an overlay, most ranges a small
+1096:        // overlay does not touch. `count_correction` tells us exactly how many
+1098:        // overlay contributes nothing here — no `added` row projects into `[lo, hi]` (so
+1106:        let rows = match &self.overlay {
+1122:        match &self.overlay {
+1164:#[path = "store/overlay_deleted_tests.rs"]
+1165:mod overlay_deleted_tests;
+1168:mod tests {
+1835:    /// The delta-overlay must be INVISIBLE in results: a store with an overlay must answer
+1839:    /// overlay that nets out to nothing is dropped (zero-overhead empty case).
+1841:    fn overlay_scans_match_rebuild() {
+1863:        assert!(store.has_overlay());
+1874:        assert_eq!(store.len(), rebuilt.len(), "len must reflect the overlay");
+1899:                                "unsorted overlay scan for {pat:?} ({label})"
+1947:        // Reverting every EFFECTIVE change must drop the overlay entirely (no residual
+1949:        // new ones (the no-op delete/insert from above never entered the overlay).
+1953:        assert!(!store.has_overlay(), "a fully reverted overlay must be dropped");
+1960:    /// The overlay zero-copy fast path (sq-7d3dj.3) must be PERF-ONLY: a scanned range the
+1961:    /// overlay does not touch (`count_correction == (0, 0)`) returns the BORROWED base
+1963:    /// the overlay DOES touch still takes the owned merge path and reflects the correction.
+1967:    fn overlay_zero_copy_fast_path() {
+1977:        // A no-overlay reference store: EVERY scan already borrows (the `None` branch).
+1979:        assert!(!base_store.has_overlay());
+1981:        // A small overlay touching ONLY subject 50: insert (50,1,11), delete (50,1,1).
+1984:        assert!(store.has_overlay(), "the overlay must exist for a non-vacuous test");
+1993:        // the no-overlay base store (which also borrows). This is the "store WITH an
+1994:        // overlay, scanned range clean" case the fast path exists for.
+2000:            // A clean range is untouched by the overlay, so the rebuild agrees too.
+2008:        assert!(matches!(scan.rows, Cow::Owned(_)), "a range the overlay touches must take the merge path");
+2012:        // (iii) A full unbound scan intersects the overlay -> merge path, equals rebuild.
+2015:        assert!(matches!(scan.rows, Cow::Owned(_)), "an overlay-intersecting full scan takes the merge path");
+2018:        // (iv) An overlay that touches a range only via a DELETE (no insert) must still take
+2042:        // Warm the non-SPO projections. Object 11 exists ONLY as the overlay's insertion,
+2043:        // so the O-bound scan is exactly one overlay row — a stale OSP cache is then visible
+2046:        // OSP rows are (o, s, p), so the single overlay insertion (50, 1, 11) reads (11, 50, 1).

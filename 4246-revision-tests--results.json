@@ -1,0 +1,104 @@
+[
+  {
+    "name": "store-default",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 7.324387167
+  },
+  {
+    "name": "store-compact",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--no-default-features",
+      "--features",
+      "compact-index",
+      "--lib",
+      "store::",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 10.261506459
+  },
+  {
+    "name": "snapshot-fork",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--test",
+      "snapshot",
+      "--test",
+      "fork_differential",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "seconds": 41.481269166999994
+  },
+  {
+    "name": "clippy-core",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-core",
+      "--lib",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 2.8461619169999963
+  },
+  {
+    "name": "clippy-harness",
+    "command": [
+      "/Users/jesght/.cargo/bin/cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "bench/overlay-count/Cargo.toml",
+      "--features",
+      "count-alloc",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "seconds": 7.400851291999992
+  },
+  {
+    "name": "preflight",
+    "command": [
+      "python3",
+      "scripts/preflight.py",
+      "--base",
+      "a42a9e89dec485f6a319c47cb3635c59cb5a2270"
+    ],
+    "exit": 1,
+    "seconds": 1.6128999579999999
+  }
+]

@@ -1,0 +1,28 @@
+crates/sparq-core/src/lib.rs:83:    /// delta that appends terms (`apply_delta_mem`) so it is recomputed over the grown
+crates/sparq-core/src/lib.rs:1952:        for (insert, t) in Wal::replay(dir)? {
+crates/sparq-core/src/lib.rs:1954:                g.apply_delta_mem(&[t], &[]);
+crates/sparq-core/src/lib.rs:1956:                g.apply_delta_mem(&[], &[t]);
+crates/sparq-core/src/lib.rs:1972:        // `apply_delta_mem` (IN-MEMORY only) and then truncated the journal, so a record that lived
+crates/sparq-core/src/lib.rs:1997:    /// [`apply_delta`](Self::apply_delta) (NOT the in-memory-only `apply_delta_mem`), so a record
+crates/sparq-core/src/lib.rs:2955:        self.apply_delta_mem(inserts, deletes);
+crates/sparq-core/src/lib.rs:3059:        self.store = TripleStore::from_triples(Vec::new());
+crates/sparq-core/src/lib.rs:3214:        // likewise drops its handles via `*self = Graph::open(..)` after its swap).
+crates/sparq-core/src/lib.rs:3372:    fn apply_delta_mem(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) {
+crates/sparq-core/src/lib.rs:3429:            self.store = TripleStore::from_triples(triples);
+crates/sparq-core/src/lib.rs:3440:            self.persist_swap(&dir)?;
+crates/sparq-core/src/lib.rs:3462:    fn persist_swap(&mut self, dir: &std::path::Path) -> Result<(), String> {
+crates/sparq-core/src/lib.rs:3469:        *self = reopened;
+crates/sparq-core/src/lib.rs:3476:    /// `persist_swap` also calls — there is one crash-safe swap implementation, not two). Returns
+crates/sparq-core/src/lib.rs:3540:    /// swapped in via the SAME rollback-safe `persist_swap` the compaction
+crates/sparq-core/src/lib.rs:3553:        let mut fresh = self.reintern_live()?;
+crates/sparq-core/src/lib.rs:3557:            // renamed away). `persist_swap` writes `fresh`'s image to `dir` and re-opens
+crates/sparq-core/src/lib.rs:3561:            fresh.persist_swap(&dir)?;
+crates/sparq-core/src/lib.rs:3564:        std::mem::swap(self, &mut fresh);
+crates/sparq-core/src/lib.rs:3571:    /// (the caller's [`persist_swap`](Self::persist_swap) gives the swapped-in graph its own).
+crates/sparq-core/src/lib.rs:3572:    fn reintern_live(&self) -> Result<Graph, String> {
+crates/sparq-core/src/lib.rs:3591:            let sub_fresh = sub.reintern_live()?;
+crates/sparq-core/src/lib.rs:3626:/// [`persist_swap`](Graph::persist_swap) so the public [`restore_into_durable`](Graph::restore_into_durable)
+crates/sparq-core/src/lib.rs:3632:/// The protocol (matching the design recorded on `persist_swap`):
+crates/sparq-core/src/lib.rs:4084:/// in-memory-only `apply_delta_mem`, and the truncation happens only AFTER every record is durably
+crates/sparq-core/src/lib.rs:4173:    /// applied. EXACT clone of [`Wal::replay`]'s torn-tail logic, extended with the per-record slot.
+crates/sparq-core/src/lib.rs:9969:    /// Under the OLD behaviour (`apply_delta_mem` then truncate) the first reopen applied the record

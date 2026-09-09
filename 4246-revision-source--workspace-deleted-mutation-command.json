@@ -1,0 +1,1 @@
+["rg", "-n", "--glob", "*.rs", "ov\\.deleted|overlay\\.as_mut|self\\.overlay\\s*=|overlay\\.take\\(|\\.deleted\\.(insert|remove|clear|retain|extend|drain)|&mut.*Overlay|Overlay\\s*\\{", "."]

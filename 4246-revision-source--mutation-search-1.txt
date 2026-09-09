@@ -1,0 +1,5 @@
+crates/sparq-core/src/store/overlay_deleted_tests.rs:180:    ov.deleted.extend([[0, 1, 2], [2, 3, 4], [Id::MAX; 3]]);
+crates/sparq-core/src/store.rs:170:struct Overlay {
+crates/sparq-core/src/store.rs:181:impl Overlay {
+crates/sparq-core/src/store.rs:927:                ov.deleted.insert(*t);
+crates/sparq-core/src/store.rs:931:            if ov.deleted.remove(t) {

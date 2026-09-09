@@ -1,0 +1,79 @@
+{
+  "generated_at": "2026-09-09T12:24:19.554870+00:00",
+  "heads": {
+    "candidate": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+    "main-control": "912fa6c3cfd83be6b10c2e3541650120997312a9"
+  },
+  "production_main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "harness_files": {
+    "bench/overlay-count/Cargo.toml": "f0cbcc2c7f6ea5e1e576254dc9b3904540833e03ac796505d31bf926f8b1c040",
+    "bench/overlay-count/Cargo.lock": "b319e3eafeffff389ed020f2213f89dbc0f7041405a3dc9d42facec6e74681bf",
+    "bench/overlay-count/README.md": "4723afb882d47f46f86b62355646387e8687a53942098c5c743e21202f9c8260",
+    "bench/overlay-count/src/counting.rs": "25b3712e37c4142edac164b32ce47308123bac8201f8a3ff2e3078cd4b5416f2",
+    "bench/overlay-count/src/main.rs": "428313536dbdedb7d999070420675e91939faac57e1dfc94eb8b9d8b4d1087b2",
+    "bench/overlay-count/src/lifecycle.rs": "da5ea2ee729be7c505334f5977cef6e353b2f5e868665f83d8327b29e77350e8"
+  },
+  "identical_harness": true,
+  "control_production_diff_empty": true,
+  "runtime_files": {
+    "candidate": {
+      "crates/sparq-core/src/store.rs": "54b8c5b1019599c0f99eb573817118c371218de954f91a86a3eda94be72c767a",
+      "crates/sparq-core/src/lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+      "crates/sparq-engine/src/exec.rs": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd"
+    },
+    "main-control": {
+      "crates/sparq-core/src/store.rs": "807a812447409889e02fb7125f8e87761a8276d5cff0ff7d7d740b2e919d683f",
+      "crates/sparq-core/src/lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+      "crates/sparq-engine/src/exec.rs": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd"
+    }
+  },
+  "binaries": {
+    "candidate-count": {
+      "sha256": "cd2ef2767e7e03dc0b1a35d390fc7609d67a3fbffbcc1919b3213fc72d2e1e9e",
+      "bytes": 5402656
+    },
+    "candidate-time": {
+      "sha256": "a2bfaf5e1004d9d44a02048d592d2c52588581325be91b88b308662ad8080cbe",
+      "bytes": 5401072
+    },
+    "main-time": {
+      "sha256": "3939dc2ef78bb4488628047e61ba72a231f77885e4d58e1d94465444f7f3e5d6",
+      "bytes": 5381488
+    },
+    "main-count": {
+      "sha256": "c3d8ef73730fe3b79f8eb6a3e37684d36dc54297e9ada039870a679ce6cd6a0e",
+      "bytes": 5399424
+    }
+  },
+  "build_jobs": 2,
+  "rayon_threads": 1,
+  "concurrent_case_threads": 2,
+  "optimized_target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/diagnostic/target",
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)\n",
+  "profile": "opt-level=3, lto=false, debug=false, codegen-units=16",
+  "features": [
+    "default (timing)",
+    "default+count-alloc (allocation)"
+  ],
+  "no_builds_during_measurement": true,
+  "optimized_build_logs": [
+    "builds/candidate-time.log",
+    "builds/main-time.log",
+    "builds/main-count.log",
+    "builds/candidate-count.log"
+  ],
+  "build_cargo_seconds": {
+    "candidate-time": 38.36,
+    "main-time": 40.11,
+    "main-count": 4.37,
+    "candidate-count": 3.71
+  },
+  "total_optimized_cargo_seconds": 86.55,
+  "clean_worktrees": {
+    "candidate": true,
+    "main-control": true
+  }
+}

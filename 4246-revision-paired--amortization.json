@@ -1,0 +1,118 @@
+{
+  "method": "Algebra only: first window C1/M1 plus (reads-1)*warm-query Qc/Qm. First integer reads with C1+(reads-1)*Qc < M1+(reads-1)*Qm. Uses saved medians, not an additional measurement.",
+  "assumptions": [
+    "Subsequent queries have the same shape and access the already materialized permutations on the same generation, with no intervening tombstone mutation/compaction.",
+    "Fork-tombstone warm read cost is borrowed from the snapshot(one warmed permutation) read phase at the same generation index. It has D rather than D+generation tombstones; assumes that tiny difference does not materially change warmed query latency.",
+    "Multi-pattern warm and cold cases share exact fixture/query.",
+    "Costs add linearly and median observations are representative; no covariance/confidence interval or scheduler/allocator/cache-pressure model is established.",
+    "Does not repay or remove retained memory, clone copies, cold tail latency, or costs for new permutations; not an admission policy/threshold."
+  ],
+  "rows": [
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 1,
+      "generation": 1,
+      "first_main_ns": 236666,
+      "first_candidate_ns": 1212041,
+      "assumed_subsequent_main_query_ns": 225958,
+      "assumed_subsequent_candidate_query_ns": 37958,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1592414,
+      "projected_candidate_ns": 1439789
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 1,
+      "generation": 2,
+      "first_main_ns": 208084,
+      "first_candidate_ns": 1190875,
+      "assumed_subsequent_main_query_ns": 197958,
+      "assumed_subsequent_candidate_query_ns": 6500,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1395832,
+      "projected_candidate_ns": 1229875
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 1,
+      "generation": 3,
+      "first_main_ns": 195500,
+      "first_candidate_ns": 1218334,
+      "assumed_subsequent_main_query_ns": 190833,
+      "assumed_subsequent_candidate_query_ns": 4791,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1340498,
+      "projected_candidate_ns": 1247080
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 1,
+      "generation": 4,
+      "first_main_ns": 204666,
+      "first_candidate_ns": 1211583,
+      "assumed_subsequent_main_query_ns": 190167,
+      "assumed_subsequent_candidate_query_ns": 4291,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1345668,
+      "projected_candidate_ns": 1237329
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 6,
+      "generation": 1,
+      "first_main_ns": 233375,
+      "first_candidate_ns": 1311334,
+      "assumed_subsequent_main_query_ns": 225958,
+      "assumed_subsequent_candidate_query_ns": 37958,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1589123,
+      "projected_candidate_ns": 1539082
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 6,
+      "generation": 2,
+      "first_main_ns": 198667,
+      "first_candidate_ns": 1222584,
+      "assumed_subsequent_main_query_ns": 197958,
+      "assumed_subsequent_candidate_query_ns": 6500,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1386415,
+      "projected_candidate_ns": 1261584
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 6,
+      "generation": 3,
+      "first_main_ns": 203208,
+      "first_candidate_ns": 1219083,
+      "assumed_subsequent_main_query_ns": 190833,
+      "assumed_subsequent_candidate_query_ns": 4791,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1348206,
+      "projected_candidate_ns": 1247829
+    },
+    {
+      "case": "fork-tombstone",
+      "warm_perms": 6,
+      "generation": 4,
+      "first_main_ns": 198417,
+      "first_candidate_ns": 1283041,
+      "assumed_subsequent_main_query_ns": 190167,
+      "assumed_subsequent_candidate_query_ns": 4291,
+      "first_strictly_cheaper_total_reads": 7,
+      "projected_main_ns": 1339419,
+      "projected_candidate_ns": 1308787
+    },
+    {
+      "case": "multi-cold",
+      "first_main_ns": 962792,
+      "first_candidate_ns": 3829167,
+      "assumed_subsequent_main_query_ns": 874000,
+      "assumed_subsequent_candidate_query_ns": 28792,
+      "first_strictly_cheaper_total_reads": 5,
+      "projected_main_ns": 4458792,
+      "projected_candidate_ns": 3944335
+    }
+  ]
+}

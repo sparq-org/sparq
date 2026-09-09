@@ -1,0 +1,61 @@
+{
+  "command": [
+    "/Users/jesght/.cargo/bin/cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-core",
+    "--lib",
+    "store::overlay_deleted_tests::",
+    "--",
+    "--test-threads=1"
+  ],
+  "results": [
+    {
+      "name": "unconditional_deleted_invalidation",
+      "exit": 101,
+      "seconds": 6.148273875,
+      "compiled": true,
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+      ]
+    },
+    {
+      "name": "remove_deleted_invalidation",
+      "exit": 101,
+      "seconds": 3.9732630419999992,
+      "compiled": true,
+      "summaries": [
+        "test result: FAILED. 4 passed; 5 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.10s"
+      ]
+    },
+    {
+      "name": "ignore_tombstone_insert_flag",
+      "exit": 101,
+      "seconds": 4.144014958000001,
+      "compiled": true,
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.08s"
+      ]
+    },
+    {
+      "name": "ignore_tombstone_remove_flag",
+      "exit": 101,
+      "seconds": 3.6707139580000003,
+      "compiled": true,
+      "summaries": [
+        "test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.10s"
+      ]
+    },
+    {
+      "name": "remove_deleted_cache_use",
+      "exit": 101,
+      "seconds": 3.7881935830000018,
+      "compiled": true,
+      "summaries": [
+        "test result: FAILED. 5 passed; 4 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.09s"
+      ]
+    }
+  ]
+}

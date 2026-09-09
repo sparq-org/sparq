@@ -1,0 +1,46 @@
+[
+  {
+    "command": [
+      "rg",
+      "-n",
+      "--glob",
+      "*.rs",
+      "ov\\.deleted|overlay\\.as_mut|self\\.overlay\\s*=|overlay\\.take\\(",
+      "crates"
+    ],
+    "exit": 0,
+    "output": "source/mutation-search-0.txt"
+  },
+  {
+    "command": [
+      "rg",
+      "-n",
+      "--glob",
+      "*.rs",
+      "\\.deleted\\.(insert|remove|clear|retain|extend|drain)|&mut.*Overlay|Overlay\\s*\\{",
+      "crates"
+    ],
+    "exit": 0,
+    "output": "source/mutation-search-1.txt"
+  },
+  {
+    "command": [
+      "rg",
+      "-n",
+      "overlay|^mod |^pub mod ",
+      "crates/sparq-core/src/store.rs"
+    ],
+    "exit": 0,
+    "output": "source/mutation-search-2.txt"
+  },
+  {
+    "command": [
+      "rg",
+      "-n",
+      "apply_delta_mem|store\\s*=|\\*self\\s*=|fn persist_swap|fn compact|fn vacuum|wal.*replay|replay.*wal",
+      "crates/sparq-core/src/lib.rs"
+    ],
+    "exit": 0,
+    "output": "source/mutation-search-3.txt"
+  }
+]

@@ -1,0 +1,13 @@
+diff --git a/crates/sparq-core/src/store.rs b/crates/sparq-core/src/store.rs
+index fdcf160e6..91351ba3b 100644
+--- a/crates/sparq-core/src/store.rs
++++ b/crates/sparq-core/src/store.rs
+@@ -294,7 +294,7 @@ impl Overlay {
+         let cached: usize = self
+             .added_by_perm
+             .iter()
+-            .chain(&self.deleted_by_perm)
++            
+             .filter_map(|slot| slot.get())
+             .map(|rows| rows.capacity() * std::mem::size_of::<[Id; 3]>())
+             .sum();

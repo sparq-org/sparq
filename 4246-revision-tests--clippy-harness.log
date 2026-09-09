@@ -1,0 +1,32 @@
+    Checking libc v0.2.186
+    Checking typenum v1.20.1
+    Checking getrandom v0.3.4
+    Checking rand_core v0.9.5
+    Checking hybrid-array v0.4.12
+    Checking rand_chacha v0.9.0
+    Checking rand v0.9.4
+    Checking block-buffer v0.12.1
+    Checking crypto-common v0.2.2
+    Checking oxrdf v0.3.3
+    Checking const-oid v0.10.2
+    Checking oxttl v0.2.3
+    Checking digest v0.11.3
+    Checking aho-corasick v1.1.4
+    Checking cpufeatures v0.3.0
+    Checking peg-runtime v0.8.6
+    Checking regex-syntax v0.8.11
+    Checking sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-core)
+    Checking peg v0.8.6
+    Checking regex-automata v0.4.14
+    Checking getrandom v0.4.2
+    Checking smallvec v1.15.2
+    Checking sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-substrate)
+    Checking uuid v1.23.4
+    Checking spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/vendor/spargebra)
+    Checking regex v1.12.4
+    Checking sha1 v0.11.0
+    Checking sha2 v0.11.0
+    Checking md-5 v0.11.0
+    Checking sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-engine)
+    Checking overlay-count-diagnostic v0.0.0 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/bench/overlay-count)
+    Finished `dev` profile [unoptimized] target(s) in 7.18s

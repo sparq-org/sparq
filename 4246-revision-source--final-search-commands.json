@@ -1,0 +1,26 @@
+[
+  [
+    "rg",
+    "-n",
+    "--glob",
+    "*.rs",
+    "ov\\.deleted|overlay\\.as_mut|self\\.overlay\\s*=|overlay\\.take\\(",
+    "crates"
+  ],
+  [
+    "rg",
+    "-n",
+    "--glob",
+    "*.rs",
+    "\\.deleted\\.(insert|remove|clear|retain|extend|drain)|&mut.*Overlay|Overlay\\s*\\{",
+    "crates"
+  ],
+  [
+    "rg",
+    "-n",
+    "--glob",
+    "*.rs",
+    "\\.store\\s*=|\\*self\\s*=|mem::swap\\(self|apply_delta_mem|Wal::replay|persist_swap|reintern_live",
+    "crates/sparq-core/src"
+  ]
+]

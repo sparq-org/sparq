@@ -1,0 +1,112 @@
+[
+  {
+    "name": "from_parts",
+    "start": 1384,
+    "end": 1386
+  },
+  {
+    "name": "open",
+    "start": 1891,
+    "end": 1988
+  },
+  {
+    "name": "fork",
+    "start": 2885,
+    "end": 2903
+  },
+  {
+    "name": "snapshot",
+    "start": 2924,
+    "end": 2926
+  },
+  {
+    "name": "apply_delta",
+    "start": 2947,
+    "end": 2957
+  },
+  {
+    "name": "insert_triple",
+    "start": 2973,
+    "end": 2981
+  },
+  {
+    "name": "remove_triple",
+    "start": 2990,
+    "end": 2998
+  },
+  {
+    "name": "clear_default_durable",
+    "start": 3038,
+    "end": 3061
+  },
+  {
+    "name": "clear_named_durable",
+    "start": 3076,
+    "end": 3084
+  },
+  {
+    "name": "apply_delta_mem",
+    "start": 3372,
+    "end": 3397
+  },
+  {
+    "name": "redo_txn_record",
+    "start": 2006,
+    "end": 2033
+  },
+  {
+    "name": "compact",
+    "start": 3406,
+    "end": 3443
+  },
+  {
+    "name": "persist_swap",
+    "start": 3462,
+    "end": 3471
+  },
+  {
+    "name": "vacuum",
+    "start": 3548,
+    "end": 3566
+  },
+  {
+    "name": "reintern_live",
+    "start": 3572,
+    "end": 3595
+  },
+  {
+    "name": "restore_into_durable",
+    "start": 3498,
+    "end": 3503
+  },
+  {
+    "name": "swap_dir_to_new_base",
+    "start": 3645,
+    "end": 3666
+  },
+  {
+    "name": "build",
+    "start": 1679,
+    "end": 1701
+  },
+  {
+    "name": "into_compressed",
+    "start": 1716,
+    "end": 1739
+  },
+  {
+    "name": "save",
+    "start": 1752,
+    "end": 1764
+  },
+  {
+    "name": "save_compressed",
+    "start": 1772,
+    "end": 1782
+  },
+  {
+    "name": "save_named",
+    "start": 1796,
+    "end": 1821
+  }
+]

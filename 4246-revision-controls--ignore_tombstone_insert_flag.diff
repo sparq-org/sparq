@@ -1,0 +1,11 @@
+--- store.rs
++++ ignore_tombstone_insert_flag
+@@ -937,7 +937,7 @@
+             if let Ok(i) = ov.added.binary_search(t) {
+                 ov.added.remove(i); // retract a pending insertion
+             } else if self.base_contains(*t) {
+-                deleted_changed |= ov.deleted.insert(*t);
++                ov.deleted.insert(*t);
+             }
+         }
+         for t in inserts {

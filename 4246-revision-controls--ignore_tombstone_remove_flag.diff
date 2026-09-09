@@ -1,0 +1,11 @@
+--- store.rs
++++ ignore_tombstone_remove_flag
+@@ -942,7 +942,7 @@
+         }
+         for t in inserts {
+             if ov.deleted.remove(t) {
+-                deleted_changed = true;
++                // mutant: ignore successful removal
+                 continue; // re-insert of a deleted base triple: just undelete
+             }
+             if self.base_contains(*t) {

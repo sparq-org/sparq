@@ -1,0 +1,11 @@
+--- store.rs
++++ remove_deleted_invalidation
+@@ -953,7 +953,7 @@
+             }
+         }
+         if deleted_changed {
+-            ov.invalidate_deleted();
++            let _ = deleted_changed;
+         }
+         self.overlay = if ov.is_empty() { None } else { Some(ov) };
+     }

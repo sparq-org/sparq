@@ -1,0 +1,51 @@
+{
+  "head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
+  "base": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+  "prior": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+  "verified_at": "2026-09-09T12:44:25.543132+00:00",
+  "manifest_entries": 95,
+  "manifest_sha256": "4709cb1529348554120cc8487eb76aa8c9ad5618360d1fe22a5d0ad77a2fe090",
+  "manifest_all_files_verified": true,
+  "packet_bytes": 238995,
+  "packet_sha256": "bb45493066e061c65a2c603fb55dd376cae0d21743778e10442c7190f8c63ecf",
+  "clean_head_verified": true,
+  "whole_and_revision_diff_match_git": true,
+  "full_source_copies_match_git": [
+    "rust-toolchain.toml",
+    "bench/benchmarks.toml",
+    "crates/sparq-core/Cargo.toml",
+    "crates/sparq-core/tests/fork_differential.rs",
+    "crates/sparq-core/tests/snapshot.rs",
+    "crates/sparq-core/src/lib.rs",
+    "crates/sparq-core/src/store.rs",
+    "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+    "bench/overlay-count/Cargo.toml",
+    "bench/overlay-count/Cargo.lock",
+    "bench/overlay-count/README.md",
+    "bench/overlay-count/src/counting.rs",
+    "bench/overlay-count/src/main.rs",
+    "bench/overlay-count/src/lifecycle.rs"
+  ],
+  "test_summaries": {
+    "tests/snapshot-fork.log": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.15s",
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s"
+    ],
+    "tests/store-default.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.56s"
+    ],
+    "tests/clippy-harness.log": [],
+    "tests/preflight.log": [],
+    "tests/store-b1-after.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 135 filtered out; finished in 0.59s"
+    ],
+    "tests/b1-before.log": [
+      "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 154 filtered out; finished in 0.01s"
+    ],
+    "tests/store-compact.log": [
+      "test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 105 filtered out; finished in 0.48s"
+    ],
+    "tests/clippy-core.log": []
+  },
+  "limits": "Root verified artifacts, exact source and reported test/control logs; did not rerun expensive measurements or fullworkspace/admission checks."
+}

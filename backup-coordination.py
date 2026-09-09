@@ -125,6 +125,10 @@ for evidence_name in [*json.loads((OVERLAY_4246 / 'manifest.json').read_text())[
 
 FILES['4246-opus-review-acfa31cf.json'] = ROOT / 'direct-4246/opus-review-acfa31cf.json'
 
+OVERLAY_4246_REVISION = ROOT / 'direct-4246/revision'
+for evidence_name in [*json.loads((OVERLAY_4246_REVISION / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
+    FILES['4246-revision-' + evidence_name.replace('/', '--')] = OVERLAY_4246_REVISION / evidence_name
+
 OPERATIONAL_TRIAGE = ROOT / 'recovery-20260909/operational-triage'
 for evidence_name in [*json.loads((OPERATIONAL_TRIAGE / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['operational-triage-' + evidence_name.replace('/', '--')] = OPERATIONAL_TRIAGE / evidence_name

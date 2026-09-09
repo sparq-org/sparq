@@ -1,0 +1,30 @@
+[
+  {
+    "name": "main-time",
+    "exit": 0,
+    "started": 1788956445.657275,
+    "ended": 1788956447.615811,
+    "binary_sha256": "3939dc2ef78bb4488628047e61ba72a231f77885e4d58e1d94465444f7f3e5d6"
+  },
+  {
+    "name": "candidate-time",
+    "exit": 0,
+    "started": 1788956447.622155,
+    "ended": 1788956449.847243,
+    "binary_sha256": "a2bfaf5e1004d9d44a02048d592d2c52588581325be91b88b308662ad8080cbe"
+  },
+  {
+    "name": "candidate-count",
+    "exit": 0,
+    "started": 1788956449.857558,
+    "ended": 1788956451.3751318,
+    "binary_sha256": "cd2ef2767e7e03dc0b1a35d390fc7609d67a3fbffbcc1919b3213fc72d2e1e9e"
+  },
+  {
+    "name": "main-count",
+    "exit": 0,
+    "started": 1788956451.3823879,
+    "ended": 1788956452.688461,
+    "binary_sha256": "c3d8ef73730fe3b79f8eb6a3e37684d36dc54297e9ada039870a679ce6cd6a0e"
+  }
+]

@@ -1,0 +1,27 @@
+83:    /// delta that appends terms (`apply_delta_mem`) so it is recomputed over the grown
+1680:        let store = TripleStore::from_triples(triples);
+1898:        let store = TripleStore::open(dir)?;
+1954:                g.apply_delta_mem(&[t], &[]);
+1956:                g.apply_delta_mem(&[], &[t]);
+1972:        // `apply_delta_mem` (IN-MEMORY only) and then truncated the journal, so a record that lived
+1997:    /// [`apply_delta`](Self::apply_delta) (NOT the in-memory-only `apply_delta_mem`), so a record
+2296:        let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
+2678:        let store = TripleStore::open(dir).map_err(|e| e.to_string())?;
+2955:        self.apply_delta_mem(inserts, deletes);
+3059:        self.store = TripleStore::from_triples(Vec::new());
+3214:        // likewise drops its handles via `*self = Graph::open(..)` after its swap).
+3372:    fn apply_delta_mem(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) {
+3406:    pub fn compact(&mut self) -> Result<(), String> {
+3429:            self.store = TripleStore::from_triples(triples);
+3462:    fn persist_swap(&mut self, dir: &std::path::Path) -> Result<(), String> {
+3469:        *self = reopened;
+3548:    pub fn vacuum(&mut self) -> Result<(), String> {
+4084:/// in-memory-only `apply_delta_mem`, and the truncation happens only AFTER every record is durably
+9709:    fn wal_replay_and_compact_roundtrip() {
+9767:    fn wal_torn_batch_replay() {
+9969:    /// Under the OLD behaviour (`apply_delta_mem` then truncate) the first reopen applied the record
+10158:    fn compact_swap_crash_recovery() {
+10907:    fn vacuum_erases_deleted_data_bytes_on_disk() {
+10970:    fn vacuum_preserves_live_dataset_exactly() {
+11013:    fn vacuum_swap_crash_recovery() {
+11219:    fn compact_keeps_caches_shareable_for_the_next_fork() {

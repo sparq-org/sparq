@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T12:27:56.353594+00:00",
+  "updated_at": "2026-09-09T12:45:31.907288+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -64,12 +64,12 @@
     "effort": "xhigh",
     "issue": 4246,
     "pr": null,
-    "head": "acfa31cf52ec0d2641dd4925d5b4f094a0a531fe",
+    "head": "cb638a42a54fc7c9e11e9101587910e668a5f92a",
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Same Astra worker continues focused Opus-requested revision. B1 and lifecycle harness committed; bounded measurements completed, controls/tests/frozen followup packet pending. No admission approval.",
-    "phase": "Focused Opus-requested invalidation and lifecycle revision",
+    "state": "Frozen revision and95manifestfiles verified by root; one actual focused Opus followup is running in exec session48546. Collect this exact session/output, never launch duplicate.",
+    "phase": "Focused actual Opus5 xhigh review of verified revision",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
     "issue_url": "https://github.com/sparq-org/sparq/issues/4246",
@@ -111,6 +111,20 @@
       "evidence_status": "Preliminary agent report only; root has not yet verified frozen revised manifest or raw summaries.",
       "measurements": "Identical-harness main/candidate lifecycle runs completed; four optimized builds within cap. Agent reports620 recorded windows, no retries. Warm insert into an overlay already holding deletions preserves cache; warmedfork copies projection memory. True-tombstone-update fork/read, multi-pattern cold and concurrentcold remain slower than main. Exact generated summaries/ranges/heap attribution pending packet.",
       "remaining": "Already scoped compiled controls, tests and context packet. No additional matrix, Clone/Arc redesign or admission. Root will verify and decide one focused actual Opus5xhigh followup."
+    },
+    "revision_report": "direct-4246/revision/report.json",
+    "revision_root_verification": "direct-4246/revision/root-verification.json",
+    "revision_validation": "48 scoped test executions,5 compiled controls killed,core/harnessclippyPASS; frozen620-window lifecycle evidence. Known Bash3mapfile preflight failure; fullworkspace/wasm/conformance/canonical ratchets pending. Warm gains coexist with cold and retained-memory regressions; no admission claim.",
+    "focused_review_runtime": {
+      "session_id": 48546,
+      "kind": "exec_command",
+      "input_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/review-packet.md",
+      "input_sha256": "bb45493066e061c65a2c603fb55dd376cae0d21743778e10442c7190f8c63ecf",
+      "input_bytes": 238995,
+      "output_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-4246/revision/opus-review-cb638a42.json",
+      "started_at": "2026-09-09T12:45:31.907288+00:00",
+      "completed": false,
+      "acceptance": "SuccessfulJSON,is_errorfalse,actual modelUsageclaude-opus-5,exactcb638reviewedhead; no duplicate/exhaustedquota retry."
     }
   },
   "prs": {
@@ -399,7 +413,7 @@
     }
   },
   "next_actions": [
-    "Collect the existing postmerge_ci focused4246 revision and frozen evidence. Verify manifest/source/tests/lifecycle results, then run one actual Opus5 xhigh focused followup. Never repeat the completed acfa review.",
+    "Collect running actual Opus focusedreview session48546 and verify exactcb638head/model/success. Do not repeat either completedacfa or runningcb638 review. Read-only6468 diagnosis may be collected independently.",
     "Resolve remaining4246 findings and run required full validation, actual Copilot and protected exact-head admission only after sound review. Preserve baseline/candidate evidence and cold/memory tradeoffs.",
     "After4246 lane reaches its next terminal state, assess narrow actionable6468 classification repair; identify actual originating row and supported owner area. Keep unknown-label guard, do not create labels or replay live work for diagnosis.",
     "Top-k recovery remains stopped atd08295b6; public6465 holds unresolved findings. No additional design, measurement or review spending without a new task decision.",
@@ -717,5 +731,11 @@
       "ci-latency-alarm": "Existing5153; scheduled-delivery deficit does not prove scheduler/runner/source failure. No duplicate.",
       "review-alarm": "Existing4554; expected census-policy failure, no authorization to bypass6049 or pausedregistry. No duplicate."
     }
+  },
+  "pending_6468_diagnosis": {
+    "agent": "/root/postmerge_ci",
+    "state": "Bounded read-only followup assigned during actualOpus review",
+    "scope": "At most2focusedsearches andfewexactreads afterbudgetcheck; identify currentoffendinginput/classifierpath/existingownermapping. Offlinepure-functionreproduction only; nofullboardenumeration,replay,implementation,remote mutation,dispatch orbuild. Distinguish originalrun fromcurrentnew6468reportinput.",
+    "evidence_directory": "direct-6468"
   }
 }

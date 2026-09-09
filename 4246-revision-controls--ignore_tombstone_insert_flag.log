@@ -1,0 +1,31 @@
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246/crates/sparq-core)
+    Finished `test` profile [unoptimized] target(s) in 3.50s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_core-53b43ac9cb50e22c)
+
+running 9 tests
+test store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication ... FAILED
+test store::overlay_deleted_tests::deleted_cache_compressed_base_matches_rebuild ... ok
+test store::overlay_deleted_tests::deleted_cache_concurrent_first_reads_share_initialized_projection ... ok
+test store::overlay_deleted_tests::deleted_cache_fork_and_clone_are_independent ... ok
+test store::overlay_deleted_tests::deleted_cache_graph_snapshot_retains_warm_generation ... ok
+test store::overlay_deleted_tests::deleted_cache_inclusive_bounds_and_empty_ranges ... ok
+test store::overlay_deleted_tests::deleted_cache_is_lazy_reused_and_accounted ... ok
+test store::overlay_deleted_tests::deleted_cache_matches_rebuild_after_mixed_deltas ... ok
+test store::overlay_deleted_tests::deleted_cache_survives_insert_only_and_noop_deltas ... ok
+
+failures:
+
+---- store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication stdout ----
+
+thread 'store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication' (2399198) panicked at crates/sparq-core/src/store/overlay_deleted_tests.rs:162:9:
+assertion failed: store.overlay.as_ref().unwrap().deleted_by_perm.iter().all(|s|
+        s.get().is_none())
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::overlay_deleted_tests::deleted_cache_actual_tombstone_changes_invalidate_before_publication
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p sparq-core --lib`

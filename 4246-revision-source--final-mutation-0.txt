@@ -1,0 +1,17 @@
+crates/sparq-core/src/store/overlay_deleted_tests.rs:33:                assert!(ov.deleted_by_perm[perm as usize].get().is_none());
+crates/sparq-core/src/store/overlay_deleted_tests.rs:48:    assert!(ov.deleted_by_perm.iter().all(|s| s.get().is_none()));
+crates/sparq-core/src/store/overlay_deleted_tests.rs:57:        let rows = ov.deleted_by_perm[perm as usize]
+crates/sparq-core/src/store/overlay_deleted_tests.rs:67:                ov.deleted_by_perm[perm as usize].get().unwrap().as_ptr(),
+crates/sparq-core/src/store/overlay_deleted_tests.rs:75:                assert!(ov.deleted_by_perm[other as usize].get().is_none());
+crates/sparq-core/src/store/overlay_deleted_tests.rs:180:    ov.deleted.extend([[0, 1, 2], [2, 3, 4], [Id::MAX; 3]]);
+crates/sparq-core/src/store/overlay_deleted_tests.rs:183:        for &t in &ov.deleted {
+crates/sparq-core/src/store/overlay_deleted_tests.rs:185:            assert_eq!(ov.deleted_count(perm, row, row), 1);
+crates/sparq-core/src/store/overlay_deleted_tests.rs:187:        assert_eq!(ov.deleted_count(perm, [0; 3], [Id::MAX; 3]), 3);
+crates/sparq-core/src/store/overlay_deleted_tests.rs:188:        assert_eq!(ov.deleted_count(perm, [42; 3], [42; 3]), 0);
+crates/sparq-core/src/store.rs:876:            Some(ov) => base + ov.added.len() - ov.deleted.len(),
+crates/sparq-core/src/store.rs:906:                !ov.deleted.contains(&t)
+crates/sparq-core/src/store.rs:930:        let mut ov = self.overlay.take().unwrap_or_default();
+crates/sparq-core/src/store.rs:940:                deleted_changed |= ov.deleted.insert(*t);
+crates/sparq-core/src/store.rs:944:            if ov.deleted.remove(t) {
+crates/sparq-core/src/store.rs:958:        self.overlay = if ov.is_empty() { None } else { Some(ov) };
+crates/sparq-core/src/store.rs:996:        self.overlay.as_ref().map_or(0, |ov| ov.added.len() + ov.deleted.len())
