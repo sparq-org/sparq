@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T14:08:29.853537+00:00",
+  "updated_at": "2026-09-09T14:17:16.853952+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -46,8 +46,8 @@
   },
   "live_main": {
     "oid": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T12:12:30.660568+00:00",
-    "evidence": "recovery-20260909/operational-triage-root-read.json"
+    "observed_at": "2026-09-09T14:17:16.853952+00:00",
+    "evidence": "recovery-20260909/monitor-1418.json"
   },
   "rules": {
     "required_check": "gate",
@@ -68,7 +68,7 @@
     "branch": "codex/overlay-deleted-projections",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
     "main": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "state": "Root verified14-file failurediagnosis. Same Astra agent authorized to preserve exactoriginalcompiled defaultfunction/insertstatement undercfg-not withseparatecfg-on implementation, keepingaccuratedocs. No gateedit/declaration/push yet. One bounded offline compiler-backed report-only proof allowed onlywith installedtooling/cacheddeps, twojobs/privatepertreetargets/15mincap/disk>=10GiB. KeepPR6469draft and allb86evidence.",
+    "state": "PR remains draft at b86. Local correction 6334b338 restores original default function and insert statement verbatim behind cfg-not; agent completing bounded validation and proof. Await frozen packet, root verification, then one focused actual Opus review.",
     "phase": "Focused default-text preservation repair and bounded compiler proof",
     "contract": "Split deleted-cache invalidation on actual deleted-set change, maintain added behavior; targeted insert-into-tombstone-overlay/delete-reinsert/no-op/cache controls. Measure warmedfork/update/read and fixed retained generations against exactmain, with coldmulti-permutation and smallconcurrentcase. No unmeasuredClone/APIredesign/thresholdtuning. Supplymissing327-851+workspace mutator inventory and exacttest/control/generated summary bodies for focusedOpusfollowup. Twojobs/onesequentialprivatetargetlane/15minbuildcap, no fullworkspace/networkinstalls/remote mutations/newmodels/EC2.",
     "dedupe": "Exact existing issue4246OPEN, no comments or linkedPR before takeover. Five scoped searches complete; only relevant prior merged1367 and closed3183. Broad numeric PRsearch hits unrelated mergedPRs; no claim they implement4246.",
@@ -105,14 +105,11 @@
       "N1_N2_N3": "Documentworstcase vector+fixedmemory and first-reader serialization; bounded multi-permutation BGP/concurrentcoldreader evidence. No speculative threshold tuning."
     },
     "latest_agent_status": {
-      "at": "2026-09-09T13:05:19.603042+00:00",
-      "revision_head": "b86b5d5ad84bce900762defa094630eb358317a6",
-      "source_commit_exists_verified": true,
-      "evidence_status": "Agent progress report only; final feature-stage manifest not frozen or root-verified. Prior cb638 review/evidence remain verified and complete.",
-      "implementation": "Core-only overlay-deleted-projections Cargo feature defaultOFF; no dependency/forwarded enablement. Agent reports new fields/counting/flag/accounting compile out when off. Dedicated feature-matrix test leg and generated golden included; pending independent review.",
-      "validation": "Agent reports four identical default fixtures on main/candidate, layout/heap checks pass; five feature-on compiled controls killed; forcing cache into default-off build fails retained-heap assertion. Full scoped off/on/compact tests and clippy still running.",
-      "measurement": "No new timing yet. Fixed sole extension D32768,6 initially warmed permutations,4 retained generations, R={1,2,4,8,16}; identical main/opt-in harness.",
-      "remaining": "Complete current scoped checks and fixed measurement, freeze exact source/manifests/packet. No restart, additional design, extra timing points or second model review before freeze."
+      "at": "2026-09-09T14:17:16.853952+00:00",
+      "local_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "public_head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "state": "Focused source preservation correction committed. Root inspected the one-file diff. Agent is completing authorized native checks and the single offline compiler-backed proof; final manifest and independent Opus review pending.",
+      "proof_contract": "Unchanged protocol and raw cargo wasm builder; local argv shim may append only --locked and must record full source/forwarded argv. Per-tree private targets, offline dependencies, two jobs, one shared 900-second cap, stop below 10 GiB free. No source declaration, push, or gate edit authorized."
     },
     "revision_report": "direct-4246/revision/report.json",
     "revision_root_verification": "direct-4246/revision/root-verification.json",
@@ -202,7 +199,9 @@
       "diagnosis_report": "direct-4246/wasm-failure-b86/report.json",
       "diagnosis_manifest_verified": 14,
       "concrete_cause": "Neutral line-blanking removes newlyadded replacementdelbinding becauseoriginalcompiledbinding wasdeleted; E0425delundefined atstore313. All20nonblankdeletedlinesin store,10compiled+10comments. Auto proof never reached neutral/headcomparison or deletion-neutral/base obligation.",
-      "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof."
+      "binary_limit": "Equal1560241bytebundleswith12differentbytes. Metadata-only drift remains unproven; no rawpairedartifactupload configured. Defaultalgorithm leak notfound in source/priorfixtures; that doesnotdischarge compilerproof.",
+      "repair_head": "6334b338587fe5c635c69a09e134917ec35eaaca",
+      "repair_state": "Local source correction committed; new proof pending. Public CI failure remains at b86."
     },
     "wasm_repair_contract": "Restoreexactoriginaldefaultcount_correction underaddedcfg-not; addmutuallyexclusivecfg-on fn; retaindefaultov.deleted.insert statementverbatim and separatefeaturebookkeeping. Keepaccuratecommentchanges. Targetedoff/onlayout/semantic/controltests andoff/onalltargetclippy. Singleexistingreport-onlyproofattempt ifinstalledrawcargotooling/caches suffice,offline/locked/noinstalls,privatepertreetargets,allwasmoptimizedbuilds15mincap anddisk10GiBstop. No substitution/retry, declaration, gateorbaselinechange, remoteaction, newmodels orEC2. Ifproofsuccess, keepgeneratedproposaloutsidecodeforreview; requirebothcomparisons.",
     "latest_check_snapshot": {
@@ -643,7 +642,24 @@
       "updated_at": "2026-09-09T00:12:19Z"
     },
     "outcome": "Originalfirstnaturalcf19nightly34202612161completedCANCELLED at2026-09-09T00:12:19Z. Actor/cause and completeheavyartifactinventory not inspected. Coordinator did not cancel/retry. Firstadmission was proven; fullheavycompletion remains unproven.",
-    "next": "Wait for ordinaryeligiblelater scheduled execution on currentmain; no manualdispatch/retry orreleaseauthorization."
+    "next": "Wait for ordinaryeligiblelater scheduled execution on currentmain; no manualdispatch/retry orreleaseauthorization.",
+    "later_natural_run": {
+      "id": 34327540479,
+      "head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
+      "observed_at": "2026-09-09T14:17:16.853952+00:00",
+      "state": "in_progress",
+      "evidence": "recovery-20260909/nightly34327540479-jobs-1418.json",
+      "created_job_count": 67,
+      "currently_returned_all_jobs": true,
+      "counts": {
+        "success": 43,
+        "cancelled": 4,
+        "skipped": 7,
+        "failure": 5,
+        "in_progress": 8
+      },
+      "limit": "All five failed and four cancelled jobs are advisory mutation legs. Root did not cancel. Logs/causes not inspected; no claim of source regression, healthy completion, or complete eventual matrix inventory. Await terminal run and bounded diagnostics after active lane."
+    }
   },
   "issues": {
     "6465": {
@@ -867,5 +883,36 @@
     "root_verification": "direct-6468/root-verification.json",
     "finding": "Current5016 and report6468 emit missingarea viaT2. Originalrowunlogged;5016predatesrun,6468doesnot. Existingwrapper labels do not conflict withactualgen partition, so no safealias established.",
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
+  },
+  "latest_monitor": {
+    "at": "2026-09-09T14:17:16.853952+00:00",
+    "query": "recovery-20260909/monitor-1418.json",
+    "queue_entries": 0,
+    "queued_runs": 3,
+    "in_progress_runs": 1,
+    "run_inventory": [
+      "recovery-20260909/queued-1418.json",
+      "recovery-20260909/in-progress-1418.json"
+    ],
+    "limit": "Workflow-run counts are not queued-job counts or proof of runner reserve. No cancellation or dispatch performed.",
+    "registry_actions_enabled": false,
+    "registry_evidence": "recovery-20260909/registry-pause-1418.json",
+    "pr6469_checks": {
+      "head": "b86b5d5ad84bce900762defa094630eb358317a6",
+      "draft": true,
+      "counts": {
+        "success": 89,
+        "in_progress": 8,
+        "queued": 1,
+        "skipped": 15,
+        "neutral": 1,
+        "failure": 2
+      },
+      "only_failures": "Known wasm exact-equality check and its dependent draft gate.",
+      "workspace_clippy": "success",
+      "core_group": "success, job 102491249335",
+      "actual_feature_leg_evidence": "Not yet collected. gh run view refused logs while parent run is in progress; no retry. Wait for ordinary completion and inspect actual test/report evidence.",
+      "evidence": "direct-4246/pr6469-checks-1418.json"
+    }
   }
 }

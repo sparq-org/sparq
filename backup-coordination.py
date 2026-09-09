@@ -148,6 +148,9 @@ WASM_FAILURE_B86 = ROOT / 'direct-4246/wasm-failure-b86'
 for evidence_name in [*json.loads((WASM_FAILURE_B86 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
     FILES['4246-wasm-failure-b86-' + evidence_name.replace('/', '--')] = WASM_FAILURE_B86 / evidence_name
 FILES['4246-pr6469-checks-1405.json'] = ROOT / 'direct-4246/pr6469-checks-1405.json'
+FILES['4246-pr6469-checks-1418.json'] = ROOT / 'direct-4246/pr6469-checks-1418.json'
+for evidence_name in ['monitor-1418-query.json', 'monitor-1418.json', 'queued-1418.json', 'in-progress-1418.json', 'registry-pause-1418.json', 'nightly34327540479-jobs-1418.json']:
+    FILES[evidence_name] = ROOT / 'recovery-20260909' / evidence_name
 
 TRIAGE_6468 = ROOT / 'direct-6468'
 for evidence_name in [*json.loads((TRIAGE_6468 / 'manifest.json').read_text())['files'], 'manifest.json', 'root-verification.json']:
