@@ -1,0 +1,127 @@
+test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area) ... ok
+test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body) ... FAIL
+test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order) ... FAIL
+test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path) ... ok
+test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority) ... ok
+test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget) ... FAIL
+test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning) ... FAIL
+
+======================================================================
+FAIL: test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 266, in test_diagnostic_escapes_records_without_dumping_issue_body
+    self.assertEqual(self.records(err), [{"number": 7, "label": label, "evidence": why}])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T2 evidence\n::error::forged\[60 chars]: 0}] != [{'number': 7, 'label': 'area:missing\nsecon[60 chars]d"'}]
+
+First differing element 0:
+{'evidence': 'T2 evidence\n::error::forged\[59 chars]': 0}
+{'number': 7, 'label': 'area:missing\nsecon[59 chars]ed"'}
+
+  [{'evidence': 'T2 evidence\n::error::forged\r\t"quoted"',
+    'label': 'area:missing\nsecond-line',
+-   'number': 0}]
+?             ^
+
++   'number': 7}]
+?             ^
+
+
+======================================================================
+FAIL: test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 248, in test_offenders_keep_row_label_tier_association_and_order
+    self.assertEqual(self.records(result[3]), [
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"number": 19, "label": "area:sparq-core",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        {"number": 5016, "label": "area:sparq-wrapper-gen",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T0 author-declared crate_or_s[287 chars]: 0}] != [{'number': 19, 'label': 'area:sparq-core', [292 chars]n)'}]
+
+First differing element 0:
+{'evidence': 'T0 author-declared crate_or_s[57 chars]': 0}
+{'number': 19, 'label': 'area:sparq-core', [58 chars]eld'}
+
+  [{'evidence': 'T0 author-declared crate_or_surface/crates field',
+    'label': 'area:sparq-core',
+-   'number': 0},
+?             ^
+
++   'number': 19},
+?             ^^
+
+   {'evidence': 'T0 author-declared crate_or_surface/crates field',
+    'label': 'area:sparq-engine',
+-   'number': 0},
+?             ^
+
++   'number': 19},
+?             ^^
+
+   {'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+    'label': 'area:sparq-wrapper-gen',
+-   'number': 0}]
++   'number': 5016}]
+?             + ++
+
+
+======================================================================
+FAIL: test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 236, in test_unknown_later_row_blocks_all_writes_even_outside_budget
+    self.assertEqual(self.records(err), [{
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+        "number": 5016, "label": "area:sparq-wrapper-gen",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T2 bd-to-issues.derive_areas [71 chars]: 0}] != [{'number': 5016, 'label': 'area:sparq-wrapp[74 chars]n)'}]
+
+First differing element 0:
+{'evidence': 'T2 bd-to-issues.derive_areas [70 chars]': 0}
+{'number': 5016, 'label': 'area:sparq-wrapp[73 chars]en)'}
+
+  [{'evidence': 'T2 bd-to-issues.derive_areas (title scope/crate token)',
+    'label': 'area:sparq-wrapper-gen',
+-   'number': 0}]
++   'number': 5016}]
+?             + ++
+
+
+======================================================================
+FAIL: test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 289, in test_unrelated_unknown_still_blocks_after_generator_provisioning
+    self.assertEqual(self.records(err), [{
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+        "number": 19, "label": "area:sparq-core",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "evidence": "T0 author-declared crate_or_surface/crates field"}])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'evidence': 'T0 author-declared crate_or_s[58 chars]: 0}] != [{'number': 19, 'label': 'area:sparq-core', [59 chars]ld'}]
+
+First differing element 0:
+{'evidence': 'T0 author-declared crate_or_s[57 chars]': 0}
+{'number': 19, 'label': 'area:sparq-core', [58 chars]eld'}
+
+  [{'evidence': 'T0 author-declared crate_or_surface/crates field',
+    'label': 'area:sparq-core',
+-   'number': 0}]
+?             ^
+
++   'number': 19}]
+?             ^^
+
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.017s
+
+FAILED (failures=4)

@@ -1,0 +1,18 @@
+ok   declared single
+ok   declared multi
+ok   declared surface
+ok   declared new-crate -> parked
+ok   no evidence -> parked
+ok   body-only mention does not fire a title rule
+ok   body-only ieee754 does not fire the title-scoped zk rule
+ok   spec beats zk
+ok   workflow lane beats zk-compose
+ok   noir upstream
+ok   dual zk libraries
+ok   dl lane
+ok   el lane
+ok   difftest normaliser+harness
+ok   difftest harness only
+ok   t2 title scope
+ok   already-area is a no-op
+SELF-TEST PASSED

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T18:59:54.657538+00:00",
+  "updated_at": "2026-09-09T19:05:17.131137+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -63,7 +63,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Astra implementation running in isolated issue6468 lane; maintenance awaiting first ordinary scheduled classification",
+    "phase": "Actual independentOpus5xhighsource review running on frozen5f758d2a",
     "started_at": "2026-09-09T18:04:24.354143+00:00",
     "current_issue": "direct-6468/current-1802.json",
     "contract": "Max10min source-bound report+manifest only; no source edits/builds/remote mutations/labels/live classifier replay/new models/registry/EC2. Resolve existing label-provisioning policy for true sparq-wrapper-gen partition; plan title-scopedtriageci and offending-row diagnostic preservingglobalzero-writeguard. No guessedaliases, no duplicate diagnosis. Rootdecides implementation after exactpartition/source review.",
@@ -98,7 +98,7 @@
       "result": "direct-6468/label-maintenance/opus-review-result.json",
       "verdict": "approve for exact one label create only after all15preconditions; key newpreconditionP7completeopenPRchangedpathcheckrequired beforemutation"
     },
-    "agent_state": "Implementation running; no additional agents/models authorized.",
+    "agent_state": "Completed/idle, cleancommittedhead; no commandsrunning",
     "maintenance": {
       "state": "exact_one_label_created_verified",
       "evidence": "direct-6468/label-maintenance/maintenance-verified.json",
@@ -137,20 +137,24 @@
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
-      "state": "authorized_running",
+      "state": "completed_frozen_root_verified",
       "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
       "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
       "branch": "codex/triage-area-unknown-diagnostics",
       "directory": "direct-6468/implementation",
-      "contract": "Exactlytriage-area.pyandtests;title-onlyrule/ANCHORED_ONLY;rowlabeltierdiagnostic;globalzero-writeguardbeforebudgetpreserved. NoT0_DECL,census,workflows,policy/budgets,oldPRsource,remotemutations/models/buildinstalls. ScopedPython/selftests/negativecontrolsandcompositioncheck;commitreportfrozenpacket;rootreviews/publishes."
+      "contract": "Exactlytriage-area.pyandtests;title-onlyrule/ANCHORED_ONLY;rowlabeltierdiagnostic;globalzero-writeguardbeforebudgetpreserved. NoT0_DECL,census,workflows,policy/budgets,oldPRsource,remotemutations/models/buildinstalls. ScopedPython/selftests/negativecontrolsandcompositioncheck;commitreportfrozenpacket;rootreviews/publishes.",
+      "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+      "manifest_files": 54,
+      "report": "direct-6468/implementation/report.json",
+      "root_verification": "direct-6468/source-admission/root-verification.json"
     },
     "model": "GPT-6 Astra",
     "pr": null,
-    "head": null,
+    "head": "5f758d2afed6524cf191820463934c2213ddcfda",
     "branch": "codex/triage-area-unknown-diagnostics",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
     "main": "cea4414b39225b1240f36d968ba1549e700cd32f",
-    "state": "ActualAstraxhigh implementing scoped6468 two-file classifier/diagnostic repair. Existing5457/6095draftchanges/holds preserved; source hunks independent. Exact generatorlabelmaintenance reviewed/created/readbackverified; ordinaryscheduledclassificationaftercreate notyetobserved. Rootawaitsfrozenimplementation/test/control/compositionreportbeforeactualOpusreview and any publication.",
+    "state": "Exact2file6468repair committedand54filemanifestrootverified;44tests17classifier114migrationassertionsand8controls reported/verifiedartifactidentity. Source/harnessprivacyBash3limitationremainsLinuxCIobligation. ActualOpusreviewrunning, noPR/push/admissionyet. Singlelabelmaintenanceverified, firstordinaryscheduledpostcreateclassifiernotyetobserved.",
     "documentation_followup": {
       "issue": 5412,
       "comment": "https://github.com/sparq-org/sparq/issues/5412#issuecomment-5607105898",
@@ -163,6 +167,30 @@
       "reported_checks": "44classifier tests;classifier/migration selftests;8compiled/executednegativecontrolskilled;frozen6095gitapply--checkclean;T0/propertyloopsbyte-identical;authorpreflightonlyknownBash3privacyfailure;no commandrunningatprogressmessage",
       "review_not_started": true,
       "root_preface": "direct-6468/source-admission/review-preface-draft.md"
+    },
+    "source_review": {
+      "state": "running",
+      "completed": false,
+      "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+      "input": "direct-6468/source-admission/opus-input.md",
+      "input_sha256": "0d5fd7a304064f45848960201140919345d19acd8d74d58e74519c99390b6780",
+      "input_bytes": 93839,
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "output": "direct-6468/source-admission/opus-review-5f758d2a.json",
+      "session_id": 85170,
+      "rejection": "Automaticapprovalreview rejected externalClaude export of private source/reviewpacket as not specificallyauthorized; no process launched/outputfilescreated. No alternatechannel/model/push attempted.",
+      "risk_audit": "direct-6468/source-admission/payload-risk-audit.json",
+      "repo_visibility": {
+        "full_name": "sparq-org/sparq",
+        "html_url": "https://github.com/sparq-org/sparq",
+        "private": false,
+        "visibility": "public"
+      },
+      "kind": "exec_command",
+      "started_at": "2026-09-09T19:05:17.131137+00:00",
+      "approval_resolution": "Initialauto-review incorrectlytreatedpacket asprivatesource andrequiredspecificexportpermission. No process/modelrequeststarted. ReadGitHubAPI provedPUBLIC repository;localmanifest/section/secretpatternauditfoundonlyreposource,taskauthored2filefixandgeneratedtestevidence,no credentialfiles/transcripts/secretmatches. SamecommandresubmittedwithnewriskfactsandexistingexplicituserOpusauthorization;automaticapprovalaccepted. Notalternativechannel/publicationworkaround or exhaustedmodelretry.",
+      "acceptance": "RequireouterJSONsubtypesuccess,is_errorfalse,modelUsageclaude-opus-5,exact5f758head. One actualmodelinvocationonly; no duplicate/exhaustedquotaretry."
     }
   },
   "prs": {

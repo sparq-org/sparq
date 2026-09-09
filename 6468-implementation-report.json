@@ -1,0 +1,75 @@
+{
+  "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+  "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "branch": "codex/triage-area-unknown-diagnostics",
+  "clean": true,
+  "implementation_model": "Actual inherited OpenAI GPT-6 Astra xhigh; honest inline markers and commit trailer. No independent model review called.",
+  "scope": {
+    "files": [
+      "scripts/triage-area.py",
+      "scripts/tests/test_triage_area.py"
+    ],
+    "insertions": 135,
+    "deletions": 3
+  },
+  "behavior": [
+    "An early title-only triage-area rule routes classifier diagnostics to ci before topic rules or T2 crate-token inference. T0 explicit declaration retains precedence.",
+    "The unchanged full-plan unknown-label predicate and exit2 remain before budget slicing, --json output or any apply/unpark. Offenders now emit deterministic UNKNOWN_AREA JSON records with issue number, missing label and exact evidence tier/rule.",
+    "Remedy text distinguishes wrong routing from separately reviewed provisioning for a verified existing crate. The classifier never creates a label.",
+    "Existing area labels are preserved; genuine generator work continues deriving sparq-wrapper-gen. Root-owned exact-label provisioning is external context, not an action of this patch."
+  ],
+  "validation": {
+    "classifier_unittest": 44,
+    "new_test_methods": 7,
+    "triage_self_test_assertions": 17,
+    "bd_self_test_assertions": 114,
+    "controls": 8,
+    "control_executions": 56,
+    "control_survivors": 0
+  },
+  "tests_command": "/opt/homebrew/bin/python3 scripts/tests/test_triage_area.py",
+  "tests_exit": 0,
+  "negative_controls": "Eight actual production-source mutants compiled and executed against the unchanged seven-test class (56 test executions). Seven produce assertion failures; the newline-unescape control produces a JSONDecodeError in the round-trip test. No compile-only kills or survivors.",
+  "preflight": "Exit1 solely because installed Bash3.2 lacks mapfile in privacy checker line92, followed by BrokenPipeError. G1/G2/G6/guard-untested passed. No-perf-numbers/readme-template correctly skip the two Python files. No Bash>=4 at /opt/homebrew/bin/bash or /usr/local/bin/bash. No workaround, suppression, gate change or install; Linux CI must run the privacy gate.",
+  "preflight_input": "Exact uncommitted whole diff and changed-file list supplied through supported --changed-files/--added-lines options, then verified byte-identical to the committed diff.",
+  "composition": "Read-only git apply --check succeeds for frozen6095 full.diff against this candidate. T0 declaration region and all other production function bodies are byte-identical to base; only main changes. Existing scope-property loops are byte-identical. No5457/6095 change imported, authorship rewritten, branch touched or hold changed.",
+  "ci": "docs-quality.yml has no workflow path filters; its hard scripts/tests job runs triage-area.py --self-test and scripts/tests/test_triage_area.py at625-628. The new tests are part of that actual module. The scheduled classifier self-tests both before --apply. No workflow change needed.",
+  "limitations": [
+    "No live classifier replay, GitHub reads/writes, dispatch, issue relabel, PR admission or broad board enumeration during implementation.",
+    "Mocked CLI tests exercise real main/plan/classify/apply_row but replace candidate fetch, live labels, gh and sleep. The serialization-only fixture explicitly injects a synthetic plan; other tests derive actual T0/T1/T2 records.",
+    "The original run did not log row identity;5016 remains a captured candidate, not proven historical input. Current already-labelled6468 is a no-op.",
+    "Existing live label list limit500 (#6335), T0 suffix-boundary issue4567/PR6095 and census5457 remain separate. Their behavior was not changed or claimed fixed.",
+    "Patch applicability is a mechanical composition check, not combined6095 tests or a new independent review.",
+    "Preflight is not fully green locally; the Bash/privacy limitation remains for authoritative Linux validation."
+  ],
+  "timing": {
+    "classifier_tests_tool_wall_seconds": 0.555900042,
+    "first_self_tests_and_controls_tool_wall_seconds": 0.996580417,
+    "controls_in_process_seconds": 0.37743704198510386,
+    "preflight_seconds": 0.680535959,
+    "exact_head_self_tests": [
+      {
+        "command": [
+          "/opt/homebrew/bin/python3",
+          "scripts/triage-area.py",
+          "--self-test"
+        ],
+        "exit": 0,
+        "seconds": 0.251887875,
+        "reason_for_exact_head_capture": "First short sequential shell batch saved output but retained only the final control runner exit status."
+      },
+      {
+        "command": [
+          "/opt/homebrew/bin/python3",
+          "scripts/bd-to-issues.py",
+          "--self-test"
+        ],
+        "exit": 0,
+        "seconds": 0.199134875,
+        "reason_for_exact_head_capture": "First short sequential shell batch saved output but retained only the final control runner exit status."
+      }
+    ],
+    "validation_window_seconds_from_first_test_log": 369.9967520236969,
+    "limit": "All local checks scoped to Python/read-only patch checks; no Cargo, installs or network. Requested check window approximately ten minutes."
+  }
+}

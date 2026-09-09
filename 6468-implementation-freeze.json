@@ -1,0 +1,10 @@
+{
+  "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+  "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "clean": true,
+  "packet_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/implementation/review-packet.md",
+  "packet_bytes": 91424,
+  "packet_sha256": "f95203ff45b00bdb4e7bb81216cf531dc31ece29e96631f7da0bd6ddf4ebaf9b",
+  "manifest_files": 54,
+  "manifest_sha256": "332c7df7ee1b8ac5a8747277c0dd8b6e2df86fb0165352f2491ea67b212b5753"
+}

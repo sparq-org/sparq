@@ -1,0 +1,65 @@
+# scripts/bd-to-issues.py:183
+_SURFACE_AREAS = {"site": "site", "gui": "gui", "bench": "bench", "ci": "ci", "docs": "docs",
+                  "js": "js", "wasm": "sparq-wasm", "workflows": "ci", "release": "release",
+                  "orchestration": "orchestration", "deps": "deps", "workspace": "workspace"}
+
+# scripts/bd-to-issues.py:187
+_TITLE_SCOPE = re.compile(r"^\s*(?:[a-z]+\(([a-z0-9\-/]+)\)|([a-z0-9\-]+))\s*:", re.I)
+
+# scripts/bd-to-issues.py:208
+def _scope_to_area(scope, crates):
+    scope = (scope or "").lower().split("/")[0]
+    for cand in (scope, f"sparq-{scope}"):
+        if cand in crates:
+            return cand
+    return _SURFACE_AREAS.get(scope)
+
+# scripts/bd-to-issues.py:216
+def _token_hits(names, text):
+    """`names` occurring in `text` as whole tokens, ordered by FIRST OCCURRENCE, longest name
+    winning over any name it contains (`sparq-reason-el` over `sparq-reason`). First-occurrence
+    order matters: an alphabetical sort followed by a `[:limit]` truncation silently drops the
+    most-specific hit — "deploy(site+docs): …" derived `ci,docs` and discarded `site`."""
+    found = []
+    for n in sorted(names, key=len, reverse=True):
+        m = re.search(r"(?<![a-z0-9\-])" + re.escape(n) + r"(?![a-z0-9\-])", text)
+        if m and not any(n in f for _, f in found):
+            found.append((m.start(), n))
+    return [n for _, n in sorted(found)]
+
+# scripts/bd-to-issues.py:229
+def derive_areas(bead, crates=None, limit=2):
+    """Derive `area:` values from a bead's own text, most-specific evidence first:
+
+      1. the conventional `verb(scope):` / `scope:` title prefix — an explicit author declaration;
+      2. crate names appearing as whole tokens in the TITLE;
+      3. a surface keyword (site/gui/bench/ci/…) in the title's SCOPE REGION only — i.e. before the
+         first colon. A bare "site"/"ci"/"docs" anywhere in running prose is NOT evidence: matching
+         the whole title mislabeled a zkSPARQL spec bead `area:site` off one incidental word;
+      4. the description, and ONLY when it names exactly ONE crate. A description that name-drops
+         several neighbouring crates is a cross-cutting task, not a package assignment — that rule
+         is what stopped "formalize codex-EC2 worker tooling" deriving `sparq-core,sparq-jsonld`.
+
+    Returns [] when nothing is derivable; the caller then parks the issue `needs:area` rather than
+    guessing. A wrong partition is worse than an explicit park: the park is maintainer-visible and
+    the retriage cron re-promotes it once an area lands, whereas a wrong area silently routes the
+    work. That readmission holds only for a park the sweep can SEE and whose author it trusts —
+    the fetch is paginated for exactly this reason (retriage.py `_fetch_label`); its predecessor
+    truncated at 500 and 219 of 719 parks were unreachable on every tick (issue #3831)."""
+    crates = crate_names() if crates is None else crates
+    title = bead.get("title") or ""
+    low = title.lower()
+    m = _TITLE_SCOPE.match(title)
+    if m:
+        a = _scope_to_area(m.group(1) or m.group(2), crates)
+        if a:
+            return [a]
+    hits = _token_hits(crates, low)
+    if hits:
+        return hits[:limit]
+    scope_region = low.split(":", 1)[0] if ":" in low[:60] else ""
+    surf = [_SURFACE_AREAS[k] for k in _token_hits(_SURFACE_AREAS, scope_region)]
+    if surf:
+        return list(dict.fromkeys(surf))[:limit]
+    desc_hits = _token_hits(crates, (bead.get("description") or "")[:400].lower())
+    return desc_hits if len(desc_hits) == 1 else []

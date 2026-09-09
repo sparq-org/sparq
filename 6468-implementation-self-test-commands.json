@@ -1,0 +1,22 @@
+[
+  {
+    "command": [
+      "/opt/homebrew/bin/python3",
+      "scripts/triage-area.py",
+      "--self-test"
+    ],
+    "exit": 0,
+    "seconds": 0.251887875,
+    "reason_for_exact_head_capture": "First short sequential shell batch saved output but retained only the final control runner exit status."
+  },
+  {
+    "command": [
+      "/opt/homebrew/bin/python3",
+      "scripts/bd-to-issues.py",
+      "--self-test"
+    ],
+    "exit": 0,
+    "seconds": 0.199134875,
+    "reason_for_exact_head_capture": "First short sequential shell batch saved output but retained only the final control runner exit status."
+  }
+]

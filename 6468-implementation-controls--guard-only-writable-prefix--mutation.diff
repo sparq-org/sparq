@@ -1,0 +1,11 @@
+--- candidate/triage-area.py
++++ guard-only-writable-prefix/triage-area.py
+@@ -742,7 +742,7 @@
+     known = live_area_labels()
+     rows = plan(candidate_issues(), crates)
+ 
+-    unknown = sorted({lb for _, add, _ in rows for lb in add} - known)
++    unknown = sorted({lb for _, add, _ in rows[:a.max_writes] for lb in add} - known)
+     if unknown:
+         print(f"ERROR: classification produced labels that do not exist: {unknown}",
+               file=sys.stderr)

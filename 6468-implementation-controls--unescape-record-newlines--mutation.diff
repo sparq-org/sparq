@@ -1,0 +1,11 @@
+--- candidate/triage-area.py
++++ unescape-record-newlines/triage-area.py
+@@ -753,7 +753,7 @@
+             for label in sorted(set(add).intersection(unknown)):
+                 print("UNKNOWN_AREA " + json.dumps(
+                     {"number": it["number"], "label": label, "evidence": why},
+-                    sort_keys=True), file=sys.stderr)
++                    sort_keys=True).replace(chr(92) + "n", chr(10)), file=sys.stderr)
+         print("Review the row's routing evidence. A wrong mapping needs a classifier fix; "
+               "a verified existing crate may need separately reviewed label provisioning. "
+               "This classifier never creates labels.", file=sys.stderr)

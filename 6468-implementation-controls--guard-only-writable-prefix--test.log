@@ -1,0 +1,27 @@
+test_captured_titles_and_existing_area (triage_area_control_tests.TestTriageAreaDiagnostics.test_captured_titles_and_existing_area) ... ok
+test_diagnostic_escapes_records_without_dumping_issue_body (triage_area_control_tests.TestTriageAreaDiagnostics.test_diagnostic_escapes_records_without_dumping_issue_body) ... ok
+test_offenders_keep_row_label_tier_association_and_order (triage_area_control_tests.TestTriageAreaDiagnostics.test_offenders_keep_row_label_tier_association_and_order) ... ok
+test_supported_label_uses_normal_add_and_unpark_path (triage_area_control_tests.TestTriageAreaDiagnostics.test_supported_label_uses_normal_add_and_unpark_path) ... ok
+test_title_scope_and_t0_priority (triage_area_control_tests.TestTriageAreaDiagnostics.test_title_scope_and_t0_priority) ... ok
+test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget) ... FAIL
+test_unrelated_unknown_still_blocks_after_generator_provisioning (triage_area_control_tests.TestTriageAreaDiagnostics.test_unrelated_unknown_still_blocks_after_generator_provisioning) ... ok
+
+======================================================================
+FAIL: test_unknown_later_row_blocks_all_writes_even_outside_budget (triage_area_control_tests.TestTriageAreaDiagnostics.test_unknown_later_row_blocks_all_writes_even_outside_budget)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468/scripts/tests/test_triage_area.py", line 235, in test_unknown_later_row_blocks_all_writes_even_outside_budget
+    self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: (0, [['issue', 'edit', '1', '--repo', 'spa[969 chars]", 0) != (2, [], '', 0)
+
+First differing element 0:
+0
+2
+
+Diff is 1187 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.023s
+
+FAILED (failures=1)

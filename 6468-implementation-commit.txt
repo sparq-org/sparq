@@ -1,0 +1,11 @@
+commit 5f758d2afed6524cf191820463934c2213ddcfda
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Wed Sep 9 19:57:29 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Wed Sep 9 19:57:29 2026 +0100
+
+    fix(ci): identify unknown area rows before classification writes
+    
+    Route triage-area titles to the CI lane and report escaped issue, missing-label and tier records before the unchanged global write barrier. Preserve separate reviewed provisioning for real existing crates and never create labels from the classifier.
+    
+    Co-Authored-By: OpenAI GPT-6 Astra <noreply@openai.com>

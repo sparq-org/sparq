@@ -1,0 +1,11 @@
+--- candidate/triage-area.py
++++ drop-tier-evidence/triage-area.py
+@@ -752,7 +752,7 @@
+         for it, add, why in rows:
+             for label in sorted(set(add).intersection(unknown)):
+                 print("UNKNOWN_AREA " + json.dumps(
+-                    {"number": it["number"], "label": label, "evidence": why},
++                    {"number": it["number"], "label": label, "evidence": ""},
+                     sort_keys=True), file=sys.stderr)
+         print("Review the row's routing evidence. A wrong mapping needs a classifier fix; "
+               "a verified existing crate may need separately reviewed label provisioning. "

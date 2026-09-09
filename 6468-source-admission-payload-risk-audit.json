@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-09T19:03:38.925803+00:00",
+  "repository": {
+    "full_name": "sparq-org/sparq",
+    "html_url": "https://github.com/sparq-org/sparq",
+    "private": false,
+    "visibility": "public"
+  },
+  "packet_sha256": "0d5fd7a304064f45848960201140919345d19acd8d74d58e74519c99390b6780",
+  "token_pattern_counts": {
+    "credential_assignments": 0,
+    "private_key": 0,
+    "github_token": 0,
+    "api_secret_literal": 0
+  },
+  "contents": "Tracked repository source and newly authored2filediff; generated local tests/controls/preflight/composition outputs and provenance. No environment dumps, credentials files, keychain material, session cookies or agent transcripts in manifest/packet. Local paths and public commit author attribution are present.",
+  "limits": "Pattern scanning cannot prove absence of every secret. Repository visibility is separately verified; no packet sent after the rejection.",
+  "user_authorization": "User expressly requested Claude Opus5 for independent review/soundness/trust work, offered Claude sign-in, and asked this session to continuously solve and review repository work. User authorization persists across turns."
+}

@@ -1,0 +1,81 @@
+1: # docs-quality — documentation-quality CI (bead sq-5fd1). [OPUS-4.8]
+2: #
+3: # [FABLE-5] sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.1):
+4: # CONSOLIDATED from 13 sub-minute jobs to 2 bucket jobs. Every job was a separate
+5: # runner claim (queue wait + claim + checkout + action setup) for seconds of real
+6: # linting, and this is the repo's highest-frequency workflow (pull_request +
+7: # merge_group + main push) — the churn fed the documented congestion-collapse mode.
+8: # The former jobs survive VERBATIM as named sequential step-groups inside:
+9: #
+10: #   * `quick-gates`   ("docs-quality quick-gates") — every HARD gate. NO
+11: #     continue-on-error anywhere: any failing step fails the job, the single
+12: #     gating check-run reds, and the required ci-summary `gate` reds. Former job
+13: #     names survive as step names for log greppability + blame attribution.
+14: #   * `quick-advisory` ("docs-quality quick-advisory (advisory)") — the three
+15: #     advisory checks. The job NAME carries the advisory token (ci-summary
+16: #     exclusion) and findings stay swallowed AT THE STEP exactly as before.
+17: #
+18: # Gate-contract safety: ci-summary's aggregator polls check-runs (created PER JOB)
+19: # by name — jobs merge freely as long as (a) every formerly-GATING check still runs
+20: # inside an advisory-token-free job and (b) every ADVISORY check stays under an
+21: # advisory-token name concluding SUCCESS. Registry: the three former advisory job
+22: # entries in .github/advisory-registry.json are replaced by one entry for the
+23: # consolidated advisory job (same PR, C2-checked by the ci-scripts step below).
+24: #
+25: # WHAT: lints the repo's markdown for spelling, link integrity, style, and the
+26: # house rules (no baked-in perf numbers; concise crate-README template). Two tiers:
+27: #
+28: #   HARD gates (FAIL the build; picked up by the ci-summary aggregator):
+29: #     • markdownlint  — structural markdown defects over the user-facing + governance
+30: #                       doc surface (root docs, skills/, docs/, crates/, metrics/, the
+31: #                       book/ mdBook sources — added by issue #5020 — and, as of
+32: #                       sq-rqyo, research/ + zk/). Tuned to the repo's house style via
+33: #                       .markdownlint-cli2.jsonc, which carries the authoritative globs.
+34: #     • typos         — high-confidence spelling errors in those same docs (markdown
+35: #                       only), with a domain allowlist in _typos.toml.
+36: #     • internal-links — lychee --offline over those docs (incl. book/, issue #5020): every
+37: #                       relative link AND heading-anchor (#fragment) must resolve.
+38: #                       Deterministic (no net).
+39: #     • privacy-claims — greps the OUTWARD claim surface for unqualified ZK/MPC
+40: #                       privacy/soundness claims (the empirical-honesty mandate; the v1
+41: #                       ZK verifier is pending external audit + sparq-mpc is semi-honest
+42: #                       only). A hit fails unless the line carries an inline
+43: #                       `privacy-claims-allow: <why>` marker. (scripts/check-privacy-claims.sh;
+44: #                       beads sq-toze.35 / sq-qhy4.)
+45: #     • terminology    — greps the doc surface for deprecated RDF/SPARQL wording: the
+595:       # per-test-cap TIMEOUTS (cost debt, sq-0s15k — non-fatal) or a GENUINE Miri UB/assertion
+596:       # failure (always fatal — the finding the lane exists for). A regression here could turn
+597:       # the UB lane silently green, so its hermetic self-test (timeout-vs-real-failure split +
+598:       # exit codes) runs on every PR — same stdlib-only, no-deps pattern as the lints above.
+599:       - name: Self-test Miri verdict classifier (timeout-vs-UB split + exit codes)
+600:         run: python3 scripts/miri_classify_verdict.py --self-test
+601:       # [FABLE-5] #3419: the issue-triage pair (scripts/triage.py + scripts/retriage.py) was
+602:       # self-tested ONLY inside the retriage cron (retriage.yml), so a PR that changed
+603:       # triage.py's promotion behavior (#2898: park no-area issues) broke retriage's fixture
+604:       # expectations on main SILENTLY — the KeyError surfaced a day later, out-of-band.
+605:       # Running both hermetic self-tests HERE (stdlib-only, no gh/network: pure label-delta
+606:       # fixtures) reds the offending PR instead of the next cron run.
+607:       - name: Self-test triage.py + retriage.py (static-triage + retriage-plan fixtures)
+608:         run: |
+609:           python3 scripts/triage.py --self-test
+610:           python3 scripts/retriage.py --self-test
+611:       # [OPUS-5] #1135: scripts/triage-area.py is the third member of that triage
+612:       # family — it CLEARS the `needs:area` park triage.py sets. As of #3816 it also
+613:       # runs unattended every half hour (.github/workflows/triage-area.yml), which
+614:       # makes this PR-time gate load-bearing rather than merely prudent: without it a
+615:       # rule-table edit would first be observed by mislabeling LIVE issues on the next
+616:       # cron fire, and a wrong `area:` routes a worker at the wrong crate. The cron
+617:       # re-runs both suites itself before it writes, so this gate and that one fail on
+618:       # the same regression — here on the PR, there before any label is touched.
+619:       # Both suites are hermetic (stdlib only, no gh/network):
+620:       # the script's own rule self-test, plus the independent safety tests
+621:       # (fail-closed / no unpark-without-an-area / no invented label / the three
+622:       # rule orderings that were measured wrong on the live backlog / — since
+623:       # #5003 — the candidate fetch's REACH and its no-silent-truncation guards,
+624:       # which are fail-QUIET defects a live cron cannot surface on its own).
+625:       - name: Self-test triage-area.py (needs:area classifier — fail-closed + no-drift)
+626:         run: |
+627:           python3 scripts/triage-area.py --self-test
+628:           python3 scripts/tests/test_triage_area.py
+629:       # [OPUS-5] #5425: scripts/promote.py is the fourth member of that family — it decides
+630:       # whether third-party content leaves QUARANTINE, so a regression here is a security

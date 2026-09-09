@@ -1,0 +1,9 @@
+{
+  "classifier_unittest": 44,
+  "new_test_methods": 7,
+  "triage_self_test_assertions": 17,
+  "bd_self_test_assertions": 114,
+  "controls": 8,
+  "control_executions": 56,
+  "control_survivors": 0
+}

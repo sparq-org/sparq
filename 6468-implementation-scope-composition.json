@@ -1,0 +1,20 @@
+{
+  "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "changed_production_functions": [
+    "main"
+  ],
+  "t0_parser_and_declaration_helpers_byte_identical": true,
+  "all_other_production_functions_byte_identical": true,
+  "existing_scope_property_loop_bodies_byte_identical": true,
+  "peer_patch": "../conflict-assessment/p6095.diff",
+  "peer_patch_sha256": "6879fe591e440e8c2f9968572bc981b4a02b3992d255c2a9bd4c16ecfb15f44f",
+  "peer_head": "0883db681c73ddc338643f135c770c5a036ac3a4",
+  "peer_patch_check_command": [
+    "git",
+    "apply",
+    "--check",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6468/conflict-assessment/p6095.diff"
+  ],
+  "peer_patch_check_exit": 0,
+  "limits": "Read-only git apply --check proves patch applies to candidate files; no composed tests or semantic re-review of6095 performed. No peer branch/source modified."
+}

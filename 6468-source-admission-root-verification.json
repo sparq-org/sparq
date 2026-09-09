@@ -1,0 +1,12 @@
+{
+  "verified_at": "2026-09-09T19:01:48.485789+00:00",
+  "head": "5f758d2afed6524cf191820463934c2213ddcfda",
+  "base": "cea4414b39225b1240f36d968ba1549e700cd32f",
+  "manifest_files": 54,
+  "all_hashes_sizes_verified": true,
+  "worktree_clean": true,
+  "parent_exact": true,
+  "root_diff_review": "Exactly2Pythonfiles,+135/-3;title-onlyruleandANCHORED_ONLY;errorrecorddiagnosticbeforeunchangedreturn2andbudget;noT0/census/workflow/automaticlabelcreation/runtimeperformancechanges",
+  "packet_sha256": "f95203ff45b00bdb4e7bb81216cf531dc31ece29e96631f7da0bd6ddf4ebaf9b",
+  "manifest_sha256": "332c7df7ee1b8ac5a8747277c0dd8b6e2df86fb0165352f2491ea67b212b5753"
+}
