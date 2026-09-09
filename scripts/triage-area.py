@@ -744,7 +744,8 @@ def main():
 
     unknown = sorted({lb for _, add, _ in rows for lb in add} - known)
     if unknown:
-        print(f"ERROR: classification produced labels that do not exist: {unknown}",
+        print(f"ERROR: classification produced labels absent from the fetched area-label set "
+              f"({len(known)} area labels; the fetch may be incomplete): {unknown}",
               file=sys.stderr)
         # [GPT-6 Astra] Bind each missing label to its row and classification tier.
         # JSON escapes newlines/control characters; no issue body is logged. Keep
@@ -754,8 +755,10 @@ def main():
                 print("UNKNOWN_AREA " + json.dumps(
                     {"number": it["number"], "label": label, "evidence": why},
                     sort_keys=True), file=sys.stderr)
-        print("Review the row's routing evidence. A wrong mapping needs a classifier fix; "
-              "a verified existing crate may need separately reviewed label provisioning. "
+        print("Do not create a label based on this failure. First verify each name with "
+              "GET /repos/{owner}/{repo}/labels/{url-encoded-name}. Review incomplete "
+              "enumeration or wrong routing separately; label provisioning for a verified "
+              "existing crate requires a separate reviewed maintenance action. "
               "This classifier never creates labels.", file=sys.stderr)
         return 2
 

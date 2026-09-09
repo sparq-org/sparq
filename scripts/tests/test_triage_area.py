@@ -185,7 +185,7 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
         return {"number": number, "title": title, "body": body,
                 "labels": [{"name": name} for name in labels]}
 
-    def run_main(self, issues, known, *args):
+    def run_main(self, issues, known, *args, apply=True):
         """Drive the actual CLI, poisoning every unmocked GitHub call."""
         calls, out, err = [], io.StringIO(), io.StringIO()
 
@@ -199,7 +199,7 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
                 patch.object(TA, "live_area_labels", return_value=set(known)), \
                 patch.object(TA, "_gh", side_effect=gh), \
                 patch.object(TA, "_sleep") as sleep, \
-                patch.object(sys, "argv", ["triage-area.py", "--apply", *args]), \
+                patch.object(sys, "argv", ["triage-area.py", *(["--apply"] if apply else []), *args]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = TA.main()
         return code, calls, out.getvalue(), err.getvalue(), sleep.call_count
@@ -227,16 +227,28 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
         self.assertEqual(TA.classify(self.DIAGNOSTIC, "crate_or_surface: sparq-core", CRATES),
                          (["sparq-core"], "T0 author-declared crate_or_surface/crates field"))
 
+    def test_rule_precedes_benchmark_and_website_collisions(self):
+        for title in ("triage-area: benchmark the classification pass",
+                      "triage-area: website routing"):
+            got, why = TA.classify(title, "", CRATES)
+            self.assertEqual(got, ["ci"], title)
+            self.assertTrue(why.startswith("T1 triage-area:"), (title, why))
+
     def test_unknown_later_row_blocks_all_writes_even_outside_budget(self):
         issues = [self.issue(5016, self.GENERATOR, TA.PARK_LABEL),
                   self.issue(1, self.DIAGNOSTIC, TA.PARK_LABEL)]
-        for args in ((), ("--max-writes", "1"), ("--json",)):
-            code, calls, out, err, sleeps = self.run_main(issues, {"area:ci"}, *args)
+        for apply, args in ((True, ()), (True, ("--max-writes", "1")),
+                            (True, ("--json",)), (False, ())):
+            code, calls, out, err, sleeps = self.run_main(issues, {"area:ci"}, *args, apply=apply)
             self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
             self.assertEqual(self.records(err), [{
                 "number": 5016, "label": "area:sparq-wrapper-gen",
                 "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
-            self.assertIn("separately reviewed label provisioning", err)
+            self.assertIn("absent from the fetched area-label set (1 area labels", err)
+            self.assertIn("the fetch may be incomplete", err)
+            self.assertIn("Do not create a label based on this failure.", err)
+            self.assertIn("GET /repos/{owner}/{repo}/labels/{url-encoded-name}", err)
+            self.assertIn("a separate reviewed maintenance action", err)
             self.assertIn("This classifier never creates labels.", err)
 
     def test_offenders_keep_row_label_tier_association_and_order(self):
@@ -263,8 +275,11 @@ class TestTriageAreaDiagnostics(unittest.TestCase):
         with patch.object(TA, "plan", return_value=[(row, [label], why)]):
             code, calls, out, err, sleeps = self.run_main([], set())
         self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
-        self.assertEqual(self.records(err), [{"number": 7, "label": label, "evidence": why}])
+        # Assert line behavior BEFORE decoding: a newline can split a record and
+        # inject a workflow command without adding another UNKNOWN_AREA prefix.
         self.assertFalse(any(line.startswith("::") for line in err.splitlines()))
+        self.assertEqual(sum(line.startswith("UNKNOWN_AREA ") for line in err.splitlines()), 1)
+        self.assertEqual(self.records(err), [{"number": 7, "label": label, "evidence": why}])
         self.assertNotIn("private fixture body", err)
         self.assertNotIn("unprinted title", err)
 
