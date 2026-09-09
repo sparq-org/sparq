@@ -12,6 +12,13 @@ RDF credential adapter, Sparq query verifier, or new cryptographic construction.
 It is a separate Cargo workspace. Its dependencies do not enter the ordinary
 Sparq build, the lean engine, or the WASM bundle. No existing verifier is changed.
 
+The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
+runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull
+requests and main-branch pushes touching this workspace or its Rust configuration.
+It builds Circom from a pinned source commit and uses both committed lockfiles.
+It can also be run manually. Passing this lane is regression evidence for the
+bounded prototype, not an external cryptographic audit.
+
 ## Run
 
 Install Circom **2.2.2** and use the repository's pinned Rust toolchain. The build
