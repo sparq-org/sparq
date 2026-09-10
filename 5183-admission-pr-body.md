@@ -1,0 +1,13 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The first original UPDATE differential failure in #5183 comes from the reference store collapsing distinct integer lexical forms. That changes the number of matching solutions and fresh template blank nodes, which the existing comparator correctly rejects.
+
+This narrows the reference corpus to disjoint canonical/noncanonical integer values with one spelling per value, including LOAD and nested triple terms. Noncanonical inputs still reach Sparq unchanged. Lexical adjudication now rejects term collisions, row loss and blank-node-count differences before requiring full normalized structural equality. The strict Sparq-versus-Sparq comparison remains unchanged.
+
+The exact original ten-request sequence is retained as a Sparq-only regression through both public update paths and full-quad probes, including the final ADD. Separate tests preserve the lexical-alias coverage that the lossy reference cannot support.
+
+Validation: the exact-module harness passed all 20 tests under the repository's Rust 2021 edition, including the existing differential and generator windows; scoped Clippy with `--tests -D warnings`, touched-file formatting and `git diff --check` passed. The original seven guard controls and focused follow-up controls detected their intended defects. A control build confirmed the earlier let-chain compatibility gap; the final source passes under Rust 2021. Local preflight stopped only at the established Bash 3 `mapfile` incompatibility; normal Linux CI remains required.
+
+This is a test-corpus/adjudication repair, with no engine, canonicalizer, dependency, allowlist or workflow change. The correspondence is limited to this generator's operations and complete-quad probes. Seven other original failing inputs remain unresolved; passing their numbers under the changed generator would not replay them. Keep #5183 open.
+
+Independent review: actual Claude Opus5 with extra-high reasoning approved the scoped original change and this follow-up at `fe3284199db0831f353d2ae401b8c69472764904` for normal CI, with no blocking findings. The follow-up resolves the Rust edition mismatch, preserves failure diagnostics and strengthens the test oracles. Implementation: GPT-6 Astra with extra-high reasoning.

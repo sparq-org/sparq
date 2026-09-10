@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T14:25:11.591010+00:00",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "publish_approved": true,
+  "merge_approved": false,
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 79015,
+  "session_state": "completed_collected",
+  "output_sha256": "0c093d3d42af2abc2834c2e4ccca221ddee802896f1b378e8d536bc50190580a",
+  "finding_dispositions": "All five original points resolved or clarified by full helper context. Edition2021 gap confirmed/fixed, diagnostics retained, explicit independent pool asserts, hermetic testallowlist, disjoint rawcountguards. No blockingfindings.",
+  "prior_review_reconciliation": "Initial787aab5 scoped generator/adjudicator review retained; complete followup helper review coverschangedbranches. Unchanged originalgenerator/LOADcontext remains prior-reviewed, not claimed re-reviewed bydelta.",
+  "residuals": "Minor unlabeled countordering/negativeparsemessage/unchangedinitialerrorformat are nonblocking; no expandededit. Originaldomainnarrowing and7historicalcases remain explicit; issue staysopen.",
+  "validation": "Root verified final116-filemanifest/source/delta, raw20tests, scopedClippy andcompat/controlfailure details. Real repositoryCI andCopilot/threadresolution requiredbeforeprotectedmerge; no fullworkspacelocalpassclaim."
+}

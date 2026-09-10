@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T14:22:50.659420+00:00",
+  "updated_at": "2026-09-10T14:28:07.242996+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -66,7 +66,7 @@
   "active_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "followup_committed_independent_review_in_progress",
+    "state": "published_pr6482_ci_in_progress",
     "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -148,10 +148,10 @@
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
     "next_actions": [
-      "Collect actual Opus followup review79015 onfe3284199, disposition all findings; publish prepared scoped5183PR only after approval and fresh target/budget checks.",
-      "Collect original7seed fixed-list execution from existingAstra; verify provenance/perseedmismatch and contraryevidence; no newgeneratorseedsubstitution.",
-      "Drive newPR normalCI/Copilot/protectedqueue; noauto-close5183 untilremainingoriginalcasesresolved. Main459alreadyCI/matrix/aggregate green; no more recovery.",
-      "Preserve registryOFF,ALLGREEN,6049/6055/canon/EC2/release holds; bounded10minheartbeat, no duplicatedagents/builds/reviews."
+      "Watch PR6482 normalCI/Copilot; verify requiredgate exacthead/app15368, resolve every substantive finding, then normalprotectedqueue with exactexpectedhead. No force/admin/reviewlabel fabrication.",
+      "Collect and verify existingAstra remaining-original-execution frozenbundle; classify7perseed failures usingoriginalsource reconstruction and compareparent/main. Keep5183open untilclassification+landedrepair proven.",
+      "No new modelreview or build onfe328 unless findings/changejustify it. Main459alreadygreen; do notrerun.",
+      "Preserve registryOFF,ALLGREEN,6049/6055/canon/EC2/release holds; bounded10minheartbeat andoneimplementationworker."
     ],
     "design_manifest_sha256": "2c25700e565a5d475d31392b23f9a921b2861a119e6d6a54a9b56a045f7fc574",
     "design_root_verification": "direct-5183/admission/comparator-design-root-verification.json",
@@ -215,7 +215,7 @@
       "finding": "Sevenmarkersonly,nooriginaldetail; fixedbinarieshardcodedfirstseed; newdriveronlybuildneeded withunchangedoriginalsources."
     },
     "followup_review": {
-      "state": "running",
+      "state": "completed_collected",
       "session": 79015,
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
@@ -223,7 +223,12 @@
       "input_sha256": "34ed405dcfee169e22e7cf159389269fe6b452955f68e120ddc66a1804959eb8",
       "output": "direct-5183/admission/opus-edition-followup-review.json",
       "completion": "direct-5183/admission/opus-edition-followup-completion.json",
-      "policy": "Collect79015 once before parsing; verify successfulouter andactualOpusmodelUsage. Do not relaunch, quota/authretry, or publish before assessed approval."
+      "policy": "Session79015completed/collected; do notpoll/relaunch. No blockingfindings; normalCI/Copilot/threadresolution stillrequiredbeforemerge.",
+      "actual_model": "claude-opus-5",
+      "verdict": "APPROVE_FOR_CI",
+      "result": "direct-5183/admission/opus-edition-followup-result.json",
+      "root_disposition": "direct-5183/admission/opus-edition-followup-root-disposition.json",
+      "output_sha256": "0c093d3d42af2abc2834c2e4ccca221ddee802896f1b378e8d536bc50190580a"
     },
     "remaining_original_execution": {
       "state": "in_progress",
@@ -231,7 +236,30 @@
       "agent": "/root/postmerge_ci",
       "scope": "Two driver-onlybuilds withfrozenoriginal0807388module, parentd41/main781f qualifieddependencies; sevenlistedseeds onceperrevision,14runsmax; edition2021 matchingrealcrate. No generator/source changes.",
       "limits": "600saggregate,120seachbuild,30seachseed,128MiBnew,min2GiBfree,offlinejobs1,no retries",
-      "qualification": "Reconstructdeterministicallyfromoriginalsource; originalCIcapturedonlymarkersforthese7. Preserveunexpectedsuccesswithoutsecondrun."
+      "qualification": "Reconstructdeterministicallyfromoriginalsource; originalCIcapturedonlymarkersforthese7. Preserveunexpectedsuccesswithoutsecondrun.",
+      "progress": "Agent reports2driverbuilds+14runs terminal in~39.4s/~20.1MB,7failuresmatchparent/main; freeze/perseedproofnotyetrootverified. No extraexecution."
+    },
+    "pr": 6482,
+    "url": "https://github.com/sparq-org/sparq/pull/6482",
+    "publication": {
+      "state": "completed_collected",
+      "session": 81792,
+      "receipt": "direct-5183/admission/publication-receipt.json",
+      "pr": 6482,
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "draft": false,
+      "registry_verified_off": true,
+      "copilot": "Requested, session95217completedcollected",
+      "copilot_receipt": "direct-5183/admission/copilot-request-receipt.json"
+    },
+    "ci": {
+      "state": "initial_runs_pending",
+      "evidence": "direct-5183/admission/pr6482-first-runs.json",
+      "CI": 34488984319,
+      "feature_matrix": 34488984325,
+      "aggregate": 34488983731,
+      "docs_quality": 34488983828,
+      "supply_chain": 34488983646
     }
   },
   "prs": {
@@ -658,6 +686,32 @@
       "last_observed_at": "2026-09-10T12:21:53.621323+00:00",
       "merged_at": "2026-09-10T12:12:31Z",
       "merge_commit": "4595388de9e389f5369d63828fbf90cfc16b62d9"
+    },
+    "6482": {
+      "state": "OPEN_CI_IN_PROGRESS",
+      "url": "https://github.com/sparq-org/sparq/pull/6482",
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "branch": "codex/update-differential-replay",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+      "issue": 5183,
+      "review": "ActualOpus5xhigh initial+editionfollowup approvedforCI; alloriginalfindingsresolved; rootverified",
+      "publication": "direct-5183/admission/publication-receipt.json",
+      "first_ci": {
+        "state": "initial_runs_pending",
+        "evidence": "direct-5183/admission/pr6482-first-runs.json",
+        "CI": 34488984319,
+        "feature_matrix": 34488984325,
+        "aggregate": 34488983731,
+        "docs_quality": 34488983828,
+        "supply_chain": 34488983646
+      },
+      "copilot": "requested",
+      "merge_admitted": false,
+      "issue_autoclose": false,
+      "observed_labels": [
+        "area:sparq-bench"
+      ],
+      "observed_at": "2026-09-10T14:28:07.242996+00:00"
     }
   },
   "registry": {
@@ -3921,9 +3975,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T13:59:11.819114+00:00",
+    "at": "2026-09-10T14:25:36.963685+00:00",
     "enabled": false,
-    "evidence": "direct-6480/admission/gate-recovery-registry.json"
+    "evidence": "direct-5183/admission/publication-receipt.json registry/prepush proof"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

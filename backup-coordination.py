@@ -662,6 +662,11 @@ for evidence_name in ['before.rs.txt', 'build-tests.stderr', 'build-tests.stdout
 for evidence_name in ['review-followup-root-verification.json', 'opus-followup-review-task.md', 'opus-edition-followup-input.md', 'opus-edition-followup-input-audit.json', 'run-opus-edition-followup.py', 'publish.py']:
     FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
 
+
+# Completed actual5183 followup review, publication and requestedCopilot review.
+for evidence_name in ['opus-edition-followup-review.json', 'opus-edition-followup-stderr.log', 'opus-edition-followup-completion.json', 'opus-edition-followup-result.json', 'opus-edition-followup-root-disposition.json', 'pr-body.md', 'pr-create-input.json', 'publication-receipt.json', 'request-copilot.py', 'pr6482-first-runs.json', 'pr6482-first-runs.stderr', 'copilot-budget.json', 'copilot-budget.stderr', 'copilot-existing-reviews.json', 'copilot-existing-reviews.stderr', 'copilot-immediate-pr.json', 'copilot-immediate-pr.stderr', 'copilot-request-input.json', 'copilot-request-receipt.json', 'copilot-request-result.json', 'copilot-request-result.stderr']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

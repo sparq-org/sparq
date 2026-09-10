@@ -1,0 +1,58 @@
+{
+  "verdict": "APPROVE_FOR_CI",
+  "reviewed_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "review_basis": "Static reading of the supplied delta plus the newly supplied complete helper bodies (compare prologue/final Differs, Verdict, comparable, oxigraph_normalized_term, oxigraph_normalized, record_lexical_terms, one_sided, nquads_line, PROBES, apply_sequence, allowlist, changed tests, Cargo/toolchain excerpts). No tools, builds, or execution by me.",
+  "blocking_findings": [],
+  "masking_check": "Not delta-only. Re-read the full supplied prologue and terminal Differs path: Same and AdjudicatedIntegerLexical admission criteria are unchanged (byte-identical structural equality after relabel; adjudication still requires row-count parity, injective per-side normalization, no row merge/duplication, equal blank-node counts, and exact post-normalization canonical equality). The delta changes only (a) two Differs message bodies, (b) one control-flow-equivalent rewrite in record_lexical_terms, (c) test bodies/formatting. No original scoped boundary is widened, and no original finding is hidden by the narrow diff.",
+  "dispositions": [
+    {
+      "finding": "1. Retain per-side dataset diagnostics on blank-node mismatch and normalized-comparable error",
+      "status": "RESOLVED (as reported)",
+      "assessment": "Both new branches now emit an explicit reason plus one_sided(label_a,&ca,label_b,&cb); counts are labelled by position only, and lines shown are the c14n-relabelled forms \u2014 identical to the pre-existing terminal Differs path, so no regression. Verdict class unchanged (Differs), so diagnostics cannot alter admission. Author-reported mutation control omit-blank-node-dataset-details (101) and the fault-positive/negative pair support teeth on both branches.",
+      "residual_nonblocking": "The prologue comparable() failure still returns bare `e` without one_sided; that arm is pre-existing at base, untouched here, and out of the approved scope."
+    },
+    {
+      "finding": "2. Independently assert both integer pool boundaries for all parsed integer leaves, incl. nested terms",
+      "status": "RESOLVED (as reported)",
+      "assessment": "assert_integer_pool asserts value<20 implies canonical spelling, else membership in 20..80 AND non-canonical spelling, and recurses into Term::Triple objects. Applied to LOAD-document objects and to every post-update generated-state object across 400 seeds. CANONICAL_INTEGER_VALUES is pinned by assert_eq!(\u2026,20) rather than used to derive the expectation, so the oracle no longer depends on the production constant nor on a sampled collision. Control partial-canonical-pool-overlap (rng.below(40)) \u2192 101 is the correct discriminator for canonical/noncanonical overlap.",
+      "residual_nonblocking": "Integers occurring only in never-matching DELETE patterns are not asserted; a negative integer literal would panic at parse::<u64>() with a misleading message rather than a pool assertion. Both fail closed."
+    },
+    {
+      "finding": "3. Make the injected-marker test independent of SPARQ_FUZZ_DIVERGENCES",
+      "status": "RESOLVED (as reported)",
+      "assessment": "Test now builds a local UpdateDivergenceAllowlist literal; control restore-ambient-marker-allowlist under an empty ambient registry \u2192 101. Registry-content coverage is retained by committed_allowlist_enables_exactly_the_adjudicated_classes, which is present and passing in the 20-test run.",
+      "residual_nonblocking": "Coupling to the committed registry now rests entirely on that separate test; if it were ever removed, a registry regression would not surface here."
+    },
+    {
+      "finding": "4. Check let-chain edition compatibility",
+      "status": "RESOLVED \u2014 MATERIAL DEFECT CONFIRMED AND FIXED",
+      "assessment": "Workspace edition = 2021 and sparq-bench uses edition.workspace = true, so parent 787aab5 could not have compiled in-crate; the reported 2021 compile of the unchanged source yields three let-chain diagnostics at 837/838/1986, matching the two removed sites. I verified equivalence line by line: insert() is still executed exactly once whenever parse::<i64>() succeeds, and the error fires only when a Some(previous) differs from l.value() \u2014 the guarded match arm is exactly the third conjunct of the old chain. No semantic or diagnostic-text change. The two rustfmt-only test rewrites preserve the escaped-continuation string content and the assert! predicate. Prior 20/20 under edition 2024 indeed did not prove crate compatibility."
+    },
+    {
+      "finding": "5. Informational uncertainty about the earlier raw-count guard",
+      "status": "CONFIRMED NOT DEAD",
+      "assessment": "Supplied prologue shows the first guard executes only inside `if ca == cb` (isomorphic but differing raw counts), while the adjudication-path guard executes only when ca != cb and allow_integer_lexical. Disjoint conditions; neither removed nor shadowed."
+    }
+  ],
+  "additional_observations": [
+    "Blank-node-count message reports `(1 vs 2)` without naming which side; order is (a,b) and one_sided labels the sections, so it is recoverable but slightly weaker than the raw-count message's labelled form.",
+    "The changed message drops the old string 'integer normalization changed blank-node counts'; the new wording is more accurate (cross-side comparison, not before/after) and nothing in the shown allowlist/registry keys on it.",
+    "Fault-injection control uses a process-global AtomicUsize call counter, so its ordering holds only under the single filtered test; this is control methodology, not shipped code \u2014 the final comparable() contains no injected block."
+  ],
+  "required_CI": [
+    "Full protected Linux CI on fe32841 as HEAD \u2014 no partial or local substitution accepted.",
+    "Workspace build and test including sparq-bench compiled at inherited edition 2021 (the minimal exact-module harness is not a substitute for the real crate/workspace graph).",
+    "cargo clippy -D warnings and cargo fmt --check as configured by the repo.",
+    "The repo's MSRV 1.88 job, given the edition/toolchain interaction just corrected.",
+    "The repo-selected preflight/privacy-claims gate must pass green on Linux; the local exit 1 is attributable to Bash 3 lacking mapfile and was neither weakened nor bypassed.",
+    "No new per-run non-vacuity policy and no targets beyond those the repo already selects.",
+    "Issue 5183 stays open: the other seven historical advancing-window inputs remain unresolved; new-seed generator successes are not original-input replay."
+  ],
+  "explicit_limits": [
+    "I executed nothing. Every exit code, hash, timing, byte-identity and helper-equivalence claim above is author-reported terminal evidence that I read as data, not independently reproduced.",
+    "Source review covers only the text supplied. Unchanged bodies not included \u2014 the non-canonical integer generator and object constructors, LoadSandbox, engine/canon/parser internals, other parent tests \u2014 were not re-read; therefore the 20..80 non-canonical-spelling domain is inferred from the passing assertions, not verified against generator source.",
+    "Native minimal exact-module 2021 validation does not prove full sparq-bench/workspace or Linux CI compilation; module-path, feature-unification or dependency-resolution differences could still surface in CI.",
+    "The fault-injected branch demonstrates diagnostic formatting preservation only, not a naturally observed canonicalizer failure.",
+    "Scope unchanged: test-corpus/adjudication repair with a compile-compatibility fix. No engine, canon, parser, allowlist-registry or workflow change; no Sparq defect fixed; no multiset redesign; narrower generated reference domain and Sparq-only historical regression persist as at parent."
+  ]
+}
