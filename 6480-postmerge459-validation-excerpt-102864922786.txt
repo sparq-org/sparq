@@ -1,0 +1,38 @@
+3384: 2026-09-10T12:22:40.6987025Z ##[group]Run python3 scripts/tests/test_js_wasm_pack_install.py
+3385: 2026-09-10T12:22:40.6987449Z [36;1mpython3 scripts/tests/test_js_wasm_pack_install.py[0m
+3386: 2026-09-10T12:22:40.7009825Z shell: /usr/bin/bash -e {0}
+3387: 2026-09-10T12:22:40.7010079Z env:
+3388: 2026-09-10T12:22:40.7010337Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+3389: 2026-09-10T12:22:40.7010753Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+3390: 2026-09-10T12:22:40.7011161Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3391: 2026-09-10T12:22:40.7011518Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3392: 2026-09-10T12:22:40.7012005Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+3393: 2026-09-10T12:22:40.7012369Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+3394: 2026-09-10T12:22:40.7012669Z ##[endgroup]
+3395: 2026-09-10T12:22:40.7603232Z test_install_precedes_npm_ci (__main__.JsLaneWasmPackInstall.test_install_precedes_npm_ci)
+3396: 2026-09-10T12:22:40.7608510Z (4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH. ... ok
+3397: 2026-09-10T12:22:40.7609611Z test_installs_prebuilt_binary_sha_pinned (__main__.JsLaneWasmPackInstall.test_installs_prebuilt_binary_sha_pinned)
+3398: 2026-09-10T12:22:40.7610877Z (2) The replacement is the SHA-pinned prebuilt-download action. ... ok
+3399: 2026-09-10T12:22:40.7612059Z test_no_cargo_install_wasm_pack (__main__.JsLaneWasmPackInstall.test_no_cargo_install_wasm_pack)
+3400: 2026-09-10T12:22:40.7613475Z (1) The source compile — the actual flake surface — must be gone. ... ok
+3401: 2026-09-10T12:22:40.7614680Z test_npm_ci_before_wasm_pack_is_rejected (__main__.JsLaneWasmPackInstall.test_npm_ci_before_wasm_pack_is_rejected) ... ok
+3402: 2026-09-10T12:22:40.7615890Z test_root_install_inline_and_block_forms (__main__.JsLaneWasmPackInstall.test_root_install_inline_and_block_forms) ... ok
+3403: 2026-09-10T12:22:40.7617248Z test_root_install_missing_or_wrong_command_is_rejected (__main__.JsLaneWasmPackInstall.test_root_install_missing_or_wrong_command_is_rejected) ... ok
+3404: 2026-09-10T12:22:40.7621470Z test_root_install_wrong_or_missing_directory_is_rejected (__main__.JsLaneWasmPackInstall.test_root_install_wrong_or_missing_directory_is_rejected) ... ok
+3405: 2026-09-10T12:22:40.7622652Z test_version_is_pinned_exactly_not_latest (__main__.JsLaneWasmPackInstall.test_version_is_pinned_exactly_not_latest)
+3406: 2026-09-10T12:22:40.7624180Z (3) An exact vX.Y.Z — `latest` re-adds a network lookup to resolve it. ... ok
+3407: 2026-09-10T12:22:40.7624947Z test_both_wasm_lanes_use_the_action (__main__.WasmPackVersionUnified.test_both_wasm_lanes_use_the_action)
+3408: 2026-09-10T12:22:40.7713963Z Anti-vacuity: the two lanes #5771 unified must still be in the sample. ... ok
+3409: 2026-09-10T12:22:40.7714972Z test_every_step_pins_an_exact_version (__main__.WasmPackVersionUnified.test_every_step_pins_an_exact_version)
+3410: 2026-09-10T12:22:40.7789474Z Every wasm-pack step names an exact release — an omitted `version:` takes ... ok
+3411: 2026-09-10T12:22:40.7790799Z test_mutation_dropping_a_lanes_version_is_caught (__main__.WasmPackVersionUnified.test_mutation_dropping_a_lanes_version_is_caught)
+3412: 2026-09-10T12:22:40.7792099Z Deleting one lane's `version:` must NOT leave both assertions green. ... ok
+3413: 2026-09-10T12:22:40.7792985Z test_mutation_version_outside_with_is_not_a_pin (__main__.WasmPackVersionUnified.test_mutation_version_outside_with_is_not_a_pin)
+3414: 2026-09-10T12:22:40.7793900Z A `version:` that the action never receives must not read as a pin. ... ok
+3415: 2026-09-10T12:22:40.7866794Z test_single_version_across_workflows (__main__.WasmPackVersionUnified.test_single_version_across_workflows) ... ok
+3416: 2026-09-10T12:22:40.7867456Z 
+3417: 2026-09-10T12:22:40.7867710Z ----------------------------------------------------------------------
+3418: 2026-09-10T12:22:40.7868126Z Ran 13 tests in 0.027s
+3419: 2026-09-10T12:22:40.7868285Z 
+3420: 2026-09-10T12:22:40.7868392Z OK
+3421: 2026-09-10T12:22:40.7974473Z ##[group]Run python3 scripts/tests/test_ci_selection_alarm.py

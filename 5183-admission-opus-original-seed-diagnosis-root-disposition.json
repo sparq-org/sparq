@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-10T12:53:59.825337+00:00",
+  "review_session": 14706,
+  "completion": "completed_collected_exit0",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "output_sha256": "bf2e0d1329f283bf8ed66e830633eacb6bcf369566e972b6d751e7ea8f560be2",
+  "ancillary_cli_usage": "Haiku17outputtokens; substantive reviewactualOpus5",
+  "decision": "Acceptqualifiedreference-limitation diagnosis; noSparqenginefix/comparatorbug established. Candidate repair is narrower injectivegenerator domain + strongerlexicaladjudication + exactoriginalstrictSparqregression. Not patchapproval.",
+  "required_next": "Staticreadunshownnormalizer triple-term recursion, literal-generationsites/LOADmirrors/PROBES and lexical-sensitiveSPARQLoperations beforeconcreteimplementation. ExistingAstraworker dispatched read-only; no builds/runs/sourceedits.",
+  "additional_root_caveat": "Injectivelexicalrenamingalone doesnotpreservearbitrarySTR/sameTerm/SPARQLconstantmatching; auditactualgeneratedtemplates/probes. Do notdependonparticularcanonicalblanknodelabelassignment. Other7originalCIcasesremainunexecuted andunattributed.",
+  "review_scope": "OriginalfixedseedsourcequalifiedmacOSdiagnostic plusrootverifiedreducedwitnesses; mainrelevantRustsourceunchanged. No genericcorrectness, allCIgreen orcanonwaiverclaim."
+}

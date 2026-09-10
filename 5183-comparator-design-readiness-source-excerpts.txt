@@ -1,0 +1,1137 @@
+
+crates/sparq-bench/src/update_fuzz.rs:177-253
+177: // Small term pools so random DELETE DATA / WHERE conditions collide with previously
+178: // inserted data at high probability (a delete that never matches exercises nothing).
+179: 
+180: fn gen_subject(rng: &mut Rng) -> String {
+181:     format!("<http://ex/s{}>", rng.below(6))
+182: }
+183: 
+184: fn gen_predicate(rng: &mut Rng) -> String {
+185:     format!("<http://ex/p{}>", rng.below(4))
+186: }
+187: 
+188: /// A simple ground object: IRI / plain string / canonical `xsd:integer` (the
+189: /// dictionary's inline-id path) / language-tagged string. No triple term — this is
+190: /// what nests INSIDE a triple term, and what the reifier form quotes.
+191: fn gen_simple_object(rng: &mut Rng) -> String {
+192:     match rng.below(6) {
+193:         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
+194:         2 | 3 => format!("\"lit{}\"", rng.below(5)),
+195:         4 => format!("{}", rng.below(20)),
+196:         _ => format!("\"tag{}\"@en", rng.below(3)),
+197:     }
+198: }
+199: 
+200: /// An RDF-1.2 triple term `<<( s p o )>>`. `depth` bounds further nesting (the
+201: /// canonicalizer enforces a depth bound of its own, and deep nesting buys nothing
+202: /// the one-level case does not).
+203: fn gen_triple_term(rng: &mut Rng, depth: u32) -> String {
+204:     let o = if depth > 0 && rng.chance(1, 4) {
+205:         gen_triple_term(rng, depth - 1)
+206:     } else {
+207:         gen_simple_object(rng)
+208:     };
+209:     format!(
+210:         "<<( {} {} {} )>>",
+211:         gen_subject(rng),
+212:         gen_predicate(rng),
+213:         o
+214:     )
+215: }
+216: 
+217: /// A POOLABLE ground object — ground, blank-node-free, and in canonical lexical
+218: /// form, so the enclosing quad can later be reused verbatim as an exact-term
+219: /// `DELETE DATA` quad or a ground `WHERE` condition (see [`GenQuad::poolable`]).
+220: fn gen_object(rng: &mut Rng) -> String {
+221:     if rng.chance(1, 8) {
+222:         gen_triple_term(rng, 1)
+223:     } else {
+224:         gen_simple_object(rng)
+225:     }
+226: }
+227: 
+228: /// A NON-CANONICAL `xsd:integer` lexical. Every form here is non-canonical by
+229: /// construction (`v` is non-negative and something is always prepended), so it must
+230: /// round-trip as a term DISTINCT from `"{v}"^^xsd:integer`.
+231: fn gen_noncanonical_integer(rng: &mut Rng) -> String {
+232:     let v = rng.below(20);
+233:     let lexical = match rng.below(3) {
+234:         0 => format!("0{}", v),
+235:         1 => format!("+{}", v),
+236:         _ => format!("00{}", v),
+237:     };
+238:     format!("\"{}\"^^{}", lexical, XSD_INTEGER)
+239: }
+240: 
+241: /// A ground object spelled so the SAME text is valid in BOTH N-Triples (the `LOAD`
+242: /// document) and SPARQL (the reference engine's equivalent `INSERT DATA`). That rules
+243: /// out the bare-integer Turtle shorthand `4`, which N-Triples does not accept; the
+244: /// integer arm writes the typed literal out in full, in CANONICAL lexical form so the
+245: /// loaded quads stay poolable and outside the adjudicated numeric class.
+246: fn gen_ntriples_object(rng: &mut Rng) -> String {
+247:     match rng.below(6) {
+248:         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
+249:         2 | 3 => format!("\"lit{}\"", rng.below(5)),
+250:         4 => format!("\"{}\"^^{}", rng.below(20), XSD_INTEGER),
+251:         _ => format!("\"tag{}\"@en", rng.below(3)),
+252:     }
+253: }
+
+crates/sparq-bench/src/update_fuzz.rs:273-511
+273: /// Generator state threaded through one sequence: the ground quads emitted by
+274: /// earlier `INSERT DATA` / `LOAD` operations, as `(graph IRI or None-for-default,
+275: /// "s p o .")`. `DELETE DATA` (and the ground `WHERE` condition) sample mostly from
+276: /// this pool so deletions/conditions actually HIT live data — a purely random quad
+277: /// almost never matches the store, which was measured to let a neutered DELETE DATA
+278: /// path slip through a 200-seed window undetected. Still a pure function of the seed.
+279: ///
+280: /// ONLY [`GenQuad::poolable`] quads are recorded: a blank node's label is not
+281: /// re-referenceable across operations (a second mention makes a FRESH node), and a
+282: /// non-canonical numeric lexical must stay out of `DELETE DATA` / `WHERE` to keep the
+283: /// adjudicated Oxigraph-canonicalization class narrow (see the module docs).
+284: #[derive(Default)]
+285: struct GenState {
+286:     inserted: Vec<(Option<String>, String)>,
+287: }
+288: 
+289: /// A generated quad plus whether it may enter the reuse pool.
+290: struct GenQuad {
+291:     slot: Option<String>,
+292:     triple: String,
+293:     poolable: bool,
+294: }
+295: 
+296: fn gen_slot(rng: &mut Rng) -> Option<String> {
+297:     if rng.chance(2, 5) {
+298:         Some(gen_graph_iri(rng))
+299:     } else {
+300:         None
+301:     }
+302: }
+303: 
+304: /// A random fresh ground, canonical, blank-node-free quad — always poolable.
+305: fn gen_quad(rng: &mut Rng) -> GenQuad {
+306:     let triple = format!(
+307:         "{} {} {} .",
+308:         gen_subject(rng),
+309:         gen_predicate(rng),
+310:         gen_object(rng)
+311:     );
+312:     GenQuad {
+313:         slot: gen_slot(rng),
+314:         triple,
+315:         poolable: true,
+316:     }
+317: }
+318: 
+319: /// The INSERT-side quad. On top of [`gen_quad`] it may carry a blank node (subject
+320: /// and/or object), a non-canonical numeric lexical, or the `<< s p o >>` reifier form
+321: /// (which desugars to a fresh blank node + `rdf:reifies`) — none of which is poolable.
+322: fn gen_insert_quad(ns: &str, rng: &mut Rng) -> GenQuad {
+323:     let (subject, subject_poolable) = if rng.chance(1, 8) {
+324:         (gen_bnode(ns, rng), false)
+325:     } else {
+326:         (gen_subject(rng), true)
+327:     };
+328:     // The non-canonical-lexical arm is deliberately the RAREST: every step for which
+329:     // one is live in the store compares against Oxigraph under the adjudicated
+330:     // normalization rather than byte-for-byte, so keeping it rare keeps the strictest
+331:     // regime dominant while still covering the family in every seed window (pinned by
+332:     // `tests::generator_emits_every_v2_family`).
+333:     let (object, object_poolable) = match rng.below(64) {
+334:         0 => (gen_bnode(ns, rng), false),
+335:         1 => (gen_noncanonical_integer(rng), false),
+336:         2 | 3 => (
+337:             format!(
+338:                 "<< {} {} {} >>",
+339:                 gen_subject(rng),
+340:                 gen_predicate(rng),
+341:                 gen_simple_object(rng)
+342:             ),
+343:             false,
+344:         ),
+345:         _ => (gen_object(rng), true),
+346:     };
+347:     GenQuad {
+348:         slot: gen_slot(rng),
+349:         triple: format!("{} {} {} .", subject, gen_predicate(rng), object),
+350:         poolable: subject_poolable && object_poolable,
+351:     }
+352: }
+353: 
+354: /// Renders a quad into a data block: bare triple or `GRAPH`-wrapped.
+355: fn push_quad(block: &mut String, slot: &Option<String>, t: &str) {
+356:     match slot {
+357:         Some(g) => block.push_str(&format!(" GRAPH {} {{ {} }}", g, t)),
+358:         None => block.push_str(&format!(" {}", t)),
+359:     }
+360: }
+361: 
+362: /// The `INSERT DATA` block: 1..=5 fresh quads; the poolable ones are recorded.
+363: fn gen_insert_block(ns: &str, rng: &mut Rng, st: &mut GenState) -> String {
+364:     let n = 1 + rng.below(5);
+365:     let mut s = String::new();
+366:     for _ in 0..n {
+367:         let q = gen_insert_quad(ns, rng);
+368:         push_quad(&mut s, &q.slot, &q.triple);
+369:         if q.poolable {
+370:             st.inserted.push((q.slot, q.triple));
+371:         }
+372:     }
+373:     s
+374: }
+375: 
+376: /// The `DELETE DATA` block: 1..=5 quads, each drawn from the (poolable-only) pool
+377: /// with probability 7/10 — a hit unless an intervening op already removed it — and
+378: /// fresh random otherwise (the delete-of-absent-quad no-op path).
+379: fn gen_delete_block(rng: &mut Rng, st: &GenState) -> String {
+380:     let n = 1 + rng.below(5);
+381:     let mut s = String::new();
+382:     for _ in 0..n {
+383:         let (slot, t) = if !st.inserted.is_empty() && rng.chance(7, 10) {
+384:             st.inserted[rng.below(st.inserted.len() as u64) as usize].clone()
+385:         } else {
+386:             let q = gen_quad(rng);
+387:             (q.slot, q.triple)
+388:         };
+389:         push_quad(&mut s, &slot, &t);
+390:     }
+391:     s
+392: }
+393: 
+394: /// A `DELETE/INSERT … WHERE` operation. Templates are ground or variable; the WHERE
+395: /// is a single BGP (optionally GRAPH-wrapped / re-scoped). The query-side differential
+396: /// owns complex WHERE evaluation; the shapes here exist to drive the update-side
+397: /// template instantiation, `WITH`/`USING` re-scoping, and variable-graph-name paths.
+398: fn gen_where_op(ns: &str, rng: &mut Rng, st: &GenState) -> String {
+399:     match rng.below(11) {
+400:         // Conditional ground insert: fires iff the (ground) condition triple exists.
+401:         // The condition samples the inserted pool half the time so both the
+402:         // condition-holds and condition-fails branches are exercised. The condition is
+403:         // always a POOLABLE (canonical, blank-node-free) triple; the inserted template
+404:         // object may be a non-canonical lexical.
+405:         0 => {
+406:             let cond = if !st.inserted.is_empty() && rng.chance(1, 2) {
+407:                 let (slot, t) = &st.inserted[rng.below(st.inserted.len() as u64) as usize];
+408:                 match slot {
+409:                     Some(g) => format!("GRAPH {} {{ {} }}", g, t),
+410:                     None => t.clone(),
+411:                 }
+412:             } else {
+413:                 format!(
+414:                     "{} {} {} .",
+415:                     gen_subject(rng),
+416:                     gen_predicate(rng),
+417:                     gen_object(rng)
+418:                 )
+419:             };
+420:             let object = if rng.chance(1, 16) {
+421:                 gen_noncanonical_integer(rng)
+422:             } else {
+423:                 gen_object(rng)
+424:             };
+425:             format!(
+426:                 "INSERT {{ {} {} {} }} WHERE {{ {} }}",
+427:                 gen_subject(rng),
+428:                 gen_predicate(rng),
+429:                 object,
+430:                 cond
+431:             )
+432:         }
+433:         // Remove every `p` edge from the default graph.
+434:         1 => {
+435:             let p = gen_predicate(rng);
+436:             format!("DELETE {{ ?s {} ?o }} WHERE {{ ?s {} ?o }}", p, p)
+437:         }
+438:         // Predicate rename in the default graph (delete + insert see the same pre-state).
+439:         2 => {
+440:             let p = gen_predicate(rng);
+441:             let p2 = gen_predicate(rng);
+442:             format!(
+443:                 "DELETE {{ ?s {} ?o }} INSERT {{ ?s {} ?o }} WHERE {{ ?s {} ?o }}",
+444:                 p, p2, p
+445:             )
+446:         }
+447:         // Copy the default graph into a named graph (template GRAPH block).
+448:         3 => format!(
+449:             "INSERT {{ GRAPH {} {{ ?s ?p ?o }} }} WHERE {{ ?s ?p ?o }}",
+450:             gen_graph_iri(rng)
+451:         ),
+452:         // Cross-graph delete with a VARIABLE graph name in the template.
+453:         4 => {
+454:             let p = gen_predicate(rng);
+455:             format!(
+456:                 "DELETE {{ GRAPH ?g {{ ?s {} ?o }} }} WHERE {{ GRAPH ?g {{ ?s {} ?o }} }}",
+457:                 p, p
+458:             )
+459:         }
+460:         // WITH-scoped predicate rename inside one named graph.
+461:         5 => {
+462:             let g = gen_graph_iri(rng);
+463:             let p = gen_predicate(rng);
+464:             let p2 = gen_predicate(rng);
+465:             format!(
+466:                 "WITH {} DELETE {{ ?s {} ?o }} INSERT {{ ?s {} ?o }} WHERE {{ ?s {} ?o }}",
+467:                 g, p, p2, p
+468:             )
+469:         }
+470:         // USING re-scoping: WHERE evaluates against the named graph, the deletion
+471:         // template applies to the default graph.
+472:         6 => format!(
+473:             "DELETE {{ ?s ?p ?o }} USING {} WHERE {{ ?s ?p ?o }}",
+474:             gen_graph_iri(rng)
+475:         ),
+476:         // Pull a named graph's triples into the default graph.
+477:         7 => format!(
+478:             "INSERT {{ ?s ?p ?o }} WHERE {{ GRAPH {} {{ ?s ?p ?o }} }}",
+479:             gen_graph_iri(rng)
+480:         ),
+481:         // Blank node in an INSERT template: SPARQL 1.1 §3.1.3 makes it FRESH per
+482:         // solution, so N matching rows must yield N distinct nodes on every engine —
+483:         // pure isomorphism structure, invisible to a label-sensitive compare. Scoped
+484:         // to one predicate to keep the produced node count small.
+485:         8 => {
+486:             let p = gen_predicate(rng);
+487:             format!(
+488:                 "INSERT {{ ?s {} _:{}t }} WHERE {{ ?s {} ?o }}",
+489:                 gen_predicate(rng),
+490:                 ns,
+491:                 p
+492:             )
+493:         }
+494:         // RDF-1.2 triple term built from the solution. The `isBlank` FILTER is LOAD-
+495:         // BEARING, not decoration: it keeps blank nodes out of the quoted triple, which
+496:         // is the precondition of the constrained RDFC-1.0 profile the comparator uses
+497:         // (see the module docs and `tests::no_nested_blank_nodes_in_triple_terms`).
+498:         9 => {
+499:             let p = gen_predicate(rng);
+500:             format!(
+501:                 "INSERT {{ ?s {} <<( ?s ?p ?o )>> }} WHERE {{ ?s ?p ?o \
+502:                  FILTER(!isBlank(?s) && !isBlank(?o)) }}",
+503:                 p
+504:             )
+505:         }
+506:         // The DELETE WHERE shorthand (its own grammar production).
+507:         _ => {
+508:             let p = gen_predicate(rng);
+509:             format!("DELETE WHERE {{ ?s {} ?o }}", p)
+510:         }
+511:     }
+
+crates/sparq-bench/src/update_fuzz.rs:514-680
+514: /// A graph-management operation. Always `SILENT`: the spec leaves the error-vs-no-op
+515: /// choice for absent/existing targets implementation-defined (a store MAY succeed),
+516: /// so a non-SILENT error-status difference between engines would not be a semantic
+517: /// divergence — SILENT removes that ambiguity and keeps "every op must succeed on
+518: /// every engine, and the states must match" as the whole oracle.
+519: fn gen_structural(rng: &mut Rng) -> String {
+520:     // DEFAULT or a named graph, for COPY/MOVE/ADD endpoints.
+521:     fn graph_or_default(rng: &mut Rng) -> String {
+522:         if rng.chance(1, 4) {
+523:             "DEFAULT".to_string()
+524:         } else {
+525:             format!("GRAPH {}", gen_graph_iri(rng))
+526:         }
+527:     }
+528:     match rng.below(8) {
+529:         0 | 1 => {
+530:             let target = match rng.below(5) {
+531:                 0 => "DEFAULT".to_string(),
+532:                 1 => "NAMED".to_string(),
+533:                 2 => "ALL".to_string(),
+534:                 _ => format!("GRAPH {}", gen_graph_iri(rng)),
+535:             };
+536:             format!("CLEAR SILENT {}", target)
+537:         }
+538:         2 | 3 => {
+539:             let target = match rng.below(5) {
+540:                 0 => "DEFAULT".to_string(),
+541:                 1 => "NAMED".to_string(),
+542:                 2 => "ALL".to_string(),
+543:                 _ => format!("GRAPH {}", gen_graph_iri(rng)),
+544:             };
+545:             format!("DROP SILENT {}", target)
+546:         }
+547:         4 => format!("CREATE SILENT GRAPH {}", gen_graph_iri(rng)),
+548:         // COPY/MOVE/ADD, including the same-source-and-destination corner (a spec
+549:         // no-op) — both engines desugar via spargebra, so only evaluation-layer
+550:         // handling can diverge here.
+551:         _ => {
+552:             let verb = ["COPY", "MOVE", "ADD"][rng.below(3) as usize];
+553:             format!(
+554:                 "{} SILENT {} TO {}",
+555:                 verb,
+556:                 graph_or_default(rng),
+557:                 graph_or_default(rng)
+558:             )
+559:         }
+560:     }
+561: }
+562: 
+563: // ── one generated request ────────────────────────────────────────────────────────
+564: 
+565: /// A local document a `LOAD` operation reads. `name` is the file name under the
+566: /// per-run load base (never an absolute path — see the module docs on why the
+567: /// generated IRI is relative).
+568: #[derive(Clone, Debug, PartialEq, Eq)]
+569: struct LoadDoc {
+570:     name: String,
+571:     content: String,
+572: }
+573: 
+574: /// One generated update request.
+575: ///
+576: /// `sparq` is what both sparq paths execute. `oxi` is what the REFERENCE engine
+577: /// executes: identical for every operation except `LOAD`, where it is the
+578: /// semantically-equivalent `INSERT DATA` (Oxigraph 0.5 cannot fetch a `file://`
+579: /// source at all — see the module docs), or `None` for a `LOAD SILENT` of an absent
+580: /// document, whose equivalent is "apply nothing".
+581: #[derive(Clone, Debug, PartialEq, Eq)]
+582: struct Op {
+583:     sparq: String,
+584:     oxi: Option<String>,
+585:     doc: Option<LoadDoc>,
+586: }
+587: 
+588: impl Op {
+589:     /// An operation both engines run verbatim.
+590:     fn shared(text: String) -> Op {
+591:         Op {
+592:             oxi: Some(text.clone()),
+593:             sparq: text,
+594:             doc: None,
+595:         }
+596:     }
+597: }
+598: 
+599: /// A `LOAD` operation plus the document it reads.
+600: ///
+601: /// 1-in-4 loads an ABSENT document under `SILENT` (sparq's silent-failure path); that
+602: /// name is never written, so no earlier document can accidentally satisfy it.
+603: fn gen_load(rng: &mut Rng, st: &mut GenState) -> Op {
+604:     let destination = if rng.chance(1, 2) {
+605:         Some(gen_graph_iri(rng))
+606:     } else {
+607:         None
+608:     };
+609:     let into = match &destination {
+610:         Some(g) => format!(" INTO GRAPH {}", g),
+611:         None => String::new(),
+612:     };
+613:     if rng.chance(1, 4) {
+614:         return Op {
+615:             sparq: format!("LOAD SILENT <file://absent.nt>{}", into),
+616:             oxi: None,
+617:             doc: None,
+618:         };
+619:     }
+620:     let name = format!("doc{}.nt", rng.below(3));
+621:     let n = 1 + rng.below(3);
+622:     let mut content = String::new();
+623:     let mut block = String::new();
+624:     for _ in 0..n {
+625:         // N-Triples: ground, blank-node-free, canonical — so the INSERT DATA the
+626:         // reference engine gets is exactly equivalent, and the triples are poolable.
+627:         let triple = format!(
+628:             "{} {} {} .",
+629:             gen_subject(rng),
+630:             gen_predicate(rng),
+631:             gen_ntriples_object(rng)
+632:         );
+633:         content.push_str(&triple);
+634:         content.push('\n');
+635:         push_quad(&mut block, &destination, &triple);
+636:         st.inserted.push((destination.clone(), triple));
+637:     }
+638:     let silent = if rng.chance(1, 2) { " SILENT" } else { "" };
+639:     Op {
+640:         sparq: format!("LOAD{} <file://{}>{}", silent, name, into),
+641:         oxi: Some(format!("INSERT DATA {{{} }}", block)),
+642:         doc: Some(LoadDoc { name, content }),
+643:     }
+644: }
+645: 
+646: /// One update request. Mostly a single operation; 1-in-10 a two-operation compound
+647: /// (`op ; op`) to exercise within-one-request sequencing.
+648: ///
+649: /// A `LOAD` is never compounded: its reference-engine substitute is a whole separate
+650: /// request, and splicing two substitutes into one `;` chain would silently change the
+651: /// sequencing the compound is there to test.
+652: fn gen_op(rng: &mut Rng, st: &mut GenState) -> Op {
+653:     fn single(ns: &str, rng: &mut Rng, st: &mut GenState) -> String {
+654:         match rng.below(100) {
+655:             0..=34 => format!("INSERT DATA {{{} }}", gen_insert_block(ns, rng, st)),
+656:             35..=49 => format!("DELETE DATA {{{} }}", gen_delete_block(rng, st)),
+657:             50..=74 => gen_where_op(ns, rng, st),
+658:             _ => gen_structural(rng),
+659:         }
+660:     }
+661:     if rng.chance(1, 12) {
+662:         return gen_load(rng, st);
+663:     }
+664:     // Disjoint blank-node label namespaces for the two halves of a compound request
+665:     // (see `gen_bnode`).
+666:     let first = single("b", rng, st);
+667:     if rng.chance(1, 10) {
+668:         Op::shared(format!("{} ;\n{}", first, single("c", rng, st)))
+669:     } else {
+670:         Op::shared(first)
+671:     }
+672: }
+673: 
+674: /// The whole update sequence for one seed: 4..=10 update requests, applied (and
+675: /// differentially checked) one at a time.
+676: fn gen_sequence(rng: &mut Rng) -> Vec<Op> {
+677:     let n = 4 + rng.below(7) as usize;
+678:     let mut st = GenState::default();
+679:     (0..n).map(|_| gen_op(rng, &mut st)).collect()
+680: }
+
+crates/sparq-bench/src/update_fuzz.rs:749-907
+749: fn mentions_blank_node(lines: &[String]) -> bool {
+750:     lines.iter().any(|l| l.contains("_:"))
+751: }
+752: 
+753: /// Re-parses N-Quads lines back into `oxrdf` quads (the input side of every
+754: /// structural rewrite below).
+755: fn parse_lines(lines: &[String], what: &str) -> Result<Vec<Quad>, String> {
+756:     let doc = {
+757:         let mut s = lines.join("\n");
+758:         s.push('\n');
+759:         s
+760:     };
+761:     sparq_canon::parse_nquads(&doc)
+762:         .map_err(|e| format!("{}: N-Quads re-parse failed ({})", what, e))
+763: }
+764: 
+765: /// The comparable form of one snapshot.
+766: ///
+767: /// With `relabel` false (neither side mentions a blank node) the sorted lines ARE the
+768: /// canonical form and are returned untouched — the strongest, byte-level compare.
+769: /// With it true, both sides are relabelled to their RDFC-1.0 canonical form so the
+770: /// comparison decides RDF ISOMORPHISM. The constrained `*_ground_terms` profile is
+771: /// used deliberately: it is exactly RDFC-1.0 with triple terms as opaque constants and
+772: /// fails closed on a blank node nested inside a triple term, so the non-standard
+773: /// nested-bnode descent is never reachable from this harness.
+774: fn comparable(lines: &[String], relabel: bool, what: &str) -> Result<Vec<String>, String> {
+775:     if !relabel {
+776:         return Ok(lines.to_vec());
+777:     }
+778:     let quads = parse_lines(lines, what)?;
+779:     let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+780:         .map_err(|e| format!("{}: RDFC-1.0 canonicalization failed ({})", what, e))?;
+781:     let mut out: Vec<String> = canon.lines().map(str::to_string).collect();
+782:     out.sort();
+783:     Ok(out)
+784: }
+785: 
+786: /// Rewrites `t` the way Oxigraph's storage layer does: an `xsd:integer` literal whose
+787: /// value fits the native integer it decodes to is re-rendered in canonical lexical
+788: /// form. Structural, never string surgery — and it descends into triple terms, which
+789: /// Oxigraph's recursive term encoder also normalizes.
+790: fn oxigraph_normalized_term(t: &Term) -> Term {
+791:     match t {
+792:         Term::Literal(l) if l.datatype() == xsd::INTEGER => match l.value().parse::<i64>() {
+793:             Ok(v) if v.to_string() != l.value() => {
+794:                 Term::Literal(Literal::new_typed_literal(v.to_string(), xsd::INTEGER))
+795:             }
+796:             _ => t.clone(),
+797:         },
+798:         Term::Triple(inner) => Term::Triple(Box::new(Triple::new(
+799:             inner.subject.clone(),
+800:             inner.predicate.clone(),
+801:             oxigraph_normalized_term(&inner.object),
+802:         ))),
+803:         _ => t.clone(),
+804:     }
+805: }
+806: 
+807: /// A snapshot with every `xsd:integer` lexical canonicalized and duplicates merged —
+808: /// the state Oxigraph's lossy numeric encoding collapses a dataset to. Re-derived
+809: /// here independently of BOTH engines; see the adjudicated class in the module docs.
+810: fn oxigraph_normalized(lines: &[String], what: &str) -> Result<Vec<String>, String> {
+811:     let quads = parse_lines(lines, what)?;
+812:     let mut out: Vec<String> = quads
+813:         .iter()
+814:         .map(|q| {
+815:             let graph = match &q.graph_name {
+816:                 oxrdf::GraphName::DefaultGraph => None,
+817:                 g => Some(g.to_string()),
+818:             };
+819:             nquads_line(
+820:                 &q.subject.to_string(),
+821:                 &q.predicate.to_string(),
+822:                 &oxigraph_normalized_term(&q.object).to_string(),
+823:                 graph.as_deref(),
+824:             )
+825:         })
+826:         .collect();
+827:     out.sort();
+828:     out.dedup();
+829:     Ok(out)
+830: }
+831: 
+832: /// The lines on exactly one side — the human-readable core of a divergence report.
+833: fn one_sided(label_a: &str, a: &[String], label_b: &str, b: &[String]) -> String {
+834:     let bset: std::collections::BTreeSet<&String> = b.iter().collect();
+835:     let aset: std::collections::BTreeSet<&String> = a.iter().collect();
+836:     let mut s = String::new();
+837:     s.push_str(&format!("only in {}:\n", label_a));
+838:     for l in a.iter().filter(|l| !bset.contains(l)) {
+839:         s.push_str(&format!("  {}\n", l));
+840:     }
+841:     s.push_str(&format!("only in {}:\n", label_b));
+842:     for l in b.iter().filter(|l| !aset.contains(l)) {
+843:         s.push_str(&format!("  {}\n", l));
+844:     }
+845:     s
+846: }
+847: 
+848: /// The outcome of comparing two snapshots.
+849: enum Verdict {
+850:     /// Byte-identical, or RDF-isomorphic when blank nodes are in play.
+851:     Same,
+852:     /// Absorbed by the adjudicated `update-oxigraph-integer-lexical-canonicalization`
+853:     /// class: the two datasets agree exactly once Oxigraph's numeric normalization is
+854:     /// re-derived on both sides.
+855:     AdjudicatedIntegerLexical,
+856:     /// A real divergence (the string is the report body).
+857:     Differs(String),
+858: }
+859: 
+860: /// Compares two snapshots under the canonical form the module docs describe.
+861: ///
+862: /// `allow_integer_lexical` is set ONLY for a sparq-vs-Oxigraph compare, and only when
+863: /// the allowlist enables the class. The sparq-vs-sparq compare passes false: both
+864: /// sides are sparq, so any lexical disagreement between them is a real bug.
+865: fn compare(
+866:     label_a: &str,
+867:     a: &[String],
+868:     label_b: &str,
+869:     b: &[String],
+870:     allow_integer_lexical: bool,
+871: ) -> Verdict {
+872:     let relabel = mentions_blank_node(a) || mentions_blank_node(b);
+873:     let (ca, cb) = match (
+874:         comparable(a, relabel, label_a),
+875:         comparable(b, relabel, label_b),
+876:     ) {
+877:         (Ok(ca), Ok(cb)) => (ca, cb),
+878:         (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+879:     };
+880:     if ca == cb {
+881:         // Canonicalization deduplicates, so a duplicate quad on one side alone would
+882:         // survive the compare — check the raw counts to keep that failure visible.
+883:         if a.len() != b.len() {
+884:             return Verdict::Differs(format!(
+885:                 "datasets are isomorphic but the raw quad COUNTS differ \
+886:                  ({} {} vs {} {}) — one side is yielding a duplicate quad",
+887:                 label_a,
+888:                 a.len(),
+889:                 label_b,
+890:                 b.len()
+891:             ));
+892:         }
+893:         return Verdict::Same;
+894:     }
+895:     if allow_integer_lexical {
+896:         let normalized = (
+897:             oxigraph_normalized(a, label_a).and_then(|n| comparable(&n, relabel, label_a)),
+898:             oxigraph_normalized(b, label_b).and_then(|n| comparable(&n, relabel, label_b)),
+899:         );
+900:         if let (Ok(na), Ok(nb)) = normalized {
+901:             if na == nb {
+902:                 return Verdict::AdjudicatedIntegerLexical;
+903:             }
+904:         }
+905:     }
+906:     Verdict::Differs(one_sided(label_a, &ca, label_b, &cb))
+907: }
+
+crates/sparq-bench/src/update_fuzz.rs:916-975
+916: const PROBES: &[(&str, &[&str])] = &[
+917:     ("SELECT ?s ?p ?o WHERE { ?s ?p ?o }", &["s", "p", "o"]),
+918:     (
+919:         "SELECT ?s ?p ?o ?g WHERE { GRAPH ?g { ?s ?p ?o } }",
+920:         &["s", "p", "o", "g"],
+921:     ),
+922: ];
+923: 
+924: /// Renders one probe row's cells as an N-Quads line.
+925: fn probe_line(cells: &[String]) -> String {
+926:     format!("{} .", cells.join(" "))
+927: }
+928: 
+929: /// The full sorted binding set of a probe through sparq's query path.
+930: fn sparq_probe(g: &Graph, q: &str) -> Result<Vec<String>, String> {
+931:     let r = sparq_engine::query(g, q).map_err(|e| format!("sparq probe error: {}", e))?;
+932:     let mut rows: Vec<String> = r
+933:         .rows
+934:         .iter()
+935:         .map(|row| {
+936:             probe_line(
+937:                 &row.iter()
+938:                     .map(|t| {
+939:                         t.as_ref()
+940:                             .map(|t| t.to_string())
+941:                             .unwrap_or_else(|| "UNDEF".to_string())
+942:                     })
+943:                     .collect::<Vec<_>>(),
+944:             )
+945:         })
+946:         .collect();
+947:     rows.sort();
+948:     Ok(rows)
+949: }
+950: 
+951: /// The full sorted binding set of a probe through Oxigraph's query path.
+952: // clippy: the differential oracle pins oxigraph's legacy Store::query semantics
+953: #[allow(deprecated)]
+954: fn oxi_probe(store: &Store, q: &str, vars: &[&str]) -> Result<Vec<String>, String> {
+955:     match store.query(q).map_err(|e| e.to_string())? {
+956:         oxigraph::sparql::QueryResults::Solutions(s) => {
+957:             let mut rows = Vec::new();
+958:             for sol in s {
+959:                 let sol = sol.map_err(|e| e.to_string())?;
+960:                 rows.push(probe_line(
+961:                     &vars
+962:                         .iter()
+963:                         .map(|v| {
+964:                             sol.get(*v)
+965:                                 .map(|t| t.to_string())
+966:                                 .unwrap_or_else(|| "UNDEF".to_string())
+967:                         })
+968:                         .collect::<Vec<_>>(),
+969:                 ));
+970:             }
+971:             rows.sort();
+972:             Ok(rows)
+973:         }
+974:         _ => Err("probe did not return solutions".to_string()),
+975:     }
+
+crates/sparq-bench/src/update_fuzz.rs:1035-1205
+1035: /// Applies one seed's update sequence to all three implementations, checking the
+1036: /// canonical dataset + both probes after every step. Returns the run's counts, or the
+1037: /// divergence detail (step-localized).
+1038: ///
+1039: /// `inject_divergence_at`: test-only comparator non-vacuity knob — after applying
+1040: /// step `i` to all three engines, a marker quad is inserted into the OXIGRAPH store
+1041: /// only, so the comparator MUST report a divergence at that step (see
+1042: /// `tests::injected_divergence_is_caught`). `None` in production.
+1043: fn check_seed(
+1044:     seed: u64,
+1045:     inject_divergence_at: Option<usize>,
+1046:     allow: &UpdateDivergenceAllowlist,
+1047: ) -> Result<SeedOutcome, String> {
+1048:     let mut rng = Rng::new(seed);
+1049:     let ops = gen_sequence(&mut rng);
+1050:     let sandbox = if ops.iter().any(|o| o.sparq.starts_with("LOAD")) {
+1051:         Some(LoadSandbox::new()?)
+1052:     } else {
+1053:         None
+1054:     };
+1055:     match sandbox.as_ref() {
+1056:         // The allowlisted base is installed for the whole seed: `with_load_base` is a
+1057:         // thread-local guard, and a seed's steps all run on this thread.
+1058:         Some(s) => sparq_engine::with_load_base(s.path(), || {
+1059:             apply_sequence(seed, &ops, Some(s), inject_divergence_at, allow)
+1060:         }),
+1061:         None => apply_sequence(seed, &ops, None, inject_divergence_at, allow),
+1062:     }
+1063: }
+1064: 
+1065: fn apply_sequence(
+1066:     seed: u64,
+1067:     ops: &[Op],
+1068:     sandbox: Option<&LoadSandbox>,
+1069:     inject_divergence_at: Option<usize>,
+1070:     allow: &UpdateDivergenceAllowlist,
+1071: ) -> Result<SeedOutcome, String> {
+1072:     let mut g_rebuild = Graph::new();
+1073:     let mut g_inplace = Graph::new();
+1074:     let store = Store::new().map_err(|e| format!("oxigraph store init: {}", e))?;
+1075:     let mut adjudicated_integer_lexical = 0u64;
+1076:     let mut isomorphism_compares = 0u64;
+1077: 
+1078:     let fail = |step: usize, op: &Op, detail: String| -> String {
+1079:         format!(
+1080:             "step={} of {}\nop: {}\n{}\nrepro: cargo run -p sparq-bench --release -- \
+1081:              update-fuzz --seed-start {} --seed-count 1\n--- full sequence ---\n{}",
+1082:             step,
+1083:             ops.len(),
+1084:             op.sparq,
+1085:             detail,
+1086:             seed,
+1087:             ops.iter()
+1088:                 .enumerate()
+1089:                 .map(|(i, o)| match &o.oxi {
+1090:                     Some(x) if *x != o.sparq =>
+1091:                         format!("[{}] {}\n     (reference engine ran: {})", i, o.sparq, x),
+1092:                     Some(_) => format!("[{}] {}", i, o.sparq),
+1093:                     None => format!("[{}] {}\n     (reference engine ran: nothing)", i, o.sparq),
+1094:                 })
+1095:                 .collect::<Vec<_>>()
+1096:                 .join("\n")
+1097:         )
+1098:     };
+1099: 
+1100:     for (i, op) in ops.iter().enumerate() {
+1101:         // A LOAD's document must exist before the request runs.
+1102:         if let (Some(doc), Some(s)) = (&op.doc, sandbox) {
+1103:             s.write(doc).map_err(|e| fail(i, op, e))?;
+1104:         }
+1105: 
+1106:         // Apply to all three implementations. Every generated op is inside the
+1107:         // supported deterministic subset, so an error from ANY engine is itself a
+1108:         // divergence (strict — there is no unsupported-skip in this harness).
+1109:         g_rebuild = sparq_engine::update(&g_rebuild, &op.sparq)
+1110:             .map_err(|e| fail(i, op, format!("sparq update (rebuild path) error: {}", e)))?;
+1111:         sparq_engine::update_in_place(&mut g_inplace, &op.sparq)
+1112:             .map_err(|e| fail(i, op, format!("sparq update_in_place error: {}", e)))?;
+1113:         if let Some(oxi) = &op.oxi {
+1114:             store
+1115:                 .update(oxi.as_str())
+1116:                 .map_err(|e| fail(i, op, format!("oxigraph update error: {}", e)))?;
+1117:         }
+1118: 
+1119:         if inject_divergence_at == Some(i) {
+1120:             use oxigraph::model::{GraphName, NamedNode, Quad};
+1121:             let n = |s: &str| NamedNode::new(s).expect("valid IRI");
+1122:             let marker = Quad::new(
+1123:                 n("http://ex/injected"),
+1124:                 n("http://ex/injected"),
+1125:                 n("http://ex/injected"),
+1126:                 GraphName::DefaultGraph,
+1127:             );
+1128:             store
+1129:                 .insert(&marker)
+1130:                 .map_err(|e| format!("marker insert failed: {}", e))?;
+1131:         }
+1132: 
+1133:         // (a) Canonical dataset equality. Localizes a divergence to this exact step.
+1134:         // sparq-vs-sparq FIRST and STRICT (no adjudication): the two sparq paths must
+1135:         // agree with each other whatever the reference engine does.
+1136:         let nq_rebuild = sparq_nquads(&g_rebuild);
+1137:         let nq_inplace = sparq_nquads(&g_inplace);
+1138:         let nq_oxi = oxi_nquads(&store).map_err(|e| fail(i, op, e))?;
+1139:         if mentions_blank_node(&nq_rebuild) || mentions_blank_node(&nq_oxi) {
+1140:             isomorphism_compares += 1;
+1141:         }
+1142:         if let Verdict::Differs(detail) = compare(
+1143:             "sparq(rebuild)",
+1144:             &nq_rebuild,
+1145:             "sparq(in-place)",
+1146:             &nq_inplace,
+1147:             false,
+1148:         ) {
+1149:             return Err(fail(
+1150:                 i,
+1151:                 op,
+1152:                 format!(
+1153:                     "canonical dataset differs BETWEEN SPARQ'S OWN UPDATE PATHS\n{}",
+1154:                     detail
+1155:                 ),
+1156:             ));
+1157:         }
+1158:         for (label, nq) in [
+1159:             ("sparq(rebuild)", &nq_rebuild),
+1160:             ("sparq(in-place)", &nq_inplace),
+1161:         ] {
+1162:             match compare(label, nq, "oxigraph", &nq_oxi, allow.integer_lexical) {
+1163:                 Verdict::Same => {}
+1164:                 Verdict::AdjudicatedIntegerLexical => adjudicated_integer_lexical += 1,
+1165:                 Verdict::Differs(detail) => {
+1166:                     return Err(fail(
+1167:                         i,
+1168:                         op,
+1169:                         format!("canonical dataset differs ({} vs oxigraph)\n{}", label, detail),
+1170:                     ))
+1171:                 }
+1172:             }
+1173:         }
+1174: 
+1175:         // (b) Probe SELECTs — the query-path view of the updated store, full sorted
+1176:         // binding sets (never counts). Checked for BOTH sparq graphs: the in-place
+1177:         // one reads through the live delta overlay.
+1178:         for (probe, vars) in PROBES {
+1179:             let oxi = oxi_probe(&store, probe, vars)
+1180:                 .map_err(|e| fail(i, op, format!("oxigraph probe error: {}", e)))?;
+1181:             for (label, g) in [("rebuild", &g_rebuild), ("in-place", &g_inplace)] {
+1182:                 let sparq = sparq_probe(g, probe).map_err(|e| fail(i, op, e))?;
+1183:                 match compare("sparq", &sparq, "oxigraph", &oxi, allow.integer_lexical) {
+1184:                     Verdict::Same => {}
+1185:                     Verdict::AdjudicatedIntegerLexical => adjudicated_integer_lexical += 1,
+1186:                     Verdict::Differs(detail) => {
+1187:                         return Err(fail(
+1188:                             i,
+1189:                             op,
+1190:                             format!(
+1191:                                 "probe {:?} binding set differs (sparq {} vs oxigraph)\n{}",
+1192:                                 probe, label, detail
+1193:                             ),
+1194:                         ))
+1195:                     }
+1196:                 }
+1197:             }
+1198:         }
+1199:     }
+1200:     Ok(SeedOutcome {
+1201:         ops: ops.len() as u64,
+1202:         adjudicated_integer_lexical,
+1203:         isomorphism_compares,
+1204:     })
+1205: }
+
+crates/sparq-bench/src/update_fuzz.rs:1233-1293
+1233:     /// Load from `SPARQ_FUZZ_DIVERGENCES` (a CI/agent override), else the committed
+1234:     /// repo default resolved relative to this crate's manifest (works from any cwd).
+1235:     fn load() -> Self {
+1236:         let path = std::env::var("SPARQ_FUZZ_DIVERGENCES").unwrap_or_else(|_| {
+1237:             concat!(
+1238:                 env!("CARGO_MANIFEST_DIR"),
+1239:                 "/../../bench/differential-divergences.json"
+1240:             )
+1241:             .to_string()
+1242:         });
+1243:         match std::fs::read_to_string(&path) {
+1244:             Ok(s) => Self::from_json(&s, &path),
+1245:             Err(e) => Self::strict(&path, &format!("unreadable ({})", e)),
+1246:         }
+1247:     }
+1248: 
+1249:     /// Parse the allowlist JSON. An unknown `update-*` class id is IGNORED with a loud
+1250:     /// warning (fail-STRICT: the comparator has no detector for it, so that class keeps
+1251:     /// failing rather than being silently "absorbed" by nothing); malformed JSON is
+1252:     /// also strict.
+1253:     fn from_json(s: &str, path: &str) -> Self {
+1254:         let v: serde_json::Value = match serde_json::from_str(s) {
+1255:             Ok(v) => v,
+1256:             Err(e) => return Self::strict(path, &format!("invalid JSON ({})", e)),
+1257:         };
+1258:         let ids: Vec<String> = v["classes"]
+1259:             .as_array()
+1260:             .map(Vec::as_slice)
+1261:             .unwrap_or(&[])
+1262:             .iter()
+1263:             .filter_map(|c| c["id"].as_str())
+1264:             .filter(|id| id.starts_with("update-"))
+1265:             .map(str::to_string)
+1266:             .collect();
+1267:         if ids.is_empty() {
+1268:             return Self::strict(path, "no adjudicated `update-*` classes");
+1269:         }
+1270:         let mut out = UpdateDivergenceAllowlist {
+1271:             integer_lexical: false,
+1272:             state: String::new(),
+1273:         };
+1274:         let mut enabled = Vec::new();
+1275:         for id in &ids {
+1276:             if id == INTEGER_LEXICAL_CLASS {
+1277:                 out.integer_lexical = true;
+1278:                 enabled.push(id.clone());
+1279:             } else {
+1280:                 eprintln!(
+1281:                     "warning: divergence allowlist lists update class {:?} but update-fuzz has \
+1282:                      no detector for it — that class stays STRICT",
+1283:                     id
+1284:                 );
+1285:             }
+1286:         }
+1287:         out.state = format!(
+1288:             "({}): adjudicated classes enabled {:?}; every other divergence fails",
+1289:             path, enabled
+1290:         );
+1291:         out
+1292:     }
+1293: }
+
+crates/sparq-bench/src/update_fuzz.rs:1402-1459
+1402:     /// The generator is a pure function of the seed (the seed IS the corpus — the
+1403:     /// repro contract depends on this), INCLUDING the LOAD documents.
+1404:     #[test]
+1405:     fn generator_is_deterministic() {
+1406:         let a = gen_sequence(&mut Rng::new(12345));
+1407:         let b = gen_sequence(&mut Rng::new(12345));
+1408:         assert_eq!(a, b);
+1409:         assert!(a.len() >= 4 && a.len() <= 10, "sequence length in 4..=10");
+1410:     }
+1411: 
+1412:     /// Every v2 term/operation family actually reaches the generated corpus. Without
+1413:     /// this, a refactor that silently stopped emitting (say) triple terms would leave
+1414:     /// the whole extension untested and every seed still green.
+1415:     #[test]
+1416:     fn generator_emits_every_v2_family() {
+1417:         let mut noncanonical = 0;
+1418:         let mut bnodes = 0;
+1419:         let mut triple_terms = 0;
+1420:         let mut reifiers = 0;
+1421:         let mut loads = 0;
+1422:         let mut load_docs = 0;
+1423:         let mut bnode_templates = 0;
+1424:         for seed in 0..400 {
+1425:             for op in gen_sequence(&mut Rng::new(seed)) {
+1426:                 if op.sparq.contains(XSD_INTEGER) {
+1427:                     noncanonical += 1;
+1428:                 }
+1429:                 if op.sparq.contains("_:b") || op.sparq.contains("_:c") {
+1430:                     bnodes += 1;
+1431:                 }
+1432:                 if op.sparq.contains("<<(") {
+1433:                     triple_terms += 1;
+1434:                 }
+1435:                 if op.sparq.contains("<< <") {
+1436:                     reifiers += 1;
+1437:                 }
+1438:                 if op.sparq.starts_with("LOAD") {
+1439:                     loads += 1;
+1440:                 }
+1441:                 if op.doc.is_some() {
+1442:                     load_docs += 1;
+1443:                 }
+1444:                 if op.sparq.contains("_:bt") || op.sparq.contains("_:ct") {
+1445:                     bnode_templates += 1;
+1446:                 }
+1447:             }
+1448:         }
+1449:         for (what, n) in [
+1450:             ("non-canonical numeric lexicals", noncanonical),
+1451:             ("blank nodes in data blocks", bnodes),
+1452:             ("triple terms", triple_terms),
+1453:             ("reifier syntax", reifiers),
+1454:             ("LOAD operations", loads),
+1455:             ("LOAD documents", load_docs),
+1456:             ("blank-node INSERT templates", bnode_templates),
+1457:         ] {
+1458:             assert!(n > 0, "{} never generated over seeds 0..400", what);
+1459:         }
+
+crates/sparq-bench/src/update_fuzz.rs:1551-1604
+1551:     /// sq-hodke (1): a non-canonical `xsd:integer` lexical survives a store round-trip
+1552:     /// as a term DISTINCT from its canonical sibling, through BOTH sparq update paths
+1553:     /// and through the query path — and an exact-term `DELETE DATA` of one removes ONLY
+1554:     /// it. This is the sparq-INTERNAL oracle for the family, and it is the right one:
+1555:     /// Oxigraph collapses the two terms, so it cannot serve as a reference here.
+1556:     #[test]
+1557:     fn non_canonical_integer_lexicals_are_distinct_terms() {
+1558:         let insert = "INSERT DATA { \
+1559:                       <http://ex/s> <http://ex/p> \"05\"^^<http://www.w3.org/2001/XMLSchema#integer> . \
+1560:                       <http://ex/s> <http://ex/p> \"+7\"^^<http://www.w3.org/2001/XMLSchema#integer> . \
+1561:                       <http://ex/s> <http://ex/p> 5 . <http://ex/s> <http://ex/p> 7 }";
+1562:         let expected = [
+1563:             "<http://ex/s> <http://ex/p> \"+7\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+1564:             "<http://ex/s> <http://ex/p> \"05\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+1565:             "<http://ex/s> <http://ex/p> \"5\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+1566:             "<http://ex/s> <http://ex/p> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+1567:         ];
+1568:         let g = sparq_engine::update(&Graph::new(), insert).expect("rebuild insert");
+1569:         assert_eq!(sparq_nquads(&g), expected, "rebuild path lost a lexical form");
+1570:         let mut gi = Graph::new();
+1571:         sparq_engine::update_in_place(&mut gi, insert).expect("in-place insert");
+1572:         assert_eq!(
+1573:             sparq_nquads(&gi),
+1574:             expected,
+1575:             "delta-overlay path lost a lexical form"
+1576:         );
+1577:         assert_eq!(
+1578:             sparq_probe(&g, PROBES[0].0).expect("probe"),
+1579:             expected,
+1580:             "the query path must also see four distinct terms"
+1581:         );
+1582: 
+1583:         // Deleting the non-canonical term must NOT take its canonical sibling with it.
+1584:         let deleted = sparq_engine::update(
+1585:             &g,
+1586:             "DELETE DATA { <http://ex/s> <http://ex/p> \
+1587:              \"05\"^^<http://www.w3.org/2001/XMLSchema#integer> }",
+1588:         )
+1589:         .expect("delete");
+1590:         let after = sparq_nquads(&deleted);
+1591:         assert!(
+1592:             !after.iter().any(|l| l.contains("\"05\"")),
+1593:             "the non-canonical term must be gone: {:?}",
+1594:             after
+1595:         );
+1596:         assert!(
+1597:             after
+1598:                 .iter()
+1599:                 .any(|l| l.contains("\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>")),
+1600:             "its canonical sibling is a different RDF term and must survive: {:?}",
+1601:             after
+1602:         );
+1603:         assert_eq!(after.len(), 3, "exactly one term removed: {:?}", after);
+1604:     }
+
+crates/sparq-bench/src/update_fuzz.rs:1642-1712
+1642:     /// A duplicate quad on one side alone survives canonicalization (RDFC-1.0
+1643:     /// deduplicates), so the raw-count guard must catch it. Pins the check that keeps
+1644:     /// v1's duplicate sensitivity alive under the new comparator.
+1645:     #[test]
+1646:     fn duplicate_quad_is_caught_despite_canonicalization() {
+1647:         let a = vec![
+1648:             "_:x <http://ex/p> <http://ex/o> .".to_string(),
+1649:             "_:x <http://ex/p> <http://ex/o> .".to_string(),
+1650:         ];
+1651:         let b = vec!["_:y <http://ex/p> <http://ex/o> .".to_string()];
+1652:         match compare("a", &a, "b", &b, false) {
+1653:             Verdict::Differs(d) => assert!(
+1654:                 d.contains("COUNTS differ"),
+1655:                 "expected the raw-count guard to fire, got:\n{}",
+1656:                 d
+1657:             ),
+1658:             _ => panic!("a duplicated quad on one side must not compare equal"),
+1659:         }
+1660:     }
+1661: 
+1662:     /// sq-hodke (1), comparator side: the adjudicated integer-lexical class absorbs
+1663:     /// EXACTLY Oxigraph's normalization and nothing more.
+1664:     #[test]
+1665:     fn integer_lexical_adjudication_is_narrow() {
+1666:         let ncl = "<http://ex/s> <http://ex/p> \
+1667:                    \"05\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+1668:             .to_string();
+1669:         let canonical = "<http://ex/s> <http://ex/p> \
+1670:                          \"5\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+1671:             .to_string();
+1672:         let sparq = vec![ncl.clone(), canonical.clone()];
+1673:         let oxi = vec![canonical.clone()];
+1674:         assert!(
+1675:             matches!(
+1676:                 compare("sparq", &sparq, "oxigraph", &oxi, true),
+1677:                 Verdict::AdjudicatedIntegerLexical
+1678:             ),
+1679:             "the collapse of a non-canonical lexical onto its canonical sibling is the \
+1680:              adjudicated class"
+1681:         );
+1682:         assert!(
+1683:             matches!(
+1684:                 compare("sparq", &sparq, "oxigraph", &oxi, false),
+1685:                 Verdict::Differs(_)
+1686:             ),
+1687:             "with the class DISABLED the same case must fail — including for every \
+1688:              sparq-vs-sparq compare, which never passes the flag"
+1689:         );
+1690:         // An unrelated missing quad alongside the lexical difference must NOT be
+1691:         // absorbed: the class only fires when normalization makes the sets agree.
+1692:         let mut sparq_plus = sparq.clone();
+1693:         sparq_plus.push("<http://ex/s> <http://ex/q> <http://ex/o> .".to_string());
+1694:         sparq_plus.sort();
+1695:         assert!(
+1696:             matches!(
+1697:                 compare("sparq", &sparq_plus, "oxigraph", &oxi, true),
+1698:                 Verdict::Differs(_)
+1699:             ),
+1700:             "a real missing quad must survive the adjudication"
+1701:         );
+1702:         // A lexical difference the reference engine does NOT make is not this class.
+1703:         let lang = vec!["<http://ex/s> <http://ex/p> \"a\"@en .".to_string()];
+1704:         let lang2 = vec!["<http://ex/s> <http://ex/p> \"a\"@fr .".to_string()];
+1705:         assert!(
+1706:             matches!(
+1707:                 compare("sparq", &lang, "oxigraph", &lang2, true),
+1708:                 Verdict::Differs(_)
+1709:             ),
+1710:             "the class must not absorb a language-tag difference"
+1711:         );
+1712:     }

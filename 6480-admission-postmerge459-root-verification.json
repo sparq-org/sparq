@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T12:46:58.062202+00:00",
+  "manifest_sha256": "34678b4fe632a678c4bd0affc6cc9a19845b8813c6025bf516a7af4ea5ee347d",
+  "files": 37,
+  "source_head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "root_review": "Verified allfilehashes; actualjs output/version/nativePNG followedby nextstep confirms no-drift; relevant13inspection and25advisory plus standalone drift successful. RequiredPRandMGgatealreadyverified;3defaultalerts fixed.",
+  "close6480_decision": "Scoped dependency remediation is completed; close6480 while broader unrelated/mainpostmergeCI remains monitored, not claimed allgreen.",
+  "automation_failures": "batchmergeemptyREGISTRY_RING_TOKEN expected pause suppression; releasepackagefailure sameOPEN6474; bothadvisory, no enable/retry/release."
+}

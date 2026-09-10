@@ -1,0 +1,9 @@
+{
+  "source_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "source_tree": "3ccc4164afe1d61e7e79f65f7870b9805c5ed499",
+  "run_head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "all_8_run_head_commit_tree_ids_match_source_tree": true,
+  "local_merge_object_unavailable": true,
+  "no_fetch_attempted": true,
+  "sources": "git show exact known source head with verified whole-tree identity"
+}

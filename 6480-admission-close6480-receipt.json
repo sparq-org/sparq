@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T12:48:26.141936+00:00",
+  "issue": "https://github.com/sparq-org/sparq/issues/6480",
+  "state": "closed",
+  "state_reason": "completed",
+  "closed_at": "2026-09-10T12:48:25Z",
+  "comment": "https://github.com/sparq-org/sparq/issues/6480#issuecomment-5616304836",
+  "registry_enabled": false,
+  "alerts_fixed": [
+    32,
+    106,
+    107
+  ]
+}

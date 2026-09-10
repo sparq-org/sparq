@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T13:10:58.403740+00:00",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+  "branch": "codex/update-differential-replay",
+  "before": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "after": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "clean": true,
+  "scope": "Fastforward isolated clean taskbranch to verifiedmergedmain; no sharedcheckout switch/push"
+}

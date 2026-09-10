@@ -1,0 +1,30 @@
+{
+  "files": [
+    {
+      "path": "prior-review-result.txt",
+      "bytes": 9423,
+      "sha256": "2c3387f23e4c8c3a3c7457f8ae67c55ceff06c0fc65c2284f4c680c10e2786af"
+    },
+    {
+      "path": "report.json",
+      "bytes": 12609,
+      "sha256": "17a8e4ea2b91fe223363e904d4adb8910a727e283067762c9cff3e064393c729"
+    },
+    {
+      "path": "source-excerpts.txt",
+      "bytes": 51142,
+      "sha256": "bbf677396d9a0a7ae046b53fa3c6781597fddc8f1495856e1b96d2262b42cae6"
+    },
+    {
+      "path": "source-proof.json",
+      "bytes": 334,
+      "sha256": "0d3d6115454532a2e938c736e65a36904955462af803a4b495c882aa46c536da"
+    },
+    {
+      "path": "update_fuzz.rs.source.txt",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    }
+  ],
+  "count": 5
+}

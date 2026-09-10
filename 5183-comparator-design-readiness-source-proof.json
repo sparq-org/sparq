@@ -1,0 +1,11 @@
+{
+  "source_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "path": "crates/sparq-bench/src/update_fuzz.rs",
+  "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+  "matches_frozen_original_seed_module": true,
+  "clean": true,
+  "builds": 0,
+  "runs": 0,
+  "network_reads": 0,
+  "production_edits": 0
+}

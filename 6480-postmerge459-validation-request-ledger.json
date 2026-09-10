@@ -1,0 +1,28 @@
+{
+  "logical_read_requests": 18,
+  "requests": [
+    "GET rate_limit",
+    "GET repos/sparq-org/sparq/actions/runs/34475426889/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475426852/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475426887/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475426864/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475426835/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475427098/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475427058/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475426945/jobs?per_page=100",
+    "GET repos/sparq-org/sparq/actions/runs/34475427098",
+    "GET repos/sparq-org/sparq/actions/runs/34475427058",
+    "GET repos/sparq-org/sparq/actions/runs/34475426945",
+    "GET repos/sparq-org/sparq/actions/jobs/102864922324/logs",
+    "GET repos/sparq-org/sparq/actions/jobs/102864922786/logs",
+    "GET repos/sparq-org/sparq/actions/jobs/102864922189/logs",
+    "GET repos/sparq-org/sparq/actions/jobs/102864931546/logs",
+    "GET repos/sparq-org/sparq/actions/jobs/102864921752/logs",
+    "GET repos/sparq-org/sparq/issues/6474"
+  ],
+  "each_once": true,
+  "retries": 0,
+  "mutations": 0,
+  "core_remaining_before": 4914,
+  "limitations": "Job-log redirect downloads are part of each logical log request. No registry settings, credentials, runner administration or alert APIs were probed."
+}

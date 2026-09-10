@@ -1,0 +1,90 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "mode": "bounded read-only source assessment; no tests/builds/network/model/source edits",
+  "source_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "module_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+  "worktree_clean": true,
+  "recommendation": "FEASIBLE as one focused update_fuzz.rs generator-domain plus stricter-adjudication/test/documentation slice. No engine, canon, allowlist, parser, LOAD-sandbox or workflow repair is indicated. The existing first-seed failure is a correct rejection of an unsuitable reference-state cascade.",
+  "resolved_unknowns": {
+    "triple_recursion": {
+      "source": "790-804",
+      "finding": "Already recursive: literal INTEGER branch canonicalizes i64 lexicals; Term::Triple reconstructs the subject/predicate unchanged and recursively normalizes its object at801. Nested generated objects and solution-derived triple terms are covered. No recursion fix is needed.",
+      "grammar_boundary": "Generated subjects/predicates/graph names are IRIs or permitted blank nodes, never integer literals or generalized triple subjects. gen_triple_term nests objects; gen_where_op arm9 embeds ?o and preserves the existing isBlank guard. Do not generalize this proof to arbitrary RDF profiles."
+    },
+    "literal_inventory": [
+      {
+        "source": "191-197",
+        "site": "gen_simple_object",
+        "values": "canonical bare integer0..19; plain lit0..4; @en tag0..2; IRIs",
+        "callers": "gen_object, gen_triple_term recursively, and reifier object in gen_insert_quad"
+      },
+      {
+        "source": "231-238",
+        "site": "gen_noncanonical_integer",
+        "values": "integer0..19 with independent 0/+ /00 prefix choice; this permits both A/B collisions and multiple noncanonical lexicals for the same value",
+        "callers": "gen_insert_quad335 and conditional INSERT object421 only"
+      },
+      {
+        "source": "246-252",
+        "site": "gen_ntriples_object",
+        "values": "canonical typed integer0..19; same plain/language pools and IRIs",
+        "callers": "gen_load631; the exact same triple text feeds document content and reference INSERT DATA at633-641"
+      }
+    ],
+    "other_datatypes": "The complete production generator creates only xsd:integer, plain strings (xsd:string) and fixed lowercase @en language strings. No decimal, float, double, boolean, date/time, arbitrary typed literal or datatype-conversion expression is emitted. isBlank returns a FILTER predicate, not a stored boolean. Empty initial graphs and task-generated LOAD documents introduce no outside literal source. Behavior of Oxigraph normalization for other datatypes remains unverified and is unnecessary to this finite grammar; no other datatype adjudication should be added.",
+    "load": "gen_load603-644 uses canonical-only gen_ntriples_object, writes the same triple into doc.content and reference INSERT DATA, and retains it in the canonical pool. Missing-document SILENT loads have no reference operation. Keep all of this and the allowlisted local sandbox unchanged.",
+    "query_scope": "gen_where_op398-511 has exactly11 fixed shapes: canonical ground condition; one-pattern variable BGP delete/rename/copy/GRAPH/WITH/USING forms; fresh blank-node template; solution-derived triple term with !isBlank; DELETE WHERE. PROBES916-922 are full s,p,o and s,p,o,g projections without DISTINCT. No STR, sameTerm, STRDT, arithmetic, numeric comparison, aggregation, ordering or lexical-dependent function exists in this corpus."
+  },
+  "restricted_semantic_argument": [
+    "Use one global injective mapping over every integer value emitted during a whole sequence, including generated nested terms, templates and LOAD. Keep canonical constants in a domain fixed by normalization; noncanonical values occupy a disjoint domain with exactly one chosen lexical spelling per value.",
+    "Canonical ground DELETE/WHERE terms are drawn only from the canonical pool. Because these constants are fixed and cannot equal a normalized noncanonical-pool term, ground-match truth is preserved.",
+    "All other generated WHERE shapes use variable matching plus graph scope and isBlank. Injective term replacement preserves their solution multiplicities; isBlank is invariant under integer lexical replacement. INSERT/DELETE templates copy terms or construct ground-checked triple terms; the recursive normalizer commutes with those constructions. Fresh template blank nodes are one-per-solution on both sides.",
+    "Graph management and LOAD mirrors only move/copy/insert these same terms. Injection on the global generated term domain preserves set membership under those operations. This is an argument for the inspected finite grammar, not a claim that a bijection preserves arbitrary SPARQL STR or sameTerm behavior."
+  ],
+  "minimal_edit_points": [
+    {
+      "source": "148,191-197,228-252",
+      "proposal": "Make canonical value-pool size explicit and route both bare and LOAD typed canonical integer constructors through that bound. Make the noncanonical pool disjoint and give every value one deterministic spelling. A small option retains existing RNG consumption: two draws v in0..19 and style in0..2; encoded value=20+3*v+style; its prefix chosen by style. Values20..79 then have one global spelling while all canonical constants remain0..19. This preserves three prefix families and two RNG draws; it still intentionally changes generated literal text. Exact numeric choice is private test-corpus policy, not an engine threshold."
+    },
+    {
+      "source": "273-283,328-332,103-128",
+      "proposal": "Document corpus narrowing and why poolability/INSERT-only generation remain necessary. Preserve st.inserted membership and all random branch/family probabilities; no taint skip or mutation of actual Sparq input."
+    },
+    {
+      "source": "810-829 and895-904",
+      "proposal": "Only strengthen the lexical-adjudication branch. Keep original strict Same/raw-count and all canonicalization-error paths unchanged. Reject raw-count mismatch before adjudication; require structural normalization to retain parsed and output cardinality, reject collisions before dedup can hide them, and compare equal normalized full line collections using unchanged constrained canonicalization. Term-level injectivity should be checked on distinct integer lexical terms recursively, not merely distinct output quads: two colliding terms under different subjects/predicates do not reduce quad count. Preserve distinct blank-node count and shape requirements; never delete nodes or waive a residual."
+    },
+    {
+      "source": "1662-1712",
+      "proposal": "Existing narrow-adjudication test explicitly expects two lexical forms collapsing to one to be accepted (1672-1680). Under the stricter intended policy this example must become a negative assertion, with a separate one-to-one noncanonical/canonical positive fixture retaining real adjudication. This is a documented strengthening, not an unnoticed old-test failure."
+    },
+    {
+      "source": "1352-1847 tests module",
+      "proposal": "Add the exact frozen10-request original sequence as literal-data Sparq-only rebuild/in-place regression, including original LOAD document/mirror provenance. At index8 assert9 fresh blank nodes overall,4 for s2, and both8/008 terms; preserve full internal dataset/row checks at every step and then execute the final original request. Do not regenerate the original fixture from a seed after changing the generator."
+    }
+  ],
+  "adjudication_cautions": [
+    "The current helper sorts and deduplicates at827-828. Simple raw-count equality plus per-side distinct-line equality is not a proof of term injectivity across contexts. Require a structural integer-value\u2192original-lexical collision check over all literal occurrences, including nested triple objects, if claiming injectivity.",
+    "For these fixed full-quad projections a correct set-backed store yields at most one row per represented quad. Rejecting duplicate normalized rows on either side is a narrow fail-closed choice that avoids canon dedup masking a probe multiplicity defect. Do not deduplicate before validating cardinality. Explicit equal-total-count/different-duplicate-distribution negatives are needed.",
+    "General multiset comparison with arbitrary projection duplicates and blank-node canonicalization is not solved by line-count checks alone. Do not broaden PROBES or claim a general bag-isomorphism implementation in this slice; either demonstrate this fixed full-quad domain or report a blocker.",
+    "A snapshot injectivity guard cannot prove historical state was always injective. The generator invariant supplies the whole-sequence induction; do not infer that a later snapshot authorizes ignoring an earlier rejected comparison.",
+    "The i64 normalizer covers the proposed small value pools. Do not claim full XSD-integer-domain parity or extend overflow/datatype behavior without separate evidence."
+  ],
+  "test_control_plan": [
+    "Pure generator property over a fixed bounded corpus: collect actual structured integer literal values/lexicals from every generated operation, nested triple and LOAD doc/reference mirror, proving one spelling per value over the entire sequence; assert noncanonical emissions and all three prefix families are nonzero. Preserve all existing operation/triple/bnode/LOAD family loops.",
+    "Canonical-pool-overlap and alternate-spelling controls must fail the property, including a collision introduced only through LOAD and one nested in a triple term.",
+    "A fixed one-to-one lexical pair must adjudicate with the class enabled and fail with it disabled; include a nested triple-term pair and a bnode-bearing graph pair. Sparq-only nested noncanonical literal retention must stay exact.",
+    "Collapsing2\u21921 lexical pair, same-total-count duplicate redistribution, colliding terms at different predicates, unequal bnode count/shape, unknown datatype/language difference, and unrelated injected marker must remain failures. Old dedup/removed guard controls must be executed and fail meaningful assertions later.",
+    "Keep injected_divergence_is_caught; add a fixed independently chosen sequence with active one-to-one lexical adjudication and inject the existing marker at that step. Positive counterpart must actually adjudicate so the test is not a no-lexical-path negative.",
+    "Retain existing fixed-window40, family400, nested-bnode200 and LOAD/reference-mirror tests. Tighten noncanonical-family evidence beyond merely XSD_INTEGER substring if necessary: actual adjudication or literal-lexical inspection proves the intended class rather than typed canonical text.",
+    "Exact historical10-operation Sparq regression stays distinct from changed-generator acceptance windows. The other seven original CI failures remain unknown; a green new-generator run for those seed numbers would use changed input and cannot prove their original failures resolved."
+  ],
+  "coverage_tradeoff": "Remove cross-engine differential cases where multiple lexical forms of the same value coexist and influence later solution multiplicity, because this pinned reference cannot represent that state. Retain noncanonical-term storage/query/nested-triple/reference coverage for disjoint values. Preserve the removed semantic shape in exact internal public-API regressions. No Sparq engine defect is fixed; comparator policy is strengthened while the generated domain is deliberately narrowed.",
+  "scope_boundary": "One production harness file plus its in-file tests/module docs should suffice. No engine/core/parser/canon edits, seed exceptions, blank-node erasure, allowlist-class widening, workflow budget change, gate weakening or external resource changes. No implementation or execution was performed in this task.",
+  "remaining_caveats": [
+    "The proposed construction and guard algorithm are not compiled or executed. Actual test/control and cost outcomes remain pending implementation authorization.",
+    "Static complete-generator coverage is established here; other datatypes and arbitrary query grammars remain outside it.",
+    "Only the first historical CI mismatch has runtime evidence. Further old-sequence replay, if desired, requires separate bounded execution and cannot be substituted by new-generator same-seed runs.",
+    "No new run-level nonvacuity policy is required to settle this static unknown. Prefer deterministic positive tests first; altering CI window failure/warning policy is an explicit separate decision."
+  ]
+}

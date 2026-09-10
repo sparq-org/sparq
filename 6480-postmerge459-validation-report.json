@@ -1,0 +1,147 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "event": "push",
+  "branch": "main",
+  "head_identity": "All eight selected runs and all returned jobs match exact main head. Whole source tree 3ccc4164afe1d61e7e79f65f7870b9805c5ed499 matches local reviewed17594; proof saved. The merge commit object is unavailable locally, so no local merge-object content claim or fetch was made.",
+  "js": {
+    "run": 34475426889,
+    "job": 102864922324,
+    "conclusion": "success",
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "next_site": "15.5.24",
+    "next_gui_app": "15.5.24",
+    "sharp": "0.35.4",
+    "vips": "8.18.6",
+    "png_bytes": 91,
+    "actual_runtime_proof": "Log436\u2013437 installed Node/npm;512\u2013514 installed Next resolution in both workspaces;516 actual loaded sharp/native versions;517 generated PNG. Source js.yml143\u2013158 requires loaded version equal committed lock, nonempty generated output, and 1x1 dimensions.",
+    "no_drift": "Same successful root install step ends with git diff --exit-code -- package-lock.json gui/app/package.json site/package.json (source160/log481). No diff text was emitted; step7 success establishes command completion. This is actual Linux installed-tree/native evidence, not just npm metadata or echoed command text.",
+    "source": "source/.github/workflows/js.yml:134\u2013160",
+    "limits": "Single Linux hosted runtime/native platform and 1x1 synthetic PNG; no claim every native platform, format or vulnerability exploit was executed."
+  },
+  "docs": {
+    "run": 34475426852,
+    "job": 102864922786,
+    "conclusion": "success",
+    "inspection_command": "python3 scripts/tests/test_js_wasm_pack_install.py",
+    "tests": 13,
+    "result": "OK",
+    "log_lines": [
+      3384,
+      3418,
+      3420
+    ],
+    "scope": "Actual relevant suite in hard quick-gates job, not nearby unrelated13-test output."
+  },
+  "supply_chain": {
+    "run": 34475426887,
+    "job": 102864922189,
+    "conclusion": "success",
+    "advisory_record_tests": 25,
+    "tests_result": "OK",
+    "tests_log_lines": [
+      276,
+      278
+    ],
+    "drift_command": "python3 scripts/check-npm-advisory-record.py",
+    "drift_result": "success: brace-expansion4, postcss1, sharp1 instances all recorded",
+    "drift_log_lines": [
+      283,
+      290
+    ],
+    "scope": "Confirms existing advisory record checks and unweakened standalone drift gate; does not independently repeat root-verified default-branch alert-state API proof."
+  },
+  "batch_merge": {
+    "run": 34475426864,
+    "job": 102864931546,
+    "conclusion": "failure",
+    "cause": "REGISTRY_RING_TOKEN is empty; explicit guard exits1 before gh workflow run. Ring was not sent.",
+    "classification": "Expected suppressed operation consistent with the standing registry-OFF pause; same missing-token condition as earlier main runs.",
+    "source": "source/.github/workflows/batch-merge.yml:157\u2013170",
+    "log_lines": [
+      44,
+      46,
+      47
+    ],
+    "gate_scope": "Exact job is listed advisory at advisory-registry.json:219. Overflow job skipped.",
+    "action": "Keep registry/token/workflow states unchanged. The log suggestion of next cron pickup is inapplicable while registry Actions remain OFF; do not provision a token or enable workflows."
+  },
+  "release_plz": {
+    "run": 34475426835,
+    "job": 102864921752,
+    "conclusion": "failure",
+    "phase": "Package/version determination followed by failed privileged-token containment",
+    "cause": "cargo package cannot prepare sparq-introspect0.1.1 because its versioned sparq-engine dev-dependency is not found in crates.io index.",
+    "classification": "Same concrete packaging/bootstrap failure as OPEN issue6474; not the expected blocked-PR-creation403 and not newly introduced by the dependency patch.",
+    "source": [
+      "source/crates/sparq-introspect/Cargo.toml:75\u201378",
+      "source/.github/workflows/release-plz.yml:221\u2013223"
+    ],
+    "log_lines": [
+      1063,
+      1068,
+      1116,
+      1131
+    ],
+    "tracking_issue": 6474,
+    "gate_scope": "Exact Release-PR job listed advisory at advisory-registry.json:226.",
+    "action": "Remain deferred under existing release pause; retain this occurrence on6474 if root considers useful. No release authorization, grant change or rerun is warranted by this observation.",
+    "limits": "Successful sibling tag-job metadata was observed but its log was not fetched. No claim of publication/tag creation or absence of side effects, and no local packaging reproduction."
+  },
+  "current_progress": {
+    "34475427098": {
+      "name": "CI",
+      "status": "queued",
+      "conclusion": null,
+      "attempt": 1,
+      "job_count": 24,
+      "job_counts": {
+        "success": 3,
+        "skipped": 4,
+        "queued": 17
+      },
+      "read_utc": "2026-09-10T12:38:29Z"
+    },
+    "34475426945": {
+      "name": "ci-summary",
+      "status": "in_progress",
+      "conclusion": null,
+      "attempt": 1,
+      "job_count": 1,
+      "job_counts": {
+        "in_progress": 1
+      },
+      "read_utc": "2026-09-10T12:38:29Z"
+    },
+    "34475427058": {
+      "name": "feature-matrix",
+      "status": "queued",
+      "conclusion": null,
+      "attempt": 1,
+      "job_count": 57,
+      "job_counts": {
+        "success": 6,
+        "queued": 50,
+        "skipped": 1
+      },
+      "read_utc": "2026-09-10T12:38:30Z"
+    }
+  },
+  "decision": "Same-head installed Next/sharp/native and relevant13+25/drift evidence is verified. It supports closing the scoped6480 implementation/validation obligation once root combines its already-verified fixed alert states. It does not establish all main CI green: full CI/matrix still queued and aggregate in progress at saved observation.",
+  "constraints": {
+    "github_logical_reads": 18,
+    "max_authorized": 25,
+    "retries": 0,
+    "builds_tests_models": 0,
+    "remote_mutations": 0,
+    "registry_release_changes": 0,
+    "pending_commands": false,
+    "snapshots_not_continuous_monitoring": true
+  },
+  "limits": [
+    "No active gate log fetched and no queued job cancelled/retried. Run-level queued status is distinguished from already completed individual jobs.",
+    "Prior registry-OFF and fixed-alert facts are root-confirmed standing evidence; this task made no duplicate settings/alert reads.",
+    "No inference that advisory automation failures caused the still-running aggregate. No new source repair or security-adjudication claim."
+  ]
+}

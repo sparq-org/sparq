@@ -1,0 +1,85 @@
+[package]
+name = "sparq-introspect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Opt-in ontology/schema introspection for the sparq RDF engine: characteristic sets, effective-schema mining (classes, predicate usage, observed domain/range), vocabulary detection, and token-budgeted text summaries for LLM grounding"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# front page and every feature-gated item (`federation-descriptors`) render on docs.rs.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+# [GPT-5.6] sq-lsp7k.29: numeric range/histogram facet summaries are opt-in so
+# the crate's existing facet response and work stay byte-for-byte unchanged by default.
+numeric-facets = []
+# [GPT-5.6] sq-yjemp: structured schema drift is additive and default-OFF; the
+# existing introspection build and output remain unchanged unless requested.
+schema-diff = []
+
+# Opt-in schema introspection (GenAI phase 2 — see research/genai-design.md and
+# research/genai-ontology-introspection.md). This is a SEPARATE crate so the core
+# engine carries zero introspection code; it consumes only sparq-core's PUBLIC
+# read API (dict lookups, permutation-index scans). The whole effective schema —
+# characteristic sets, class extents, predicate histograms, observed domain/range
+# — falls out of sorted scans over the indexes the store already keeps: no
+# GROUP BY, no hashing joins, no models, no network.
+
+[dependencies]
+# `version` alongside `path`: cargo uses the path locally and the version on crates.io
+# (required to publish — crates.io strips `path`).
+#
+# [FABLE-5] sq-lxkr1: `default-features = false` HERE, with defaults re-enabled only for
+# non-wasm targets below. Cargo unions features across every declaration that applies to a
+# build, so the previous shape (defaults here + a wasm-only `default-features = false`
+# override) was a no-op: wasm still got sparq-core's default `parallel` feature (rayon).
+# With resolver = "2", target-specific declarations are ignored on non-matching platforms,
+# so this split genuinely drops rayon from the wasm32 graph.
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+oxrdf.workspace = true
+rustc-hash.workspace = true
+# The machine-readable surface for LLM grounding (`Introspection::to_json`).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# [OPUS-4.8] sq-aq5: wasm-safety. The whole crate is sorted scans over sparq-core's public
+# read API — no threads, no syscalls, no wall clock — so it must compile and RUN on
+# `wasm32-unknown-unknown` (tier-b browser surface for in-tab schema cards). On wasm we
+# take sparq-core WITHOUT default features: the only default feature is `parallel` (rayon,
+# native-only thread-pool index construction) which introspect never uses — it reads
+# already-built indexes — so dropping it keeps the wasm graph lean (no rayon) and matches
+# the bundle crates' pattern. `Graph::load_str` (used by the smoke test) is not
+# `parallel`-gated; it falls back to the sequential loader when the feature is off.
+# [FABLE-5] sq-lxkr1: sparq-core's default features are restored for NATIVE builds here
+# (the base [dependencies] declaration is default-features = false so the wasm graph
+# stays lean — see the note there).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sparq-core = { path = "../sparq-core", version = "0.1.1" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# oxrdf pulls `rand`/getrandom (blank-node ids). On wasm there is no OS RNG, so select
+# getrandom's browser backend (crypto.getRandomValues). The matching
+# `--cfg getrandom_backend="wasm_js"` is set in the workspace .cargo/config.toml — exactly
+# as the shipped wasm bundle crates (sparq-wasm / sparq-rsp-wasm / …) do.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+# Round-trips the VoID export to assert it is valid N-Triples (subset of Turtle).
+oxttl.workspace = true
+sparq-engine = { path = "../sparq-engine", version = "0.1.1" }
+
+# [OPUS-4.8] sq-aq5 — headless wasm smoke test (`tests/wasm.rs`), mirroring the shipped
+# wasm bundle crates: exercises the real introspection pipeline (build + to_json +
+# to_text_summary + to_void(_with_cs) + characteristic_set_ids) in a GENUINE wasm32
+# runtime via `wasm-pack test --node`. Dev-only; never enters a non-dev graph.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -1,0 +1,612 @@
+{
+  "34475426889": {
+    "total": 1,
+    "counts": {
+      "success": 1
+    },
+    "jobs": [
+      {
+        "id": 102864922324,
+        "name": "js",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "34475427098": {
+    "total": 24,
+    "counts": {
+      "success": 3,
+      "skipped": 4,
+      "queued": 17
+    },
+    "jobs": [
+      {
+        "id": 102864923857,
+        "name": "detect rust changes",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102864924155,
+        "name": "unsafe-register (count ratchet)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102864924387,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102864925299,
+        "name": "nightly-gate",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102864925700,
+        "name": "coverage (nightly, full incl. heavy vectors)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102864925706,
+        "name": "mutation ratchet (cargo-mutants, advisory)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102867836521,
+        "name": "unsafe report (cargo-geiger, informational)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102867836537,
+        "name": "clippy (gate) + fmt (non-blocking)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102867836596,
+        "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102867836632,
+        "name": "MSRV check (Rust 1.88, declared floor)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102867836692,
+        "name": "docker image smoke (run + curl /health + query)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955600,
+        "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955670,
+        "name": "W3C SHACL conformance (ratchet \u2014 core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955681,
+        "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955684,
+        "name": "build + archive test binaries (+ doctests once)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955717,
+        "name": "Solid WAC/ACP conformance (ratchet \u2014 wac >= 13, acp >= 13)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955806,
+        "name": "W3C/OGC GeoSPARQL conformance (ratchet \u2014 topology >= 119, query-rewrite >= 38)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955843,
+        "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955856,
+        "name": "sparq-text BM25 differential oracle (extension ratchet \u2014 assertions >= 18750)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955863,
+        "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955883,
+        "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet \u2014 assertions >= 149)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955916,
+        "name": "W3C JSON-LD 1.1 conformance (ratchet \u2014 toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868955940,
+        "name": "SolidLab ODRL conformance (ratchet \u2014 pass >= 59)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102868956707,
+        "name": "nightly selection backstop (full-matrix guard)",
+        "status": "completed",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "34475426945": {
+    "total": 1,
+    "counts": {
+      "in_progress": 1
+    },
+    "jobs": [
+      {
+        "id": 102864922275,
+        "name": "gate",
+        "status": "in_progress",
+        "conclusion": null
+      }
+    ]
+  },
+  "34475426835": {
+    "total": 2,
+    "counts": {
+      "failure": 1,
+      "success": 1
+    },
+    "jobs": [
+      {
+        "id": 102864921752,
+        "name": "release-plz / Release-PR (advisory)",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 102864922002,
+        "name": "release-plz / tag (handoff to release.yml)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "34475426864": {
+    "total": 2,
+    "counts": {
+      "failure": 1,
+      "skipped": 1
+    },
+    "jobs": [
+      {
+        "id": 102864931546,
+        "name": "ring registry dispatcher",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "id": 102864932936,
+        "name": "batch overflow into omnibus",
+        "status": "completed",
+        "conclusion": "skipped"
+      }
+    ]
+  },
+  "34475427058": {
+    "total": 57,
+    "counts": {
+      "success": 6,
+      "queued": 50,
+      "skipped": 1
+    },
+    "jobs": [
+      {
+        "id": 102864922826,
+        "name": "detect rust changes (feature-matrix)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102864923013,
+        "name": "select / select (change-based test selection)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102865131550,
+        "name": "assemble feature matrix",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102865131666,
+        "name": "feature-matrix check-tier (rest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102865131682,
+        "name": "sparq-lws-core pure Solid (--no-default-features)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102865131689,
+        "name": "sparq-server pure-serialiser (--no-default-features)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102865131691,
+        "name": "feature-matrix check-tier (engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102865131693,
+        "name": "fedclient dependency-boundary guard",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102865131740,
+        "name": "sparq-geo pure-geometry (--no-default-features)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102865133609,
+        "name": "pre-merge C1 (feature-gated test execution)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 102870835534,
+        "name": "opt-in group (g03 sparq-wrapper)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835538,
+        "name": "opt-in group (g06 sparq-trust)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835550,
+        "name": "opt-in group (g01 sparq-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835563,
+        "name": "opt-in group (g10 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835599,
+        "name": "opt-in group (g02 sparq-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835611,
+        "name": "opt-in group (g05 sparq-reason-el)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835635,
+        "name": "opt-in group (g09 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835636,
+        "name": "opt-in group (g13 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835676,
+        "name": "opt-in group (g21 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835679,
+        "name": "opt-in group (g12 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835681,
+        "name": "opt-in group (g18 sparq-mcp)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835691,
+        "name": "opt-in group (g24 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835694,
+        "name": "opt-in group (g15 sparq-reason)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835699,
+        "name": "opt-in group (g04 sparq-cli)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835706,
+        "name": "opt-in group (g19 sparq-vectors)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835719,
+        "name": "opt-in group (g14 sparq-reason)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835746,
+        "name": "opt-in group (g11 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835761,
+        "name": "opt-in group (g29 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835771,
+        "name": "opt-in group (g08 sparq-solid)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835777,
+        "name": "opt-in group (g25 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835787,
+        "name": "opt-in group (g35 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835789,
+        "name": "opt-in group (g37 sparq-shacl)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835816,
+        "name": "opt-in group (g33 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835817,
+        "name": "opt-in group (g22 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835822,
+        "name": "opt-in group (g07 sparq-trust)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835826,
+        "name": "opt-in group (g30 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835828,
+        "name": "opt-in group (g16 sparq-reason)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835834,
+        "name": "opt-in group (g39 sparq-kb)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835836,
+        "name": "opt-in group (g38 sparq-server)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835837,
+        "name": "opt-in group (g17 sparq-geo)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835885,
+        "name": "opt-in group (g20 sparq-vectors)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835891,
+        "name": "opt-in group (g31 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835896,
+        "name": "opt-in group (g34 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835901,
+        "name": "opt-in group (g28 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835908,
+        "name": "opt-in group (g27 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835916,
+        "name": "opt-in group (g45 sparq-reason-ql)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835923,
+        "name": "opt-in group (g23 sparq-lws-core)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835932,
+        "name": "opt-in group (g43 sparq-nlq)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835933,
+        "name": "opt-in group (g26 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835961,
+        "name": "opt-in group (g32 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835968,
+        "name": "opt-in group (g41 sparq-reason-el)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870835972,
+        "name": "opt-in group (g36 sparq-engine)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870836001,
+        "name": "opt-in group (g44 sparq-reason-dl)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870836014,
+        "name": "opt-in group (g42 sparq-sim)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870836016,
+        "name": "opt-in group (g47 sparq-introspect)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870836023,
+        "name": "opt-in group (g40 sparq-zk)",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 102870836121,
+        "name": "opt-in group (g46 sparq-mpc)",
+        "status": "queued",
+        "conclusion": null
+      }
+    ]
+  },
+  "34475426887": {
+    "total": 1,
+    "counts": {
+      "success": 1
+    },
+    "jobs": [
+      {
+        "id": 102864922189,
+        "name": "supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "34475426852": {
+    "total": 2,
+    "counts": {
+      "success": 2
+    },
+    "jobs": [
+      {
+        "id": 102864922380,
+        "name": "docs-quality quick-advisory (advisory)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 102864922786,
+        "name": "docs-quality quick-gates",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  }
+}

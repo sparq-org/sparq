@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-10T13:15:25.398789+00:00",
+  "manifest_sha256": "2c25700e565a5d475d31392b23f9a921b2861a119e6d6a54a9b56a045f7fc574",
+  "verified_files": 5,
+  "decision": "Acceptboundedimplementationfeasibility inoneupdate_fuzz.rs module. Existingnormalizerrecursion coversgeneratedtripleobjects;3literalhelperscoverallcurrentintegerinputs/LOAD; fixedWHERE/probes lacklexical-sensitivefunctions. This resolves priorOpusstaticunknowns forfinitegrammar only.",
+  "requirements": "Term-levelglobalintegerinjectivity, notquad-countalone; preserveallstrict/multiset/canonunknownchecks. Exactoriginal10-requestinternalregression andmeaningfulpositive/negativecontrols; no newworkflowpolicy.",
+  "implementation_authorized": {
+    "agent": "/root/postmerge_ci",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+    "branch": "codex/update-differential-replay",
+    "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+    "max_compile_test_seconds": 1200,
+    "max_each_build_seconds": 600,
+    "max_new_allocated_bytes": 536870912,
+    "min_free_bytes": 2147483648,
+    "jobs": 1,
+    "offline": true
+  },
+  "acceptance_limits": "No sourcechangeoutsideharnessmodule; no fullworkspacecoldbuild. Other7historicalcasesremainunclassified andchanged-generatorseedrunscannotresolvethem. ActualOpuspatchreview+requiredCI neededbeforepublication/merge."
+}
