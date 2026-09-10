@@ -626,6 +626,10 @@ for evidence_name in ['close6480-alert106.json', 'close6480-alert107.json', 'clo
 for evidence_name in ['opus-original-seed-diagnosis-review.json', 'opus-original-seed-diagnosis-completion.json', 'opus-original-seed-diagnosis-stderr.log', 'opus-original-seed-diagnosis-result.json', 'opus-original-seed-diagnosis-root-disposition.json', 'reference-comment-before-original-update.json', 'update-original-seed-comment.py', 'comparator-design-root-verification.json', 'implementation-base-preparation.json', 'original-seed-comment-budget.json', 'original-seed-comment-expected.json', 'original-seed-comment-input.json', 'original-seed-comment-issue.json', 'original-seed-comment-precheck.json', 'original-seed-comment-receipt.json', 'original-seed-comment-result.json']:
     FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
 
+# Main459 successful CI confirmation and1329 heartbeat.
+for evidence_name in ['budget-1328.json', 'main459-ci-run-1331.json', 'main459-ci-1329.json', 'main459-matrix-1329.json', 'main459-gate-1329.json', 'main459-ref-1329.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

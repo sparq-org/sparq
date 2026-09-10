@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T13:15:25.398789+00:00",
+  "updated_at": "2026-09-10T13:32:02.593829+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -51,8 +51,8 @@
   },
   "live_main": {
     "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-    "observed_at": "2026-09-10T12:21:53.621323+00:00",
-    "evidence": "direct-6480/admission/main459-merge-root-verification.json"
+    "observed_at": "2026-09-10T13:32:02.593829+00:00",
+    "evidence": "direct-6480/admission/main459-ref-1329.json"
   },
   "rules": {
     "required_check": "gate",
@@ -168,7 +168,15 @@
       "jobs": 1,
       "offline": true
     },
-    "base_preparation": "direct-5183/admission/implementation-base-preparation.json"
+    "base_preparation": "direct-5183/admission/implementation-base-preparation.json",
+    "implementation_progress": {
+      "at": "2026-09-10T13:32:02.593829+00:00",
+      "source": "existingAstraworkerprogressmessages",
+      "first_build": "passed24.5s;102dependencyfeaturesetsmatchoriginalharness",
+      "first_suite": "20/20passed includingexisting40/400/200windows andcompletehistorical10requests",
+      "control_gap": "LOADcanonicalpoolshift20 survived400-seedsample; retainedasanobservedcontrolsurvivor. Workeradding deterministicactualparsedLOADintegerpool/fixedpoint assertion, thenrevalidatingfinalbytes. No seedexpansion/runtimepolicychange.",
+      "final_validation": "notyetcomplete/frozen; do notusefirst20/20asfinalpatchvalidation"
+    }
   },
   "prs": {
     "4300": {
@@ -657,16 +665,12 @@
     "manifest_sha256": "34678b4fe632a678c4bd0affc6cc9a19845b8813c6025bf516a7af4ea5ee347d",
     "root_verification": "direct-6480/admission/postmerge459-root-verification.json",
     "agent": "none; existing worker on5183",
-    "CI": {
-      "success": 25,
-      "skipped": 4,
-      "in_progress": 7
-    },
+    "CI": "completed_success",
     "feature_matrix": {
-      "success": 25,
+      "success": 45,
       "skipped": 1,
-      "queued": 30,
-      "in_progress": 1
+      "in_progress": 7,
+      "queued": 4
     },
     "aggregate": "in_progress",
     "known_advisory_failures": {
@@ -3427,9 +3431,9 @@
   "postmerge_watch": {
     "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "pr": 6481,
-    "observed_at": "2026-09-10T13:15:25.398789+00:00",
-    "evidence": "direct-6480/admission/main459-runs-1312.json",
-    "state": "CoreCIandmatrixprogressing; aggregatepending; changed-surfacevalidationclosed6480",
+    "observed_at": "2026-09-10T13:32:02.593829+00:00",
+    "evidence": "direct-6480/admission/main459-ci-run-1331.json",
+    "state": "MainCIverifiedsuccess; matrix45success1skip7running4queued; aggregatependingat1329; no livecancellation/rerun",
     "changed_surface_checks": "js/docs/supply verifiedsuccess;6480closed",
     "release_authorized": false,
     "unresolved_noncore_failures": [
@@ -3439,15 +3443,14 @@
     ],
     "job_observation": {
       "ci": {
-        "success": 25,
-        "skipped": 4,
-        "in_progress": 7
+        "success": 33,
+        "skipped": 6
       },
       "matrix": {
-        "success": 25,
+        "success": 45,
         "skipped": 1,
-        "queued": 30,
-        "in_progress": 1
+        "in_progress": 7,
+        "queued": 4
       }
     },
     "aggregate": "in_progress",
@@ -3457,6 +3460,11 @@
       "status": "completed",
       "conclusion": "success",
       "scope": "Workflowresultverified, notrawfuzztargetlogre-audit"
+    },
+    "CI": {
+      "run": 34475427098,
+      "status": "completed",
+      "conclusion": "success"
     }
   },
   "classifier_watch": {
