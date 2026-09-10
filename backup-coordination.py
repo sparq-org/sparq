@@ -427,6 +427,11 @@ for evidence_name in ['heartbeat-0425.json', 'postmerge-checks-0427.json']:
 for evidence_name in ["debug-cache-cleanup-precheck.json", "debug-cache-cleanup-receipt.json"]:
     FILES["6476-" + evidence_name] = ROOT / "direct-6476" / evidence_name
 
+# Issue6476 completed actualOpus design review and healthy6477postmerge.
+for evidence_name in ['opus-design-review.json', 'opus-design-stderr.log', 'opus-design-result.json', 'opus-design-completion.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+FILES["3105-admission-heartbeat-0450.json"] = ROOT / "direct-3105/admission/heartbeat-0450.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

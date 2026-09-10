@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T04:36:58.281919+00:00",
+  "updated_at": "2026-09-10T04:54:38.541119+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -50,8 +50,8 @@
   },
   "live_main": {
     "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-    "observed_at": "2026-09-10T04:00:53.065065+00:00",
-    "evidence": "direct-3105/admission/issue6476-start-precheck.json"
+    "observed_at": "2026-09-10T04:51:21.435426+00:00",
+    "evidence": "direct-3105/admission/heartbeat-0450.json"
   },
   "rules": {
     "required_check": "gate",
@@ -67,14 +67,14 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Confirmed reproduction frozen/root-verified; actualOpus preimplementation design review running",
-    "state": "SameAstra author idle; clean worktree d41. No production fix yet. Actual Opus5 xhigh session83681 running; do not duplicate.",
+    "phase": "Astra implementation of scoped budget-state restoration",
+    "state": "Production implementation authorized at04:52 in existingissue6476worktree following actualOpusB1-B4 andsnapshotvisibilityconditions. One engine lane. No source/fix/testpass claimed until author freeze.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476",
     "directory": "direct-6476",
-    "max_minutes": 15,
+    "max_minutes": 25,
     "scope": "Execute real nested public extension-callback reproduction; inspect affected entry points and previous limits/sticky-error/cancel pointer restoration lifetimes; exact source and test/control plan.",
     "constraints": "Own newworktree; no production fix/push/remote mutation/modelcall/release/EC2 yet. max2jobs incrementalOFF offline;stopfree<6509559808B. Cache5983 mayreuse asregenerableonly. Preservecompletedworktrees and frozen evidence. No bd commands after readonly bootstrap defect. Disk floor remains live; stop again if reserve crossed. No evidence was deleted.",
     "fresh_admission": [
@@ -85,10 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect actualOpus83681 when complete, verify modelUsage and concrete design conditions; do not duplicate.",
-      "Authorize sameAstra minimal restoration implementation only afterdesignconditions resolved; preserve scoped guard/no-publicAPI andsnapshotlifetime obligations. Fullfinaldiff+tests independentlyreviewedbeforeprotectedCI.",
-      "If sounddesignconfirmed, authorize same Astra lane minimal fix andcalibratedpublic-callback/state/unwind tests underresourcefloor; fullindependentreview/protectedCI beforepublication/merge.",
-      "Postmerge6477CI andfeaturematrixSUCCESS; aggregatewaits boundedcargo-fuzz34435176590. Do not combineadvisoryfailures orlivechecksintoregressionclaim."
+      "Collect sameAstra implementation phase; verify finalcommit/diff/scope preservation and realtest/control evidence. Do not duplicateagent orclaimreadybeforefreeze.",
+      "ActualOpus5 xhigh finalimplementedsource review before protectedpublication; design approval is not finalapproval.",
+      "If resource/compilefailures arise, recover within known task-owned scope; no blindcleanup orrequestbudgetretries.",
+      "Postmerge6477CI/matrix/aggregate/fuzz allSUCCESS; retainknownadvisoryringpause/release6474 separately. No ongoingmergeblocker."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -131,7 +131,7 @@
       "proof": "direct-6476/admission/reproduction-root-verification.json"
     },
     "design_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 83681,
       "actual_model_required": "claude-opus-5",
@@ -141,7 +141,24 @@
       "input_sha256": "d5d72c2e60a656e8b31a76a020837e94fb71f1353f3f23a4c08701714e9be5a7",
       "output": "direct-6476/admission/opus-design-review.json",
       "scope": "Save full prior Limits/EXCEEDED, private scoped Guard/install boundary,14sites and4synchronous snapshots; currentcallers vs hypotheticalprivate misuse clearlyseparated. Designonly, not finalcodeapproval.",
-      "collect_policy": "Collect83681 completion and verify actualmodelUsage. Do not launchduplicate; initialmissinginput shellredirectionneverlaunchedClaude andisnotamodelrequestretry."
+      "collect_policy": "83681 completed/collected. Do not poll/relaunch. Actual modelUsage verified. Finalimplementedsource stillrequiresactualOpusreview.",
+      "exit_code": 0,
+      "actual_model": "claude-opus-5",
+      "verdict": "approve_with_conditions",
+      "result": "direct-6476/admission/opus-design-result.json",
+      "receipt": "direct-6476/admission/opus-design-completion.json",
+      "output_sha256": "c2dd7517cbf616c8e265e91d08653e6f9fc7f24c50550990ceacf95e6e6ce4eb"
+    },
+    "implementation": {
+      "state": "running",
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "directory": "direct-6476/implementation",
+      "started_at": "2026-09-10T04:54:38.540163+00:00",
+      "scope": "Private restoringGuard/install; scoped with_budget FnOnce seam;14caller scopeequivalence; full Limits+EXCEEDED restore; narrowed rawsnapshot visibility/lifetime comments; QueryBudget behavior docs; calibratedruntime/state/unwind/parallel tests andcontrols.",
+      "source_review": "Opus design approvedwithconditions, not implementationapproval. SERVICE savepointstraddling mustbeassessed forsameouterstateafterreturnednestedcall, not prohibitedwithoutcause.",
+      "constraints": "25minfirstphase2jobsincrementalOFF/offline/free>=6509559808B;preferpreservedreleasecache;no cleanup/bd/fullworkspace/localwasmbuild/newdep/publicAPI/ArcTLSrewrite/remoteGitHub/model/EC2/release. Preserve32frozenreproductionfiles."
     }
   },
   "prs": {
@@ -552,7 +569,8 @@
       "merge_group_gate": "success",
       "merge_group_gate_run": 34433648325,
       "merged_at": "2026-09-10T03:55:26Z",
-      "merge_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+      "merge_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "postmerge_validation": "CI34435176563,featurematrix34435176570,ci-summary34435176404,fuzz34435176590 allSUCCESS onmergedd41; sourcesbyteverified."
     }
   },
   "registry": {
@@ -603,9 +621,9 @@
     }
   },
   "next_actions": [
-    "Collect active6476 bounded reproduction and authorize nextphase onlyonconcreteevidence.",
-    "Watch actualpush mainCI/matrix/gate atd41ec9f independentlyfromsuccessfulmerge-group. Diagnose newrequiredfailures; no retries ofknownpausedregistry/releaseadvisories.",
-    "Preserve6049approvalblock,6055ownerhold,6475canonicalizationNO_GO,6095hold,registry2305ActionsOFF;no releases/EC2/groupingchange."
+    "Collect active6476 implementation then realindependentfinalreview andprotectedCI/merge.",
+    "No duplicate6477work: merged, byteverified, allpostmergecoregatespassed.",
+    "Preserve6049approvalblock,6055ownerhold,6475canonicalizationNO_GO,6095hold,registry2305ActionsOFF; no releases/EC2/groupingchange."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -903,18 +921,14 @@
     }
   },
   "main_health": {
-    "head": "a42a9e89dec485f6a319c47cb3635c59cb5a2270",
-    "observed_at": "2026-09-09T02:06:57.622869+00:00",
-    "aggregate_ci_summary": {
-      "run": 34280482031,
-      "conclusion": "success"
-    },
-    "CI": {
-      "run": 34280482521,
-      "conclusion": "success"
-    },
-    "evidence": "main-a42a9e89-runs.json",
-    "scope": "Currentmain61listedruns fit onepage. Required aggregate green;source not authored/merged by this coordinator in this turn."
+    "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "core_ci": "success",
+    "feature_matrix": "success",
+    "aggregate": "success",
+    "fuzz": "success",
+    "observed_at": "2026-09-10T04:51:21.435426+00:00",
+    "evidence": "direct-3105/admission/heartbeat-0450.json",
+    "advisories": "Registryring intentionallynotoken/no dispatch; releasepackaging6474 remainsheld, not releaseauthorization."
   },
   "pending_operational_triage": {
     "priority": "Bounded read-only at an agent break, not another implementation lane",
@@ -2188,8 +2202,8 @@
     "state": "Main CI, feature matrix and required aggregate allSUCCESS; two noncore failure causes under bounded read-only diagnosis",
     "6477": {
       "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "state": "running",
-      "observed_at": "2026-09-10T04:28:03.530294+00:00",
+      "state": "completed_success",
+      "observed_at": "2026-09-10T04:51:21.435426+00:00",
       "ci_run": 34435176563,
       "matrix_run": 34435176570,
       "gate_run": 34435176404,
@@ -2202,11 +2216,12 @@
         "run": 34435176367,
         "result": "failed; current diagnostics notyetread, existing packaging issue6474 remainsopen; do not retry/authorize release"
       },
-      "evidence": "direct-3105/admission/postmerge-checks-0427.json",
+      "evidence": "direct-3105/admission/heartbeat-0450.json",
       "ci_state": "success",
       "matrix_state": "success",
-      "gate_state": "in_progress",
-      "remaining_required": "cargo-fuzz (parsers + mmap loader, bounded),run34435176590/job102738724670,start03:56:13"
+      "gate_state": "success",
+      "remaining_required": null,
+      "fuzz_state": "success"
     }
   },
   "classifier_watch": {
