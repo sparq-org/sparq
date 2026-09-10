@@ -1,0 +1,33 @@
+{
+  "at": "2026-09-10T01:21:41.901621+00:00",
+  "response": {
+    "data": {
+      "repository": {
+        "issue": {
+          "number": 5016,
+          "state": "OPEN",
+          "labels": {
+            "nodes": [
+              {
+                "name": "role:impl"
+              },
+              {
+                "name": "status:untriaged"
+              },
+              {
+                "name": "self-improvement"
+              },
+              {
+                "name": "from:agent"
+              }
+            ]
+          }
+        },
+        "issues": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    }
+  }
+}

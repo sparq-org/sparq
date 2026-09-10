@@ -361,6 +361,8 @@ for evidence_name in ['baseline/Cargo.lock', 'baseline/Cargo.toml', 'baseline/sr
 for evidence_name in ['opus-review.json', 'opus-review.stderr.log', 'opus-result.json', 'opus-completion.json', 'performance-stop-root-verification.json', 'source-validity-context.txt', 'source-validity-assessment.json', 'nested-budget-issue.md', 'nested-budget-precreate.json', 'nested-budget-issue-url.txt', 'nested-budget-issue-verified.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+FILES["3105-admission-generator-label-watch-0120.json"] = ROOT / "direct-3105/admission/generator-label-watch-0120.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
