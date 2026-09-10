@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T18:24:39.485480+00:00",
+  "updated_at": "2026-09-10T18:28:52.052509+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -10,7 +10,7 @@
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
     "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
-    "last_file_verify_at": "2026-09-10T17:07:59.089651+00:00",
+    "last_file_verify_at": "2026-09-10T18:28:52.052509+00:00",
     "last_app_view_note": "View succeeded during previous heartbeat; precise time not recorded."
   },
   "constraints": [
@@ -93,7 +93,8 @@
     "next_actions": [
       "Wait current6486 required CI/matrix; collect actualmemo test/current feature execution proof before queue.",
       "One aggregate-only recovery after required peers green and fresh head/budget/checks; no current evidence cancellations.",
-      "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication."
+      "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication.",
+      "Existing /root/postmerge_ci running6483. Reuse; no duplicate agent/review/test launches. Completed Opus69637 must not be polled or relaunched."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -232,7 +233,9 @@
       "verification": "direct-6485/admission/paths-filter-recovery-watch.json",
       "reruns_requested": 1,
       "aggregate_rerun_performed": false,
-      "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes."
+      "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes.",
+      "aggregate_prepared_script": "direct-6485/admission/recover6486-aggregate.py",
+      "aggregate_script_state": "Prepared and parsed only; NOT EXECUTED. Preconditions require latest cohort terminalgreen exceptaggregate and exact9ac target. One-shot receipt guard."
     }
   },
   "prs": {
@@ -787,10 +790,10 @@
     }
   },
   "next_actions": [
-    "Wait for relevant6486 CI/matrix completion; obtain actual execution proof of memo tests/currenthead feature legs/doclinks. Otherlatestworkflows already succeeded.",
-    "Once peers are green, fresh exacthead/gate/budget validation permits one aggregate-only recovery. Then normal protected queue if current reviews/holds clear; no bypass/jump.",
-    "Collect Astra6483 source-only repair design, obtain actual Opus soundness review before new code.",
-    "RegistryOFF/heartbeatACTIVE; preserveALLGREEN/gate15368/6049/6055/canon/EC2/releases/rate-fail-closed holds."
+    "Wait current6486 required CI/matrix; collect actualmemo test/current feature execution proof before queue.",
+    "One aggregate-only recovery after required peers green and fresh head/budget/checks; no current evidence cancellations.",
+    "Collect6483 implementation, verify source/evidence, actual Opus final review before any publication.",
+    "Existing /root/postmerge_ci running6483. Reuse; no duplicate agent/review/test launches. Completed Opus69637 must not be polled or relaunched."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -809,100 +812,104 @@
     }
   },
   "budget": {
-    "observed_at": "2026-09-10T10:36:57.270637+00:00",
+    "observed_at": "2026-09-10T18:26:04.868728+00:00",
     "resources": {
       "core": {
         "limit": 5000,
-        "used": 23,
-        "remaining": 4977,
-        "reset": 1789037384
+        "used": 9,
+        "remaining": 4991,
+        "reset": 1789067268
       },
       "search": {
         "limit": 30,
         "used": 0,
         "remaining": 30,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "graphql": {
         "limit": 5000,
         "used": 0,
         "remaining": 5000,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "integration_manifest": {
         "limit": 5000,
         "used": 0,
         "remaining": 5000,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "source_import": {
         "limit": 100,
         "used": 0,
         "remaining": 100,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "code_scanning_autofix": {
         "limit": 10,
         "used": 0,
         "remaining": 10,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "actions_runner_registration": {
         "limit": 10000,
         "used": 0,
         "remaining": 10000,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "scim": {
         "limit": 15000,
         "used": 0,
         "remaining": 15000,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "dependency_snapshots": {
         "limit": 100,
         "used": 0,
         "remaining": 100,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "dependency_sbom": {
         "limit": 100,
         "used": 0,
         "remaining": 100,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "audit_log": {
         "limit": 1750,
         "used": 0,
         "remaining": 1750,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "audit_log_streaming": {
         "limit": 15,
         "used": 0,
         "remaining": 15,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "code_search": {
         "limit": 10,
         "used": 0,
         "remaining": 10,
-        "reset": 1789036677
+        "reset": 1789064820
       },
       "copilot_usage_records": {
         "limit": 1750,
         "used": 0,
         "remaining": 1750,
-        "reset": 1789040217
+        "reset": 1789068360
       },
       "enterprise_token_inventory": {
         "limit": 1750,
         "used": 0,
         "remaining": 1750,
-        "reset": 1789040217
+        "reset": 1789068360
       }
     },
-    "policy": "failclosed onexhaustion; no retriesuntilfirsteligiblepostresetdispatch"
+    "graphql": {
+      "remaining": 4995,
+      "resetAt": "2026-09-10T18:57:04Z"
+    },
+    "policy": "Fail closed on exhaustion; no retry storms or repeat exhausted requests."
   },
   "actions_backlog": {
     "at": "2026-09-10T16:28:12.114658+00:00",
@@ -1304,17 +1311,55 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T17:10:14.961590+00:00",
+    "at": "2026-09-10T18:26:04.868728+00:00",
     "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "state": "6482 merged/postmerge verified;5183 closed;6485 active bounded corrected controls",
+    "state": "6486 awaiting current CI/matrix;6483 bounded implementation running after conditional actual Opus design",
     "registry_actions_enabled": false,
     "release_authorized": false,
-    "capacity": "Only old scheduled CI/miri running and old queued batch-merge; no current target capacity incident. No cancellations/reruns. Job occupancy not freshly queried.",
+    "queue": [],
+    "latest_merges": [
+      {
+        "number": 6482,
+        "mergedAt": "2026-09-10T15:45:55Z",
+        "mergeCommit": {
+          "oid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464"
+        }
+      },
+      {
+        "number": 6481,
+        "mergedAt": "2026-09-10T12:12:31Z",
+        "mergeCommit": {
+          "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9"
+        }
+      },
+      {
+        "number": 6478,
+        "mergedAt": "2026-09-10T08:44:34Z",
+        "mergeCommit": {
+          "oid": "781f667c19a8ebb779cfccb24b05ea432360b025"
+        }
+      },
+      {
+        "number": 6477,
+        "mergedAt": "2026-09-10T03:55:26Z",
+        "mergeCommit": {
+          "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+        }
+      },
+      {
+        "number": 6473,
+        "mergedAt": "2026-09-09T20:45:32Z",
+        "mergeCommit": {
+          "oid": "e53464c73f31f7aca800f3867ac054c36408e346"
+        }
+      }
+    ],
     "workflow_status_counts": {
-      "in_progress": 2,
-      "queued": 1
+      "queued": 2,
+      "in_progress": 2
     },
-    "workflow_snapshot": "monitor-20260910-1712"
+    "workflow_snapshot": "monitor-20260910-1826",
+    "capacity": "Current6486 matrix progressing alongside currentCI and old scheduledCI. Old queuedbatch remains. No demonstrated saturation; no runner-inventory403retry or cancellation."
   },
   "registry_pause": {
     "enabled": false,
@@ -4458,9 +4503,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T17:57:06.423252+00:00",
+    "at": "2026-09-10T18:26:04.868728+00:00",
     "enabled": false,
-    "evidence": "direct-6485/admission/publish-declaration-ready-receipt.json"
+    "evidence": "monitor-20260910-1826/registry-permissions.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

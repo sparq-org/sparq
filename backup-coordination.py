@@ -821,6 +821,23 @@ FILES['direct-6485--admission--ci-jobs1825.stderr'] = ROOT / 'direct-6485/admiss
 FILES['direct-6485--admission--matrix-jobs1825.json'] = ROOT / 'direct-6485/admission' / 'matrix-jobs1825.json'
 FILES['direct-6485--admission--matrix-jobs1825.stderr'] = ROOT / 'direct-6485/admission' / 'matrix-jobs1825.stderr'
 
+# Current1826 coordinator monitor and prepared6486 aggregate-only recovery.
+FILES['monitor-20260910-1826--actions-in_progress.json'] = ROOT / 'monitor-20260910-1826' / 'actions-in_progress.json'
+FILES['monitor-20260910-1826--actions-in_progress.stderr'] = ROOT / 'monitor-20260910-1826' / 'actions-in_progress.stderr'
+FILES['monitor-20260910-1826--actions-queued.json'] = ROOT / 'monitor-20260910-1826' / 'actions-queued.json'
+FILES['monitor-20260910-1826--actions-queued.stderr'] = ROOT / 'monitor-20260910-1826' / 'actions-queued.stderr'
+FILES['monitor-20260910-1826--budget.json'] = ROOT / 'monitor-20260910-1826' / 'budget.json'
+FILES['monitor-20260910-1826--budget.stderr'] = ROOT / 'monitor-20260910-1826' / 'budget.stderr'
+FILES['monitor-20260910-1826--graph.json'] = ROOT / 'monitor-20260910-1826' / 'graph.json'
+FILES['monitor-20260910-1826--graph.stderr'] = ROOT / 'monitor-20260910-1826' / 'graph.stderr'
+FILES['monitor-20260910-1826--main-rules.json'] = ROOT / 'monitor-20260910-1826' / 'main-rules.json'
+FILES['monitor-20260910-1826--main-rules.stderr'] = ROOT / 'monitor-20260910-1826' / 'main-rules.stderr'
+FILES['monitor-20260910-1826--query.json'] = ROOT / 'monitor-20260910-1826' / 'query.json'
+FILES['monitor-20260910-1826--receipt.json'] = ROOT / 'monitor-20260910-1826' / 'receipt.json'
+FILES['monitor-20260910-1826--registry-permissions.json'] = ROOT / 'monitor-20260910-1826' / 'registry-permissions.json'
+FILES['monitor-20260910-1826--registry-permissions.stderr'] = ROOT / 'monitor-20260910-1826' / 'registry-permissions.stderr'
+FILES['6485-admission-recover6486-aggregate.py'] = ROOT / 'direct-6485/admission/recover6486-aggregate.py'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
