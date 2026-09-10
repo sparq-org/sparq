@@ -1,0 +1,7 @@
+{
+  "scripts/check-vectorized-feature-off.py": "6d5139e305a1b9fe27c095043849febc5ae9ee9e362b8b55990e47da7408a892",
+  "bench/feature-off-declarations/README.md": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e",
+  "rustfmt.toml": "71d4e08778d2e2112d2ee2524955e6c373b0645db8afc6b7d2cedfa9fc3d46a2",
+  "rust-toolchain.toml": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37",
+  "crates/sparq-engine/Cargo.toml": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+}

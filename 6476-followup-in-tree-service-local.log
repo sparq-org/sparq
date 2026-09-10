@@ -1,0 +1,481 @@
+warning: failed to save last-use data
+This may prevent cargo from accurately tracking what is being used in its global cache. This information is used for automatically removing unused data in the cache.
+
+attempt to write a readonly database
+
+Caused by:
+  Error code 8: attempt to write a readonly database
+       Fresh libc v0.2.186
+       Fresh cfg-if v1.0.4
+       Fresh unicode-ident v1.0.24
+       Fresh proc-macro2 v1.0.106
+       Fresh quote v1.0.45
+       Fresh getrandom v0.3.4
+       Fresh rand_core v0.9.5
+       Fresh zerocopy v0.8.50
+       Fresh syn v2.0.117
+       Fresh ppv-lite86 v0.2.21
+       Fresh rand_chacha v0.9.0
+       Fresh memchr v2.8.2
+       Fresh rand v0.9.4
+       Fresh crossbeam-utils v0.8.21
+       Fresh thiserror-impl v2.0.18
+       Fresh typenum v1.20.1
+       Fresh hybrid-array v0.4.12
+       Fresh thiserror v2.0.18
+       Fresh crossbeam-epoch v0.9.20
+       Fresh oxiri v0.2.11
+       Fresh oxilangtag v0.1.6
+       Fresh oxrdf v0.3.3
+       Fresh crossbeam-deque v0.8.6
+       Fresh rayon-core v1.13.0
+       Fresh getrandom v0.4.2
+       Fresh crypto-common v0.2.2
+       Fresh block-buffer v0.12.1
+       Fresh errno v0.3.14
+       Fresh foldhash v0.2.0
+       Fresh either v1.16.0
+       Fresh equivalent v1.0.2
+       Fresh autocfg v1.5.1
+       Fresh bitflags v2.13.0
+       Fresh allocator-api2 v0.2.21
+       Fresh const-oid v0.10.2
+       Fresh digest v0.11.3
+       Fresh hashbrown v0.17.1
+       Fresh rustix v1.1.4
+       Fresh rayon v1.12.0
+       Fresh serde_core v1.0.228
+       Fresh oxttl v0.2.3
+       Fresh memmap2 v0.9.11
+       Fresh fastrand v2.4.1
+       Fresh rustc-hash v2.1.3
+       Fresh once_cell v1.21.4
+       Fresh regex-syntax v0.8.11
+       Fresh peg-macros v0.8.6
+       Fresh tempfile v3.27.0
+       Fresh sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-core)
+       Fresh zmij v1.0.21
+       Fresh aho-corasick v1.1.4
+       Fresh serde_derive v1.0.228
+       Fresh cpufeatures v0.3.0
+       Fresh wait-timeout v0.2.1
+warning: direct cast of function item into an integer
+  --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wait-timeout-0.2.1/src/unix.rs:68:48
+   |
+68 |             new.sa_sigaction = sigchld_handler as usize;
+   |                                                ^^^^^^^^
+   |
+note: the lint level is defined here
+  --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wait-timeout-0.2.1/src/lib.rs:31:23
+   |
+31 | #![deny(missing_docs, warnings)]
+   |                       ^^^^^^^^
+   = note: `#[warn(function_casts_as_integer)]` implied by `#[warn(warnings)]`
+help: first cast to a pointer `as *const ()`
+   |
+68 |             new.sa_sigaction = sigchld_handler as *const () as usize;
+   |                                                ++++++++++++
+
+warning: `wait-timeout` (lib) generated 1 warning
+       Fresh fnv v1.0.7
+       Fresh peg-runtime v0.8.6
+       Fresh itoa v1.0.18
+       Fresh bit-vec v0.8.0
+warning: unnecessary parentheses around closure body
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:820:38
+    |
+820 |         self.process(other, |w1, w2| (w1 | w2))
+    |                                      ^       ^
+    |
+    = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+help: remove these parentheses
+    |
+820 -         self.process(other, |w1, w2| (w1 | w2))
+820 +         self.process(other, |w1, w2| w1 | w2)
+    |
+
+warning: unnecessary parentheses around closure body
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:851:38
+    |
+851 |         self.process(other, |w1, w2| (w1 & w2))
+    |                                      ^       ^
+    |
+help: remove these parentheses
+    |
+851 -         self.process(other, |w1, w2| (w1 & w2))
+851 +         self.process(other, |w1, w2| w1 & w2)
+    |
+
+warning: unnecessary parentheses around closure body
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:890:38
+    |
+890 |         self.process(other, |w1, w2| (w1 & !w2))
+    |                                      ^        ^
+    |
+help: remove these parentheses
+    |
+890 -         self.process(other, |w1, w2| (w1 & !w2))
+890 +         self.process(other, |w1, w2| w1 & !w2)
+    |
+
+warning: unnecessary parentheses around closure body
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:921:38
+    |
+921 |         self.process(other, |w1, w2| (w1 ^ w2))
+    |                                      ^       ^
+    |
+help: remove these parentheses
+    |
+921 -         self.process(other, |w1, w2| (w1 ^ w2))
+921 +         self.process(other, |w1, w2| w1 ^ w2)
+    |
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:440:19
+    |
+440 |     fn blocks_mut(&mut self) -> MutBlocks<B> {
+    |                   ^^^^^^^^^     ^^^^^^^^^^^^ the same lifetime is hidden here
+    |                   |
+    |                   the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+440 |     fn blocks_mut(&mut self) -> MutBlocks<'_, B> {
+    |                                           +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:447:19
+    |
+447 |     pub fn blocks(&self) -> Blocks<B> {
+    |                   ^^^^^     ^^^^^^^^^ the same lifetime is hidden here
+    |                   |
+    |                   the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+447 |     pub fn blocks(&self) -> Blocks<'_, B> {
+    |                                    +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:608:20
+    |
+608 |     pub fn get_mut(&mut self, index: usize) -> Option<MutBorrowedBit<B>> {
+    |                    ^^^^^^^^^                          ^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                    |
+    |                    the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+608 |     pub fn get_mut(&mut self, index: usize) -> Option<MutBorrowedBit<'_, B>> {
+    |                                                                      +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:638:37
+    |
+638 |     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> MutBorrowedBit<B> {
+    |                                     ^^^^^^^^^                   ^^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |                                     |
+    |                                     the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+638 |     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> MutBorrowedBit<'_, B> {
+    |                                                                                +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+    --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:1113:17
+     |
+1113 |     pub fn iter(&self) -> Iter<B> {
+     |                 ^^^^^     ^^^^^^^ the same lifetime is hidden here
+     |                 |
+     |                 the lifetime is elided here
+     |
+     = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+     |
+1113 |     pub fn iter(&self) -> Iter<'_, B> {
+     |                                +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+    --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/src/lib.rs:1137:21
+     |
+1137 |     pub fn iter_mut(&mut self) -> IterMut<B> {
+     |                     ^^^^^^^^^     ^^^^^^^^^^ the same lifetime is hidden here
+     |                     |
+     |                     the lifetime is elided here
+     |
+     = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+     |
+1137 |     pub fn iter_mut(&mut self) -> IterMut<'_, B> {
+     |                                           +++
+
+warning: `bit-vec` (lib) generated 10 warnings
+       Fresh quick-error v1.2.3
+       Fresh rusty-fork v0.3.1
+       Fresh bit-set v0.8.0
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-set-0.8.0/src/lib.rs:467:17
+    |
+467 |     pub fn iter(&self) -> Iter<B> {
+    |                 ^^^^^     ^^^^^^^ the same lifetime is hidden here
+    |                 |
+    |                 the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+467 |     pub fn iter(&self) -> Iter<'_, B> {
+    |                                +++
+
+warning: `bit-set` (lib) generated 1 warning
+       Fresh serde_json v1.0.150
+       Fresh peg v0.8.6
+       Fresh serde v1.0.228
+       Fresh regex-automata v0.4.14
+       Fresh num-traits v0.2.19
+       Fresh rand_xorshift v0.4.0
+       Fresh unarray v0.1.4
+       Fresh smallvec v1.15.2
+       Fresh sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-substrate)
+       Fresh proptest v1.11.0
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:707:21
+    |
+707 |                     $typ::SIGN_MASK
+    |                     ^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::SIGN_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+note: the lint level is defined here
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/lib.rs:17:11
+    |
+ 17 | #![forbid(future_incompatible)]
+    |           ^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(unstable_name_collisions)]` implied by `#[warn(future_incompatible)]`
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:714:21
+    |
+714 |                     $typ::SIGN_MASK
+    |                     ^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::SIGN_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:739:47
+    |
+739 |                             ($typ::EXP_MASK | $typ::MANTISSA_MASK, 0,
+    |                                               ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::MANTISSA_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:742:30
+    |
+742 |                             ($typ::MANTISSA_MASK, 0, true, false)),
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::MANTISSA_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:748:30
+    |
+748 |                             ($typ::MANTISSA_MASK >> 1, quiet_or,
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::MANTISSA_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:751:30
+    |
+751 |                             ($typ::MANTISSA_MASK >> 1, signaling_or,
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::MANTISSA_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:765:44
+    |
+765 |                     0 == generated_value & $typ::MANTISSA_MASK
+    |                                            ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f32 as FloatLayout>::MANTISSA_MASK`
+...
+965 | float_bin_search!(f32, F32U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:707:21
+    |
+707 |                     $typ::SIGN_MASK
+    |                     ^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::SIGN_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:714:21
+    |
+714 |                     $typ::SIGN_MASK
+    |                     ^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::SIGN_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:739:47
+    |
+739 |                             ($typ::EXP_MASK | $typ::MANTISSA_MASK, 0,
+    |                                               ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::MANTISSA_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:742:30
+    |
+742 |                             ($typ::MANTISSA_MASK, 0, true, false)),
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::MANTISSA_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:748:30
+    |
+748 |                             ($typ::MANTISSA_MASK >> 1, quiet_or,
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::MANTISSA_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:751:30
+    |
+751 |                             ($typ::MANTISSA_MASK >> 1, signaling_or,
+    |                              ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::MANTISSA_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: an associated constant with this name may be added to the standard library in the future
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/num.rs:765:44
+    |
+765 |                     0 == generated_value & $typ::MANTISSA_MASK
+    |                                            ^^^^^^^^^^^^^^^^^^^ help: use the fully qualified path to the associated const: `<f64 as FloatLayout>::MANTISSA_MASK`
+...
+966 | float_bin_search!(f64, F64U);
+    | ---------------------------- in this macro invocation
+    |
+    = warning: once this associated item is added to the standard library, the ambiguity may cause an error or change in behavior!
+    = note: for more information, see issue #48919 <https://github.com/rust-lang/rust/issues/48919>
+    = note: this warning originates in the macro `float_any` which comes from the expansion of the macro `float_bin_search` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: function pointer comparisons do not produce meaningful results since their addresses are not guaranteed to be unique
+   --> /Users/jesght/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proptest-1.11.0/src/test_runner/config.rs:398:5
+    |
+223 | #[derive(Clone, Debug, PartialEq)]
+    |                        --------- in this derive macro expansion
+...
+398 |     pub result_cache: fn() -> Box<dyn ResultCache>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: the address of the same function can vary between different codegen units
+    = note: furthermore, different functions could have the same address after being merged together
+    = note: for more information visit <https://doc.rust-lang.org/nightly/core/ptr/fn.fn_addr_eq.html>
+    = note: `#[warn(unpredictable_function_pointer_comparisons)]` on by default
+
+warning: `proptest` (lib) generated 15 warnings
+       Fresh regex v1.12.4
+       Fresh sparq-introspect v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-introspect)
+       Fresh spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/vendor/spargebra)
+       Fresh sha1 v0.11.0
+       Fresh sha2 v0.11.0
+       Fresh md-5 v0.11.0
+       Fresh uuid v1.23.4
+       Fresh ryu v1.0.23
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-engine)
+     Running `CARGO=/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo CARGO_CRATE_NAME=sparq_engine CARGO_MANIFEST_DIR=/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-engine CARGO_MANIFEST_PATH=/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-engine/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='SPARQL query engine over sparq-core: algebra-to-physical-plan compilation, cardinality-based join planning, and parallel execution' CARGO_PKG_HOMEPAGE='https://github.com/sparq-org/sparq' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=sparq-engine CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/sparq-org/sparq' CARGO_PKG_RUST_VERSION=1.88 CARGO_PKG_VERSION=0.1.1 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=1 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 DYLD_FALLBACK_LIBRARY_PATH='/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps:/Users/jesght/lib:/usr/local/lib:/usr/lib' /Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc --crate-name sparq_engine --edition=2021 crates/sparq-engine/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C opt-level=3 -C embed-bitcode=no -C codegen-units=16 --warn=unexpected_cfgs --check-cfg 'cfg(kani)' --test --cfg 'feature="default"' --cfg 'feature="digest"' --cfg 'feature="parallel"' --cfg 'feature="regex"' --cfg 'feature="service-local"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("algebra-rewrite", "antijoin-static-decline", "cluster-materialize", "cs-anchor-incidence", "cs-planner", "default", "digest", "dp-planner", "explain-json", "id-filter-fastpath", "parallel", "params", "paths", "persistent-stats", "query-solution", "regex", "result-cache", "semijoin-bitmap", "serialize-rdf", "service", "service-local", "spatial-exact-pushdown", "spqcprm2", "streaming-serialization", "templates", "topk-lazy-strkey", "txn", "value-join", "vectorized", "window-functions", "yannakakis", "zk"))' -C metadata=e824ab4488ffb814 -C extra-filename=-46d925d7c181d085 --out-dir /private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps -C strip=debuginfo -L dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps --extern md5=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmd5-d957b44d2a717174.rlib --extern oxiri=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxiri-256fcb858fdf74ff.rlib --extern oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib --extern proptest=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libproptest-fe58022d97b60f4d.rlib --extern rayon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-fb353b242d14de3d.rlib --extern regex=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libregex-97e8c9837dd5af91.rlib --extern rustc_hash=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rlib --extern ryu=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libryu-3ba3c802d5dc7f7c.rlib --extern serde_json=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-46e7197693bd16e2.rlib --extern sha1=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha1-cae15182d420d048.rlib --extern sha2=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsha2-778aad56561bbe29.rlib --extern smallvec=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsmallvec-2cf754751a422d03.rlib --extern spargebra=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libspargebra-070dccb8a8b877d8.rlib --extern sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-e0ac301aa343ee6c.rlib --extern sparq_introspect=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_introspect-db40efe0fe90a3d8.rlib --extern sparq_substrate=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_substrate-41ef2d192a9dee1f.rlib --extern uuid=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libuuid-633b917788174200.rlib`
+    Finished `release` profile [optimized] target(s) in 39.72s
+     Running `CARGO=/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo CARGO_MANIFEST_DIR=/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-engine CARGO_MANIFEST_PATH=/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476/crates/sparq-engine/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='SPARQL query engine over sparq-core: algebra-to-physical-plan compilation, cardinality-based join planning, and parallel execution' CARGO_PKG_HOMEPAGE='https://github.com/sparq-org/sparq' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=sparq-engine CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/sparq-org/sparq' CARGO_PKG_RUST_VERSION=1.88 CARGO_PKG_VERSION=0.1.1 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=1 CARGO_PKG_VERSION_PRE='' DYLD_FALLBACK_LIBRARY_PATH='/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release:/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps:/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/lib:/Users/jesght/lib:/usr/local/lib:/usr/lib' /private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/sparq_engine-46d925d7c181d085 'exec::budget::nested_budget_tests' --nocapture`
+
+running 7 tests
+test exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget ... ok
+test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok
+test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok
+test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... ok
+
+thread 'exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind' (4030843) panicked at crates/sparq-engine/src/exec.rs:559:25:
+controlled child unwind
+test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind' (4030843) panicked at crates/sparq-engine/src/exec.rs:572:21:
+controlled top-level unwind
+test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok
+test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 332 filtered out; finished in 0.00s
+

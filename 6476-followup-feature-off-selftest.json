@@ -1,0 +1,8 @@
+{
+  "command": [
+    "python3",
+    "scripts/check-vectorized-feature-off.py",
+    "--self-test"
+  ],
+  "exit_code": 0
+}

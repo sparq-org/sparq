@@ -455,6 +455,16 @@ for evidence_name in ['declaration-template.json', 'pr-body.md', 'report.json', 
     FILES["6476-publication-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/publication-readiness" / evidence_name
 FILES["6476-admission-pre-publication-capacity.json"] = ROOT / "direct-6476/admission/pre-publication-capacity.json"
 
+# Issue6476 completed actual Opus review and draft PR6478 publication.
+for evidence_name in ['opus-final-review.json', 'opus-final-stderr.log', 'opus-final-result.json', 'opus-final-completion.json', 'pr-draft-body.md', 'publish-draft.py', 'draft-publication-receipt.json', 'pr-url.txt', 'pr-created.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
+# PR6478 frozen follow-up, active supplement input and adjacent issue6479.
+for evidence_name in ['NB1-source.txt', 'binary/in-tree-default', 'binary/in-tree-no-default', 'binary/in-tree-service-local', 'commit-message.txt', 'delta.diff', 'exec-after.rs', 'exec-before.rs', 'feature-off-selftest.json', 'feature-off-selftest.log', 'in-tree-default.json', 'in-tree-default.log', 'in-tree-no-default.json', 'in-tree-no-default.log', 'in-tree-provenance.json', 'in-tree-service-local.json', 'in-tree-service-local.log', 'mechanical-checks.json', 'policy-source-hashes.json', 'preflight.json', 'preflight.log', 'protocol.json', 'public-review-supplement.md', 'report.json', 'run.py', 'rustfmt-stderr.log', 'service-local-amendment.json', 'source-edit-plan.json', 'source-precommit.json', 'manifest.json']:
+    FILES["6476-followup-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/followup" / evidence_name
+for evidence_name in ['followup-root-verification.json', 'opus-followup-input.md', 'opus-followup-input-receipt.json', 'issue-pr-progress.json', 'issue-pr-progress-precheck.json', 'issue-pr-progress-receipt.json', 'query-base-followup-dedupe.json', 'query-base-main-source.txt', 'query-base-issue-input.json', 'query-base-precreate.json', 'query-base-issue-created.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

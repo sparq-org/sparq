@@ -1,0 +1,8 @@
+test: clarify nested budget scopes and declare wasm intent
+
+Refine the cancellation-pointer safety comments, pin serial callback evidence,
+and assert idle state after SERVICE savepoint restoration. Format only touched
+tests and restore incidental production reflows. Add PR 6478 V2 intent metadata
+for the intentional always-compiled budget restoration.
+
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>

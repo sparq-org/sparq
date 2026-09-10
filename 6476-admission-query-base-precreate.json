@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T06:23:08.593009+00:00",
+  "main": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "verified_labels": [
+    "self-improvement",
+    "area:sparq-engine",
+    "role:impl"
+  ],
+  "dedupe": "Two successful searches saved; four broad matches concern VC/CLI-hook/subquery/WAC topics, none nested public callback BASE restoration.",
+  "prior_attempt": "Stopped before any mutation because source issue had advanced from status:untriaged to status:ready. No issue POST occurred. Removed that unnecessary status assumption; source/main/budgets were not the blocker."
+}

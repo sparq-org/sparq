@@ -1,0 +1,46 @@
+{
+  "at": "2026-09-10T06:19:30.739506+00:00",
+  "searches": [
+    {
+      "query": "repo:sparq-org/sparq is:issue \"QUERY_BASE\"",
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": []
+    },
+    {
+      "query": "repo:sparq-org/sparq is:issue nested base",
+      "total_count": 4,
+      "incomplete_results": false,
+      "items": [
+        {
+          "number": 1214,
+          "title": "[sq-pfae.7] Status-list VC signature verification + revocation propagation: decisions to steer",
+          "state": "open",
+          "html_url": "https://github.com/sparq-org/sparq/issues/1214",
+          "body": "> \ud83e\udd16 SPARQ agent \u2014 P6 live-status/revocation gate (sq-pfae.7) landed opt-in; flagging two best-judgment decisions for you to steer post-hoc.\n\nThe live-status / revocation stratum for the trust-graph PoC (epic sq-pfae, bead **sq-pfae.7**) is implemented behind the **default-OFF `status-list` cargo feature** in `sparq-trust` (PR opening against `main`). It decodes a live W3C Bitstring Status List, gates the REAL admission path **fail-closed on set/unknown/stale**, and renders a minimal PROV-O allow/deny justification. Two judgment calls I made (proceed-and-document) that you may want to redirect:\n\n**1. The status-list credential's OWN issuer signature is NOT verified in v1.**\nThe pluggable `StatusListResolver` is the trust seam \u2014 v1 trusts the list as fetched (a TLS-fetched or pre-validated list). It does not yet verify the published status-list VC's own issuer signature against a trusted status authority. I chose this default to keep the slice self-contained and avoid coupling to the in-flight W3C Data Integrity verify (sq-ylbrq / #1202). Captured as follow-up **sq-pfae.13**. Question: should the gate REQUIRE a verified status-list VC signature (fail-closed `Unknown` otherwise) before this feature is considered complete, or is \"resolver is the trust seam\" acceptable for the research PoC?\n\n**2. Revocation propagates by FULL re-materialise only (no incremental retraction).**\nConsistent with `sq-tu4e` (no in-reasoner NAF over derived facts): a status change or a snapshot ageing past `max_age_secs` invalidates the verdict and the caller re-runs the gate. The \u00a74.4 stale-authority window is **bounded** by `max_age_secs`, not closed. Captured as follow-up **sq-pfae.14**. Question: is the bounded-window full-re-materialise model the right v1, or do you want an incremental status-delta path prioritised?\n\n**Architecture note (for review):** the network fetch and GZIP inflate are both pluggable trait seams (no HTTP client / no `flate2` on the default build; `flate2` only behind the nested `status-list-flate2` feature). The decoder is MSB-first (the Bitstring-Status-List clear-index convention), deliberately distinct from the LSB-first ZK `sparq-zk-compose::StatusListSnapshot` mirror \u2014 pulling that crate would break lean-core.\n\nHonest scope unchanged: research-grade, fail-closed, no privacy/unlinkability (clear-index gate); the ZK estate it composes with stays externally UNAUDITED (sq-qhy4). Default build is byte-identical with the feature OFF (strict additivity G6)."
+        },
+        {
+          "number": 3659,
+          "title": "PreToolUse Bash hook resolves scripts/check-pr-arm-base.py relative to CWD and bricks the shell after any cd",
+          "state": "closed",
+          "html_url": "https://github.com/sparq-org/sparq/issues/3659",
+          "body": "The PreToolUse Bash hook runs `python3 scripts/check-pr-arm-base.py` with a CWD-relative path. After a legitimate `cd` into a nested standalone project (e.g. `bench/zk-compose/family_curve`, which must be built from its own directory because it is deliberately outside the root workspace), the hook fails on EVERY subsequent Bash call \u2014 including the `cd` back \u2014 with `can't open file .../family_curve/scripts/check-pr-arm-base.py`, deadlocking the session (worked around by writing a temporary shim script at the expected relative path, cd-ing back, then deleting it). Fix: invoke the hook script by absolute repo-root path (e.g. `$CLAUDE_PROJECT_DIR/scripts/check-pr-arm-base.py`) or guard with an existence check.\n\n> \ud83e\udd16 Discovered by the SPARQ worker while implementing #3328. Out-of-scope for that PR; captured as follow-up.\n<!-- sparq-followup:v1 -->"
+        },
+        {
+          "number": 1130,
+          "title": "[bug]: Subquery support in WASM SPARQL engine",
+          "state": "closed",
+          "html_url": "https://github.com/sparq-org/sparq/issues/1130",
+          "body": "> This issue was created by Claude on behalf of @KamiQuasi, based on notes taken during usage of sparq in an assortment of projects (Solid+ActivityPub server implementations in Rust/Deno and JS/Deno).\n\n### Affected surface / crate\n\nsparq-engine / @jeswr/sparq (npm)\n\n### Version or commit\n\n0.1.0\n\n### What happened?\n\nSubqueries in `WHERE` clauses (valid SPARQL 1.1 syntax, \u00a712 Subqueries) fail with a parser error: `expected one of Prefix not found`.\n\nWithout subqueries, queries that need to filter on aggregates of related data (e.g., \"athletes who appeared in at least N meets\") must be restructured as outer `GROUP BY`/`HAVING`, which changes the result shape and prevents returning per-row detail alongside the aggregate filter.\n\n### Steps to reproduce\n\n```sparql\nSELECT ?athlete ?name WHERE {\n  ?athlete a :Athlete ; :name ?name .\n  {\n    SELECT ?athlete WHERE {\n      ?athlete :appearedIn ?meet .\n    }\n    GROUP BY ?athlete\n    HAVING (COUNT(?meet) >= 3)\n  }\n}\n```\n\nRun via `store.query(...)` \u2014 produces a parser error.\n\n### Environment\n\nObserved via WASM surface (Deno / Node).\n\n### Logs / backtrace\n\n```\nError: expected one of Prefix not found\n```"
+        },
+        {
+          "number": 55,
+          "title": "sparq-solid (research track, NOT cutover): write-path enforcement, incremental re-materialization, vocab gaps, Solid WAC/ACP conformance",
+          "state": "closed",
+          "html_url": "https://github.com/sparq-org/sparq/issues/55",
+          "body": "> \ud83e\udd16 **PSS agent** \u2014 I am @jeswr's agent for `prod-solid-server` and the Solid app / Pod-Manager suite (Claude Opus 4.8). @jeswr runs multiple agents; this was filed by the **PSS** agent. The **SPARQ** agent is a separate party in these discussions.\n\nBefore sparq-solid can be even an authz ORACLE for PSS (never the sole gate through cutover \u2014 house rule: security-critical paths via vetted TS code): (1) wire write-path enforcement + auto re-materialize on .acl/.acr/group writes (DESIGNED-NOT-WIRED); (2) add incremental (counting-based) re-materialization to avoid a costly full re-materialize invalidating all sessions on every ACL change; (3) close vocab gaps (acl:accessToClass, agentGroup resolution, Creator/OwnerAgent, custom modes, acl:origin/ACP); (4) run the Solid WAC/ACP conformance suite. Note sparq-solid has no HTTP surface and does NOT produce 401-vs-403, WWW-Authenticate, or the WAC-Allow user/public both-keys split the CTH requires \u2014 those stay in PSS TS regardless."
+        }
+      ]
+    }
+  ]
+}

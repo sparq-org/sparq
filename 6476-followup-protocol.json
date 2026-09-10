@@ -1,0 +1,27 @@
+{
+  "started_epoch": 1789021104.653674,
+  "max_seconds": 900,
+  "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+  "prior_evidence": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation",
+  "original_target_initial_allocated_bytes": 394117120,
+  "current_target_allocated_bytes": 431710208,
+  "prior_evidence_allocated_bytes": 112373760,
+  "initial_new_evidence_allocated_bytes": 1073152,
+  "minimum_free_bytes": 2147483648,
+  "aggregate_growth_limit_bytes": 536870912,
+  "free_initial_bytes": 5164310528,
+  "jobs": 1,
+  "profile_overrides": {
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind"
+  },
+  "estimate": "Warm O3/unwind/noLTO/codegen16 production deps, but engine dev-deps (including mmap/dict-spill core, proptest, introspect) need fresh artifacts. Expected scoped deps + one engine unit executable may fit remaining aggregate allowance; monitor includes old frozen evidence and all target growth from original baseline. Not a guarantee.",
+  "planned": [
+    "cargo test --release --locked --offline -p sparq-engine --lib exec::budget::nested_budget_tests",
+    "same with --no-default-features only if first completes within budget"
+  ],
+  "halt": "No dependency downloads, lockfile edits, retries or alternate harness. Stop on resource/resolution failure; preserve exact partial evidence."
+}

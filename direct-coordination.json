@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T05:59:43.376269+00:00",
+  "updated_at": "2026-09-10T06:30:58.157921+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,7 +67,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Final implemented-source Opus review running",
+    "phase": "Actual Opus supplement review running; draft6478 awaits reviewed follow-up push",
     "state": "Clean bcba candidate and 205-file validation bundle root-verified. Final public witness4/4, exact copied module15/15, three mutants killed, internal seal calibrated, one actual production snapshot path observed on two workers. No merge or full-CI approval claimed.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
@@ -85,9 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect actual Opus final review32484 once; verify output/model/precise reviewed head.",
-      "Collect same-agent publication-readiness packet; no duplicate work.",
-      "If findings clear, fresh main/issue/branch/PR dedupe and budget checks, then normal PR publication/full CI; no invented review:pass."
+      "Collect actual Opus supplement54920 once; if clear, fresh draft PR/main/head/remote checks and fast-forward d07, update PR body then ready and Copilot.",
+      "Collect bounded operator-coverage clarification; resolve actual template/gate coverage before merge without inventing full local gate.",
+      "Verify normal full current-head CI and review threads, then protected queue/main checks.",
+      "Next source-only issue6479 requires runtime witness; do not mix into6478 or claim broader TLS audit."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -295,7 +296,7 @@
       }
     },
     "final_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 32484,
       "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
@@ -306,9 +307,14 @@
       "input_bytes": 141446,
       "output": "direct-6476/admission/opus-final-review.json",
       "started_at": "2026-09-10T05:50:56.532057+00:00",
-      "collect_policy": "Collect session32484 once before reading output; verify outer result success and actual modelUsage. Do not relaunch or retry exhausted budget. No source mutation during review."
+      "collect_policy": "32484 completed and collected; do not poll or relaunch. Only concise supplement for actual follow-up delta/declaration later.",
+      "completed": true,
+      "actual_model": "claude-opus-5",
+      "verdict": "approve_for_ci",
+      "result": "direct-6476/admission/opus-final-result.json",
+      "receipt": "direct-6476/admission/opus-final-completion.json"
     },
-    "agent_state": "Astra idle; final source/publication packets frozen",
+    "agent_state": "Same Astra doing bounded read-only operator-coverage route clarification; no source edits/build/dispatch/model",
     "publication_readiness": {
       "state": "completed_root_hash_verified",
       "directory": "direct-6476/publication-readiness",
@@ -323,6 +329,54 @@
       "hosted_runner_reserve": "Not established by repository runners endpoint; no release authorization",
       "registry_actions_enabled": false,
       "evidence": "direct-6476/admission/pre-publication-capacity.json"
+    },
+    "publication": {
+      "pr": 6478,
+      "url": "https://github.com/sparq-org/sparq/pull/6478",
+      "state": "OPEN",
+      "draft": true,
+      "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "branch": "codex/nested-query-budget",
+      "verified": "direct-6476/admission/pr-created.json",
+      "receipt": "direct-6476/admission/draft-publication-receipt.json"
+    },
+    "followup": {
+      "state": "completed_frozen_root_verified",
+      "required_delta": [
+        "NB5 precise ACTIVE/cancel writer lifetime comments",
+        "NB6 touched-region format cleanup only",
+        "NB7 idle after savepoint test and pin serial callback witness explanation",
+        "bench/feature-off-declarations/6478.json"
+      ],
+      "validation": "Attempt actual engine cfg(test) default/no-default subset only after resource estimate; offline jobs1 O3/unwind/no-LTO/codegen16 and original aggregate512MiB/2GiB floor. No heavy fullworkspace/Miri/toolchain install.",
+      "review": "One concise actual Opus supplement for exact delta + declaration and review dispositions; no 141KB resend.",
+      "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "parent": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "directory": "direct-6476/followup",
+      "manifest_sha256": "3437c8dd2b4c4ddc1189a807ac6bb1b684536d29d57f43b9dbc26a0c32735eaa",
+      "manifest_files": 29,
+      "root_verification": "direct-6476/admission/followup-root-verification.json",
+      "report": "direct-6476/followup/report.json",
+      "in_tree_results": "default6/6, engine no-default6/6, service-local7/7; dev core remains parallel/mmap/dict-spill",
+      "resource": {
+        "free_bytes": 5226663936,
+        "aggregate_growth_bytes": 263958528
+      }
+    },
+    "supplement_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 54920,
+      "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "parent": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6476/admission/opus-followup-input.md",
+      "input_bytes": 39774,
+      "input_sha256": "959e6f7105f832da23a91bd76189d752ff2b79067e6065e268b8874500adef14",
+      "output": "direct-6476/admission/opus-followup-review.json",
+      "started_at": "2026-09-10T06:28:49.369702+00:00",
+      "collect_policy": "Collect54920 once before reading output; verify outer result/modelUsage/head and declaration assessment. No duplicate/retry after exhaustion. Parent full review32484 done and collected."
     }
   },
   "prs": {
@@ -2786,5 +2840,15 @@
     "bd_ready": "Readonly/no-daemon/no-auto-import/no-auto-flush invocation failed: malformedcommentIDs and existingDoltmissingrepo_state/bootstrapdatabaseexists. Startup logged staleLOCKremoval despite readonly. No furtherbd/DBrepair/cleanup attempted.",
     "evidence": "direct-3105/admission/ready-frontier-0359.json",
     "selection": "GitHub-native issue6476 with freshsource/PRdedupe and oneengine-lane constraint; no claim that bdfrontier was empty."
+  },
+  "followup_issues": {
+    "6479": {
+      "url": "https://github.com/sparq-org/sparq/issues/6479",
+      "state": "OPEN",
+      "scope": "Outer BASE IRI overwritten by nested public query; source-confirmed at d41, runtime witness pending",
+      "evidence": "direct-6476/admission/query-base-issue-created.json",
+      "dedupe": "direct-6476/admission/query-base-followup-dedupe.json",
+      "constraint": "Separate from6478, view_scope already restores state; no broad TLS redesign claim"
+    }
   }
 }

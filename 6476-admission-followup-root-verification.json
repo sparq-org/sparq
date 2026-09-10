@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-10T06:27:23.230479+00:00",
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "parent": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "clean": true,
+  "manifest_sha256": "3437c8dd2b4c4ddc1189a807ac6bb1b684536d29d57f43b9dbc26a0c32735eaa",
+  "files": 29,
+  "bytes": 24219492,
+  "packet_bytes": 33419,
+  "packet_sha256": "fd38d0eb3d9531d22be9486f1d3ce1a2f6f478c0474ae1a9e09d2552b2b28ed7",
+  "source_files_byte_verified": [],
+  "privacy_pattern_hits": [],
+  "delta_byte_verified": true,
+  "source_files_sha256_verified": {
+    "bench/feature-off-declarations/6478.json": "4be2e936e09324d635c511072075e49d4c03c56fc9b56be67bddcdbe7acef06c",
+    "crates/sparq-engine/src/cache.rs": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "crates/sparq-engine/src/construct.rs": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5",
+    "crates/sparq-engine/src/exec.rs": "2cb27fc03db5e23b4fe373740b35fe2cf1cf1dd472fdc9eb5d873aa52beb9a09",
+    "crates/sparq-engine/src/explain.rs": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+    "crates/sparq-engine/src/explain_json.rs": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+    "crates/sparq-engine/src/lib.rs": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "crates/sparq-engine/src/update.rs": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe"
+  },
+  "exec_before_after_byte_verified": true,
+  "in_tree_exit_and_summaries_verified": true
+}

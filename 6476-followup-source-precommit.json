@@ -1,0 +1,8 @@
+{
+  "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "files": {
+    "bench/feature-off-declarations/6478.json": "4be2e936e09324d635c511072075e49d4c03c56fc9b56be67bddcdbe7acef06c",
+    "crates/sparq-engine/src/exec.rs": "2cb27fc03db5e23b4fe373740b35fe2cf1cf1dd472fdc9eb5d873aa52beb9a09"
+  },
+  "diff_sha256": "7763aa74112ee572f7b6df249c04fba3b67f95ea633d5c6128068ac7750f8452"
+}

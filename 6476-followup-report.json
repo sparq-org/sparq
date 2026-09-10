@@ -1,0 +1,134 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "parent": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "pr": 6478,
+  "clean": true,
+  "changed_files": [
+    "crates/sparq-engine/src/exec.rs",
+    "bench/feature-off-declarations/6478.json"
+  ],
+  "diff_stat": "bench/feature-off-declarations/6478.json |  5 +++\n crates/sparq-engine/src/exec.rs          | 57 ++++++++++++++++++++------------\n 2 files changed, 40 insertions(+), 22 deletions(-)",
+  "delta_sha256": "7763aa74112ee572f7b6df249c04fba3b67f95ea633d5c6128068ac7750f8452",
+  "all_source_sha256": {
+    "bench/feature-off-declarations/6478.json": "4be2e936e09324d635c511072075e49d4c03c56fc9b56be67bddcdbe7acef06c",
+    "crates/sparq-engine/src/cache.rs": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "crates/sparq-engine/src/construct.rs": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5",
+    "crates/sparq-engine/src/exec.rs": "2cb27fc03db5e23b4fe373740b35fe2cf1cf1dd472fdc9eb5d873aa52beb9a09",
+    "crates/sparq-engine/src/explain.rs": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+    "crates/sparq-engine/src/explain_json.rs": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+    "crates/sparq-engine/src/lib.rs": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "crates/sparq-engine/src/update.rs": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe"
+  },
+  "runtime_delta": "Only comments and whitespace in production. Single test executable addition: assert_state(OFF,None) after SERVICE savepoint outer frame; all existing thread-identity assertions retained.",
+  "in_tree_results": [
+    {
+      "label": "in-tree-default",
+      "passed": 6,
+      "failed": 0,
+      "filtered": 328,
+      "engine_cfg": [
+        "feature=\"default\"",
+        "feature=\"digest\"",
+        "feature=\"parallel\"",
+        "feature=\"regex\""
+      ],
+      "binary_sha256": "725905f8ca7f2935465c6528c8085cd4dbd65906b7ae45c617c1a64a8ef66d71",
+      "test_results": [
+        "test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok",
+        "test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok",
+        "test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... ok",
+        "test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok",
+        "test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok",
+        "test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok"
+      ],
+      "summary": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 328 filtered out; finished in 0.01s"
+      ]
+    },
+    {
+      "label": "in-tree-no-default",
+      "passed": 6,
+      "failed": 0,
+      "filtered": 314,
+      "engine_cfg": [],
+      "binary_sha256": "e55ed8a980d8bcc7dd6e7804532fd97c3d5468f3058b90305319ddd28dea4898",
+      "test_results": [
+        "test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok",
+        "test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok",
+        "test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... ok",
+        "test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok",
+        "test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok",
+        "test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok"
+      ],
+      "summary": [
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 314 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "label": "in-tree-service-local",
+      "passed": 7,
+      "failed": 0,
+      "filtered": 332,
+      "engine_cfg": [
+        "feature=\"default\"",
+        "feature=\"digest\"",
+        "feature=\"parallel\"",
+        "feature=\"regex\"",
+        "feature=\"service-local\""
+      ],
+      "binary_sha256": "8b9d7b3f2839c14ce60b3afa5730034a1345467dc10ba8338662f3b9cd123f05",
+      "test_results": [
+        "test exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget ... ok",
+        "test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok",
+        "test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok",
+        "test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... ok",
+        "test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok",
+        "test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok",
+        "test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok"
+      ],
+      "summary": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 332 filtered out; finished in 0.00s"
+      ]
+    }
+  ],
+  "profile": "Local correctness only: pinned1.97.1 O3/unwind/noLTO/codegen16; jobs1,incrementalOFF,locked/offline. Actual rustc has --test, opt-level3, codegen16, no abort/LTO flag. Full argv captured separately.",
+  "resource": {
+    "free_bytes": 5226663936,
+    "aggregate_growth_bytes": 263958528
+  },
+  "dispositions": {
+    "NB1": "Source check only: QUERY_BASE setter and resolver are unscoped, byte-identical to d41. exec::view::Guard already saves/restores State. Root reports source-only issue6479 created; no duplicate or runtime BASE claim. No broader TLS audit in this patch.",
+    "NB2": "Defer lifetime-typed snapshot redesign; previous four-consumer synchronous scope audit remains unchanged. Future unsafe misuse risk acknowledged.",
+    "NB3": "No frame-counter addition. All three actual SERVICE owners preserve frame ordering; a fully returned nested scope restores parent before savepoint restoration. Guard hardening is separate future work.",
+    "NB4": "Shadow-not-inherit behavior remains documented. No bound on callback/nested-unlimited duration or combined child+parent memory claimed.",
+    "NB5": "Clarified only install/Drop change cancel pointer; other writers affect current frame width/bytes. Safety comments explicitly rely on private construction and four audited scoped-join consumers.",
+    "NB6": "Pinned rustfmt applied only to new module and two migrated tests; removed blank closure line/corrected indentation. Four incidental production reflows restored to base. Whole-tree formatting remains informational and was not applied.",
+    "NB7": "Added final idle assertion and comment pinning serial one-row callback. Discriminating thread assertion retained; actual service-local in-tree7/7 executes new assertion.",
+    "NB8": "Dynamic production observer still proves one of four snapshot paths; other three remain source-audited, no new claim."
+  },
+  "declaration": {
+    "path": "bench/feature-off-declarations/6478.json",
+    "sha256": "4be2e936e09324d635c511072075e49d4c03c56fc9b56be67bddcdbe7acef06c",
+    "fields": {
+      "pr": 6478,
+      "date": "2026-09-10",
+      "reason": "[GPT-6 Astra] Intentional always-compiled engine change: nested evaluations restore outer query limits and sticky errors through a private scoped budget boundary. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged."
+    },
+    "actual_checker": "scripts/check-vectorized-feature-off.py _new_declaration_files admits new digit-named filename set difference; no general JSON schema in this checker. Manually verified pr integer6478,date,reason only; actual helper returns exactly6478.json against base-name fixture.",
+    "selftest": "All repository feature-off selftest tripwires passed. No wasm build or dynamic equality/size result claimed."
+  },
+  "remaining": [
+    "Full workspace/all-target Cargo clippy and test gates pending normal CI; these were targeted --lib tests only.",
+    "No-default-feature run has no engine feature cfgs but engine dev sparq-core explicitly enables parallel,mmap,dict-spill; not a fully serial dependency graph.",
+    "No all-features/remote HTTP SERVICE test run, wasm, Miri, full conformance/coverage/perf ratchet in this followup.",
+    "Preflight exits1 solely known Bash3 privacy-claims mapfile absence; rest of invoked mechanical checks pass.",
+    "No performance or new wasm byte-size claim. No remote changes in this lane."
+  ],
+  "frozen_prior_reference": {
+    "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+    "manifest_sha256": "36eea69fbae564fd6fcf362889e47cdc99a7d7efea74e6946197417b87155dcf",
+    "packet_sha256": "35d79d3037e767a6bf8df9a43f6c8eb531020423a15a38efba61d4b5e88de200"
+  },
+  "all_commands_complete": true
+}

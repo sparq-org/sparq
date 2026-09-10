@@ -1,0 +1,139 @@
+{
+  "at": "2026-09-10T06:15:01.804930+00:00",
+  "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "calls": [
+    {
+      "args": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0,
+      "stdout": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "branch",
+        "--show-current"
+      ],
+      "exit": 0,
+      "stdout": "codex/nested-query-budget\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "rate_limit"
+      ],
+      "exit": 0,
+      "stdout": "{\"resources\":{\"core\":{\"limit\":5000,\"used\":27,\"remaining\":4973,\"reset\":1789022021},\"search\":{\"limit\":30,\"used\":0,\"remaining\":30,\"reset\":1789020962},\"graphql\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789024502},\"integration_manifest\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789024502},\"source_import\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789020962},\"code_scanning_autofix\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789020962},\"actions_runner_registration\":{\"limit\":10000,\"used\":0,\"remaining\":10000,\"reset\":1789024502},\"scim\":{\"limit\":15000,\"used\":0,\"remaining\":15000,\"reset\":1789024502},\"dependency_snapshots\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789020962},\"dependency_sbom\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789020962},\"audit_log\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789024502},\"audit_log_streaming\":{\"limit\":15,\"used\":0,\"remaining\":15,\"reset\":1789024502},\"code_search\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789020962},\"copilot_usage_records\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789024502},\"enterprise_token_inventory\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789024502}},\"rate\":{\"limit\":5000,\"used\":27,\"remaining\":4973,\"reset\":1789022021}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=query {\n  rateLimit { remaining resetAt }\n  repository(owner:\"sparq-org\",name:\"sparq\") {\n    isPrivate\n    defaultBranchRef { target { oid } }\n    issue(number:6476) {\n      state\n      labels(first:40) { nodes { name } }\n      timelineItems(last:30,itemTypes:[CROSS_REFERENCED_EVENT]) {\n        nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number state url headRefName } } } }\n      }\n    }\n    pullRequests(first:10,headRefName:\"codex/nested-query-budget\",states:[OPEN]) {\n      nodes { number headRefOid url }\n    }\n  }\n}"
+      ],
+      "exit": 0,
+      "stdout": "{\"data\":{\"rateLimit\":{\"remaining\":4987,\"resetAt\":\"2026-09-10T06:29:45Z\"},\"repository\":{\"isPrivate\":false,\"defaultBranchRef\":{\"target\":{\"oid\":\"d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5\"}},\"issue\":{\"state\":\"OPEN\",\"labels\":{\"nodes\":[{\"name\":\"priority:P3\"},{\"name\":\"role:impl\"},{\"name\":\"status:ready\"},{\"name\":\"self-improvement\"},{\"name\":\"area:sparq-engine\"}]},\"timelineItems\":{\"nodes\":[]}},\"pullRequests\":{\"nodes\":[]}}}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "ls-remote",
+        "--exit-code",
+        "origin",
+        "refs/heads/codex/nested-query-budget"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "push",
+        "origin",
+        "bcba08207b03714a25ad7a2a4774370c7f6f6bfa:refs/heads/codex/nested-query-budget"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "remote: \nremote: Create a pull request for 'codex/nested-query-budget' on GitHub by visiting:        \nremote:      https://github.com/sparq-org/sparq/pull/new/codex/nested-query-budget        \nremote: \nremote: GitHub found 63 vulnerabilities on sparq-org/sparq's default branch (2 critical, 41 high, 20 moderate). To find out more, visit:        \nremote:      https://github.com/sparq-org/sparq/security/dependabot        \nremote: \nTo https://github.com/sparq-org/sparq.git\n * [new branch]          bcba08207b03714a25ad7a2a4774370c7f6f6bfa -> codex/nested-query-budget\n"
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=query {\n  rateLimit { remaining resetAt }\n  repository(owner:\"sparq-org\",name:\"sparq\") {\n    isPrivate\n    defaultBranchRef { target { oid } }\n    issue(number:6476) {\n      state\n      labels(first:40) { nodes { name } }\n      timelineItems(last:30,itemTypes:[CROSS_REFERENCED_EVENT]) {\n        nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number state url headRefName } } } }\n      }\n    }\n    pullRequests(first:10,headRefName:\"codex/nested-query-budget\",states:[OPEN]) {\n      nodes { number headRefOid url }\n    }\n  }\n}"
+      ],
+      "exit": 0,
+      "stdout": "{\"data\":{\"rateLimit\":{\"remaining\":4986,\"resetAt\":\"2026-09-10T06:29:45Z\"},\"repository\":{\"isPrivate\":false,\"defaultBranchRef\":{\"target\":{\"oid\":\"d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5\"}},\"issue\":{\"state\":\"OPEN\",\"labels\":{\"nodes\":[{\"name\":\"priority:P3\"},{\"name\":\"role:impl\"},{\"name\":\"status:ready\"},{\"name\":\"self-improvement\"},{\"name\":\"area:sparq-engine\"}]},\"timelineItems\":{\"nodes\":[]}},\"pullRequests\":{\"nodes\":[]}}}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "pr",
+        "create",
+        "--repo",
+        "sparq-org/sparq",
+        "--base",
+        "main",
+        "--head",
+        "codex/nested-query-budget",
+        "--draft",
+        "--title",
+        "fix(engine): restore outer budgets after nested queries",
+        "--body-file",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/admission/pr-draft-body.md"
+      ],
+      "exit": 0,
+      "stdout": "https://github.com/sparq-org/sparq/pull/6478\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "pr",
+        "view",
+        "6478",
+        "--repo",
+        "sparq-org/sparq",
+        "--json",
+        "number,url,state,isDraft,headRefOid,headRefName,baseRefName,body,labels,statusCheckRollup"
+      ],
+      "exit": 0,
+      "stdout": "{\"baseRefName\":\"main\",\"body\":\"> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\\n\\n## Summary\\n\\nA public query called inside an extension callback could clear its caller\u2019s active QueryBudget on return, allowing the outer query to miss a later cancellation check. Nested evaluation now uses its own budget and restores the exact outer limits and sticky error for subsequent outer polling, including error and unwind paths.\\n\\nSeal the installer behind a private scoped restorer, migrate all 14 production call sites without changing their guard order, and narrow raw snapshot access to the synchronous executor consumers. Clarify nested-budget and SERVICE savepoint behavior. No public API, dependency, or global budget policy change.\\n\\nRefs #6476.\\n\\n## Validation\\n\\nImplementation: GPT-6 Astra with extra-high reasoning. Independent source review: actual Claude Opus 5 with extra-high reasoning approved `bcba08207b03714a25ad7a2a4774370c7f6f6bfa` for CI with no blocking findings. Small comment/test cleanup, in-tree validation and the per-PR declaration are being completed while this PR is draft.\\n\\n- Fresh-engine public callback regression passes all four cases; 15 focused actual-budget-module tests pass.\\n- Executed Limits/sticky-error/byte-restoration mutants fail; internal sibling visibility negative and positive compile controls calibrate the sealed boundary.\\n- An instrumented production snapshot path executed on two workers with a 60,000-row oracle. This is a local path witness, not a performance measurement.\\n- Local production feature builds and direct clippy-driver checks passed. Full Cargo/workspace feature unification, conformance, coverage, wasm and deterministic perf gates remain pending normal CI. The local Bash 3 preflight cannot execute its privacy mapfile step.\\n\\n## Required CI and intent declaration\\n\\n- [ ] Workspace build/test shards and full workspace clippy; existing engine optional-feature tests, especially result-cache, params, explain-json and SERVICE variants.\\n- [ ] Conformance, coverage/test-presence, MSRV, wasm and normal required aggregate gate.\\n- [ ] Reviewed per-PR V2 feature-off intent declaration with the assigned PR number; separate wasm size ratchet unchanged. No byte-neutrality or size-pass claim.\\n- [ ] Verify operator-coverage obligations separately: ordinary PR benchmarks use the deterministic-only route.\\n\\nNo conformance, performance, coverage or wasm floor is lowered. Existing holds and registry pause remain unchanged.\\n\",\"headRefName\":\"codex/nested-query-budget\",\"headRefOid\":\"bcba08207b03714a25ad7a2a4774370c7f6f6bfa\",\"isDraft\":true,\"labels\":[],\"number\":6478,\"state\":\"OPEN\",\"statusCheckRollup\":[],\"url\":\"https://github.com/sparq-org/sparq/pull/6478\"}\n",
+      "stderr": ""
+    }
+  ]
+}

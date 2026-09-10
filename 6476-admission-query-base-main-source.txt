@@ -1,0 +1,30 @@
+14712: thread_local! {
+14713:     /// The query's BASE IRI (when declared), used by IRI()/URI() to resolve relative
+14714:     /// references. Set by the `lib.rs` query entry points after parsing.
+14715:     static QUERY_BASE: std::cell::RefCell<Option<oxiri::Iri<String>>> = const { std::cell::RefCell::new(None) };
+14716: }
+14717: 
+14718: /// Installs the active query's base IRI for expression evaluation (IRI()/URI()
+14719: /// relative-reference resolution). Called by the query entry points; `None` clears it.
+14720: pub(crate) fn set_query_base(base: Option<&str>) {
+14721:     QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+14722: }
+14723: 
+14724: /// `IRI(str)`: absolute IRIs pass through; relative references resolve against the
+14725: /// query's BASE (a relative reference without a base is a type error).
+14726: fn resolve_iri(s: &str) -> Option<oxrdf::NamedNode> {
+14727:     if let Ok(abs) = oxiri::Iri::parse(s.to_string()) {
+14728:         return Some(oxrdf::NamedNode::new_unchecked(abs.into_inner()));
+14729:     }
+14730:     QUERY_BASE.with(|b| {
+14731:         b.borrow()
+14732:             .as_ref()
+14733:             .and_then(|base| base.resolve(s).ok())
+14734:             .map(|iri| oxrdf::NamedNode::new_unchecked(iri.into_inner()))
+14735:     })
+14736: }
+14737: 
+14738: thread_local! {
+14739:     /// The identity of the solution row an expression is being evaluated for:
+14740:     /// (bindings identity — the rows buffer address —, row index). Set by the per-row
+14741:     /// evaluation loops (BIND / FILTER); BNODE(str) derives its label from it, so equal

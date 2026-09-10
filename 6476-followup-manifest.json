@@ -1,0 +1,150 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "files": [
+    {
+      "path": "NB1-source.txt",
+      "bytes": 3637,
+      "sha256": "75944df49f7c8a4afbc5eca967261b37c46edaf1e7a81fc2a93b383c9afda6a9"
+    },
+    {
+      "path": "binary/in-tree-default",
+      "bytes": 8012944,
+      "sha256": "725905f8ca7f2935465c6528c8085cd4dbd65906b7ae45c617c1a64a8ef66d71"
+    },
+    {
+      "path": "binary/in-tree-no-default",
+      "bytes": 5746432,
+      "sha256": "e55ed8a980d8bcc7dd6e7804532fd97c3d5468f3058b90305319ddd28dea4898"
+    },
+    {
+      "path": "binary/in-tree-service-local",
+      "bytes": 8038128,
+      "sha256": "8b9d7b3f2839c14ce60b3afa5730034a1345467dc10ba8338662f3b9cd123f05"
+    },
+    {
+      "path": "commit-message.txt",
+      "bytes": 404,
+      "sha256": "8d8207c2d5c857ec5ae9ce2105886cc7aafade5a0c849460e5dff553a5d52edf"
+    },
+    {
+      "path": "delta.diff",
+      "bytes": 7324,
+      "sha256": "7763aa74112ee572f7b6df249c04fba3b67f95ea633d5c6128068ac7750f8452"
+    },
+    {
+      "path": "exec-after.rs",
+      "bytes": 1066315,
+      "sha256": "2cb27fc03db5e23b4fe373740b35fe2cf1cf1dd472fdc9eb5d873aa52beb9a09"
+    },
+    {
+      "path": "exec-before.rs",
+      "bytes": 1065593,
+      "sha256": "58cd125b945a3b2f08e99f8edc1a31164e9569422daa9b8d1a72bca66d703407"
+    },
+    {
+      "path": "feature-off-selftest.json",
+      "bytes": 121,
+      "sha256": "1716826944e78a1cd5bcb5a789360d07f68fa4d99fdad690e68562dcfa26796c"
+    },
+    {
+      "path": "feature-off-selftest.log",
+      "bytes": 3987,
+      "sha256": "5a116b0ffbc50c3b6b3aa196112c0c8b39b346e6dd82b793b6d4c9999d51c03b"
+    },
+    {
+      "path": "in-tree-default.json",
+      "bytes": 1130,
+      "sha256": "61ec5a195081b5063da536347c9da510fa52668108d50f8390d1f03dbbd0324d"
+    },
+    {
+      "path": "in-tree-default.log",
+      "bytes": 136739,
+      "sha256": "f4400bc72f835d3c216c5c9caf31f93bd0037dd20eb51d21215cdde7b7895150"
+    },
+    {
+      "path": "in-tree-no-default.json",
+      "bytes": 1162,
+      "sha256": "1bf97493ad08a00b4c471c5ba912e2dfab4db69646c53681b72365f59431269a"
+    },
+    {
+      "path": "in-tree-no-default.log",
+      "bytes": 31745,
+      "sha256": "a3336a748716d2ebeeb385e1993fb14d6de1a3445d87e14e72c7650029681246"
+    },
+    {
+      "path": "in-tree-provenance.json",
+      "bytes": 18100,
+      "sha256": "a5e626c9ca6ff1c6211e8c220173ea71a8e0954cb32f42e0acdcd5858199b501"
+    },
+    {
+      "path": "in-tree-service-local.json",
+      "bytes": 1174,
+      "sha256": "f9492fb633f98eeb649e6e9ab238b72a2d057365fc00591b21b024c96c676787"
+    },
+    {
+      "path": "in-tree-service-local.log",
+      "bytes": 32928,
+      "sha256": "5a9d385c8e86d86de07f6af0f48b8c487ba6f83a733682cc7f649e891ab90620"
+    },
+    {
+      "path": "mechanical-checks.json",
+      "bytes": 1373,
+      "sha256": "e8a5ee8789edcfa0e04e240adb7605de4beea8b4907afe816d3e03be3983a435"
+    },
+    {
+      "path": "policy-source-hashes.json",
+      "bytes": 513,
+      "sha256": "bb7ea04dc45fb5fb6f94f3ddc34999bf40930b4d9fab770bfb1a0b87d757a989"
+    },
+    {
+      "path": "preflight.json",
+      "bytes": 142,
+      "sha256": "9aedc456813ab7973977002aba71ae6866845dc9219265cbb8504b1e942808e0"
+    },
+    {
+      "path": "preflight.log",
+      "bytes": 1834,
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 1538,
+      "sha256": "34372c471c8228a282eb026b4b3d14c0c68cc0ddb967be761605d189265b4093"
+    },
+    {
+      "path": "public-review-supplement.md",
+      "bytes": 33419,
+      "sha256": "fd38d0eb3d9531d22be9486f1d3ce1a2f6f478c0474ae1a9e09d2552b2b28ed7"
+    },
+    {
+      "path": "report.json",
+      "bytes": 9162,
+      "sha256": "e1228996ab8b0499658a17a365cc7bdba2f99e94bd68e668267077a61267d14c"
+    },
+    {
+      "path": "run.py",
+      "bytes": 2256,
+      "sha256": "6a2909bbbef8d4319153f29d029d3188324e604464fa69cca75c72182f5dc0e4"
+    },
+    {
+      "path": "rustfmt-stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "service-local-amendment.json",
+      "bytes": 406,
+      "sha256": "a380a822da8147d521340cae20c3d34f793704f0313291bdf60ec9e2808ee705"
+    },
+    {
+      "path": "source-edit-plan.json",
+      "bytes": 604,
+      "sha256": "da650f6f6ea2155f1eb88ae3e4e285d5122c9cc9580b8a29758fd0c600d60ecc"
+    },
+    {
+      "path": "source-precommit.json",
+      "bytes": 382,
+      "sha256": "46b43408cae26c7d6709b018140d9db04f0cb001265c3731aa005b9f0a83904b"
+    }
+  ]
+}

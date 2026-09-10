@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T06:28:49.369702+00:00",
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "parent": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "input_bytes": 39774,
+  "input_sha256": "959e6f7105f832da23a91bd76189d752ff2b79067e6065e268b8874500adef14",
+  "requested_model": "claude-opus-5",
+  "effort": "xhigh",
+  "scope": "Exact two-file delta, V2 declaration and in-tree evidence; unchanged parent has prior actual independent approval",
+  "privacy": "Repository-relative source/structured evidence only; host paths/raw logs/personal metadata excluded"
+}

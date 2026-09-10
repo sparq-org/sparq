@@ -1,0 +1,22 @@
+{
+  "production_noncomment_nonwhitespace_unchanged": true,
+  "test_only_executable_delta": "service savepoint test adds assert_state(OFF,None) after outer scope",
+  "callback_thread_assertion_retained": true,
+  "selected_tests_match_pinned_rustfmt": [
+    "mod nested_budget_tests {",
+    "fn cancel_flag_zero_vs_one_trips_both_poll_paths() {",
+    "fn budget_remaining_timeout_reflects_deadline() {"
+  ],
+  "four_existing_production_reflows_removed": "Preserved base formatting, whole-tree formatter remains informational",
+  "git_diff_check_exit": 0,
+  "declaration_fields": {
+    "pr": 6478,
+    "date": "2026-09-10",
+    "reason": "[GPT-6 Astra] Intentional always-compiled engine change: nested evaluations restore outer query limits and sticky errors through a private scoped budget boundary. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged."
+  },
+  "repository_filename_set_difference": [
+    "6478.json"
+  ],
+  "declaration_content_check": "Manual structural check above; repository V2 admission is filename set-difference, not JSON-schema validation. No wasm bytes or gate outcome inferred.",
+  "NB1": "QUERY_BASE setter/read and view Guard/suspend_all source byte-identical to main d41. Base setter has no restorer; view scope already saves/restores State. No runtime BASE reproduction or broader TLS audit performed."
+}

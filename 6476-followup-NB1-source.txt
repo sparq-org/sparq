@@ -1,0 +1,92 @@
+crates/sparq-engine/src/exec.rs :: query_base
+thread_local! {
+    /// The query's BASE IRI (when declared), used by IRI()/URI() to resolve relative
+    /// references. Set by the `lib.rs` query entry points after parsing.
+    static QUERY_BASE: std::cell::RefCell<Option<oxiri::Iri<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs the active query's base IRI for expression evaluation (IRI()/URI()
+/// relative-reference resolution). Called by the query entry points; `None` clears it.
+pub(crate) fn set_query_base(base: Option<&str>) {
+    QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+}
+
+/// `IRI(str)`: absolute IRIs pass through; relative references resolve against the
+/// query's BASE (a relative reference without a base is a type error).
+fn resolve_iri(s: &str) -> Option<oxrdf::NamedNode> {
+    if let Ok(abs) = oxiri::Iri::parse(s.to_string()) {
+        return Some(oxrdf::NamedNode::new_unchecked(abs.into_inner()));
+    }
+    QUERY_BASE.with(|b| {
+        b.borrow()
+            .as_ref()
+            .and_then(|base| base.resolve(s).ok())
+            .map(|iri| oxrdf::NamedNode::new_unchecked(iri.into_inner()))
+    })
+}
+
+
+
+crates/sparq-engine/src/exec.rs :: view
+pub(crate) mod view {
+    use crate::{DatasetView, DefaultGraphMode};
+    use oxrdf::Term;
+    use rustc_hash::FxHashSet;
+    use std::cell::RefCell;
+    use std::sync::Arc;
+
+    /// The installed view, plus the "inside GRAPH" suspend flag:
+    /// `eval_graph_named` swaps evaluation to the named sub-`Graph`, whose inner
+    /// patterns must NOT be empty-defaulted (only the TOP-LEVEL graph scope is).
+    #[derive(Clone, Default)]
+    pub(crate) struct State {
+        named: Option<Arc<FxHashSet<Term>>>,
+        default_empty: bool,
+        suspended: bool,
+    }
+
+    thread_local! {
+        static ACTIVE: RefCell<State> = RefCell::new(State::default());
+    }
+
+    /// Restores the pre-install state when the installing entry point returns
+    /// (also on error/unwind, so a poisoned thread never leaks a stale view).
+    pub(crate) struct Guard(State);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            ACTIVE.with(|a| *a.borrow_mut() = std::mem::take(&mut self.0));
+        }
+    }
+
+    pub(crate) fn install(v: &DatasetView) -> Guard {
+        let new = State {
+            named: Some(Arc::clone(&v.named)),
+            default_empty: matches!(v.default, DefaultGraphMode::Empty),
+            suspended: false,
+        };
+        Guard(ACTIVE.with(|a| std::mem::replace(&mut *a.borrow_mut(), new)))
+    }
+
+    /// Fully suspends the view (named filter AND empty default) for a scope —
+    /// used by the entry points once `dataset::build_active` has folded the view
+    /// into a dataset-clause ACTIVE graph: the restriction is already applied,
+    /// and re-filtering would make a non-visible FROM NAMED graph behave
+    /// differently from an absent one (both must be the EMPTY active graph).
+    pub(crate) fn suspend_all() -> Guard {
+        Guard(ACTIVE.with(|a| std::mem::take(&mut *a.borrow_mut())))
+    }
+
+    /// RAII suspension of the empty-default short-circuit only, for GRAPH scope
+    /// (the named-graph visibility filter stays active). Restores the previous
+    /// flag on drop, so nested scopes compose.
+    pub(crate) struct GraphScope(bool);
+    impl Drop for GraphScope {
+        fn drop(&mut self) {
+            ACTIVE.with(|a| a.borrow_mut().suspended = self.0);
+        }
+    }
+
+    pub(crate) fn enter_graph() -> GraphScope {
+        GraphScope(ACTIVE.with(|a| std::mem::replace(&mut a.borrow_mut().suspended, true)))
+    }
+

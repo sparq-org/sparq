@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "python3",
+    "scripts/preflight.py",
+    "--base",
+    "bcba08207b03714a25ad7a2a4774370c7f6f6bfa"
+  ],
+  "exit_code": 1
+}

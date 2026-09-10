@@ -1,0 +1,19 @@
+{
+  "base": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "changes": [
+    "NB5 comment precision",
+    "NB6 only new test module and two migrated tests use pinned rustfmt; four incidental production reflows reverted",
+    "NB7 idle assertion and serial-callback comment; identity assertion retained",
+    "V2 reviewed intent declaration PR6478"
+  ],
+  "formatter_argv": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+    "--config-path",
+    "rustfmt.toml",
+    "--config",
+    "skip_children=true",
+    "--emit",
+    "stdout"
+  ],
+  "no_runtime_token_change": true
+}

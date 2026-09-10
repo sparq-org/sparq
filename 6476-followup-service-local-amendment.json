@@ -1,0 +1,9 @@
+{
+  "time_epoch": 1789021374.0572019,
+  "reason": "The only new executable assertion is SERVICE-gated and was excluded from successful default/no-default suites. One same-filter service-local leg is the narrow test needed to execute that assertion; no new production change or broad feature sweep.",
+  "command_suffix": [
+    "--features",
+    "service-local"
+  ],
+  "same_profile_resource_limits": true
+}

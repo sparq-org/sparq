@@ -1,0 +1,26 @@
+[leg1] VIOLATION: sparq-engine node 'sparq-engine 0.1.0 (path+file:///repo/crates/sparq-engine)' has 'vectorized' in resolved features: ['vectorized']
+
+[leg1] FAIL — 1 violation(s) found. The `vectorized` feature must NOT be in any resolved default feature set.
+TRIPWIRE 1 (leg1): PASS — guard correctly detected 'vectorized' in synthetic fixture
+[leg2] feature-OFF wasm DIFFERS from the base tree: base=10 head=11 bytes, size delta=+1 (+10.000%). Comparison is byte-for-byte, so same-length content changes are also detected.
+[leg2] VIOLATION: the feature-OFF wasm bundle changed vs the base tree (size delta +1 bytes, +10.000%) but the change is NOT declared (no new bench/feature-off-declarations/<PR>.json file added, and the legacy scalar change_token is unchanged at 0).
+  - If this is ACCIDENTAL vectorized / default-path code leaking into the feature-OFF build, REMOVE it or gate it behind #[cfg(feature = "vectorized")].
+  - If this is an INTENTIONAL change to always-compiled engine/core code, DECLARE it (mechanism V2): add bench/feature-off-declarations/<PR-number>.json with {pr, date, reason}. If the SIZE moves > +/-2%, ALSO raise metrics.wasm_bundle_bytes.floor in bench/perf-baseline.json (the bench.yml ratchet).
+
+[leg2] FAIL — undeclared feature-OFF bundle change. Declare it or remove it.
+TRIPWIRE 2 (leg2): PASS — dynamic check correctly rejected an UNDECLARED feature-OFF byte change (bytes differ, change_token un-bumped)
+[leg2] feature-OFF wasm DIFFERS from the base tree: base=10 head=11 bytes, size delta=+1 (+10.000%). Comparison is byte-for-byte, so same-length content changes are also detected.
+[leg2] OK — change DECLARED (legacy scalar, transition window): bench/feature-off-declaration.json change_token 0 -> 1. The feature-OFF byte change is intentional. Its SIZE is governed by the wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate. NOTE: the scalar mechanism is retired — new PRs should add a per-PR declaration file under bench/feature-off-declarations/ (mechanism V2) instead.
+TRIPWIRE 3 (leg2): PASS — dynamic check accepted a DECLARED change (bytes differ, change_token 0 -> 1)
+[leg2] feature-OFF wasm DIFFERS from the base tree: base=10 head=11 bytes, size delta=+1 (+10.000%). Comparison is byte-for-byte, so same-length content changes are also detected.
+[leg2] OK — change DECLARED (mechanism V2): the head tree added bench/feature-off-declarations/['1720.json'] not present in the base tree. The feature-OFF byte change is intentional. Its SIZE is governed by the wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate.
+TRIPWIRE 4 (leg2 V2): PASS — dynamic check accepted a DECLARED change via a new per-PR file (bench/feature-off-declarations/1720.json added by head)
+[leg2] feature-OFF wasm DIFFERS from the base tree: base=10 head=11 bytes, size delta=+1 (+10.000%). Comparison is byte-for-byte, so same-length content changes are also detected.
+[leg2] VIOLATION: the feature-OFF wasm bundle changed vs the base tree (size delta +1 bytes, +10.000%) but the change is NOT declared (no new bench/feature-off-declarations/<PR>.json file added, and the legacy scalar change_token is unchanged at 0).
+  - If this is ACCIDENTAL vectorized / default-path code leaking into the feature-OFF build, REMOVE it or gate it behind #[cfg(feature = "vectorized")].
+  - If this is an INTENTIONAL change to always-compiled engine/core code, DECLARE it (mechanism V2): add bench/feature-off-declarations/<PR-number>.json with {pr, date, reason}. If the SIZE moves > +/-2%, ALSO raise metrics.wasm_bundle_bytes.floor in bench/perf-baseline.json (the bench.yml ratchet).
+
+[leg2] FAIL — undeclared feature-OFF bundle change. Declare it or remove it.
+TRIPWIRE 5 (leg2 V2): PASS — no new per-PR file (only README on both sides) correctly rejected as UNDECLARED
+
+[self-test] OK — all tripwires fired correctly. The guards can fail (and the dynamic leg2 accepts a declared change).
