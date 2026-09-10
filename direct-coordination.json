@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T16:28:12.114658+00:00",
+  "updated_at": "2026-09-10T16:49:05.444524+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -92,7 +92,7 @@
       "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
     "next_scope": "Merged6482at15:45:55 mainf50b5049; all8MGworkflows success, exactgate15368 verified, reviewedtreeidentical. Watch relevantnewmainCI/matrix/gate/fuzz beforeclosing5183; no current6482queueentry or mutationrequired.",
-    "agent_current_task": "ExistingAstra boundedGitHubfallback frontierselection (~5min,8readsmax), no builds/mutations/models. Preferhigher-impactSPARQLperformance; hashreuseF5-F7held aftersmallbaselineworkwitness.",
+    "agent_current_task": "ExistingAstra one bounded3113 numericmemo baseline; no productionedits. Warmcoreprofile prerequisite;480s256MiB/jobs1/offline/continuous2GiB; no retry. Allformerworkcomplete.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -926,8 +926,8 @@
     }
   },
   "next_actions": [
-    "Watchmainf50 CI/matrix/gateandactualUPDATEunitproof; healthauditconfirmsprogress, no retry/canceljustified. Preserveorg403no-retry/scopeslimit.",
-    "CollectexistingAstra boundedfrontierselection direct-frontier-20260910-1625; verifydedupe/source/value beforeimplementation. Hashreusebaseline63filesverified, nofeatureadmission; avoidmorecycleswithoutcredibleF5-F7policy/valuecase.",
+    "Watchcurrentmainf50CI34497774423/matrix34497774420/gate34497774057;fuzz34497774415completedSUCCESS. CollectactualUPDATEunitproofbeforeclosing5183, no blindreruns.",
+    "CollectexistingAstra direct-3113/delete-memo-baseline. Verifyprovenance/cold/warm/deletecounts+safetycontrols. No productionchangeuntilrevalidatedownership andactualOpusreview. Original3113firstcoldscan remainsoutofscope; considerlinkedconcreteissueafterconfirmedruntime/dedupe. Hashreuse3105held/preserved.",
     "Afterrelevantpostmergeproof, link6482andclose5183 withqualified8caseclassification; separate6483runtimecoveragegap remainsopen.",
     "RegistryActionsOFF/heartbeatACTIVE/releasesheld. Preserve6049/6055/registry2305/canon/EC2holds,ALLGREENandratefailclosed."
   ],
@@ -3695,7 +3695,7 @@
   "postmerge_watch": {
     "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
     "pr": 6482,
-    "state": "ordinary_completion_pending",
+    "state": "CIinprogress/matrixqueued/gateinprogress;fuzzworkflowpassed16:30:32;UPDATEunitproofstillpending",
     "runs": {
       "CI": 34497774423,
       "feature_matrix": 34497774420,
@@ -3704,7 +3704,7 @@
     },
     "first_snapshot": "direct-5183/admission/mg6482-runs1547.json",
     "known_advisory_observation": "Freshlogconfirmed batchmissingREGISTRY_RING_TOKEN guard; releasecargo-package unpublishedengine matches6474. No newfailurerecoveryauthorized.",
-    "latest_snapshot": "direct-5183/admission/mainf50-runs1615.json",
+    "latest_snapshot": "direct-5183/admission/mainf50-runs1643.json",
     "health_audit": {
       "directory": "direct-5183/mainf50-health",
       "manifest_sha256": "ed7750335cdf3abb3ef806a0629c6519df1d3c037bcb221da2eee1a1b58664cd",
@@ -4061,7 +4061,7 @@
   },
   "performance_readiness": {
     "issue": 3105,
-    "state": "baseline_confirmed_cache_implementation_held_frontier_reassessment",
+    "state": "hash_reuse_held_selected3113_baseline",
     "source_plan": "direct-3105/hash-reuse-source-plan",
     "manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
     "root_verification": "direct-3105/hash-reuse-source-plan-root-verification.json",
@@ -4083,7 +4083,7 @@
     },
     "decision": "No implementation/build admission. Fixed2048seed/64RHS/limit65query path+memoryaccountingstatic only. Actualqueryandcountsnotrun.",
     "agent": "/root/postmerge_ci",
-    "agent_task": "ExistingAstra boundedGitHubfallback frontierselection (~5min,8readsmax), no builds/mutations/models. Preferhigher-impactSPARQLperformance; hashreuseF5-F7held aftersmallbaselineworkwitness.",
+    "agent_task": "ExistingAstra one bounded3113 numericmemo baseline; no productionedits. Warmcoreprofile prerequisite;480s256MiB/jobs1/offline/continuous2GiB; no retry. Allformerworkcomplete.",
     "prior_scan_and_hash_readiness": {
       "issue": 3105,
       "at": "2026-09-10T00:28:18.762567+00:00",
@@ -4147,7 +4147,17 @@
       "root_verification": "direct-3105/admission/hash-reuse-fixed-witness-root-verification.json",
       "result": "2actual64rowRHStablebuilds,1scan,64rowexactbag; no performancebenefitclaim."
     },
-    "priority_decision": "Smallverified64rowrebuildsaving doesnotjustifyforcingunresolvedF6/F7retentionpolicy; boundedfrontierselectionbeforefurtherhashcachemodel/buildcycles. Investigationpreserved, no performanceclaim orfeatureadmission."
+    "priority_decision": "Smallverified64rowrebuildsaving doesnotjustifyforcingunresolvedF6/F7retentionpolicy; boundedfrontierselectionbeforefurtherhashcachemodel/buildcycles. Investigationpreserved, no performanceclaim orfeatureadmission.",
+    "next_issue": {
+      "issue": 3113,
+      "frontier": "direct-frontier-20260910-1625",
+      "manifest_sha256": "269e66d801b5e7c2c13521620d412bea6440d9a1dead7e021cb93cc4614f449e",
+      "admission": "direct-3113/admission/frontier-and-baseline-admission.json",
+      "state": "bounded_baseline_authorized_running",
+      "directory": "direct-3113/delete-memo-baseline",
+      "implementation_admitted": false,
+      "scope": "Repeatednumericmemo invalidation afterdelete-only updates; originalfirstcoldscan remainsoutofscope. No benefit/runtimeclaimuntilbaseline."
+    }
   },
   "monitoring_followups": {
     "generator_labels": {

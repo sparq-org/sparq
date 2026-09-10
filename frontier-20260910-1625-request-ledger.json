@@ -1,0 +1,45 @@
+{
+  "all_get": true,
+  "requests": [
+    {
+      "output": "01-budget.json",
+      "decoded_endpoint": "rate_limit",
+      "exit": 0
+    },
+    {
+      "output": "02-issue3113.json",
+      "decoded_endpoint": "repos/sparq-org/sparq/issues/3113",
+      "exit": 0
+    },
+    {
+      "output": "03-performance-issues.json",
+      "decoded_endpoint": "search/issues?q=repo:sparq-org/sparq is:issue is:open label:area:sparq-engine perf&per_page=30&sort=updated",
+      "exit": 0
+    },
+    {
+      "output": "04-open-lftj-prs.json",
+      "decoded_endpoint": "search/issues?q=repo:sparq-org/sparq is:pr is:open LFTJ&per_page=30",
+      "exit": 0
+    },
+    {
+      "output": "05-open-decimal-prs.json",
+      "decoded_endpoint": "search/issues?q=repo:sparq-org/sparq is:pr is:open \"high-precision\"&per_page=30",
+      "exit": 0
+    },
+    {
+      "output": "06-open-3113-prs.json",
+      "decoded_endpoint": "search/issues?q=repo:sparq-org/sparq is:pr is:open 3113&per_page=30",
+      "exit": 0
+    },
+    {
+      "output": "07-issue3113-timeline.json",
+      "decoded_endpoint": "repos/sparq-org/sparq/issues/3113/timeline?per_page=100",
+      "exit": 0
+    },
+    {
+      "output": "08-open-sargable-prs.json",
+      "decoded_endpoint": "search/issues?q=repo:sparq-org/sparq is:pr is:open sargable&per_page=30",
+      "exit": 0
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "local_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "clean": true,
+  "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "qualification": "Root whole-tree proof establishes f50==fe328. No local fetch or branch change.",
+  "sources": [
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+      "ranges": [
+        [
+          78,
+          86
+        ],
+        [
+          791,
+          800
+        ],
+        [
+          2726,
+          2755
+        ],
+        [
+          2885,
+          2895
+        ],
+        [
+          2947,
+          2957
+        ],
+        [
+          2983,
+          2998
+        ],
+        [
+          3371,
+          3397
+        ],
+        [
+          9594,
+          9635
+        ]
+      ],
+      "excerpt": "crates_sparq-core_src_lib.rs.txt"
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+      "ranges": [
+        [
+          6544,
+          6578
+        ]
+      ],
+      "excerpt": "crates_sparq-engine_src_exec.rs.txt"
+    }
+  ]
+}

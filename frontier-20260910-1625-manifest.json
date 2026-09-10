@@ -1,0 +1,69 @@
+{
+  "files": [
+    {
+      "path": "01-budget.json",
+      "bytes": 1234,
+      "sha256": "657eed549e7d470374e395d4429d8fac87dac827ec278340f161ee07d1a61bd3"
+    },
+    {
+      "path": "02-issue3113.json",
+      "bytes": 3544,
+      "sha256": "014285605f6e335f4ee81e7b60be1174adbdcef3d2d652d954dc10b1f49edc36"
+    },
+    {
+      "path": "03-performance-issues.json",
+      "bytes": 103379,
+      "sha256": "3b260c76ff47a781385b8dbf1d4dc03ddd54196141d97b4e24f6547c6aa1dc49"
+    },
+    {
+      "path": "04-open-lftj-prs.json",
+      "bytes": 69901,
+      "sha256": "078bce8b046bbe2d72904cd8d255eb9af56155b442a45ed91e8f50c4702ef351"
+    },
+    {
+      "path": "05-open-decimal-prs.json",
+      "bytes": 79,
+      "sha256": "c9938edecb99d754b2d039ac9eec320a94c769b6a6417921e2dcbef9e2fe01a0"
+    },
+    {
+      "path": "06-open-3113-prs.json",
+      "bytes": 11382,
+      "sha256": "aa5462ebe14405514b77ee85e983d4409721512d14bee5e90155cdb7a82e1180"
+    },
+    {
+      "path": "07-issue3113-timeline.json",
+      "bytes": 9090,
+      "sha256": "e747d7254baca4f86d260ec103ecd32c66f6f6ede6363dcace17691e0d8c7aba"
+    },
+    {
+      "path": "08-open-sargable-prs.json",
+      "bytes": 4374,
+      "sha256": "01d53d1325cf140aed3b1aa928f0852ab47a41304053c99eef60c94026bdd76d"
+    },
+    {
+      "path": "crates_sparq-core_src_lib.rs.txt",
+      "bytes": 10656,
+      "sha256": "f6fa23c9e3f5b53378a5c0c2db239f1fbb1026dd7d2c9c67869fa072ccac9d58"
+    },
+    {
+      "path": "crates_sparq-engine_src_exec.rs.txt",
+      "bytes": 1871,
+      "sha256": "9a494cc16c62b87c0c213fcddd9ea988491ff36ac0fbfa1dd56893aba382b48f"
+    },
+    {
+      "path": "report.json",
+      "bytes": 7653,
+      "sha256": "615984d75fdf4c87d7aee09ae8dcc46f747adf1858d965ccd0fba597cf82d333"
+    },
+    {
+      "path": "request-ledger.json",
+      "bytes": 1339,
+      "sha256": "0d99ba60d9a78a001a786c92a2f2ae881fdee0c0797b17c5f291b8de4d21ac8e"
+    },
+    {
+      "path": "source-provenance.json",
+      "bytes": 1164,
+      "sha256": "892fabdbf478de7b308018ad3d671ad08989ac4cd54e6543ca934c96ccbcc2fe"
+    }
+  ]
+}

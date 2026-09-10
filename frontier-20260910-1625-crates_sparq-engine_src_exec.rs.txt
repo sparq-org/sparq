@@ -1,0 +1,36 @@
+crates/sparq-engine/src/exec.rs
+6544:     // (left, right, op-if-var-on-left, op-if-var-on-right)
+6545:     let (l, r, on_left, on_right): (&Expression, &Expression, CmpOp, CmpOp) = match e {
+6546:         Expression::Greater(l, r) => (l, r, CmpOp::Gt, CmpOp::Lt),
+6547:         Expression::GreaterOrEqual(l, r) => (l, r, CmpOp::Ge, CmpOp::Le),
+6548:         Expression::Less(l, r) => (l, r, CmpOp::Lt, CmpOp::Gt),
+6549:         Expression::LessOrEqual(l, r) => (l, r, CmpOp::Le, CmpOp::Ge),
+6550:         Expression::Equal(l, r) => (l, r, CmpOp::Eq, CmpOp::Eq),
+6551:         _ => return None,
+6552:     };
+6553:     let num_cmp = |op: CmpOp, t: f64| -> ScanCmp {
+6554:         ScanCmp::Num(match op {
+6555:             CmpOp::Gt => NumCmp::Gt(t),
+6556:             CmpOp::Ge => NumCmp::Ge(t),
+6557:             CmpOp::Lt => NumCmp::Lt(t),
+6558:             CmpOp::Le => NumCmp::Le(t),
+6559:             CmpOp::Eq => NumCmp::Eq(t),
+6560:         })
+6561:     };
+6562:     for (var, konst, op) in [(l, r, on_left), (r, l, on_right)] {
+6563:         let Some(v) = var_of(var) else { continue };
+6564:         if let Some(c) = lit_num(konst) {
+6565:             // sq-lr2ii: decline the f64 numeric fast path when the graph holds an f64-inexact
+6566:             // decimal — the scan's per-row f64 compare could be wrong for it. A numeric
+6567:             // constant is never also a temporal one, so declining here yields `None` for this
+6568:             // orientation; the exact general evaluator handles the residual FILTER correctly.
+6569:             if !graph.has_high_precision_decimal() {
+6570:                 return Some((v, num_cmp(op, c)));
+6571:             }
+6572:             continue;
+6573:         }
+6574:         if let Some(t) = lit_temp(konst) {
+6575:             return Some((v, ScanCmp::Temp(op, t)));
+6576:         }
+6577:     }
+6578:     None

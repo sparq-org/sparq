@@ -1,0 +1,134 @@
+{
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T16:31:41.904815+00:00",
+  "choice": {
+    "issue": 3113,
+    "url": "https://github.com/sparq-org/sparq/issues/3113",
+    "title": "sq-aghft: perf(engine): avoid one-time O(numeric) scan on first numeric FILTER for graphs with a high-precision decimal (sq-lr2ii follow-up)",
+    "state": "open",
+    "labels": [
+      "priority:P3",
+      "role:impl",
+      "status:ready",
+      "area:sparq-engine",
+      "bd-migration"
+    ],
+    "assignees": [],
+    "comments": 0,
+    "cross_referenced_items": 0
+  },
+  "decision": "GO_FOR_ONE_BOUNDED_WORK_COUNT_WITNESS; no implementation or measured benefit claim",
+  "why_this_frontier": "Unlike one avoidable64row hash build, the current numeric safety memo can redo a dictionary-wide scan after every nonempty delete-only delta, although dictionary contents have not changed. Work scales with dictionary cardinality and mutation/query cycles. This is a concrete default-path source opportunity with no extra retained data structure. Relative latency or end-to-end importance remains unmeasured.",
+  "source_facts": [
+    {
+      "file": "crates/sparq-core/src/lib.rs",
+      "lines": [
+        2743,
+        2749,
+        2751
+      ],
+      "fact": "Cold high_precision_decimal state0 visits dictionary IDs1..=len and probes numeric cache, stopping only on an offending decimal. State1 returns false by atomic load."
+    },
+    {
+      "file": "crates/sparq-core/src/lib.rs",
+      "lines": [
+        2947,
+        2955,
+        2997
+      ],
+      "fact": "Nonempty public delete request reaches apply_delta_mem; only both-empty public batches early-return. remove_triple delegates a nonempty delete slice."
+    },
+    {
+      "file": "crates/sparq-core/src/lib.rs",
+      "lines": [
+        3375,
+        3379,
+        3382,
+        3390
+      ],
+      "fact": "Deletion resolves IDs without interning. Despite unchanged dict length for delete-only updates, memo1 is unconditionally reset to0. Next check scans again. This remains safe but needlessly discards evidence."
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "lines": [
+        6564,
+        6569
+      ],
+      "fact": "Numeric FILTER sargability consults Graph::has_high_precision_decimal before selecting fast numeric comparison; this is a real public-query planning seam."
+    }
+  ],
+  "narrow_scope": "First establish repeated invalidation on a warmed numeric-safe Graph under delete-only nonempty deltas. If confirmed, consider preserving memo when dictionary length is unchanged; do not redesign initial cold scan, numeric semantics, ingest caches, fork/clone storage, or planner in this slice. The initial first-query scan remains outside that smallest fix.",
+  "safety_invariants": [
+    "Never skip invalidation when new dictionary terms may introduce a high-precision decimal.",
+    "Keep state2 sticky; deleted triples do not remove terms from dictionary.",
+    "Preserve all current numeric literal classifications and exact FILTER fallback.",
+    "Do not infer empty apply_delta([],[]) invalidates: public method early-returns. Use a real nonempty deletion/control."
+  ],
+  "witness_plan": {
+    "fixture": "Finite generated integer-safe graph with a small queried predicate and many unrelated distinct terms. Record exact dictionary size. Warm safety memo; query/control; remove one unrelated existing triple; query/control again. Include a known-terms absent-triple deletion separately.",
+    "deterministic_assertions": "Count cold-branch dictionary ID visits in actual Graph source via cfg(test) observer. Baseline cold call visits D IDs; immediate second call zero; nonempty delete-only causes another D despite identical dict length. Query result bag on untouched predicate unchanged. Observe actual engine sargability call if a bounded linked-engine harness is available; otherwise core seam proof and static caller evidence are explicitly separate.",
+    "positive_safety_controls": "Fresh insertion of a new inexact decimal must change false\u2192true; exact decimal, integer, known-term reinsertion, empty delta, and state2 cases preserve existing classification. Existing has_high_precision_decimal_memo_survives_delta_insert remains mandatory.",
+    "candidate_stage_control": "Only after a fix exists: restore unconditional1\u21920 reset and require actual visit-count assertion to fail; bypass new-term invalidation must fail decimal safety test. No wall-clock unit assertion.",
+    "measurement_needed": "Later fixed cold/warm/delete-query versus exact main whole-query latency/allocation comparison; preserve ingestion/update costs and no universal speedup claim."
+  },
+  "ownership": {
+    "searches": {
+      "04-open-lftj-prs.json": {
+        "total_count": 1,
+        "returned": 1,
+        "items": [
+          {
+            "number": 6064,
+            "title": "chore: release v0.1.0",
+            "url": "https://github.com/sparq-org/sparq/pull/6064"
+          }
+        ]
+      },
+      "05-open-decimal-prs.json": {
+        "total_count": 0,
+        "returned": 0,
+        "items": []
+      },
+      "06-open-3113-prs.json": {
+        "total_count": 2,
+        "returned": 2,
+        "items": [
+          {
+            "number": 1487,
+            "title": "feat(solid): Kani proof harnesses for WAC/ACP decision core \u2014 BLOCKED on harness re-scoping (sq-sqtk2.1) [FABLE-5]",
+            "url": "https://github.com/sparq-org/sparq/pull/1487"
+          },
+          {
+            "number": 1509,
+            "title": "docs(specs): zkSPARQL Unofficial Proposal Draft \u2014 restart from codebase (sq-vvu9d) [OPUS-4.8]",
+            "url": "https://github.com/sparq-org/sparq/pull/1509"
+          }
+        ]
+      },
+      "08-open-sargable-prs.json": {
+        "total_count": 1,
+        "returned": 1,
+        "items": [
+          {
+            "number": 4097,
+            "title": "feat(sparq-substrate): numeric: xsd:float promotion double-rounds via f64 \u2014 SUM/AVG can return the w",
+            "url": "https://github.com/sparq-org/sparq/pull/4097"
+          }
+        ]
+      }
+    },
+    "finding": "No matching open PR implementing3113 or high-precision memo invalidation found. Issue has no assignee/comment/cross-reference or hold label. Searches return unrelated1487/1509 and numeric-promotion4097; their visible title/body scopes differ.",
+    "limit": "Bounded title/body search and issue timeline are not a complete all-open-PR changed-hunk audit.4097 source paths were not fetched. Root should verify exact corelib invalidation hunk ownership before authorizing production edits; this does not block a read-only baseline witness."
+  },
+  "resource_plan": "One separately authorized diagnostic-only actual-core work-count test using known warm profile, jobs1/offline/incremental0, no dependency installs. First assess exact core cfg(test) closure; propose480s/256MiB/maxonebuild+onefilteredrun with fresh>=2GiB+64MiB and continuous>=2GiB. If public engine linkage requires incompatible cold dependencies, stop at core seam proof and report gap. No build authorized/performed here.",
+  "other_frontiers": "Hash reuse remains held for F5\u2013F7. No excluded owner-held/AWS/NO_GO/canon/release issue adopted. No need to fall back to6479 because3113 has a credible source-grounded performance opportunity.",
+  "request_budget": {
+    "logical_reads": 8,
+    "retries": 0,
+    "initial_core_remaining": 4962,
+    "errors": [],
+    "search_scope": "23engine perf issues returned in one30limit search; narrow open-PR searches and one issue/timeline."
+  },
+  "commands_pending": false,
+  "mutations": []
+}

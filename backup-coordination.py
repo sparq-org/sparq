@@ -723,6 +723,14 @@ FILES["3105-admission-hash-reuse-fixed-witness-root-verification.json"] = ROOT /
 for evidence_name in ['mainf50-runs1615.json', 'mainf50-runs1615.stderr', 'registry-settings1615.json', 'registry-settings1615.stderr', 'main-ref1615.json', 'main-ref1615.stderr', 'mainf50-health-root-verification.json']:
     FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
 
+# Frozen strategic frontier and numeric-memo baseline admission/ownership checks.
+for evidence_name in ['01-budget.json', '02-issue3113.json', '03-performance-issues.json', '04-open-lftj-prs.json', '05-open-decimal-prs.json', '06-open-3113-prs.json', '07-issue3113-timeline.json', '08-open-sargable-prs.json', 'crates_sparq-core_src_lib.rs.txt', 'crates_sparq-engine_src_exec.rs.txt', 'report.json', 'request-ledger.json', 'source-provenance.json', 'manifest.json']:
+    FILES["frontier-20260910-1625-" + evidence_name.replace("/", "--")] = ROOT / "direct-frontier-20260910-1625" / evidence_name
+for evidence_name in ['frontier-and-baseline-admission.json', 'pr4097-current.json', 'pr4097-current.stderr', 'pr4097-files.json', 'pr4097-files.stderr', 'open-memo-prs.json', 'open-memo-prs.stderr', 'open-core-prs.json', 'open-core-prs.stderr', 'pr4354-current.json', 'pr4354-current.stderr', 'pr4354-files.json', 'pr4354-files.stderr', 'pr4247-current.json', 'pr4247-current.stderr', 'pr4247-files.json', 'pr4247-files.stderr']:
+    FILES["3113-admission-" + evidence_name] = ROOT / "direct-3113/admission" / evidence_name
+for evidence_name in ['mainf50-runs1643.json', 'mainf50-runs1643.stderr', 'main-ref1643.json', 'main-ref1643.stderr']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

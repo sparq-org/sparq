@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-10T16:49:05.444524+00:00",
+  "frontier_manifest_sha256": "269e66d801b5e7c2c13521620d412bea6440d9a1dead7e021cb93cc4614f449e",
+  "frontier_files_verified": 13,
+  "selected_issue": 3113,
+  "scope": "Repeatednumericmemo invalidation afterdelete-only updates; originalfirstcoldscan remainsoutofscope. No benefit/runtimeclaimuntilbaseline.",
+  "known_pr_hunk_review": {
+    "4097": "Draft3844f80b;3files substrate/numeric+README+featuredecl; no corelib change.",
+    "4354": "Draftneeds:user/review:pass01dde678; optinsparsenumerics builder+standalonetests, no memo/apply_delta_mem hunk. Preservehold/evidence andflag cacheinteraction foractualreview.",
+    "4247": "Draftreview:needs8733324c; Cargo/compress/docs/declaration only; preservecanonhold.",
+    "searches": "NoopenPRexacthas_high_precision_decimal match; corelabelreturns4354and4247. Priorbounded3113/decimal searches recorded.",
+    "limit": "Not an exhaustive all-unlabelled-PR diff census; exacthead/main/issue/ownership mustberevalidated beforeproductionmutation."
+  },
+  "baseline_authorized": {
+    "agent": "/root/postmerge_ci",
+    "directory": "direct-3113/delete-memo-baseline",
+    "builds": 1,
+    "filtered_tests": 1,
+    "seconds": 480,
+    "new_allocated_bytes": 268435456,
+    "start_free_bytes": 2214592512,
+    "continuous_free_bytes": 2147483648,
+    "offline": true,
+    "jobs": 1,
+    "profile": "Compatibleactualcorecfgtest warmRust1.97.1edition2021only; exactcompiler/artifact/source closure prerequisite. Stopifmissingprofile/colddependencies.",
+    "scope": "Diagnosticcopyonly. Actualcoreseam valid; enginequerybag/latency unclaimedwithoutreal linkage. Existinginserttestaccountedfor, no expandedfullsuite. No retry/tuning/newmodels/productionmutation."
+  },
+  "implementation_admitted": false
+}
