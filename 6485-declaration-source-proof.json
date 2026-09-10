@@ -1,0 +1,8 @@
+{
+  "parent": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "core_path": "crates/sparq-core/src/lib.rs",
+  "core_parent_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "core_candidate_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "identical": true,
+  "schema_check": "integer PR, matching filename, date, exact three keys, one-line honest intent reason; no derived fields"
+}

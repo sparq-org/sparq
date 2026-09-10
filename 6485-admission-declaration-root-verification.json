@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T17:50:03.581095+00:00",
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "parent": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "verified_files": 14,
+  "manifest_sha256": "e903a527cbd5c39fa7276bffe7db25365d54fe629f82ef9f02669a50c2dd764f",
+  "core_source_identical": true,
+  "only_change": "bench/feature-off-declarations/6486.json",
+  "input_bytes": 38081,
+  "input_sha256": "41d60515dac7b38af29a43875dd6f44aede5697a0f106314d07b710902ce391f"
+}

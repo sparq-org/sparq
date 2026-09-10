@@ -1,0 +1,11 @@
+diff --git a/bench/feature-off-declarations/6486.json b/bench/feature-off-declarations/6486.json
+new file mode 100644
+index 000000000..34b9bbfe3
+--- /dev/null
++++ b/bench/feature-off-declarations/6486.json
+@@ -0,0 +1,5 @@
++{
++  "pr": 6486,
++  "date": "2026-09-10",
++  "reason": "[GPT-6 Astra] Intentional always-compiled core change: preserve the numeric precision memo when an update adds no stored dictionary terms. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged."
++}

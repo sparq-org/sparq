@@ -1,0 +1,33 @@
+[
+  {
+    "argv": [
+      "python3",
+      "-m",
+      "json.tool",
+      "bench/feature-off-declarations/6486.json"
+    ],
+    "exit": 0,
+    "seconds": 0.24588900000000002,
+    "log": "json-validation.log"
+  },
+  {
+    "argv": [
+      "python3",
+      "scripts/check-vectorized-feature-off.py",
+      "--self-test"
+    ],
+    "exit": 0,
+    "seconds": 0.48563662499999993,
+    "log": "self-test.log"
+  },
+  {
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "seconds": 0.08985975000000002,
+    "log": "diff-check.log"
+  }
+]

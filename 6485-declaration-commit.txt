@@ -1,0 +1,11 @@
+commit 9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 18:47:08 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 18:47:08 2026 +0100
+
+    chore(core): declare numeric memo optimization for PR 6486
+    
+    Record intentional always-compiled code for the existing feature-off V2 process; retain the independent size ratchet.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

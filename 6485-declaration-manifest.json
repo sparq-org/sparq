@@ -1,0 +1,75 @@
+{
+  "files": [
+    {
+      "path": "6486.json",
+      "bytes": 286,
+      "sha256": "19d06f90b054d4a69d839754d7754d3f0aabcfee4da668164a812197f73f1205"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 560,
+      "sha256": "9c9c24e177cbaa667442e36a38b051484bd5312c52598abe43c643537c1af89c"
+    },
+    {
+      "path": "commit.txt",
+      "bytes": 517,
+      "sha256": "eec17a3713e2fef08a9338408df74a6069484ebd49223ce872f4825d6dfddc9e"
+    },
+    {
+      "path": "complete-caller.rs.txt",
+      "bytes": 2091,
+      "sha256": "022b82e7aabc059fb8f6e63dd9ad27d381f9ecd4060531e659956e2b758f2bce"
+    },
+    {
+      "path": "declaration-docs.md",
+      "bytes": 9460,
+      "sha256": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e"
+    },
+    {
+      "path": "delta.diff",
+      "bytes": 513,
+      "sha256": "397c82404863f6024346b9ee83221d5031b281e6f5c74d1c731bb3a16879bd8b"
+    },
+    {
+      "path": "diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "final-status.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "json-validation.log",
+      "bytes": 292,
+      "sha256": "3e7418f41a963b9b7cfbd1b710338762667dbec500397f9cf1ad6e83609a995e"
+    },
+    {
+      "path": "report.json",
+      "bytes": 2136,
+      "sha256": "650d87b05a89545fcdef3535eb84bf05ca8600d24dbc3f97f86e677616650c6e"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 27113,
+      "sha256": "b7d7f929addfec2650361cae13dfe65f8951eaed9e6d61b3e13b4a662cec854a"
+    },
+    {
+      "path": "self-test.log",
+      "bytes": 3987,
+      "sha256": "5a116b0ffbc50c3b6b3aa196112c0c8b39b346e6dd82b793b6d4c9999d51c03b"
+    },
+    {
+      "path": "source-proof.json",
+      "bytes": 439,
+      "sha256": "254b3a4819ec7a5f59b3f028192d61520c2511891a9d5e53106813af08290c95"
+    },
+    {
+      "path": "v2-helper.py.txt",
+      "bytes": 8143,
+      "sha256": "63bf40d0d87ed837c18402c97f98cb853061750c6f8814c2eeb297b90717d5c5"
+    }
+  ],
+  "file_count": 14
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T17:47:37.188586+00:00",
+  "updated_at": "2026-09-10T17:51:55.525934+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Source approved by actual Opus; draft6486 published; numbered declaration being added locally.",
+    "phase": "Metadata-only declaration committed locally; actual Opus followup running before push/ready.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,15 +85,15 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "draft6486_metadata_implementation_running",
+    "state": "draft6486_declaration_review_running",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect Astra metadata-only declaration child; obtain actual Opus review including caller precision correction.",
-      "Fresh current target validation; publish metadata and mark ready through normal process after review; request Copilot and inspect CI execution evidence.",
-      "No source-only draft merge. Keep6485 open until landed/postmergeproof; parent3113 stays open."
+      "Collect actual Opus98501 declaration review, then publish metadata/mark6486 ready if approved and fresh checks hold.",
+      "Collect existing Astra6483 source-only witness readiness, consider bounded execution while6486 CI runs.",
+      "Keep all protections/holds and registryOFF; do not replay source publication70658 (completed)."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -125,14 +125,14 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "Add/validate/commit only6486 declaration; source bytes preserved; final small independent review before push/ready.",
+    "agent_current_task": "Read-only6483 deferred-witness readiness; no builds/source edits/publication.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
       "manifest_sha256": "a86fc5c86b63c33a91f43a3d5cffff710a08e0da3a45c14cd1c362a2b76066f4",
       "verified_files": 6
     },
-    "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+    "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
     "implementation": {
       "directory": "direct-6485/implementation",
       "manifest_sha256": "2679e940e1f2106778d6ee569f90aeb6896ed4d468b5f6b3aa01e7e3a55e5df3",
@@ -175,7 +175,28 @@
       "manifest_sha256": "d597ef6f3d863ae0ed8f29e02f3d86ae57b56146ef3643a8832e95c83dd033dc",
       "files": 5
     },
-    "declaration_admission": "direct-6485/admission/declaration-admission.json"
+    "declaration_admission": "direct-6485/admission/declaration-admission.json",
+    "declaration": {
+      "directory": "direct-6485/declaration",
+      "manifest_sha256": "e903a527cbd5c39fa7276bffe7db25365d54fe629f82ef9f02669a50c2dd764f",
+      "files": 14,
+      "root_verification": "direct-6485/admission/declaration-root-verification.json",
+      "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "source_identical_to_reviewed737": true,
+      "JSON_selftest_diff_checks": "pass"
+    },
+    "declaration_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 98501,
+      "requested_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6485/admission/opus-memo-declaration-input.md",
+      "input_sha256": "41d60515dac7b38af29a43875dd6f44aede5697a0f106314d07b710902ce391f",
+      "output": "direct-6485/admission/opus-memo-declaration-review.json",
+      "completion": "direct-6485/admission/opus-memo-declaration-completion.json",
+      "policy": "Collect98501; no relaunch. Correct dict-only review imprecision. No push/ready until review/current targets reconciled."
+    }
   },
   "prs": {
     "4300": {
@@ -708,7 +729,7 @@
     }
   },
   "next_actions": [
-    "Collect Astra metadata-only declaration child; obtain actual Opus review including caller precision correction.",
+    "Collect actual Opus98501 declaration review, then publish metadata/mark6486 ready if approved and fresh checks hold.",
     "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
     "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
   ],
@@ -4420,5 +4441,13 @@
     "at": "2026-09-10T17:07:59.089651+00:00",
     "free_bytes": 10735230976,
     "policy": "No global cleanup. New bounded builds require their continuous2GiB guard; previous6483 attempt stayed stopped."
+  },
+  "next_lane_readiness": {
+    "issue": 6483,
+    "agent": "/root/postmerge_ci",
+    "directory": "direct-6483/readiness",
+    "state": "source_only_running",
+    "execution_authorized": false,
+    "scope": "Revisit preserved pre-build disk stop; verify warm actual module route/issue/source/current reserve. No repeated5183diagnosis."
   }
 }

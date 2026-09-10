@@ -771,6 +771,12 @@ for evidence_name in ['declaration-template.json', 'precedent-6477.json', 'proce
 for evidence_name in ['opus-memo-final-review.json', 'opus-memo-final-stderr.log', 'opus-memo-final-completion.json', 'opus-memo-final-result.json', 'opus-memo-final-root-disposition.json', 'pr-draft-body.md', 'pr-create-input.json', 'publish-draft.py', 'publication-receipt.json', 'declaration-admission.json']:
     FILES["6485-admission-" + evidence_name] = ROOT / "direct-6485/admission" / evidence_name
 
+# Frozen6486 declaration and live metadata-review input.
+for evidence_name in ['6486.json', 'commands.json', 'commit.txt', 'complete-caller.rs.txt', 'declaration-docs.md', 'delta.diff', 'diff-check.log', 'final-status.txt', 'json-validation.log', 'report.json', 'review-packet.md', 'self-test.log', 'source-proof.json', 'v2-helper.py.txt', 'manifest.json']:
+    FILES["6485-declaration-" + evidence_name.replace("/", "--")] = ROOT / "direct-6485/declaration" / evidence_name
+for evidence_name in ['declaration-root-verification.json', 'opus-memo-declaration-input.md', 'run-opus-memo-declaration.py']:
+    FILES["6485-admission-" + evidence_name] = ROOT / "direct-6485/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,64 @@
+{
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "parent": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "actual_author": "GPT-6 Astra xhigh",
+  "changed_paths": [
+    "bench/feature-off-declarations/6486.json"
+  ],
+  "diff_stat": "bench/feature-off-declarations/6486.json | 5 +++++\n 1 file changed, 5 insertions(+)",
+  "core_source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "core_byte_identical_to_reviewed_parent": true,
+  "clean": true,
+  "declaration": {
+    "pr": 6486,
+    "date": "2026-09-10",
+    "intent_only": true,
+    "derived": false,
+    "schema": "Documented {pr,date,reason}; checker detects new numeric filenames without parsing JSON fields."
+  },
+  "validation": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "json.tool",
+        "bench/feature-off-declarations/6486.json"
+      ],
+      "exit": 0,
+      "seconds": 0.24588900000000002,
+      "log": "json-validation.log"
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/check-vectorized-feature-off.py",
+        "--self-test"
+      ],
+      "exit": 0,
+      "seconds": 0.48563662499999993,
+      "log": "self-test.log"
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 0.08985975000000002,
+      "log": "diff-check.log"
+    }
+  ],
+  "staged_diff_check": {
+    "command": "git diff --cached --check",
+    "exit": 0
+  },
+  "review_precision_correction": "has_high_precision_decimal checks self.numerics.lookup(id).is_some() before is_high_precision_decimal(&self.dict,id). The memo therefore depends on the coherent numeric cache and dictionary term pairing, not dictionary alone. Existing invariant comment is retained unchanged. Complete caller supplied; no optional wording change applied.",
+  "limitations": [
+    "No wasm build or byte comparison in this metadata task.",
+    "No claim of byte neutrality, runtime speedup, size acceptance or final CI approval.",
+    "Prior source behavioral tests were not repeated; production source is byte-identical."
+  ],
+  "pending_commands": 0,
+  "remote_mutations": 0
+}

@@ -1,0 +1,154 @@
+# scripts/check-vectorized-feature-off.py:158
+def _read_change_token(decl_path: str) -> int:
+    """Read the integer 'change_token' from a feature-off declaration JSON file (LEGACY).
+
+    Retained for the TRANSITION WINDOW (sq-v3nel-v2): the scalar mechanism is retired but
+    in-flight branches that already bumped the token must still be accepted. The V2
+    per-PR-file mechanism (_new_declaration_files below) is the going-forward path.
+
+    Fail-SAFE default: a missing file, missing field, or non-integer value reads as 0.
+    Because an ABSENT declaration reads the same as an UN-bumped one, an undeclared byte
+    change still fails the gate (the check compares base vs head token for INEQUALITY).
+    """
+    try:
+        with open(decl_path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return 0
+    tok = data.get("change_token", 0) if isinstance(data, dict) else 0
+    try:
+        return int(tok)
+    except (TypeError, ValueError):
+        return 0
+
+_DECL_FILE_RE = re.compile(r'^\d+\.(?:json|md)$')
+
+# scripts/check-vectorized-feature-off.py:187
+def _list_declaration_files(dir_path: str | None) -> set[str]:
+    """Return the set of per-PR declaration file names in a declarations directory.
+
+    Fail-SAFE: a None / missing / non-directory path reads as the EMPTY set, so an absent
+    directory can never be mistaken for a declaration (keeps the gate fail-closed).
+    Only names matching <digits>.json|md are counted (README.md/.gitkeep are ignored).
+    """
+    if not dir_path or not os.path.isdir(dir_path):
+        return set()
+    return {name for name in os.listdir(dir_path) if _DECL_FILE_RE.match(name)}
+
+# scripts/check-vectorized-feature-off.py:199
+def _new_declaration_files(base_dir: str | None, head_dir: str | None) -> set[str]:
+    """Return declaration files the HEAD tree has that the BASE tree does NOT (set diff).
+
+    A non-empty result means the PR ADDED at least one bench/feature-off-declarations/
+    <PR-number>.json — i.e. it DECLARED an intentional feature-OFF byte change under
+    mechanism V2. Because each PR adds a distinctly-named file, this never collides with
+    another declaring PR (unlike the old shared scalar token line).
+    """
+    return _list_declaration_files(head_dir) - _list_declaration_files(base_dir)
+
+# scripts/check-vectorized-feature-off.py:210
+def check_leg2_dynamic(base_wasm: str, head_wasm: str,
+                       base_decl: str, head_decl: str,
+                       base_decls_dir: str | None = None,
+                       head_decls_dir: str | None = None) -> int:
+    """DYNAMIC byte-identity gate for the feature-OFF wasm bundle (sq-v3nel / sq-v3nel-v2).
+
+    Compares the feature-OFF wasm built from the BASE (target-branch / merge-base) tree
+    against the one built from the HEAD (PR / merged) tree IN THE SAME CI RUN. Same
+    toolchain + same runner in one run => a deterministic comparison with NO static byte
+    pin, so NO merge-order dependence.
+
+    Policy:
+      * bytes byte-for-byte IDENTICAL  -> PASS. The PR touched no always-compiled code
+        that reaches the feature-OFF bundle. (This is the common case for non-engine PRs.)
+      * bytes DIFFER + change DECLARED -> PASS. 'declared' is satisfied by EITHER mechanism
+        (transition window, sq-v3nel-v2):
+          V2 (going-forward): the head-tree bench/feature-off-declarations/ directory
+            contains a <PR-number>.json/.md file the base tree does NOT (set difference).
+            Conflict-free: each PR adds its own file.
+          LEGACY (retired, still accepted): change_token differs between the base-tree and
+            head-tree bench/feature-off-declaration.json (a pre-V2 branch bumped it).
+        The SIZE of the change is governed SEPARATELY, unchanged, by the wasm_bundle_bytes
+        floor ratchet (+/-2% band) in bench.yml — this gate governs INTENT, not magnitude.
+      * bytes DIFFER + NOT declared    -> FAIL. Either accidental default-path/vectorized
+        code leaked into the feature-OFF build (remove / cfg-gate it) or an intentional
+        always-compiled change was not declared (add a per-PR declaration file).
+
+    Returns 0 on pass, 1 on fail/error.
+    """
+    try:
+        with open(base_wasm, "rb") as fh:
+            base_bytes = fh.read()
+    except OSError as exc:
+        print(f"[leg2] ERROR: cannot read base wasm {base_wasm!r}: {exc}", file=sys.stderr)
+        return 1
+    try:
+        with open(head_wasm, "rb") as fh:
+            head_bytes = fh.read()
+    except OSError as exc:
+        print(f"[leg2] ERROR: cannot read head wasm {head_wasm!r}: {exc}", file=sys.stderr)
+        return 1
+
+    base_len, head_len = len(base_bytes), len(head_bytes)
+
+    if base_bytes == head_bytes:
+        print(
+            f"[leg2] OK — feature-OFF wasm is byte-for-byte IDENTICAL to the base tree "
+            f"({head_len} bytes). No always-compiled code changed the default build; "
+            "deterministic same-run comparison, no static pin, no merge-order dependence."
+        )
+        return 0
+
+    # Bytes differ (size and/or content). Require an audit-visible declaration.
+    delta = head_len - base_len
+    pct = (delta / base_len * 100) if base_len else float("inf")
+
+    print(
+        f"[leg2] feature-OFF wasm DIFFERS from the base tree: "
+        f"base={base_len} head={head_len} bytes, size delta={delta:+d} ({pct:+.3f}%). "
+        "Comparison is byte-for-byte, so same-length content changes are also detected."
+    )
+
+    # V2 (going-forward): a per-PR declaration FILE was added under
+    # bench/feature-off-declarations/ (set difference on the directory listing). Preferred
+    # because each PR adds a distinct file, so declaring PRs never textually conflict.
+    new_files = _new_declaration_files(base_decls_dir, head_decls_dir)
+    if new_files:
+        print(
+            "[leg2] OK — change DECLARED (mechanism V2): the head tree added "
+            f"bench/feature-off-declarations/{sorted(new_files)} not present in the base "
+            "tree. The feature-OFF byte change is intentional. Its SIZE is governed by the "
+            "wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate."
+        )
+        return 0
+
+    # LEGACY (retired, accepted during the transition window): the scalar change_token in
+    # bench/feature-off-declaration.json differs between base and head tree. Kept live so
+    # pre-V2 branches that already bumped the token do not break.
+    base_tok = _read_change_token(base_decl)
+    head_tok = _read_change_token(head_decl)
+    if head_tok != base_tok:
+        print(
+            f"[leg2] OK — change DECLARED (legacy scalar, transition window): "
+            f"bench/feature-off-declaration.json change_token {base_tok} -> {head_tok}. "
+            "The feature-OFF byte change is intentional. Its SIZE is governed by the "
+            "wasm_bundle_bytes floor ratchet (+/-2% band) in bench.yml, unchanged by this gate. "
+            "NOTE: the scalar mechanism is retired — new PRs should add a per-PR declaration "
+            "file under bench/feature-off-declarations/ (mechanism V2) instead."
+        )
+        return 0
+
+    print(
+        f"[leg2] VIOLATION: the feature-OFF wasm bundle changed vs the base tree "
+        f"(size delta {delta:+d} bytes, {pct:+.3f}%) but the change is NOT declared "
+        f"(no new bench/feature-off-declarations/<PR>.json file added, and the legacy scalar "
+        f"change_token is unchanged at {base_tok}).\n"
+        "  - If this is ACCIDENTAL vectorized / default-path code leaking into the "
+        "feature-OFF build, REMOVE it or gate it behind #[cfg(feature = \"vectorized\")].\n"
+        "  - If this is an INTENTIONAL change to always-compiled engine/core code, DECLARE "
+        "it (mechanism V2): add bench/feature-off-declarations/<PR-number>.json with "
+        "{pr, date, reason}. If the SIZE moves > +/-2%, ALSO raise "
+        "metrics.wasm_bundle_bytes.floor in bench/perf-baseline.json (the bench.yml ratchet)."
+    )
+    print("\n[leg2] FAIL — undeclared feature-OFF bundle change. Declare it or remove it.")
+    return 1
