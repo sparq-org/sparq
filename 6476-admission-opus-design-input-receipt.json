@@ -1,0 +1,81 @@
+{
+  "at": "2026-09-10T04:35:21.286010+00:00",
+  "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "bytes": 93763,
+  "sha256": "d5d72c2e60a656e8b31a76a020837e94fb71f1353f3f23a4c08701714e9be5a7",
+  "source": "32-file frozen reproduction plus exact additional source ranges",
+  "ranges": [
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 235,
+      "to": 465
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 2170,
+      "to": 2195
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 2530,
+      "to": 2610
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 2730,
+      "to": 2800
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 8790,
+      "to": 8860
+    },
+    {
+      "file": "crates/sparq-engine/src/exec.rs",
+      "from": 9765,
+      "to": 9830
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "from": 20,
+      "to": 30
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "from": 1010,
+      "to": 1248
+    },
+    {
+      "file": "crates/sparq-engine/src/cache.rs",
+      "from": 345,
+      "to": 382
+    },
+    {
+      "file": "crates/sparq-engine/src/construct.rs",
+      "from": 35,
+      "to": 160
+    },
+    {
+      "file": "crates/sparq-engine/src/explain.rs",
+      "from": 75,
+      "to": 140
+    },
+    {
+      "file": "crates/sparq-engine/src/explain_json.rs",
+      "from": 195,
+      "to": 255
+    },
+    {
+      "file": "crates/sparq-engine/src/update.rs",
+      "from": 510,
+      "to": 575
+    },
+    {
+      "file": "crates/sparq-engine/src/update.rs",
+      "from": 700,
+      "to": 815
+    }
+  ],
+  "scope": "Preimplementation soundness design only",
+  "preparation_note": "Initial range exceeded cache.rs EOF; input generation stopped. Shell input redirection then failed before Claude launch. No model request or running session existed; corrected range endpoints before first actual invocation."
+}

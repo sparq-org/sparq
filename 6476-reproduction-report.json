@@ -1,0 +1,225 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "branch": "codex/nested-query-budget",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476",
+  "clean": true,
+  "production_edits": 0,
+  "verdict": "CONFIRMED: nested public query erases the outer cancellation budget",
+  "runtime_results": [
+    {
+      "inner": "none",
+      "enforced": true,
+      "result": "cancelled",
+      "control": true,
+      "callback_calls": 1,
+      "same_installing_thread": true,
+      "outer_flag_true": true,
+      "subsequent_top_level_ask": true
+    },
+    {
+      "inner": "unlimited ASK {}",
+      "enforced": false,
+      "result": "one row containing integer 7",
+      "control": false,
+      "callback_calls": 1,
+      "same_installing_thread": true,
+      "outer_flag_true": true,
+      "subsequent_top_level_ask": true
+    },
+    {
+      "inner": "ASK {} with explicit max_rows=1",
+      "enforced": false,
+      "result": "one row containing integer 7",
+      "control": false,
+      "callback_calls": 1,
+      "same_installing_thread": true,
+      "outer_flag_true": true,
+      "subsequent_top_level_ask": true
+    },
+    {
+      "inner": "parse rejection before install",
+      "enforced": true,
+      "result": "cancelled",
+      "control": true,
+      "callback_calls": 1,
+      "same_installing_thread": true,
+      "outer_flag_true": true,
+      "subsequent_top_level_ask": true
+    }
+  ],
+  "execution": "Four deterministic cases in observation mode (exit0); same four again with required-restoration invariant (expected exit101). Both successful nested cases violate restoration. No-nesting and parse-error controls prove actual post-callback polling. No timing assertions or private production instrumentation.",
+  "root_cause": {
+    "file": "exec.rs",
+    "install": "205-234 overwrites ACTIVE and clears EXCEEDED",
+    "drop": "198-203 unconditionally clears to OFF/None",
+    "callback": "14209-14225 invokes actual registered ExtFn",
+    "outer_final_gate": "eval_select calls budget::check after eval_modified; exhausted at400-405 returns false when ACTIVE.on is false"
+  },
+  "state_restoration_requirements": [
+    "Save and restore all Limits fields: on, deadline, row/byte maxima, byte_width, extra_bytes, cancel pointer; do not restore only original public QueryBudget values.",
+    "Save and restore the prior EXCEEDED reason exactly. A handled child error is child-local; it must not erase or replace a previously sticky outer reason.",
+    "Restored outer deadline and cancellation are reevaluated on next poll; elapsed time or flag changes during nested execution must remain observable.",
+    "Error and unwind restore the enclosing state; entry from idle returns to OFF/None. A caught inner unwind must restore outer state before the callback resumes. Abort has no continuation/drop guarantee.",
+    "Preserve thread affinity and owning-budget lifetimes, including scoped Rayon joins; do not assume PhantomData of the child budget also protects a saved parent pointer."
+  ],
+  "guard_safety_assessment": {
+    "visibility": "lib.rs:26 makes exec private to external users. Within the crate, exec::budget, Guard, install, Limits and snapshot are pub(crate). Guard has private fields and lifetime/!Send markers, but install returns it by value.",
+    "external_boundary": "External safe callers cannot name/install/drop budget guards or obtain Limits through the public API. The inspected 14 production installers are synchronous functions with local guards and concrete owned Result return types; callbacks receive no guard. Their returns, early errors and unwinds therefore currently nest dynamically. No guard escape, explicit early drop or forget was found at those installation sites.",
+    "internal_boundary": "The crate-visible safe install API DOES NOT enforce LIFO. Guard<child> borrows only the child QueryBudget, not the outer guard/budget. A future safe internal caller can drop the outer guard and budget before dropping the inner guard. Therefore a naive saved-Limits field is not by itself a lifetime proof.",
+    "counterexample_not_executed": "In a crate-internal caller: create outer budget owning its only cancel Arc; g1=install(&outer); g2=install(&inner); drop(g1); drop(outer); drop(g2); budget::check(0). A naive g2 restoration would reinstall the now-dangling outer CancelPtr. Both guards lifetimes satisfy their own borrowed budgets. This is a source/type argument, not an executed UB test or a claim of current externally reachable UAF.",
+    "other_internal_hazard": "Even before the proposed patch, crate-internal safe code could retain the lifetime-free Copy Limits snapshot beyond guard/budget drop, or forget the guard. Current external API does not expose these operations. Do not silently advertise the existing crate-visible raw-pointer interfaces as intrinsically sound for arbitrary internal use.",
+    "snapshot_actual_callers": [
+      {
+        "line": 2553,
+        "operation": "parallel_json_fanout snapshot; par_chunks map collects owned fragments before returning"
+      },
+      {
+        "line": 2755,
+        "operation": "snapshot; par_chunks map collects owned strings before returning"
+      },
+      {
+        "line": 8819,
+        "operation": "EngineSnapshot; parallel fold/reduce returns owned rows before guard exit"
+      },
+      {
+        "line": 9784,
+        "operation": "snapshot; par_iter collect<Result<Vec<bool>>> joins before return, including errors"
+      }
+    ],
+    "snapshot_scope_limit": "Inspected current snapshot callers keep borrowed cancellation pointers inside synchronous Rayon operations; no detached task or Limits return is present. This call-site audit supports current execution but does not make the lifetime-free snapshot signature safe against arbitrary future internal escape.",
+    "recommended_minimal_boundary": "Do not ship only saved raw Limits under the current broadly callable returning-Guard interface. Prefer a private Guard/install within budget plus a scoped pub(crate) with_budget(b, closure) wrapper, migrating the 14 install sites and direct tests. It prevents other modules from early-dropping/forgetting the guard and gives restoration an enforced dynamic scope. Save/restore both state values inside that sealed wrapper; no new heap stack or public API is needed.",
+    "unresolved_for_review": "The independent review must explicitly settle the snapshot boundary too: either accept/document and narrow the existing four audited synchronous internal consumers as part of the trusted implementation boundary, or use a lifetime-scoped snapshot interface/owned cancellation handle so a safe internal caller cannot retain a raw snapshot. Merely noting lexical current callers is not a type-level proof. A broader Arc/TLS ownership redesign is not implemented or assumed necessary here.",
+    "alternative_limit": "Adding an Arc only to the restoring guard is insufficient if the restored TLS raw pointer outlives that guard. An owning-state solution must keep the active cancellation allocation alive in TLS and address stale outer restoration under non-LIFO drops, not just clone a parent Arc temporarily."
+  },
+  "direct_production_install_sites": [
+    {
+      "entry": "query_prepared_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1036
+    },
+    {
+      "entry": "ask_prepared_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1073
+    },
+    {
+      "entry": "query_json_prepared_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1109
+    },
+    {
+      "entry": "query_json_chunks_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1134
+    },
+    {
+      "entry": "query_json_stream_prepared_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1189
+    },
+    {
+      "entry": "count_prepared_with_budget",
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1227
+    },
+    {
+      "entry": "ResultCache::get_or_eval -> private eval on miss/noncacheable path",
+      "file": "crates/sparq-engine/src/cache.rs",
+      "line": 368
+    },
+    {
+      "entry": "construct_prepared_with_budget",
+      "file": "crates/sparq-engine/src/construct.rs",
+      "line": 60
+    },
+    {
+      "entry": "describe_prepared_with_budget",
+      "file": "crates/sparq-engine/src/construct.rs",
+      "line": 96
+    },
+    {
+      "entry": "construct_or_describe_with_budget",
+      "file": "crates/sparq-engine/src/construct.rs",
+      "line": 123
+    },
+    {
+      "entry": "explain_analyze_with_budget",
+      "file": "crates/sparq-engine/src/explain.rs",
+      "line": 93
+    },
+    {
+      "entry": "explain_plan_analyze_with_budget",
+      "file": "crates/sparq-engine/src/explain_json.rs",
+      "line": 222
+    },
+    {
+      "entry": "params PreparedUpdate -> update_in_place_prepared_with_budget",
+      "file": "crates/sparq-engine/src/update.rs",
+      "line": 535
+    },
+    {
+      "entry": "update_in_place_with_budget/capturing/atomic -> update_in_place_core",
+      "file": "crates/sparq-engine/src/update.rs",
+      "line": 728
+    }
+  ],
+  "entry_point_scope": "String/prepared/unlimited/view/functions/aggregate wrappers delegate to these sites. ResultCache hits need not install. Ordinary internal EXISTS does not install. End-to-end runtime coverage here is limited to the public query/functions callback cases, not every listed family.",
+  "next_validation": [
+    "Preserve exact public cancellation witness with all four cases and require restoration in both successful nested cases.",
+    "At the chosen safe scoped seam, test distinct nested limits, prior sticky errors, child errors isolated from parent, byte width/local-vocab accumulation, three levels, return/error/unwind and idle cleanup.",
+    "Test both live cancel identities and outer deadline changes without sleeps; retain thread restrictions and scoped worker lifetime proof.",
+    "Meaningful controls: omit prior Limits restoration -> public witness fails; omit EXCEEDED restoration -> sticky-error test fails; omit byte fields -> exact accounting test fails.",
+    "For sealed installation, add compile-fail/API-visibility evidence that other modules cannot acquire/forget/drop a guard; do not execute deliberately dangling-pointer code."
+  ],
+  "behavioral_scope": "Restoration repairs the outer state after a nested invocation. It does not enforce a composite/global budget inside an explicitly separate inner call, nor make arbitrary callback work cancellable.",
+  "provenance": {
+    "tree": "cd47ccfcb442f46723d1ed16fe1bf1c279fed05e",
+    "current_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "cached_library_commit": "ed66ef0931fa19dd521fac433870c86a78687a30",
+    "whole_tree_byte_identical": true,
+    "method": "Standalone harness compiled with installed rustc1.97.1 against cached unmodified production release rlibs. Cache engine hash and dep-info match the frozen bounded-many-timing provenance; no fresh production rebuild under merged commit name.",
+    "engine_features": "[\"default\", \"digest\", \"parallel\", \"regex\"]",
+    "core_features": "[\"default\", \"parallel\"]",
+    "engine_rlib_sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d",
+    "harness_sha256": "88eb9cab7dce8b37e5418ca1bc285678435d0a93b299e5f77161c25f5faa48cc",
+    "binary_sha256": "515c9500cccc2920eca79aae7a674799869254dcfec6cc8b3ffc88d5ec4da5ab",
+    "environment_overrides": {
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_BUILD_JOBS": "2",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "compiler_warning": "Only the multiple emit-type output-file-name adaptation warning; stderr preserved."
+  },
+  "resource_limits": {
+    "build_floor": 6509559808,
+    "early_floor_stop": 5884108800,
+    "root_confirmed_resume": true,
+    "commands_min_free": 6622674944,
+    "export_floor": 1073741824,
+    "export_allowance_bytes": 10485760,
+    "export_only_exception": true,
+    "free_at_export": 7207849984
+  },
+  "limits": [
+    "No production repair, commit, Cargo/dependency/workspace build, wasm/Miri/full feature suite, network request, model call, remote mutation, bd command or cleanup.",
+    "No pointer misuse sequence was compiled/executed; no current external memory-unsafety claim.",
+    "Deadline/sticky/accounting/unwind coverage remains planned rather than measured in this phase.",
+    "All completed runtime evidence is outside the regenerable cache. Previous frozen bundles and completed issue3105 worktree were not edited."
+  ],
+  "source_hashes": {
+    "crates/sparq-engine/src/exec.rs": "098a3af6a14c483910750ca3b0d032c4f004633222ad0394f948c394aeb16566",
+    "crates/sparq-engine/src/lib.rs": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb",
+    "crates/sparq-engine/src/cache.rs": "23824d6b4cccd4d1a0bb404e02ef7b16aa403027e10a64d0a1e519e811c61ebf",
+    "crates/sparq-engine/src/construct.rs": "82e73b4f239040f63e9f6918bf2f1dc9dc0286acfcf23a01e5f690429c646247",
+    "crates/sparq-engine/src/explain.rs": "bee95ed992794fc6757d9b0e464d9203c59cb1911b14d5f9bb5234601aedb573",
+    "crates/sparq-engine/src/explain_json.rs": "47c389a6804f165448b31f19dbccb001d6d0201701b4dac2d999d58cce35a4f7",
+    "crates/sparq-engine/src/update.rs": "6234695021400a114bff15b469ee65fd660a6bb2c1d875e915e885a6eed8b310",
+    "crates/sparq-engine/src/aggregate.rs": "65f67628c6b70b73ea1df065e17b6e678aaed7edc921e0b810d20f9dc831ebb8",
+    "crates/sparq-engine/Cargo.toml": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "Cargo.lock": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+    "rust-toolchain.toml": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+  },
+  "completed_at_utc": "2026-09-10T04:31:33.642805+00:00"
+}

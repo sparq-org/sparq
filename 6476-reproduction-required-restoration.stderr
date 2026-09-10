@@ -1,0 +1,4 @@
+
+thread 'main' (3820704) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/reproduction/public_callback.rs:57:9:
+nested public query erased outer cancellation budget
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

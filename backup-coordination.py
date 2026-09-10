@@ -417,6 +417,16 @@ for evidence_name in ['advisory-content.json', 'advisory-registry.json', 'batch-
 for evidence_name in ['heartbeat-0355.json', 'merged-source-proof.json', 'next6476-admission.json', 'next6476-admission-page2.json', 'issue3105-merged-comment.json', 'issue3105-merged-comment-receipt.json', 'ready-frontier-0359.json', 'ready-frontier-0359.stdout', 'ready-frontier-0359.stderr', 'postmerge-runs-0359.json', 'postmerge-ring-root-verification.json', 'issue6476-start-comment.json', 'issue6476-start-precheck.json', 'issue6476-start-comment-receipt.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+# Issue6476 frozen public-callback reproduction and pending soundness review.
+for evidence_name in ['binary/public_callback', 'binary/public_callback.d', 'cached-provenance.json', 'commands.json', 'compile.stderr', 'compile.stdout', 'core-features.json', 'engine-dep-info.d', 'engine-features.json', 'install-inventory.txt', 'observed.stderr', 'observed.stdout', 'protocol.json', 'public_callback.rs', 'report.json', 'required-restoration.stderr', 'required-restoration.stdout', 'review-packet.md', 'rustc-version.txt', 'snapshot-inventory.txt', 'source/Cargo.lock', 'source/crates/sparq-engine/Cargo.toml', 'source/crates/sparq-engine/src/aggregate.rs', 'source/crates/sparq-engine/src/cache.rs', 'source/crates/sparq-engine/src/construct.rs', 'source/crates/sparq-engine/src/exec.rs', 'source/crates/sparq-engine/src/explain.rs', 'source/crates/sparq-engine/src/explain_json.rs', 'source/crates/sparq-engine/src/lib.rs', 'source/crates/sparq-engine/src/update.rs', 'source/rust-toolchain.toml', 'worktree-creation.json', 'manifest.json']:
+    FILES["6476-reproduction-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/reproduction" / evidence_name
+for evidence_name in ['reproduction-root-verification.json', 'opus-design-input.md', 'opus-design-input-receipt.json', 'issue-runtime-comment.json', 'issue-runtime-comment-receipt.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+for evidence_name in ['heartbeat-0425.json', 'postmerge-checks-0427.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+for evidence_name in ["debug-cache-cleanup-precheck.json", "debug-cache-cleanup-receipt.json"]:
+    FILES["6476-" + evidence_name] = ROOT / "direct-6476" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

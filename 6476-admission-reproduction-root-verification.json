@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-10T04:34:32.638335+00:00",
+  "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "files_verified": 32,
+  "manifest_sha256": "e779db868b6045bcfed80b5500b7a5a0c53578494336636b2ae123b7df1105fc",
+  "packet_sha256": "d57076af0ebed38f969bf86ba47f7300c54f475c1693ea00ed4191ec5de72931",
+  "tree_equivalence_verified": true,
+  "prior_frozen_build_provenance_and_current_rlib_verified": true,
+  "copied_binary_verified": true,
+  "both_mode_outputs_identical": true,
+  "exit_codes": [
+    0,
+    0,
+    101
+  ],
+  "assessment": "Actual public-callback source/raw controls confirm outer cancellation loss after successful nested installs. No production change or external UAF claimed. Saved raw pointer restoration needs scoped installation/snapshot lifetime review."
+}

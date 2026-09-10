@@ -1,0 +1,4 @@
+HEAD:crates/sparq-engine/src/exec.rs:2553:        if let Some(limits) = budget::parallel_json_fanout() {
+HEAD:crates/sparq-engine/src/exec.rs:2755:        let limits = budget::snapshot();
+HEAD:crates/sparq-engine/src/exec.rs:8819:        let snap = EngineSnapshot(budget::snapshot());
+HEAD:crates/sparq-engine/src/exec.rs:9784:            let limits = budget::snapshot();

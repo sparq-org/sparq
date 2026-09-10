@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T04:30:06.564580+00:00",
+  "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug",
+  "cache_tag_verified": true,
+  "symlink": false,
+  "allocated_KiB_before": 1795588,
+  "lsof_exit": 1,
+  "lsof_stdout": "",
+  "lsof_stderr": "",
+  "scope": "Only task-owned regenerable debug build directory; completed evidence and reproduction binary are copied outside target. Release cache retained for standalone/targeted validation. No other directory cleanup.",
+  "free_before": 5538918400,
+  "completed_at": "2026-09-10T04:30:13.218844+00:00",
+  "free_after": 7359512576,
+  "deleted": true
+}

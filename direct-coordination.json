@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T04:06:30.917974+00:00",
+  "updated_at": "2026-09-10T04:36:58.281919+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Runtime reproduction resumed after disk reserve recovered",
-    "state": "Same Astra lane running bounded public extension-callback harness and no-nesting cancellation control; no production fix, publication or runtime finding claimed yet.",
+    "phase": "Confirmed reproduction frozen/root-verified; actualOpus preimplementation design review running",
+    "state": "SameAstra author idle; clean worktree d41. No production fix yet. Actual Opus5 xhigh session83681 running; do not duplicate.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,9 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect existing Astra reproduction/design phase; do not launchduplicate.",
-      "If runtime findingconfirmed, authorize minimal restoration fix with meaningful public-callback success/error/unwind/cancellation/sticky-state controls and actual Opus5 xhigh soundness review.",
-      "Keep postmerge6477watch active; no mixedpush/merge-group verdict counts or releaseauthorization."
+      "Collect actualOpus83681 when complete, verify modelUsage and concrete design conditions; do not duplicate.",
+      "Authorize sameAstra minimal restoration implementation only afterdesignconditions resolved; preserve scoped guard/no-publicAPI andsnapshotlifetime obligations. Fullfinaldiff+tests independentlyreviewedbeforeprotectedCI.",
+      "If sounddesignconfirmed, authorize same Astra lane minimal fix andcalibratedpublic-callback/state/unwind tests underresourcefloor; fullindependentreview/protectedCI beforepublication/merge.",
+      "Postmerge6477CI andfeaturematrixSUCCESS; aggregatewaits boundedcargo-fuzz34435176590. Do not combineadvisoryfailures orlivechecksintoregressionclaim."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -95,9 +96,53 @@
       "root_inspection": "Only known task-owned direct5983target (~2.1GB) and issue3105worktree (~97MB) measured. Cache is regenerable; all result artifacts frozenoutside and backed. No cleanup performed.",
       "reserve_recovered": "Root then measured6971408384B; child7002030080B. Runtime phase explicitly reauthorized from~04:05 with same strict floor and15min bound.",
       "system_process_check": "Sandbox ps read was unavailable; no cleanup or escalation attempted on that evidence.",
-      "no_cache_cleanup": true
+      "no_cache_cleanup": false,
+      "second_stop": "Runtimecompleted; export initiallyblockedat6436810752B. Rootexplicitlyallowed\u226410MiBcompleted-evidence export at\u22651GiBfree; no buildfloor waiver.",
+      "debug_cache_cleanup": "Rootverifiedno symlink/CACHEDIRtag andlsofno consumers, then removedonly regenerabletarget/debug:1795588KiB. Free5538918400\u21927359512576B. Releasecacheandsavedresultsretained. Receipts direct-6476/debug-cache-cleanup-{precheck,receipt}.json."
     },
-    "runtime_scope": "Outer query_with_functions_and_budget extension callback optionally invokes public inner ASK, then sets outer cancel flag. Must calibrate no-nesting control to actual cancelled outcome; no inference if no subsequent budget polling. Expand entry-point inventory/design without patching."
+    "runtime_scope": "Outer query_with_functions_and_budget extension callback optionally invokes public inner ASK, then sets outer cancel flag. Must calibrate no-nesting control to actual cancelled outcome; no inference if no subsequent budget polling. Expand entry-point inventory/design without patching.",
+    "reproduction": {
+      "state": "completed_frozen_root_verified",
+      "source_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "cached_source_head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "tree": "cd47ccfcb442f46723d1ed16fe1bf1c279fed05e",
+      "tree_equivalence": "Root verified d41/ed66 wholeGit trees identical and prior frozen buildprovenance/currentrlib hash/copybinary/rawoutputs",
+      "result": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "case_order": [
+        "no nesting",
+        "nested unlimited",
+        "nested explicit max_rows",
+        "nested parse rejection before install"
+      ],
+      "harness": "direct-6476/reproduction/public_callback.rs",
+      "raw": "direct-6476/reproduction/observed.stdout",
+      "negative": "direct-6476/reproduction/required-restoration.stderr",
+      "binary_sha256": "515c9500cccc2920eca79aae7a674799869254dcfec6cc8b3ffc88d5ec4da5ab",
+      "limits": "Same callback once on installingthread, precise expectedcancelled error; root readharness/raw, no timingclaim.",
+      "manifest_files": 32,
+      "manifest_sha256": "e779db868b6045bcfed80b5500b7a5a0c53578494336636b2ae123b7df1105fc",
+      "packet_bytes": 24430,
+      "packet_sha256": "d57076af0ebed38f969bf86ba47f7300c54f475c1693ea00ed4191ec5de72931",
+      "proof": "direct-6476/admission/reproduction-root-verification.json"
+    },
+    "design_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 83681,
+      "actual_model_required": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6476/admission/opus-design-input.md",
+      "input_bytes": 93763,
+      "input_sha256": "d5d72c2e60a656e8b31a76a020837e94fb71f1353f3f23a4c08701714e9be5a7",
+      "output": "direct-6476/admission/opus-design-review.json",
+      "scope": "Save full prior Limits/EXCEEDED, private scoped Guard/install boundary,14sites and4synchronous snapshots; currentcallers vs hypotheticalprivate misuse clearlyseparated. Designonly, not finalcodeapproval.",
+      "collect_policy": "Collect83681 completion and verify actualmodelUsage. Do not launchduplicate; initialmissinginput shellredirectionneverlaunchedClaude andisnotamodelrequestretry."
+    }
   },
   "prs": {
     "4300": {
@@ -2144,7 +2189,7 @@
     "6477": {
       "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
       "state": "running",
-      "observed_at": "2026-09-10T03:59:24.937502+00:00",
+      "observed_at": "2026-09-10T04:28:03.530294+00:00",
       "ci_run": 34435176563,
       "matrix_run": 34435176570,
       "gate_run": 34435176404,
@@ -2157,7 +2202,11 @@
         "run": 34435176367,
         "result": "failed; current diagnostics notyetread, existing packaging issue6474 remainsopen; do not retry/authorize release"
       },
-      "evidence": "direct-3105/admission/postmerge-runs-0359.json"
+      "evidence": "direct-3105/admission/postmerge-checks-0427.json",
+      "ci_state": "success",
+      "matrix_state": "success",
+      "gate_state": "in_progress",
+      "remaining_required": "cargo-fuzz (parsers + mmap loader, bounded),run34435176590/job102738724670,start03:56:13"
     }
   },
   "classifier_watch": {

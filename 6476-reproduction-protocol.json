@@ -1,0 +1,24 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "declared_at_utc": "2026-09-10T04:07:49.739856+00:00",
+  "source_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "source_tree": "cd47ccfcb442f46723d1ed16fe1bf1c279fed05e",
+  "cached_rlib_source_head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "cached_rlib_source_tree": "cd47ccfcb442f46723d1ed16fe1bf1c279fed05e",
+  "tree_identical": true,
+  "build": "Only standalone harness via installed pinned rustc and exact cached production release rlibs; no Cargo/dependency/workspace build or production edit",
+  "cases": [
+    "no nesting cancellation positive control",
+    "nested unlimited public query",
+    "nested explicit max_rows=1 public query",
+    "nested parser rejection before budget installation control"
+  ],
+  "outer_query": "SELECT (<urn:nested>() AS ?value) WHERE {}",
+  "inner_query": "ASK {}",
+  "observations": "one callback on installing thread; callback sets outer cancel flag after optional nested query; outer final result or precise cancelled error; subsequent top-level ASK usable",
+  "oracle": "both controls enforce cancellation; required-restoration mode must also enforce cancellation in nested cases",
+  "timing_claims": false,
+  "commands_bound_seconds": 120,
+  "disk_floor_bytes": 6509559808,
+  "harness_sha256": "88eb9cab7dce8b37e5418ca1bc285678435d0a93b299e5f77161c25f5faa48cc"
+}

@@ -1,0 +1,5 @@
+case=None callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+case=Unlimited callback_calls=1 same_thread=true cancel=true enforced=false result=Ok(QueryResult { vars: [Variable { name: "value" }], rows: [[Some(Literal(Literal(TypedLiteral { value: "7", datatype: NamedNode { iri: "http://www.w3.org/2001/XMLSchema#integer" } })))]] })
+case=ExplicitBudget callback_calls=1 same_thread=true cancel=true enforced=false result=Ok(QueryResult { vars: [Variable { name: "value" }], rows: [[Some(Literal(Literal(TypedLiteral { value: "7", datatype: NamedNode { iri: "http://www.w3.org/2001/XMLSchema#integer" } })))]] })
+case=ParseError callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+outer_cancellation_enforced=[true, false, false, true]

@@ -1,0 +1,164 @@
+{
+  "files": [
+    {
+      "path": "binary/public_callback",
+      "bytes": 5374096,
+      "sha256": "515c9500cccc2920eca79aae7a674799869254dcfec6cc8b3ffc88d5ec4da5ab"
+    },
+    {
+      "path": "binary/public_callback.d",
+      "bytes": 465,
+      "sha256": "9023e8de04732d9f98019f2d4c243b02e9c55986b97c5d7430bbbe35cb70d14f"
+    },
+    {
+      "path": "cached-provenance.json",
+      "bytes": 9797,
+      "sha256": "3e133b99de23d1b608b9b1e44eb33ed7b36da3bb3fd76a2341d3a60a2d5be4f5"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 1974,
+      "sha256": "8ad184cf4167fb17b9312bb826591f1e19afe0f27dfeb0fdee94a9e6001691ad"
+    },
+    {
+      "path": "compile.stderr",
+      "bytes": 157,
+      "sha256": "7ebd0827d0286054d2208a1a2e21ca7982daa14cd4d7d95f6caaa68e8894e272"
+    },
+    {
+      "path": "compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "core-features.json",
+      "bytes": 947,
+      "sha256": "2c7a17a4fe6ee937e843295a545f7278dd131e3400a123eef342aec1aea2ba63"
+    },
+    {
+      "path": "engine-dep-info.d",
+      "bytes": 3606,
+      "sha256": "05b36e45a8e8a90499af622e44355bef1b3bb94a9ddb91f6d1d1faadcf407168"
+    },
+    {
+      "path": "engine-features.json",
+      "bytes": 1738,
+      "sha256": "97e50b47ad873403bfc16031f2311339604f9b7ed303efbc67529d428a0949bc"
+    },
+    {
+      "path": "install-inventory.txt",
+      "bytes": 1657,
+      "sha256": "baf983cbbd6144bc6cd03964a192bc0dae72258408e6010a32f2dddb8064166e"
+    },
+    {
+      "path": "observed.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "observed.stdout",
+      "bytes": 850,
+      "sha256": "ea9e388de9c84795ffe5237a336cad52a6674e9d2b956c5b9d0276c2be3e6c1f"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 1356,
+      "sha256": "ea04a83b34090728d77d2fe0303471bab1976fbffaa7ab18da49f6246ffa2f21"
+    },
+    {
+      "path": "public_callback.rs",
+      "bytes": 3083,
+      "sha256": "88eb9cab7dce8b37e5418ca1bc285678435d0a93b299e5f77161c25f5faa48cc"
+    },
+    {
+      "path": "report.json",
+      "bytes": 13871,
+      "sha256": "8844c956c32d9f8d42aeed49a193da3d119ccb427835394290f25fcb2a3d525f"
+    },
+    {
+      "path": "required-restoration.stderr",
+      "bytes": 264,
+      "sha256": "e6ffe5bbf68397f30f4698ed1839aa687c82958823503f9c668d0d3ab5d1a46b"
+    },
+    {
+      "path": "required-restoration.stdout",
+      "bytes": 850,
+      "sha256": "ea9e388de9c84795ffe5237a336cad52a6674e9d2b956c5b9d0276c2be3e6c1f"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 24430,
+      "sha256": "d57076af0ebed38f969bf86ba47f7300c54f475c1693ea00ed4191ec5de72931"
+    },
+    {
+      "path": "rustc-version.txt",
+      "bytes": 192,
+      "sha256": "e794146d99fad54562fdcbd4a7c8b22b0240d2b0312ff6d879d67939b3131850"
+    },
+    {
+      "path": "snapshot-inventory.txt",
+      "bytes": 372,
+      "sha256": "19229ded49732104789c697fb800628854a57dd27a5a186665a86ce2a72ff409"
+    },
+    {
+      "path": "source/Cargo.lock",
+      "bytes": 176396,
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152"
+    },
+    {
+      "path": "source/crates/sparq-engine/Cargo.toml",
+      "bytes": 39603,
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/aggregate.rs",
+      "bytes": 16716,
+      "sha256": "65f67628c6b70b73ea1df065e17b6e678aaed7edc921e0b810d20f9dc831ebb8"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/cache.rs",
+      "bytes": 15773,
+      "sha256": "23824d6b4cccd4d1a0bb404e02ef7b16aa403027e10a64d0a1e519e811c61ebf"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/construct.rs",
+      "bytes": 23242,
+      "sha256": "82e73b4f239040f63e9f6918bf2f1dc9dc0286acfcf23a01e5f690429c646247"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/exec.rs",
+      "bytes": 1053225,
+      "sha256": "098a3af6a14c483910750ca3b0d032c4f004633222ad0394f948c394aeb16566"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/explain.rs",
+      "bytes": 34249,
+      "sha256": "bee95ed992794fc6757d9b0e464d9203c59cb1911b14d5f9bb5234601aedb573"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/explain_json.rs",
+      "bytes": 25938,
+      "sha256": "47c389a6804f165448b31f19dbccb001d6d0201701b4dac2d999d58cce35a4f7"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/lib.rs",
+      "bytes": 168184,
+      "sha256": "2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/update.rs",
+      "bytes": 124152,
+      "sha256": "6234695021400a114bff15b469ee65fd660a6bb2c1d875e915e885a6eed8b310"
+    },
+    {
+      "path": "source/rust-toolchain.toml",
+      "bytes": 10596,
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    },
+    {
+      "path": "worktree-creation.json",
+      "bytes": 3120,
+      "sha256": "0c190d28f2c03425c99e8d9360def9a7590a98d00fbd5d2efd61ab55327ab4d9"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "name": "compile",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--edition=2024",
+      "--crate-name",
+      "public_callback_6476",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/reproduction/public_callback.rs",
+      "--emit=link,dep-info",
+      "-C",
+      "opt-level=0",
+      "-C",
+      "debuginfo=0",
+      "-C",
+      "strip=debuginfo",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-17d69fdf30aada97.rlib",
+      "--extern",
+      "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-e9ed6f0c10ca33fd.rlib",
+      "--extern",
+      "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib",
+      "-o",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/reproduction/binary/public_callback"
+    ],
+    "exit_code": 0,
+    "stop_reason": null,
+    "elapsed_seconds": 1.8915259580000001,
+    "min_free_bytes": 6623162368,
+    "free_after": 6632275968
+  },
+  {
+    "name": "observed",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/reproduction/binary/public_callback"
+    ],
+    "exit_code": 0,
+    "stop_reason": null,
+    "elapsed_seconds": 0.832112875,
+    "min_free_bytes": 6623576064,
+    "free_after": 6622674944
+  },
+  {
+    "name": "required-restoration",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/reproduction/binary/public_callback",
+      "--require-restoration"
+    ],
+    "exit_code": 101,
+    "stop_reason": null,
+    "elapsed_seconds": 0.219816625,
+    "min_free_bytes": 6622674944,
+    "free_after": 6619488256
+  }
+]
