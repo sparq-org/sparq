@@ -409,6 +409,8 @@ for evidence_name in ['uncached-lifetime-root-verification.json', 'pr-source-cle
 for evidence_name in ['heartbeat-0328.json', 'pr-ci-green-body.md', 'queue-admission-root-verification.json', 'enqueue-6477.py', 'queue-rules-0329.json', 'queue-precheck-0329.json', 'enqueue-6477-input.json', 'enqueue-6477-result.json', 'queue-after-admission.json', 'merge-group-first-runs.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+FILES["3105-admission-heartbeat-0343.json"] = ROOT / "direct-3105/admission/heartbeat-0343.json"
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

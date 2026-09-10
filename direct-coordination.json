@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T03:32:35.575406+00:00",
+  "updated_at": "2026-09-10T03:44:03.739156+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,7 +67,7 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Protected merge queue admitted at position1; merge-group validation pending",
+    "phase": "Protected merge queue position1; merge-group CI progressing normally",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
@@ -143,7 +143,7 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "Verify queue entry/merge-group head after admission, then observe actual protected merge-group gate on the scheduled cadence. No cancel/requeue/lucky retry.",
+      "Next scheduled check: observe PR6477 merge/ejection state and merge-group d41ec9f gate34433648325; no repeated polls, cancellation or requeue while live.",
       "If merged, byte-verify reviewed source/declaration on main and watch postmerge CI. Issue3105 stays OPEN for planner/hash-build reuse.",
       "If queue ejected or CI fails, diagnose named failure using same Astra lane; preserve current evidence.",
       "Keep registryOFF,ALLGREEN,all unrelated holds,no releases/EC2; choose next bounded ready SPARQL lane after current landing."
@@ -301,8 +301,24 @@
       "evidence": "direct-3105/admission/enqueue-6477-result.json",
       "root_verification": "direct-3105/admission/queue-admission-root-verification.json",
       "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "verified_at": "2026-09-10T03:31:51.821071+00:00",
-      "verification": "direct-3105/admission/queue-after-admission.json"
+      "verified_at": "2026-09-10T03:43:39.556534+00:00",
+      "verification": "direct-3105/admission/heartbeat-0343.json"
+    },
+    "merge_group_ci": {
+      "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "gate_run": 34433648325,
+      "gate_job": 102734161005,
+      "gate_app": 15368,
+      "state": "in_progress",
+      "at": "2026-09-10T03:43:39.556534+00:00",
+      "counts": {
+        "success": 73,
+        "skipped": 9,
+        "in_progress": 18
+      },
+      "failure_count": 0,
+      "notes": "No queue ejection; all observed remaining jobs started. Normal active validation, no incident or mutation warranted.",
+      "evidence": "direct-3105/admission/heartbeat-0343.json"
     }
   },
   "prs": {
@@ -703,13 +719,15 @@
       "threads": "All resolved on fresh preclear observation",
       "gate_run": 34431706773,
       "gate_state": "success",
-      "latest_evidence": "direct-3105/admission/queue-after-admission.json",
+      "latest_evidence": "direct-3105/admission/heartbeat-0343.json",
       "scope": "Partial #3105 scanreuse only; Refs, not Closes.",
       "performance": "Local advisory fullmiss-14.48%,firsthit+2.06%,5/8patterns-7.37%/-5.04%. Bounded4MiB perinvocation; manycaseextra~2.24million requestedpeakbytes. No universal or canonical claim.",
       "queue_position": 1,
       "queue_state": "AWAITING_CHECKS",
       "admission": "direct-3105/admission/enqueue-6477-result.json",
-      "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+      "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "merge_group_gate": "in_progress",
+      "merge_group_gate_run": 34433648325
     }
   },
   "registry": {
