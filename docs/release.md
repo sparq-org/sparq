@@ -193,7 +193,8 @@ labelled OPT-IN artifact, not silently alongside the `sparq-cli` archives.
 **37 crates publish.** [GPT-5.6] This is the complete crates.io dependency closure, not
 just the top-level product crates. `scripts/release-interval-guard.py` derives the set and
 the dependency-first order directly from the workspace manifests, refuses public-to-private
-path edges, and requires a registry version on every shipped workspace dependency.
+path edges, and requires a registry version on every shipped workspace dependency. This
+closure includes `sparq-algos`, a core-only leaf with full crates.io metadata.
 
 Exact bootstrap commands, from the repo root on the tagged **v0.1.1** commit:
 

@@ -18,3 +18,4 @@ sync with src/. -->
 
 - [Install & build from source](./getting-started/install.md)
 - [Capabilities at a glance](./getting-started/capabilities.md)
+- [Rust crate catalogue](./getting-started/rust-crates.md)
