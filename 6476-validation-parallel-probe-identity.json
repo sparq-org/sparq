@@ -1,0 +1,6 @@
+{
+  "production_exec_sha256": "58cd125b945a3b2f08e99f8edc1a31164e9569422daa9b8d1a72bca66d703407",
+  "instrumented_exec_sha256": "c3213ce0eac55647f8eb5ab0142fb2b6a36ee66fd8168b4c93ff611dcbf1541c",
+  "observer": "One call before limits.hit in actual scan JSON par_chunks closure; first call per worker rendezvous forces two distinct actual Rayon workers; does not select branch or alter snapshot/limit logic.",
+  "bound": "run under30second subprocess timeout; no timings claimed"
+}

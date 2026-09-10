@@ -1,0 +1,11 @@
+{
+  "path": "actual scan JSON par_chunks snapshot hit",
+  "threads": [
+    "ThreadId(10)",
+    "ThreadId(11)"
+  ],
+  "thread_count": 2,
+  "rows": 60000,
+  "instrumentation_only": true,
+  "production_delta": false
+}

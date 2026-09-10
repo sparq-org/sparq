@@ -1,0 +1,20 @@
+
+running 15 tests
+test exec::budget::cancel_tests::cancel_flag_zero_vs_one_trips_both_poll_paths ... ok
+test exec::budget::cancel_tests::cancel_from_another_thread_stops_large_query_promptly ... ok
+test exec::budget::cancel_tests::cancelled_query_does_not_leak_flag_into_next_query_on_same_thread ... ok
+test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok
+test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok
+test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok
+test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok
+test exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget ... ok
+test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok
+test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... ok
+test exec::budget::snapshot_reason_tests::a_limit_not_yet_crossed_reports_nothing ... ok
+test exec::budget::snapshot_reason_tests::an_elapsed_deadline_reports_timeout ... ok
+test exec::budget::snapshot_reason_tests::each_limit_reports_the_reason_check_would_raise ... ok
+test exec::budget::snapshot_reason_tests::snapshot_is_the_only_signal_a_worker_thread_can_see ... ok
+test exec::budget::snapshot_reason_tests::unbudgeted_snapshot_has_no_reason ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

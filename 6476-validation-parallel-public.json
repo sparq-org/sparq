@@ -1,0 +1,29 @@
+{
+  "label": "parallel-public",
+  "command": [
+    "python3",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/bounded-parallel-run.py",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/binary/parallel-public"
+  ],
+  "start_epoch": 1789018232.274092,
+  "seconds": 1.1871020793914795,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    6274146304,
+    96415744
+  ],
+  "after_free_growth": [
+    6273822720,
+    96419840
+  ],
+  "max_growth_bytes": 96419840,
+  "min_free_bytes": 6273822720,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

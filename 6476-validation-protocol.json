@@ -1,0 +1,28 @@
+{
+  "started_epoch": 1789017451.401721,
+  "head": "e0aa233d59321c5a437ced8c072d359b272b6222",
+  "max_seconds": 1200,
+  "target": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+  "target_initial_allocated_bytes": 394117120,
+  "free_initial_bytes": 5949349888,
+  "minimum_free_bytes": 2147483648,
+  "aggregate_growth_limit_bytes": 536870912,
+  "jobs": 1,
+  "offline": true,
+  "incremental": false,
+  "profile": {
+    "opt-level": 3,
+    "panic": "unwind",
+    "lto": false,
+    "codegen-units": 16,
+    "debug": false
+  },
+  "source_rule": "Fresh path-dependent engine at exact committed source; no reused production artifact claims. Copy actual budget module for private-state tests; public witness links fresh engine.",
+  "planned_checks": [
+    "Fresh default public four-case regression",
+    "Actual copied budget module full focused tests including snapshot/SERVICE-local tests; copied TLS differs from production TLS and cannot introspect public calls",
+    "omit-Limits/omit-sticky/omit-byte controls and internal-sibling sealing compile failure/control",
+    "No-parallel and relevant feature checks only within bounds; no workspace/wasm build"
+  ],
+  "no_performance_claim": true
+}

@@ -1,0 +1,26 @@
+--- crates/sparq-engine/src/exec.rs
++++ task-private/src/exec.rs
+@@ -2847,6 +2847,7 @@
+             let frags: Vec<(usize, String)> = scan_rows
+                 .par_chunks(chunk)
+                 .map(|rows| {
++                    budget_parallel_probe();
+                     // Coarse deadline re-check at the chunk boundary: once the wall-clock
+                     // deadline has passed, every later chunk produces nothing, so at most
+                     // the chunks already in flight (~one per worker) run to completion.
+@@ -22212,3 +22213,15 @@
+         );
+     }
+ }
++
++// GPT-6 Astra: task-private path/thread witness, absent from production.
++fn budget_parallel_probe() {
++    thread_local! { static SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
++    static GATE: std::sync::OnceLock<std::sync::Barrier> = std::sync::OnceLock::new();
++    SEEN.with(|seen| {
++        if !seen.replace(true) {
++            eprintln!("BUDGET_PROBE path=scan_json thread={:?}", std::thread::current().id());
++            GATE.get_or_init(|| std::sync::Barrier::new(2)).wait();
++        }
++    });
++}

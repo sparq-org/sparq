@@ -1,0 +1,155 @@
+{
+  "issue": 6476,
+  "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "source_status": "clean committed candidate for independent review, not merge approval",
+  "implementation_model": "GPT-6 Astra xhigh",
+  "source_files": {
+    "crates/sparq-engine/src/cache.rs": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "crates/sparq-engine/src/construct.rs": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5",
+    "crates/sparq-engine/src/exec.rs": "58cd125b945a3b2f08e99f8edc1a31164e9569422daa9b8d1a72bca66d703407",
+    "crates/sparq-engine/src/explain.rs": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+    "crates/sparq-engine/src/explain_json.rs": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+    "crates/sparq-engine/src/lib.rs": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "crates/sparq-engine/src/update.rs": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe"
+  },
+  "diff_sha256": "4040eb1026d33b1535c475121f3273b60408c7743e7477a0461a48a7506304ea",
+  "diffstat": {
+    "files": 7,
+    "insertions": 519,
+    "deletions": 208
+  },
+  "implementation": [
+    "Private Guard/install plus crate-visible synchronous with_budget FnOnce scope; full prior Limits and EXCEEDED restored on return/unwind",
+    "All14 production caller bodies mechanically preserved inside same scope; view guards outside, trace guard inside; nine prior test install scopes migrated",
+    "Limits/snapshot/hit/why/fanout restricted to exec and documented four synchronous production consumers; QueryBudget nested behavior documented"
+  ],
+  "validation": {
+    "fresh_public_final": {
+      "cases": [
+        "no nested call",
+        "unlimited nested ASK",
+        "explicit-budget nested ASK",
+        "nested parse error"
+      ],
+      "cancellation_enforced": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "baseline_enforced": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "each_callback_calls": 1,
+      "same_installing_thread": true,
+      "subsequent_top_level_ASK": true
+    },
+    "actual_module": {
+      "passed": 15,
+      "failed": 0,
+      "test_source": "exact complete copied budget module, including explicit caught top-level unwind cleanup",
+      "boundary": "Private copied TLS differs from linked production-library TLS; state tests exercise actual copied code, public callback tests call fresh production library. Not full engine Cargo test suite."
+    },
+    "mutants": [
+      {
+        "control": "final-omit-limits",
+        "compiled": true,
+        "passed": 2,
+        "failed": 5,
+        "failures": [
+          "exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind",
+          "exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep",
+          "exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel",
+          "exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget",
+          "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+        ]
+      },
+      {
+        "control": "final-omit-sticky",
+        "compiled": true,
+        "passed": 6,
+        "failed": 1,
+        "failures": [
+          "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+        ]
+      },
+      {
+        "control": "final-omit-bytes",
+        "compiled": true,
+        "passed": 4,
+        "failed": 3,
+        "failures": [
+          "exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind",
+          "exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget",
+          "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+        ]
+      }
+    ],
+    "internal_sibling_sealing": {
+      "sealed_E0603_errors": 4,
+      "opened_control_compile_exit": 0,
+      "runtime_executed": false
+    },
+    "production_parallel": {
+      "path": "scan JSON par_chunks before snapshot hit",
+      "two_distinct_Rayon_workers": true,
+      "fixture_rows": 60000,
+      "complete_rows_and_materialized_oracle_count": true,
+      "budget": "Cancellation owner installed, flag false; raw harness field armed_cancel=false denotes flag value, not absence of installed budget.",
+      "source": "Task-private exact engine copy plus one observer call/private helper; production has no observer. First observer call per worker rendezvous establishes two real workers; watchdog30sec; no timing/throughput claim."
+    },
+    "features": {
+      "cargo_default": "compiled; public four-case witness passed at final source",
+      "cargo_feature_bundle": [
+        "result-cache",
+        "explain-json",
+        "params",
+        "service-local",
+        "vectorized",
+        "cs-planner"
+      ],
+      "feature_bundle_result": "compiled and public four-case witness passed before final nine-line cfg(test)-only top-unwind assertion",
+      "no_parallel": "Actual engine compiled with no feature cfgs against existing pinned dependency artifacts, and public four-case witness passed. Core dependency remains parallel-enabled; not a full serial/wasm dependency-graph gate. Executed before cfg(test)-only final assertion.",
+      "clippy": "Direct installed clippy-driver -D warnings passed whole production library under affected-feature bundle and exact final copied budget tests. Cargo dependency-package clippy rejected feature selection, so no ordinary full Cargo clippy claim."
+    }
+  },
+  "failures_and_limits": [
+    "Initial shipping-profile build stopped on prior disk floor before engine compilation; preserved in frozen implementation bundle.",
+    "Serial Cargo --locked rejected changed feature lock; offline regenerated scratch lock changed package versions, rejected by subset assertion and never built. No package installed or production dependency changed; direct pinned-artifact engine feature-off check used instead.",
+    "Preflight exit1: Bash3 privacy script mapfile unavailable; other mechanical checks passed.",
+    "No full workspace tests/clippy, remote SERVICE build/runtime, wasm, Miri, or full ratchets run locally. Those remain required supported CI obligations.",
+    "Parallel snapshot witness covers one of four production fanouts dynamically; all four synchronous lifetimes audited in source. Raw Copy snapshot remains a trusted exec-internal boundary, not a type-level lifetime proof against arbitrary future escapes."
+  ],
+  "ownership_and_service": [
+    "Private scoped installer prevents caller-forgotten/out-of-order guards; borrowed budget and !Send marker retained. Each saved cancellation owner is borrowed by a live enclosing with_budget frame.",
+    "Snapshots synchronously join/collect before parent evaluation returns. No production snapshot consumer installs parent TLS on workers or returns raw Limits.",
+    "All three SERVICE byte savepoint paths restore only their parent transaction extra_bytes/sticky error. A synchronous nested with_budget may complete in a handler before parent interning/rollback; its full parent restoration makes this safe. A savepoint must not be applied while another frame is active. Existing code does not do so."
+  ],
+  "resources": {
+    "jobs": 1,
+    "incremental": false,
+    "offline": true,
+    "profile": "O3/unwind/no-LTO/codegen16 local correctness only",
+    "growth_limit": 536870912,
+    "free_floor": 2147483648,
+    "max_measured_growth": 138362880,
+    "min_measured_free": 2504892416,
+    "free_at_freeze": 5966749696,
+    "final_aggregate_growth_before_manifest": 149921792
+  },
+  "no_remote_mutations": true,
+  "no_admission_claim": true,
+  "toolchain": [
+    "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "binary: rustc",
+    "commit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+    "commit-date: 2026-07-14",
+    "host: aarch64-apple-darwin",
+    "release: 1.97.1",
+    "LLVM version: 22.1.6"
+  ]
+}

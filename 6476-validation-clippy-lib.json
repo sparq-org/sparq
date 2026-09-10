@@ -1,0 +1,41 @@
+{
+  "label": "clippy-lib",
+  "command": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+    "clippy",
+    "--manifest-path",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/public/Cargo.toml",
+    "--release",
+    "--locked",
+    "--offline",
+    "-p",
+    "sparq-engine",
+    "--lib",
+    "--features",
+    "result-cache,explain-json,params,service-local,vectorized,cs-planner",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "start_epoch": 1789017919.002201,
+  "seconds": 0.613048791885376,
+  "exit_code": 101,
+  "stop": null,
+  "before_free_growth": [
+    6284582912,
+    73850880
+  ],
+  "after_free_growth": [
+    6284537856,
+    73854976
+  ],
+  "max_growth_bytes": 73854976,
+  "min_free_bytes": 6284537856,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

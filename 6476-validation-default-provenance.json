@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-d082493c198a3f5b.rlib",
+    "bytes": 5286128,
+    "sha256": "982c72fa3aa9efdc9b514fd5fe4d7c773558158a529c30e7e3775ca08641db69"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-127354fe878a2f23.rlib",
+    "bytes": 2820408,
+    "sha256": "37e9d27afb0f2c35c565ce403d6f7c238e5ac40595b49cc2949fa50dc27e98be"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/sparq_engine-d082493c198a3f5b.d",
+    "bytes": 3606,
+    "sha256": "c0f711c9ffa37e47099cf19f6e0578f3a8c61de3b6fde41807c6692c4ead62b0"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/binary/public-default",
+    "bytes": 5239456,
+    "sha256": "68f8bae705194c49ea76410d6e83e0ea303b936fe472f7bf6db0ad8d0a806b12"
+  }
+]

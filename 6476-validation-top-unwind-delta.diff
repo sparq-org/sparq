@@ -1,0 +1,20 @@
+diff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs
+index d239a258a..be8bfb606 100644
+--- a/crates/sparq-engine/src/exec.rs
++++ b/crates/sparq-engine/src/exec.rs
+@@ -567,6 +567,15 @@ pub(crate) mod budget {
+                 assert!(check(8).is_err());
+             });
+             assert_state(OFF, None);
++            let top_level_panic = std::panic::catch_unwind(|| {
++                with_budget(&outer, || {
++                    set_width(9);
++                    add_bytes(5000);
++                    panic!("controlled top-level unwind");
++                });
++            });
++            assert!(top_level_panic.is_err());
++            assert_state(OFF, None);
+         }
+ 
+         #[test]

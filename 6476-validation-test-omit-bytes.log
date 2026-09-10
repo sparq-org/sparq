@@ -1,0 +1,42 @@
+
+running 7 tests
+test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... FAILED
+test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok
+test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok
+test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok
+test exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget ... FAILED
+test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok
+test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... FAILED
+
+failures:
+
+---- exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind stdout ----
+
+thread 'exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind' (3950820) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/omit-bytes.rs:458:13:
+assertion `left == right` failed
+  left: 4
+ right: 8
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget stdout ----
+
+thread 'exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget' (3950834) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/omit-bytes.rs:458:13:
+assertion `left == right` failed
+  left: 4
+ right: 12
+
+---- exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children stdout ----
+
+thread 'exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children' (3950838) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/omit-bytes.rs:459:13:
+assertion `left == right` failed
+  left: 0
+ right: 129
+
+
+failures:
+    exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind
+    exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget
+    exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children
+
+test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.02s
+

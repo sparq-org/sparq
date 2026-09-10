@@ -1,0 +1,5 @@
+case=None callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+case=Unlimited callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+case=ExplicitBudget callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+case=ParseError callback_calls=1 same_thread=true cancel=true enforced=true result=Err("query budget exceeded (cancelled)")
+outer_cancellation_enforced=[true, true, true, true]

@@ -1,0 +1,51 @@
+error[E0603]: struct `Guard` is private
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:862:68
+    |
+862 |     pub fn escaped(b: &crate::QueryBudget) -> crate::exec::budget::Guard<'_> {
+    |                                                                    ^^^^^ private struct
+    |
+note: the struct `Guard` is defined here
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:136:5
+    |
+136 |     struct Guard<'a> {
+    |     ^^^^^^^^^^^^^^^^
+
+error[E0603]: function `install` is private
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:863:30
+    |
+863 |         crate::exec::budget::install(b)
+    |                              ^^^^^^^ private function
+    |
+note: the function `install` is defined here
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:149:5
+    |
+149 |     fn install(b: &QueryBudget) -> Guard<'_> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0603]: struct `Limits` is private
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:865:47
+    |
+865 |     pub fn detached() -> crate::exec::budget::Limits { crate::exec::budget::snapshot() }
+    |                                               ^^^^^^ private struct
+    |
+note: the struct `Limits` is defined here
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:40:5
+    |
+ 40 |     pub(in crate::exec) struct Limits {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0603]: function `snapshot` is private
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:865:77
+    |
+865 |     pub fn detached() -> crate::exec::budget::Limits { crate::exec::budget::snapshot() }
+    |                                                                             ^^^^^^^^ private function
+    |
+note: the function `snapshot` is defined here
+   --> /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/sealed.rs:256:5
+    |
+256 |     pub(in crate::exec) fn snapshot() -> Limits {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 4 previous errors
+
+For more information about this error, try `rustc --explain E0603`.

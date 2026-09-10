@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-10T05:49:13.020467+00:00",
+  "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+  "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "clean": true,
+  "manifest_sha256": "36eea69fbae564fd6fcf362889e47cdc99a7d7efea74e6946197417b87155dcf",
+  "files": 205,
+  "bytes": 111868602,
+  "source_byte_verified": [
+    "crates/sparq-engine/src/cache.rs",
+    "crates/sparq-engine/src/construct.rs",
+    "crates/sparq-engine/src/exec.rs",
+    "crates/sparq-engine/src/explain.rs",
+    "crates/sparq-engine/src/explain_json.rs",
+    "crates/sparq-engine/src/lib.rs",
+    "crates/sparq-engine/src/update.rs"
+  ],
+  "packet_bytes": 138576,
+  "packet_sha256": "35d79d3037e767a6bf8df9a43f6c8eb531020423a15a38efba61d4b5e88de200",
+  "privacy_pattern_hits": [],
+  "diff_byte_verified": true,
+  "named_final_result_exit_codes_verified": true,
+  "raw_public_module_parallel_observations_read": true
+}

@@ -1,0 +1,7 @@
+{
+  "path": "public-review-packet.md",
+  "no_local_absolute_paths": true,
+  "no_raw_environment_logs": true,
+  "no_personal_identifiers": true,
+  "repository_relative_source_only": true
+}

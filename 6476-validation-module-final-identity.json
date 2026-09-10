@@ -1,0 +1,7 @@
+{
+  "exec_sha256": "58cd125b945a3b2f08e99f8edc1a31164e9569422daa9b8d1a72bca66d703407",
+  "module_sha256": "8752d0c367cb698a7a417cdb577135439480dd4efe2e32b194bd5a4e6d72c98c",
+  "module_first_line": 68,
+  "module_last_line": 930,
+  "change_from_initial": "Explicit caught top-level unwind/idle cleanup assertion inside existing test; no always-compiled code delta"
+}

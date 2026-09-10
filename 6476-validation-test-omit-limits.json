@@ -1,0 +1,29 @@
+{
+  "label": "test-omit-limits",
+  "command": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/binary/omit-limits",
+    "exec::budget::nested_budget_tests::",
+    "--test-threads=1"
+  ],
+  "start_epoch": 1789017676.295419,
+  "seconds": 1.2079288959503174,
+  "exit_code": 101,
+  "stop": null,
+  "before_free_growth": [
+    6178353152,
+    42844160
+  ],
+  "after_free_growth": [
+    6178168832,
+    42848256
+  ],
+  "max_growth_bytes": 42848256,
+  "min_free_bytes": 6178168832,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

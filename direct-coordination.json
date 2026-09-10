@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T05:29:26.557951+00:00",
+  "updated_at": "2026-09-10T05:52:18.165681+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Fresh public witness repaired; remaining scoped tests/controls running",
-    "state": "Agent reports matched-profile fresh build success and exact public witness repaired to all four cases enforced. Root verification pending final frozen validation packet.",
+    "phase": "Final implemented-source Opus review running",
+    "state": "Clean bcba candidate and 205-file validation bundle root-verified. Final public witness4/4, exact copied module15/15, three mutants killed, internal seal calibrated, one actual production snapshot path observed on two workers. No merge or full-CI approval claimed.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,9 +85,9 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Reuse same Astra lane to perform bounded matched warm-profile validation after resource assessment. Preserve complete gates and evidence.",
-      "Review actual final implemented source and validation with Claude Opus 5 xhigh before protected publication.",
-      "Continue normal protected PR/queue/main verification; registry remains off."
+      "Collect actual Opus final review32484 once; verify output/model/precise reviewed head.",
+      "Collect same-agent publication-readiness packet; no duplicate work.",
+      "If findings clear, fresh main/issue/branch/PR dedupe and budget checks, then normal PR publication/full CI; no invented review:pass."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -161,20 +161,20 @@
       "output_sha256": "c2dd7517cbf616c8e265e91d08653e6f9fc7f24c50550990ceacf95e6e6ce4eb"
     },
     "implementation": {
-      "state": "bounded scoped validation running",
+      "state": "completed_frozen_root_verified",
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
-      "directory": "direct-6476/implementation",
+      "directory": "direct-6476/validation",
       "started_at": "2026-09-10T04:54:38.540163+00:00",
       "scope": "Private restoringGuard/install; scoped with_budget FnOnce seam;14caller scopeequivalence; full Limits+EXCEEDED restore; narrowed rawsnapshot visibility/lifetime comments; QueryBudget behavior docs; calibratedruntime/state/unwind/parallel tests andcontrols.",
       "source_review": "Opus design approvedwithconditions, not implementationapproval. SERVICE savepointstraddling mustbeassessed forsameouterstateafterreturnednestedcall, not prohibitedwithoutcause.",
       "constraints": "Existing lane only; exact warm profile must be confirmed before build. One compiler process at a time, jobs1, incrementalOFF/offline; stop free<2GiB OR aggregate task output/target allocated growth>512MiB. No fullworkspace/wasm build, broad cleanup, remote push/model/EC2/release. Keep frozen draft and reproduction immutable.",
-      "head": "e0aa233d59321c5a437ced8c072d359b272b6222",
-      "manifest_sha256": "bd5db57c5fd83cac7c3998a06b5701bd5da6980d480b263e8428d6c15316ba39",
-      "root_verification": "direct-6476/admission/implementation-draft-root-verification.json",
-      "tests_executed": false,
-      "build_result": "Stopped initial mismatched release-profile dependency rebuild at operational disk reserve before engine compile. No source compiler error reached.",
+      "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "manifest_sha256": "36eea69fbae564fd6fcf362889e47cdc99a7d7efea74e6946197417b87155dcf",
+      "root_verification": "direct-6476/admission/final-validation-root-verification.json",
+      "tests_executed": true,
+      "build_result": "Fresh native default production library and affected-feature bundle built; exact local scope/serial graph/direct clippy limitations retained in report.",
       "profile_assessment": {
         "directory": "direct-6476/profile-assessment",
         "manifest_sha256": "568bacf710150b00f720ab569098aafbd70f362caef77788dc2310e3fe229fa7",
@@ -185,8 +185,130 @@
         "fresh_engine_build": "Agent reports success in matched warm profile; aggregate growth approximately25MB. Root waiting frozen final evidence.",
         "public_callback": "Freshly linked four-case witness reports enforced=[true,true,true,true], versus baseline=[true,false,false,true].",
         "remaining": "Actual-module tests, calibrated mutants, internal sealing control, production >1-worker snapshot witness, final clean commit/packet, actual Opus final review."
+      },
+      "manifest_files": 205,
+      "report": "direct-6476/validation/report.json",
+      "validation_summary": {
+        "fresh_public_final": {
+          "cases": [
+            "no nested call",
+            "unlimited nested ASK",
+            "explicit-budget nested ASK",
+            "nested parse error"
+          ],
+          "cancellation_enforced": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "baseline_enforced": [
+            true,
+            false,
+            false,
+            true
+          ],
+          "each_callback_calls": 1,
+          "same_installing_thread": true,
+          "subsequent_top_level_ASK": true
+        },
+        "actual_module": {
+          "passed": 15,
+          "failed": 0,
+          "test_source": "exact complete copied budget module, including explicit caught top-level unwind cleanup",
+          "boundary": "Private copied TLS differs from linked production-library TLS; state tests exercise actual copied code, public callback tests call fresh production library. Not full engine Cargo test suite."
+        },
+        "mutants": [
+          {
+            "control": "final-omit-limits",
+            "compiled": true,
+            "passed": 2,
+            "failed": 5,
+            "failures": [
+              "exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind",
+              "exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep",
+              "exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel",
+              "exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget",
+              "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+            ]
+          },
+          {
+            "control": "final-omit-sticky",
+            "compiled": true,
+            "passed": 6,
+            "failed": 1,
+            "failures": [
+              "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+            ]
+          },
+          {
+            "control": "final-omit-bytes",
+            "compiled": true,
+            "passed": 4,
+            "failed": 3,
+            "failures": [
+              "exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind",
+              "exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget",
+              "exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children"
+            ]
+          }
+        ],
+        "internal_sibling_sealing": {
+          "sealed_E0603_errors": 4,
+          "opened_control_compile_exit": 0,
+          "runtime_executed": false
+        },
+        "production_parallel": {
+          "path": "scan JSON par_chunks before snapshot hit",
+          "two_distinct_Rayon_workers": true,
+          "fixture_rows": 60000,
+          "complete_rows_and_materialized_oracle_count": true,
+          "budget": "Cancellation owner installed, flag false; raw harness field armed_cancel=false denotes flag value, not absence of installed budget.",
+          "source": "Task-private exact engine copy plus one observer call/private helper; production has no observer. First observer call per worker rendezvous establishes two real workers; watchdog30sec; no timing/throughput claim."
+        },
+        "features": {
+          "cargo_default": "compiled; public four-case witness passed at final source",
+          "cargo_feature_bundle": [
+            "result-cache",
+            "explain-json",
+            "params",
+            "service-local",
+            "vectorized",
+            "cs-planner"
+          ],
+          "feature_bundle_result": "compiled and public four-case witness passed before final nine-line cfg(test)-only top-unwind assertion",
+          "no_parallel": "Actual engine compiled with no feature cfgs against existing pinned dependency artifacts, and public four-case witness passed. Core dependency remains parallel-enabled; not a full serial/wasm dependency-graph gate. Executed before cfg(test)-only final assertion.",
+          "clippy": "Direct installed clippy-driver -D warnings passed whole production library under affected-feature bundle and exact final copied budget tests. Cargo dependency-package clippy rejected feature selection, so no ordinary full Cargo clippy claim."
+        }
+      },
+      "resources": {
+        "jobs": 1,
+        "incremental": false,
+        "offline": true,
+        "profile": "O3/unwind/no-LTO/codegen16 local correctness only",
+        "growth_limit": 536870912,
+        "free_floor": 2147483648,
+        "max_measured_growth": 138362880,
+        "min_measured_free": 2504892416,
+        "free_at_freeze": 5966749696,
+        "final_aggregate_growth_before_manifest": 149921792
       }
-    }
+    },
+    "final_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 32484,
+      "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6476/admission/opus-final-input.md",
+      "input_sha256": "dab1182ce3760c72131e5058246d45419824a04870c91004dec33f0d61704856",
+      "input_bytes": 141446,
+      "output": "direct-6476/admission/opus-final-review.json",
+      "started_at": "2026-09-10T05:50:56.532057+00:00",
+      "collect_policy": "Collect session32484 once before reading output; verify outer result success and actual modelUsage. Do not relaunch or retry exhausted budget. No source mutation during review."
+    },
+    "agent_state": "Same Astra agent doing bounded read-only publication-readiness/feature-off V2 preparation, no builds/source edits/models"
   },
   "prs": {
     "4300": {

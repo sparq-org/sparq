@@ -1,0 +1,30 @@
+[
+  {
+    "control": "omit-limits",
+    "compile_exit": 0,
+    "test_exit": 101,
+    "executed": true
+  },
+  {
+    "control": "omit-sticky",
+    "compile_exit": 0,
+    "test_exit": 101,
+    "executed": true
+  },
+  {
+    "control": "omit-bytes",
+    "compile_exit": 0,
+    "test_exit": 101,
+    "executed": true
+  },
+  {
+    "control": "sealed",
+    "compile_exit": 1,
+    "executed_runtime": false
+  },
+  {
+    "control": "opened-control",
+    "compile_exit": 0,
+    "executed_runtime": false
+  }
+]

@@ -1,0 +1,54 @@
+{
+  "label": "compile-opened-control",
+  "command": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "--edition",
+    "2021",
+    "--crate-type",
+    "lib",
+    "--emit",
+    "metadata",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/opened-control.rs",
+    "--cfg",
+    "feature=\"parallel\"",
+    "--cfg",
+    "feature=\"service-local\"",
+    "-C",
+    "opt-level=0",
+    "-C",
+    "debuginfo=0",
+    "-C",
+    "panic=unwind",
+    "-o",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/opened-control.rmeta",
+    "-L",
+    "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+    "--extern",
+    "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-d082493c198a3f5b.rlib",
+    "--extern",
+    "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-127354fe878a2f23.rlib",
+    "--extern",
+    "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib"
+  ],
+  "start_epoch": 1789017681.6632729,
+  "seconds": 0.6425840854644775,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    6165114880,
+    55562240
+  ],
+  "after_free_growth": [
+    6165049344,
+    55599104
+  ],
+  "max_growth_bytes": 55599104,
+  "min_free_bytes": 6165049344,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

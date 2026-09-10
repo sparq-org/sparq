@@ -1,0 +1,11 @@
+commit bcba08207b03714a25ad7a2a4774370c7f6f6bfa
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 06:11:31 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 06:33:51 2026 +0100
+
+    fix: restore outer query budgets after nested evaluations
+    
+    Seal installation behind a private RAII scope and restore the complete prior limits and sticky error. Preserve all 14 production caller scopes, constrain raw snapshots to exec, and pin nested, unwind, cancellation, and byte-savepoint behavior.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

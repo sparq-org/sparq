@@ -1,0 +1,3 @@
+{"$message_type":"artifact","artifact":"/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/parallel-probe/lib/sparq_engine-parallelprobe6476.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/parallel-probe/lib/libsparq_engine-parallelprobe6476.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/parallel-probe/lib/libsparq_engine-parallelprobe6476.rlib","emit":"link"}

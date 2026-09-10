@@ -1,0 +1,25 @@
+
+running 7 tests
+test exec::budget::nested_budget_tests::exact_parent_state_survives_three_levels_ok_err_and_unwind ... ok
+test exec::budget::nested_budget_tests::expired_parent_deadline_returns_after_unlimited_child_without_sleep ... ok
+test exec::budget::nested_budget_tests::live_parent_cancel_is_distinct_from_child_cancel ... ok
+test exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel ... ok
+test exec::budget::nested_budget_tests::service_savepoint_brackets_a_fully_returned_nested_budget ... ok
+test exec::budget::nested_budget_tests::snapshots_join_two_workers_before_parent_cancel_owner_returns ... ok
+test exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children ... FAILED
+
+failures:
+
+---- exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children stdout ----
+
+thread 'exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children' (3965473) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/final-omit-sticky.rs:463:13:
+assertion `left == right` failed
+  left: None
+ right: Some("max-rows")
+
+
+failures:
+    exec::budget::nested_budget_tests::sticky_parent_errors_survive_clean_and_exhausted_children
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+

@@ -1,0 +1,11 @@
+--- actual-budget-final.rs
++++ final-omit-limits.rs
+@@ -141,7 +141,7 @@
+     }
+     impl Drop for Guard<'_> {
+         fn drop(&mut self) {
+-            ACTIVE.with(|a| a.set(self.previous));
++            ACTIVE.with(|a| a.set(OFF));
+             EXCEEDED.with(|e| e.set(self.exceeded));
+         }
+     }

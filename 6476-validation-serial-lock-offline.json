@@ -1,0 +1,31 @@
+{
+  "label": "serial-lock-offline",
+  "command": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+    "generate-lockfile",
+    "--manifest-path",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/serial/Cargo.toml",
+    "--offline"
+  ],
+  "start_epoch": 1789017873.0459368,
+  "seconds": 0.6484353542327881,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    6275629056,
+    73838592
+  ],
+  "after_free_growth": [
+    6277562368,
+    73834496
+  ],
+  "max_growth_bytes": 73838592,
+  "min_free_bytes": 6275620864,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

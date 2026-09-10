@@ -1,0 +1,11 @@
+{
+  "source": "crates/sparq-engine/src/exec.rs",
+  "source_sha256": "207f3abe106301d11a9d57da212b7026612e53bd17c1b4b4a03072a7cd5ca247",
+  "module_start_line": 68,
+  "module_end_line": 921,
+  "module_sha256": "3af2801ecd4f349060a071a22f37abfd4a6380cbf4e0c553d70e0f7562a5dbc3",
+  "copied_module_exact": true,
+  "private_tls_is_distinct_from_linked_production_library": true,
+  "public_calls_link_fresh_engine": true,
+  "test_markers": 15
+}

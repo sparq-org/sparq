@@ -1,0 +1,34 @@
+{
+  "label": "build-default",
+  "command": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+    "build",
+    "--manifest-path",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/public/Cargo.toml",
+    "--release",
+    "--locked",
+    "--offline",
+    "-vv"
+  ],
+  "start_epoch": 1789017479.163871,
+  "seconds": 51.33977007865906,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    5768134656,
+    40960
+  ],
+  "after_free_growth": [
+    6052397056,
+    25010176
+  ],
+  "max_growth_bytes": 25010176,
+  "min_free_bytes": 2504892416,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}

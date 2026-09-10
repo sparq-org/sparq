@@ -1,0 +1,46 @@
+{
+  "label": "compile-public-serial",
+  "command": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "--edition",
+    "2021",
+    "-C",
+    "opt-level=3",
+    "-C",
+    "panic=unwind",
+    "-C",
+    "debuginfo=0",
+    "-L",
+    "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+    "--extern",
+    "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-127354fe878a2f23.rlib",
+    "--extern",
+    "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/public/src/main.rs",
+    "--extern",
+    "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/direct-serial/libsparq_engine-direct-serial.rlib",
+    "-o",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6476/validation/binary/public-serial"
+  ],
+  "start_epoch": 1789018213.6622138,
+  "seconds": 2.2653331756591797,
+  "exit_code": 0,
+  "stop": null,
+  "before_free_growth": [
+    6291681280,
+    81498112
+  ],
+  "after_free_growth": [
+    6287929344,
+    84684800
+  ],
+  "max_growth_bytes": 84684800,
+  "min_free_bytes": 6287929344,
+  "env": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+  }
+}
