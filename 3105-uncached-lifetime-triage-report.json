@@ -1,0 +1,94 @@
+{
+  "author": "GPT-6 Astra, xhigh; source-only assessment",
+  "created_at_utc": "2026-09-10T03:15:48.279678+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
+  "clean_before_and_after": true,
+  "verdict": "claimed_ndv_overlap_refuted_by_lexical_scope; no_source_change_recommended",
+  "finding": {
+    "head": {
+      "else_scope": [
+        4250,
+        4290
+      ],
+      "uncached_declaration": 4254,
+      "spare_slot_declaration": 4255,
+      "join_assignments": [
+        4280,
+        4284,
+        4288
+      ],
+      "ndv_call": 4291
+    },
+    "base": {
+      "else_scope": [
+        4235,
+        4257
+      ],
+      "owned_join_assignments": [
+        4251,
+        4253,
+        4255
+      ],
+      "ndv_call": 4258
+    }
+  },
+  "reasoning": [
+    "The uncached Option<Bindings> and spare slot are local to the non-bind else block. That block ends on line 4290, before the next statement record_pattern_ndv on line 4291. They cannot carry their owned RHS buffers into that next statement.",
+    "Borrowed join functions return owned Bindings (Vec fields, no lifetime parameter), so the resulting relation does not retain a reference to the scratch owner. Their corresponding owned wrappers merely call the borrowed kernel with their owned inputs.",
+    "With reuse disabled the cache slot vector is empty and remaining allowance is zero. The per-step spare slot and uncached scratch both end at the same else boundary, including a possible zero-charge empty result stored in the spare slot.",
+    "Main consumes the RHS into the owned join and destroys those inputs at function exit before assignment completes. Final borrows it during that same join and destroys its scratch at the immediately following else boundary. There is no intervening production allocation or NDV call establishing the claimed additional peak.",
+    "Eligible fitting entries intentionally persist in the outer RHS cache when reuse is enabled, within the per-invocation retained-storage allowance. That distinct behavior is not evidence for the suppressed disabled-reuse claim."
+  ],
+  "minimal_remedy": "No runtime correction is justified. Reply with exact head lines 4254, 4290 and 4291. Preserve the current nested scope; do not introduce a redundant drop, source comment or ownership refactor solely for this claim.",
+  "limits": [
+    "No compiler, test, benchmark, allocator probe or remote request was run in this task. This is source lifetime reasoning, not a new measured equality of peak heap or cumulative RSS.",
+    "Input destruction moves from owned kernel return to the immediately following branch-scope boundary; no guarantee of identical physical allocator behavior or target machine scheduling is asserted.",
+    "This finding does not clear PR holds, establish all CI passing, or replace the existing performance/admission assessment. No scope beyond the named finding was audited."
+  ],
+  "source_hashes": {
+    "e53464c73f31f7aca800f3867ac054c36408e346": "71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd",
+    "ed66ef0931fa19dd521fac433870c86a78687a30": "098a3af6a14c483910750ca3b0d032c4f004633222ad0394f948c394aeb16566"
+  },
+  "source_size_bytes": {
+    "e53464c73f31f7aca800f3867ac054c36408e346": 1023539,
+    "ed66ef0931fa19dd521fac433870c86a78687a30": 1053225
+  },
+  "actions": {
+    "source_edits": 0,
+    "builds": 0,
+    "tests": 0,
+    "network_calls": 0,
+    "model_calls": 0,
+    "remote_mutations": 0
+  },
+  "commands_for_frozen_source_evidence": [
+    [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    [
+      "git",
+      "status",
+      "--porcelain"
+    ],
+    [
+      "git",
+      "show",
+      "e53464c73f31f7aca800f3867ac054c36408e346:crates/sparq-engine/src/exec.rs"
+    ],
+    [
+      "git",
+      "show",
+      "ed66ef0931fa19dd521fac433870c86a78687a30:crates/sparq-engine/src/exec.rs"
+    ],
+    [
+      "git",
+      "status",
+      "--porcelain"
+    ]
+  ],
+  "available_disk_bytes_at_finish": 9149460480
+}

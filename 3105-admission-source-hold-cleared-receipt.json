@@ -1,0 +1,27 @@
+{
+  "at": "2026-09-10T03:16:02.704711+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "own_hold_removed": true,
+  "labels": [
+    {
+      "id": 11550950980,
+      "node_id": "LA_kwDOSz3qKM8AAAACsH2GRA",
+      "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:bench",
+      "name": "area:bench",
+      "color": "0e8a16",
+      "default": false,
+      "description": "workspace crate/area"
+    },
+    {
+      "id": 11551729069,
+      "node_id": "LA_kwDOSz3qKM8AAAACsIllrQ",
+      "url": "https://api.github.com/repos/sparq-org/sparq/labels/area:sparq-engine",
+      "name": "area:sparq-engine",
+      "color": "1d76db",
+      "default": false,
+      "description": "Work scoped to crates/sparq-engine"
+    }
+  ],
+  "all_existing_threads_resolved_before_mutation": true,
+  "no_new_code_or_review_pass_or_queue_mutation": true
+}

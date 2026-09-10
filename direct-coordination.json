@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T03:13:58.331113+00:00",
+  "updated_at": "2026-09-10T03:17:37.029619+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,14 +67,14 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Current-head CI running; actual Copilot suppressed uncached-RHS lifetime finding assigned to same Astra lane for read-only source triage",
+    "phase": "Source review findings resolved; current-head protected CI running",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
-    "worktree_state": "Clean ed66; author read-only source triage, no builds/edits authorized.",
+    "worktree_state": "Clean ed66; author idle, no commands running.",
     "directory": "direct-3105",
-    "state": "ed66 published and actual Opus source-approved for CI; 24 allocation +40 System timings root verified and tradeoff accepted. Own review:changes hold remains pending new lifetime finding.",
+    "state": "PR6477 ed66 open and source-cleared; own review:changes removed after fresh exact-head revalidation. All existing threads resolved; no fabricated review:pass/VERDICT and no queue mutation. Waiting full CI.",
     "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
     "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
     "readiness": "direct-6475/source-admission/perf3105-readiness.json",
@@ -143,10 +143,11 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "Collect same-author uncached lifetime triage; if real, minimal lifetime correction and calibrated regression test, then actual Opus delta review before publication.",
-      "Fresh CI for ed66 has62 success6skipped22queued20in_progress and no failures at03:11; let protected jobs run.",
-      "Original memory thread is already resolved/outdated by fresh GitHub observation; do not claim coordinator resolved it. Own hold stays for new suppressed finding.",
-      "No duplicate Copilot request or CI rerun; preserve current evidence and all other holds, registry OFF, no releases."
+      "At next scheduled observation read current exact-head required CI/gate and all reviews/threads; do not poll repeatedly while jobs are in progress.",
+      "If actual full CI green and no new blocker, revalidate main/head/labels/threads and admit through normal protected merge queue with expectedHeadOid ed66ef0931fa19dd521fac433870c86a78687a30, jump=false. No force/admin/review:pass fabrication.",
+      "If CI fails, diagnose named failure with same Astra lane; preserve evidence and live merge-group runs. No blind reruns or retry after budget exhaustion.",
+      "After protected merge verify reviewed code on main and postmerge CI; issue3105 remains open for planner/hash reuse. Choose next ready bounded SPARQL lane afterwards.",
+      "Keep registry Actions OFF, all unrelated approval/operator holds, ALLGREEN and no releases; no EC2."
     ],
     "coverage": {
       "agent": "/root/postmerge_ci",
@@ -269,22 +270,33 @@
       "commands_running": false
     },
     "uncached_lifetime": {
-      "state": "source_triage_running",
+      "state": "completed_frozen_root_verified",
       "agent": "/root/postmerge_ci",
       "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
       "directory": "direct-3105/uncached-lifetime-triage",
       "source": "Copilot current-head review 2026-09-10T03:05:43Z, suppressed comment at exec.rs4289",
-      "scope": "Compare uncached RHS drop point with baseline consuming join; no edits/builds/network/model calls yet."
+      "scope": "Compare uncached RHS drop point with baseline consuming join; no edits/builds/network/model calls yet.",
+      "manifest_files": 5,
+      "manifest_sha256": "9587d1ea11eed25f8b5c9597b5386fcfa6a0682b7443142810af82baa2ab8bb2",
+      "verdict": "Claimed NDV overlap refuted by lexical scope; no production correction warranted.",
+      "root_verification": "direct-3105/admission/uncached-lifetime-root-verification.json"
     },
     "current_ci": {
-      "at": "2026-09-10T03:11:00Z",
+      "at": "2026-09-10T03:16:39.494511+00:00",
       "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
       "gate_run": 34431706773,
       "gate_job": 102728401318,
       "state": "in_progress",
-      "checks": "direct-3105/admission/checks-live-0311.json"
+      "checks": "direct-3105/admission/current-ci-after-hold.json",
+      "counts": {
+        "success": 97,
+        "skipped": 21,
+        "in_progress": 19,
+        "queued": 3
+      },
+      "notes": "No failures. Actual current-head wasm build and initial feature-off exact-equality completed SUCCESS. Normal label-triggered duplicate feature-off run in progress; do not cancel."
     },
-    "publication_assessment": "direct-3105/admission/assessed-publication-receipt.json"
+    "publication_assessment": "direct-3105/admission/source-hold-cleared-receipt.json"
   },
   "prs": {
     "4300": {
@@ -674,26 +686,19 @@
       }
     },
     "6477": {
-      "state": "OPEN_REVIEW_CHANGES_MEMORY_REGRESSION",
-      "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
-      "branch": "codex/capped-rhs-reuse",
+      "state": "OPEN_AWAITING_CURRENT_HEAD_CI",
       "issue": 3105,
-      "isDraft": false,
-      "url": "https://github.com/sparq-org/sparq/pull/6477",
-      "hold": "Coordinatorappliedreview:changes forrealmeasuredmemoryNO_GO; canclearwhenfix independentlyreviewed+verified, notpendingownerapproval.",
-      "hold_comment": "https://github.com/sparq-org/sparq/pull/6477#issuecomment-5611720556",
-      "review": "ActualOpus5xhigh11803approve_for_ci, notmerge. ActualCopilotsamememoryfinding.",
-      "copilot_thread": "PRRT_kwDOSz3qKM6g6CZs",
-      "copilot_comment": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3974906548",
-      "latest_checks": "19763terminal254success53skip3fail; gateand2undeclaredwasm-equalityruns. Newed66unpublished.",
-      "wasm_diagnosis": "Intentionalsemanticdefault-onenginecode: base1560241/head1560595,+354bytes. ExistingV2declarationmissing; autodeclarecorrectlyfailssemanticblanking. Documentintentinnextrevieweddiff; sizefloorunchanged. No metadata-only orneutralityclaim.",
-      "evidence": [
-        "direct-3105/admission/pr-created.json",
-        "direct-3105/admission/pr-held-checks.json",
-        "direct-3105/admission/wasm-equality-job.log",
-        "direct-3105/admission/copilot-threads.json"
-      ],
-      "closure": "Refs3105only; planner/hashbuildhoistingunimplemented, issueOPEN."
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "branch": "codex/capped-rhs-reuse",
+      "source_review": "Actual Opus5 xhigh approve_for_ci; completed40 System timings accepted by root. Copilot unboundedmemory addressed; new suppressed scopefinding refuted with source and public reply.",
+      "own_hold_removed_at": "2026-09-10T03:16:02.704711+00:00",
+      "reply": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3975074265",
+      "threads": "All resolved on fresh preclear observation",
+      "gate_run": 34431706773,
+      "gate_state": "in_progress",
+      "latest_evidence": "direct-3105/admission/current-ci-after-hold.json",
+      "scope": "Partial #3105 scanreuse only; Refs, not Closes.",
+      "performance": "Local advisory fullmiss-14.48%,firsthit+2.06%,5/8patterns-7.37%/-5.04%. Bounded4MiB perinvocation; manycaseextra~2.24million requestedpeakbytes. No universal or canonical claim."
     }
   },
   "registry": {

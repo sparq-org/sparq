@@ -1,0 +1,241 @@
+ed66ef0931fa19dd521fac433870c86a78687a30:crates/sparq-engine/src/exec.rs
+
+Lines 4170-4195
+4170:     }
+4171:     let (pat_filters, residual) = split_sargable(graph, patterns, filters);
+4172:     let pfilter = |i: usize| -> Option<(usize, ScanCmp)> { pat_filters.get(i).copied().flatten() };
+4173:     let prepared = prepare_bgp(graph, patterns)?;
+4174:     if prepared.iter().any(|p| p.unsatisfiable) {
+4175:         return Ok(Some(Bindings::unsorted(collect_vars(patterns), vec![])));
+4176:     }
+4177:     if cap == 0 {
+4178:         // Zero rows requested: an empty partial answer is valid under the contract
+4179:         // (`|result| >= cap` — the caller's slice truncates to nothing either way).
+4180:         return Ok(Some(Bindings::unsorted(collect_vars(patterns), vec![])));
+4181:     }
+4182:     let seed = goo_seed(&prepared);
+4183:     let seed_sort_col = goo_seed_sort(&prepared, seed, pfilter(seed).map(|(c, _)| c));
+4184:     let seed_all = scan_to_bindings(
+4185:         graph,
+4186:         &prepared[seed].id_pat,
+4187:         &prepared[seed].pos_vars,
+4188:         seed_sort_col,
+4189:         pfilter(seed),
+4190:         None,
+4191:         #[cfg(feature = "semijoin-bitmap")]
+4192:         None,
+4193:     );
+4194: 
+4195:     #[cfg(test)]
+
+Lines 4235-4297
+4235:             // block is much smaller than the pattern; else merge / hash / cross.
+4236:             let connecting: Vec<Variable> =
+4237:                 result.vars.iter().filter(|v| prepared[i].var_pos(v).is_some()).cloned().collect();
+4238:             if connecting.len() == 1
+4239:                 && distinct_pattern_vars(&prepared[i].pos_vars)
+4240:                 && result.rows.len().saturating_mul(8) < prepared[i].est
+4241:             {
+4242:                 let jv = &connecting[0];
+4243:                 let rk = result.col(jv).unwrap();
+4244:                 let pp = prepared[i].var_pos(jv).unwrap();
+4245:                 #[cfg(test)]
+4246:                 capped_rhs_tests::observe(3);
+4247:                 #[cfg(test)]
+4248:                 capped_rhs_tests::step(start, i, "bind", None, false, None);
+4249:                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
+4250:             } else {
+4251:                 let filt = pfilter(i);
+4252:                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
+4253:                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
+4254:                 let mut uncached = None;
+4255:                 let mut spare_slot = None;
+4256:                 let slot = rhs_cache.get_mut(i).unwrap_or(&mut spare_slot);
+4257:                 #[cfg(test)]
+4258:                 let mut scanned = false;
+4259:                 let rhs = capped_rhs(slot, &mut rhs_remaining, &mut uncached, scan_sort, || {
+4260:                     #[cfg(test)]
+4261:                     {
+4262:                         capped_rhs_tests::observe(2);
+4263:                         scanned = true;
+4264:                     }
+4265:                     scan_to_bindings(
+4266:                         graph,
+4267:                         &prepared[i].id_pat,
+4268:                         &prepared[i].pos_vars,
+4269:                         scan_sort,
+4270:                         filt,
+4271:                         None,
+4272:                         #[cfg(feature = "semijoin-bitmap")]
+4273:                         None,
+4274:                     )
+4275:                 });
+4276:                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
+4277:                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
+4278:                     #[cfg(test)]
+4279:                     capped_rhs_tests::step(start, i, "merge", scan_sort, scanned, rhs.sorted_by.as_ref());
+4280:                     result = merge_join_ref(&result, rhs, &jv);
+4281:                 } else if connected {
+4282:                     #[cfg(test)]
+4283:                     capped_rhs_tests::step(start, i, "hash", scan_sort, scanned, rhs.sorted_by.as_ref());
+4284:                     result = hash_join_ref(&result, rhs);
+4285:                 } else {
+4286:                     #[cfg(test)]
+4287:                     capped_rhs_tests::step(start, i, "cross", scan_sort, scanned, rhs.sorted_by.as_ref());
+4288:                     result = cross_product_ref(&result, rhs);
+4289:                 }
+4290:             }
+4291:             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
+4292:             if result.rows.is_empty() {
+4293:                 break;
+4294:             }
+4295:         }
+4296:         // Residual FILTERs per block — a row only counts toward the cap once it has
+4297:         // passed EVERY filter (the late-FILTER safety property: a partial solution
+
+Lines 4337-4362
+4337: 
+4338: fn capped_rhs_cache(len: usize, enabled: bool) -> (Vec<Option<CappedRhs>>, usize) {
+4339:     let mut slots = Vec::new();
+4340:     if !enabled
+4341:         || len
+4342:             .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+4343:             .is_none_or(|bytes| bytes > CAPPED_RHS_STORAGE)
+4344:         || slots.try_reserve_exact(len).is_err()
+4345:     {
+4346:         return (slots, 0);
+4347:     }
+4348:     let Some(bytes) = slots
+4349:         .capacity()
+4350:         .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+4351:         .filter(|&bytes| bytes <= CAPPED_RHS_STORAGE)
+4352:     else {
+4353:         return (Vec::new(), 0);
+4354:     };
+4355:     slots.resize_with(len, || None);
+4356:     (slots, CAPPED_RHS_STORAGE - bytes)
+4357: }
+4358: 
+4359: // [GPT-6 Astra] Count capacities, not planner estimates or populated lengths.
+4360: // Scan rows have at most three ids and fit inline; decline an unproved spilled
+4361: // representation. Variable owns a String, whose capacity is exposed by its safe
+4362: // consuming API; move it out and back without cloning or allocating its text.
+
+Lines 4400-4425
+4400:     if slot
+4401:         .as_ref()
+4402:         .is_none_or(|(cached_sort, _, _)| *cached_sort != sort)
+4403:     {
+4404:         if let Some(old) = slot.take() {
+4405:             *remaining += old.2;
+4406:             drop(old); // release stale ownership/accounting before its replacement scan
+4407:         }
+4408:         let mut rhs = scan();
+4409:         if let Some(bytes) = capped_rhs_storage(&mut rhs, *remaining) {
+4410:             *remaining -= bytes;
+4411:             *slot = Some((sort, rhs, bytes));
+4412:         } else {
+4413:             *uncached = Some(rhs);
+4414:             return uncached.as_ref().unwrap();
+4415:         }
+4416:     }
+4417:     &slot.as_ref().unwrap().1
+4418: }
+4419: 
+4420: /// Distinct (non-repeated) variable positions of a prepared pattern, or `None` if
+4421: /// a variable repeats (e.g. `?x p ?x`), which would make range counts over-count.
+4422: pub(crate) fn distinct_pattern_vars(pos_vars: &[Option<Variable>; 3]) -> bool {
+4423:     let vars: Vec<&Variable> = pos_vars.iter().flatten().collect();
+4424:     let mut sorted = vars.clone();
+4425:     sorted.sort();
+
+Lines 2314-2329
+2314: /// Intermediate result: rows of one id per `vars[i]` (`NO_ID` = unbound).
+2315: /// `sorted_by` records the variable the rows are sorted on (if any), enabling a
+2316: /// merge join instead of a hash table.
+2317: struct Bindings {
+2318:     vars: Vec<Variable>,
+2319:     rows: Vec<Row>,
+2320:     sorted_by: Option<Variable>,
+2321: }
+2322: 
+2323: impl Bindings {
+2324:     fn col(&self, v: &Variable) -> Option<usize> {
+2325:         self.vars.iter().position(|x| x == v)
+2326:     }
+2327:     fn unsorted(vars: Vec<Variable>, rows: Vec<Row>) -> Self {
+2328:         Bindings { vars, rows, sorted_by: None }
+2329:     }
+
+Lines 8698-8725
+8698: fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+8699:     merge_join_ref(&left, &right, jv)
+8700: }
+8701: 
+8702: // [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+8703: fn merge_join_ref(left: &Bindings, right: &Bindings, jv: &Variable) -> Bindings {
+8704:     let lk = left.col(jv).unwrap();
+8705:     let rk = right.col(jv).unwrap();
+8706:     let mut out_vars = left.vars.clone();
+8707:     let mut right_only: Vec<usize> = Vec::new();
+8708:     let mut extra_shared: Vec<(usize, usize)> = Vec::new();
+8709:     for (ri, v) in right.vars.iter().enumerate() {
+8710:         match left.col(v) {
+8711:             Some(li) if v != jv => extra_shared.push((li, ri)),
+8712:             Some(_) => {}
+8713:             None => {
+8714:                 out_vars.push(v.clone());
+8715:                 right_only.push(ri);
+8716:             }
+8717:         }
+8718:     }
+8719:     // The sorted-merge probe loop lives in the shared substrate (sq-hknqs); the engine supplies
+8720:     // the `Bindings`-derived key columns + its thread-local query budget, monomorphically.
+8721:     let mut rows = Vec::new();
+8722:     sjoin::merge_join(&left.rows, lk, &right.rows, rk, &extra_shared, &right_only, &EngineBudget, &mut rows);
+8723:     Bindings { vars: out_vars, rows, sorted_by: Some(jv.clone()) }
+8724: }
+8725: 
+
+Lines 8755-8770
+8755: fn hash_join(left: Bindings, right: Bindings) -> Bindings {
+8756:     hash_join_ref(&left, &right)
+8757: }
+8758: 
+8759: // [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+8760: fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
+8761:     // Build the hash table on the smaller side.
+8762:     let (build, probe) = if left.rows.len() <= right.rows.len() {
+8763:         (left, right)
+8764:     } else {
+8765:         (right, left)
+8766:     };
+8767:     // Shared vars relative to (build, probe).
+8768:     let shared: Vec<(usize, usize)> = build
+8769:         .vars
+8770:         .iter()
+
+Lines 9297-9319
+9297: fn cross_product(left: Bindings, right: Bindings) -> Bindings {
+9298:     cross_product_ref(&left, &right)
+9299: }
+9300: 
+9301: // [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+9302: fn cross_product_ref(left: &Bindings, right: &Bindings) -> Bindings {
+9303:     let mut out_vars = left.vars.clone();
+9304:     out_vars.extend(right.vars.iter().cloned());
+9305:     let mut rows = Vec::with_capacity(budget::cap_alloc(left.rows.len().saturating_mul(right.rows.len())));
+9306:     for l in &left.rows {
+9307:         // Coarse budget check once per left row.
+9308:         if budget::exhausted(rows.len()) {
+9309:             break;
+9310:         }
+9311:         for r in &right.rows {
+9312:             let mut row = l.clone();
+9313:             row.extend_from_slice(r);
+9314:             rows.push(row);
+9315:         }
+9316:     }
+9317:     Bindings::unsorted(out_vars, rows)
+9318: }
+9319: 

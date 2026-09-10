@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T03:17:37.026481+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "manifest_sha256": "9587d1ea11eed25f8b5c9597b5386fcfa6a0682b7443142810af82baa2ab8bb2",
+  "files_verified": 5,
+  "exact_main_and_head_source_hashes_verified": true,
+  "root_direct_scope_inspection": "uncached declared4254 in else4250..4290; record_pattern_ndv4291 outside. No named overlap; no edit or new memory equality claim.",
+  "source_worktree_clean": true
+}

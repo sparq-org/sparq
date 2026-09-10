@@ -1,0 +1,106 @@
+e53464c73f31f7aca800f3867ac054c36408e346:crates/sparq-engine/src/exec.rs
+
+Lines 4223-4262
+4223:             // Same step selection as `eval_bgp_binary`: bind-join when the running
+4224:             // block is much smaller than the pattern; else merge / hash / cross.
+4225:             let connecting: Vec<Variable> =
+4226:                 result.vars.iter().filter(|v| prepared[i].var_pos(v).is_some()).cloned().collect();
+4227:             if connecting.len() == 1
+4228:                 && distinct_pattern_vars(&prepared[i].pos_vars)
+4229:                 && result.rows.len().saturating_mul(8) < prepared[i].est
+4230:             {
+4231:                 let jv = &connecting[0];
+4232:                 let rk = result.col(jv).unwrap();
+4233:                 let pp = prepared[i].var_pos(jv).unwrap();
+4234:                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
+4235:             } else {
+4236:                 let filt = pfilter(i);
+4237:                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
+4238:                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
+4239:                 let rhs = scan_to_bindings(
+4240:                     graph,
+4241:                     &prepared[i].id_pat,
+4242:                     &prepared[i].pos_vars,
+4243:                     scan_sort,
+4244:                     filt,
+4245:                     None,
+4246:                     #[cfg(feature = "semijoin-bitmap")]
+4247:                     None,
+4248:                 );
+4249:                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
+4250:                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
+4251:                     result = merge_join(result, rhs, &jv);
+4252:                 } else if connected {
+4253:                     result = hash_join(result, rhs);
+4254:                 } else {
+4255:                     result = cross_product(result, rhs);
+4256:                 }
+4257:             }
+4258:             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
+4259:             if result.rows.is_empty() {
+4260:                 break;
+4261:             }
+4262:         }
+
+Lines 8576-8598
+8576: fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+8577:     let lk = left.col(jv).unwrap();
+8578:     let rk = right.col(jv).unwrap();
+8579:     let mut out_vars = left.vars.clone();
+8580:     let mut right_only: Vec<usize> = Vec::new();
+8581:     let mut extra_shared: Vec<(usize, usize)> = Vec::new();
+8582:     for (ri, v) in right.vars.iter().enumerate() {
+8583:         match left.col(v) {
+8584:             Some(li) if v != jv => extra_shared.push((li, ri)),
+8585:             Some(_) => {}
+8586:             None => {
+8587:                 out_vars.push(v.clone());
+8588:                 right_only.push(ri);
+8589:             }
+8590:         }
+8591:     }
+8592:     // The sorted-merge probe loop lives in the shared substrate (sq-hknqs); the engine supplies
+8593:     // the `Bindings`-derived key columns + its thread-local query budget, monomorphically.
+8594:     let mut rows = Vec::new();
+8595:     sjoin::merge_join(&left.rows, lk, &right.rows, rk, &extra_shared, &right_only, &EngineBudget, &mut rows);
+8596:     Bindings { vars: out_vars, rows, sorted_by: Some(jv.clone()) }
+8597: }
+8598: 
+
+Lines 8628-8641
+8628: fn hash_join(left: Bindings, right: Bindings) -> Bindings {
+8629:     // Build the hash table on the smaller side.
+8630:     let (build, probe) = if left.rows.len() <= right.rows.len() {
+8631:         (left, right)
+8632:     } else {
+8633:         (right, left)
+8634:     };
+8635:     // Shared vars relative to (build, probe).
+8636:     let shared: Vec<(usize, usize)> = build
+8637:         .vars
+8638:         .iter()
+8639:         .enumerate()
+8640:         .filter_map(|(bi, v)| probe.col(v).map(|pi| (bi, pi)))
+8641:         .collect();
+
+Lines 9165-9184
+9165: fn cross_product(left: Bindings, right: Bindings) -> Bindings {
+9166:     let mut out_vars = left.vars.clone();
+9167:     out_vars.extend(right.vars.iter().cloned());
+9168:     let mut rows = Vec::with_capacity(budget::cap_alloc(left.rows.len().saturating_mul(right.rows.len())));
+9169:     for l in &left.rows {
+9170:         // Coarse budget check once per left row.
+9171:         if budget::exhausted(rows.len()) {
+9172:             break;
+9173:         }
+9174:         for r in &right.rows {
+9175:             let mut row = l.clone();
+9176:             row.extend_from_slice(r);
+9177:             rows.push(row);
+9178:         }
+9179:     }
+9180:     Bindings::unsorted(out_vars, rows)
+9181: }
+9182: 
+9183: /// Generic join used for Join of non-conjunctive sub-results. With fully-bound
+9184: /// shared columns it takes the fast path (merge if both are sorted on the join

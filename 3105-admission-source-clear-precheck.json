@@ -1,0 +1,84 @@
+{
+  "data": {
+    "rateLimit": {
+      "remaining": 4972,
+      "resetAt": "2026-09-10T03:47:19Z"
+    },
+    "repository": {
+      "pullRequest": {
+        "state": "OPEN",
+        "headRefOid": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\n## Summary\n\nReuse reached non-bind RHS scans across capped seed blocks when the prepared pattern and requested sort are unchanged. A private 4 MiB allowance per capped BGP invocation bounds retained cache storage, including indexed slots, row/variable buffers and owned variable-name capacities. Scans that do not fit retain their original per-step lifetime. Stale entries are released and refunded before replacement scans; actual sort metadata stays unchanged.\n\nThis reduces repeated scan work for ASK and LIMIT queries that continue into later blocks. Armed resource budgets keep the original scan lifetime, and an armed ZK recorder keeps the existing uncapped execution path. Per-block planning, bind decisions and hash-table builds remain unchanged. No public API, dependency or storage-format changes.\n\nRefs #3105 (`sq-7d3dj.30.18`). Planner and hash-build reuse remain open.\n\n## Validation and review\n\nImplementation: actual GPT-6 Astra, extra-high reasoning. Independent review of the bounded correction by actual Claude Opus 5, extra-high reasoning: **approved for CI validation** at `ed66ef0931fa19dd521fac433870c86a78687a30`; the unbounded-retention finding is resolved. Merge admission remains pending full current-head CI and assessment of Copilot\u2019s new uncached-RHS lifetime finding.\n\nAt `ed66ef0931fa19dd521fac433870c86a78687a30`, ten focused tests pass in each of the default, core compact-index and semijoin-bitmap configurations; engine library/test clippy passes. Tests cover full result bags, join paths, requested/actual sort, named views, overlays, allocation capacities, exact-fit/oversized entries, spilled rows, stale refunds, metadata overflow and armed-but-untripped cancellation/deadline budgets. Three compiled controls fail their intended runtime assertions for excessive retention, length-based undercounting and missing refunds.\n\nAll 24 allocation samples and 40 System-allocator timing samples pass their declared local screens. These are advisory measurements on one macOS arm64 host. Full-miss timing improves while first-hit timing has a small cost; this is not a universal latency or memory-neutrality claim. The larger-pattern cases retain some additional memory within the cache allowance. System-allocator timing of the same five/eight-pattern allocation fixtures also improves. I accept this bounded memory-for-latency tradeoff based on the measured cases; broader workloads remain covered by the repository gates.\n\nThe allowance bounds requested retained storage per capped BGP invocation, not total query heap, transient scan/join allocations, allocator metadata or process RSS. Aggregate cache storage scales with concurrent or nested invocations. Local preflight still encounters Bash 3's missing `mapfile` in the existing privacy-check script; Linux CI must execute that check.\n\n`bench/feature-off-declarations/6477.json` declares intentional changes to always-compiled engine code under the documented V2 process. It does not claim byte neutrality. The separate wasm size ratchet and all other floors remain unchanged.\n\n## Base gate\n\n- [ ] Authoritative workspace build and full workspace clippy on the current head.\n- [x] Touched code matches surrounding formatting; no workspace reformat.\n- [ ] Full affected-crate tests from current-head CI (scoped local tests passed).\n\n## Targeted re-evaluation\n\n- [ ] Query execution: conformance ratchet, operator coverage and builtin error cases.\n- [ ] Wasm builds/tests, dependency guard and bundle-size gate.\n- [ ] Coverage ratchet and test-presence gate.\n- [x] Bounded retention and larger-pattern allocation checks; local timing tradeoff assessed.\n\n## Ratchets and conventions\n\n- [x] No conformance, performance or coverage ratchet lowered.\n- [x] No hard-coded benchmark results added to repository Markdown.\n- [x] Remaining planner/hash-build work stays tracked in #3105.\n",
+        "mergeQueueEntry": null,
+        "labels": {
+          "nodes": [
+            {
+              "name": "area:bench"
+            },
+            {
+              "name": "area:sparq-engine"
+            },
+            {
+              "name": "review:changes"
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "github-actions"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-10T02:24:42Z",
+              "commit": {
+                "oid": "19763bfab1dce196a654c899b172e7b24d70bc59"
+              }
+            },
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-10T02:25:02Z",
+              "commit": {
+                "oid": "19763bfab1dce196a654c899b172e7b24d70bc59"
+              }
+            },
+            {
+              "author": {
+                "login": "jeswr"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-10T03:03:52Z",
+              "commit": {
+                "oid": "ed66ef0931fa19dd521fac433870c86a78687a30"
+              }
+            },
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-10T03:05:43Z",
+              "commit": {
+                "oid": "ed66ef0931fa19dd521fac433870c86a78687a30"
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOSz3qKM6g6CZs",
+              "isResolved": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

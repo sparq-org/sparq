@@ -1,0 +1,14 @@
+{
+  "source": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/admission/pr-live-0311.json",
+  "source_sha256": "5f6a5c849710bbc29cca473c9fc448b6851efb60d799e8b2efc87dc5359076f9",
+  "matching_review_records": [
+    {
+      "author": {
+        "login": "copilot-pull-request-reviewer"
+      },
+      "state": "COMMENTED",
+      "body": "### \ud83d\udd35 Needs a closer look\n\nA moderate peak-memory issue remains, and required validation checks are incomplete.\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**crates/sparq-engine/src/exec.rs:4289**\n* When `reuse_rhs` is false, `capped_rhs` puts the scan in `uncached`, but the new `*_ref` joins only borrow it. That keeps the entire RHS alive through the rest of the block (and `record_pattern_ndv`) instead of dropping it when the old consuming join returned, so armed-budget queries can have a substantially larger peak working set despite the intended no-retention path. Drop the uncached RHS immediately after the join dispatch (or scope the borrow) before continuing.\n\n- **Files reviewed:** 2/2 changed files\n- **Comments generated:** 0 new\n- **Review effort level:** Lite\n</details>",
+      "submittedAt": "2026-09-10T03:05:43Z"
+    }
+  ]
+}

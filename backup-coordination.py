@@ -399,6 +399,12 @@ for evidence_name in ['baseline/Cargo.lock', 'baseline/Cargo.toml', 'baseline/sr
 for evidence_name in ['assessed-publication-receipt.json', 'assessed-thread-reply.json', 'bounded-copilot-request-receipt.json', 'bounded-many-timing-root-verification.json', 'bounded-pr-verified.json', 'bounded-publication-receipt.json', 'bounded-reconcile-precheck.json', 'bounded-review-reconciliation.json', 'bounded-thread-reply-receipt.json', 'bounded-thread-reply.json', 'checks-live-0311.json', 'finish-bounded-pr.py', 'opus-bounded-completion.json', 'opus-bounded-result.json', 'opus-bounded-review.json', 'pr-assessed-body.md', 'pr-bounded-body-draft.md', 'pr-bounded-body.md', 'pr-live-0311.json', 'push-bounded-pr.py', 'registry-off-0311.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+# Completed uncached-lifetime finding disposition and source-hold removal.
+for evidence_name in ['assessment.md', 'head-scopes.txt', 'main-scopes.txt', 'report.json', 'review-finding.json', 'manifest.json']:
+    FILES["3105-uncached-lifetime-triage-" + evidence_name.replace("/", "--")] = ROOT / "direct-3105/uncached-lifetime-triage" / evidence_name
+for evidence_name in ['uncached-lifetime-root-verification.json', 'pr-source-cleared-body.md', 'source-cleared-thread-reply.json', 'source-clear-precheck.json', 'source-cleared-reply-receipt.json', 'source-hold-cleared-receipt.json', 'current-ci-after-hold.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
