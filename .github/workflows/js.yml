@@ -41,6 +41,8 @@ on:
       - "crates/sparq-*-wasm/**"
       - "package.json"
       - "package-lock.json"
+      - "site/package.json"
+      - "gui/app/package.json"
       - ".github/workflows/js.yml"
   push:
     branches: [main]
