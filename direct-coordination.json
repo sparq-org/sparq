@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T19:59:15.553778+00:00",
+  "updated_at": "2026-09-10T20:00:59.283853+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -298,9 +298,11 @@
       "CI": 34522399163,
       "feature_matrix": 34522399200,
       "gate": 34522398851,
-      "state": "pending",
-      "snapshot": "monitor-20260910-1950/main-runs.json",
-      "issue_close_authorized": false
+      "state": "main_pending_no_required_job_failure_observed",
+      "snapshot": "monitor-20260910-2007/main-runs.json",
+      "issue_close_authorized": false,
+      "source_binding": "direct-6485/admission/postmerge-source-binding.json",
+      "full_tree_identical_to_reviewed_head": true
     }
   },
   "prs": {
@@ -1061,11 +1063,11 @@
     "policy": "Fail closed on exhaustion; no retry storms or repeat exhausted requests."
   },
   "actions_backlog": {
-    "at": "2026-09-10T16:28:12.114658+00:00",
-    "evidence": "direct-5183/mainf50-health/report.json",
-    "queued_workflows": 4,
-    "in_progress_workflows": 4,
-    "limits": "Workflowqueuedmayhaveactivejobs; nonatomicsame-reposnapshots; hostedquota/orgcapacityunknown."
+    "at": "2026-09-10T20:00:59.283853+00:00",
+    "queued_runs": 4,
+    "in_progress_runs": 5,
+    "source": "monitor-20260910-2007",
+    "qualification": "Workflowrun counts, notrunnerreserveproof; joblists show activeCI+matrixprogress. No org-runnerinventory retry or releaseauthorization."
   },
   "postmerge_observations": {
     "observed_at": "2026-09-08T06:20:14.035146+00:00",
@@ -1582,11 +1584,10 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "directory": "monitor-20260910-1950",
-    "at": "2026-09-10T19:54:16.289590+00:00",
+    "directory": "monitor-20260910-2007",
+    "at": "2026-09-10T20:00:59.283853+00:00",
     "main": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f",
-    "rate_budget": "healthy",
-    "state": "6486merged, mainpending;6487PRgreen;6479sourceonlyreadiness"
+    "state": "No failing requiredmainjobsobserved; CI14success4active8queued;matrix15success4active36queued;aggregateactive; registryActionsoff."
   },
   "registry_pause": {
     "enabled": false,
@@ -4730,9 +4731,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T19:22:02.654034+00:00",
+    "at": "2026-09-10T20:00:59.283853+00:00",
     "enabled": false,
-    "evidence": "monitor-20260910-1921/registry-permissions.json"
+    "source": "monitor-20260910-2007/registry-permissions.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

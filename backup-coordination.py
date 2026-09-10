@@ -1291,6 +1291,27 @@ FILES['direct-6479--admission--preimplementation-page2-query.json'] = ROOT / 'di
 FILES['direct-6483--admission--enqueue6487.py'] = ROOT / 'direct-6483/admission/enqueue6487.py'
 FILES['direct-6483--admission--target6487-query.json'] = ROOT / 'direct-6483/admission/target6487-query.json'
 
+# Currentmain202879sourcebindingand2007health.
+FILES['direct-6485--admission--postmerge-source-binding.json'] = ROOT / 'direct-6485/admission/postmerge-source-binding.json'
+FILES['monitor-20260910-2007--ci-jobs.json'] = ROOT / 'monitor-20260910-2007/ci-jobs.json'
+FILES['monitor-20260910-2007--in_progress.stderr'] = ROOT / 'monitor-20260910-2007/in_progress.stderr'
+FILES['monitor-20260910-2007--registry-permissions.stderr'] = ROOT / 'monitor-20260910-2007/registry-permissions.stderr'
+FILES['monitor-20260910-2007--main-runs.stderr'] = ROOT / 'monitor-20260910-2007/main-runs.stderr'
+FILES['monitor-20260910-2007--matrix-jobs.stderr'] = ROOT / 'monitor-20260910-2007/matrix-jobs.stderr'
+FILES['monitor-20260910-2007--in_progress.json'] = ROOT / 'monitor-20260910-2007/in_progress.json'
+FILES['monitor-20260910-2007--main.json'] = ROOT / 'monitor-20260910-2007/main.json'
+FILES['monitor-20260910-2007--matrix-jobs.json'] = ROOT / 'monitor-20260910-2007/matrix-jobs.json'
+FILES['monitor-20260910-2007--queued.json'] = ROOT / 'monitor-20260910-2007/queued.json'
+FILES['monitor-20260910-2007--queued.stderr'] = ROOT / 'monitor-20260910-2007/queued.stderr'
+FILES['monitor-20260910-2007--budget.json'] = ROOT / 'monitor-20260910-2007/budget.json'
+FILES['monitor-20260910-2007--budget.stderr'] = ROOT / 'monitor-20260910-2007/budget.stderr'
+FILES['monitor-20260910-2007--registry-permissions.json'] = ROOT / 'monitor-20260910-2007/registry-permissions.json'
+FILES['monitor-20260910-2007--main.stderr'] = ROOT / 'monitor-20260910-2007/main.stderr'
+FILES['monitor-20260910-2007--ci-jobs.stderr'] = ROOT / 'monitor-20260910-2007/ci-jobs.stderr'
+FILES['monitor-20260910-2007--main-runs.json'] = ROOT / 'monitor-20260910-2007/main-runs.json'
+FILES['monitor-20260910-2007--receipt.json'] = ROOT / 'monitor-20260910-2007/receipt.json'
+FILES['monitor-20260910-2007--read.py'] = ROOT / 'monitor-20260910-2007/read.py'
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

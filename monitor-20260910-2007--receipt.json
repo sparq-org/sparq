@@ -1,0 +1,38 @@
+{
+  "started_at": "2026-09-10T20:00:06.751661+00:00",
+  "requests": [
+    {
+      "name": "budget",
+      "exit": 0
+    },
+    {
+      "name": "main",
+      "exit": 0
+    },
+    {
+      "name": "main-runs",
+      "exit": 0
+    },
+    {
+      "name": "ci-jobs",
+      "exit": 0
+    },
+    {
+      "name": "matrix-jobs",
+      "exit": 0
+    },
+    {
+      "name": "queued",
+      "exit": 0
+    },
+    {
+      "name": "in_progress",
+      "exit": 0
+    },
+    {
+      "name": "registry-permissions",
+      "exit": 0
+    }
+  ],
+  "completed_at": "2026-09-10T20:00:13.099887+00:00"
+}
