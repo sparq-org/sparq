@@ -1,0 +1,11 @@
+commit fe3284199db0831f353d2ae401b8c69472764904
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 15:13:57 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 15:13:57 2026 +0100
+
+    test(bench): validate lexical adjudication under workspace edition
+    
+    Preserve original dataset details on lexical adjudication failures, pin integer spelling pools independently, and make the marker test allowlist explicit. Replace Rust 2024 let chains with equivalent Rust 2021 syntax to match sparq-bench.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

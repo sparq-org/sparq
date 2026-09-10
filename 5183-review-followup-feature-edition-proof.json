@@ -1,0 +1,409 @@
+{
+  "harness_edition": "2021",
+  "workspace_edition": "2021",
+  "bench_inherits_workspace_edition": true,
+  "native_target": "aarch64-apple-darwin",
+  "all_102_dependency_features_equal": true,
+  "dependency_features": {
+    "aho-corasick@1.1.4": [
+      "perf-literal",
+      "std"
+    ],
+    "allocator-api2@0.2.21": [
+      "alloc"
+    ],
+    "base16ct@0.2.0": [
+      "alloc"
+    ],
+    "block-buffer@0.10.4": [],
+    "block-buffer@0.12.1": [],
+    "cfg-if@1.0.4": [],
+    "const-oid@0.10.2": [],
+    "cpufeatures@0.2.17": [],
+    "cpufeatures@0.3.0": [],
+    "crossbeam-deque@0.8.6": [
+      "default",
+      "std"
+    ],
+    "crossbeam-epoch@0.9.20": [
+      "alloc",
+      "std"
+    ],
+    "crossbeam-utils@0.8.21": [
+      "default",
+      "std"
+    ],
+    "crypto-common@0.1.7": [
+      "std"
+    ],
+    "crypto-common@0.2.2": [],
+    "dashmap@6.2.1": [],
+    "digest@0.10.7": [
+      "alloc",
+      "block-buffer",
+      "core-api",
+      "default",
+      "std"
+    ],
+    "digest@0.11.3": [
+      "alloc",
+      "block-api",
+      "default",
+      "oid"
+    ],
+    "either@1.16.0": [
+      "std",
+      "use_std"
+    ],
+    "equivalent@1.0.2": [],
+    "foldhash@0.2.0": [],
+    "generic-array@0.14.7": [
+      "more_lengths"
+    ],
+    "getrandom@0.2.17": [
+      "std"
+    ],
+    "getrandom@0.3.4": [
+      "std"
+    ],
+    "getrandom@0.4.2": [],
+    "hashbrown@0.14.5": [
+      "raw"
+    ],
+    "hashbrown@0.17.1": [
+      "allocator-api2",
+      "default",
+      "default-hasher",
+      "equivalent",
+      "inline-more",
+      "raw-entry"
+    ],
+    "hex@0.4.3": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "hybrid-array@0.4.12": [],
+    "itertools@0.14.0": [
+      "default",
+      "use_alloc",
+      "use_std"
+    ],
+    "itoa@1.0.18": [],
+    "json-event-parser@0.2.3": [],
+    "libc@0.2.186": [
+      "default",
+      "std"
+    ],
+    "lock_api@0.4.14": [
+      "atomic_usize",
+      "default"
+    ],
+    "md-5@0.10.6": [
+      "default",
+      "std"
+    ],
+    "md-5@0.11.0": [
+      "alloc",
+      "default",
+      "oid"
+    ],
+    "memchr@2.8.2": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "memmap2@0.9.11": [],
+    "once_cell@1.21.4": [
+      "alloc",
+      "default",
+      "race",
+      "std"
+    ],
+    "oxigraph@0.5.9": [
+      "rdf-12"
+    ],
+    "oxilangtag@0.1.6": [
+      "default",
+      "std"
+    ],
+    "oxiri@0.2.11": [],
+    "oxjsonld@0.2.5": [
+      "default",
+      "rdf-12"
+    ],
+    "oxrdf@0.2.4": [
+      "default"
+    ],
+    "oxrdf@0.3.3": [
+      "default",
+      "oxsdatatypes",
+      "rdf-12",
+      "rdfc-10"
+    ],
+    "oxrdfio@0.2.5": [
+      "default",
+      "rdf-12"
+    ],
+    "oxrdfxml@0.2.3": [
+      "default",
+      "rdf-12"
+    ],
+    "oxsdatatypes@0.2.2": [],
+    "oxttl@0.1.8": [
+      "default"
+    ],
+    "oxttl@0.2.3": [
+      "default",
+      "rdf-12"
+    ],
+    "parking_lot_core@0.9.12": [],
+    "peg@0.8.6": [
+      "default",
+      "std"
+    ],
+    "peg-macros@0.8.6": [],
+    "peg-runtime@0.8.6": [
+      "std"
+    ],
+    "pin-project-lite@0.2.17": [],
+    "ppv-lite86@0.2.21": [
+      "simd",
+      "std"
+    ],
+    "proc-macro2@1.0.106": [
+      "default",
+      "proc-macro"
+    ],
+    "quick-xml@0.37.5": [
+      "default"
+    ],
+    "quote@1.0.45": [
+      "default",
+      "proc-macro"
+    ],
+    "rand@0.8.6": [
+      "alloc",
+      "default",
+      "getrandom",
+      "libc",
+      "rand_chacha",
+      "std",
+      "std_rng"
+    ],
+    "rand@0.9.4": [
+      "alloc",
+      "default",
+      "os_rng",
+      "small_rng",
+      "std",
+      "std_rng",
+      "thread_rng"
+    ],
+    "rand_chacha@0.3.1": [
+      "std"
+    ],
+    "rand_chacha@0.9.0": [
+      "std"
+    ],
+    "rand_core@0.6.4": [
+      "alloc",
+      "getrandom",
+      "std"
+    ],
+    "rand_core@0.9.5": [
+      "os_rng",
+      "std"
+    ],
+    "rayon@1.12.0": [],
+    "rayon-core@1.13.0": [],
+    "rdf-canon@0.15.3": [],
+    "regex@1.12.4": [
+      "default",
+      "perf",
+      "perf-backtrack",
+      "perf-cache",
+      "perf-dfa",
+      "perf-inline",
+      "perf-literal",
+      "perf-onepass",
+      "std",
+      "unicode",
+      "unicode-age",
+      "unicode-bool",
+      "unicode-case",
+      "unicode-gencat",
+      "unicode-perl",
+      "unicode-script",
+      "unicode-segment"
+    ],
+    "regex-automata@0.4.14": [
+      "alloc",
+      "dfa-onepass",
+      "hybrid",
+      "meta",
+      "nfa-backtrack",
+      "nfa-pikevm",
+      "nfa-thompson",
+      "perf-inline",
+      "perf-literal",
+      "perf-literal-multisubstring",
+      "perf-literal-substring",
+      "std",
+      "syntax",
+      "unicode",
+      "unicode-age",
+      "unicode-bool",
+      "unicode-case",
+      "unicode-gencat",
+      "unicode-perl",
+      "unicode-script",
+      "unicode-segment",
+      "unicode-word-boundary"
+    ],
+    "regex-syntax@0.8.11": [
+      "default",
+      "std",
+      "unicode",
+      "unicode-age",
+      "unicode-bool",
+      "unicode-case",
+      "unicode-gencat",
+      "unicode-perl",
+      "unicode-script",
+      "unicode-segment"
+    ],
+    "rustc-hash@2.1.3": [
+      "default",
+      "std"
+    ],
+    "ryu-js@1.0.2": [],
+    "scopeguard@1.2.0": [],
+    "serde@1.0.228": [
+      "alloc",
+      "std"
+    ],
+    "serde_core@1.0.228": [
+      "alloc",
+      "result",
+      "std"
+    ],
+    "serde_json@1.0.150": [
+      "default",
+      "std"
+    ],
+    "sha1@0.10.6": [
+      "default",
+      "std"
+    ],
+    "sha1@0.11.0": [
+      "alloc",
+      "default",
+      "oid"
+    ],
+    "sha2@0.10.9": [
+      "default",
+      "std"
+    ],
+    "sha2@0.11.0": [
+      "alloc",
+      "default",
+      "oid"
+    ],
+    "siphasher@1.0.3": [
+      "default",
+      "std"
+    ],
+    "smallvec@1.15.2": [],
+    "sparesults@0.3.3": [
+      "default",
+      "sparql-12"
+    ],
+    "spareval@0.2.6": [
+      "calendar-ext",
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "spargebra@0.4.6": [
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "sparopt@0.3.6": [
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "sparq-canon@0.1.1": [
+      "default",
+      "parallel",
+      "rdf12-triple-terms"
+    ],
+    "sparq-core@0.1.1": [
+      "default",
+      "dict-spill",
+      "mmap",
+      "parallel"
+    ],
+    "sparq-engine@0.1.1": [
+      "algebra-rewrite",
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "sparq-substrate@0.1.1": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ],
+    "syn@2.0.117": [
+      "clone-impls",
+      "default",
+      "derive",
+      "extra-traits",
+      "full",
+      "parsing",
+      "printing",
+      "proc-macro",
+      "visit",
+      "visit-mut"
+    ],
+    "thiserror@2.0.18": [
+      "default",
+      "std"
+    ],
+    "thiserror-impl@2.0.18": [],
+    "tracing@0.1.44": [
+      "attributes",
+      "default",
+      "std",
+      "tracing-attributes"
+    ],
+    "tracing-attributes@0.1.31": [],
+    "tracing-core@0.1.36": [
+      "once_cell",
+      "std"
+    ],
+    "typenum@1.20.1": [
+      "const-generics"
+    ],
+    "unicode-ident@1.0.24": [],
+    "uuid@1.23.4": [
+      "default",
+      "rng",
+      "std",
+      "v4"
+    ],
+    "version_check@0.9.5": [],
+    "zerocopy@0.8.50": [
+      "simd"
+    ],
+    "zmij@1.0.21": []
+  }
+}

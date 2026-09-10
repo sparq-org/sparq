@@ -1,0 +1,16 @@
+--- fault-positive/update_fuzz.rs
++++ fault-negative/update_fuzz.rs
+@@ -1007,12 +1007,7 @@
+                     comparable(&nb.lines, relabel, label_b),
+                 ) {
+                     (Ok(na), Ok(nb)) if na == nb => return Verdict::AdjudicatedIntegerLexical,
+-                    (Err(e), _) | (_, Err(e)) => {
+-                        return Verdict::Differs(format!(
+-                            "integer-lexical adjudication refused: {e}\n{}",
+-                            one_sided(label_a, &ca, label_b, &cb)
+-                        ));
+-                    }
++                    (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+                     _ => {}
+                 }
+             }

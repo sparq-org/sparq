@@ -1,0 +1,68 @@
+{
+  "suite": "20 passed;0 failed;0 ignored (exact module, serial, edition2021)",
+  "full_stdout_sha256": "585ee208604133145f2f2739e9e17c7254db710a1bcff7e5a0163902127e155a",
+  "clippy": "cargo clippy --release --locked --offline -j1 --tests -- -D warnings; exit0",
+  "marker_strict_ambient": "Exact candidate marker test passes with empty ambient allowlist; local explicit allowlist reaches adjudication.",
+  "control_results": [
+    {
+      "name": "partial-canonical-pool-overlap",
+      "source_sha256": "d6224fd1d16b61f6b9205c3a5c41c9f2bffea503bbe6d6dbb9d4f3a86906267c",
+      "test": "update_fuzz::tests::generated_integer_domain_is_injective_including_load",
+      "tests_equal": true,
+      "build_exit": 0,
+      "binary_sha256": "1a8ad7ffdb4eee6b3f200031c3361b0589b60df3da09d02760f2318ac3923308",
+      "test_exit": 101,
+      "expected_test_exit": 101
+    },
+    {
+      "name": "omit-blank-node-dataset-details",
+      "source_sha256": "0a77a0cf06442f9698cd767761315846649cca71aa8d948b4ab5917196b2ed78",
+      "test": "update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure",
+      "tests_equal": true,
+      "build_exit": 0,
+      "binary_sha256": "9cac135b936d5e4c05b376a94c5fa12f6e52ed5bc2ac88ca701b3eab706d05f3",
+      "test_exit": 101,
+      "expected_test_exit": 101
+    },
+    {
+      "name": "restore-ambient-marker-allowlist",
+      "source_sha256": "f7e4d4cd40f691395222f2683c400dcb9a83729d3e118aa0b4de6632a2b6e02d",
+      "test": "update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication",
+      "tests_equal": false,
+      "build_exit": 0,
+      "binary_sha256": "52bb31637f8d29c1063260367ceba9a2a44ef5fba2662d99df741271a20ffdbd",
+      "test_exit": 101,
+      "expected_test_exit": 101
+    },
+    {
+      "name": "old-source-edition2021",
+      "source_sha256": "962e5f3e0558d36b48b2f0a970ed3a28b7beeb2aac0bec8e52aed72b5d3c93d3",
+      "test": null,
+      "tests_equal": false,
+      "build_exit": 1,
+      "confirmed_edition_error": true
+    },
+    {
+      "name": "normalized-error-fault-positive",
+      "source_sha256": "66217402e29791cfd8094920b10d594008b7e234e13e40df02d00827679e64cc",
+      "test": "update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details",
+      "tests_equal": false,
+      "build_exit": 0,
+      "binary_sha256": "ca3e3a1c569f868b93e21a84ba38fcde8e70ba294b441963a6771b744f441ace",
+      "test_exit": 0,
+      "expected_test_exit": 0
+    },
+    {
+      "name": "normalized-error-old-detail-control",
+      "source_sha256": "1a50cb677c9b5d162bc0aee39631e695d34dd4631d2e034c91effca5e80418e4",
+      "test": "update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details",
+      "tests_equal": false,
+      "build_exit": 0,
+      "binary_sha256": "3083901858ebfd6385fd7b1ca99dffb0c5ab17b9671cf5eb8e80120ed5d6a937",
+      "test_exit": 101,
+      "expected_test_exit": 101
+    }
+  ],
+  "fault_injection_limit": "Third comparable() call is deliberately injected to fail after both raw dataset calls succeed. Positive uses final branch; negative has identical fault/test and old error-only branch. This establishes diagnostic preservation on that branch, not a naturally observed canonicalizer failure.",
+  "prior_controls": "No repeat of seven parent controls: generator partition/LOAD draw policy, record recursion, duplicate refusal, count/blank-node guards, and marker detection conditions unchanged; diagnostic formatting, syntax and test oracles changed. Current20-test suite plus focused follow-up controls passed; prior control outputs remain frozen separately."
+}

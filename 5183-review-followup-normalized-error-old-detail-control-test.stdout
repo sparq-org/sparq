@@ -1,0 +1,11 @@
+
+running 1 test
+test update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details ... FAILED
+
+failures:
+
+failures:
+    update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.01s
+

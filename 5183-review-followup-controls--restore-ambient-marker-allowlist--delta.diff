@@ -1,0 +1,14 @@
+--- candidate/update_fuzz.rs
++++ restore-ambient-marker-allowlist/update_fuzz.rs
+@@ -2209,10 +2209,7 @@
+             )),
+             Op::shared("INSERT { ?s <http://ex/q> _:bt } WHERE { ?s <http://ex/p> ?o }".into()),
+         ];
+-        let allow = UpdateDivergenceAllowlist {
+-            integer_lexical: true,
+-            state: "hermetic marker-adjudication test".into(),
+-        };
++        let allow = UpdateDivergenceAllowlist::load();
+         let positive = apply_sequence(0, &ops, None, None, &allow).unwrap();
+         assert_eq!(positive.ops, 2);
+         assert!(positive.adjudicated_integer_lexical > 0);

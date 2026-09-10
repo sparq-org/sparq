@@ -1,0 +1,24 @@
+[
+  {
+    "message": "let chains are only allowed in Rust 2024 or later",
+    "source_lines": [
+      837
+    ]
+  },
+  {
+    "message": "let chains are only allowed in Rust 2024 or later",
+    "source_lines": [
+      838
+    ]
+  },
+  {
+    "message": "let chains are only allowed in Rust 2024 or later",
+    "source_lines": [
+      1986
+    ]
+  },
+  {
+    "message": "aborting due to 3 previous errors",
+    "source_lines": []
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "head_before": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "edition": 2021,
+  "previous_edition_proof_gap": "Prior exact-module harness was2024; passing it did not establish production2021 compatibility.",
+  "limits": {
+    "compile_test_seconds": 300,
+    "new_allocated_bytes": 134217728,
+    "min_free_bytes": 2147483648,
+    "jobs": 1
+  },
+  "profile": "Same O3/unwind/noLTO/codegen16/offline/incremental0 as prior; only harness edition and unique package name differ.",
+  "planned": [
+    "metadata feature/pin parity",
+    "full20tests",
+    "scopedClippy --tests -D warnings",
+    "partial canonical pool overlap mutant",
+    "diagnostic detail omission mutant",
+    "marker exact test under strict ambient allowlist",
+    "prior source edition2021 expected compile failure"
+  ],
+  "no_full_workspace_or_other_seeds": true
+}

@@ -1,0 +1,28 @@
+{
+  "at": "2026-09-10T14:20:52.070360+00:00",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "manifest_files": 116,
+  "manifest_sha256": "46406e3877e873eda569e1fec9199da54584d07874e751ba4195149381bcc0ce",
+  "packet_sha256": "22986274b0f379c1f2a6434bd45a1acc7c7d75aab3a3ab828cb7a375614b8471",
+  "packet_bytes": 60883,
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "source_matching_files": [
+    "final.rs.txt"
+  ],
+  "git": "Clean correct branch/head; delta matches exact committed bytes",
+  "root_read": [
+    "delta.diff",
+    "report.json",
+    "feature-edition-proof.json",
+    "test-summary.json",
+    "full-suite.stdout 20/20",
+    "clippy-tests.stderr success",
+    "helper-equivalence.json",
+    "old-source2021 compiler errors",
+    "partial canonical overlap failure at canonical38",
+    "blank-node diagnostic omission failure",
+    "ambient allowlist failure",
+    "normalized error fault positive/negative pair"
+  ],
+  "scope": "Current Rust2021 exact-module tests and scoped Clippy; prior2024harnessgap fixed, all controls terminal, normal Linux CI still required; full packet is function excerpts and delta, complete source separately frozen."
+}

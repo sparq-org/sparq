@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ partial-canonical-pool-overlap/update_fuzz.rs
+@@ -214,7 +214,7 @@
+     match rng.below(6) {
+         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
+         2 | 3 => format!("\"lit{}\"", rng.below(5)),
+-        4 => format!("{}", gen_canonical_integer(rng)),
++        4 => format!("{}", rng.below(40)),
+         _ => format!("\"tag{}\"@en", rng.below(3)),
+     }
+ }

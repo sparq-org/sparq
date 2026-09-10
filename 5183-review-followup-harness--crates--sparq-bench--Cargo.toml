@@ -1,0 +1,15 @@
+[package]
+name="issue5183-injective-followup"
+version="0.0.0"
+edition="2021"
+[workspace]
+resolver="2"
+[dependencies]
+sparq-core={path="/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-core",features=["mmap", "dict-spill"]}
+sparq-engine={path="/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-engine",features=["algebra-rewrite"]}
+sparq-canon={path="/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-canon",features=["rdf12-triple-terms"]}
+oxigraph={version="=0.5.9",default-features=false,features=["rdf-12"]}
+oxrdf={version="=0.3.3",features=["rdf-12"]}
+serde_json="1"
+[patch.crates-io]
+spargebra={path="/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/vendor/spargebra"}

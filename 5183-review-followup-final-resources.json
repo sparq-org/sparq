@@ -1,0 +1,19 @@
+{
+  "initial": {
+    "initial_target_allocated": 846344192,
+    "initial_free_bytes": 2777513984
+  },
+  "final_free_bytes": 2676850688,
+  "final_target_allocated": 856784896,
+  "final_evidence_allocated": 65183744,
+  "max_monitored_new_allocated": 75255808,
+  "min_monitored_free_bytes": 2575007744,
+  "monitored_command_seconds": 110.87237696000001,
+  "lightweight_seconds": 1.298871374,
+  "limits": {
+    "seconds": 300,
+    "new_allocated": 134217728,
+    "free": 2147483648
+  },
+  "final_new_allocated": 75624448
+}

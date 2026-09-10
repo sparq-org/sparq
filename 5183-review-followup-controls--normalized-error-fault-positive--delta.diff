@@ -1,0 +1,39 @@
+--- candidate/update_fuzz.rs
++++ normalized-error-fault-positive/update_fuzz.rs
+@@ -793,6 +793,13 @@
+ /// fails closed on a blank node nested inside a triple term, so the non-standard
+ /// nested-bnode descent is never reachable from this harness.
+ fn comparable(lines: &[String], relabel: bool, what: &str) -> Result<Vec<String>, String> {
++    #[cfg(test)] {
++        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++        if CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 2 {
++            return Err("injected normalized comparable error".into());
++        }
++    }
++
+     if !relabel {
+         return Ok(lines.to_vec());
+     }
+@@ -2331,3 +2338,22 @@
+         });
+     }
+ }
++
++#[cfg(test)]
++mod diagnostic_fault_probe {
++    use super::*;
++    #[test]
++    fn normalized_error_preserves_original_details() {
++        let a = vec![format!("_:a <http://ex/p> \"020\"^^{} .", XSD_INTEGER)];
++        let b = vec![format!("_:b <http://ex/p> \"20\"^^{} .", XSD_INTEGER)];
++        match compare("original", &a, "reference", &b, true) {
++            Verdict::Differs(detail) => {
++                assert!(detail.contains("injected normalized comparable error"), "{detail}");
++                assert!(detail.contains("only in original:"), "{detail}");
++                assert!(detail.contains("only in reference:"), "{detail}");
++                assert!(detail.contains("020"), "{detail}");
++            }
++            _ => panic!("injected normalized comparable error must fail"),
++        }
++    }
++}

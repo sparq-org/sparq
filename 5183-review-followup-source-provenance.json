@@ -1,0 +1,18 @@
+{
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "parent": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "parent_source_sha256": "962e5f3e0558d36b48b2f0a970ed3a28b7beeb2aac0bec8e52aed72b5d3c93d3",
+  "base_source_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+  "source_hash_bound_to_control_baseline": true,
+  "actual_model": "GPT-6 Astra (xhigh)",
+  "coauthor": "GPT-6 Astra <noreply@openai.com>",
+  "clean": true,
+  "delta_stat": "crates/sparq-bench/src/update_fuzz.rs | 123 ++++++++++++++++++++++++----------\n 1 file changed, 86 insertions(+), 37 deletions(-)",
+  "prior_implementation_manifest_sha256": "76c1012bf2fa7d784006dd70fe075559aebc59ff06addca6550b783d68600421",
+  "prior_review_result_sha256": "794575fb5904dc479106d8f63612e9c911c75bb43d8c34db0179081757a30c50"
+}

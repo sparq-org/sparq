@@ -1,0 +1,7 @@
+{
+  "commands": 17,
+  "all_returned": true,
+  "managed_sessions": "Controls exec57826 returned exit0; all17 monitored command receipts have terminal exit codes. Export exec97690 exited1 on denied ps. No build/test is pending in managed sessions.",
+  "process_inventory_limit": "Read-only ps was denied by filesystem/process sandbox; no retry or alternate route attempted. Independent OS process census not established.",
+  "completion_utc": "2026-09-10T14:18:28Z"
+}

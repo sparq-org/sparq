@@ -1,0 +1,9 @@
+
+thread 'update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details' (4716957) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/review-followup/controls/normalized-error-old-detail-control/update_fuzz.rs:2347:17:
+injected normalized comparable error
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: issue5183_injective_followup::update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details
+   3: <issue5183_injective_followup::update_fuzz::diagnostic_fault_probe::normalized_error_preserves_original_details::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

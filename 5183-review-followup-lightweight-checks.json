@@ -1,0 +1,39 @@
+[
+  {
+    "name": "format-check",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+      "--edition",
+      "2021",
+      "--check",
+      "crates/sparq-bench/src/update_fuzz.rs"
+    ],
+    "exit": 0,
+    "seconds": 0.24161154099999999
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "seconds": 0.066680833
+  },
+  {
+    "name": "preflight",
+    "argv": [
+      "python3",
+      "scripts/preflight.py",
+      "--root",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+      "--changed-files",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/review-followup/changed-files.txt",
+      "--added-lines",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/review-followup/full.diff"
+    ],
+    "exit": 1,
+    "seconds": 0.990579
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "errors": [
+    "System python3 lacks tomllib; first proof script stopped. The following build still began because the shell did not stop on that failure.",
+    "Unfiltered cargo metadata included42 extra foreign-platform dependencies; compared102 common native feature sets were unchanged."
+  ],
+  "correction": "No install/dependency correction. Native --filter-platform metadata now exactly matches102 dependency feature sets; Cargo package metadata and section-scoped source verify2021. Subsequent multi-command runs use set -e."
+}

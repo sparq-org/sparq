@@ -1,0 +1,1010 @@
+[
+  {
+    "command": "metadata",
+    "seconds": 3.083000000014824e-06,
+    "aggregate_seconds": 3.957999999970596e-06,
+    "free_bytes": 2768076800,
+    "target_allocated": 846344192,
+    "output_allocated": 180224,
+    "new_allocated": 180224
+  },
+  {
+    "command": "metadata",
+    "seconds": 0.227801875,
+    "aggregate_seconds": 0.227802917,
+    "free_bytes": 2768904192,
+    "target_allocated": 846344192,
+    "output_allocated": 188416,
+    "new_allocated": 188416
+  },
+  {
+    "command": "metadata",
+    "seconds": 1.404123292,
+    "aggregate_seconds": 1.404125667,
+    "free_bytes": 2768326656,
+    "target_allocated": 846344192,
+    "output_allocated": 188416,
+    "new_allocated": 188416
+  },
+  {
+    "command": "metadata",
+    "seconds": 2.587208167,
+    "aggregate_seconds": 2.5872101250000004,
+    "free_bytes": 2766098432,
+    "target_allocated": 846344192,
+    "output_allocated": 188416,
+    "new_allocated": 188416
+  },
+  {
+    "command": "metadata",
+    "seconds": 3.6797503330000003,
+    "aggregate_seconds": 3.679751625,
+    "free_bytes": 2764976128,
+    "target_allocated": 846344192,
+    "output_allocated": 188416,
+    "new_allocated": 188416
+  },
+  {
+    "command": "metadata",
+    "seconds": 4.772373,
+    "aggregate_seconds": 4.772374583,
+    "free_bytes": 2764824576,
+    "target_allocated": 846344192,
+    "output_allocated": 815104,
+    "new_allocated": 815104
+  },
+  {
+    "command": "build-tests",
+    "seconds": 2.5839999999999197e-06,
+    "aggregate_seconds": 5.903521209,
+    "free_bytes": 2757799936,
+    "target_allocated": 846344192,
+    "output_allocated": 815104,
+    "new_allocated": 815104
+  },
+  {
+    "command": "build-tests",
+    "seconds": 0.08709975,
+    "aggregate_seconds": 5.990619000000001,
+    "free_bytes": 2757296128,
+    "target_allocated": 846344192,
+    "output_allocated": 815104,
+    "new_allocated": 815104
+  },
+  {
+    "command": "build-tests",
+    "seconds": 1.171487959,
+    "aggregate_seconds": 7.075009334000001,
+    "free_bytes": 2751283200,
+    "target_allocated": 846344192,
+    "output_allocated": 819200,
+    "new_allocated": 819200
+  },
+  {
+    "command": "build-tests",
+    "seconds": 2.2644262090000002,
+    "aggregate_seconds": 8.167945667,
+    "free_bytes": 2750316544,
+    "target_allocated": 846348288,
+    "output_allocated": 1114112,
+    "new_allocated": 1118208
+  },
+  {
+    "command": "build-tests",
+    "seconds": 3.3607936670000003,
+    "aggregate_seconds": 9.264314417,
+    "free_bytes": 2751438848,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 4.450990042,
+    "aggregate_seconds": 10.354510792,
+    "free_bytes": 2751168512,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 5.5626454590000005,
+    "aggregate_seconds": 11.466164875,
+    "free_bytes": 2750730240,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 6.680921834,
+    "aggregate_seconds": 12.58444375,
+    "free_bytes": 2750345216,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 7.859055917,
+    "aggregate_seconds": 13.762576209,
+    "free_bytes": 2750935040,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 8.945032125000001,
+    "aggregate_seconds": 14.848553375000002,
+    "free_bytes": 2750656512,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 10.0396885,
+    "aggregate_seconds": 15.943207999999998,
+    "free_bytes": 2750791680,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 11.197610667000001,
+    "aggregate_seconds": 17.101131084,
+    "free_bytes": 2750517248,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 12.326216375,
+    "aggregate_seconds": 18.229735709,
+    "free_bytes": 2749603840,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 13.416501209,
+    "aggregate_seconds": 19.320022584,
+    "free_bytes": 2749231104,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 14.523303,
+    "aggregate_seconds": 20.426822667,
+    "free_bytes": 2748346368,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 15.616883875000001,
+    "aggregate_seconds": 21.520404417,
+    "free_bytes": 2747277312,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 16.718329917000002,
+    "aggregate_seconds": 22.621850084000002,
+    "free_bytes": 2746486784,
+    "target_allocated": 846352384,
+    "output_allocated": 1114112,
+    "new_allocated": 1122304
+  },
+  {
+    "command": "build-tests",
+    "seconds": 17.82975775,
+    "aggregate_seconds": 23.733277375,
+    "free_bytes": 2748559360,
+    "target_allocated": 847241216,
+    "output_allocated": 1114112,
+    "new_allocated": 2011136
+  },
+  {
+    "command": "build-tests",
+    "seconds": 19.827500917000002,
+    "aggregate_seconds": 25.731020875000002,
+    "free_bytes": 2747805696,
+    "target_allocated": 847241216,
+    "output_allocated": 1114112,
+    "new_allocated": 2011136
+  },
+  {
+    "command": "build-tests",
+    "seconds": 20.967858500000002,
+    "aggregate_seconds": 26.871378042,
+    "free_bytes": 2746974208,
+    "target_allocated": 847622144,
+    "output_allocated": 1114112,
+    "new_allocated": 2392064
+  },
+  {
+    "command": "build-tests",
+    "seconds": 22.085909167,
+    "aggregate_seconds": 27.989429125,
+    "free_bytes": 2747117568,
+    "target_allocated": 847896576,
+    "output_allocated": 1114112,
+    "new_allocated": 2666496
+  },
+  {
+    "command": "build-tests",
+    "seconds": 23.173744375000002,
+    "aggregate_seconds": 29.077268167,
+    "free_bytes": 2746564608,
+    "target_allocated": 848130048,
+    "output_allocated": 1114112,
+    "new_allocated": 2899968
+  },
+  {
+    "command": "build-tests",
+    "seconds": 24.442932042,
+    "aggregate_seconds": 30.346451917,
+    "free_bytes": 2745593856,
+    "target_allocated": 848429056,
+    "output_allocated": 1114112,
+    "new_allocated": 3198976
+  },
+  {
+    "command": "build-tests",
+    "seconds": 25.54177325,
+    "aggregate_seconds": 31.445294292,
+    "free_bytes": 2745479168,
+    "target_allocated": 848662528,
+    "output_allocated": 1114112,
+    "new_allocated": 3432448
+  },
+  {
+    "command": "build-tests",
+    "seconds": 26.630539084,
+    "aggregate_seconds": 32.53405975,
+    "free_bytes": 2744832000,
+    "target_allocated": 848928768,
+    "output_allocated": 1114112,
+    "new_allocated": 3698688
+  },
+  {
+    "command": "build-tests",
+    "seconds": 27.733965292,
+    "aggregate_seconds": 33.63748625,
+    "free_bytes": 2736435200,
+    "target_allocated": 849223680,
+    "output_allocated": 1114112,
+    "new_allocated": 3993600
+  },
+  {
+    "command": "build-tests",
+    "seconds": 28.864494084,
+    "aggregate_seconds": 34.768013667,
+    "free_bytes": 2742996992,
+    "target_allocated": 849399808,
+    "output_allocated": 1118208,
+    "new_allocated": 4173824
+  },
+  {
+    "command": "build-tests",
+    "seconds": 29.944036375,
+    "aggregate_seconds": 35.847557209,
+    "free_bytes": 2742099968,
+    "target_allocated": 849399808,
+    "output_allocated": 1118208,
+    "new_allocated": 4173824
+  },
+  {
+    "command": "build-tests",
+    "seconds": 31.022194250000002,
+    "aggregate_seconds": 36.925714167,
+    "free_bytes": 2743345152,
+    "target_allocated": 849399808,
+    "output_allocated": 1118208,
+    "new_allocated": 4173824
+  },
+  {
+    "command": "build-tests",
+    "seconds": 32.101481584,
+    "aggregate_seconds": 38.005001459,
+    "free_bytes": 2741481472,
+    "target_allocated": 849399808,
+    "output_allocated": 1118208,
+    "new_allocated": 4173824
+  },
+  {
+    "command": "build-tests",
+    "seconds": 33.449068625,
+    "aggregate_seconds": 39.352588042,
+    "free_bytes": 2741387264,
+    "target_allocated": 849399808,
+    "output_allocated": 1118208,
+    "new_allocated": 4173824
+  },
+  {
+    "command": "build-tests",
+    "seconds": 34.52431525,
+    "aggregate_seconds": 40.427835459,
+    "free_bytes": 2733674496,
+    "target_allocated": 856764416,
+    "output_allocated": 1118208,
+    "new_allocated": 11538432
+  },
+  {
+    "command": "metadata-native",
+    "seconds": 2.916000000005581e-06,
+    "aggregate_seconds": 41.51455812499999,
+    "free_bytes": 2728169472,
+    "target_allocated": 856764416,
+    "output_allocated": 1126400,
+    "new_allocated": 11546624
+  },
+  {
+    "command": "metadata-native",
+    "seconds": 0.140546208,
+    "aggregate_seconds": 41.655102082999996,
+    "free_bytes": 2728136704,
+    "target_allocated": 856764416,
+    "output_allocated": 1126400,
+    "new_allocated": 11546624
+  },
+  {
+    "command": "full-suite",
+    "seconds": 2.2910000000014863e-06,
+    "aggregate_seconds": 42.799181999,
+    "free_bytes": 2713399296,
+    "target_allocated": 856764416,
+    "output_allocated": 11997184,
+    "new_allocated": 22417408
+  },
+  {
+    "command": "full-suite",
+    "seconds": 0.09712412499999999,
+    "aggregate_seconds": 42.896304083,
+    "free_bytes": 2713391104,
+    "target_allocated": 856764416,
+    "output_allocated": 12001280,
+    "new_allocated": 22421504
+  },
+  {
+    "command": "full-suite",
+    "seconds": 1.167874458,
+    "aggregate_seconds": 43.967055415999994,
+    "free_bytes": 2713182208,
+    "target_allocated": 856764416,
+    "output_allocated": 12017664,
+    "new_allocated": 22437888
+  },
+  {
+    "command": "full-suite",
+    "seconds": 2.247982625,
+    "aggregate_seconds": 45.047164249,
+    "free_bytes": 2713071616,
+    "target_allocated": 856764416,
+    "output_allocated": 12017664,
+    "new_allocated": 22437888
+  },
+  {
+    "command": "full-suite",
+    "seconds": 3.356260375,
+    "aggregate_seconds": 46.155441040999996,
+    "free_bytes": 2712858624,
+    "target_allocated": 856764416,
+    "output_allocated": 12009472,
+    "new_allocated": 22429696
+  },
+  {
+    "command": "full-suite",
+    "seconds": 4.444339375,
+    "aggregate_seconds": 47.243521208,
+    "free_bytes": 2712506368,
+    "target_allocated": 856764416,
+    "output_allocated": 12013568,
+    "new_allocated": 22433792
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 2.874999999985528e-06,
+    "aggregate_seconds": 48.426917581999994,
+    "free_bytes": 2711535616,
+    "target_allocated": 856764416,
+    "output_allocated": 12009472,
+    "new_allocated": 22429696
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 0.080099208,
+    "aggregate_seconds": 48.507014166,
+    "free_bytes": 2711523328,
+    "target_allocated": 856764416,
+    "output_allocated": 12009472,
+    "new_allocated": 22429696
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 1.1496590000000002,
+    "aggregate_seconds": 49.576581499,
+    "free_bytes": 2711392256,
+    "target_allocated": 856764416,
+    "output_allocated": 12009472,
+    "new_allocated": 22429696
+  },
+  {
+    "command": "clippy-tests",
+    "seconds": 2.2423370830000002,
+    "aggregate_seconds": 50.669252498999995,
+    "free_bytes": 2711007232,
+    "target_allocated": 856768512,
+    "output_allocated": 12013568,
+    "new_allocated": 22437888
+  },
+  {
+    "command": "marker-strict-ambient",
+    "seconds": 3.5840000000009198e-06,
+    "aggregate_seconds": 51.758308458,
+    "free_bytes": 2736689152,
+    "target_allocated": 856784896,
+    "output_allocated": 12021760,
+    "new_allocated": 22462464
+  },
+  {
+    "command": "marker-strict-ambient",
+    "seconds": 0.13209579200000002,
+    "aggregate_seconds": 51.890400958,
+    "free_bytes": 2736680960,
+    "target_allocated": 856784896,
+    "output_allocated": 12025856,
+    "new_allocated": 22466560
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 6.625000000010095e-06,
+    "aggregate_seconds": 52.964663417000004,
+    "free_bytes": 2736644096,
+    "target_allocated": 856784896,
+    "output_allocated": 12144640,
+    "new_allocated": 22585344
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 0.09851325,
+    "aggregate_seconds": 53.063170709000005,
+    "free_bytes": 2736603136,
+    "target_allocated": 856784896,
+    "output_allocated": 12148736,
+    "new_allocated": 22589440
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 1.166376834,
+    "aggregate_seconds": 54.131033959,
+    "free_bytes": 2736500736,
+    "target_allocated": 856784896,
+    "output_allocated": 12156928,
+    "new_allocated": 22597632
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 2.24023625,
+    "aggregate_seconds": 55.204893542,
+    "free_bytes": 2736435200,
+    "target_allocated": 856784896,
+    "output_allocated": 12156928,
+    "new_allocated": 22597632
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 3.346892834,
+    "aggregate_seconds": 56.311551209,
+    "free_bytes": 2736390144,
+    "target_allocated": 856784896,
+    "output_allocated": 12156928,
+    "new_allocated": 22597632
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 4.5593935,
+    "aggregate_seconds": 57.524050584,
+    "free_bytes": 2736308224,
+    "target_allocated": 856784896,
+    "output_allocated": 12156928,
+    "new_allocated": 22597632
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 5.64470325,
+    "aggregate_seconds": 58.609361667,
+    "free_bytes": 2736254976,
+    "target_allocated": 856784896,
+    "output_allocated": 12156928,
+    "new_allocated": 22597632
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 6.795943416999999,
+    "aggregate_seconds": 59.760601625,
+    "free_bytes": 2728108032,
+    "target_allocated": 856784896,
+    "output_allocated": 13418496,
+    "new_allocated": 23859200
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 8.110550917,
+    "aggregate_seconds": 61.07521,
+    "free_bytes": 2720288768,
+    "target_allocated": 856784896,
+    "output_allocated": 14307328,
+    "new_allocated": 24748032
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 9.625924834,
+    "aggregate_seconds": 62.590586584,
+    "free_bytes": 2719948800,
+    "target_allocated": 856784896,
+    "output_allocated": 14307328,
+    "new_allocated": 24748032
+  },
+  {
+    "command": "partial-canonical-pool-overlap-build",
+    "seconds": 10.737857834,
+    "aggregate_seconds": 63.702514959,
+    "free_bytes": 2718904320,
+    "target_allocated": 856784896,
+    "output_allocated": 15204352,
+    "new_allocated": 25645056
+  },
+  {
+    "command": "partial-canonical-pool-overlap-test",
+    "seconds": 3.1669999999983656e-06,
+    "aggregate_seconds": 64.7894505,
+    "free_bytes": 2711117824,
+    "target_allocated": 856784896,
+    "output_allocated": 22552576,
+    "new_allocated": 32993280
+  },
+  {
+    "command": "partial-canonical-pool-overlap-test",
+    "seconds": 0.075546959,
+    "aggregate_seconds": 64.86499533400001,
+    "free_bytes": 2711040000,
+    "target_allocated": 856784896,
+    "output_allocated": 22556672,
+    "new_allocated": 32997376
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 4.165999999999892e-06,
+    "aggregate_seconds": 65.93469466700002,
+    "free_bytes": 2711048192,
+    "target_allocated": 856784896,
+    "output_allocated": 22679552,
+    "new_allocated": 33120256
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 0.11721379100000001,
+    "aggregate_seconds": 66.05190445900001,
+    "free_bytes": 2710982656,
+    "target_allocated": 856784896,
+    "output_allocated": 22679552,
+    "new_allocated": 33120256
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 1.189415791,
+    "aggregate_seconds": 67.12410770900001,
+    "free_bytes": 2710933504,
+    "target_allocated": 856784896,
+    "output_allocated": 22687744,
+    "new_allocated": 33128448
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 2.2691025000000002,
+    "aggregate_seconds": 68.20379483400002,
+    "free_bytes": 2710683648,
+    "target_allocated": 856784896,
+    "output_allocated": 22687744,
+    "new_allocated": 33128448
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 3.532986583,
+    "aggregate_seconds": 69.46767766700002,
+    "free_bytes": 2710654976,
+    "target_allocated": 856784896,
+    "output_allocated": 22687744,
+    "new_allocated": 33128448
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 4.614335,
+    "aggregate_seconds": 70.54902716700002,
+    "free_bytes": 2710528000,
+    "target_allocated": 856784896,
+    "output_allocated": 22798336,
+    "new_allocated": 33239040
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 5.906990958,
+    "aggregate_seconds": 71.84168295900001,
+    "free_bytes": 2709192704,
+    "target_allocated": 856784896,
+    "output_allocated": 24182784,
+    "new_allocated": 34623488
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 7.211995999999999,
+    "aggregate_seconds": 73.14668695900002,
+    "free_bytes": 2708140032,
+    "target_allocated": 856784896,
+    "output_allocated": 24838144,
+    "new_allocated": 35278848
+  },
+  {
+    "command": "omit-blank-node-dataset-details-build",
+    "seconds": 8.364476250000001,
+    "aggregate_seconds": 74.29916737500001,
+    "free_bytes": 2708135936,
+    "target_allocated": 856784896,
+    "output_allocated": 25726976,
+    "new_allocated": 36167680
+  },
+  {
+    "command": "omit-blank-node-dataset-details-test",
+    "seconds": 3.4579999999978517e-06,
+    "aggregate_seconds": 75.378353209,
+    "free_bytes": 2713313280,
+    "target_allocated": 856784896,
+    "output_allocated": 33087488,
+    "new_allocated": 43528192
+  },
+  {
+    "command": "omit-blank-node-dataset-details-test",
+    "seconds": 0.08740504099999999,
+    "aggregate_seconds": 75.465755709,
+    "free_bytes": 2713300992,
+    "target_allocated": 856784896,
+    "output_allocated": 33091584,
+    "new_allocated": 43532288
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 8.124999999997717e-06,
+    "aggregate_seconds": 76.53909325000001,
+    "free_bytes": 2713120768,
+    "target_allocated": 856784896,
+    "output_allocated": 33210368,
+    "new_allocated": 43651072
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 0.102089458,
+    "aggregate_seconds": 76.64117483400001,
+    "free_bytes": 2712989696,
+    "target_allocated": 856784896,
+    "output_allocated": 33210368,
+    "new_allocated": 43651072
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 1.169338958,
+    "aggregate_seconds": 77.708424292,
+    "free_bytes": 2712956928,
+    "target_allocated": 856784896,
+    "output_allocated": 33218560,
+    "new_allocated": 43659264
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 2.259905125,
+    "aggregate_seconds": 78.79899187500001,
+    "free_bytes": 2712739840,
+    "target_allocated": 856784896,
+    "output_allocated": 33218560,
+    "new_allocated": 43659264
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 3.4815727080000003,
+    "aggregate_seconds": 80.020658209,
+    "free_bytes": 2575007744,
+    "target_allocated": 856784896,
+    "output_allocated": 33218560,
+    "new_allocated": 43659264
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 4.561024208,
+    "aggregate_seconds": 81.10011116700001,
+    "free_bytes": 2717249536,
+    "target_allocated": 856784896,
+    "output_allocated": 33263616,
+    "new_allocated": 43704320
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 5.800251167,
+    "aggregate_seconds": 82.339338084,
+    "free_bytes": 2715951104,
+    "target_allocated": 856784896,
+    "output_allocated": 34480128,
+    "new_allocated": 44920832
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 7.057229375,
+    "aggregate_seconds": 83.59631483400001,
+    "free_bytes": 2846400512,
+    "target_allocated": 856784896,
+    "output_allocated": 35368960,
+    "new_allocated": 45809664
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 8.156499457999999,
+    "aggregate_seconds": 84.69558558400001,
+    "free_bytes": 2837491712,
+    "target_allocated": 856784896,
+    "output_allocated": 35368960,
+    "new_allocated": 45809664
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-build",
+    "seconds": 9.347067749999999,
+    "aggregate_seconds": 85.88615345900001,
+    "free_bytes": 2828861440,
+    "target_allocated": 856784896,
+    "output_allocated": 47116288,
+    "new_allocated": 57556992
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-test",
+    "seconds": 2.9580000000251072e-06,
+    "aggregate_seconds": 86.994362792,
+    "free_bytes": 2812772352,
+    "target_allocated": 856784896,
+    "output_allocated": 43618304,
+    "new_allocated": 54059008
+  },
+  {
+    "command": "restore-ambient-marker-allowlist-test",
+    "seconds": 0.073239417,
+    "aggregate_seconds": 87.067599626,
+    "free_bytes": 2812190720,
+    "target_allocated": 856784896,
+    "output_allocated": 43622400,
+    "new_allocated": 54063104
+  },
+  {
+    "command": "old-source-edition2021-build",
+    "seconds": 9.291999999994083e-06,
+    "aggregate_seconds": 88.13175300099999,
+    "free_bytes": 2802798592,
+    "target_allocated": 856784896,
+    "output_allocated": 43753472,
+    "new_allocated": 54194176
+  },
+  {
+    "command": "old-source-edition2021-build",
+    "seconds": 0.11970062499999998,
+    "aggregate_seconds": 88.25144521,
+    "free_bytes": 2801836032,
+    "target_allocated": 856784896,
+    "output_allocated": 43761664,
+    "new_allocated": 54202368
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 1.1666999999992989e-05,
+    "aggregate_seconds": 89.321930793,
+    "free_bytes": 2794766336,
+    "target_allocated": 856784896,
+    "output_allocated": 43880448,
+    "new_allocated": 54321152
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 0.10682366699999998,
+    "aggregate_seconds": 89.428742793,
+    "free_bytes": 2794741760,
+    "target_allocated": 856784896,
+    "output_allocated": 43880448,
+    "new_allocated": 54321152
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 1.18923775,
+    "aggregate_seconds": 90.511156918,
+    "free_bytes": 2792452096,
+    "target_allocated": 856784896,
+    "output_allocated": 43888640,
+    "new_allocated": 54329344
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 2.75128625,
+    "aggregate_seconds": 92.073207252,
+    "free_bytes": 2784309248,
+    "target_allocated": 856784896,
+    "output_allocated": 43888640,
+    "new_allocated": 54329344
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 3.9046253749999997,
+    "aggregate_seconds": 93.226546377,
+    "free_bytes": 2777395200,
+    "target_allocated": 856784896,
+    "output_allocated": 43888640,
+    "new_allocated": 54329344
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 5.335701167000001,
+    "aggregate_seconds": 94.65762196,
+    "free_bytes": 2774302720,
+    "target_allocated": 856784896,
+    "output_allocated": 45154304,
+    "new_allocated": 55595008
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 6.684341375000001,
+    "aggregate_seconds": 96.00626096,
+    "free_bytes": 2767302656,
+    "target_allocated": 856784896,
+    "output_allocated": 46043136,
+    "new_allocated": 56483840
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 7.767725125,
+    "aggregate_seconds": 97.08964471,
+    "free_bytes": 2761969664,
+    "target_allocated": 856784896,
+    "output_allocated": 46043136,
+    "new_allocated": 56483840
+  },
+  {
+    "command": "normalized-error-fault-positive-build",
+    "seconds": 8.8488805,
+    "aggregate_seconds": 98.170803418,
+    "free_bytes": 2745561088,
+    "target_allocated": 856784896,
+    "output_allocated": 57331712,
+    "new_allocated": 67772416
+  },
+  {
+    "command": "normalized-error-fault-positive-test",
+    "seconds": 3.2910000000024864e-06,
+    "aggregate_seconds": 99.27310591800001,
+    "free_bytes": 2743975936,
+    "target_allocated": 856784896,
+    "output_allocated": 54284288,
+    "new_allocated": 64724992
+  },
+  {
+    "command": "normalized-error-fault-positive-test",
+    "seconds": 0.078139708,
+    "aggregate_seconds": 99.35124312700002,
+    "free_bytes": 2743607296,
+    "target_allocated": 856784896,
+    "output_allocated": 54288384,
+    "new_allocated": 64729088
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 9.000000000009e-06,
+    "aggregate_seconds": 100.42216612700001,
+    "free_bytes": 2737475584,
+    "target_allocated": 856784896,
+    "output_allocated": 54411264,
+    "new_allocated": 64851968
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 0.10648908299999998,
+    "aggregate_seconds": 100.52864641800002,
+    "free_bytes": 2737270784,
+    "target_allocated": 856784896,
+    "output_allocated": 54415360,
+    "new_allocated": 64856064
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 1.178534833,
+    "aggregate_seconds": 101.60069241800002,
+    "free_bytes": 2737188864,
+    "target_allocated": 856784896,
+    "output_allocated": 54423552,
+    "new_allocated": 64864256
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 2.31140725,
+    "aggregate_seconds": 102.73356475200002,
+    "free_bytes": 2735124480,
+    "target_allocated": 856784896,
+    "output_allocated": 54423552,
+    "new_allocated": 64864256
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 3.609982333,
+    "aggregate_seconds": 104.03213954300001,
+    "free_bytes": 2734661632,
+    "target_allocated": 856784896,
+    "output_allocated": 54423552,
+    "new_allocated": 64864256
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 4.694346083,
+    "aggregate_seconds": 105.11650408500002,
+    "free_bytes": 2732969984,
+    "target_allocated": 856784896,
+    "output_allocated": 54603776,
+    "new_allocated": 65044480
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 5.983830125,
+    "aggregate_seconds": 106.40598879300002,
+    "free_bytes": 2728529920,
+    "target_allocated": 856784896,
+    "output_allocated": 55922688,
+    "new_allocated": 66363392
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 7.118459125,
+    "aggregate_seconds": 107.54061721000002,
+    "free_bytes": 2723954688,
+    "target_allocated": 856784896,
+    "output_allocated": 56578048,
+    "new_allocated": 67018752
+  },
+  {
+    "command": "normalized-error-old-detail-control-build",
+    "seconds": 8.199397375,
+    "aggregate_seconds": 108.62155479300002,
+    "free_bytes": 2719727616,
+    "target_allocated": 856784896,
+    "output_allocated": 57475072,
+    "new_allocated": 67915776
+  },
+  {
+    "command": "normalized-error-old-detail-control-test",
+    "seconds": 3.7089999999906365e-06,
+    "aggregate_seconds": 109.725667752,
+    "free_bytes": 2705924096,
+    "target_allocated": 856784896,
+    "output_allocated": 64815104,
+    "new_allocated": 75255808
+  },
+  {
+    "command": "normalized-error-old-detail-control-test",
+    "seconds": 0.07514270899999999,
+    "aggregate_seconds": 109.80080716900001,
+    "free_bytes": 2705432576,
+    "target_allocated": 856784896,
+    "output_allocated": 64815104,
+    "new_allocated": 75255808
+  }
+]

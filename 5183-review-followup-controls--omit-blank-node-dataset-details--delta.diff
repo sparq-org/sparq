@@ -1,0 +1,11 @@
+--- candidate/update_fuzz.rs
++++ omit-blank-node-dataset-details/update_fuzz.rs
+@@ -992,7 +992,7 @@
+                         "integer-lexical adjudication refused: blank-node counts differ ({} vs {})\n{}",
+                         na.blank_nodes,
+                         nb.blank_nodes,
+-                        one_sided(label_a, &ca, label_b, &cb)
++                        String::new()
+                     ));
+                 }
+                 match (

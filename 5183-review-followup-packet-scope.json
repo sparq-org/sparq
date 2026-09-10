@@ -1,0 +1,6 @@
+{
+  "format": "focused follow-up, repository-relative public source",
+  "included": "Full delta; complete compare/Verdict/comparable/parse/normalizers/record/one_sided/nquads_line/PROBES/apply_sequence/allowlist; complete three changed test functions; old record helper; Cargo edition inheritance/toolchain configuration; actual suite stdout and structured controls; exact fault-positive source delta plus minimal negative delta.",
+  "omitted": "Unchanged operation constructors, LoadSandbox body, engine/parser/canon internals, historical/other unchanged parent tests. Complete current source remains final.rs.txt, prior full source separately frozen. No claim prior review packet was complete.",
+  "packet_bytes": 60883
+}

@@ -1,0 +1,45 @@
+{
+  "comparison_parent": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "final": "fe3284199db0831f353d2ae401b8c69472764904",
+  "unchanged_helpers": {
+    "nquads_line": {
+      "before_sha256": "fb337c12b28be0cb94dc923cf2a6ec4211d084312a35d0bce25bbacd4aaff26b",
+      "final_sha256": "fb337c12b28be0cb94dc923cf2a6ec4211d084312a35d0bce25bbacd4aaff26b",
+      "byte_identical": true
+    },
+    "comparable": {
+      "before_sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786",
+      "final_sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786",
+      "byte_identical": true
+    },
+    "oxigraph_normalized_term": {
+      "before_sha256": "3bf3b737db5bdab794331691d4e1eb1f0e17e4f9e77d04470d191c9f131a8705",
+      "final_sha256": "3bf3b737db5bdab794331691d4e1eb1f0e17e4f9e77d04470d191c9f131a8705",
+      "byte_identical": true
+    },
+    "oxigraph_normalized": {
+      "before_sha256": "0f7865b447dfb20399e490d99ba06eb1783ef1bcccbe40ba9f87543d83edb1c3",
+      "final_sha256": "0f7865b447dfb20399e490d99ba06eb1783ef1bcccbe40ba9f87543d83edb1c3",
+      "byte_identical": true
+    },
+    "one_sided": {
+      "before_sha256": "05d7e38585762a9f2ffa587eb3087053405f35859cd66993e675c15394aef11f",
+      "final_sha256": "05d7e38585762a9f2ffa587eb3087053405f35859cd66993e675c15394aef11f",
+      "byte_identical": true
+    },
+    "Verdict": {
+      "before_sha256": "c6ed6dca8072f1ed9b902affd80a3f372cc0f98b51f9333990c4bc90a186fc5a",
+      "final_sha256": "c6ed6dca8072f1ed9b902affd80a3f372cc0f98b51f9333990c4bc90a186fc5a",
+      "byte_identical": true
+    },
+    "allowlist": {
+      "before_sha256": "7d718a9f370abf75e6de4cdd0c8ffa1a2679907ac072ae53388410547e1ab703",
+      "final_sha256": "7d718a9f370abf75e6de4cdd0c8ffa1a2679907ac072ae53388410547e1ab703",
+      "byte_identical": true
+    }
+  },
+  "compare_initial_prologue_and_raw_count_guard_identical": true,
+  "compare_outer_normalization_error_and_final_Differs_identical": true,
+  "record_helper": "Same parse guard, one BTreeMap insert per parsed integer, mismatch-only error, recursive call and blank-node handling; 2024 let-chain becomes 2021 nested if/match. Full before/after bodies frozen. Full suite and unchanged integer-injectivity controls exercise it.",
+  "main_base_qualification": "4595388d is the original whole-patch base; its comparator is intentionally changed by parent787. No semantic equivalence to that base is claimed for the complete patch."
+}

@@ -1,0 +1,31 @@
+fn record_lexical_terms(
+    term: &Term,
+    integers: &mut BTreeMap<i64, String>,
+    blank_nodes: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    match term {
+        Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+            if let Ok(value) = l.value().parse::<i64>()
+                && let Some(previous) = integers.insert(value, l.value().to_string())
+                && previous != l.value()
+            {
+                return Err(format!(
+                    "integer normalization is not term-injective: {previous:?} and {:?}",
+                    l.value()
+                ));
+            }
+        }
+        Term::BlankNode(b) => {
+            blank_nodes.insert(b.as_str().to_string());
+        }
+        Term::Triple(t) => {
+            if let oxrdf::NamedOrBlankNode::BlankNode(b) = &t.subject {
+                blank_nodes.insert(b.as_str().to_string());
+            }
+            record_lexical_terms(&t.object, integers, blank_nodes)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+

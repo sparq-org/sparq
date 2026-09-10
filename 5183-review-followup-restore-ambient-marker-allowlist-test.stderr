@@ -1,0 +1,10 @@
+
+thread 'update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication' (4716043) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/review-followup/controls/restore-ambient-marker-allowlist/update_fuzz.rs:2213:68:
+called `Result::unwrap()` on an `Err` value: "step=0 of 2\nop: INSERT DATA { <http://ex/s> <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> }\ncanonical dataset differs (sparq(rebuild) vs oxigraph)\nonly in sparq(rebuild):\n  <http://ex/s> <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .\nonly in oxigraph:\n  <http://ex/s> <http://ex/p> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n\nrepro: cargo run -p sparq-bench --release -- update-fuzz --seed-start 0 --seed-count 1\n--- full sequence ---\n[0] INSERT DATA { <http://ex/s> <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> }\n[1] INSERT { ?s <http://ex/q> _:bt } WHERE { ?s <http://ex/p> ?o }"
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::result::unwrap_failed
+   3: issue5183_injective_followup::update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication
+   4: <issue5183_injective_followup::update_fuzz::tests::injected_marker_fails_during_actual_lexical_adjudication::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

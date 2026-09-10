@@ -1,0 +1,5 @@
+{
+  "stage": "before any build",
+  "observed": "edition text replacement expected spaces; exact TOML had edition=\"2024\" so assertion stopped setup. Follow-on monitor command found run.py absent, exit2. No compile or tests ran.",
+  "correction": "Exact TOML edit to2021; will verify from cargo metadata before any compile."
+}
