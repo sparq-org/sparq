@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T02:04:24.829420+00:00",
+  "updated_at": "2026-09-10T02:05:43.745811+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -9,7 +9,8 @@
     "active": true,
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
-    "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation."
+    "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
+    "last_app_view_at": "2026-09-10T02:05:43.745811+00:00"
   },
   "constraints": [
     "Implementation: actual GPT-6 Astra xhigh, never Sol; independent review/security/soundness: actual Claude Opus 5 xhigh.",
@@ -142,7 +143,7 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "Launch once actual Opus5 xhigh focused final review from audited opus-final-input.md; collect actual result.",
+      "Collect existing actual Opus5 xhigh session11803 once completed; verify outer JSON success and actual modelUsage before using verdict. Do not launch duplicate review. Collect read-only preparation agent output.",
       "If source approved, fresh target/budget/main revalidation, push normal branch and publish accurate partial-scope PR; required authoritative CI, wasm/conformance/perf gates before protected queue.",
       "Keep registryOFF and holds6049/6055/6095/6475 unchanged; no releases."
     ],
@@ -176,6 +177,12 @@
       "input_sha256": "8266714025e14167dd2fad08ac86a02c2d3ce8312dc10370a4bca160d0782683",
       "output": "direct-3105/admission/opus-final-review.json",
       "collect_policy": "Collect session11803 once complete; no duplicate model call. Prior90599 completed collected."
+    },
+    "publication_preparation": {
+      "agent": "/root/postmerge_ci",
+      "state": "active_read_only",
+      "output": "direct-3105/admission/publication-preparation.json",
+      "scope": "Bounded local PR-template/process and CI-wiring report only; no builds, production edits, remote mutations or new lane."
     }
   },
   "prs": {
