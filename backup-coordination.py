@@ -375,6 +375,10 @@ for evidence_name in ['ask-early-exit.json', 'ask-early-exit.log', 'before-final
 for evidence_name in ['coverage-root-verification.json', 'opus-final-input.md', 'opus-final-input-receipt.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+# Issue3105 final prepublication health and latency diagnostics.
+for evidence_name in ['health-check-final.py', 'health-final.json', 'latency-alarm-jobs.json', 'latency-alarm-job.log', 'generator-label-watch-final.json', 'generator-label-watch-corrected.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T02:00:54.982892+00:00",
+  "updated_at": "2026-09-10T02:04:24.829420+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -49,8 +49,8 @@
   },
   "live_main": {
     "oid": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "observed_at": "2026-09-10T00:51:28.433721+00:00",
-    "evidence": "direct-3105/admission/health-summary.json"
+    "observed_at": "2026-09-10T02:01:39.633445+00:00",
+    "evidence": "direct-3105/admission/health-final.json"
   },
   "rules": {
     "required_check": "gate",
@@ -980,8 +980,8 @@
   },
   "registry_pause": {
     "enabled": false,
-    "observed_at": "2026-09-09T18:47:40Z",
-    "evidence": "direct-6468/label-maintenance/precreate-registry-pause.json"
+    "observed_at": "2026-09-10T02:01:39.633445+00:00",
+    "evidence": "direct-3105/admission/health-final.json"
   },
   "actions_snapshot": {
     "observed_at": "2026-09-09T23:27:46.453047+00:00",
@@ -1948,13 +1948,16 @@
     "issue_state": "CLOSED",
     "fix_pr": 6473,
     "source_head": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "latest_scheduled_run": 34409971933,
+    "latest_scheduled_run": 34420784191,
     "latest_scheduled_created": "2026-09-09T22:00:34Z",
     "latest_scheduled_conclusion": "success",
     "latest_run_predates_source_merge": false,
-    "checked_at": "2026-09-09T22:12:34.018648+00:00",
+    "checked_at": "2026-09-10T02:04:24.829420+00:00",
     "evidence": "direct-6468/label-maintenance/postmerge-scheduled-proof.json",
-    "next": "Firstscheduledmergedsource success and45executedtests/150actualwrites proven. Onlywatch eventualgenerator-label recipients; #5016correctlyplannedstilldeferred, zero currentrecipients."
+    "next": "Firstscheduledmergedsource success and45executedtests/150actualwrites proven. Onlywatch eventualgenerator-label recipients; #5016correctlyplannedstilldeferred, zero currentrecipients.",
+    "latest_generator_recipients": 0,
+    "latest_generator_evidence": "direct-3105/admission/generator-label-watch-corrected.json",
+    "label_query_correction": "Initial final-watch query incorrectly used area:wrapper-gen; corrected query uses actual area:sparq-wrapper-gen and confirms label exists with zero OPEN recipients. No mutations."
   },
   "operational_diagnosis_e534": {
     "agent": "completed/idle",
@@ -2320,5 +2323,15 @@
       "open_recipient_count": 0,
       "action": "No manualclassifierreplay,labelmutation,or starvationclaim; remainpendingnormal scheduledbatchprogress"
     }
+  },
+  "operational_latency_watch": {
+    "at": "2026-09-10T02:04:24.829420+00:00",
+    "alarm_run": 34420777850,
+    "job": 102695484840,
+    "issue": 5153,
+    "issue_open": true,
+    "finding": "Three measured cron firing deficits: auto-arm/batch-merge/verdict-bridge at00:19; each since has a successful scheduled run in health-final.json. Does not establish rolling deficit fully recovered. Hermetic not-a-slug expected test error is not the live failure. No executions overrun in alarm snapshot.",
+    "action": "Preserve existing incident, watch next normal alarm; no manual rerun/cancel/duplicate issue.",
+    "evidence": "direct-3105/admission/latency-alarm-job.log"
   }
 }
