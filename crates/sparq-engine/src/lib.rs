@@ -268,6 +268,11 @@ use spargebra::{Query, SparqlParser};
 /// trips, evaluation stops and the query fails with
 /// `"query budget exceeded (timeout)"` / `"query budget exceeded (max-rows)"` /
 /// `"query budget exceeded (max-bytes)"` / `"query budget exceeded (cancelled)"`.
+///
+/// [GPT-6 Astra] A nested engine call from a callback uses its own budget. The
+/// outer budget resumes when that call returns (also after errors or unwind).
+/// Its deadline and cancellation are checked at the next outer poll; this does
+/// not interrupt arbitrary callback work or combine budgets across queries.
 #[derive(Debug, Clone, Default)]
 pub struct QueryBudget {
     /// Wall-clock deadline. Native only: `std::time::Instant` is unusable on
@@ -1033,18 +1038,19 @@ pub fn query_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
-        // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
-        // is satisfiable — the standard "unit row" encoding of a boolean result.
-        Query::Ask { pattern, .. } => Ok(QueryResult {
-            vars: Vec::new(),
-            rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
-        }),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+            // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
+            // is satisfiable — the standard "unit row" encoding of a boolean result.
+            Query::Ask { pattern, .. } => Ok(QueryResult {
+                vars: Vec::new(),
+                rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
+            }),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 /// Executes an ASK query: `true` iff the pattern has at least one solution.
@@ -1070,12 +1076,13 @@ pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget:
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
-        _ => Err("ask() requires an ASK query".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
+            _ => Err("ask() requires an ASK query".into()),
+        }
+    })
 }
 
 /// Executes a SELECT and serialises it directly to a SPARQL 1.1 JSON results string,
@@ -1106,14 +1113,15 @@ pub fn query_json_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
-        // The SPARQL 1.1 JSON results boolean form.
-        Query::Ask { pattern, .. } => Ok(format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
+            // The SPARQL 1.1 JSON results boolean form.
+            Query::Ask { pattern, .. } => Ok(format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 /// Flush threshold for [`query_json_chunks_with_budget`]: large enough that the
@@ -1131,15 +1139,16 @@ pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &Query
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
-        Query::Ask { pattern, .. } => {
-            Ok(vec![format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)])
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
+            Query::Ask { pattern, .. } => {
+                Ok(vec![format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)])
+            }
+            _ => Err("only SELECT and ASK queries are supported".into()),
         }
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    })
 }
 
 /// Streams the SPARQL-JSON serialisation of a SELECT (or ASK) result, invoking `sink` for
@@ -1186,19 +1195,20 @@ pub fn query_json_stream_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => {
-            exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => {
+                exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
+            }
+            Query::Ask { pattern, .. } => {
+                let doc = format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?);
+                let _ = sink(doc);
+                Ok(())
+            }
+            _ => Err("only SELECT and ASK queries are supported".into()),
         }
-        Query::Ask { pattern, .. } => {
-            let doc = format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?);
-            let _ = sink(doc);
-            Ok(())
-        }
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    })
 }
 
 /// Counts the solutions of a SELECT query *without* materialising the result
@@ -1224,14 +1234,15 @@ pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budge
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::count_select(graph, pattern),
-        // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
-        Query::Ask { pattern, .. } => Ok(usize::from(exec::eval_ask(graph, pattern)?)),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::count_select(graph, pattern),
+            // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
+            Query::Ask { pattern, .. } => Ok(usize::from(exec::eval_ask(graph, pattern)?)),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 #[derive(Debug)]

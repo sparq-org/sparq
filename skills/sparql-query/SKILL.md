@@ -498,6 +498,14 @@ let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budg
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
 ```
 
+[GPT-6 Astra] A nested public query from an extension callback uses an independent child
+budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
+budget rather than combining limits. After the child returns, returns an error, or unwinds,
+the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
+and any previously recorded budget error restored. Its deadline and cancellation are checked
+at the next outer poll. This does not interrupt arbitrary callback work or pool resource limits
+across nested queries; an aborting panic has no continuation.
+
 **Named-graph dataset view** (zero-copy restriction; a non-visible graph is indistinguishable from
 an absent one):
 
