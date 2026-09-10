@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-10T08:29:37.116172+00:00",
+  "merge_group": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "ci_run": 34453439542,
+  "ci_success": 26,
+  "ci_expected_skips": 9,
+  "actual_nextest_shards_passed": [
+    "test (load-aware shard bulk 1/3)",
+    "test (load-aware shard bulk 3/3)",
+    "test (load-aware shard bulk 2/3)",
+    "test (load-aware shard heavy-hnsw)",
+    "test (load-aware shard heavy-diskann)"
+  ],
+  "ci_source_sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+  "coverage_skip_source_guards": {
+    "coverage-measure": "if: >-\n      github.event_name != 'schedule' &&\n      github.event_name != 'merge_group' &&\n      (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&\n      needs.changes.outputs.rust_changed == 'true' &&\n      (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')",
+    "coverage-engine-run": "if: >-\n      github.event_name != 'schedule' &&\n      github.event_name != 'merge_group' &&\n      (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&\n      needs.changes.outputs.rust_changed == 'true' &&\n      (needs.select.outputs.mode != 'selected' || needs.select.outputs.affected != '[]')",
+    "coverage-engine-merge": "if: needs.coverage-engine-run.result == 'success'"
+  },
+  "coverage_boundary": "Instrumented coverage passed exact PR head; merge-group runs only floor/presence guards. Main must remeasure.",
+  "matrix": {
+    "success": 36,
+    "skipped": 1,
+    "in_progress": 9,
+    "queued": 11,
+    "state": "making progress with GitHub-hosted runners"
+  },
+  "gate": "still waiting for sibling checks",
+  "runner_scope": "repo runner inventory empty; org inventory denied HTTP403 missing admin:org. No scope escalation attempted. Observed active hosted jobs only; not fleet-wide reserve proof.",
+  "mutation": "none; preserved all live checks"
+}

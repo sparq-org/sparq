@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T08:09:14.083001+00:00",
+  "updated_at": "2026-09-10T08:29:37.116172+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -10,7 +10,8 @@
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
     "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
-    "last_app_view_at": "2026-09-10T03:13:58.329719+00:00"
+    "last_app_view_at": "2026-09-10T08:29:37.116172+00:00",
+    "last_file_verify_at": "2026-09-10T08:29:37.116172+00:00"
   },
   "constraints": [
     "Implementation: actual GPT-6 Astra xhigh, never Sol; independent review/security/soundness: actual Claude Opus 5 xhigh.",
@@ -68,7 +69,7 @@
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
     "phase": "PR #6478 admitted to the protected merge queue; merge-group validation running",
-    "state": "All exact-head PR validation passed and source/review requirements were verified. Normal queue admission accepted at position 1. No merge has occurred yet.",
+    "state": "PR6478 remains queue position1 on unchanged head3c and merge-group781f. CI actual five test shards and other applicable jobs passed. Matrix progressing, gate awaits matrix; no merge or recovery needed.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -601,15 +602,10 @@
       "latest_verification": "direct-6476/admission/attempt2-recovery-verified-0744.json"
     },
     "latest_heartbeat": {
-      "at": "2026-09-10T08:09:14.083001+00:00",
-      "phase": "protected queue",
-      "required_PR_rollup": "SUCCESS",
-      "merge_group_rollup": "PENDING",
-      "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
-      "merge_group_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
-      "main": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "unresolved_threads": 0,
-      "evidence": "direct-6476/admission/queue-first-state-6478.json"
+      "at": "2026-09-10T08:29:37.116172+00:00",
+      "snapshot": "direct-6476/admission/heartbeat-0821.json",
+      "jobs": "direct-6476/admission/merge-group-jobs-0828.json",
+      "proof": "direct-6476/admission/merge-group-progress-root-verification-0828.json"
     },
     "final_pr_ci": {
       "state": "passed_root_verified",
@@ -1115,17 +1111,13 @@
     "Preserve all pending approvals/holds, registry Actions OFF, no releases/EC2/grouping changes."
   ],
   "followup_lane": {
-    "issue": 6462,
-    "agent": "root",
-    "branch": "codex/ci-rerun-bot-query",
-    "head": "5640d06b669f4a6cd52029d6b0dcc9ee48b6e692",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-    "state": "PR6463merged5315; bothreviewedfilesverifiedonmain; issue6462closedwithresolutioncomment; owncleanworktree removed. Observefirstnaturalpost-fixsweeper.",
-    "packet": "recovery-20260908/6462-rereview-5640d06b.md",
-    "packet_sha256": "cbbed101eb48afd78a04ed9ae18e72294f9a3010417c7730ced407b7e96edf9f",
-    "review_output": "recovery-20260908/6462-opus-rereview-5640d06b.json",
-    "real_identity_proof": "REST login sparq-orchestrator[bot], GraphQL Bot login sparq-orchestrator, SAME stable node ID. Root verified via public readonly REST+GraphQL; no production claim/rerun/App credentials.",
-    "pr": 6463
+    "issue": 6480,
+    "phase": "read-only readiness while PR6478 merge-group progresses",
+    "agent": "/root/postmerge_ci",
+    "model": "GPT-6 Astra",
+    "effort": "xhigh",
+    "directory": "direct-6480/readiness",
+    "constraints": "No implementation/install/build/git or remote mutation; root authorization required for next implementation phase after current lane."
   },
   "budget": {
     "remaining": 4994,
@@ -1472,24 +1464,10 @@
     "evidence": "direct-3105/admission/health-final.json"
   },
   "actions_snapshot": {
-    "observed_at": "2026-09-09T23:27:46.453047+00:00",
-    "queued": 1,
-    "in_progress": 3,
-    "queued_run": 32217747734,
-    "queue_note": "Same historical Aug19 scheduled batch-merge run. No capacity intervention warranted from run counts. RegistryActions remain OFF.",
-    "in_progress_runs": [
-      34416654126,
-      34416533010,
-      34327540479
-    ],
-    "older_ci": "34327540479 has four active advisory mutation shards20-23/24, started19:23-21:15 UTC; not a15-hour single stalled job. No cancellation performed.",
-    "runner_note": "Repository self-hosted runner list is empty; this does not measure GitHub-hosted capacity or organization runner reserve. Four active mutation jobs name GitHub Actions runners.",
-    "evidence": [
-      "direct-6475/source-admission/actions-queued-2326.json",
-      "direct-6475/source-admission/actions-running-2326.json",
-      "direct-6475/source-admission/runners-2326.json",
-      "direct-6475/source-admission/older-main-jobs-2328.json"
-    ]
+    "at": "2026-09-10T08:29:37.116172+00:00",
+    "queued_workflows": 5,
+    "in_progress_workflows": 2,
+    "jobs_scope": "matrix36success/1skip/9running/11queued at08:27; no observed failures"
   },
   "completed_lanes": {
     "4246": {
@@ -3101,9 +3079,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T08:09:14.083001+00:00",
-    "actions_enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0757.json"
+    "at": "2026-09-10T08:29:37.116172+00:00",
+    "enabled": false,
+    "proof": "direct-6476/admission/heartbeat-0821.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
