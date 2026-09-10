@@ -1,0 +1,60 @@
+{
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "alerts": [
+    {
+      "number": 107,
+      "ghsa": "GHSA-2xp9-vwfh-vxw4",
+      "package": {
+        "ecosystem": "npm",
+        "name": "next"
+      },
+      "manifest": "package-lock.json",
+      "affected": ">= 10.0.0, < 15.5.24",
+      "patched": "15.5.24"
+    },
+    {
+      "number": 106,
+      "ghsa": "GHSA-p293-qw3h-jr36",
+      "package": {
+        "ecosystem": "npm",
+        "name": "next"
+      },
+      "manifest": "package-lock.json",
+      "affected": ">= 13.4.0, < 15.5.24",
+      "patched": "15.5.24"
+    }
+  ],
+  "locked_next": "15.5.21",
+  "direct_workspace_consumers": [
+    "site",
+    "gui/app"
+  ],
+  "configuration_observation": {
+    "site": "output export; images unoptimized true",
+    "gui/app": "output export; images unoptimized true"
+  },
+  "dedupe": {
+    "repo:sparq-org/sparq is:open \"15.5.24\"": {
+      "count": 0,
+      "matches": []
+    },
+    "repo:sparq-org/sparq is:open \"GHSA-2xp9-vwfh-vxw4\"": {
+      "count": 0,
+      "matches": []
+    },
+    "repo:sparq-org/sparq is:open \"Next.js\"": {
+      "count": 8,
+      "matches": [
+        2717,
+        3299,
+        5531,
+        2645,
+        2623,
+        6133,
+        5916,
+        758
+      ]
+    }
+  },
+  "assessment": "Intake only. Runtime exposure and priority not independently assessed. No dismissal, production call, source edit or dependency install. Narrow Opus security assessment and a deduplicated patch issue/PR remain outstanding."
+}

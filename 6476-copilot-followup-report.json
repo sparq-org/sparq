@@ -1,0 +1,73 @@
+{
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "source_clean": true,
+  "delta": {
+    "files": 3,
+    "insertions": 24,
+    "deletions": 3,
+    "production_code_changed": false,
+    "feature_off_declaration_unchanged": true
+  },
+  "findings": {
+    "execution_error": "New fifth callback case successfully parses CONSTRUCT then gets exact SELECT/ASK-only error through query -> query_with_budget -> query_prepared_with_budget -> with_budget -> match error arm. Old parse rejection remains separate. Existing serial-thread assertion and outer cancelled error remain; new assert_state compares full Limits and sticky None after child Err.",
+    "skill": "Documents independent child budget shadowing; complete outer limits, cancellation, byte accounting and sticky error restoration; resumed coarse polling; no aggregate budget or arbitrary callback interruption guarantee.",
+    "readme": "Corrected pointer clear-on-every-drop statement to restore parent scope, clear at outermost exit."
+  },
+  "validation": [
+    {
+      "configuration": "default",
+      "cargo_exit": 0,
+      "result": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 328 filtered out; finished in 0.00s",
+      "test_binary_sha256": "255b242546fad2fce6f95c6076424f94ea804dcbeac61a5c29b754291f4227e7",
+      "bytes": 7995584,
+      "production_features": [
+        "default",
+        "digest",
+        "parallel",
+        "regex"
+      ],
+      "new_public_case": "valid graph-form parse; exact execution Err inside query_prepared_with_budget; full parent-state equality; outer cancelled error and exact callback thread",
+      "child_variants": 5,
+      "no_default_qualification": null
+    },
+    {
+      "configuration": "no-default",
+      "cargo_exit": 0,
+      "result": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 314 filtered out; finished in 0.00s",
+      "test_binary_sha256": "3c1ddbdd8a21ef75888efaed7b76804709c33f965d11aad1d01ce825249dd1a1",
+      "bytes": 5694000,
+      "production_features": [],
+      "new_public_case": "valid graph-form parse; exact execution Err inside query_prepared_with_budget; full parent-state equality; outer cancelled error and exact callback thread",
+      "child_variants": 5,
+      "no_default_qualification": "Engine defaults disabled; dev-dependency sparq-core still explicitly enables parallel/mmap/dict-spill."
+    }
+  ],
+  "preflight": {
+    "exit_code": 1,
+    "only_mechanical_finding": "Existing Bash3 mapfile unavailable in check-privacy-claims.sh; no bypass or install. Other invoked checks passed; no-perf/readme-template reported no matching diff path."
+  },
+  "format": "Pinned rustfmt applied to a scratch wrapper around the touched test; exact match, no source formatting change. git diff --check passed.",
+  "scope_limits": [
+    "Only affected in-tree default and no-default nested-budget suites run; no full workspace or service-local rebuild.",
+    "No-default disables engine defaults but dev core dependency retains parallel/mmap/dict-spill; not an entirely serial dependency graph.",
+    "New child-install path is established by exact public call source and valid parse/exact execution-error assertion; no additional runtime installation counter was introduced.",
+    "No new guard logic or controls: earlier frozen restore-state mutants remain relevant; this delta adds a real public error-path witness.",
+    "Operator corpus was not rerun because only cfg(test) Rust changed; unchanged-production proof preserved.",
+    "Authoritative exact-head full CI and root independent review remain before publication/admission."
+  ],
+  "resources": {
+    "free_final_observed_bytes": 4613943296,
+    "aggregate_growth_final_observed_bytes": 303652864,
+    "cap_bytes": 536870912,
+    "floor_bytes": 2147483648,
+    "max_build_observed_growth_bytes": 295329792,
+    "minimum_build_observed_free_bytes": 4546134016,
+    "one_job_offline_incremental_off": true,
+    "seconds_by_command": {
+      "default": 41.096949100494385,
+      "no-default": 34.97953510284424
+    }
+  },
+  "pending_commands": false
+}

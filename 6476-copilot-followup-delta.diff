@@ -1,0 +1,69 @@
+diff --git a/crates/sparq-engine/README.md b/crates/sparq-engine/README.md
+index abf1ec28c..373c4e395 100644
+--- a/crates/sparq-engine/README.md
++++ b/crates/sparq-engine/README.md
+@@ -105,7 +105,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
+ - **Id-level term-identity FILTER fast path** *(opt-in `id-filter-fastpath` feature, OFF by default)* — a compiled `=`/`!=` over operands a static analysis proves non-literal (subject/predicate-only variables, constant IRIs, and — via a snapshot-aware predicate-range check — an object of a constant predicate whose object column has NO literals in the current store snapshot, the SP2Bench `dc:creator`/q08/q12b shape) is decided by dictionary-id (in)equality, and equal ids of ANY kind short-circuit `=` true (canonicalising dict → sameTerm), skipping the per-row term materialisation. The predicate-range verdict is re-checked against the LIVE graph every evaluation, so an UPDATE inserting a literal object simply declines the next query (never cross-snapshot). Unequal-id literals (numeric-promotion, the `sq-lr2ii` class) and possible type-errors fall through to the exact path. Result-identical (differential vs the exact oracle); off, no new deps.
+ - **Characteristic-set anchor-incidence prune** *(opt-in `cs-anchor-incidence` feature, OFF by default)* — the DISTINCT predicate-projection semijoin (`SELECT DISTINCT ?p WHERE { anchor UNION probe }`, SP2Bench q09) precomputes, per anchor join position, the SET of predicates that relate SOME anchor member, so a candidate predicate absent from that set is pruned by an O(1) membership test instead of a large no-hit clipped block scan. Result-identical (the set only prunes provably-empty existence checks; differential vs the exact scan); conservatively declines on a graph with a pending-update overlay; off, zero code compiles, no new deps.
+ - **Lazy top-k string sort key** *(opt-in `topk-lazy-strkey` feature, OFF by default)* — an `ORDER BY` on a plain `xsd:string` column with a `LIMIT` builds a zero-allocation id-carrying sort key (compared via the literal's zero-copy value bytes) instead of reconstructing + re-allocating the literal value per input row, so a top-k over a large scan pays no key allocation for the rows it discards. Byte-identical output (a full-output differential + W3C ORDER BY conformance); off, zero code compiles, no new deps.
+-- **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins and clears the pointer on drop. The four `unsafe` sites are listed in the workspace unsafe register.
++- **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
+ 
+ ## 📚 Learn more
+ 
+diff --git a/crates/sparq-engine/src/exec.rs b/crates/sparq-engine/src/exec.rs
+index 098414f92..dc532c380 100644
+--- a/crates/sparq-engine/src/exec.rs
++++ b/crates/sparq-engine/src/exec.rs
+@@ -701,7 +701,7 @@ pub(crate) mod budget {
+             use oxrdf::{Literal, Term};
+             use sparq_core::Graph;
+             use std::sync::atomic::AtomicUsize;
+-            for inner in 0..4 {
++            for inner in 0..5 {
+                 let graph = Graph::load_str("", "turtle").unwrap();
+                 let nested = Graph::load_str("", "turtle").unwrap();
+                 let flag = Arc::new(AtomicBool::new(false));
+@@ -733,9 +733,22 @@ pub(crate) mod budget {
+                                 1
+                             );
+                         }
+-                        _ => {
++                        3 => {
++                            // Parse rejection occurs before a child budget is installed.
+                             assert!(crate::query(&nested, "not SPARQL").is_err());
+                         }
++                        _ => {
++                            // [GPT-6 Astra] This valid graph form reaches the error
++                            // arm inside query_prepared_with_budget's budget scope.
++                            let sparql = "CONSTRUCT { ?s ?p ?o } WHERE {}";
++                            assert!(crate::PreparedQuery::parse(sparql).unwrap().is_graph_form());
++                            let outer = ACTIVE.with(Cell::get);
++                            assert_eq!(
++                                crate::query(&nested, sparql).unwrap_err(),
++                                "only SELECT and ASK queries are supported"
++                            );
++                            assert_state(outer, None);
++                        }
+                     }
+                     callback_flag.store(true, Ordering::Relaxed);
+                     Ok(Term::Literal(Literal::from(7)))
+diff --git a/skills/sparql-query/SKILL.md b/skills/sparql-query/SKILL.md
+index e83775d3d..7aaa1199d 100644
+--- a/skills/sparql-query/SKILL.md
++++ b/skills/sparql-query/SKILL.md
+@@ -498,6 +498,14 @@ let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budg
+ // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
+ ```
+ 
++[GPT-6 Astra] A nested public query from an extension callback uses an independent child
++budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
++budget rather than combining limits. After the child returns, returns an error, or unwinds,
++the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
++and any previously recorded budget error restored. Its deadline and cancellation are checked
++at the next outer poll. This does not interrupt arbitrary callback work or pool resource limits
++across nested queries; an aborting panic has no continuation.
++
+ **Named-graph dataset view** (zero-copy restriction; a non-visible graph is indistinguishable from
+ an absent one):
+ 

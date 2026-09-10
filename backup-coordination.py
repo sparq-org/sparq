@@ -479,6 +479,12 @@ for evidence_name in ['binary/operator-corpus', 'binary/production-engine.rlib',
 for evidence_name in ['operator-corpus-root-verification.json', 'heartbeat-0703.json', 'd07-full-ci-jobs.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 frozen Copilot correction, reviewer input, and critical-alert intake.
+for evidence_name in ['after/crates/sparq-engine/README.md', 'after/crates/sparq-engine/src/exec.rs', 'after/skills/sparql-query/SKILL.md', 'before/crates/sparq-engine/README.md', 'before/crates/sparq-engine/src/exec.rs', 'before/skills/sparql-query/SKILL.md', 'binary/in-tree-default', 'binary/in-tree-no-default', 'commit-message.txt', 'commit.json', 'default-compiler-invocation.txt', 'default.json', 'default.log', 'delta.diff', 'diff-check.log', 'export-note.json', 'format.json', 'no-default-compiler-invocation.txt', 'no-default.json', 'no-default.log', 'path-proof.txt', 'preflight.json', 'preflight.log', 'protocol.json', 'public-api-context.rs', 'public-review-supplement.md', 'report.json', 'review-context.rs', 'run.py', 'test-results.json', 'touched-format-input.rs', 'touched-format-output.rs', 'unchanged-production-proof.json', 'manifest.json']:
+    FILES["6476-copilot-followup-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/copilot-followup" / evidence_name
+for evidence_name in ['copilot-followup-root-verification.json', 'opus-copilot-input.md', 'opus-copilot-input-receipt.json', 'critical-alert-readiness.json', 'critical-alert-dedupe-source.json', 'critical-alert-intake-summary.json', 'pr-copilot-followup-body.md', 'copilot-followup-replies.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

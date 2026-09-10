@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T07:15:29.673822+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "input_bytes": 20734,
+  "input_sha256": "b704cff02087b1a04b13cf631c891d41d4e3437a6bffd5f31ab20d152bdded06",
+  "model": "claude-opus-5",
+  "effort": "xhigh",
+  "privacy": "Publicrepositorysource+boundedstructuredobservations; nohostpaths/rawlogs/credentials",
+  "scope": "3filetest/docsdeltaonly"
+}

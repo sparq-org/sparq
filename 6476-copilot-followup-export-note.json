@@ -1,0 +1,4 @@
+{
+  "first_export_attempt": "Parser expected unquoted libtest filter; actual Cargo -vv surrounds the filter in single quotes. Assertion stopped export, no test rerun or source change; corrected parser read existing logs.",
+  "initial_commit_attempt": "No commit created because exact body-file write had not happened; same explicit paths were staged."
+}

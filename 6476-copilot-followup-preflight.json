@@ -1,0 +1,9 @@
+{
+  "command": [
+    "python3",
+    "scripts/preflight.py",
+    "--base",
+    "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+  ],
+  "exit_code": 1
+}

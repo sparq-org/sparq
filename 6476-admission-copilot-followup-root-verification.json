@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T07:15:29.673822+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "clean": true,
+  "manifest_files": 33,
+  "manifest_sha256": "d5be47f11bda7b7ead982a11e4c12e43a4a03662af559021567f042200b05ef9",
+  "delta_git_byte_verified": true,
+  "only_cfg_test_rust_changed": true,
+  "declaration_unchanged": true,
+  "actual_default_no_default_exit_and_summaries_verified": true,
+  "public_packet_bytes": 18783,
+  "public_packet_sha256": "b8e972353bd833cdb2ca57059ddde4f884439814844c72b8466819028c0926a9",
+  "privacy_pattern_hits": []
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "configuration": "default",
+    "cargo_exit": 0,
+    "result": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 328 filtered out; finished in 0.00s",
+    "test_binary_sha256": "255b242546fad2fce6f95c6076424f94ea804dcbeac61a5c29b754291f4227e7",
+    "bytes": 7995584,
+    "production_features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "new_public_case": "valid graph-form parse; exact execution Err inside query_prepared_with_budget; full parent-state equality; outer cancelled error and exact callback thread",
+    "child_variants": 5,
+    "no_default_qualification": null
+  },
+  {
+    "configuration": "no-default",
+    "cargo_exit": 0,
+    "result": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 314 filtered out; finished in 0.00s",
+    "test_binary_sha256": "3c1ddbdd8a21ef75888efaed7b76804709c33f965d11aad1d01ce825249dd1a1",
+    "bytes": 5694000,
+    "production_features": [],
+    "new_public_case": "valid graph-form parse; exact execution Err inside query_prepared_with_budget; full parent-state equality; outer cancelled error and exact callback thread",
+    "child_variants": 5,
+    "no_default_qualification": "Engine defaults disabled; dev-dependency sparq-core still explicitly enables parallel/mmap/dict-spill."
+  }
+]

@@ -1,0 +1,50 @@
+1016: /// Executes a SPARQL query string against a graph, materialising the solutions.
+1017: pub fn query(graph: &Graph, sparql: &str) -> Result<QueryResult, String> {
+1018:     query_with_budget(graph, sparql, &QueryBudget::unlimited())
+1019: }
+1020: 
+1021: /// [`query`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1022: pub fn query_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<QueryResult, String> {
+1023:     query_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)
+1024: }
+1025: 
+1026: /// [`query`] over a [`PreparedQuery`] — no per-execution parse.
+1027: pub fn query_prepared(graph: &Graph, prepared: &PreparedQuery) -> Result<QueryResult, String> {
+1028:     query_prepared_with_budget(graph, prepared, &QueryBudget::unlimited())
+1029: }
+1030: 
+1031: /// [`query_prepared`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1032: pub fn query_prepared_with_budget(
+1033:     graph: &Graph,
+1034:     prepared: &PreparedQuery,
+1035:     budget: &QueryBudget,
+1036: ) -> Result<QueryResult, String> {
+1037:     let q = &prepared.query;
+1038:     let active = active_dataset(graph, q);
+1039:     let graph = active.as_ref().unwrap_or(graph);
+1040:     let _view_scope = view_scope(&active);
+1041:     exec::budget::with_budget(budget, || {
+1042:         exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+1043:         match q {
+1044:             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+1045:             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
+1046:             // is satisfiable — the standard "unit row" encoding of a boolean result.
+1047:             Query::Ask { pattern, .. } => Ok(QueryResult {
+1048:                 vars: Vec::new(),
+1049:                 rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
+1050:             }),
+1051:             _ => Err("only SELECT and ASK queries are supported".into()),
+1052:         }
+1053:     })
+1054: }
+1055: 
+1056: /// Executes an ASK query: `true` iff the pattern has at least one solution.
+1057: /// Evaluation early-exits where the engine has a streaming path (the pattern is
+1058: /// evaluated under a `LIMIT 1`).
+1059: pub fn ask(graph: &Graph, sparql: &str) -> Result<bool, String> {
+1060:     ask_with_budget(graph, sparql, &QueryBudget::unlimited())
+1061: }
+1062: 
+1063: /// [`ask`] under a cooperative [`QueryBudget`] (deadline / max result rows).
+1064: pub fn ask_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<bool, String> {
+1065:     ask_prepared_with_budget(graph, &PreparedQuery::parse(sparql)?, budget)

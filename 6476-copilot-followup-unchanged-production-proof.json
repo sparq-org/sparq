@@ -1,0 +1,7 @@
+{
+  "exact_exec_prefix_before_changed_cfg_test": true,
+  "exact_exec_suffix_after_changed_cfg_test": true,
+  "only_rust_delta_within": "#[cfg(test)] exec::budget::nested_budget_tests::public_extension_nested_query_preserves_outer_cancel",
+  "declaration_sha256_unchanged": "4be2e936e09324d635c511072075e49d4c03c56fc9b56be67bddcdbe7acef06c",
+  "scope": "No production source tokens changed; existing d07 operator corpus and fresh-production provenance remain applicable; no rerun."
+}

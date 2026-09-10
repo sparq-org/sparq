@@ -1,0 +1,12 @@
+{
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "status": "clean",
+  "files": {
+    "crates/sparq-engine/src/exec.rs": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "crates/sparq-engine/README.md": "d6fed81b2322ebf92d803510fdab99b7349ef7feccf2b56b0be6fcd53c36090d",
+    "skills/sparql-query/SKILL.md": "7e0bb012f1db6e5566c3dec2dd4e63d7257356eb9235ea6e5b09697b563b40f0"
+  },
+  "subject": "test(engine): cover nested query execution errors",
+  "authorship": "GPT-6 Astra; exact footer preserved in commit-message.txt"
+}

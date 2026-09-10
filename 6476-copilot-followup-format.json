@@ -1,0 +1,6 @@
+{
+  "command": "pinned rustfmt stdin, --edition2021 --config-path rustfmt.toml --emit stdout",
+  "exit_code": 0,
+  "exact_touched_test_match": true,
+  "stderr": ""
+}

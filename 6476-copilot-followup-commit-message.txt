@@ -1,0 +1,5 @@
+test(engine): cover nested query execution errors
+
+Keep parse rejection distinct from a valid unsupported graph query that exits after installing its child budget. Document independent nested scopes and restoration in the query skill and engine README.
+
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
