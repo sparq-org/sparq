@@ -1,0 +1,11 @@
+
+running 1 test
+test update_fuzz::tests::raw_duplicate_redistribution_is_rejected ... FAILED
+
+failures:
+
+failures:
+    update_fuzz::tests::raw_duplicate_redistribution_is_rejected
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.01s
+

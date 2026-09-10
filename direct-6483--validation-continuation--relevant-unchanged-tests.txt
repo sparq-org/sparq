@@ -1,0 +1,181 @@
+    fn duplicate_quad_is_caught_despite_canonicalization() {
+        let a = vec![
+            "_:x <http://ex/p> <http://ex/o> .".to_string(),
+            "_:x <http://ex/p> <http://ex/o> .".to_string(),
+        ];
+        let b = vec!["_:y <http://ex/p> <http://ex/o> .".to_string()];
+        match compare("a", &a, "b", &b, false) {
+            Verdict::Differs(d) => assert!(
+                d.contains("COUNTS differ"),
+                "expected the raw-count guard to fire, got:\n{}",
+                d
+            ),
+            _ => panic!("a duplicated quad on one side must not compare equal"),
+        }
+    }
+
+    /// sq-hodke (1), comparator side: the adjudicated integer-lexical class absorbs
+    /// EXACTLY Oxigraph's normalization and nothing more.
+    fn blank_node_compare_is_isomorphism_not_relabelling_blindness() {
+        let a = vec![
+            "_:fb0 <http://ex/p> <http://ex/o> .".to_string(),
+            "_:fb0 <http://ex/q> _:fb1 <http://ex/g> .".to_string(),
+        ];
+        let relabelled = vec![
+            "_:zzz <http://ex/p> <http://ex/o> .".to_string(),
+            "_:zzz <http://ex/q> _:aaa <http://ex/g> .".to_string(),
+        ];
+        assert!(
+            matches!(compare("a", &a, "b", &relabelled, false), Verdict::Same),
+            "a pure blank-node relabelling is the SAME dataset"
+        );
+        let mut extra = relabelled.clone();
+        extra.push("_:zzz <http://ex/r> <http://ex/o2> .".to_string());
+        extra.sort();
+        assert!(
+            matches!(compare("a", &a, "b", &extra, false), Verdict::Differs(_)),
+            "an extra edge on a blank node is NOT an isomorphism and must fail"
+        );
+        // A different blank-node *shape* with the same edge count must also fail.
+        let reshaped = vec![
+            "_:p <http://ex/p> <http://ex/o> .".to_string(),
+            "_:q <http://ex/q> _:r <http://ex/g> .".to_string(),
+        ];
+        assert!(
+            matches!(compare("a", &a, "b", &reshaped, false), Verdict::Differs(_)),
+            "splitting one blank node into two is NOT an isomorphism and must fail"
+        );
+    }
+
+    /// A duplicate quad on one side alone survives canonicalization (RDFC-1.0
+    /// deduplicates), so the raw-count guard must catch it. Pins the check that keeps
+    /// v1's duplicate sensitivity alive under the new comparator.
+    fn integer_lexical_adjudication_is_narrow() {
+        let ncl = "<http://ex/s> <http://ex/p> \
+                   \"05\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+            .to_string();
+        let canonical = "<http://ex/s> <http://ex/p> \
+                         \"5\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+            .to_string();
+        let collapsed = vec![ncl.clone(), canonical.clone()];
+        let oxi = vec![canonical.clone()];
+        assert!(
+            matches!(
+                compare("sparq", &collapsed, "oxigraph", &oxi, true),
+                Verdict::Differs(_)
+            ),
+            "a reference-state collapse is no longer adjudicated"
+        );
+        let sparq = vec![ncl.clone()];
+        assert!(
+            matches!(
+                compare("sparq", &sparq, "oxigraph", &oxi, true),
+                Verdict::AdjudicatedIntegerLexical
+            ),
+            "a one-to-one lexical rewrite must still exercise the adjudicated class"
+        );
+        assert!(
+            matches!(
+                compare("sparq", &sparq, "oxigraph", &oxi, false),
+                Verdict::Differs(_)
+            ),
+            "with the class DISABLED the same case must fail — including for every \
+             sparq-vs-sparq compare, which never passes the flag"
+        );
+        // An unrelated missing quad alongside the lexical difference must NOT be
+        // absorbed: the class only fires when normalization makes the sets agree.
+        let mut sparq_plus = sparq.clone();
+        sparq_plus.push("<http://ex/s> <http://ex/q> <http://ex/o> .".to_string());
+        sparq_plus.sort();
+        assert!(
+            matches!(
+                compare("sparq", &sparq_plus, "oxigraph", &oxi, true),
+                Verdict::Differs(_)
+            ),
+            "a real missing quad must survive the adjudication"
+        );
+        // A lexical difference the reference engine does NOT make is not this class.
+        let lang = vec!["<http://ex/s> <http://ex/p> \"a\"@en .".to_string()];
+        let lang2 = vec!["<http://ex/s> <http://ex/p> \"a\"@fr .".to_string()];
+        assert!(
+            matches!(
+                compare("sparq", &lang, "oxigraph", &lang2, true),
+                Verdict::Differs(_)
+            ),
+            "the class must not absorb a language-tag difference"
+        );
+    }
+
+    /// Pins the committed registry ⟷ this comparator's detectors. A new `update-*`
+    /// class added to the JSON without a detector here must NOT silently start
+    /// absorbing divergences.
+    fn lexical_adjudication_preserves_rows_and_blank_node_structure() {
+        // The blank-node case reaches canon's set conversion; without it the
+        // ordinary vector comparison alone rejects the differing multiplicities.
+        for subject in ["<http://ex/s>", "_:x"] {
+            let p = format!("{subject} <http://ex/p> \"020\"^^{XSD_INTEGER} .");
+            let q = format!("{subject} <http://ex/q> \"021\"^^{XSD_INTEGER} .");
+            let a = vec![p.clone(), p.clone(), q.clone()];
+            let b = vec![
+                p.replace("020", "20"),
+                q.replace("021", "21"),
+                q.replace("021", "21"),
+            ];
+            assert!(
+                matches!(compare("a", &a, "b", &b, true), Verdict::Differs(_)),
+                "equal totals cannot hide duplicate redistribution for {subject}"
+            );
+        }
+        let a = vec![
+            format!("_:a <http://ex/p> \"020\"^^{XSD_INTEGER} ."),
+            "_:a <http://ex/q> <http://ex/o> .".into(),
+        ];
+        let good = vec![
+            format!("_:x <http://ex/p> \"20\"^^{XSD_INTEGER} ."),
+            "_:x <http://ex/q> <http://ex/o> .".into(),
+        ];
+        assert!(matches!(
+            compare("a", &a, "b", &good, true),
+            Verdict::AdjudicatedIntegerLexical
+        ));
+        let split = vec![good[0].clone(), "_:y <http://ex/q> <http://ex/o> .".into()];
+        match compare("a", &a, "b", &split, true) {
+            Verdict::Differs(detail) => {
+                assert!(
+                    detail.contains("blank-node counts differ (1 vs 2)"),
+                    "{detail}"
+                );
+                assert!(detail.contains("only in a:"), "{detail}");
+                assert!(detail.contains("only in b:"), "{detail}");
+                assert!(
+                    detail.contains("\"020\""),
+                    "original lexical missing: {detail}"
+                );
+                assert!(
+                    detail.contains("\"20\""),
+                    "reference lexical missing: {detail}"
+                );
+            }
+            _ => panic!("different blank-node counts must fail with original dataset details"),
+        }
+        let extra = vec![good[0].clone(), "_:x <http://ex/r> <http://ex/o> .".into()];
+        assert!(
+            matches!(compare("a", &a, "b", &extra, true), Verdict::Differs(_)),
+            "same node/row counts do not license a changed predicate"
+        );
+        for (left, right) in [
+            (
+                "\"20.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                "\"20\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+            ),
+            ("\"x\"@en", "\"x\"@fr"),
+        ] {
+            let left = vec![format!("<http://ex/s> <http://ex/p> {left} .")];
+            let right = vec![format!("<http://ex/s> <http://ex/p> {right} .")];
+            assert!(matches!(
+                compare("a", &left, "b", &right, true),
+                Verdict::Differs(_)
+            ));
+        }
+    }
+

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "seconds": 0.036512333999999994
+  },
+  {
+    "name": "author-preflight",
+    "argv": [
+      "python3",
+      "scripts/preflight.py",
+      "--changed-files",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/validation-continuation/changed-files.txt",
+      "--added-lines",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/validation-continuation/full.diff"
+    ],
+    "exit": 1,
+    "seconds": 0.8702645419999999
+  }
+]

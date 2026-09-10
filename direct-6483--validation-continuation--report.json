@@ -1,0 +1,47 @@
+{
+  "decision": "ready for independent final source review; no publication or CI admission claim",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "parent": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "model": "GPT-6 Astra xhigh",
+  "source_binding": "source-binding.json",
+  "scope": "Private UPDATE differential complete-quad snapshots/probes only; rejects repeated raw full-quad emissions in strict Same branch after existing unequal-count check. No general bag uniqueness policy or engine/canonicalizer fix.",
+  "change": "O(N log N) BTreeSet comparisons and O(N) borrowed references; deterministic side-first first repeated raw line with total occurrence count. No cloned raw strings in guard.",
+  "validation": {
+    "candidate": "26/26 actual module tests passed (existing20 + new6); exact original compiled candidate, zero rebuilds in continuation",
+    "both_engine_scope": "Actual same SPO in default plus two named graphs; each renderer snapshot3; each default probe1 and named probe2 exact graph-bearing rows passed.",
+    "control": "Removed only new guard; same source tests and pinned libraries. Compiled successfully, regression exits101 with equal-total raw duplicate redistribution returned Same.",
+    "clippy": "Actual module direct clippy-driver --test metadata with -D warnings exit0; not full workspace lint.",
+    "format": "Previously executed touched-region rustfmt against exact candidate before its successful compile; copied unchanged evidence. No whole-file reflow.",
+    "diff_check": "exit0",
+    "author_preflight": "exit1 solely privacy-claims shell line92 mapfile unavailable under host Bash3; other selected mechanical checks pass. Linux privacy proof remains required."
+  },
+  "interrupted_prior_run": {
+    "manifest_sha256": "dfa1ff9fa266fe27756028bd148a7fccb77898bf8926c9c52bcd4bd5aaef6157",
+    "files_verified_before_and_after": 40,
+    "candidate_build_exit": 0,
+    "candidate_test_exit": -15,
+    "cause": "Controller allocation census raced LOAD sandbox file removal (ENOENT); no observed Rust assertion failure. Four tests passed then interruption. Old files retained unchanged.",
+    "continuation": "Controller catches only ENOENT during traversal/stat, all other failures stop. Runtime TMPDIR moved to continuation; compile-time faithful allowlist remains old read-only location.",
+    "enoent_observed_in_continuation": 0
+  },
+  "resource": {
+    "phase_seconds": 17.056804625,
+    "initial_combined_allocated_bytes": 108208128,
+    "max_combined_allocated_bytes": 122343424,
+    "minimum_free_bytes": 12985921536,
+    "limit_combined_bytes": 201326592,
+    "export_reserve_bytes": 8388608,
+    "jobs": 1,
+    "offline": true,
+    "dependency_builds": 0,
+    "candidate_rebuilds": 0,
+    "control_builds": 1
+  },
+  "limits": [
+    "Diagnostic macOS Rust1.97.1 edition2021 O3/unwind/no-LTO/codegen16 profile and recorded6rlibs, not authoritative Linux full-crate/workspace CI.",
+    "No random additional seeds or performance measurement; unchanged fixed40/400/200 suites ran as part of26 module tests.",
+    "New guard only resolves strict Same blind spot; canonicalization/lexical errors and unknown divergences stay strict.",
+    "Predicate scoping source proof and runtime fixture apply to current two private full-quad probes; future lossy projection/join/UNION needs contract reassessment."
+  ],
+  "pending_commands": false
+}

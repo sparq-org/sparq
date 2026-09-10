@@ -1,0 +1,11 @@
+{
+  "elapsed_seconds": 0.170036875,
+  "allocations": {
+    "worktrees/issue6483": 97153024,
+    "direct-6483/implementation": 11046912,
+    "direct-6483/validation-continuation": 8192
+  },
+  "allocated_bytes": 108208128,
+  "free_bytes": 13002174464,
+  "enoent_entries": 0
+}

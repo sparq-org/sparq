@@ -1,0 +1,519 @@
+[
+  {
+    "elapsed_seconds": 0.170036875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 8192
+    },
+    "allocated_bytes": 108208128,
+    "free_bytes": 13002174464,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 0.532786083,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 139264
+    },
+    "allocated_bytes": 108339200,
+    "free_bytes": 13002035200,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 0.676996125,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 147456
+    },
+    "allocated_bytes": 108347392,
+    "free_bytes": 13002027008,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 1.027980208,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 147456
+    },
+    "allocated_bytes": 108347392,
+    "free_bytes": 13002027008,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 1.375426875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 147456
+    },
+    "allocated_bytes": 108347392,
+    "free_bytes": 13002027008,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 1.716964875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001924608,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 2.072275458,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001924608,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 2.4355449580000004,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001924608,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 2.8550148330000003,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001920512,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 2.993542167,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001895936,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 3.1194662920000003,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001883648,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 3.4597042080000002,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 151552
+    },
+    "allocated_bytes": 108351488,
+    "free_bytes": 13001879552,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 3.8146639170000003,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 159744
+    },
+    "allocated_bytes": 108359680,
+    "free_bytes": 13001871360,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 4.162769333,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 159744
+    },
+    "allocated_bytes": 108359680,
+    "free_bytes": 13001871360,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 4.5258345,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 163840
+    },
+    "allocated_bytes": 108363776,
+    "free_bytes": 13001859072,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 5.426976833,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 163840
+    },
+    "allocated_bytes": 108363776,
+    "free_bytes": 13001859072,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 6.02716225,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 163840
+    },
+    "allocated_bytes": 108363776,
+    "free_bytes": 13001846784,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 6.419772667,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 163840
+    },
+    "allocated_bytes": 108363776,
+    "free_bytes": 13001842688,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 6.785584125000001,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 163840
+    },
+    "allocated_bytes": 108363776,
+    "free_bytes": 13001842688,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 7.651303042,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 417792
+    },
+    "allocated_bytes": 108617728,
+    "free_bytes": 13001584640,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 8.348390958,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 1687552
+    },
+    "allocated_bytes": 109887488,
+    "free_bytes": 13000302592,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 8.729246083,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 2334720
+    },
+    "allocated_bytes": 110534656,
+    "free_bytes": 12999655424,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 9.118495542,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 2334720
+    },
+    "allocated_bytes": 110534656,
+    "free_bytes": 12999655424,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 9.489585875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 2334720
+    },
+    "allocated_bytes": 110534656,
+    "free_bytes": 12999655424,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 9.872797958,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 2334720
+    },
+    "allocated_bytes": 110534656,
+    "free_bytes": 12999655424,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 10.242940542,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3284992
+    },
+    "allocated_bytes": 111484928,
+    "free_bytes": 12998701056,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 10.585741417,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3289088
+    },
+    "allocated_bytes": 111489024,
+    "free_bytes": 12998684672,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 10.913903042,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3289088
+    },
+    "allocated_bytes": 111489024,
+    "free_bytes": 12998680576,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 11.243408792,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998672384,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 11.585199417,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998668288,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 11.927571958,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998938624,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 12.265912583,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998922240,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 12.608902917,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998897664,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 12.951305875000001,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998897664,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 13.300189625,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998897664,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 13.634343625,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12998889472,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 14.018345,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 3293184
+    },
+    "allocated_bytes": 111493120,
+    "free_bytes": 12997836800,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 14.366838792,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 14143488
+    },
+    "allocated_bytes": 122343424,
+    "free_bytes": 12985921536,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 14.805554875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10567680
+    },
+    "allocated_bytes": 118767616,
+    "free_bytes": 12989493248,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 14.927096,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10567680
+    },
+    "allocated_bytes": 118767616,
+    "free_bytes": 12989493248,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 15.054754125,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10567680
+    },
+    "allocated_bytes": 118767616,
+    "free_bytes": 12989476864,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 15.444274583,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10571776
+    },
+    "allocated_bytes": 118771712,
+    "free_bytes": 12989476864,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 15.857554375,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10579968
+    },
+    "allocated_bytes": 118779904,
+    "free_bytes": 12989448192,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 16.03653575,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10579968
+    },
+    "allocated_bytes": 118779904,
+    "free_bytes": 12989448192,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 16.182003875,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10579968
+    },
+    "allocated_bytes": 118779904,
+    "free_bytes": 12989448192,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 16.552660583,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10584064
+    },
+    "allocated_bytes": 118784000,
+    "free_bytes": 12989444096,
+    "enoent_entries": 0
+  },
+  {
+    "elapsed_seconds": 16.991041708,
+    "allocations": {
+      "worktrees/issue6483": 97153024,
+      "direct-6483/implementation": 11046912,
+      "direct-6483/validation-continuation": 10588160
+    },
+    "allocated_bytes": 118788096,
+    "free_bytes": 12989435904,
+    "enoent_entries": 0
+  }
+]

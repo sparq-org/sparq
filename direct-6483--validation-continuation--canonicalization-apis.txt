@@ -1,0 +1,450 @@
+crates/sparq-canon/src/lib.rs:112-150
+112: pub fn canonicalize_nquads(input: &str) -> Result<String, CanonError> {
+113:     let quads = parse_nquads_03(input)?;
+114:     canonicalize_quads(&quads)
+115: }
+116: 
+117: /// Parses an oxrdf-0.3 N-Quads document into [`Quad`]s (the input side of
+118: /// [`canonicalize_nquads`]). Surfaced so a caller that needs the parsed quads
+119: /// (e.g. to also issue identifiers) does not re-implement the parse.
+120: pub fn parse_nquads(input: &str) -> Result<Vec<Quad>, CanonError> {
+121:     parse_nquads_03(input)
+122: }
+123: 
+124: fn parse_nquads_03(input: &str) -> Result<Vec<Quad>, CanonError> {
+125:     let mut quads = Vec::new();
+126:     for item in NQuadsParser::new().for_slice(input.as_bytes()) {
+127:         quads.push(item.map_err(|e| CanonError::Bridge(e.to_string()))?);
+128:     }
+129:     Ok(quads)
+130: }
+131: 
+132: /// **NON-STANDARD, opt-in (`rdf12-triple-terms` feature).** Native RDF-1.2
+133: /// triple-term canonicalization profile — see the [module docs](rdf12) and the
+134: /// crate-level banner. Not W3C RDFC-1.0.
+135: #[cfg(feature = "rdf12-triple-terms")]
+136: pub mod rdf12;
+137: 
+138: #[cfg(feature = "rdf12-triple-terms")]
+139: pub use rdf12::{
+140:     canonicalize_graph_content_rdf12, canonicalize_graph_content_rdf12_ground_terms,
+141:     canonicalize_graph_content_rdf12_ground_terms_with, canonicalize_graph_content_rdf12_with,
+142:     canonicalize_rdf12,
+143:     canonicalize_rdf12_ground_terms, canonicalize_rdf12_ground_terms_with, canonicalize_rdf12_with,
+144:     canonicalize_triples_rdf12, canonicalize_triples_rdf12_ground_terms,
+145:     canonicalize_triples_rdf12_ground_terms_with, canonicalize_triples_rdf12_with,
+146:     issue_dataset_rdf12, issue_dataset_rdf12_ground_terms, issue_dataset_rdf12_ground_terms_with,
+147:     issue_dataset_rdf12_with,
+148: };
+149: 
+150: // **Opt-in (`concept` feature).** `urn:concept:` content-addressed record
+
+crates/sparq-canon/src/lib.rs:302-366
+302: /// assert!(canon.contains("_:c14n0"));
+303: /// ```
+304: pub fn canonicalize(dataset: &[Quad]) -> Result<String, CanonError> {
+305:     canonicalize_quads(dataset)
+306: }
+307: 
+308: /// Alias of [`canonicalize`] for callers that prefer the explicit `_quads`
+309: /// name (mirrors [`rdf_canon::canonicalize_quads`]).
+310: pub fn canonicalize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
+311:     let quads02 = bridge_to_02(dataset)?;
+312:     rdf_canon::canonicalize_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))
+313: }
+314: 
+315: /// Like [`canonicalize_quads`] but parameterized over the RDFC-1.0 hash
+316: /// function `D` (the spec default is SHA-256; e.g. `sha2::Sha384` selects the
+317: /// SHA-384 profile). Uses the default HNDQ call limit.
+318: pub fn canonicalize_quads_with<D: Digest>(dataset: &[Quad]) -> Result<String, CanonError> {
+319:     let quads02 = bridge_to_02(dataset)?;
+320:     let opts = rdf_canon::CanonicalizationOptions::default();
+321:     rdf_canon::canonicalize_quads_with::<D>(&quads02, &opts)
+322:         .map_err(|e| CanonError::Canonicalization(e.to_string()))
+323: }
+324: 
+325: /// Returns the digest bytes of the exact canonical N-Quads document produced
+326: /// by [`canonicalize_quads`].
+327: ///
+328: /// `D` selects only the final digest algorithm; canonicalization retains the
+329: /// RDFC-1.0 default hash profile. Every canonical byte is hashed, including the
+330: /// final trailing newline when the dataset is non-empty. [GPT-5.6] sq-ddws7.
+331: pub fn digest_quads_with<D: Digest>(dataset: &[Quad]) -> Result<Vec<u8>, CanonError> {
+332:     let c = canonicalize_quads(dataset)?;
+333:     let mut h = D::new();
+334:     h.update(c.as_bytes());
+335:     Ok(h.finalize().to_vec())
+336: }
+337: 
+338: /// Like [`issue_quads`] but parameterized over the RDFC-1.0 hash function `D`.
+339: pub fn issue_quads_with<D: Digest>(
+340:     dataset: &[Quad],
+341: ) -> Result<HashMap<String, String>, CanonError> {
+342:     let quads02 = bridge_to_02(dataset)?;
+343:     let opts = rdf_canon::CanonicalizationOptions::default();
+344:     let map = rdf_canon::issue_quads_with::<D>(&quads02, &opts)
+345:         .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
+346:     Ok(map.into_iter().collect())
+347: }
+348: 
+349: /// Returns the RDFC-1.0 **issued-identifier map** for a dataset: input
+350: /// blank-node label → canonical `c14nN` label. Cheap relative to a full
+351: /// canonicalization-and-reparse when only the relabelling is needed.
+352: pub fn issued_identifiers(dataset: &[Quad]) -> Result<HashMap<String, String>, CanonError> {
+353:     issue_quads(dataset)
+354: }
+355: 
+356: /// Alias of [`issued_identifiers`] (mirrors [`rdf_canon::issue_quads`]).
+357: pub fn issue_quads(dataset: &[Quad]) -> Result<HashMap<String, String>, CanonError> {
+358:     let quads02 = bridge_to_02(dataset)?;
+359:     let map = rdf_canon::issue_quads(&quads02)
+360:         .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
+361:     Ok(map.into_iter().collect())
+362: }
+363: 
+364: // ---------------------------------------------------------------------------
+365: // Single-graph API (a default-graph-only dataset). What the ZK per-graph
+366: // commitment pipeline consumes; kept here so the bridge is single-sourced.
+
+crates/sparq-canon/src/rdf12.rs:175-222
+175: /// On triple-term-free input this is byte-identical to the standard
+176: /// [`crate::canonicalize`]. With triple terms it additionally relabels blank
+177: /// nodes nested inside triple-term objects via the HNDQ descent.
+178: ///
+179: /// This is **not** W3C RDFC-1.0; W3C has published no RDF-1.2 dataset
+180: /// canonicalization specification. See the [module docs](self).
+181: pub fn canonicalize_rdf12(dataset: &[Quad]) -> Result<String, CanonError> {
+182:     canonicalize_rdf12_with::<Sha256>(dataset)
+183: }
+184: 
+185: /// **NON-STANDARD.** Like [`canonicalize_rdf12`] but parameterized over the
+186: /// RDFC-1.0 hash function `D` ([`crate::Digest`]). The profile default is
+187: /// SHA-256 ([`canonicalize_rdf12`]); pass `sha2::Sha384` to select the SHA-384
+188: /// profile, for parity with the standard delegated path's
+189: /// [`crate::canonicalize_quads_with`].
+190: ///
+191: /// The relabelling and line order are determined by hash comparison, so a
+192: /// different `D` may produce a different (but still canonical and
+193: /// isomorphism-stable) `c14nN` assignment; the SHA-256 default
+194: /// ([`canonicalize_rdf12`]) is byte-identical to before.
+195: pub fn canonicalize_rdf12_with<D: Digest>(dataset: &[Quad]) -> Result<String, CanonError> {
+196:     let issued = issue_dataset_rdf12_with::<D>(dataset)?;
+197:     Ok(serialize_canonical(dataset, &issued))
+198: }
+199: 
+200: /// **NON-STANDARD.** The issued-identifier map (input blank-node label →
+201: /// canonical `c14nN` label) for an RDF-1.2 dataset under the
+202: /// `rdf12-triple-terms` profile (SHA-256). See [`canonicalize_rdf12`].
+203: pub fn issue_dataset_rdf12(
+204:     dataset: &[Quad],
+205: ) -> Result<std::collections::HashMap<String, String>, CanonError> {
+206:     issue_dataset_rdf12_with::<Sha256>(dataset)
+207: }
+208: 
+209: /// **NON-STANDARD.** Like [`issue_dataset_rdf12`] but parameterized over the
+210: /// RDFC-1.0 hash function `D` ([`crate::Digest`]). See
+211: /// [`canonicalize_rdf12_with`].
+212: pub fn issue_dataset_rdf12_with<D: Digest>(
+213:     dataset: &[Quad],
+214: ) -> Result<std::collections::HashMap<String, String>, CanonError> {
+215:     // Crate-wide nesting-depth bound, checked iteratively BEFORE any recursive
+216:     // descent (this is the funnel every full-profile entry point drains
+217:     // through). [FABLE-5] sq-x3oj2.
+218:     ensure_triple_term_depth(dataset)?;
+219:     let state = CanonState::compute::<D>(dataset)?;
+220:     Ok(state.canonical_issuer.issued.into_iter().collect())
+221: }
+222: 
+
+crates/sparq-canon/src/rdf12.rs:302-356
+302: 
+303: // ---------------------------------------------------------------------------
+304: // Constrained ground-triple-term variant ([FABLE-5] sq-iaxd): thin wrappers
+305: // that fail closed on any blank node nested inside a triple term, then
+306: // delegate. With every triple term ground, the nested-bnode HNDQ-descent
+307: // extension above is unreachable, so these entry points exercise exactly the
+308: // RDFC-1.0 algorithm with triple terms as opaque constants (see module docs).
+309: // ---------------------------------------------------------------------------
+310: 
+311: /// **NON-STANDARD (constrained).** Like [`canonicalize_rdf12`], but requires
+312: /// every triple term to be **ground** (no blank node at any nesting depth) and
+313: /// fails closed with [`CanonError::NestedBlankNode`] otherwise — the common
+314: /// credential/VC case. Top-level blank nodes are ordinary RDFC-1.0 bnodes and
+315: /// are relabelled as usual. On accepted input the output is byte-identical to
+316: /// [`canonicalize_rdf12`] (this is a thin guard + delegate wrapper), and the
+317: /// nested-bnode HNDQ-descent extension is never exercised.
+318: pub fn canonicalize_rdf12_ground_terms(dataset: &[Quad]) -> Result<String, CanonError> {
+319:     canonicalize_rdf12_ground_terms_with::<Sha256>(dataset)
+320: }
+321: 
+322: /// **NON-STANDARD (constrained).** Like [`canonicalize_rdf12_ground_terms`] but
+323: /// parameterized over the RDFC-1.0 hash function `D` ([`crate::Digest`]); see
+324: /// [`canonicalize_rdf12_with`] for the hash-profile semantics.
+325: pub fn canonicalize_rdf12_ground_terms_with<D: Digest>(
+326:     dataset: &[Quad],
+327: ) -> Result<String, CanonError> {
+328:     // Depth-bound first: the ground guard walks nested terms, so an over-deep
+329:     // term reports `TripleTermDepthExceeded`, not `NestedBlankNode`.
+330:     ensure_triple_term_depth(dataset)?;
+331:     ensure_ground_triple_terms(dataset)?;
+332:     canonicalize_rdf12_with::<D>(dataset)
+333: }
+334: 
+335: /// **NON-STANDARD (constrained).** Like [`issue_dataset_rdf12`], but fails
+336: /// closed with [`CanonError::NestedBlankNode`] if any blank node occurs inside
+337: /// a triple term. See [`canonicalize_rdf12_ground_terms`].
+338: pub fn issue_dataset_rdf12_ground_terms(
+339:     dataset: &[Quad],
+340: ) -> Result<std::collections::HashMap<String, String>, CanonError> {
+341:     issue_dataset_rdf12_ground_terms_with::<Sha256>(dataset)
+342: }
+343: 
+344: /// **NON-STANDARD (constrained).** Like [`issue_dataset_rdf12_ground_terms`]
+345: /// but parameterized over the RDFC-1.0 hash function `D` ([`crate::Digest`]).
+346: pub fn issue_dataset_rdf12_ground_terms_with<D: Digest>(
+347:     dataset: &[Quad],
+348: ) -> Result<std::collections::HashMap<String, String>, CanonError> {
+349:     // Depth-bound first — same ordering rationale as
+350:     // `canonicalize_rdf12_ground_terms_with`.
+351:     ensure_triple_term_depth(dataset)?;
+352:     ensure_ground_triple_terms(dataset)?;
+353:     issue_dataset_rdf12_with::<D>(dataset)
+354: }
+355: 
+356: /// **NON-STANDARD (constrained).** Like [`canonicalize_triples_rdf12`], but
+
+crates/sparq-canon/src/rdf12.rs:407-483
+407: /// Top-level subject/object/graph blank nodes do not count — those are
+408: /// ordinary RDFC-1.0 blank nodes.
+409: fn ensure_ground_triple_terms(dataset: &[Quad]) -> Result<(), CanonError> {
+410:     if dataset.iter().any(|q| term_has_nested_bnode(&q.object)) {
+411:         return Err(CanonError::NestedBlankNode);
+412:     }
+413:     Ok(())
+414: }
+415: 
+416: /// True iff `term` is a triple term containing a blank node at any depth.
+417: /// A top-level `Term::BlankNode` is NOT nested and returns `false`.
+418: fn term_has_nested_bnode(term: &Term) -> bool {
+419:     match term {
+420:         Term::Triple(t) => triple_contains_bnode(t),
+421:         _ => false,
+422:     }
+423: }
+424: 
+425: /// True iff the (triple-term) triple contains a blank node in its subject or
+426: /// (transitively) its object. Predicates are always IRIs; in oxrdf 0.3 a
+427: /// triple's subject is `NamedOrBlankNode`, so only the object chain descends —
+428: /// walked with a **loop**, not recursion, so the walk itself is stack-safe on
+429: /// any depth (the entry points additionally bound depth up front; see
+430: /// [`ensure_triple_term_depth`]). [FABLE-5] sq-x3oj2.
+431: fn triple_contains_bnode(t: &Triple) -> bool {
+432:     let mut cur = t;
+433:     loop {
+434:         if subject_bnode(&cur.subject).is_some() {
+435:             return true;
+436:         }
+437:         match &cur.object {
+438:             Term::BlankNode(_) => return true,
+439:             Term::Triple(inner) => cur = inner,
+440:             _ => return false,
+441:         }
+442:     }
+443: }
+444: 
+445: // ---------------------------------------------------------------------------
+446: // Crate-wide triple-term nesting-depth bound ([FABLE-5] sq-x3oj2): the profile
+447: // walks triple terms with recursive descent (HNDQ gossip, bnode collection,
+448: // relabelling, `Display` serialization — and oxrdf's own `Drop`/`Clone`
+449: // recurse), so unbounded nesting is a stack-overflow vector. Every public
+450: // entry point pre-checks depth ITERATIVELY (the checker itself cannot
+451: // overflow) and fails closed before any recursion or deep `clone` happens.
+452: // ---------------------------------------------------------------------------
+453: 
+454: /// The nesting depth of a term: 0 for a non-triple term; a triple term whose
+455: /// object is not itself a triple term has depth 1; each further level adds 1.
+456: /// In oxrdf 0.3 only a triple's **object** can be a triple term (the subject is
+457: /// [`NamedOrBlankNode`]), so nesting is a single chain — walked with a loop.
+458: fn triple_term_depth(term: &Term) -> usize {
+459:     let mut depth = 0usize;
+460:     let mut cur = term;
+461:     while let Term::Triple(t) = cur {
+462:         // The subject term of `t` contributes nothing to the nesting depth —
+463:         // `subject_nesting_depth` is what pins that (and what breaks the build
+464:         // if it ever stops being true; [OPUS-5] sq-tx21), so accumulating down
+465:         // the object chain alone measures the whole term.
+466:         depth += 1 + subject_nesting_depth(&t.subject);
+467:         cur = &t.object;
+468:     }
+469:     depth
+470: }
+471: 
+472: /// Depth guard over a dataset: `Err(TripleTermDepthExceeded)` iff any quad's
+473: /// object nests triple terms deeper than [`crate::MAX_TRIPLE_TERM_DEPTH`].
+474: fn ensure_triple_term_depth(dataset: &[Quad]) -> Result<(), CanonError> {
+475:     if dataset
+476:         .iter()
+477:         .any(|q| triple_term_depth(&q.object) > crate::MAX_TRIPLE_TERM_DEPTH)
+478:     {
+479:         return Err(CanonError::TripleTermDepthExceeded);
+480:     }
+481:     Ok(())
+482: }
+483: 
+
+crates/sparq-canon/src/rdf12.rs:545-601
+545: struct CanonState {
+546:     /// bnode label → the quads it is a component of (recursively through
+547:     /// triple terms). The same quad is recorded once per *distinct* bnode it
+548:     /// contains, matching the standard algorithm.
+549:     bnode_to_quads: BTreeMap<String, Vec<Quad>>,
+550:     canonical_issuer: IdentifierIssuer,
+551: }
+552: 
+553: impl CanonState {
+554:     fn compute<D: Digest>(dataset: &[Quad]) -> Result<Self, CanonError> {
+555:         let mut state = CanonState {
+556:             bnode_to_quads: BTreeMap::new(),
+557:             canonical_issuer: IdentifierIssuer::new("c14n"),
+558:         };
+559:         state.build_bnode_to_quads(dataset);
+560: 
+561:         // §4.4(3) first-degree hashes.
+562:         let mut hash_to_bnodes: HashToBnodes = BTreeMap::new();
+563:         for n in state.bnode_to_quads.keys() {
+564:             let h = state.hash_first_degree_quads::<D>(n)?;
+565:             hash_to_bnodes.entry(h).or_default().push(n.clone());
+566:         }
+567: 
+568:         // §4.4(4) unique first-degree hashes → issue canonical labels.
+569:         let mut shared: HashToBnodes = BTreeMap::new();
+570:         for (h, list) in &hash_to_bnodes {
+571:             if list.len() == 1 {
+572:                 state.canonical_issuer.issue(&list[0]);
+573:             } else {
+574:                 shared.insert(h.clone(), list.clone());
+575:             }
+576:         }
+577: 
+578:         // §4.4(5) shared hashes → HNDQ.
+579:         let mut counter = HndqCallCounter::new(DEFAULT_HNDQ_CALL_LIMIT);
+580:         for list in shared.values() {
+581:             let mut hash_path_list: Vec<HndqResult> = Vec::new();
+582:             for n in list {
+583:                 if state.canonical_issuer.get(n).is_some() {
+584:                     continue;
+585:                 }
+586:                 let mut temp = IdentifierIssuer::new("b");
+587:                 temp.issue(n);
+588:                 let result = state.hash_n_degree_quads::<D>(n, &temp, &mut counter)?;
+589:                 hash_path_list.push(result);
+590:             }
+591:             hash_path_list.sort_by(|a, b| a.hash.cmp(&b.hash));
+592:             for result in &hash_path_list {
+593:                 // Issue canonical labels in temporary-issuance order (§4.4 5.3.1).
+594:                 for existing in result.issuer.order.values() {
+595:                     state.canonical_issuer.issue(existing);
+596:                 }
+597:             }
+598:         }
+599: 
+600:         Ok(state)
+601:     }
+
+crates/sparq-canon/src/rdf12.rs:915-1010
+915: /// §5 serialize: relabel every bnode to its canonical `c14nN`, sort the lines
+916: /// in code-point order, concatenate (one `\n`-terminated line per quad).
+917: fn serialize_canonical(
+918:     dataset: &[Quad],
+919:     issued: &std::collections::HashMap<String, String>,
+920: ) -> String {
+921:     let mut doc = String::new();
+922:     for line in canonical_lines(dataset, issued) {
+923:         doc.push_str(&line);
+924:         doc.push('\n');
+925:     }
+926:     doc
+927: }
+928: 
+929: /// The canonical N-Quads lines (each `… .`, NO trailing newline — matching the
+930: /// standard `CanonicalGraph::lines` contract), sorted in code-point order and
+931: /// **deduplicated**: RDF is a set, so identical quads (which canonicalize to the
+932: /// same line) collapse, exactly as the `rdf-canon` `Dataset` path does.
+933: fn canonical_lines(
+934:     dataset: &[Quad],
+935:     issued: &std::collections::HashMap<String, String>,
+936: ) -> Vec<String> {
+937:     let mut lines: Vec<String> = dataset
+938:         .iter()
+939:         .map(|q| {
+940:             let relabelled = Quad::new(
+941:                 relabel_subject_canonical(&q.subject, issued),
+942:                 q.predicate.clone(),
+943:                 relabel_term_canonical(&q.object, issued),
+944:                 relabel_graph_canonical(&q.graph_name, issued),
+945:             );
+946:             canonical_line_no_newline(&relabelled)
+947:         })
+948:         .collect();
+949:     lines.sort();
+950:     lines.dedup();
+951:     lines
+952: }
+953: 
+954: /// A canonical N-Quads line WITHOUT the trailing ` .\n` separator — the
+955: /// `CanonicalGraph::lines` form. (The hashing path uses [`serialize_quad_line`],
+956: /// which keeps the ` .\n` the RDFC-1.0 spec hashes over.)
+957: fn canonical_line_no_newline(quad: &Quad) -> String {
+958:     match &quad.graph_name {
+959:         GraphName::DefaultGraph => {
+960:             format!("{} {} {} .", quad.subject, quad.predicate, quad.object)
+961:         }
+962:         graph => format!(
+963:             "{} {} {} {} .",
+964:             quad.subject, quad.predicate, quad.object, graph
+965:         ),
+966:     }
+967: }
+968: 
+969: fn issued_label(label: &str, issued: &std::collections::HashMap<String, String>) -> BlankNode {
+970:     match issued.get(label) {
+971:         Some(c) => BlankNode::new_unchecked(c.clone()),
+972:         // Unlabelled bnode (shouldn't happen for a fully canonicalized dataset);
+973:         // keep the input label rather than panic so the failure is visible.
+974:         None => BlankNode::new_unchecked(label),
+975:     }
+976: }
+977: 
+978: fn relabel_subject_canonical(
+979:     subject: &NamedOrBlankNode,
+980:     issued: &std::collections::HashMap<String, String>,
+981: ) -> NamedOrBlankNode {
+982:     match subject_bnode(subject) {
+983:         Some(b) => NamedOrBlankNode::BlankNode(issued_label(b.as_str(), issued)),
+984:         None => subject.clone(),
+985:     }
+986: }
+987: 
+988: fn relabel_term_canonical(term: &Term, issued: &std::collections::HashMap<String, String>) -> Term {
+989:     match term {
+990:         Term::BlankNode(b) => Term::BlankNode(issued_label(b.as_str(), issued)),
+991:         Term::Triple(t) => Term::Triple(Box::new(Triple::new(
+992:             relabel_subject_canonical(&t.subject, issued),
+993:             t.predicate.clone(),
+994:             relabel_term_canonical(&t.object, issued),
+995:         ))),
+996:         other => other.clone(),
+997:     }
+998: }
+999: 
+1000: fn relabel_graph_canonical(
+1001:     graph: &GraphName,
+1002:     issued: &std::collections::HashMap<String, String>,
+1003: ) -> GraphName {
+1004:     match graph {
+1005:         GraphName::BlankNode(b) => GraphName::BlankNode(issued_label(b.as_str(), issued)),
+1006:         other => other.clone(),
+1007:     }
+1008: }
+1009: 
+1010: /// One canonical N-Quads line, `… .\n`, using oxrdf-0.3's canonical `Display`

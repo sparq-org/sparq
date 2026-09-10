@@ -1,0 +1,30 @@
+[
+  {
+    "argv": [
+      "git",
+      "add",
+      "--",
+      "crates/sparq-bench/src/update_fuzz.rs"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "git",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "fix(bench): reject repeated raw quads before strict equality",
+      "-m",
+      "Keep complete-quad snapshot and probe comparisons strict when canonicalization would hide equal-count duplicate redistribution. Pin both-engine graph scope and preserve canonicalization, lexical adjudication, and count diagnostics.",
+      "-m",
+      "Co-Authored-By: GPT-6 Astra <noreply@openai.com>"
+    ],
+    "exit": 0,
+    "stdout": "[codex/update-comparator-raw-duplicates 0b4554b92] fix(bench): reject repeated raw quads before strict equality\n 1 file changed, 167 insertions(+)\n",
+    "stderr": ""
+  }
+]

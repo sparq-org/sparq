@@ -1,0 +1,14 @@
+[
+  {
+    "variant": "candidate",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/implementation/candidate/out/issue6483_candidate-fixed",
+    "sha256": "2e4a928326bc4df691700e21e4735a5c34acf297b3f5e624c8e298463fff921f",
+    "bytes": 10397696
+  },
+  {
+    "variant": "control",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/validation-continuation/control/out/issue6483_control-fixed",
+    "sha256": "cd07cac3f64ba40fab84b1bff5bb1e18d8d1c7f6d7cc9350d234310eba2aeb7e",
+    "bytes": 10394048
+  }
+]

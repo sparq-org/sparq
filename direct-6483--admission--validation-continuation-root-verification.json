@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T18:55:14.914786+00:00",
+  "head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "clean": true,
+  "only_changed_file": "crates/sparq-bench/src/update_fuzz.rs",
+  "source_sha256": "ca35e2bd604e8abe5b3004b2987dbb7c377b9fd369c1d2f82b68d164b888caa4",
+  "verified_files": 47,
+  "manifest_sha256": "b815b2385b54dcce648c4c0c82756105eefde57986788376a7db4b0eacca5cb9",
+  "packet_sha256": "4d9e4f0c0c59cd2a2094e535512d6192c5940bef22399f21eb3788b429e408ac",
+  "interrupted_run_preserved": true
+}

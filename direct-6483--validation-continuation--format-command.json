@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+    "--edition",
+    "2021",
+    "--config-path",
+    "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6483/rustfmt.toml",
+    "--emit",
+    "stdout"
+  ],
+  "exit": 0,
+  "scope": "Only newly added tests wrapped for formatting; no unchanged source reflow."
+}

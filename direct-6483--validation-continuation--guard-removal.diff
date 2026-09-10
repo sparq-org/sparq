@@ -1,0 +1,19 @@
+--- candidate/update_fuzz.rs
++++ control/update_fuzz.rs
+@@ -986,16 +986,6 @@
+                 b.len()
+             ));
+         }
+-        for (label, lines) in [(label_a, a), (label_b, b)] {
+-            if let Some((line, count)) = repeated_raw_line(lines) {
+-                return Verdict::Differs(format!(
+-                    "{label}: repeated raw full-quad line occurs {count} times \
+-                     (raw totals: {label_a} {}, {label_b} {}):\n  {line}",
+-                    a.len(),
+-                    b.len()
+-                ));
+-            }
+-        }
+         return Verdict::Same;
+     }
+     if allow_integer_lexical {

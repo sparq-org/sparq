@@ -1,0 +1,9 @@
+
+thread 'update_fuzz::tests::raw_duplicate_redistribution_is_rejected' (5134157) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/validation-continuation/control/update_fuzz.rs:1513:34:
+equal-total raw duplicate redistribution returned Same
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: issue6483_control::update_fuzz::tests::raw_duplicate_redistribution_is_rejected
+   3: <issue6483_control::update_fuzz::tests::raw_duplicate_redistribution_is_rejected::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

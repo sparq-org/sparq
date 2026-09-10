@@ -1,0 +1,15 @@
+{
+  "candidate": "existing exact binary, one full26-test run",
+  "control": "one removed-guard module build and one filtered regression, expected101 and Same assertion",
+  "clippy": "same candidate module, metadata-only -D warnings",
+  "limits_seconds": 180,
+  "accounted_roots": [
+    "worktrees/issue6483",
+    "direct-6483/implementation",
+    "direct-6483/validation-continuation"
+  ],
+  "max_combined_bytes": 201326592,
+  "export_reserve": 8388608,
+  "controller_change": "Only ENOENT from allocation traversal/stat is tolerated; removed temporary LOAD files no longer abort unrelated test. All other errors/time/free/growth guards retained.",
+  "before_execution": true
+}
