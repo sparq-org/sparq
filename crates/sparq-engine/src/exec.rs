@@ -4244,6 +4244,8 @@ fn eval_bgp_binary_capped(
                 let pp = prepared[i].var_pos(jv).unwrap();
                 #[cfg(test)]
                 capped_rhs_tests::observe(3);
+                #[cfg(test)]
+                capped_rhs_tests::step(start, i, "bind", None, false, None);
                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
             } else {
                 let filt = pfilter(i);
@@ -4251,9 +4253,14 @@ fn eval_bgp_binary_capped(
                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
                 let mut uncached = None;
                 let slot = if reuse_rhs { &mut rhs_cache[i] } else { &mut uncached };
+                #[cfg(test)]
+                let mut scanned = false;
                 let rhs = capped_rhs(slot, scan_sort, || {
                     #[cfg(test)]
-                    capped_rhs_tests::observe(2);
+                    {
+                        capped_rhs_tests::observe(2);
+                        scanned = true;
+                    }
                     scan_to_bindings(
                         graph,
                         &prepared[i].id_pat,
@@ -4267,10 +4274,16 @@ fn eval_bgp_binary_capped(
                 });
                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "merge", scan_sort, scanned, rhs.sorted_by.as_ref());
                     result = merge_join_ref(&result, rhs, &jv);
                 } else if connected {
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "hash", scan_sort, scanned, rhs.sorted_by.as_ref());
                     result = hash_join_ref(&result, rhs);
                 } else {
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "cross", scan_sort, scanned, rhs.sorted_by.as_ref());
                     result = cross_product_ref(&result, rhs);
                 }
             }
@@ -4325,6 +4338,9 @@ fn capped_rhs(
         .as_ref()
         .is_none_or(|(cached_sort, _)| *cached_sort != sort)
     {
+        // [GPT-6 Astra] Release the stale relation before materializing its replacement.
+        // No subsequent step can borrow the old requested order from this slot.
+        *slot = None;
         *slot = Some((sort, scan()));
     }
     &slot.as_ref().unwrap().1
@@ -21233,12 +21249,254 @@ mod order_bindings_worker_reinstall {
 #[cfg(test)]
 mod capped_rhs_tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     thread_local! {
         static WORK: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+        static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
     }
 
+    // [GPT-6 Astra] Observe the actual branch, scan closure and returned metadata.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Step {
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<String>,
+    }
+
+    pub(super) fn step(
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<&Variable>,
+    ) {
+        STEPS.with_borrow_mut(|steps| {
+            if let Some(steps) = steps {
+                steps.push(Step {
+                    start,
+                    pattern,
+                    kernel,
+                    requested,
+                    scanned,
+                    actual: actual.map(|v| v.as_str().to_owned()),
+                });
+            }
+        });
+    }
+
+    fn trace<T>(f: impl FnOnce() -> T) -> (T, Vec<Step>) {
+        STEPS.with_borrow_mut(|steps| *steps = Some(Vec::new()));
+        let result = f();
+        let steps = STEPS.with_borrow_mut(|steps| steps.take().unwrap());
+        (result, steps)
+    }
+
+    fn bag(result: &crate::QueryResult) -> std::collections::BTreeMap<Vec<String>, usize> {
+        let mut bag = std::collections::BTreeMap::new();
+        for row in &result.rows {
+            *bag.entry(
+                row.iter()
+                    .map(|v| v.as_ref().unwrap().to_string())
+                    .collect(),
+            )
+            .or_default() += 1;
+        }
+        bag
+    }
+
+    #[test]
+    fn capped_rhs_changing_sort_mixed_kernels_preserves_full_bag() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        for i in 0..70_000 {
+            // Projection deliberately collapses pairs, making multiplicity observable.
+            ttl.push_str(&format!(":s{i} :p {} ; :q {i} ; :r {i} .\n", i / 2));
+        }
+        ttl.push_str(":extra1 :q 70001 ; :r 70001 . :extra2 :r 70002 .");
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :p ?o . ?s :q ?x . ?s :r ?x . FILTER(?o + 0 >= 0) }";
+        let full = crate::query(&graph, query).unwrap();
+        let (limited, steps) =
+            trace(|| crate::query(&graph, &format!("{query} LIMIT 70001")).unwrap());
+        println!("changing-sort actual steps: {steps:?}");
+        assert_eq!(limited.rows.len(), 70_000);
+        assert_eq!(bag(&limited), bag(&full));
+        let expected: std::collections::BTreeMap<_, _> = (0..35_000)
+            .map(|i| (vec![oxrdf::Literal::from(i).to_string()], 2))
+            .collect();
+        assert_eq!(bag(&limited), expected);
+        let q: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 1)
+            .map(|s| {
+                (
+                    s.start,
+                    s.kernel,
+                    s.requested,
+                    s.scanned,
+                    s.actual.as_deref(),
+                )
+            })
+            .collect();
+        let r: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 2)
+            .map(|s| (s.start, s.requested, s.scanned, s.actual.as_deref()))
+            .collect();
+        if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) {
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "merge", Some(0), true, Some("s")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("s")),
+                    (1024, Some(0), true, Some("s")),
+                    (65536, None, true, Some("s"))
+                ]
+            );
+        } else {
+            // Three permutations return object order: no false subject-order claim,
+            // and the unchanged None request must reuse the actually unsorted-for-s RHS.
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "hash", None, true, Some("x")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("x")),
+                    (1024, None, false, Some("x")),
+                    (65536, None, false, Some("x"))
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn capped_rhs_replacement_releases_old_slot_before_scan() {
+        let mut slot = Some((
+            None,
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[1])],
+            ),
+        ));
+        // A failed replacement leaves the actual slot empty only if old ownership
+        // was released before invoking the scan. This is not a timing/heap estimate.
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            capped_rhs(&mut slot, Some(0), || panic!("replacement scan sentinel"));
+        }));
+        assert!(failed.is_err());
+        assert!(
+            slot.is_none(),
+            "old RHS remained live through replacement scan"
+        );
+        let replacement = capped_rhs(&mut slot, Some(0), || {
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[2])],
+            )
+        });
+        assert_eq!(replacement.rows, [Row::from_slice(&[2])]);
+    }
+
+    #[test]
+    fn capped_rhs_disconnected_cross_preserves_multiplicity() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1 . :b :p 2 . :c :q 3, 4, 5 .",
+            "turtle",
+        )
+        .unwrap();
+        let query =
+            "PREFIX : <http://ex/> SELECT ?s WHERE { ?s :p ?o . ?t :q ?x . FILTER(?o + 0 >= 0) }";
+        let (limited, steps) = trace(|| crate::query(&graph, &format!("{query} LIMIT 7")).unwrap());
+        assert_eq!(bag(&limited), bag(&crate::query(&graph, query).unwrap()));
+        assert_eq!(limited.rows.len(), 6);
+        assert_eq!(bag(&limited).values().copied().collect::<Vec<_>>(), [3, 3]);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kernel, "cross");
+        assert!(steps[0].scanned);
+        println!("disconnected actual steps: {steps:?}");
+    }
+
+    #[test]
+    fn capped_rhs_named_view_overlay_and_residual_exists() {
+        let mut graph = Graph::load_dataset("@prefix : <http://ex/> . :g { :a :p 1, 2 ; :q 1, 2 ; :visible true . :b :p 3 ; :q 3 . }", "trig").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?s WHERE { GRAPH :g { SELECT ?s WHERE { ?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0 && EXISTS { ?s :visible true }) } LIMIT 10 } }";
+        let (base, steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(base.rows.len(), 2);
+        assert_eq!(base.rows[0], base.rows[1]);
+        // EXISTS is deliberately non-conjunctive: prove the existing fallback remains.
+        assert!(
+            steps.is_empty(),
+            "EXISTS must retain the scope-safe fallback"
+        );
+        let eligible = query.replace(" && EXISTS { ?s :visible true }", "");
+        let (eligible_base, eligible_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_base.rows.len(), 3);
+        assert!(
+            eligible_steps.iter().any(|s| s.scanned),
+            "named subquery must reach capped RHS: {eligible_steps:?}"
+        );
+        let visible = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new([graph.named[0].0.clone()].into_iter().collect()),
+            default: crate::DefaultGraphMode::Empty,
+        };
+        assert_eq!(
+            bag(&crate::query_view(&visible, query).unwrap()),
+            bag(&base)
+        );
+        let (visible_rows, visible_steps) =
+            trace(|| crate::query_view(&visible, &eligible).unwrap());
+        assert_eq!(bag(&visible_rows), bag(&eligible_base));
+        assert!(visible_steps.iter().any(|s| s.scanned));
+        let hidden = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new(Default::default()),
+            default: crate::DefaultGraphMode::StoreDefault,
+        };
+        assert!(crate::query_view(&hidden, query).unwrap().rows.is_empty());
+        let (hidden_rows, hidden_steps) = trace(|| crate::query_view(&hidden, &eligible).unwrap());
+        assert!(hidden_rows.rows.is_empty());
+        assert!(
+            hidden_steps.is_empty(),
+            "hidden graph must not enter RHS cache"
+        );
+        let mut fork = graph.named[0].1.fork();
+        fork.apply_delta(
+            &[],
+            &[[
+                oxrdf::NamedNode::new("http://ex/a").unwrap().into(),
+                oxrdf::NamedNode::new("http://ex/q").unwrap().into(),
+                oxrdf::Literal::from(2).into(),
+            ]],
+        )
+        .unwrap();
+        graph.named[0].1 = fork;
+        let (changed, changed_steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(changed.rows.len(), 1);
+        assert_eq!(changed.rows[0], base.rows[0]);
+        assert!(changed_steps.is_empty(), "overlay EXISTS retains fallback");
+        let (eligible_overlay, overlay_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_overlay.rows.len(), 2);
+        assert!(overlay_steps.iter().any(|s| s.scanned));
+        println!("named EXISTS fallback: {steps:?}, {changed_steps:?}; eligible base/overlay: {eligible_steps:?}, {overlay_steps:?}");
+    }
     pub(super) fn observe(index: usize) {
         WORK.with(|cell| {
             let mut counts = cell.get();
