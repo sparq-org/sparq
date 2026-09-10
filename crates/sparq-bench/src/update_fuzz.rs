@@ -115,8 +115,9 @@
 //! equality is lexical-form equality), so sparq is spec-correct and Oxigraph is lossy.
 //! It is NOT a blind skip: the comparator re-derives Oxigraph's normalization
 //! independently — rewriting every `xsd:integer` literal on BOTH sides to its canonical
-//! lexical form, then deduplicating — and absorbs the step ONLY when the two datasets
-//! agree exactly under it. Any residual difference still FAILS. The sparq-vs-sparq
+//! lexical form — and absorbs the step ONLY when that rewrite is injective on terms,
+//! preserves rows and blank nodes, and the two datasets agree exactly under it.
+//! Any residual difference still FAILS. The sparq-vs-sparq
 //! compare never consults the allowlist: both sides are sparq, so any lexical
 //! disagreement between them is a real bug.
 //!
@@ -126,6 +127,18 @@
 //! normalization can undo; that shape is covered instead by the sparq-internal
 //! `tests::non_canonical_integer_lexicals_are_distinct_terms`, which is the correct
 //! oracle given Oxigraph cannot serve as a reference for it.
+//!
+//! [GPT-6 ASTRA] #5183 also exposed a solution-multiplicity cascade: coexisting `8`
+//! and `"008"^^xsd:integer` produce two template blank nodes in sparq, but one in the
+//! lossy reference. The comparator correctly rejects this. The reference corpus now
+//! uses disjoint canonical/noncanonical integer value pools, with one spelling per
+//! value globally, including LOAD and nested triple terms. This narrows coverage;
+//! the exact historical sequence remains a sparq-only regression. Noncanonical
+//! terms still reach storage, queries, templates and the reference comparison.
+//! This correspondence is limited to the generated BGP/graph/isBlank operations
+//! and full-quad probes: it does not justify lexical-sensitive STR/sameTerm queries.
+//! A changed generator changes a seed's input; it does not resolve other historical
+//! failures merely because their seed numbers pass under the new generator.
 //!
 //! KNOWN SHARED-ORACLE BLIND SPOT (honest boundary): both engines parse updates with
 //! `spargebra`, so a parser-level desugaring bug (e.g. in COPY/MOVE/ADD expansion, or in
@@ -142,10 +155,19 @@ use oxigraph::store::Store;
 use oxrdf::vocab::xsd;
 use oxrdf::{Literal, Quad, Term, Triple};
 use sparq_core::Graph;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The `xsd:integer` IRI in the N-Triples spelling the generator emits.
 const XSD_INTEGER: &str = "<http://www.w3.org/2001/XMLSchema#integer>";
+
+// [GPT-6 ASTRA] Keep the small canonical pool for exact DELETE/WHERE hits. The
+// noncanonical pool starts above it; LOAD must use this same canonical bound.
+const CANONICAL_INTEGER_VALUES: u64 = 20;
+
+fn gen_canonical_integer(rng: &mut Rng) -> u64 {
+    rng.below(CANONICAL_INTEGER_VALUES)
+}
 
 // ── deterministic RNG ────────────────────────────────────────────────────────────
 
@@ -192,7 +214,7 @@ fn gen_simple_object(rng: &mut Rng) -> String {
     match rng.below(6) {
         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
         2 | 3 => format!("\"lit{}\"", rng.below(5)),
-        4 => format!("{}", rng.below(20)),
+        4 => format!("{}", gen_canonical_integer(rng)),
         _ => format!("\"tag{}\"@en", rng.below(3)),
     }
 }
@@ -206,12 +228,7 @@ fn gen_triple_term(rng: &mut Rng, depth: u32) -> String {
     } else {
         gen_simple_object(rng)
     };
-    format!(
-        "<<( {} {} {} )>>",
-        gen_subject(rng),
-        gen_predicate(rng),
-        o
-    )
+    format!("<<( {} {} {} )>>", gen_subject(rng), gen_predicate(rng), o)
 }
 
 /// A POOLABLE ground object — ground, blank-node-free, and in canonical lexical
@@ -229,8 +246,12 @@ fn gen_object(rng: &mut Rng) -> String {
 /// construction (`v` is non-negative and something is always prepended), so it must
 /// round-trip as a term DISTINCT from `"{v}"^^xsd:integer`.
 fn gen_noncanonical_integer(rng: &mut Rng) -> String {
-    let v = rng.below(20);
-    let lexical = match rng.below(3) {
+    // Two draws, as before. Encoding the style in the value gives every value one
+    // spelling while retaining all three prefix families and their probabilities.
+    let offset = rng.below(CANONICAL_INTEGER_VALUES);
+    let style = rng.below(3);
+    let v = CANONICAL_INTEGER_VALUES + 3 * offset + style;
+    let lexical = match style {
         0 => format!("0{}", v),
         1 => format!("+{}", v),
         _ => format!("00{}", v),
@@ -247,7 +268,7 @@ fn gen_ntriples_object(rng: &mut Rng) -> String {
     match rng.below(6) {
         0 | 1 => format!("<http://ex/o{}>", rng.below(6)),
         2 | 3 => format!("\"lit{}\"", rng.below(5)),
-        4 => format!("\"{}\"^^{}", rng.below(20), XSD_INTEGER),
+        4 => format!("\"{}\"^^{}", gen_canonical_integer(rng), XSD_INTEGER),
         _ => format!("\"tag{}\"@en", rng.below(3)),
     }
 }
@@ -804,11 +825,61 @@ fn oxigraph_normalized_term(t: &Term) -> Term {
     }
 }
 
-/// A snapshot with every `xsd:integer` lexical canonicalized and duplicates merged —
-/// the state Oxigraph's lossy numeric encoding collapses a dataset to. Re-derived
-/// here independently of BOTH engines; see the adjudicated class in the module docs.
-fn oxigraph_normalized(lines: &[String], what: &str) -> Result<Vec<String>, String> {
+// [GPT-6 ASTRA] Quad uniqueness alone cannot detect colliding terms at different
+// predicates/graphs. Check every integer leaf, including nested triple objects.
+fn record_lexical_terms(
+    term: &Term,
+    integers: &mut BTreeMap<i64, String>,
+    blank_nodes: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    match term {
+        Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+            if let Ok(value) = l.value().parse::<i64>()
+                && let Some(previous) = integers.insert(value, l.value().to_string())
+                && previous != l.value()
+            {
+                return Err(format!(
+                    "integer normalization is not term-injective: {previous:?} and {:?}",
+                    l.value()
+                ));
+            }
+        }
+        Term::BlankNode(b) => {
+            blank_nodes.insert(b.as_str().to_string());
+        }
+        Term::Triple(t) => {
+            if let oxrdf::NamedOrBlankNode::BlankNode(b) = &t.subject {
+                blank_nodes.insert(b.as_str().to_string());
+            }
+            record_lexical_terms(&t.object, integers, blank_nodes)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+struct NormalizedSnapshot {
+    lines: Vec<String>,
+    blank_nodes: usize,
+}
+
+/// Normalizes integer spellings without merging terms or rows.
+fn oxigraph_normalized(lines: &[String], what: &str) -> Result<NormalizedSnapshot, String> {
     let quads = parse_lines(lines, what)?;
+    if quads.len() != lines.len() {
+        return Err(format!("{what}: parsing changed the raw row count"));
+    }
+    let mut integers = BTreeMap::new();
+    let mut blank_nodes = BTreeSet::new();
+    for q in &quads {
+        record_lexical_terms(&q.object, &mut integers, &mut blank_nodes)?;
+        if let oxrdf::NamedOrBlankNode::BlankNode(b) = &q.subject {
+            blank_nodes.insert(b.as_str().to_string());
+        }
+        if let oxrdf::GraphName::BlankNode(b) = &q.graph_name {
+            blank_nodes.insert(b.as_str().to_string());
+        }
+    }
     let mut out: Vec<String> = quads
         .iter()
         .map(|q| {
@@ -825,8 +896,17 @@ fn oxigraph_normalized(lines: &[String], what: &str) -> Result<Vec<String>, Stri
         })
         .collect();
     out.sort();
-    out.dedup();
-    Ok(out)
+    // The fixed probes project whole quads, so duplicates are not legitimate
+    // projection multiplicity. Reject before canon's set conversion can hide them.
+    if out.windows(2).any(|rows| rows[0] == rows[1]) {
+        return Err(format!(
+            "{what}: integer normalization merges or duplicates rows"
+        ));
+    }
+    Ok(NormalizedSnapshot {
+        lines: out,
+        blank_nodes: blank_nodes.len(),
+    })
 }
 
 /// The lines on exactly one side — the human-readable core of a divergence report.
@@ -893,13 +973,37 @@ fn compare(
         return Verdict::Same;
     }
     if allow_integer_lexical {
+        if a.len() != b.len() {
+            return Verdict::Differs(format!(
+                "integer-lexical adjudication refused: raw row counts differ\n{}",
+                one_sided(label_a, &ca, label_b, &cb)
+            ));
+        }
         let normalized = (
-            oxigraph_normalized(a, label_a).and_then(|n| comparable(&n, relabel, label_a)),
-            oxigraph_normalized(b, label_b).and_then(|n| comparable(&n, relabel, label_b)),
+            oxigraph_normalized(a, label_a),
+            oxigraph_normalized(b, label_b),
         );
-        if let (Ok(na), Ok(nb)) = normalized {
-            if na == nb {
-                return Verdict::AdjudicatedIntegerLexical;
+        match normalized {
+            (Ok(na), Ok(nb)) => {
+                if na.blank_nodes != nb.blank_nodes {
+                    return Verdict::Differs(
+                        "integer normalization changed blank-node counts".into(),
+                    );
+                }
+                match (
+                    comparable(&na.lines, relabel, label_a),
+                    comparable(&nb.lines, relabel, label_b),
+                ) {
+                    (Ok(na), Ok(nb)) if na == nb => return Verdict::AdjudicatedIntegerLexical,
+                    (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+                    _ => {}
+                }
+            }
+            (Err(e), _) | (_, Err(e)) => {
+                return Verdict::Differs(format!(
+                    "integer-lexical adjudication refused: {e}\n{}",
+                    one_sided(label_a, &ca, label_b, &cb)
+                ));
             }
         }
     }
@@ -1166,8 +1270,11 @@ fn apply_sequence(
                     return Err(fail(
                         i,
                         op,
-                        format!("canonical dataset differs ({} vs oxigraph)\n{}", label, detail),
-                    ))
+                        format!(
+                            "canonical dataset differs ({} vs oxigraph)\n{}",
+                            label, detail
+                        ),
+                    ));
                 }
             }
         }
@@ -1191,7 +1298,7 @@ fn apply_sequence(
                                 "probe {:?} binding set differs (sparq {} vs oxigraph)\n{}",
                                 probe, label, detail
                             ),
-                        ))
+                        ));
                     }
                 }
             }
@@ -1380,8 +1487,7 @@ mod tests {
     #[test]
     fn injected_divergence_is_caught() {
         let allow = allowlist();
-        let err =
-            check_seed(0, Some(0), &allow).expect_err("an injected extra quad must diverge");
+        let err = check_seed(0, Some(0), &allow).expect_err("an injected extra quad must diverge");
         assert!(
             err.contains("canonical dataset differs"),
             "divergence must be reported by the canonical-dataset compare, got:\n{}",
@@ -1469,9 +1575,11 @@ mod tests {
     #[test]
     fn no_nested_blank_nodes_in_triple_terms() {
         // (a) the guard actually fires on the shape it exists to reject.
-        let nested = vec!["<http://ex/s> <http://ex/p> \
+        let nested = vec![
+            "<http://ex/s> <http://ex/p> \
                           <<( <http://ex/a> <http://ex/b> _:x )>> ."
-            .to_string()];
+                .to_string(),
+        ];
         let err = comparable(&nested, true, "nested")
             .expect_err("a blank node inside a triple term must be rejected, not canonicalized");
         assert!(
@@ -1566,7 +1674,11 @@ mod tests {
             "<http://ex/s> <http://ex/p> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
         ];
         let g = sparq_engine::update(&Graph::new(), insert).expect("rebuild insert");
-        assert_eq!(sparq_nquads(&g), expected, "rebuild path lost a lexical form");
+        assert_eq!(
+            sparq_nquads(&g),
+            expected,
+            "rebuild path lost a lexical form"
+        );
         let mut gi = Graph::new();
         sparq_engine::update_in_place(&mut gi, insert).expect("in-place insert");
         assert_eq!(
@@ -1669,15 +1781,22 @@ mod tests {
         let canonical = "<http://ex/s> <http://ex/p> \
                          \"5\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
             .to_string();
-        let sparq = vec![ncl.clone(), canonical.clone()];
+        let collapsed = vec![ncl.clone(), canonical.clone()];
         let oxi = vec![canonical.clone()];
+        assert!(
+            matches!(
+                compare("sparq", &collapsed, "oxigraph", &oxi, true),
+                Verdict::Differs(_)
+            ),
+            "a reference-state collapse is no longer adjudicated"
+        );
+        let sparq = vec![ncl.clone()];
         assert!(
             matches!(
                 compare("sparq", &sparq, "oxigraph", &oxi, true),
                 Verdict::AdjudicatedIntegerLexical
             ),
-            "the collapse of a non-canonical lexical onto its canonical sibling is the \
-             adjudicated class"
+            "a one-to-one lexical rewrite must still exercise the adjudicated class"
         );
         assert!(
             matches!(
@@ -1757,9 +1876,11 @@ mod tests {
         assert!(!b.integer_lexical);
         // Malformed / absent registries are strict too.
         assert!(!UpdateDivergenceAllowlist::from_json("{", path).integer_lexical);
-        assert!(UpdateDivergenceAllowlist::from_json("{", path)
-            .state
-            .contains("STRICT"));
+        assert!(
+            UpdateDivergenceAllowlist::from_json("{", path)
+                .state
+                .contains("STRICT")
+        );
     }
 
     /// sq-hodke (3), the premise correction, MACHINE-CHECKED: Oxigraph 0.5 as this
@@ -1824,10 +1945,7 @@ mod tests {
         let loaded = sparq_engine::with_load_base(sandbox.path(), || {
             sparq_engine::update(
                 &Graph::new(),
-                &format!(
-                    "LOAD <file://{}> INTO GRAPH <http://ex/g0>",
-                    doc.name
-                ),
+                &format!("LOAD <file://{}> INTO GRAPH <http://ex/g0>", doc.name),
             )
             .expect("LOAD")
         });
@@ -1843,5 +1961,324 @@ mod tests {
             sparq_nquads(&loaded),
             oxi_nquads(&store).expect("oxigraph iter")
         );
+    }
+
+    // [GPT-6 ASTRA] These checks use actual generated operations and public updates;
+    // a persistent map also catches collisions across different graphs or steps.
+    #[test]
+    fn generated_integer_domain_is_injective_including_load() {
+        let mut noncanonical = 0;
+        let mut loads = 0;
+        let mut load_integers = 0;
+        let mut nested = 0;
+        for seed in 0..400 {
+            let ops = gen_sequence(&mut Rng::new(seed));
+            let sandbox = LoadSandbox::new().expect("sandbox");
+            sparq_engine::with_load_base(sandbox.path(), || {
+                let mut graph = Graph::new();
+                let mut integers = BTreeMap::new();
+                let mut bnodes = BTreeSet::new();
+                for op in &ops {
+                    if let Some(doc) = &op.doc {
+                        sandbox.write(doc).expect("LOAD document");
+                        let rows: Vec<_> = doc.content.lines().map(str::to_string).collect();
+                        for q in parse_lines(&rows, "LOAD document").expect("valid document") {
+                            if let Term::Literal(l) = &q.object
+                                && l.datatype() == xsd::INTEGER
+                            {
+                                let value = l.value().parse::<u64>().unwrap();
+                                assert!(
+                                    value < CANONICAL_INTEGER_VALUES,
+                                    "LOAD integer must stay in the canonical pool: {value}"
+                                );
+                                assert_eq!(value.to_string(), l.value());
+                                load_integers += 1;
+                            }
+                            record_lexical_terms(&q.object, &mut integers, &mut bnodes)
+                                .expect("LOAD shares the injective integer domain");
+                        }
+                        let mirror = sparq_engine::update(&Graph::new(), op.oxi.as_ref().unwrap())
+                            .expect("reference INSERT mirror");
+                        let loaded =
+                            sparq_engine::update(&Graph::new(), &op.sparq).expect("isolated LOAD");
+                        assert_eq!(sparq_nquads(&mirror), sparq_nquads(&loaded));
+                        loads += 1;
+                    }
+                    graph = sparq_engine::update(&graph, &op.sparq)
+                        .unwrap_or_else(|e| panic!("seed={seed} update={} failed: {e}", op.sparq));
+                    for q in parse_lines(&sparq_nquads(&graph), "generated state").unwrap() {
+                        nested += usize::from(matches!(&q.object, Term::Triple(_)));
+                        record_lexical_terms(&q.object, &mut integers, &mut bnodes)
+                            .unwrap_or_else(|e| panic!("seed={seed}: {e}"));
+                    }
+                }
+                noncanonical += integers
+                    .iter()
+                    .filter(|(v, lexical)| v.to_string() != **lexical)
+                    .count();
+            });
+        }
+        assert!(noncanonical > 0 && loads > 0 && load_integers > 0 && nested > 0);
+        eprintln!(
+            "injective corpus: noncanonical={noncanonical}, LOAD={loads}, triple terms={nested}"
+        );
+    }
+
+    #[test]
+    fn integer_pools_keep_draw_counts_and_all_spelling_families() {
+        let mut seen = BTreeMap::new();
+        let mut styles = BTreeSet::new();
+        for seed in 0..400 {
+            let mut rng = Rng::new(seed);
+            let mut expected = Rng::new(seed);
+            expected.below(20);
+            expected.below(3);
+            let term = gen_noncanonical_integer(&mut rng);
+            assert_eq!(rng.next(), expected.next(), "exactly two RNG draws");
+            let rows = vec![format!("<http://ex/s> <http://ex/p> {term} .")];
+            let q = parse_lines(&rows, "generated literal")
+                .unwrap()
+                .pop()
+                .unwrap();
+            record_lexical_terms(&q.object, &mut seen, &mut BTreeSet::new()).unwrap();
+            if let Term::Literal(l) = q.object {
+                let v = l.value().parse::<u64>().unwrap();
+                assert!((20..80).contains(&v));
+                assert_ne!(v.to_string(), l.value());
+                styles.insert(if l.value().starts_with('+') {
+                    0
+                } else if l.value().starts_with("00") {
+                    1
+                } else {
+                    2
+                });
+            }
+        }
+        assert_eq!(styles.len(), 3);
+        assert_eq!(seen.len(), 60, "all disjoint values reached");
+    }
+
+    #[test]
+    fn lexical_collisions_across_contexts_and_nested_terms_fail() {
+        for second in [
+            "<http://ex/s> <http://ex/q> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+            "<http://ex/s> <http://ex/q> <<( <http://ex/a> <http://ex/p> <<( <http://ex/b> <http://ex/r> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> )>> )>> .",
+        ] {
+            let a = vec![
+                format!("<http://ex/s> <http://ex/p> \"020\"^^{XSD_INTEGER} ."),
+                second.to_string(),
+            ];
+            let b: Vec<_> = a.iter().map(|s| s.replace("\"020\"", "\"20\"")).collect();
+            match compare("a", &a, "b", &b, true) {
+                Verdict::Differs(e) => assert!(e.contains("not term-injective"), "{e}"),
+                _ => panic!("different contexts must not hide a term collision"),
+            }
+        }
+    }
+
+    #[test]
+    fn lexical_adjudication_preserves_rows_and_blank_node_structure() {
+        // The blank-node case reaches canon's set conversion; without it the
+        // ordinary vector comparison alone rejects the differing multiplicities.
+        for subject in ["<http://ex/s>", "_:x"] {
+            let p = format!("{subject} <http://ex/p> \"020\"^^{XSD_INTEGER} .");
+            let q = format!("{subject} <http://ex/q> \"021\"^^{XSD_INTEGER} .");
+            let a = vec![p.clone(), p.clone(), q.clone()];
+            let b = vec![
+                p.replace("020", "20"),
+                q.replace("021", "21"),
+                q.replace("021", "21"),
+            ];
+            assert!(
+                matches!(compare("a", &a, "b", &b, true), Verdict::Differs(_)),
+                "equal totals cannot hide duplicate redistribution for {subject}"
+            );
+        }
+        let a = vec![
+            format!("_:a <http://ex/p> \"020\"^^{XSD_INTEGER} ."),
+            "_:a <http://ex/q> <http://ex/o> .".into(),
+        ];
+        let good = vec![
+            format!("_:x <http://ex/p> \"20\"^^{XSD_INTEGER} ."),
+            "_:x <http://ex/q> <http://ex/o> .".into(),
+        ];
+        assert!(matches!(
+            compare("a", &a, "b", &good, true),
+            Verdict::AdjudicatedIntegerLexical
+        ));
+        let split = vec![good[0].clone(), "_:y <http://ex/q> <http://ex/o> .".into()];
+        assert!(matches!(
+            compare("a", &a, "b", &split, true),
+            Verdict::Differs(_)
+        ));
+        let extra = vec![good[0].clone(), "_:x <http://ex/r> <http://ex/o> .".into()];
+        assert!(
+            matches!(compare("a", &a, "b", &extra, true), Verdict::Differs(_)),
+            "same node/row counts do not license a changed predicate"
+        );
+        for (left, right) in [
+            (
+                "\"20.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                "\"20\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+            ),
+            ("\"x\"@en", "\"x\"@fr"),
+        ] {
+            let left = vec![format!("<http://ex/s> <http://ex/p> {left} .")];
+            let right = vec![format!("<http://ex/s> <http://ex/p> {right} .")];
+            assert!(matches!(
+                compare("a", &left, "b", &right, true),
+                Verdict::Differs(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn nested_noncanonical_terms_remain_exact_in_sparq() {
+        let expected = vec![format!(
+            "<http://ex/s> <http://ex/p> <<( <http://ex/a> <http://ex/q> <<( <http://ex/b> <http://ex/r> \"020\"^^{XSD_INTEGER} )>> )>> ."
+        )];
+        let op = format!("INSERT DATA {{ {} }}", expected[0]);
+        let rebuilt = sparq_engine::update(&Graph::new(), &op).unwrap();
+        let mut inplace = Graph::new();
+        sparq_engine::update_in_place(&mut inplace, &op).unwrap();
+        for graph in [&rebuilt, &inplace] {
+            assert_eq!(sparq_nquads(graph), expected);
+            assert_eq!(sparq_probe(graph, PROBES[0].0).unwrap(), expected);
+        }
+        let canonical: Vec<_> = expected.iter().map(|s| s.replace("020", "20")).collect();
+        assert!(matches!(
+            compare("sparq", &expected, "reference", &canonical, true),
+            Verdict::AdjudicatedIntegerLexical
+        ));
+        assert!(matches!(
+            compare("sparq", &expected, "other sparq", &canonical, false),
+            Verdict::Differs(_)
+        ));
+    }
+
+    #[test]
+    fn injected_marker_fails_during_actual_lexical_adjudication() {
+        let ops = vec![
+            Op::shared(format!(
+                "INSERT DATA {{ <http://ex/s> <http://ex/p> \"020\"^^{XSD_INTEGER} }}"
+            )),
+            Op::shared("INSERT { ?s <http://ex/q> _:bt } WHERE { ?s <http://ex/p> ?o }".into()),
+        ];
+        let positive = apply_sequence(0, &ops, None, None, &allowlist()).unwrap();
+        assert_eq!(positive.ops, 2);
+        assert!(positive.adjudicated_integer_lexical > 0);
+        let negative = apply_sequence(0, &ops, None, Some(1), &allowlist()).unwrap_err();
+        assert!(negative.contains("step=1") && negative.contains("http://ex/injected"));
+    }
+
+    // [GPT-6 ASTRA] Literal historical input, not regenerated after narrowing the
+    // reference corpus. The reference cannot represent this lexical/cardinality case.
+    #[test]
+    fn historical_4141222487_preserves_lexicals_and_fresh_nodes() {
+        let ops = [
+            r#"INSERT DATA { GRAPH <http://ex/g0> { <http://ex/s4> <http://ex/p0> "lit2" . } <http://ex/s2> <http://ex/p3> <http://ex/o5> . <http://ex/s4> <http://ex/p3> 7 . <http://ex/s0> <http://ex/p2> "lit1" . <http://ex/s4> <http://ex/p0> <<( <http://ex/s2> <http://ex/p0> "tag0"@en )>> . }"#,
+            r#"INSERT DATA { <http://ex/s5> <http://ex/p2> <<( <http://ex/s4> <http://ex/p2> 9 )>> . <http://ex/s1> <http://ex/p3> 6 . GRAPH <http://ex/g2> { <http://ex/s3> <http://ex/p0> 1 . } GRAPH <http://ex/g1> { <http://ex/s5> <http://ex/p0> "lit1" . } <http://ex/s2> <http://ex/p0> "lit1" . } ;
+DELETE DATA { <http://ex/s2> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> 18 . <http://ex/s0> <http://ex/p1> 8 . }"#,
+            r#"DELETE DATA { <http://ex/s4> <http://ex/p0> <<( <http://ex/s2> <http://ex/p0> "tag0"@en )>> . <http://ex/s4> <http://ex/p3> 7 . <http://ex/s5> <http://ex/p2> <<( <http://ex/s4> <http://ex/p2> 9 )>> . }"#,
+            r#"INSERT { ?s <http://ex/p1> <<( ?s ?p ?o )>> } WHERE { ?s ?p ?o FILTER(!isBlank(?s) && !isBlank(?o)) }"#,
+            r#"INSERT DATA { <http://ex/s3> <http://ex/p1> "lit1" . <http://ex/s5> <http://ex/p2> <http://ex/o4> . <http://ex/s2> <http://ex/p1> 8 . <http://ex/s2> <http://ex/p1> "008"^^<http://www.w3.org/2001/XMLSchema#integer> . }"#,
+            r#"LOAD SILENT <file://doc1.nt>"#,
+            r#"DELETE DATA { <http://ex/s0> <http://ex/p2> "lit1" . }"#,
+            r#"CREATE SILENT GRAPH <http://ex/g0>"#,
+            r#"INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }"#,
+            r#"ADD SILENT GRAPH <http://ex/g0> TO GRAPH <http://ex/g2>"#,
+        ];
+        let sandbox = LoadSandbox::new().unwrap();
+        sandbox.write(&LoadDoc {
+            name: "doc1.nt".into(),
+            content: "<http://ex/s5> <http://ex/p1> <http://ex/o3> .\n<http://ex/s0> <http://ex/p0> <http://ex/o2> .\n<http://ex/s4> <http://ex/p1> <http://ex/o5> .\n".into(),
+        }).unwrap();
+        sparq_engine::with_load_base(sandbox.path(), || {
+            let mut rebuilt = Graph::new();
+            let mut inplace = Graph::new();
+            for (step, op) in ops.iter().enumerate() {
+                rebuilt = sparq_engine::update(&rebuilt, op).unwrap();
+                sparq_engine::update_in_place(&mut inplace, op).unwrap();
+                let a = sparq_nquads(&rebuilt);
+                let b = sparq_nquads(&inplace);
+                assert!(
+                    matches!(compare("rebuild", &a, "inplace", &b, false), Verdict::Same),
+                    "internal dataset mismatch at {step}"
+                );
+                for (probe, _) in PROBES {
+                    let a = sparq_probe(&rebuilt, probe).unwrap();
+                    let b = sparq_probe(&inplace, probe).unwrap();
+                    assert!(
+                        matches!(
+                            compare("rebuild probe", &a, "inplace probe", &b, false),
+                            Verdict::Same
+                        ),
+                        "internal full-row mismatch at {step}"
+                    );
+                }
+                if step == 8 {
+                    for graph in [&rebuilt, &inplace] {
+                        let quads = parse_lines(&sparq_nquads(graph), "historical state").unwrap();
+                        let fresh: Vec<_> = quads
+                            .iter()
+                            .filter(|q| {
+                                q.predicate.as_str() == "http://ex/p0"
+                                    && matches!(&q.object, Term::BlankNode(_))
+                            })
+                            .collect();
+                        assert_eq!(fresh.len(), 9);
+                        assert_eq!(
+                            fresh
+                                .iter()
+                                .map(|q| q.object.to_string())
+                                .collect::<BTreeSet<_>>()
+                                .len(),
+                            9
+                        );
+                        assert_eq!(
+                            fresh
+                                .iter()
+                                .filter(|q| q.subject.to_string() == "<http://ex/s2>")
+                                .count(),
+                            4
+                        );
+                        let rows = sparq_engine::query(
+                            graph,
+                            "SELECT ?s ?o WHERE { ?s <http://ex/p1> ?o }",
+                        )
+                        .unwrap();
+                        assert_eq!(rows.rows.len(), 9);
+                        let s2: Vec<_> = quads
+                            .iter()
+                            .filter(|q| {
+                                q.subject.to_string() == "<http://ex/s2>"
+                                    && q.predicate.as_str() == "http://ex/p1"
+                            })
+                            .map(|q| q.object.to_string())
+                            .collect();
+                        assert!(s2.contains(&format!("\"8\"^^{XSD_INTEGER}")));
+                        assert!(s2.contains(&format!("\"008\"^^{XSD_INTEGER}")));
+                    }
+                    eprintln!(
+                        "historical index8: 9 solutions, 9 fresh blank nodes, 4 for s2; both lexical terms retained"
+                    );
+                }
+            }
+            let g2: Vec<_> = sparq_nquads(&rebuilt)
+                .into_iter()
+                .filter(|q| q.ends_with("<http://ex/g2> ."))
+                .collect();
+            assert_eq!(
+                g2,
+                vec![
+                    format!("<http://ex/s3> <http://ex/p0> \"1\"^^{XSD_INTEGER} <http://ex/g2> ."),
+                    "<http://ex/s4> <http://ex/p0> \"lit2\" <http://ex/g2> .".to_string(),
+                ],
+                "final index9 ADD preserved existing g2 and copied g0"
+            );
+            eprintln!(
+                "historical index9: ADD completed; all 10 original requests checked internally"
+            );
+        });
     }
 }
