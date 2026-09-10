@@ -1,0 +1,98 @@
+{
+  "at": "2026-09-10T03:01:14.192791+00:00",
+  "old": "19763bfab1dce196a654c899b172e7b24d70bc59",
+  "new": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "calls": [
+    {
+      "args": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0,
+      "stdout": "ed66ef0931fa19dd521fac433870c86a78687a30\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "status",
+        "--porcelain"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        "19763bfab1dce196a654c899b172e7b24d70bc59",
+        "ed66ef0931fa19dd521fac433870c86a78687a30"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "rate_limit"
+      ],
+      "exit": 0,
+      "stdout": "{\"resources\":{\"core\":{\"limit\":5000,\"used\":19,\"remaining\":4981,\"reset\":1789009301},\"search\":{\"limit\":30,\"used\":0,\"remaining\":30,\"reset\":1789009335},\"graphql\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789012875},\"integration_manifest\":{\"limit\":5000,\"used\":0,\"remaining\":5000,\"reset\":1789012875},\"source_import\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789009335},\"code_scanning_autofix\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789009335},\"actions_runner_registration\":{\"limit\":10000,\"used\":0,\"remaining\":10000,\"reset\":1789012875},\"scim\":{\"limit\":15000,\"used\":0,\"remaining\":15000,\"reset\":1789012875},\"dependency_snapshots\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789009335},\"dependency_sbom\":{\"limit\":100,\"used\":0,\"remaining\":100,\"reset\":1789009335},\"audit_log\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789012875},\"audit_log_streaming\":{\"limit\":15,\"used\":0,\"remaining\":15,\"reset\":1789012875},\"code_search\":{\"limit\":10,\"used\":0,\"remaining\":10,\"reset\":1789009335},\"copilot_usage_records\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789012875},\"enterprise_token_inventory\":{\"limit\":1750,\"used\":0,\"remaining\":1750,\"reset\":1789012875}},\"rate\":{\"limit\":5000,\"used\":19,\"remaining\":4981,\"reset\":1789009301}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=query { rateLimit { remaining resetAt } repository(owner:\"sparq-org\",name:\"sparq\") { defaultBranchRef { target { oid } } pullRequest(number:6477) { state headRefOid mergeQueueEntry { position } labels(first:40) { nodes { name } } } } }"
+      ],
+      "exit": 0,
+      "stdout": "{\"data\":{\"rateLimit\":{\"remaining\":4993,\"resetAt\":\"2026-09-10T03:47:19Z\"},\"repository\":{\"defaultBranchRef\":{\"target\":{\"oid\":\"e53464c73f31f7aca800f3867ac054c36408e346\"}},\"pullRequest\":{\"state\":\"OPEN\",\"headRefOid\":\"19763bfab1dce196a654c899b172e7b24d70bc59\",\"mergeQueueEntry\":null,\"labels\":{\"nodes\":[{\"name\":\"area:sparq-engine\"},{\"name\":\"review:changes\"}]}}}}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "ls-remote",
+        "origin",
+        "refs/heads/codex/capped-rhs-reuse"
+      ],
+      "exit": 0,
+      "stdout": "19763bfab1dce196a654c899b172e7b24d70bc59\trefs/heads/codex/capped-rhs-reuse\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "git",
+        "push",
+        "origin",
+        "ed66ef0931fa19dd521fac433870c86a78687a30:refs/heads/codex/capped-rhs-reuse"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "remote: \nremote: GitHub found 63 vulnerabilities on sparq-org/sparq's default branch (2 critical, 41 high, 20 moderate). To find out more, visit:        \nremote:      https://github.com/sparq-org/sparq/security/dependabot        \nremote: \nTo https://github.com/sparq-org/sparq.git\n   19763bfab..ed66ef093  ed66ef0931fa19dd521fac433870c86a78687a30 -> codex/capped-rhs-reuse\n"
+    },
+    {
+      "args": [
+        "/opt/homebrew/bin/gh",
+        "pr",
+        "view",
+        "6477",
+        "--repo",
+        "sparq-org/sparq",
+        "--json",
+        "state,headRefOid,labels"
+      ],
+      "exit": 0,
+      "stdout": "{\"headRefOid\":\"19763bfab1dce196a654c899b172e7b24d70bc59\",\"labels\":[{\"id\":\"LA_kwDOSz3qKM8AAAACsIllrQ\",\"name\":\"area:sparq-engine\",\"description\":\"Work scoped to crates/sparq-engine\",\"color\":\"1d76db\"},{\"id\":\"LA_kwDOSz3qKM8AAAACsJRacw\",\"name\":\"review:changes\",\"description\":\"\",\"color\":\"e99695\"}],\"state\":\"OPEN\"}\n",
+      "stderr": ""
+    }
+  ]
+}

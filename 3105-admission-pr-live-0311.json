@@ -1,0 +1,129 @@
+{
+  "data": {
+    "rateLimit": {
+      "remaining": 4979,
+      "resetAt": "2026-09-10T03:47:19Z"
+    },
+    "repository": {
+      "defaultBranchRef": {
+        "target": {
+          "oid": "e53464c73f31f7aca800f3867ac054c36408e346"
+        }
+      },
+      "pullRequest": {
+        "id": "PR_kwDOSz3qKM8AAAABC7LrtA",
+        "state": "OPEN",
+        "isDraft": false,
+        "headRefOid": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "baseRefName": "main",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "BLOCKED",
+        "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\n## Summary\n\nReuse reached non-bind RHS scans across capped seed blocks when the prepared pattern and requested sort are unchanged. A private 4 MiB allowance per capped BGP invocation bounds retained cache storage, including indexed slots, row/variable buffers and owned variable-name capacities. Scans that do not fit retain their original per-step lifetime. Stale entries are released and refunded before replacement scans; actual sort metadata stays unchanged.\n\nThis reduces repeated scan work for ASK and LIMIT queries that continue into later blocks. Armed resource budgets keep the original scan lifetime, and an armed ZK recorder keeps the existing uncapped execution path. Per-block planning, bind decisions and hash-table builds remain unchanged. No public API, dependency or storage-format changes.\n\nRefs #3105 (`sq-7d3dj.30.18`). Planner and hash-build reuse remain open.\n\n## Validation and review\n\nImplementation: actual GPT-6 Astra, extra-high reasoning. Independent review of the bounded correction by actual Claude Opus 5, extra-high reasoning: **approved for CI validation** at `ed66ef0931fa19dd521fac433870c86a78687a30`; the unbounded-retention finding is resolved. Merge admission remains pending full current-head CI and the remaining larger-query timing assessment.\n\nAt `ed66ef0931fa19dd521fac433870c86a78687a30`, ten focused tests pass in each of the default, core compact-index and semijoin-bitmap configurations; engine library/test clippy passes. Tests cover full result bags, join paths, requested/actual sort, named views, overlays, allocation capacities, exact-fit/oversized entries, spilled rows, stale refunds, metadata overflow and armed-but-untripped cancellation/deadline budgets. Three compiled controls fail their intended runtime assertions for excessive retention, length-based undercounting and missing refunds.\n\nAll 24 allocation samples and 20 two-pattern System-allocator timing samples pass their declared local screens. These are advisory measurements on one macOS arm64 host. Full-miss timing improves while first-hit timing has a small cost; this is not a universal latency or memory-neutrality claim. The larger-pattern cases retain some additional memory within the cache allowance. A System-allocator latency check for the same five/eight-pattern allocation fixtures is also in progress.\n\nThe allowance bounds requested retained storage per capped BGP invocation, not total query heap, transient scan/join allocations, allocator metadata or process RSS. Aggregate cache storage scales with concurrent or nested invocations. Local preflight still encounters Bash 3's missing `mapfile` in the existing privacy-check script; Linux CI must execute that check.\n\n`bench/feature-off-declarations/6477.json` declares intentional changes to always-compiled engine code under the documented V2 process. It does not claim byte neutrality. The separate wasm size ratchet and all other floors remain unchanged.\n\n## Base gate\n\n- [ ] Authoritative workspace build and full workspace clippy on the current head.\n- [x] Touched code matches surrounding formatting; no workspace reformat.\n- [ ] Full affected-crate tests from current-head CI (scoped local tests passed).\n\n## Targeted re-evaluation\n\n- [ ] Query execution: conformance ratchet, operator coverage and builtin error cases.\n- [ ] Wasm builds/tests, dependency guard and bundle-size gate.\n- [ ] Coverage ratchet and test-presence gate.\n- [x] Bounded retention and larger-pattern allocation checks; local timing tradeoff assessed.\n\n## Ratchets and conventions\n\n- [x] No conformance, performance or coverage ratchet lowered.\n- [x] No hard-coded benchmark results added to repository Markdown.\n- [x] Remaining planner/hash-build work stays tracked in #3105.\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "area:bench"
+            },
+            {
+              "name": "area:sparq-engine"
+            },
+            {
+              "name": "review:changes"
+            }
+          ]
+        },
+        "mergeQueueEntry": null,
+        "reviewRequests": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "github-actions"
+              },
+              "state": "COMMENTED",
+              "body": "<!-- github-benchmark-action-comment(start): sparq engine Summary -->\n# sparq engine\n\n<details>\n\n| Benchmark suite | Current: ed66ef0931fa19dd521fac433870c86a78687a30 | Previous: e53464c73f31f7aca800f3867ac054c36408e346 | Ratio |\n|-|-|-|-|\n| `store_bytes_per_triple` | `88` bytes | `88` bytes | `1` |\n| `dict_bytes_per_term` | `53` bytes | `53` bytes | `1` |\n| `comp_store_bytes_per_triple` | `44` bytes | `44` bytes | `1` |\n| `store_bytes_per_triple_small` | `88` bytes | `88` bytes | `1` |\n| `wasm_bundle_bytes` | `1561427` bytes | `1560241` bytes | `1.00` |\n\n</details>\n\nThis comment was automatically generated by [workflow](https://github.com/sparq-org/sparq/actions?query=workflow%3ABenchmarks) using [github-action-benchmark](https://github.com/marketplace/actions/continuous-benchmark).\n<!-- github-benchmark-action-comment(end): sparq engine Summary -->",
+              "submittedAt": "2026-09-10T02:24:42Z",
+              "commit": {
+                "oid": "19763bfab1dce196a654c899b172e7b24d70bc59"
+              }
+            },
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "body": "### \ud83d\udfe1 Changes recommended\n\nAdd bounded or evicting cache behavior and validate large-pattern memory usage before approval.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis pull request reuses non-bind RHS scans across capped seed blocks for ASK/LIMIT execution while preserving sort metadata and budget behavior.\n\n**Changes:**\n- Adds query-local RHS scan caching with sort invalidation.\n- Refactors joins to borrow cached bindings.\n- Adds focused correctness and reuse tests.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `crates/sparq-engine/src/exec.rs` | Implements RHS scan reuse, borrowed joins, and tests; the cache currently has unbounded retention and may cause peak-memory regressions. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/sparq-org/sparq/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+              "submittedAt": "2026-09-10T02:25:02Z",
+              "commit": {
+                "oid": "19763bfab1dce196a654c899b172e7b24d70bc59"
+              }
+            },
+            {
+              "author": {
+                "login": "jeswr"
+              },
+              "state": "COMMENTED",
+              "body": "",
+              "submittedAt": "2026-09-10T03:03:52Z",
+              "commit": {
+                "oid": "ed66ef0931fa19dd521fac433870c86a78687a30"
+              }
+            },
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "body": "### \ud83d\udd35 Needs a closer look\n\nA moderate peak-memory issue remains, and required validation checks are incomplete.\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**crates/sparq-engine/src/exec.rs:4289**\n* When `reuse_rhs` is false, `capped_rhs` puts the scan in `uncached`, but the new `*_ref` joins only borrow it. That keeps the entire RHS alive through the rest of the block (and `record_pattern_ndv`) instead of dropping it when the old consuming join returned, so armed-budget queries can have a substantially larger peak working set despite the intended no-retention path. Drop the uncached RHS immediately after the join dispatch (or scope the borrow) before continuing.\n\n- **Files reviewed:** 2/2 changed files\n- **Comments generated:** 0 new\n- **Review effort level:** Lite\n</details>",
+              "submittedAt": "2026-09-10T03:05:43Z",
+              "commit": {
+                "oid": "ed66ef0931fa19dd521fac433870c86a78687a30"
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOSz3qKM6g6CZs",
+              "isResolved": true,
+              "isOutdated": true,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOSz3qKM7s7EK0",
+                    "databaseId": 3974906548,
+                    "author": {
+                      "login": "copilot-pull-request-reviewer"
+                    },
+                    "body": "With reuse enabled, this cache has no row/byte bound and retains every materialized RHS for every non-bind pattern reached by any block until the capped call returns. A capped miss over a multi-pattern graph can therefore keep the full relations for all reached patterns live at once, whereas the previous per-block path released each RHS after the join; because `budget::active()` is false for ordinary unbudgeted queries, this can turn a LIMIT/ASK optimization into an OOM/peak-memory regression. Please add a bounded/evicting policy (or restrict reuse to a proven small set) and a large-pattern allocation/peak-memory test before enabling it by default.",
+                    "url": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3974906548",
+                    "createdAt": "2026-09-10T02:25:02Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOSz3qKM7s7tHZ",
+                    "databaseId": 3975074265,
+                    "author": {
+                      "login": "jeswr"
+                    },
+                    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nAddressed the unbounded-retention finding in ed66ef0931fa19dd521fac433870c86a78687a30. A private storage allowance per capped BGP invocation charges actual indexed-slot, row-buffer, variable-buffer and owned-string capacities. Non-fitting scans use per-step scratch ownership; stale entries are dropped and refunded before replacement. This bounds newly retained storage, not total query heap or aggregate concurrent/nested invocations.\n\nActual independent Claude Opus 5 review approved this correction for CI and confirmed the retention bound. Ten focused tests pass in each of three configurations; compiled controls catch excessive retention, length-based undercounting and missing refunds. Root verified every generated allocation/timing sample against its raw output and executable hash.\n\nGenerated local diagnostic summary (macOS arm64, release O3, one Rayon worker):\n\n```json\n{\n  \"head\": \"ed66ef0931fa19dd521fac433870c86a78687a30\",\n  \"main\": \"e53464c73f31f7aca800f3867ac054c36408e346\",\n  \"cache_allowance_bytes_per_capped_BGP_invocation\": 4194304,\n  \"allocation_samples\": 24,\n  \"extra_peak_requested_bytes\": {\n    \"five_patterns\": 2240579,\n    \"eight_patterns\": 2240867,\n    \"two_pattern_first_hit\": 192,\n    \"two_pattern_full_miss\": -2064243\n  },\n  \"system_timing_samples\": 20,\n  \"two_pattern_median_candidate_to_main\": {\n    \"first_hit\": 1.0206169079082827,\n    \"full_miss\": 0.8552200575154927\n  }\n}\n```\n\nThe larger-pattern memory regression is bounded, with additional peak memory still present. The two-pattern screen shows a full-miss benefit and a small first-hit cost; no universal neutrality or canonical speedup is claimed. Fresh protected CI and System-allocator timing of the same five/eight-pattern cases are pending. I am retaining the review hold while those finish.\n",
+                    "url": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3975074265",
+                    "createdAt": "2026-09-10T03:03:52Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

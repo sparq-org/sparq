@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T03:12:03.209247+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "actual_review": "opus-bounded-completion.json",
+  "reconciliation": {
+    "latency": "Forty root-verified System samples close the missing-benefit evidence gap; bounded-many-timing-root-verification.json records engineering acceptance.",
+    "budget_execution": "final-default.log:24 includes capped_rhs_three_block_miss, whose new live_budgets cases execute; same test in compact/semijoin. Reviewer assertion that this test was absent is incorrect. No redundant rerun.",
+    "scope": "Public documentation now explicitly per capped BGP invocation; aggregate concurrent/nested calls can exceed one allowance. No claim that nesting is impossible.",
+    "accounting": "Correct invariant includes slot buffer: slot_capacity_bytes + sum(entry_charges) + remaining == allowance. Pinned Variable0.3.3 owns String; source hash retained.",
+    "optional_nits": "Representation size assertions would not prove complete heap ownership; spare slot coupling holds in current source; defer optional assertions/lazy indexing rather than expand reviewed scope.",
+    "failure_paths": "Source is fail-closed for reserve failure/over-allocation. No allocator fault-injection proof claimed.",
+    "new_finding": "Copilot current-head suppressed uncached lifetime finding assigned to same Astra author for source triage; hold remains."
+  }
+}

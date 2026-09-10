@@ -1,0 +1,12 @@
+import subprocess,json,pathlib,datetime
+a=pathlib.Path(__file__).parent;w=a.parents[1]/'worktrees/issue3105';old='19763bfab1dce196a654c899b172e7b24d70bc59';new='ed66ef0931fa19dd521fac433870c86a78687a30';base='e53464c73f31f7aca800f3867ac054c36408e346';branch='codex/capped-rhs-reuse';receipt={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'old':old,'new':new,'calls':[]}
+def cmd(args):
+ p=subprocess.run(args,cwd=w,capture_output=True,text=True);receipt['calls'].append({'args':args,'exit':p.returncode,'stdout':p.stdout,'stderr':p.stderr});(a/'bounded-publication-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+ if p.returncode:raise SystemExit('Operation failed; no blind retry. See receipt.')
+ return p.stdout
+def gh(*args):return json.loads(cmd(['/opt/homebrew/bin/gh',*args]))
+assert cmd(['git','rev-parse','HEAD']).strip()==new and not cmd(['git','status','--porcelain']).strip();cmd(['git','merge-base','--is-ancestor',old,new]);r=gh('api','rate_limit');assert all(r['resources'][k]['remaining']>=50 for k in ['core','graphql'])
+q='query { rateLimit { remaining resetAt } repository(owner:"sparq-org",name:"sparq") { defaultBranchRef { target { oid } } pullRequest(number:6477) { state headRefOid mergeQueueEntry { position } labels(first:40) { nodes { name } } } } }'
+r=gh('api','graphql','-f','query='+q);assert not r.get('errors');p=r['data']['repository']['pullRequest'];assert r['data']['repository']['defaultBranchRef']['target']['oid']==base;assert p['state']=='OPEN' and p['headRefOid']==old and p['mergeQueueEntry'] is None;assert any(x['name']=='review:changes' for x in p['labels']['nodes']);assert cmd(['git','ls-remote','origin','refs/heads/'+branch]).split()[0]==old
+cmd(['git','push','origin',new+':refs/heads/'+branch])
+r=gh('pr','view','6477','--repo','sparq-org/sparq','--json','state,headRefOid,labels');assert r['state']=='OPEN' and r['headRefOid']==new;cmd(['/opt/homebrew/bin/gh','pr','edit','6477','--repo','sparq-org/sparq','--body-file',str(a/'pr-bounded-body.md')]);r=gh('pr','view','6477','--repo','sparq-org/sparq','--json','state,headRefOid,body,labels,reviewRequests,reviews,statusCheckRollup');assert r['headRefOid']==new and r['body']==(a/'pr-bounded-body.md').read_text();assert any(x['name']=='review:changes' for x in r['labels']);(a/'bounded-pr-verified.json').write_text(json.dumps(r,indent=2)+'\n');print(json.dumps({'pr':6477,'head':new,'state':r['state'],'hold_preserved':True}))

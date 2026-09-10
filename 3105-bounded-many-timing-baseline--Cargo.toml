@@ -1,0 +1,27 @@
+# [GPT-6 Astra] Local diagnostic only; no production feature or dependency changes.
+[package]
+name = "capped-rhs-many-timing"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[patch.crates-io]
+spargebra = { path = "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475/vendor/spargebra" }
+
+[features]
+count-alloc = []
+
+[dependencies]
+sparq-core = { path = "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475/crates/sparq-core" }
+sparq-engine = { path = "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475/crates/sparq-engine" }
+rayon = "1"
+oxrdf = { version = "0.3", features = ["rdf-12"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = false
+codegen-units = 16

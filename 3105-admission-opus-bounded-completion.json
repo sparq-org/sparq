@@ -1,0 +1,37 @@
+{
+  "at": "2026-09-10T02:58:36.580491+00:00",
+  "session_id": 31817,
+  "exit_code": 0,
+  "actual_model": "claude-opus-5",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "verdict": "approve_for_ci",
+  "duration_ms": 313751,
+  "num_turns": 1,
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 23242,
+      "outputTokens": 15,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.023316999999999997,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-opus-5": {
+      "inputTokens": 2,
+      "outputTokens": 23488,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 29529,
+      "webSearchRequests": 0,
+      "costUSD": 0.8824999999999998,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-opus-5",
+      "provider": "firstParty"
+    }
+  },
+  "output_sha256": "d3241827c77f920c813365c36d868811b7e0953ba9ecce116fcad60ef45308f6"
+}

@@ -1,0 +1,60 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "scope": "One fixed System-allocator timing phase for the same5/8pattern memory-tradeoff cases. No source/commit/model/network changes, retesting of live-budget arms, extra cases, tuning or retries.",
+  "completed_samples": 20,
+  "paired_repetitions": 5,
+  "queries_per_sample": 3,
+  "warmups_per_process": 2,
+  "pair_order": "AB/BA/AB/BA/AB per case",
+  "fixture": "Identical many-pattern Rust harness to frozen allocation phase:70000subject/object pairs matching across every predicate,8192unrelatedtriples,ordinary base graph,allRHS/all3blocks reached before arithmeticresidualfalse. Committed physical-path tests provide separate engagement proof.",
+  "profile": "releaseO3/debugfalse/ltofalse/codegen-units16;System allocator,count-allocOFF,oneRayonworker",
+  "results": {
+    "5": {
+      "main_median_ns": 22691430.666666668,
+      "candidate_median_ns": 21018083.333333332,
+      "candidate_to_main": 0.9262564199712866,
+      "candidate_percent_change": -7.37435800287134,
+      "ranges_overlap": false,
+      "all_five_paired_ratios_below_one": true
+    },
+    "8": {
+      "main_median_ns": 33355778.0,
+      "candidate_median_ns": 31675722.333333332,
+      "candidate_to_main": 0.9496322446244045,
+      "candidate_percent_change": -5.036775537559546,
+      "ranges_overlap": false,
+      "all_five_paired_ratios_below_one": true
+    }
+  },
+  "assessment": "No latency regression observed in either fixed many-pattern case. Both candidate ranges are below main in this small local screen; no new no-go is established here. This is not canonical or standalone admission approval.",
+  "build_provenance": "Both unique capped-rhs-many-timing roots actually compile in -vv logs, with identical freshly written harness source. Actual rustc flags omit count-alloc. Distinct engine rlib identities/dep-info point to the correct source trees and hash-match the previously verified two-pattern timing libraries. Full source, root binary, harness, dependency lock and command hashes are retained.",
+  "correctness": "All20samples passed expectedfalseASK and uncapped-oracle checks; eachsample executes3queries. No sampled run failed.",
+  "limits": [
+    "LocalmacOSarm64/rustc1.97.1 screen with5pairs and3queries permeasurement; observed ranges/variation are not a statistical guarantee or universal speedup.",
+    "These timings cover only the declared5/8pattern matching-base-graph residual-miss fixtures. Earlier two-pattern timing separately records a2.06%first-hit median increase; this phase does not erase that cost.",
+    "Requested heap measurements remain in bounded-retention/measurement/summary.json; rawRSS in this phase is cumulative process high-water including setup/oracle/warmups and is not queryheap.",
+    "The private4MiB allowance is per capped-evaluation invocation, not a global/nonnested-query memory limit. Existing transient scans, results, planner/AST storage and allocator metadata are outside it. No global-budget claim or framework was introduced.",
+    "FullCI/conformance/feature/wasm ratchets and root engineering/review decisions remain separate. Existing reviewhold is untouched by this agent."
+  ],
+  "prior_preservation": [
+    {
+      "bundle": "bounded-retention",
+      "files": 162,
+      "manifest_sha256": "9807d2c72b46c5597ea719a1c00e73100d51a0747ced9bbc7280ab0ebd868ecb",
+      "all_hashes_match": true
+    },
+    {
+      "bundle": "bounded-timing",
+      "files": 75,
+      "manifest_sha256": "c384be7f1e142dc18673cf72cf6cb9074a15d651a5036b211ca4c893fd97da17",
+      "all_hashes_match": true
+    }
+  ],
+  "finished_utc": "2026-09-10T03:03:28.582150+00:00",
+  "free_bytes_finish": 9584074752,
+  "resource_floor": 6509559808,
+  "commands_running": false,
+  "source_clean": true
+}

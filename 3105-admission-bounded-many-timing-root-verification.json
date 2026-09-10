@@ -1,0 +1,42 @@
+{
+  "at": "2026-09-10T03:04:54.007897+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "files_verified": 75,
+  "bytes_verified": 12898860,
+  "manifest_sha256": "7872725eeb6ed66a9f43ad88ec7a46cd6b1d2b082e14176ab30747981fe70a98",
+  "commands_and_raw_verified": 20,
+  "results": {
+    "5": {
+      "main_median_ns": 22691430.666666668,
+      "candidate_median_ns": 21018083.333333332,
+      "candidate_to_main": 0.9262564199712866,
+      "ranges_ns": {
+        "baseline": [
+          22501319.333333332,
+          22985458.333333332
+        ],
+        "candidate": [
+          20820083.333333332,
+          21224166.666666668
+        ]
+      }
+    },
+    "8": {
+      "main_median_ns": 33355778.0,
+      "candidate_median_ns": 31675722.333333332,
+      "candidate_to_main": 0.9496322446244045,
+      "ranges_ns": {
+        "baseline": [
+          33265722.333333332,
+          33980069.333333336
+        ],
+        "candidate": [
+          31346014.0,
+          31743611.0
+        ]
+      }
+    }
+  },
+  "assessment": "Local exacthead5/8patternlatencybenefits~7.37%/~5.04% quantifypositive benefit against~2.24millionbytesextrarequestedpeak. Rootaccepts4MiB-per-capped-invocation boundedtradeoffwithin authorizedengineering scope; no ownerapproval/quarantine policy invented. Firsthitcost~2.06% remains disclosed; no universalneutrality/canonicalclaim.",
+  "remaining": "FullnewheadCI andnormalprotectedadmission; genuineotherreviewfindingsmustberesolved. SourceOpusreview31817 approvedforCIbeforethesetimingresults."
+}

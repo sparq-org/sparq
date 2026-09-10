@@ -1,0 +1,37 @@
+{
+  "declared_utc": "2026-09-10T03:00:38.970823+00:00",
+  "max_minutes": 8,
+  "source": {
+    "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "candidate": "ed66ef0931fa19dd521fac433870c86a78687a30"
+  },
+  "cases_total_patterns": [
+    5,
+    8
+  ],
+  "fixture": "Identical to frozen bounded-retention many-pattern allocation harness:70000 seed subjects,5/8predicates all share s,o andmatch,8192unrelatedtriples,final arithmeticresidualfalse",
+  "profile": "release O3, debugfalse,ltofalse,codegen-units16;System allocator,count-alloc OFF",
+  "rayon_threads": 1,
+  "warmups": 2,
+  "queries_per_sample": 3,
+  "paired_reps": 5,
+  "pair_order": [
+    "AB",
+    "BA",
+    "AB",
+    "BA",
+    "AB"
+  ],
+  "total_samples": 20,
+  "correctness": "same generated false ASK oracle and uncapped query outside measurement; actual all-RHS/all-block path separately pinned by committed tests",
+  "no_tuning_retries_or_extra_cases": true,
+  "assessment": "Report medians/ranges/paired ratios and any regression plainly. Local advisory screen only, not canonical or standalone admission approval.",
+  "build_provenance": "Unique capped-rhs-many-timing package in both paired manifests with fresh source mtimes; actual -vv root compiler invocations and distinct engine rlib/dep-info source checks",
+  "limits": {
+    "min_free_bytes": 6509559808,
+    "jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "no_concurrent_build_and_measurement": true
+  }
+}
