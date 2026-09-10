@@ -1,0 +1,10 @@
+{
+  "utc": "2026-09-10T12:24:50Z",
+  "free_bytes": 6379491328,
+  "source_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "branch": "codex/update-differential-replay",
+  "status_porcelain": "",
+  "tests_or_builds_executed_during_freeze": 0,
+  "all_prior_named_commands_terminal": true,
+  "parent_archive_regenerable_exclusion": true
+}

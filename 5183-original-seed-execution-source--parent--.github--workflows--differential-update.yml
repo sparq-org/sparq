@@ -1,0 +1,244 @@
+# [FABLE-5] Standing nightly SPARQL UPDATE differential vs Oxigraph (beads sq-3dyje.4,
+# sq-hodke).
+#
+# WHAT: runs the sparq-bench UPDATE differential fuzzer
+# (crates/sparq-bench/src/update_fuzz.rs) as a standing nightly lane. It generates
+# seeded update sequences (INSERT DATA / DELETE DATA / DELETE-INSERT-WHERE incl.
+# WITH/USING/variable graph names / CLEAR / DROP / CREATE / COPY / MOVE / ADD / LOAD,
+# over ground terms plus non-canonical numeric lexicals, blank nodes and RDF-1.2
+# triple terms) and applies each sequence, one request at a time, to THREE
+# implementations — sparq's rebuild path (`sparq_engine::update`), sparq's
+# delta-overlay path (`update_in_place`), and in-process Oxigraph 0.5 — asserting
+# after EVERY step that (a) the canonical dataset and (b) the full binding sets of
+# two probe SELECTs are identical. A divergence is therefore localized to the exact
+# offending step.
+#
+# The canonical form is sorted N-Quads while a step's dataset is ground, and RDFC-1.0
+# (blank-node-relabelled, i.e. RDF isomorphism) as soon as a blank node is in play;
+# the summary line reports `isomorphism_compares=` so a window that silently lost
+# blank-node coverage is visible. `LOAD` reads a local `file://` document that ONLY
+# sparq can fetch — Oxigraph 0.5's LOAD is HTTP-only — so the reference engine runs
+# the equivalent INSERT DATA for those steps; see the module docs for that oracle.
+#
+# WHY ITS OWN FILE: differential.yml (query differential, sq-0iqzw) and fuzz.yml are
+# owned by other open beads (sq-qcnn.5/.10); this lane deliberately lives in a file
+# nothing else touches. It mirrors their structure/pins.
+#
+# TWO SHARDS:
+#   * fixed-window   — seeds 0..2000, the regression/acceptance window from bead
+#                      sq-3dyje.4 (also smoke-covered per-PR by the BLOCKING
+#                      `update_fuzz::tests::fixed_window_smoke` cargo test, which
+#                      runs a 0..40 prefix in the normal test lane).
+#   * advancing      — start = days-since-epoch x WINDOW_STRIDE, so every night
+#                      explores a FRESH, never-replayed seed range (deterministic
+#                      SplitMix64 — the seed IS the corpus).
+#
+# ON FAILURE, each shard uploads the log (which contains `MISMATCH seed=N` lines +
+# the `FIRST FAILING CASE:` block — a complete deterministic repro incl. the exact
+# `update-fuzz --seed-start N --seed-count 1` replay command and the full update
+# sequence) and auto-files the finding via scripts/ci-file-differential-failure.py
+# (GitHub issue + best-effort P1 bug bead), exactly like differential.yml. NOTE:
+# that script's auto-generated `Replay:` one-liner assumes the query fuzzer's
+# `fuzz <start> <count> <category>` CLI; the CORRECT replay command for this lane is
+# embedded verbatim in the FIRST FAILING CASE block it inlines, so the filed issue
+# is still self-sufficient.
+#
+# ADJUDICATED DIVERGENCES: the comparator consults bench/differential-divergences.json
+# for classes whose id starts with `update-`. One is adjudicated today —
+# `update-oxigraph-integer-lexical-canonicalization` (Oxigraph's storage layer collapses
+# xsd:integer lexical forms; sparq is the spec-correct side) — and it is absorbed only
+# by re-deriving that normalization independently on both sides, never as a blind skip.
+# Every other divergence FAILS (strict); a listed update class without a detector in
+# update_fuzz.rs also stays strict, with a loud warning — never a silent skip.
+#
+# TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
+# differential.yml / shacl-diff-fuzz.yml: this workflow never produces a check-run
+# on a PR head commit, so the `ci-summary / gate` aggregator never sees it and the
+# per-PR gate is unaffected.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the
+# trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. Pins
+# match differential.yml / fuzz.yml / ci.yml.
+name: differential-update
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_start:
+        description: "seed window start (default: days-since-epoch x stride — the advancing nightly window; the fixed-window shard ignores it)"
+        required: false
+        default: ""
+      count:
+        description: "seeds for the advancing shard (the fixed-window shard keeps 2000)"
+        required: false
+        default: ""
+  # Daily heavy tier. 04:37 UTC — offset from ci.yml coverage (03:17),
+  # differential.yml (03:53), fuzz.yml / zk-toolchain.yml (04:23), miri.yml /
+  # shacl-diff-fuzz.yml (05:11) per the existing nightly stagger convention.
+  schedule:
+    - cron: "37 4 * * *"
+
+permissions:
+  contents: read
+
+# One nightly sweep at a time; never cancel a shard mid bug-filing.
+concurrency:
+  group: differential-update-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # The advancing-window stride (seeds/night). MUST stay >= the advancing shard's
+  # `count`, or consecutive nights would replay seeds instead of exploring fresh
+  # ones. (Counts are a compute budget, tunable; the update differential applies
+  # ~7 update requests + 6 store/probe compares per seed, far heavier per seed
+  # than the query fuzzer, hence the smaller window.)
+  WINDOW_STRIDE: "200000"
+
+jobs:
+  differential-update:
+    name: nightly UPDATE differential (sparq vs Oxigraph, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # best-effort .beads bug-bead commit-back (fail-soft on GH013)
+      issues: write # auto-file the finding as a GitHub issue with the repro inline
+    strategy:
+      # Run both shards even if one finds a bug.
+      fail-fast: false
+      matrix:
+        include:
+          # The fixed regression window (the bead's acceptance window).
+          - { name: fixed-window, start: "0", count: "2000" }
+          # The advancing exploration window (fresh seeds every night).
+          - { name: advancing, start: "", count: "150000" }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Rust (preinstalled stable)
+        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+        # toolchain install stable` re-downloads the whole toolchain whenever
+        # the image lags the newest release. Use the preinstalled one —
+        # `rustup default`/`component add` never trigger a toolchain download.
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # Both shards build the identical sparq-bench release-fast binary — share one
+          # cache key (and the same key as the query-differential lane, which
+          # builds the same binary).
+          shared-key: differential-nightly
+      # Build once, distinctly, so a compile error is reported separately from a
+      # differential mismatch.
+      - name: Build the differential fuzzer
+        run: cargo build -p sparq-bench --profile release-fast
+      - name: Compute the seed window
+        id: window
+        env:
+          INPUT_SEED_START: ${{ github.event.inputs.seed_start }}
+          INPUT_COUNT: ${{ github.event.inputs.count }}
+          MATRIX_START: ${{ matrix.start }}
+          MATRIX_COUNT: ${{ matrix.count }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MATRIX_START" ]; then
+            # Fixed-window shard: always the committed regression window.
+            start="$MATRIX_START"
+            count="$MATRIX_COUNT"
+          else
+            # Advancing shard: start = days-since-epoch x stride (never replays a
+            # previous night); a workflow_dispatch may pin an explicit window
+            # (e.g. to re-run a failing night's range).
+            if [ -n "$INPUT_SEED_START" ]; then
+              start="$INPUT_SEED_START"
+            else
+              days=$(( $(date -u +%s) / 86400 ))
+              start=$(( days * WINDOW_STRIDE ))
+            fi
+            count="$MATRIX_COUNT"
+            if [ -n "$INPUT_COUNT" ]; then
+              count="$INPUT_COUNT"
+            fi
+            if [ "$count" -gt "$WINDOW_STRIDE" ]; then
+              echo "::error::advancing count $count exceeds WINDOW_STRIDE $WINDOW_STRIDE — nights would replay seeds"
+              exit 1
+            fi
+          fi
+          echo "start=$start" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Window for this shard: seeds $start..$(( start + count ))"
+      - name: Run the UPDATE differential (fails on any divergence — strict)
+        env:
+          START: ${{ steps.window.outputs.start }}
+          COUNT: ${{ steps.window.outputs.count }}
+        run: |
+          set -euo pipefail
+          # Tee the log: on a divergence it contains the full deterministic repro
+          # (MISMATCH seed=N lines + the FIRST FAILING CASE block with the replay
+          # command and the whole update sequence). pipefail keeps the exit code.
+          ./target/release-fast/sparq-bench update-fuzz --seed-start "$START" --seed-count "$COUNT" 2>&1 \
+            | tee "$RUNNER_TEMP/update-fuzz-log.txt"
+      # ── failure path: preserve the repro + auto-file the finding ────────────────
+      - name: Auto-file the finding (GitHub issue + P1 bug bead, deduped)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHARD: update-${{ matrix.name }}
+          START: ${{ steps.window.outputs.start }}
+          COUNT: ${{ steps.window.outputs.count }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-file-differential-failure.py --self-test
+          python3 scripts/ci-file-differential-failure.py \
+            --log "$RUNNER_TEMP/update-fuzz-log.txt" \
+            --shard "$SHARD" \
+            --category update \
+            --mode baseline \
+            --seed-start "${START:-unknown}" \
+            --count "${COUNT:-unknown}" \
+            --out-dir "$RUNNER_TEMP/differential-update-repro" \
+            --jsonl .beads/issues.jsonl \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Commit the new bug bead back to main (best-effort; fail-soft on ruleset-blocked push)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHARD: update-${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .beads/issues.jsonl; then
+            echo "no bead appended (deduped or filing skipped) — nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .beads/issues.jsonl
+          git commit -m "chore(beads): auto-file update-differential P1 bug bead (${SHARD}) [skip ci]" \
+                     -m "Nightly UPDATE differential lane finding (sq-3dyje.4). [FABLE-5]"
+          # Best-effort push, exactly the differential.yml fail-soft pattern: the
+          # protected-main ruleset (GH013) rejects direct pushes until a bypass
+          # exists (sq-roe3); the GitHub issue filed above is the reliable channel.
+          set +e
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          push_rc=$?
+          set -e
+          if [ "$push_rc" -ne 0 ]; then
+            echo "::warning title=update-differential bead push declined::Could not push the auto-filed bug bead to protected main (git push exit ${push_rc}; likely GH013 ruleset rejection). The GitHub issue filed in the previous step is the durable record; the orchestrator beads it on the next issue sweep."
+            exit 0
+          fi
+          echo "pushed the auto-filed bug bead to main."
+      - name: Upload the repro artifact (log + parsed seed/sequence)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: differential-update-repro-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/update-fuzz-log.txt
+            ${{ runner.temp }}/differential-update-repro/
+          if-no-files-found: warn

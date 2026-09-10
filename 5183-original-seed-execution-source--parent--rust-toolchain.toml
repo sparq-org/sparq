@@ -1,0 +1,178 @@
+# =============================================================================
+# PINNED RUST TOOLCHAIN — read this before changing the version.
+# =============================================================================
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Until this file landed, NOTHING in sparq pinned a Rust version. Every stable
+# lane in `.github/workflows/` resolves its compiler with either
+#
+#     rustup default stable          (~40 sites, "use the runner image's Rust")
+#
+# or the SHA-pinned `dtolnay/rust-toolchain` action with no `toolchain:` input
+# (which also means "stable"). Both spellings mean "whatever Rust this machine
+# happens to carry" — they do NOT mean "a specific compiler". The registry's
+# review-fix gate (jeswr/agent-account-registry, `review-fix.yml`, the
+# "Ensure a Rust toolchain for the crate-scoped gate" step) inherits the same
+# property: it runs `rustup show active-toolchain || rustup default stable`
+# and then clippies THIS repository with `-D warnings`.
+#
+# So two independent consumers linted the same source with `-D warnings` on two
+# different compilers, and `-D warnings` turns any lint-set difference into a
+# hard build failure on unchanged code.
+#
+# THE MEASUREMENT (registry issue jeswr/agent-account-registry#664)
+# ----------------------------------------------------------------
+# `clippy::uninlined_format_args` is warn-by-default on clippy 1.88.0 and is
+# allow-by-default on every other version measured. Reproduced directly, on a
+# small crate containing the exact shape of `crates/sparq-core/src/nt.rs:411`
+# plus a field-access and a two-argument `format!`, `cargo clippy -- -D warnings`:
+#
+#     clippy 1.88.0  -> FAIL  (error: variables can be used directly in the
+#                              `format!` string ... `-D clippy::uninlined-format-args`
+#                              implied by `-D warnings`)
+#     clippy 1.89.0  -> pass
+#     clippy 1.97.0  -> pass
+#     clippy 1.97.1  -> pass   (the pin below)
+#
+# Measured versions only — 1.89.0/1.97.0/1.97.1 were tested, the versions
+# between them were not. On 1.97.1 the lint still EXISTS and fires under an
+# explicit `-W clippy::uninlined_format_args`; it is simply not on by default.
+# NOTE for anyone reading sparq issue #3575, which asserts the opposite ("on
+# Rust stable 1.97.1 `clippy::uninlined_format_args` is warn-by-default … once
+# the runner bumps to 1.97+ that lane fails repo-wide"): that claim does not
+# hold. sparq CI has been drawing 1.97.1 and the workspace `-D warnings` lane is
+# green, and the direct measurement above agrees. The hazard demonstrated here
+# runs the other way — a LAGGING toolchain, not a new one.
+#
+# On the live lanes, same source, same `-D warnings`:
+#
+#   * sparq's own `lint` job (ci.yml, `clippy (deny warnings)`) drew
+#     rustc 1.97.1 (8bab26f4f 2026-07-14) on three consecutive green runs
+#     and passes.
+#   * the registry fix gate drew rustc 1.88.0 (6b00bc388 2025-06-23) and failed
+#     on `crates/sparq-core/src/nt.rs:411` — a file the PR under test did not
+#     touch, that is unchanged on `main`, and that sparq CI is green on.
+#     Every registry fix run that actually reached the clippy gate failed this
+#     way; the one run recorded as a "success" never executed the gate step at
+#     all (it is conditional on `fix_made_changes == 'true'`), so it is not
+#     evidence that the same command sometimes passes.
+#
+# The exposure is NOT one lint. The codebase is written throughout in the
+# pre-inline `format!("{}", x)` style — an estimated 666+ sites across 41
+# crates — so a consumer that lands on the strict clippy does not fail on one
+# line, it fails on hundreds. Sweeping that is a scheduled project, not
+# something to do under a red `main`; see the FOLLOW-UP section.
+#
+# WHAT THIS FILE BUYS
+# -------------------
+# `rustup` honours a `rust-toolchain.toml` for EVERY consumer that runs cargo
+# anywhere inside this checkout — sparq's own CI, the registry's fix-lane gate
+# (its step `cd`s into the target checkout precisely so a target pin is
+# honoured), and a developer's laptop. One file makes them agree by
+# construction instead of by coincidence. It also removes the standing risk the
+# `lint` job's own comment already names — "a Rust-stable bump that adds a lint
+# fails CI" — because the compiler no longer moves without a commit.
+#
+# Precedence matters and is easy to get wrong. rustup resolves, highest first:
+#   1. `cargo +<toolchain>` / `rustc +<toolchain>`
+#   2. the `RUSTUP_TOOLCHAIN` environment variable
+#   3. a `rustup override set` directory override
+#   4. THIS FILE
+#   5. `rustup default`
+# So this file BEATS every `rustup default stable` in the workflow tree — all 40
+# of those lines are now COMPLETE no-ops, and is in turn BEATEN by `+toolchain`
+# and `RUSTUP_TOOLCHAIN`.
+# [OPUS-5] They add no components either: `rustup default stable` only selects.
+# Measured: of the 40 `run:` blocks containing `rustup default stable`, 7 also
+# contain a separate `rustup component add` — it is THAT command (which applies
+# to the active, i.e. pinned, toolchain) that adds anything, not the `default`.
+# The lanes that deliberately need a different compiler — the MSRV floor check
+# and the nightly Miri/ASan/fuzz/Kani lanes — assert themselves through those
+# two higher-precedence mechanisms, so they keep the compiler they declare.
+# If you add a lane that needs a non-pinned toolchain, it MUST use one of them;
+# `rustup default <x>` will silently lose to this file.
+#
+# COST, STATED HONESTLY
+# ---------------------
+# The repo carries an explicit CI-economy directive to use the runner image's
+# preinstalled toolchain and never trigger a toolchain download. This pin
+# partly gives that up: the image's toolchain is installed under the name
+# `stable`, and `1.97.1` is a DIFFERENT rustup toolchain directory even when it
+# is byte-identical, so jobs now fetch it once. `profile = "minimal"` plus an
+# explicit component/target list keeps that download as small as it can be.
+# That is the price of a reproducible lint gate and it was accepted knowingly.
+#
+# FOLLOW-UP (the deliberate exit from this pin)
+# ---------------------------------------------
+# Maintainer decision, 2026-07-25: PIN THE TOOLCHAIN NOW, SWEEP THE LINT LATER.
+# This file is deliberately only half the fix. The other half:
+#   1. Either sweep `uninlined_format_args` workspace-wide (mechanical via
+#      `cargo clippy --fix`, but a ~666-site diff across 41 crates needing a
+#      full workspace verification, and it would collide with most open PRs), or
+#      — smaller and more reviewable — state the project's position on the lint
+#      explicitly via `[workspace.lints.clippy]`. Note the convention conflict
+#      recorded in sparq issue #3575: positional `format!("{}", x)` args are
+#      mandated elsewhere to dodge a CodeQL `rust/unused-variable` false
+#      positive, so "just inline them" is not obviously the right answer.
+#   2. THEN bump the `channel` below deliberately, as its own reviewed change.
+#
+# The reason to do (1) before (2) is not that this specific lint is about to be
+# re-promoted — as measured above it is allow-by-default on 1.97.1. It is that
+# the workspace is written entirely in a style ONE lint-group decision away
+# from a repo-wide `-D warnings` failure, and this pin is currently the only
+# thing standing between that and `main`. Until (1) lands, treat a `channel`
+# bump as a change that can red the whole workspace, and verify it as one.
+#
+# =============================================================================
+
+[toolchain]
+# The exact compiler sparq CI is currently GREEN on: `rustup show
+# active-toolchain` in the `lint` job reported
+# `stable-x86_64-unknown-linux-gnu unchanged - rustc 1.97.1 (8bab26f4f 2026-07-14)`
+# on three consecutive successful runs. Pinning the version that passes, not
+# the newest that exists.
+channel = "1.97.1"
+
+# `minimal` = rustc + cargo + rust-std only; every component the PINNED-STABLE
+# lanes need is listed explicitly below rather than pulled in by the `default`
+# profile (which would also fetch rust-docs).
+#
+# [OPUS-5] Deliberately NOT the set of every component the repo uses. Three
+# more are needed elsewhere and are correctly NOT listed here:
+#   * `llvm-tools-preview` — the four ci.yml coverage jobs, added to the ACTIVE
+#     (pinned) toolchain by an explicit `rustup component add` step in each.
+#   * `miri`, `rust-src` — miri.yml / asan.yml / fuzz.yml, installed by their
+#     own `dtolnay/rust-toolchain` step onto the NIGHTLY those lanes escape to.
+# Listing any of them here would make every job that activates the pin fetch a
+# component it does not use.
+profile = "minimal"
+
+# clippy  — the `-D warnings` gate in ci.yml's `lint` job and in the registry's
+#           crate-scoped fix gate. This is the component the whole file is for.
+# rustfmt — `cargo fmt --all --check` (currently informational in `lint`).
+#
+# The 11 `rustup component add` lines in the workflows remain correct — with
+# this file active they add to the pinned toolchain — but the 7 that add only
+# `clippy`/`rustfmt clippy` are now redundant, because rustup installs those
+# when it materialises the pin. The other 4 add `llvm-tools-preview`, which is
+# NOT listed here and so is still required (see the coverage jobs in ci.yml).
+# [OPUS-5] Counted, not estimated: `grep -c 'rustup component add'` over
+# .github/workflows = 11 (6 x `clippy`, 1 x `rustfmt clippy`, 4 x
+# `llvm-tools-preview`). The "~40" figure this comment previously carried was
+# the `rustup default stable` count copied to the wrong line.
+components = ["clippy", "rustfmt"]
+
+# REQUIRED, not cosmetic. Roughly nineteen jobs across ci.yml, js.yml,
+# pages.yml, publish.yml, release.yml, gui.yml, bench.yml, site-visual.yml,
+# site-e2e-hero.yml, vectorized-feature-off.yml and nightly-full-sweep.yml
+# build for wasm32 after `dtolnay/rust-toolchain` installs the target `with:
+# targets: wasm32-unknown-unknown`. That action installs the target onto the
+# toolchain it manages (`stable`) and then calls `rustup default` — which this
+# file outranks. Without this line those jobs would resolve to `1.97.1`, find
+# no wasm32 `std`, and fail with "can't find crate for `core`". Declaring the
+# target here makes rustup materialise it on the pinned toolchain instead.
+# Verified locally: adding a `targets` entry for an ALREADY-INSTALLED toolchain
+# makes the next rustup invocation in the directory download the missing
+# `rust-std` before running.
+targets = ["wasm32-unknown-unknown"]

@@ -1,0 +1,45 @@
+{
+  "ci_run": 34458877088,
+  "ci_job": 102811674711,
+  "seed": 4141222487,
+  "variants": {
+    "parent": {
+      "sequence_equals_ci": true,
+      "failure_equals_ci": true,
+      "generated_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "stdout_except_startup_sha256": "b4d360752c9d63decd6d5235772ef48a114540f681aa7eb45baa4090bedca1bc",
+      "stderr": "MISMATCH seed=4141222487\n",
+      "exit": 1
+    },
+    "main": {
+      "sequence_equals_ci": true,
+      "failure_equals_ci": true,
+      "generated_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "stdout_except_startup_sha256": "b4d360752c9d63decd6d5235772ef48a114540f681aa7eb45baa4090bedca1bc",
+      "stderr": "MISMATCH seed=4141222487\n",
+      "exit": 1
+    }
+  }
+}

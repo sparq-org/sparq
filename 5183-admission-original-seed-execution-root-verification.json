@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T12:39:37.255769+00:00",
+  "manifest_sha256": "cac93502c4f4edaa79d8ac782ee1d993fb039f3d16eab9c151cc9c5433996389",
+  "verified_files": 78,
+  "review_packet_sha256": "660c76b921eb2dc53eab32be2c0ee2bd35fab2b46a314ab9d1af5c28bafb84aa",
+  "actual_builds": 2,
+  "actual_seed_runs": 2,
+  "result": "Bothoriginalfixedseedrunsfailatindex8; sourcebefore/afterequal; stdoutafterstartuphashidentical; allowlistenabled; build0/seed1; no retries",
+  "phase_seconds": 361.825017125,
+  "max_new_allocation_bytes": 300384256,
+  "min_free_bytes": 5318758400,
+  "current_main459_relevant_source_equals_tested781f": true,
+  "current_main_source_proof": "REST459whole-treeequalslocal17594whole-tree; localdiff781f..17594relevantpathsunchanged. InitialdirectGit459lookupfailedmissinglocalobject beforeanyproofwrite; nofetch/replay needed.",
+  "limits": "Index9generatednotexecuted; other7CIseedsnotrun; diagnosticmacOSprofilenotexactLinuxCI"
+}

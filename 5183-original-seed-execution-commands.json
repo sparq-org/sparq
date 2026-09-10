@@ -1,0 +1,192 @@
+[
+  {
+    "name": "parent-source-export",
+    "argv": [
+      "git",
+      "archive",
+      "--format=tar",
+      "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
+    "start_utc": "2026-09-10T12:08:15Z",
+    "exit": 0,
+    "seconds": 9.181641375,
+    "files": 6443
+  },
+  {
+    "name": "parent-metadata",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1",
+      "--filter-platform",
+      "aarch64-apple-darwin"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:09:04Z",
+    "exit": 0,
+    "seconds": 2.185993666999998
+  },
+  {
+    "name": "parent-build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "-j",
+      "1",
+      "-vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:09:07Z",
+    "exit": 0,
+    "seconds": 194.254689916
+  },
+  {
+    "name": "parent-seed",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-parent-binary"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:12:22Z",
+    "exit": 1,
+    "seconds": 2.1784120829999836
+  },
+  {
+    "name": "main-metadata",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1",
+      "--filter-platform",
+      "aarch64-apple-darwin"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:12:27Z",
+    "exit": 0,
+    "seconds": 2.178826249999986
+  },
+  {
+    "name": "main-build",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "-j",
+      "1",
+      "-vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:12:30Z",
+    "exit": 0,
+    "seconds": 103.43480687500002
+  },
+  {
+    "name": "main-seed",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-main-binary"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench",
+    "env": {
+      "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_DEBUG": "false",
+      "CARGO_PROFILE_RELEASE_LTO": "false",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "RUST_BACKTRACE": "1",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "start_utc": "2026-09-10T12:14:14Z",
+    "exit": 1,
+    "seconds": 2.1767947920000097
+  }
+]

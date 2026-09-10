@@ -1,0 +1,18 @@
+{
+  "parent": {
+    "source_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "hashed_source_files": 308,
+    "before_after_identical": true,
+    "all_current_hashes_match_after": true,
+    "dependency_pin_drift": [],
+    "harness_lock_allowlist_binary_hashes_verified": true
+  },
+  "main": {
+    "source_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "hashed_source_files": 308,
+    "before_after_identical": true,
+    "all_current_hashes_match_after": true,
+    "dependency_pin_drift": [],
+    "harness_lock_allowlist_binary_hashes_verified": true
+  }
+}

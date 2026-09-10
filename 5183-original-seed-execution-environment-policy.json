@@ -1,0 +1,20 @@
+{
+  "controlled": {
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/tmp",
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "RUST_BACKTRACE": "1",
+    "RAYON_NUM_THREADS": "1"
+  },
+  "removed_key_names_only": [],
+  "SPARQ_FUZZ_DIVERGENCES": "absent/default manifest-relative allowlist",
+  "runtime_thread_limit": "RAYON_NUM_THREADS=1 diagnostic scope, not exact Linux runner thread parity"
+}

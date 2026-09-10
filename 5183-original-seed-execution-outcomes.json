@@ -1,0 +1,26 @@
+[
+  {
+    "variant": "parent",
+    "exit": 1,
+    "startup": "update-fuzz divergence allowlist (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench/../../bench/differential-divergences.json): adjudicated classes enabled [\"update-oxigraph-integer-lexical-canonicalization\"]; every other divergence fails",
+    "mismatch_line": [
+      "MISMATCH seed=4141222487"
+    ],
+    "step": [
+      "8 of 10"
+    ],
+    "source_unchanged": true
+  },
+  {
+    "variant": "main",
+    "exit": 1,
+    "startup": "update-fuzz divergence allowlist (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench/../../bench/differential-divergences.json): adjudicated classes enabled [\"update-oxigraph-integer-lexical-canonicalization\"]; every other divergence fails",
+    "mismatch_line": [
+      "MISMATCH seed=4141222487"
+    ],
+    "step": [
+      "8 of 10"
+    ],
+    "source_unchanged": true
+  }
+]

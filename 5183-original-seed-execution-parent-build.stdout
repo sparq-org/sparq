@@ -1,0 +1,11 @@
+[serde_core 1.0.228] cargo:rerun-if-changed=build.rs
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(if_docsrs_then_no_serde_core)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_core_cstr)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_core_error)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_core_net)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_core_num_saturating)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_diagnostic_namespace)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_serde_derive)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_std_atomic)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_std_atomic64)
+[serde_core 1.0.228] cargo:rustc-check-cfg=cfg(no_target_has_atomic)

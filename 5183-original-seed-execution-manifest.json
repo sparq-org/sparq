@@ -1,0 +1,401 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "path": "ci-first-case.txt",
+      "bytes": 3192,
+      "sha256": "b686238bbb40ec723f82aa1ae4f47c6343a56e3f5e777462212aad3fb57b7fac"
+    },
+    {
+      "path": "ci-generated-sequence.txt",
+      "bytes": 1687,
+      "sha256": "6f9c195e645d87b5850911eace9ef7a4c147a6a47180f3130f2bcb2033ab0dc2"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 7331,
+      "sha256": "72670d0ebf5ac52e9433c64c6de2affc5919de155483ecd63b552471e2543ca5"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 904,
+      "sha256": "0d6dd1e3f5d16310a686b40f63d17db9d542d2d5a169e4806300a3d9b8cf20ac"
+    },
+    {
+      "path": "compiler-linked-provenance.json",
+      "bytes": 136710,
+      "sha256": "426b6fc0ceacb2328fc1451f2600fc58aa69b849669ca75b6d23ccd4e882c6f6"
+    },
+    {
+      "path": "environment-policy.json",
+      "bytes": 905,
+      "sha256": "b4458d10fafafe84b7498bb8ab80f76c8304f84d8c572caef0ecea9186ddce73"
+    },
+    {
+      "path": "execute.py",
+      "bytes": 11346,
+      "sha256": "f09a86c590f63ef63f39feee76b69c2361186af785103e466336a08c2220448f"
+    },
+    {
+      "path": "final-source-verification.json",
+      "bytes": 569,
+      "sha256": "a60c5ddb4aba60209ce80112a2f15adce2bc94bfaa242cd55411d7937f30cb0a"
+    },
+    {
+      "path": "freeze-verification.json",
+      "bytes": 339,
+      "sha256": "2d05eaff403fe6cc3e740b1c1af6b4ce616d43c5b77d1a7add728c3cda244f84"
+    },
+    {
+      "path": "freeze.py",
+      "bytes": 14141,
+      "sha256": "4713bf3103d0fd6041c42d66361192cf74fe39f192ecdfba0f1e460d3c1d1d2e"
+    },
+    {
+      "path": "initial-resource.json",
+      "bytes": 139,
+      "sha256": "1c984599be7d31a09966df3d81e688def850fa58b93c064cef9d8138750ce024"
+    },
+    {
+      "path": "issue5183-original-main-binary",
+      "bytes": 9763792,
+      "sha256": "2ced202953d94a96152ead54326260b4b1dc5e84d4fb5f1336c2739efedb6e9f"
+    },
+    {
+      "path": "issue5183-original-parent-binary",
+      "bytes": 9765696,
+      "sha256": "f9dd4dd424db95a59bcb8c4ae8ccc8fdf9b1e48bedf81b3d53188b48f311f823"
+    },
+    {
+      "path": "main/harness/bench/differential-divergences.json",
+      "bytes": 5722,
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2"
+    },
+    {
+      "path": "main/harness/crates/sparq-bench/Cargo.lock",
+      "bytes": 34266,
+      "sha256": "ba8b45735595547f625163710a426cfb6f9daefdfe12693663ab62b6d365eb40"
+    },
+    {
+      "path": "main/harness/crates/sparq-bench/Cargo.toml",
+      "bytes": 774,
+      "sha256": "c021c3d19c2c534d79928542c63c500ecefec207c219c73d3cbdffc90eaac2d9"
+    },
+    {
+      "path": "main/harness/crates/sparq-bench/src/main.rs",
+      "bytes": 264,
+      "sha256": "5ef9a6373edd4354da75ca209b46d0d8ee658742e5eba1cd4ff20220456ab227"
+    },
+    {
+      "path": "main-binary-depinfo.d",
+      "bytes": 3593,
+      "sha256": "094a444765b470f025a836dbf215ca76657cd24c88f6c93ec44a38760e22026a"
+    },
+    {
+      "path": "main-binary.json",
+      "bytes": 235,
+      "sha256": "93964cac53697db3d79e7a9797c4673a07f188b6abe4c927d9a2c32816389a62"
+    },
+    {
+      "path": "main-build.stderr",
+      "bytes": 104543,
+      "sha256": "84f87145fdd590d098db2afb8f40f960c0a8525e2b8139d2af054349e3e4ddad"
+    },
+    {
+      "path": "main-build.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "main-metadata.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "main-metadata.stdout",
+      "bytes": 453492,
+      "sha256": "2609cb617cc53b7ff5927e42a68f0d947d0b62f6f6cb95f42d57768957622d7b"
+    },
+    {
+      "path": "main-seed.stderr",
+      "bytes": 25,
+      "sha256": "aab55c1556f0b98fde47acf3f44f2693fb92544709a032b17fcd827c3f4ce624"
+    },
+    {
+      "path": "main-seed.stdout",
+      "bytes": 2586,
+      "sha256": "5aadc320759754dc7b16850f2688ddc68e3b057ad6c71b17c12a036fde51709d"
+    },
+    {
+      "path": "main-setup-proof.json",
+      "bytes": 7687,
+      "sha256": "99605949350e99aba86075ef2dd01fbb3628bccc34677164ba8ec111e5f07f89"
+    },
+    {
+      "path": "main-source-after.json",
+      "bytes": 55117,
+      "sha256": "7bfc8cb34118f3077e54e12d38ae125cf210bc495757a1e0903e140981615d52"
+    },
+    {
+      "path": "main-source-before.json",
+      "bytes": 55117,
+      "sha256": "7bfc8cb34118f3077e54e12d38ae125cf210bc495757a1e0903e140981615d52"
+    },
+    {
+      "path": "outcomes.json",
+      "bytes": 1005,
+      "sha256": "55589ed9d69d4de63f312f12e39cff2355e9ae0038cefad555f7e1a756a512d8"
+    },
+    {
+      "path": "parent/harness/bench/differential-divergences.json",
+      "bytes": 5722,
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2"
+    },
+    {
+      "path": "parent/harness/crates/sparq-bench/Cargo.lock",
+      "bytes": 34268,
+      "sha256": "e40502f13b47ee5b6de0e9decf672b2959bb2e80a0833bd465bb475dc47ace7f"
+    },
+    {
+      "path": "parent/harness/crates/sparq-bench/Cargo.toml",
+      "bytes": 896,
+      "sha256": "a59bbc0d2eff2615c5069fea593b7ff7f59f8c69436ced16610d8affc30f2620"
+    },
+    {
+      "path": "parent/harness/crates/sparq-bench/src/main.rs",
+      "bytes": 294,
+      "sha256": "fd066b5ee302a143631812907761baa201b9f263fa1c28eb22608a8943873d5e"
+    },
+    {
+      "path": "parent-binary-depinfo.d",
+      "bytes": 4617,
+      "sha256": "bdb786883c80e774cecea17113de699f1f5bc7383f628b3df85325641677f804"
+    },
+    {
+      "path": "parent-binary.json",
+      "bytes": 237,
+      "sha256": "6391762a38e46cca10fd5190c235b3e37debd458f3476613d3ef0a81d3a445bf"
+    },
+    {
+      "path": "parent-build.stderr",
+      "bytes": 255498,
+      "sha256": "91c075bf85e21473393c32f5bfa7510d2c2eaec3493c0ea501161c4ae6d29edc"
+    },
+    {
+      "path": "parent-build.stdout",
+      "bytes": 715,
+      "sha256": "2065956f053b23a1654a565d9acc50cd037a99d807f005537cce8684c838be44"
+    },
+    {
+      "path": "parent-export-proof.json",
+      "bytes": 1562890,
+      "sha256": "e43d9591befe0bd0196ae6bf139d3329166de4dac07b0f1a353b195e74e3d467"
+    },
+    {
+      "path": "parent-metadata.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "parent-metadata.stdout",
+      "bytes": 456642,
+      "sha256": "2853f684b83fbaaa148a3296299aefc88ef70f7729ef36ab0401debb9eaf0bf4"
+    },
+    {
+      "path": "parent-seed.stderr",
+      "bytes": 25,
+      "sha256": "aab55c1556f0b98fde47acf3f44f2693fb92544709a032b17fcd827c3f4ce624"
+    },
+    {
+      "path": "parent-seed.stdout",
+      "bytes": 2588,
+      "sha256": "55ba8b20c1a5142bed7dfa2261d363cf90a9a9dcc5f2df6ca56bba7ee7a3a07a"
+    },
+    {
+      "path": "parent-setup-proof.json",
+      "bytes": 7689,
+      "sha256": "6dbbf1cdb26bcd1509d7915400a740bd25f88addee674c587289f048d64fe5b6"
+    },
+    {
+      "path": "parent-source-after.json",
+      "bytes": 55117,
+      "sha256": "28ee63f22dfcdf625c99d8cd447b396366ad9014975911198b7fe59ee0fd7370"
+    },
+    {
+      "path": "parent-source-before.json",
+      "bytes": 55117,
+      "sha256": "28ee63f22dfcdf625c99d8cd447b396366ad9014975911198b7fe59ee0fd7370"
+    },
+    {
+      "path": "parent-source-export.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "phase-result.json",
+      "bytes": 1233,
+      "sha256": "484d916d4a26b17705430262d2caad20fbb07b8aaf8790d007e90912ebb2a8ef"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 1509,
+      "sha256": "b2b6e1800033f23edfc951bc03ac9ec8426e6aef0df99ef73a50fc7acff8beaa"
+    },
+    {
+      "path": "report.json",
+      "bytes": 6719,
+      "sha256": "1f729e7c6bca051263e22d29db714805005ce420da848d574d7b0c1832c4b0f1"
+    },
+    {
+      "path": "resources.json",
+      "bytes": 31707,
+      "sha256": "3250bf3b6bffc13e1efd4da71bc211b8a8befb584f8d8c7de89839c289274c2e"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 28867,
+      "sha256": "660c76b921eb2dc53eab32be2c0ee2bd35fab2b46a314ab9d1af5c28bafb84aa"
+    },
+    {
+      "path": "rustc-version.txt",
+      "bytes": 192,
+      "sha256": "e794146d99fad54562fdcbd4a7c8b22b0240d2b0312ff6d879d67939b3131850"
+    },
+    {
+      "path": "source/main/.github/workflows/differential-update.yml",
+      "bytes": 12550,
+      "sha256": "6e3e49ecbd494b77f9d8585faf3f39b1f2ab166ac8df0b598ed5f32a01dccbeb"
+    },
+    {
+      "path": "source/main/Cargo.lock",
+      "bytes": 176396,
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152"
+    },
+    {
+      "path": "source/main/Cargo.toml",
+      "bytes": 9813,
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73"
+    },
+    {
+      "path": "source/main/bench/differential-divergences.json",
+      "bytes": 5722,
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2"
+    },
+    {
+      "path": "source/main/crates/sparq-bench/Cargo.toml",
+      "bytes": 3636,
+      "sha256": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a"
+    },
+    {
+      "path": "source/main/crates/sparq-bench/src/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "source/main/crates/sparq-canon/Cargo.toml",
+      "bytes": 5684,
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7"
+    },
+    {
+      "path": "source/main/crates/sparq-canon/src/lib.rs",
+      "bytes": 43172,
+      "sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55"
+    },
+    {
+      "path": "source/main/crates/sparq-core/Cargo.toml",
+      "bytes": 11422,
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362"
+    },
+    {
+      "path": "source/main/crates/sparq-engine/Cargo.toml",
+      "bytes": 39603,
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "source/main/crates/sparq-engine/src/update.rs",
+      "bytes": 124166,
+      "sha256": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe"
+    },
+    {
+      "path": "source/main/rust-toolchain.toml",
+      "bytes": 10596,
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    },
+    {
+      "path": "source/main/vendor/spargebra/Cargo.toml",
+      "bytes": 9022,
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+    },
+    {
+      "path": "source/parent/.github/workflows/differential-update.yml",
+      "bytes": 12550,
+      "sha256": "6e3e49ecbd494b77f9d8585faf3f39b1f2ab166ac8df0b598ed5f32a01dccbeb"
+    },
+    {
+      "path": "source/parent/Cargo.lock",
+      "bytes": 176396,
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152"
+    },
+    {
+      "path": "source/parent/Cargo.toml",
+      "bytes": 9813,
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73"
+    },
+    {
+      "path": "source/parent/bench/differential-divergences.json",
+      "bytes": 5722,
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2"
+    },
+    {
+      "path": "source/parent/crates/sparq-bench/Cargo.toml",
+      "bytes": 3636,
+      "sha256": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a"
+    },
+    {
+      "path": "source/parent/crates/sparq-bench/src/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "source/parent/crates/sparq-canon/Cargo.toml",
+      "bytes": 5684,
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7"
+    },
+    {
+      "path": "source/parent/crates/sparq-canon/src/lib.rs",
+      "bytes": 43172,
+      "sha256": "3f701b4635743faeb425c8135c98d36fc4e23564c9db18c2b3aed9c5d94a2b55"
+    },
+    {
+      "path": "source/parent/crates/sparq-core/Cargo.toml",
+      "bytes": 11422,
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362"
+    },
+    {
+      "path": "source/parent/crates/sparq-engine/Cargo.toml",
+      "bytes": 39603,
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "source/parent/crates/sparq-engine/src/update.rs",
+      "bytes": 124152,
+      "sha256": "6234695021400a114bff15b469ee65fd660a6bb2c1d875e915e885a6eed8b310"
+    },
+    {
+      "path": "source/parent/rust-toolchain.toml",
+      "bytes": 10596,
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    },
+    {
+      "path": "source/parent/vendor/spargebra/Cargo.toml",
+      "bytes": 9022,
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71"
+    }
+  ],
+  "excluded": [
+    "parent-source/** (exact tracked archive; all 6443 blob identities and SHA256 values retained in parent-export-proof.json)",
+    "tmp/** (ephemeral LOAD sandbox)",
+    "external direct-5983/implementation/target (regenerable build cache; named link hashes retained)"
+  ],
+  "count": 78
+}

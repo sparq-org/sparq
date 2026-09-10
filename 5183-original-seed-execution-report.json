@@ -1,0 +1,119 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "status": "COMPLETED_OBSERVED_MISMATCH_BOTH_REVISIONS",
+  "production_changes": false,
+  "source_revisions": {
+    "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "main": "781f667c19a8ebb779cfccb24b05ea432360b025"
+  },
+  "worktree_clean": true,
+  "execution": {
+    "phase_seconds": 361.825017125,
+    "builds": 2,
+    "seed_invocations": 2,
+    "seed": 4141222487,
+    "count_each": 1,
+    "exit_each": 1,
+    "no_outcome_retries": true,
+    "terminal_receipts": "commands.json / phase-result.json",
+    "pending_commands": false,
+    "completion_basis": "The saved phase is complete, every named child command has a terminal exit, and execute.py polls/waits for those children. Coordinator also found the old exec session unavailable. No global process inventory is claimed; no test was restarted during this export."
+  },
+  "observations": [
+    "Both revisions generated exactly the ten CI operations, with identical first-failure detail including the extra integer lexical 008 and c14n8 blank node.",
+    "Failure is at zero-based index 8: nine generated requests were applied, then the reference dataset comparison returned early. The printed index-9 ADD request was generated but not executed.",
+    "The same witness on d41, before PR6478, excludes PR6478 as the introduction of this first-seed mismatch under the qualified diagnostic configuration.",
+    "Source ordering establishes that the strict rebuild-vs-in-place dataset comparison passed before the failing rebuild-vs-Oxigraph comparison, including at index 8. Later index-8 reference/probe checks and index-9 checks were not reached.",
+    "The startup line confirms the committed integer-lexical adjudication was enabled. Printed counts are accumulated only for completely successful seeds, so their zero values do not imply zero work or absence of earlier adjudication.",
+    "The diagnostic prints the original canonical difference after normalization fails to remove residual differences; it is not a raw post-normalization diff."
+  ],
+  "interpretation": {
+    "established": "The original first-seed failure is reproducible before and after PR6478 with unchanged generator, comparator, parser and LOAD sandbox. Existing reduced public-API results independently show Sparq retains two distinct integer lexical terms/WHERE rows/fresh blank nodes while pinned Oxigraph collapses the two terms into one before query evaluation.",
+    "supported_explanation": "At sequence index 4 the lexical pair is inserted; index 8 allocates a fresh template blank node per WHERE solution. Post-hoc lexical normalization can merge literals, but cannot undo the additional blank node already allocated from the larger solution multiset.",
+    "limits": "This explanation combines the unchanged sequence/source with prior reduced witnesses; this run did not instrument every intermediate WHERE row. Only the first of eight CI mismatches was executed. No generic comparator change or engine repair is validated."
+  },
+  "preservation": {
+    "module_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+    "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+    "generator_parser_canon_load_and_strict_guards": "unchanged qualified tracked sources, source before/after proofs identical",
+    "manifest_dir": "Each uniquely named harness preserves crates/sparq-bench relative layout and the exact committed ../../bench allowlist; SPARQ_FUZZ_DIVERGENCES unset.",
+    "dependency_pins": "No registry dependency version/source/checksum drift. Metadata feature closure matches the frozen minimal readiness closure for both revisions."
+  },
+  "features": {
+    "oxigraph@0.5.9": [
+      "rdf-12"
+    ],
+    "oxrdf@0.2.4": [
+      "default"
+    ],
+    "oxrdf@0.3.3": [
+      "default",
+      "oxsdatatypes",
+      "rdf-12",
+      "rdfc-10"
+    ],
+    "oxttl@0.1.8": [
+      "default"
+    ],
+    "oxttl@0.2.3": [
+      "default",
+      "rdf-12"
+    ],
+    "rdf-canon@0.15.3": [],
+    "spargebra@0.4.6": [
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "sparq-canon@0.1.1": [
+      "default",
+      "parallel",
+      "rdf12-triple-terms"
+    ],
+    "sparq-core@0.1.1": [
+      "default",
+      "dict-spill",
+      "mmap",
+      "parallel"
+    ],
+    "sparq-engine@0.1.1": [
+      "algebra-rewrite",
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "sparq-substrate@0.1.1": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ]
+  },
+  "environment_limits": {
+    "actual": "macOS aarch64 Rust1.97.1, O3, unwind, no LTO, codegen16, one Rayon thread, jobs1, incremental0, offline; actual rustc invocations and linked artifact hashes saved.",
+    "ci_difference": "The actual Linux UPDATE job builds sparq-bench with release-fast (thin LTO/abort). This minimal unchanged-module diagnostic is not the full CLI build or exact Linux environment. Compiled mmap/dict-spill features do not assert a disk-backed runtime graph.",
+    "performance": "No query timing, throughput, heap or peak-RSS claim. Command duration includes polling."
+  },
+  "resources": {
+    "phase_max_new_allocated_bytes": 300384256,
+    "phase_min_free_bytes": 5318758400,
+    "new_limit_bytes": 536870912,
+    "minimum_free_limit_bytes": 2147483648,
+    "aggregate_limit_seconds": 1200,
+    "per_build_limit_seconds": 600,
+    "per_seed_limit_seconds": 60,
+    "within_phase_limits": true
+  },
+  "next_review_proposal": "Obtain the planned independent soundness/diagnosis review of this first-seed reproduction together with the two reduced public-API witnesses. Review a narrowly specified way to recognize or avoid reference-state lexical collapse before stateful blank-node allocation while retaining strict Sparq rebuild/in-place comparisons, full multiset probes, unknown-divergence failures and calibrated unrelated-defect controls. Do not normalize away arbitrary blank nodes, skip the seed, weaken canonical comparisons, or presume the remaining seven failures share this cause. No implementation is supplied or approved here.",
+  "frozen_scope": {
+    "included": "Actual two harnesses/locks/allowlists, needed tracked source copies, source/archive proofs, binaries, compiler/link provenance, declared protocol, raw commands/results/resources and comparisons.",
+    "excluded_regenerable": [
+      "parent-source/** (exact tracked archive; all 6443 blob identities and SHA256 values retained in parent-export-proof.json)",
+      "tmp/** (ephemeral LOAD sandbox)",
+      "external direct-5983/implementation/target (regenerable build cache; named link hashes retained)"
+    ],
+    "no_deletion_performed": true
+  }
+}

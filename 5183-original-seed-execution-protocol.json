@@ -1,0 +1,22 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "task": "One original seed4141222487, count1, per exact parentd41/main781f; no retries for outcomes.",
+  "limits": {
+    "aggregate_seconds": 1200,
+    "build_seconds_each": 600,
+    "run_seconds_each": 60,
+    "aggregate_new_allocated_bytes": 536870912,
+    "minimum_free_bytes": 2147483648,
+    "jobs": 1
+  },
+  "order": [
+    "parent",
+    "main"
+  ],
+  "source": "Exact tracked git archive parent; unchanged clean main worktree. Exact unchanged update_fuzz module via path import.",
+  "environment": "Remove inherited SPARQ_* and RUSTFLAGS/profile overrides. Default manifest-relative committed allowlist copied/hash checked. RAYON_NUM_THREADS1 is local diagnostic scope, not exact CI thread parity.",
+  "compiler_profile": "Rust1.97.1 aarch64 macOS; O3/unwind/ltofalse/codegen16/offline/incrementalfalse. Different from Linux CI release-fast thinLTO/abort.",
+  "checks": "Metadata pin+feature equality against verified readiness before each build. Preserve all source/allowlist/generator/parser/canon/strict internal and reference comparator paths. Preserve any exit1 and unexpected result unchanged.",
+  "execution_script_sha256": "f09a86c590f63ef63f39feee76b69c2361186af785103e466336a08c2220448f",
+  "clarification": "Actual UPDATE workflow is .github/workflows/differential-update.yml:139; readiness also captured query differential.yml because both build sparq-bench release-fast. Execution exports actual UPDATE source. No workflow execution or modification."
+}
