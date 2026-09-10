@@ -1,0 +1,948 @@
+[
+  {
+    "name": "next",
+    "registry_url": "https://registry.npmjs.org/next",
+    "response_cache_integrity": "sha512-IwvYtfKczV34RoAsUbx1hS3RRKguI9wKRksiCFZhdqrEfW+s+N7rwh9YLrFGR4Bbz2XB7a5NsZoShHG5mNfVtA==",
+    "response_bytes": 31227560,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "next",
+      "version": "15.5.24",
+      "keywords": [
+        "react",
+        "framework",
+        "nextjs",
+        "web",
+        "server",
+        "node",
+        "front-end",
+        "backend",
+        "cli",
+        "vercel"
+      ],
+      "license": "MIT",
+      "_id": "next@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        },
+        {
+          "name": "matheuss",
+          "email": "matheus.frndes@gmail.com"
+        },
+        {
+          "name": "zeit-bot",
+          "email": "team@zeit.co"
+        }
+      ],
+      "homepage": "https://nextjs.org",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "bin": {
+        "next": "dist/bin/next"
+      },
+      "dist": {
+        "shasum": "27852f3cfcaeb2631fbd4795cd9d529081e8af70",
+        "tarball": "https://registry.npmjs.org/next/-/next-15.5.24.tgz",
+        "fileCount": 7270,
+        "integrity": "sha512-Y+xn8EQCoC3ZbsFPyzE+tE8XOdrWeUdUF7NeXbmg9DsgAxl5UYxlsrvgVESHTyTGigoTa1bCUrxn70F5bqt0Gw==",
+        "signatures": [
+          {
+            "sig": "MEQCIEtCDkSFhstWE4VszoxprL8uPdZbHwrm6BfBzB7MXjAQAiAv3V2OAWqKFCS5iXP8I8iPjNUlvYSQpnYqF6YIIBRb+w==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIGclkbTOji1+W2y/yQoRN3kelReSZe5tDVly4veOYzPiAiEAz4uoGpSNV6HhZmxRASq+Qeth2ZAgUtSyaH4pXmuH4CE=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/next@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 139752720
+      },
+      "main": "./dist/server/next.js",
+      "_from": "file:next-15.5.24.tgz",
+      "types": "index.d.ts",
+      "engines": {
+        "node": "^18.18.0 || ^19.8.0 || >= 20.0.0"
+      },
+      "scripts": {
+        "start": "node server.js"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:039db690-17a2-461b-adae-5f3631687d35"
+        }
+      },
+      "_resolved": "/tmp/73f3e58bf68414f099bb470ee468d987/next-15.5.24.tgz",
+      "_integrity": "sha512-Y+xn8EQCoC3ZbsFPyzE+tE8XOdrWeUdUF7NeXbmg9DsgAxl5UYxlsrvgVESHTyTGigoTa1bCUrxn70F5bqt0Gw==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "The React Framework",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "dependencies": {
+        "postcss": "8.4.31",
+        "@next/env": "15.5.24",
+        "styled-jsx": "5.1.6",
+        "@swc/helpers": "0.5.15",
+        "caniuse-lite": "^1.0.30001579"
+      },
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "peerDependencies": {
+        "sass": "^1.3.0",
+        "react": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0",
+        "react-dom": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0",
+        "@playwright/test": "^1.51.1",
+        "@opentelemetry/api": "^1.1.0",
+        "babel-plugin-react-compiler": "*"
+      },
+      "optionalDependencies": {
+        "sharp": "^0.34.3 || ^0.35.3",
+        "@next/swc-darwin-x64": "15.5.24",
+        "@next/swc-darwin-arm64": "15.5.24",
+        "@next/swc-linux-x64-gnu": "15.5.24",
+        "@next/swc-linux-x64-musl": "15.5.24",
+        "@next/swc-win32-x64-msvc": "15.5.24",
+        "@next/swc-linux-arm64-gnu": "15.5.24",
+        "@next/swc-linux-arm64-musl": "15.5.24",
+        "@next/swc-win32-arm64-msvc": "15.5.24"
+      },
+      "peerDependenciesMeta": {
+        "sass": {
+          "optional": true
+        },
+        "@playwright/test": {
+          "optional": true
+        },
+        "@opentelemetry/api": {
+          "optional": true
+        },
+        "babel-plugin-react-compiler": {
+          "optional": true
+        }
+      },
+      "_npmOperationalInternal": {
+        "tmp": "tmp/next_15.5.24_1787674446118_0.3185234955747407",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/env",
+    "registry_url": "https://registry.npmjs.org/@next%2fenv",
+    "response_cache_integrity": "sha512-lH2eD7jFtAaz0TBefM9pzcAQYiYVmGNBUELeruU3MMj9ka6kJv9hi9ig27A9LRRJ+P5Fu5nB3POt+ORnI/bnZg==",
+    "response_bytes": 7661121,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/env",
+      "version": "15.5.24",
+      "keywords": [
+        "react",
+        "next",
+        "next.js",
+        "dotenv"
+      ],
+      "author": {
+        "name": "Next.js Team",
+        "email": "support@vercel.com"
+      },
+      "license": "MIT",
+      "_id": "@next/env@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "dist": {
+        "shasum": "baee5641d0d93acac87618e1b8004acce594bbad",
+        "tarball": "https://registry.npmjs.org/@next/env/-/env-15.5.24.tgz",
+        "fileCount": 4,
+        "integrity": "sha512-mBDF7T0XKZjs9SpUAl0buizVO+O02ULjOvWX8o/AZo/5AGw/UAS1Zzcylmd4pqbftzmKQi+L/nB4jgBYKEAl5Q==",
+        "signatures": [
+          {
+            "sig": "MEYCIQCmyaIb3wophelyfCLAqc0IkOwKB+NfTOXQv7eGzWdHfgIhAKOoG8pQnUQKo+oXSMvOcQjGdw3X2HefJCt1AeJXhmkx",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIQCfHCvm9KCDNgOFxFTR4xyWAGOAVNde49aopGZzEqqNNQIgBiCXF6ZGeyRKVh+JWVK7zf45w+ead+SL7MTPnJ83wyI=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fenv@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 11742
+      },
+      "main": "dist/index.js",
+      "_from": "file:next-env-15.5.24.tgz",
+      "types": "dist/index.d.ts",
+      "scripts": {
+        "dev": "ncc build ./index.ts -w -o dist/",
+        "build": "pnpm release && pnpm types",
+        "types": "tsc --declaration --emitDeclarationOnly --declarationDir dist",
+        "release": "ncc build ./index.ts -o ./dist/ --minify --no-cache --no-source-map-register",
+        "prerelease": "node ../../scripts/rm.mjs dist"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:c05a3d8f-88d9-42da-abc9-cf7b735fcb77"
+        }
+      },
+      "_resolved": "/tmp/1679f1edf34859c5d4fee103ba9516a1/next-env-15.5.24.tgz",
+      "_integrity": "sha512-mBDF7T0XKZjs9SpUAl0buizVO+O02ULjOvWX8o/AZo/5AGw/UAS1Zzcylmd4pqbftzmKQi+L/nB4jgBYKEAl5Q==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "packages/next-env"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "Next.js dotenv file loading",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "devDependencies": {
+        "dotenv": "16.3.1",
+        "@vercel/ncc": "0.34.0",
+        "dotenv-expand": "10.0.0"
+      },
+      "_npmOperationalInternal": {
+        "tmp": "tmp/env_15.5.24_1787672911816_0.3512645480591059",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-darwin-arm64",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-darwin-arm64",
+    "response_cache_integrity": "sha512-hF1ByujcZDc2DJU0uK3iFlU/+uW8XWOvvE1jGEOag9qg2OwB6hVpl3CZB2riIhq9p8UOlnbXhm9Lt4MLwKvj+Q==",
+    "response_bytes": 5609635,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-darwin-arm64",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-darwin-arm64@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "darwin"
+      ],
+      "cpu": [
+        "arm64"
+      ],
+      "dist": {
+        "shasum": "7a9134e91872bcdb80f070f409903eb81780d04b",
+        "tarball": "https://registry.npmjs.org/@next/swc-darwin-arm64/-/swc-darwin-arm64-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-AGdNLvxZNY6eR2iSnV+6wUa8CiHTMr4F7g3uHH7fT4ICIJBE00R9u4tzN/Vuwsw0cOi8MTD2HJcTCb6siMH88Q==",
+        "signatures": [
+          {
+            "sig": "MEUCICrX9g+wKnVGWu5JDvSWbXKCBMquTEt95m4gT0mAZPz7AiEAnGMsmt6V/Zoe5aQqcMFP38i6n/cSTBhd0EufeWxy6LY=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIF9+Tp2GyClnS/F7eAESReiHP1Ulytrlvmk/d+y/weEhAiEA0JkOTRXcUZCs1kiAjvq5cxlnIV8a6HrsmLhLz1xND+w=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-darwin-arm64@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 130105735
+      },
+      "main": "next-swc.darwin-arm64.node",
+      "_from": "file:next-swc-darwin-arm64-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:f950cddb-cdc1-4ccd-bf51-5865afe1f706"
+        }
+      },
+      "_resolved": "/tmp/dcded6aad6c4886e88fff4c2a4517531/next-swc-darwin-arm64-15.5.24.tgz",
+      "_integrity": "sha512-AGdNLvxZNY6eR2iSnV+6wUa8CiHTMr4F7g3uHH7fT4ICIJBE00R9u4tzN/Vuwsw0cOi8MTD2HJcTCb6siMH88Q==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/darwin-arm64"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **aarch64-apple-darwin** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-darwin-arm64_15.5.24_1787672924004_0.6331677548460699",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-darwin-x64",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-darwin-x64",
+    "response_cache_integrity": "sha512-4U/jVgHi83SvZV4waPgXeVvLikCWQGbL2d1nw9eUlq1LBu7V3sm+vX9Y1OIJyknAPb1R4VuIPrUPOjJsBti0JQ==",
+    "response_bytes": 5549214,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-darwin-x64",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-darwin-x64@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "darwin"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "dist": {
+        "shasum": "67a91d19b1618b5d1237d874cb52042173ab3269",
+        "tarball": "https://registry.npmjs.org/@next/swc-darwin-x64/-/swc-darwin-x64-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-9HrQajBMmGcrrrvDfRimiCrbAPh3E6uHJmwBovYr6Yrmi9p9PZqI876BrXX280wICh3o2XwUlp4blkB0NNBqFg==",
+        "signatures": [
+          {
+            "sig": "MEUCIACqdD2U/tg6NLdneJ828NlCXr6K52/NA1WIHJXSQbUCAiEA8xQSRXr7wP/oWrOXgK7vQf7v+zZx9s2eKUcQSL+RGe8=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEYCIQCfW7oiA+gchDO+x8NAh60vlPsoa+uUFFEcB67I8pgmjwIhAI+BkfKjRPuBwk+guE1ZnK69IjdIjAzqOun8LPR9wjA4",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-darwin-x64@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 124930286
+      },
+      "main": "next-swc.darwin-x64.node",
+      "_from": "file:next-swc-darwin-x64-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:cbb7102f-a3b9-4002-aea6-b6622fc8cfb2"
+        }
+      },
+      "_resolved": "/tmp/93adb42f77cff47721ad3bd61b48f807/next-swc-darwin-x64-15.5.24.tgz",
+      "_integrity": "sha512-9HrQajBMmGcrrrvDfRimiCrbAPh3E6uHJmwBovYr6Yrmi9p9PZqI876BrXX280wICh3o2XwUlp4blkB0NNBqFg==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/darwin-x64"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **x86_64-apple-darwin** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-darwin-x64_15.5.24_1787673365142_0.3563938134134881",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-linux-arm64-gnu",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-linux-arm64-gnu",
+    "response_cache_integrity": "sha512-PUclo1rukXoLx1L2WEzw4h8DN/wKNzHUW6P1zQTieZPX+wFqHbdAEE/FkJmWx+zxDaDYJ09I6nu4i70JqM7G/A==",
+    "response_bytes": 5468330,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-linux-arm64-gnu",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-linux-arm64-gnu@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "arm64"
+      ],
+      "dist": {
+        "shasum": "b235d3e13c65aea3ed9dc1dde5b557b306969223",
+        "tarball": "https://registry.npmjs.org/@next/swc-linux-arm64-gnu/-/swc-linux-arm64-gnu-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-rl9LSfE75si0WT3cDgdUC1XYCKS+TgxC+/IjitmeycrAG18X/plIP1/vy8dd/HPycYcIvE688PD7FuvEAiEAew==",
+        "signatures": [
+          {
+            "sig": "MEYCIQCzJRBaQL+L0Uv51n5rpXKOSllAi1QlNbOzr+ZPaaRrIAIhAOhf/uWLV6TEH+30GGRXfrwOeUmJLeNHdJYY9MxHpWqZ",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEYCIQD3qRm4xwitdRP2QxEyZTObc3Fh1//jze0OIEaTxkkBLAIhAKRBpK5ot0wIMTJMNBm6WSqkNganKmi7oJo+gMeote8u",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-linux-arm64-gnu@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 135535237
+      },
+      "libc": [
+        "glibc"
+      ],
+      "main": "next-swc.linux-arm64-gnu.node",
+      "_from": "file:next-swc-linux-arm64-gnu-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:34e800f4-1033-4c52-9f62-104944d20a46"
+        }
+      },
+      "_resolved": "/tmp/fc8452f7d7ac047abf4b8f0fbba9f427/next-swc-linux-arm64-gnu-15.5.24.tgz",
+      "_integrity": "sha512-rl9LSfE75si0WT3cDgdUC1XYCKS+TgxC+/IjitmeycrAG18X/plIP1/vy8dd/HPycYcIvE688PD7FuvEAiEAew==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/linux-arm64-gnu"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **linux-arm64-gnu** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-linux-arm64-gnu_15.5.24_1787673190797_0.17931393662696027",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-linux-arm64-musl",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-linux-arm64-musl",
+    "response_cache_integrity": "sha512-+K+mT9CbnSNb2j7KtWdhLg1kylJK1fSOchA28WfWbUqk8nndMg3iWv9dnOrg0v9PxXLg+H26CG9Ro31okDPkWw==",
+    "response_bytes": 5487929,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-linux-arm64-musl",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-linux-arm64-musl@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "arm64"
+      ],
+      "dist": {
+        "shasum": "c3a3dd495602cf2b79e72d008226b4e438cfe321",
+        "tarball": "https://registry.npmjs.org/@next/swc-linux-arm64-musl/-/swc-linux-arm64-musl-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-TlNAnpsjxSF3aAUtqnfmtXXf8m9sIDBlmF3c7bTAlnshUYu2U0OxN2uf5d0gcFwqHVEdivJNBcCaqNOwPGNimw==",
+        "signatures": [
+          {
+            "sig": "MEYCIQCEa+reuaUvz55BjkptpRzyZHZOFUrH+K7ktFyaJO2hwQIhAISUg4Kg8Fuz6Ve5qlJonRBOysp9mS+qvYTZnjs7kcja",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIQCeChDnaJQGgxwEc55hjj9i9Tp6BRlmPfIA9pWwMbIlDQIgcxvuLIDgVd94yTFvEFQZxfNS2Hdc6pK/SR9S7hFZOX4=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-linux-arm64-musl@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 137080266
+      },
+      "libc": [
+        "musl"
+      ],
+      "main": "next-swc.linux-arm64-musl.node",
+      "_from": "file:next-swc-linux-arm64-musl-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:2cc147ce-4ad9-4a0c-9a93-8c37def00a78"
+        }
+      },
+      "_resolved": "/tmp/20ef9a0ead9f7820e1f8d617e36bcf99/next-swc-linux-arm64-musl-15.5.24.tgz",
+      "_integrity": "sha512-TlNAnpsjxSF3aAUtqnfmtXXf8m9sIDBlmF3c7bTAlnshUYu2U0OxN2uf5d0gcFwqHVEdivJNBcCaqNOwPGNimw==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/linux-arm64-musl"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **linux-arm64-musl** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-linux-arm64-musl_15.5.24_1787673167730_0.6504829371656577",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-linux-x64-gnu",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-linux-x64-gnu",
+    "response_cache_integrity": "sha512-UryR9kfIwpvBwIQ2OJzTkA7rhdr9Jn2OuTEQ94TPDAsXKkIkOq7y38KITEgfaoY58F/H8LHJGawcL1FTc81V1w==",
+    "response_bytes": 5663359,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-linux-x64-gnu",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-linux-x64-gnu@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "dist": {
+        "shasum": "b1c74074f90d2cb2a2d1fe6dda5a73b8aa9f2151",
+        "tarball": "https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-7dwtlhr0SLndqTG1z9ncRkbJswDZiKWlxzFyXDvJ2RDZRDRHp8zyMJ4D9UH/FgnQeXxxB6gZy2pMcIUoNKQ4pA==",
+        "signatures": [
+          {
+            "sig": "MEQCIHh5V4m6ir561s5gNHkpa2RT7hwRda8pzkh5Rb0+YUYAAiAwj+iht/7jAShCXzJwvp3Gy7tlGUOroUykMfVdwoE+Fw==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEQCICAdAX3JkWAtLeBxo+kDUvaWHj2N4iZgHgSe26LPk6evAiAwk1/lJUF5mG9kywviACRRWDwhFKOTBxvDISZVnVl3RQ==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-linux-x64-gnu@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 143145434
+      },
+      "libc": [
+        "glibc"
+      ],
+      "main": "next-swc.linux-x64-gnu.node",
+      "_from": "file:next-swc-linux-x64-gnu-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:2684d71b-60d9-4531-a3fc-5c923502a7a7"
+        }
+      },
+      "_resolved": "/tmp/3c56c608840e11d1ec84a64820448ed2/next-swc-linux-x64-gnu-15.5.24.tgz",
+      "_integrity": "sha512-7dwtlhr0SLndqTG1z9ncRkbJswDZiKWlxzFyXDvJ2RDZRDRHp8zyMJ4D9UH/FgnQeXxxB6gZy2pMcIUoNKQ4pA==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/linux-x64-gnu"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **x86_64-unknown-linux-gnu** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-linux-x64-gnu_15.5.24_1787673083033_0.0934749665053376",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-linux-x64-musl",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-linux-x64-musl",
+    "response_cache_integrity": "sha512-ZQIN69wtyAlKpIWhr6xKlqm3qANWtEmUG0vYhbzZinqSnv1pbQswFciHx9pSA+CNPPNz6AGkuMPGYyNZpnaGag==",
+    "response_bytes": 5418987,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-linux-x64-musl",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-linux-x64-musl@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "dist": {
+        "shasum": "528bba9b6818c92ae6da6b0f3db1aef690d7ed86",
+        "tarball": "https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-kGZxM+WhkYs0276lFrMkj7PRtXT3Btp6cwvfSO/cCVLxJJttB5Ccnl2niaCgUja8HgSbEVnMHpg3FJWoOJ9e/g==",
+        "signatures": [
+          {
+            "sig": "MEUCIASqw9/7kNrF4QCXFhwAbY8WP/quyFvRN3iVWF3DyDaCAiEA7x/uCNBtiCr+10HAPg9igykz4muMsupiXXkkxJfIONY=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEYCIQD6muboIoUTRUV7EDtZ3zLZIqHbUUGXlKh+jUB8ZjqIagIhAJcXOOsHyIEpQweTRJWDVRgFFcjglEw04M2//2/VNE6S",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-linux-x64-musl@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 142959164
+      },
+      "libc": [
+        "musl"
+      ],
+      "main": "next-swc.linux-x64-musl.node",
+      "_from": "file:next-swc-linux-x64-musl-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:8493d094-cc5a-488e-80c1-2abd8da3c58c"
+        }
+      },
+      "_resolved": "/tmp/d4c6fe7c09c20239ae52ae580abba649/next-swc-linux-x64-musl-15.5.24.tgz",
+      "_integrity": "sha512-kGZxM+WhkYs0276lFrMkj7PRtXT3Btp6cwvfSO/cCVLxJJttB5Ccnl2niaCgUja8HgSbEVnMHpg3FJWoOJ9e/g==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/linux-x64-musl"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **linux-x64-musl** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-linux-x64-musl_15.5.24_1787673205699_0.9848550786175325",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-win32-arm64-msvc",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-win32-arm64-msvc",
+    "response_cache_integrity": "sha512-J/u6f7ZyrlQylWEhlrMYPTYFbuopn6SxcaImui4GO4E3lB4lKTEkNbmnB99+RguitWcrVpmOTC/CvJkLp1eiKg==",
+    "response_bytes": 5449430,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-win32-arm64-msvc",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-win32-arm64-msvc@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "win32"
+      ],
+      "cpu": [
+        "arm64"
+      ],
+      "dist": {
+        "shasum": "1257886635fe6a3dc873cd2b0c6134b601a60cf8",
+        "tarball": "https://registry.npmjs.org/@next/swc-win32-arm64-msvc/-/swc-win32-arm64-msvc-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-jBDDkZ/qKAqkWivWDMkJSXUzbzV0QKRBKJjEHUAvSB97Hzw7NLzJ6yV56Lts/wjir7s4P31GYgpbS6ZL+hasAA==",
+        "signatures": [
+          {
+            "sig": "MEUCIQCndSrnuioHn3Bw+s3kI5Bbk9uWxAoqyQaBRf52U2kBHQIga4pSCIzlf7L9I2ZT776iIFNqLVTVbMeJPSbr8/pDZao=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIH94fMnYBzFtGPtyr7kE88VAG4zIBvo1tBTcYUtDW2iaAiEA5eSQvZRQ16QoSx5SMpR29haBP0WBipzapYHF2koBrvI=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-win32-arm64-msvc@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 119322110
+      },
+      "main": "next-swc.win32-arm64-msvc.node",
+      "_from": "file:next-swc-win32-arm64-msvc-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:5aac03fa-4695-4a09-ba0f-641eaeb5a7ce"
+        }
+      },
+      "_resolved": "/tmp/a5d63289bccb8ff16a741b41a4703d08/next-swc-win32-arm64-msvc-15.5.24.tgz",
+      "_integrity": "sha512-jBDDkZ/qKAqkWivWDMkJSXUzbzV0QKRBKJjEHUAvSB97Hzw7NLzJ6yV56Lts/wjir7s4P31GYgpbS6ZL+hasAA==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/win32-arm64-msvc"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **win32-arm64-msvc** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-win32-arm64-msvc_15.5.24_1787673101374_0.5172077269727093",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  },
+  {
+    "name": "@next/swc-win32-x64-msvc",
+    "registry_url": "https://registry.npmjs.org/@next%2fswc-win32-x64-msvc",
+    "response_cache_integrity": "sha512-DY1cGA7LiDIag3MWTy7Q3eszMuXWmh8jcd7wjsVWRWgrhsPK2P0FYdaQ2soSy5ojQe4/pNEAMH0CgjTARE8dig==",
+    "response_bytes": 5633891,
+    "lock_dist_match": true,
+    "version_metadata": {
+      "name": "@next/swc-win32-x64-msvc",
+      "version": "15.5.24",
+      "license": "MIT",
+      "_id": "@next/swc-win32-x64-msvc@15.5.24",
+      "maintainers": [
+        {
+          "name": "vercel-release-bot",
+          "email": "infra+release@vercel.com"
+        },
+        {
+          "name": "matt.straka",
+          "email": "matt.j.straka@gmail.com"
+        }
+      ],
+      "homepage": "https://github.com/vercel/next.js#readme",
+      "bugs": {
+        "url": "https://github.com/vercel/next.js/issues"
+      },
+      "os": [
+        "win32"
+      ],
+      "cpu": [
+        "x64"
+      ],
+      "dist": {
+        "shasum": "4b86cda0ebfba20b2dac1f20abc56630be5c05c9",
+        "tarball": "https://registry.npmjs.org/@next/swc-win32-x64-msvc/-/swc-win32-x64-msvc-15.5.24.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-JqtwjvvorjacQ0spgjmUJoxySoYgPwdT1sFdQ0/zmW4iMlP2hjYlCoJIyS7o6Epb4Fug8eco3HXFoBDUCDeH7Q==",
+        "signatures": [
+          {
+            "sig": "MEUCIQCiph134PJNlfL4dwuEjJUxAwoagTuPRmC2n94CiiTexwIgFE8hWvAgmLE2k3nVGnT/HX66hJTszBX96QsZt6sOxeg=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIHk/emAGdfs3tAa8vzTVz5SVMNHwg1+Am+er5O+ufg3rAiEA7KNERvBXOM+82Bar7Zl46VadAr3asA6gYBEl3yoYKks=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@next%2fswc-win32-x64-msvc@15.5.24",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 148387320
+      },
+      "main": "next-swc.win32-x64-msvc.node",
+      "_from": "file:next-swc-win32-x64-msvc-15.5.24.tgz",
+      "engines": {
+        "node": ">= 10"
+      },
+      "_npmUser": {
+        "name": "GitHub Actions",
+        "email": "npm-oidc-no-reply@github.com",
+        "trustedPublisher": {
+          "id": "github",
+          "oidcConfigId": "oidc:4d12fde8-b164-4303-8e2b-52cf9966ee8b"
+        }
+      },
+      "_resolved": "/tmp/ca2cf1b981dba11dfe385e628466fe0a/next-swc-win32-x64-msvc-15.5.24.tgz",
+      "_integrity": "sha512-JqtwjvvorjacQ0spgjmUJoxySoYgPwdT1sFdQ0/zmW4iMlP2hjYlCoJIyS7o6Epb4Fug8eco3HXFoBDUCDeH7Q==",
+      "repository": {
+        "url": "git+https://github.com/vercel/next.js.git",
+        "type": "git",
+        "directory": "crates/napi/npm/win32-x64-msvc"
+      },
+      "_npmVersion": "11.17.0",
+      "description": "This is the **x86_64-pc-windows-msvc** binary for `@next/swc`",
+      "directories": {},
+      "_nodeVersion": "24.19.0",
+      "_hasShrinkwrap": false,
+      "readmeFilename": "README.md",
+      "_npmOperationalInternal": {
+        "tmp": "tmp/swc-win32-x64-msvc_15.5.24_1787673228844_0.21539732819807123",
+        "host": "s3://npm-registry-packages-npm-production"
+      }
+    }
+  }
+]

@@ -1,0 +1,99 @@
+0 verbose cli /Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js
+1 info using npm@11.17.0
+2 info using node@v24.19.0
+3 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/npmrc
+4 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/.npmrc
+5 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-user.npmrc
+6 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-global.npmrc
+7 verbose title npm install next@15.5.24
+8 verbose argv "install" "next@15.5.24" "--workspace" "site" "--workspace" "gui/app" "--save-prefix" "^" "--package-lock-only" "--ignore-scripts" "--no-audit" "--no-fund" "--cache" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache" "--userconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-user.npmrc" "--globalconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-global.npmrc" "--registry" "https://registry.npmjs.org" "--fetch-retries" "0" "--fetch-timeout" "30000" "--update-notifier" "false" "--logs-max" "3" "--loglevel" "verbose"
+9 verbose logfile logs-max:3 dir:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_50_50_768Z-
+10 verbose logfile /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_50_50_768Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest next@15.5.24
+15 silly packumentCache full:https://registry.npmjs.org/next cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/next 1306ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/next set size:undefined disposed:false
+18 silly fetch manifest @opentelemetry/api@^1.1.0
+19 silly packumentCache full:https://registry.npmjs.org/@opentelemetry%2fapi cache-miss
+20 http fetch GET 200 https://registry.npmjs.org/@opentelemetry%2fapi 112ms (cache miss)
+21 silly packumentCache full:https://registry.npmjs.org/@opentelemetry%2fapi set size:undefined disposed:false
+22 silly fetch manifest @playwright/test@^1.51.1
+23 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest cache-miss
+24 http fetch GET 200 https://registry.npmjs.org/@playwright%2ftest 325ms (cache miss)
+25 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest set size:undefined disposed:false
+26 silly fetch manifest babel-plugin-react-compiler@*
+27 silly packumentCache full:https://registry.npmjs.org/babel-plugin-react-compiler cache-miss
+28 http fetch GET 200 https://registry.npmjs.org/babel-plugin-react-compiler 85ms (cache miss)
+29 silly packumentCache full:https://registry.npmjs.org/babel-plugin-react-compiler set size:undefined disposed:false
+30 silly fetch manifest react@^19.0.0
+31 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+32 http fetch GET 200 https://registry.npmjs.org/react 306ms (cache miss)
+33 silly packumentCache full:https://registry.npmjs.org/react set size:undefined disposed:false
+34 silly fetch manifest react-dom@^19.0.0
+35 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
+36 http fetch GET 200 https://registry.npmjs.org/react-dom 280ms (cache miss)
+37 silly packumentCache full:https://registry.npmjs.org/react-dom set size:undefined disposed:false
+38 silly fetch manifest sass@^1.3.0
+39 silly packumentCache full:https://registry.npmjs.org/sass cache-miss
+40 http fetch GET 200 https://registry.npmjs.org/sass 122ms (cache miss)
+41 silly packumentCache full:https://registry.npmjs.org/sass set size:undefined disposed:false
+42 silly placeDep ROOT next@15.5.24 REPLACE for: sparq-gui-app@0.1.0 want: 15.5.24
+43 silly fetch manifest @next/env@15.5.24
+44 silly packumentCache full:https://registry.npmjs.org/@next%2fenv cache-miss
+45 silly fetch manifest @next/swc-darwin-x64@15.5.24
+46 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-darwin-x64 cache-miss
+47 silly fetch manifest @next/swc-darwin-arm64@15.5.24
+48 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-darwin-arm64 cache-miss
+49 silly fetch manifest @next/swc-linux-x64-gnu@15.5.24
+50 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-x64-gnu cache-miss
+51 silly fetch manifest @next/swc-linux-x64-musl@15.5.24
+52 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-x64-musl cache-miss
+53 silly fetch manifest @next/swc-win32-x64-msvc@15.5.24
+54 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-win32-x64-msvc cache-miss
+55 silly fetch manifest @next/swc-linux-arm64-gnu@15.5.24
+56 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-arm64-gnu cache-miss
+57 http fetch GET 200 https://registry.npmjs.org/@next%2fenv 299ms (cache miss)
+58 silly packumentCache full:https://registry.npmjs.org/@next%2fenv set size:undefined disposed:false
+59 silly fetch manifest @next/swc-linux-arm64-musl@15.5.24
+60 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-arm64-musl cache-miss
+61 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-darwin-arm64 961ms (cache miss)
+62 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-darwin-arm64 set size:undefined disposed:false
+63 silly fetch manifest @next/swc-win32-arm64-msvc@15.5.24
+64 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-win32-arm64-msvc cache-miss
+65 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-x64-musl 1000ms (cache miss)
+66 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-x64-musl set size:undefined disposed:false
+67 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-arm64-musl 700ms (cache miss)
+68 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-arm64-musl set size:undefined disposed:false
+69 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-darwin-x64 1057ms (cache miss)
+70 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-darwin-x64 set size:undefined disposed:false
+71 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-win32-x64-msvc 1089ms (cache miss)
+72 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-win32-x64-msvc set size:undefined disposed:false
+73 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-x64-gnu 1124ms (cache miss)
+74 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-x64-gnu set size:undefined disposed:false
+75 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-arm64-gnu 1324ms (cache miss)
+76 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-linux-arm64-gnu set size:undefined disposed:false
+77 http fetch GET 200 https://registry.npmjs.org/@next%2fswc-win32-arm64-msvc 466ms (cache miss)
+78 silly packumentCache full:https://registry.npmjs.org/@next%2fswc-win32-arm64-msvc set size:undefined disposed:false
+79 silly fetch manifest @playwright/test@^1.61.0
+80 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest cache-miss
+81 http cache https://registry.npmjs.org/@playwright%2ftest 139ms (cache hit)
+82 silly packumentCache full:https://registry.npmjs.org/@playwright%2ftest set size:9514128 disposed:false
+83 silly placeDep ROOT next@15.5.24 REPLACE for: sparq-site@0.1.0 want: 15.5.24
+84 silly placeDep ROOT @next/env@15.5.24 OK for: next@15.5.24 want: 15.5.24
+85 silly placeDep ROOT @next/swc-darwin-arm64@15.5.24 OK for: next@15.5.24 want: 15.5.24
+86 silly placeDep ROOT @next/swc-darwin-x64@15.5.24 OK for: next@15.5.24 want: 15.5.24
+87 silly placeDep ROOT @next/swc-linux-arm64-gnu@15.5.24 OK for: next@15.5.24 want: 15.5.24
+88 silly placeDep ROOT @next/swc-linux-arm64-musl@15.5.24 OK for: next@15.5.24 want: 15.5.24
+89 silly placeDep ROOT @next/swc-linux-x64-gnu@15.5.24 OK for: next@15.5.24 want: 15.5.24
+90 silly placeDep ROOT @next/swc-linux-x64-musl@15.5.24 OK for: next@15.5.24 want: 15.5.24
+91 silly placeDep ROOT @next/swc-win32-arm64-msvc@15.5.24 OK for: next@15.5.24 want: 15.5.24
+92 silly placeDep ROOT @next/swc-win32-x64-msvc@15.5.24 OK for: next@15.5.24 want: 15.5.24
+93 verbose cwd /private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480
+94 verbose os Darwin 25.6.0
+95 verbose node v24.19.0
+96 verbose npm  v11.17.0
+97 verbose exit 0
+98 info ok

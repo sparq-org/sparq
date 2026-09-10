@@ -1,0 +1,79 @@
+{
+  "full_lock_equals_expected_publisher_update": true,
+  "package_entries_before_after": [
+    1126,
+    1126
+  ],
+  "changed_package_entries": [
+    "gui/app",
+    "node_modules/@next/env",
+    "node_modules/@next/swc-darwin-arm64",
+    "node_modules/@next/swc-darwin-x64",
+    "node_modules/@next/swc-linux-arm64-gnu",
+    "node_modules/@next/swc-linux-arm64-musl",
+    "node_modules/@next/swc-linux-x64-gnu",
+    "node_modules/@next/swc-linux-x64-musl",
+    "node_modules/@next/swc-win32-arm64-msvc",
+    "node_modules/@next/swc-win32-x64-msvc",
+    "node_modules/next",
+    "site"
+  ],
+  "package_entries_added_removed": [
+    0,
+    0
+  ],
+  "next_copies_all_tracked_locks": [
+    {
+      "lock": "package-lock.json",
+      "key": "node_modules/next",
+      "version": "15.5.24"
+    }
+  ],
+  "swc_count": 8,
+  "linux_libc_preserved": {
+    "node_modules/@next/swc-linux-arm64-gnu": [
+      "glibc"
+    ],
+    "node_modules/@next/swc-linux-arm64-musl": [
+      "musl"
+    ],
+    "node_modules/@next/swc-linux-x64-gnu": [
+      "glibc"
+    ],
+    "node_modules/@next/swc-linux-x64-musl": [
+      "musl"
+    ]
+  },
+  "root_overrides_and_configs_preserved_sha256": {
+    "package.json": "3e89c829ab61bb7633b8d6cd3030fe44d8e73c45f30d50a57a21937d9d7dd0ef",
+    "site/next.config.ts": "2c60fa1ea681d4eab3affcfb323bd2960eb102f8cf36ff8997327609a1eb73dc",
+    "gui/app/next.config.ts": "9f84fde404be7dc19d7faeb4c98c2353a5fa4c24c87d09067ba6b3252f765599",
+    "site/scripts/vr.sh": "c299e3fc8dccef58b33264e9994b056808c6040df520b419e6941bd2cda25302"
+  },
+  "sharp_locked_version": "0.34.5",
+  "sharp_range_before_after": [
+    "^0.34.3",
+    "^0.34.3 || ^0.35.3"
+  ],
+  "unrelated_entries_identical": 1114,
+  "manifest_minima": [
+    "site:^15.5.24",
+    "gui/app:^15.5.24"
+  ],
+  "node_modules_absent": true,
+  "diff_check_exit": 0,
+  "metadata_only_negative_controls": [
+    {
+      "fixture": "old-next",
+      "rejected_by_full_lock_equality": true
+    },
+    {
+      "fixture": "missing-swc",
+      "rejected_by_full_lock_equality": true
+    },
+    {
+      "fixture": "missing-libc",
+      "rejected_by_full_lock_equality": true
+    }
+  ]
+}

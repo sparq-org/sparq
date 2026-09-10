@@ -1,0 +1,31 @@
+{
+  "kind": "npm ls --package-lock-only virtualtree, NOT an installedtree",
+  "tree": {
+    "version": "0.0.0",
+    "name": "sparq-monorepo",
+    "dependencies": {
+      "sparq-gui-app": {
+        "version": "0.1.0",
+        "resolved": "file:../gui/app",
+        "overridden": false,
+        "dependencies": {
+          "next": {
+            "version": "15.5.24",
+            "resolved": "https://registry.npmjs.org/next/-/next-15.5.24.tgz",
+            "overridden": false
+          }
+        }
+      },
+      "sparq-site": {
+        "version": "0.1.0",
+        "resolved": "file:../site",
+        "overridden": false,
+        "dependencies": {
+          "next": {
+            "version": "15.5.24"
+          }
+        }
+      }
+    }
+  }
+}

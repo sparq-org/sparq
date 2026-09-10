@@ -1,0 +1,13 @@
+{
+  "head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+  "parent": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "branch": "codex/next-security-patch",
+  "source_clean": true,
+  "files": {
+    "package-lock.json": "8687c74f94a16e48688e23ed0e012470cd91eb0e3a34d4095dc14f01c6d1fcc3",
+    "site/package.json": "60bbea3bc8c3de693274b92882b97173e514eb0f41b7ee8c3870c72235aa887d",
+    "gui/app/package.json": "b0e1e4d94d6fe2285e52e2524b2f30e20fe576275f8765f6d062732e40985df4"
+  },
+  "authoring_model": "GPT-6 Astra",
+  "git_trailer": "Co-Authored-By: GPT-6 Astra <noreply@openai.com>"
+}

@@ -1,0 +1,7 @@
+fix(deps): patch shared Next.js security version
+
+Raise both Next minimums and the shared lock to 15.5.24 using verified npm 11.17.0. Preserve all eight SWC platform packages, Linux libc selectors, root overrides, and unrelated dependency entries.
+
+Metadata-only generation is idempotent; actual Linux install and app validation remain required.
+
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>

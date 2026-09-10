@@ -1,0 +1,1 @@
+{"node":"v24.19.0","checks":{"local_node":true,"ci_node22_minimum":true,"react":true,"react_dom":true},"qualification":"Published semver ranges only; Node22 install/runtime and app compatibility not executed."}

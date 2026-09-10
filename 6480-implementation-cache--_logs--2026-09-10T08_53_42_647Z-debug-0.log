@@ -1,0 +1,19 @@
+0 verbose cli /Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js
+1 info using npm@11.17.0
+2 info using node@v24.19.0
+3 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/npmrc
+4 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480/.npmrc
+5 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-user.npmrc
+6 silly config load:file:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-global.npmrc
+7 verbose title npm ls next
+8 verbose argv "ls" "next" "--workspace" "site" "--workspace" "gui/app" "--package-lock-only" "--json" "--offline" "--cache" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache" "--userconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-user.npmrc" "--globalconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-global.npmrc" "--registry" "https://registry.npmjs.org" "--fetch-retries" "0" "--fetch-timeout" "30000" "--update-notifier" "false" "--logs-max" "3" "--loglevel" "verbose"
+9 verbose logfile logs-max:3 dir:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_53_42_647Z-
+10 verbose logfile /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_53_42_647Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 verbose cwd /private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480
+14 verbose os Darwin 25.6.0
+15 verbose node v24.19.0
+16 verbose npm  v11.17.0
+17 verbose exit 0
+18 info ok

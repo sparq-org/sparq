@@ -1,0 +1,131 @@
+{
+  "head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+  "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "decision": "READY_FOR_INDEPENDENT_REVIEW_AND_LINUX_VALIDATION",
+  "scope": "Three files +44/-44; targeted Next15.5.24 plus bothdeclaredminimums^15.5.24",
+  "actual_author": "GPT-6 Astra",
+  "runtime_tool": {
+    "node": "24.19.0",
+    "npm": "11.17.0",
+    "integrity_verified": true,
+    "global_installs": false,
+    "node22_equivalence_claim": false
+  },
+  "generation": {
+    "targeted_package_lock_only_exit": 0,
+    "offline_idempotence_exit": 0,
+    "byte_identical_second_generation": true,
+    "virtual_npm_ls_exit": 0,
+    "workspace_next_resolution": "Both sparq-site andsparq-gui-app next15.5.24 in virtual locktree; no installedtreeclaim",
+    "lifecycle_scripts": false,
+    "node_modules_created": false
+  },
+  "scope_validation": {
+    "full_lock_equals_expected_publisher_update": true,
+    "package_entries_before_after": [
+      1126,
+      1126
+    ],
+    "changed_package_entries": [
+      "gui/app",
+      "node_modules/@next/env",
+      "node_modules/@next/swc-darwin-arm64",
+      "node_modules/@next/swc-darwin-x64",
+      "node_modules/@next/swc-linux-arm64-gnu",
+      "node_modules/@next/swc-linux-arm64-musl",
+      "node_modules/@next/swc-linux-x64-gnu",
+      "node_modules/@next/swc-linux-x64-musl",
+      "node_modules/@next/swc-win32-arm64-msvc",
+      "node_modules/@next/swc-win32-x64-msvc",
+      "node_modules/next",
+      "site"
+    ],
+    "package_entries_added_removed": [
+      0,
+      0
+    ],
+    "next_copies_all_tracked_locks": [
+      {
+        "lock": "package-lock.json",
+        "key": "node_modules/next",
+        "version": "15.5.24"
+      }
+    ],
+    "swc_count": 8,
+    "linux_libc_preserved": {
+      "node_modules/@next/swc-linux-arm64-gnu": [
+        "glibc"
+      ],
+      "node_modules/@next/swc-linux-arm64-musl": [
+        "musl"
+      ],
+      "node_modules/@next/swc-linux-x64-gnu": [
+        "glibc"
+      ],
+      "node_modules/@next/swc-linux-x64-musl": [
+        "musl"
+      ]
+    },
+    "root_overrides_and_configs_preserved_sha256": {
+      "package.json": "3e89c829ab61bb7633b8d6cd3030fe44d8e73c45f30d50a57a21937d9d7dd0ef",
+      "site/next.config.ts": "2c60fa1ea681d4eab3affcfb323bd2960eb102f8cf36ff8997327609a1eb73dc",
+      "gui/app/next.config.ts": "9f84fde404be7dc19d7faeb4c98c2353a5fa4c24c87d09067ba6b3252f765599",
+      "site/scripts/vr.sh": "c299e3fc8dccef58b33264e9994b056808c6040df520b419e6941bd2cda25302"
+    },
+    "sharp_locked_version": "0.34.5",
+    "sharp_range_before_after": [
+      "^0.34.3",
+      "^0.34.3 || ^0.35.3"
+    ],
+    "unrelated_entries_identical": 1114,
+    "manifest_minima": [
+      "site:^15.5.24",
+      "gui/app:^15.5.24"
+    ],
+    "node_modules_absent": true,
+    "diff_check_exit": 0,
+    "metadata_only_negative_controls": [
+      {
+        "fixture": "old-next",
+        "rejected_by_full_lock_equality": true
+      },
+      {
+        "fixture": "missing-swc",
+        "rejected_by_full_lock_equality": true
+      },
+      {
+        "fixture": "missing-libc",
+        "rejected_by_full_lock_equality": true
+      }
+    ]
+  },
+  "preflight": {
+    "exit": 1,
+    "sole_finding": "Known Bash3 mapfile unavailable in privacy-claims checker",
+    "other_invoked_mechanical_checks": "pass",
+    "no_perf_numbers_and_readme_template": "Skipped because no matchingdiffpath",
+    "workaround_or_gate_weakening": false
+  },
+  "resources": {
+    "new_output_cache_bytes_before_final_packet": 135532544,
+    "free_bytes_before_final_packet": 4429725696,
+    "max_npm_observed_output_cache_bytes": 134901760,
+    "min_npm_observed_free_bytes": 4340744192,
+    "output_cache_cap": 268435456,
+    "minimum_free": 2147483648,
+    "elapsed_seconds": 505.5451989173889
+  },
+  "tooling_qualification": "Npm11.17.0 selected from officialmetadata, not npm latest12.0.2. Rootnpm version/workflow pinning #6133 unchanged. TarballSRIverified; registry signingkey signature not independentlyverified.",
+  "remaining_validation": [
+    "Actual npm ci reproducibility and installed npm ls resolution on Node22Linux. Metadata-only idempotence is not an npm ci proof.",
+    "Normal exact-head GUI/site lint,typecheck,unit,staticweb+Tauri exports,development-servere2e,a11y andregistered browserchecks.",
+    "Advisory screenshot/hero/nativeTauri outcomes require honestinspection; no blindlyupdatedsnapshots.",
+    "ProtectedCIandmergequeue; pages deployment is not a premergevalidationdispatch.",
+    "Aftermerge rootrechecksalerts107AVIF/106Windows for automaticclosure; no manualdismissal."
+  ],
+  "exposure_limits": "Locked affectedversion remediation only; no claimproductionendpoint exposure, exploitability, or entiredependencysecurityaudit.",
+  "source_edits_outside_three_files": false,
+  "bd_invoked": false,
+  "remote_mutations": false,
+  "pending_commands": false
+}

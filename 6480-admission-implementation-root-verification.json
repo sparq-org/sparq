@@ -1,0 +1,22 @@
+{
+  "at": "2026-09-10T09:11:54.146971+00:00",
+  "head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+  "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "manifest_files": 2555,
+  "manifest_bytes": 129252363,
+  "manifest_sha256": "270b0554a991ca1c532a8dfefbdf99d9035094f7ef4e9063d7190d44e2f0b4fc",
+  "all_hashes_and_source_copies_verified": true,
+  "clean_worktree": true,
+  "changed_files": [
+    "gui/app/package.json",
+    "package-lock.json",
+    "site/package.json"
+  ],
+  "full_git_diff_matches_packet": true,
+  "full_lock_map_equals_only_expected_publisher_fields": true,
+  "unrelated_package_entries_preserved": 1114,
+  "next_version": "15.5.24",
+  "npm_tarball_sri_root_verified": "sha512-PurxiZexEHDTE4SSaLI3ZrnbAGiZfeyUcQcxcP5D+hfytNAze/D1IzDuInTn9XVLIbAQUnQuSPXJx02LHjLvQw==",
+  "actual_npm_commands_exit0_and_within_resource_bounds": true,
+  "qualification": "Metadata-only install/idempotence and virtual lock resolution; no installed dependency tree, lifecycle build, Node22 Linux runtime, vulnerability exploit or entire dependency security audit claimed."
+}

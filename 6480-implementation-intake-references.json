@@ -1,0 +1,10 @@
+{
+  "package-metadata-0845.json": {
+    "sha256": "23b12022756195b37109d9ecadf7c16a87dab29001ebc9772709112b07fba5d0",
+    "relative_source": "direct-6480/admission/package-metadata-0845.json"
+  },
+  "start-readiness-0848.json": {
+    "sha256": "75baadf4ba45a3d0fcb040609ca3ad7798831a974aeddf1d8fcd62f67dd0d3ab",
+    "relative_source": "direct-6480/admission/start-readiness-0848.json"
+  }
+}

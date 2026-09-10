@@ -1,0 +1,41 @@
+npm verbose cli /Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/tools/npm-11.17.0/bin/npm-cli.js
+npm info using npm@11.17.0
+npm info using node@v24.19.0
+npm verbose title npm ls next
+npm verbose argv "ls" "next" "--workspace" "site" "--workspace" "gui/app" "--package-lock-only" "--json" "--offline" "--cache" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache" "--userconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-user.npmrc" "--globalconfig" "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/empty-global.npmrc" "--registry" "https://registry.npmjs.org" "--fetch-retries" "0" "--fetch-timeout" "30000" "--update-notifier" "false" "--logs-max" "3" "--loglevel" "verbose"
+npm verbose logfile logs-max:3 dir:/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_53_42_647Z-
+npm verbose logfile /private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation/cache/_logs/2026-09-10T08_53_42_647Z-debug-0.log
+{
+  "version": "0.0.0",
+  "name": "sparq-monorepo",
+  "dependencies": {
+    "sparq-gui-app": {
+      "version": "0.1.0",
+      "resolved": "file:../gui/app",
+      "overridden": false,
+      "dependencies": {
+        "next": {
+          "version": "15.5.24",
+          "resolved": "https://registry.npmjs.org/next/-/next-15.5.24.tgz",
+          "overridden": false
+        }
+      }
+    },
+    "sparq-site": {
+      "version": "0.1.0",
+      "resolved": "file:../site",
+      "overridden": false,
+      "dependencies": {
+        "next": {
+          "version": "15.5.24"
+        }
+      }
+    }
+  }
+}
+npm verbose cwd /private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480
+npm verbose os Darwin 25.6.0
+npm verbose node v24.19.0
+npm verbose npm  v11.17.0
+npm verbose exit 0
+npm info ok

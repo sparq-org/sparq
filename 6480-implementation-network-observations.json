@@ -1,0 +1,29 @@
+{
+  "metadata_fetch_lines": [
+    "npm http fetch GET 200 https://registry.npmjs.org/next 1306ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@opentelemetry%2fapi 112ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@playwright%2ftest 325ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/babel-plugin-react-compiler 85ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/react 306ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/react-dom 280ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/sass 122ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fenv 299ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-darwin-arm64 961ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-x64-musl 1000ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-arm64-musl 700ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-darwin-x64 1057ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-win32-x64-msvc 1089ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-x64-gnu 1124ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-linux-arm64-gnu 1324ms (cache miss)",
+    "npm http fetch GET 200 https://registry.npmjs.org/@next%2fswc-win32-arm64-msvc 466ms (cache miss)"
+  ],
+  "npm_metadata_get_count": 16,
+  "npm_config_fetch_retries": 0,
+  "other_downloads": [
+    "Officialnpm11.17.0metadataGET",
+    "Officialnpm11.17.0tarballGET"
+  ],
+  "git_read": "git fetch origin main succeeded, origin/main e534\u2192781f; checked fetched head781f before isolatedworktree creation",
+  "no_lifecycle_info_run_lines": true,
+  "note": "Metadata HTTPgets include peers; package-lock diff remains bounded. No registry write."
+}

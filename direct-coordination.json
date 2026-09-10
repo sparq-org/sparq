@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T08:50:49.132995+00:00",
+  "updated_at": "2026-09-10T09:14:11.264208+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "isolated narrow Next security patch implementation",
-    "state": "Agent authorized08:47; metadata-only targeted package lock update and evidence in progress; no PR published.",
+    "phase": "Local Next patch complete; actual independent Opus review running",
+    "state": "Clean committed50c patch passed metadata/scope checks; actual Linux CI remains required. Opus session49118 running, must collect once; child separately diagnoses cancelled main fuzz without retries.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -87,7 +87,28 @@
       "Collect existing Astra /root/postmerge_ci issue6480 implementation packet once frozen. Verify exact source/lock diff, npm tool integrity, evidence and footprint; obtain actual Opus5 xhigh final patch review before publication.",
       "Resolve review findings and publish narrow Next patch through supported CI and protected merge; verify all nested Next copies and required actual installs/builds, then alert107/106 automatic closure only after main.",
       "Keep nested BASE issue6479 separate; no #6049/#6055/release/registry/EC2 or ALLGREEN changes."
-    ]
+    ],
+    "head": "50c09eb2b7563924cccde9305ee51ff62b27af38",
+    "implementation": {
+      "state": "completed_frozen_root_verified",
+      "manifest": "direct-6480/implementation/manifest.json",
+      "manifest_sha256": "270b0554a991ca1c532a8dfefbdf99d9035094f7ef4e9063d7190d44e2f0b4fc",
+      "files": 2555,
+      "bytes": 129252363,
+      "root_verification": "direct-6480/admission/implementation-root-verification.json",
+      "ci_boundary": "Only metadata generation/idempotence/virtualresolution, not installedruntime/buildvalidation"
+    },
+    "review": {
+      "state": "running",
+      "session_id": 49118,
+      "kind": "exec_command",
+      "model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6480/admission/opus-patch-input.md",
+      "output": "direct-6480/admission/opus-patch-review.json",
+      "completion": "direct-6480/admission/opus-patch-completion.json",
+      "collect_policy": "Collect49118 usingwrite_stdin before outputread; then verify actualmodelUsage +successful result; no duplicate model call."
+    }
   },
   "prs": {
     "4300": {
@@ -2752,6 +2773,14 @@
       "advisories": {
         "ring": "Empty REGISTRY_RING_TOKEN; shell guard exits1 before dispatch; expected intentional pause. No dispatch or repair attempted.",
         "release": "Same cargo package sparq-introspect missing published sparq-engine failure as existing6474; no retry/release authorized."
+      },
+      "latest": {
+        "at": "2026-09-10T09:14:11.264208+00:00",
+        "evidence": "direct-6476/admission/heartbeat-0909.json",
+        "ci": "25success4skip5running2queued/36",
+        "matrix": "24success1skip3running29queued/57",
+        "gate": "running",
+        "fuzz": "cancelled; bounded read-only diagnosis by existing agent underway, no rerun"
       }
     }
   },
@@ -3143,10 +3172,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T08:50:49.132995+00:00",
+    "at": "2026-09-10T09:14:11.264208+00:00",
     "enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0843.json",
-    "ring": "guard exited before dispatch on current main"
+    "evidence": "direct-6476/admission/heartbeat-0909.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

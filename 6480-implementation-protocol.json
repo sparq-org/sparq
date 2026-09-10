@@ -1,0 +1,18 @@
+{
+  "start_epoch": 1789030124.471405,
+  "max_seconds": 1200,
+  "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "base_tree": "28543809de37b25e7da49d665c08da8bbeca661f",
+  "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
+  "minimum_free_bytes": 2147483648,
+  "new_output_cache_limit_bytes": 268435456,
+  "output_roots": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/implementation"
+  ],
+  "node": "/Users/jesght/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+  "npm_version_candidate": "11.17.0 from freshly retrieved Next15.5.24 publishmetadata; officialnpmmetadata must verify beforeusing",
+  "plan": "One pinned npm11 metadata/tarballdownload, safety/integritycheck; metadata-only targeted Next install withscripts/audit/fund/retries off; thenoneunchanged regeneration for idempotence only iffirstpasses; no fullinstall/build",
+  "network_retries": 0,
+  "free_initial_bytes": 4772925440,
+  "tracked_worktree_baseline": "Fresh tracked source checkout is not generatedbuildoutput; new tools/cache/evidence are capped together."
+}

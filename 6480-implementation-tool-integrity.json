@@ -1,0 +1,21 @@
+{
+  "npm": "11.17.0",
+  "metadata_source": "https://registry.npmjs.org/npm/-/npm-11.17.0.tgz",
+  "published_integrity": "sha512-PurxiZexEHDTE4SSaLI3ZrnbAGiZfeyUcQcxcP5D+hfytNAze/D1IzDuInTn9XVLIbAQUnQuSPXJx02LHjLvQw==",
+  "verified_sha512": "sha512-PurxiZexEHDTE4SSaLI3ZrnbAGiZfeyUcQcxcP5D+hfytNAze/D1IzDuInTn9XVLIbAQUnQuSPXJx02LHjLvQw==",
+  "tarball_sha256": "b290bbb35b9e72c3ef84edbe041f28c4479c4d9ee79f555817b8caafe7ce4bba",
+  "tarball_bytes": 2966037,
+  "members": 1938,
+  "unpacked_file_bytes": 12097665,
+  "archive_safety": "Only regularfiles/directories; allpaths beneathpackage/, noabsolute/traversal/links/devices/duplicates; manual bounded extraction.",
+  "engine_compatibility": {
+    "node": "v24.19.0",
+    "npm": "11.17.0",
+    "engines": {
+      "node": "^20.17.0 || >=22.9.0"
+    },
+    "compatible": true
+  },
+  "signatures": "Tarball matches publishedSRI andsha1; registry signature not independentlycryptographicallyverified.",
+  "lifecycle_scripts_run": false
+}
