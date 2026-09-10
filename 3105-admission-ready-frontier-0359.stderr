@@ -1,0 +1,11 @@
+Bootstrap: Skipped 31 malformed lines during bootstrap:
+  Line 28: json: cannot unmarshal string into Go struct field Comment.comments.id of type int64
+  Line 32: json: cannot unmarshal string into Go struct field Comment.comments.id of type int64
+  Line 56: json: cannot unmarshal string into Go struct field Comment.comments.id of type int64
+  Line 202: json: cannot unmarshal string into Go struct field Comment.comments.id of type int64
+  Line 234: json: cannot unmarshal string into Go struct field Comment.comments.id of type int64
+  ... and 26 more
+Removing stale Dolt LOCK file: /Users/jesght/Documents/ChatGPT/sparq/upstream/.beads/dolt/beads/.dolt/noms/LOCK (age: 13h51m40s)
+Removing stale Dolt LOCK file: /Users/jesght/Documents/ChatGPT/sparq/upstream/.beads/dolt/beads/.dolt/stats/.dolt/noms/LOCK (age: 13h51m40s)
+time="2026-09-10T04:59:18+01:00" level=warning msg="Error getting database beads: open /Users/jesght/Documents/ChatGPT/sparq/upstream/.beads/dolt/beads/.dolt/repo_state.json: no such file or directory"
+Error: failed to open database: bootstrap failed: failed to create Dolt store: failed to create database: Error 1007: can't create database beads; database exists

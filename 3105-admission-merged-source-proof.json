@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-10T03:57:41.333567+00:00",
+  "reviewed_head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "merge_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "main_observed_at": "2026-09-10T03:55:43.335876+00:00",
+  "source_files": [
+    {
+      "path": "bench/feature-off-declarations/6477.json",
+      "bytes": 273,
+      "sha256": "89cd0e9e30c946a28a529b11868ab100afdbd2bb85df51514da2bec9b0799061"
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "bytes": 1053225,
+      "sha256": "098a3af6a14c483910750ca3b0d032c4f004633222ad0394f948c394aeb16566"
+    }
+  ],
+  "worktree_clean": true,
+  "merge_group_gate": {
+    "run": 34433648325,
+    "job": 102734161005,
+    "app": 15368,
+    "conclusion": "success"
+  },
+  "postmerge_ci": "new push runs are separate from successful merge-group runs even though SHA is shared; do not combine counts as one CI verdict."
+}

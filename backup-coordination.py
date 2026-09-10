@@ -411,6 +411,12 @@ for evidence_name in ['heartbeat-0328.json', 'pr-ci-green-body.md', 'queue-admis
 
 FILES["3105-admission-heartbeat-0343.json"] = ROOT / "direct-3105/admission/heartbeat-0343.json"
 
+# PR6477 verified merge, expected registry advisory and next6476 bounded admission.
+for evidence_name in ['advisory-content.json', 'advisory-registry.json', 'batch-merge.yml', 'job.json', 'job.log', 'report.json', 'reviewed-source-comparison.json', 'run-observation.json', 'source-read.json', 'workflow-content.json', 'manifest.json']:
+    FILES["3105-postmerge-ring-triage-" + evidence_name.replace("/", "--")] = ROOT / "direct-3105/postmerge-ring-triage" / evidence_name
+for evidence_name in ['heartbeat-0355.json', 'merged-source-proof.json', 'next6476-admission.json', 'next6476-admission-page2.json', 'issue3105-merged-comment.json', 'issue3105-merged-comment-receipt.json', 'ready-frontier-0359.json', 'ready-frontier-0359.stdout', 'ready-frontier-0359.stderr', 'postmerge-runs-0359.json', 'postmerge-ring-root-verification.json', 'issue6476-start-comment.json', 'issue6476-start-precheck.json', 'issue6476-start-comment-receipt.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "git",
+    "show",
+    "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5:.github/workflows/batch-merge.yml"
+  ],
+  "exit_code": 128,
+  "stderr": "fatal: path '.github/workflows/batch-merge.yml' exists on disk, but not in 'd41ec9fcb796504d85f5a5247a5fdc9eb3e65de5'\n"
+}

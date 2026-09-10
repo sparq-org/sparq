@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-10T03:59:18.624949+00:00",
+  "command": [
+    "/opt/homebrew/bin/bd",
+    "ready",
+    "--json",
+    "--limit",
+    "0",
+    "--readonly",
+    "--no-daemon",
+    "--no-auto-import",
+    "--no-auto-flush"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
+  "exit_code": 1,
+  "fallback_reason": "push-frontier.sh requires Bash associative arrays (declare -A); available Bash3 does not support them. Raw readonly bd ready consulted with explicit dedupe/one engine lane applied to any selection."
+}

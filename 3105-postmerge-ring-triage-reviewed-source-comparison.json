@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "git",
+    "show",
+    "ed66ef0931fa19dd521fac433870c86a78687a30:.github/workflows/batch-merge.yml"
+  ],
+  "exit_code": 0,
+  "stderr": "",
+  "reviewed_workflow_sha256": "75c775703e957c182e51433c2609a5723554e2d0f4fda681590537a1bde28515",
+  "merged_workflow_sha256": "75c775703e957c182e51433c2609a5723554e2d0f4fda681590537a1bde28515",
+  "byte_identical": true
+}

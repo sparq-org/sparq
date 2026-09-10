@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T03:44:03.739156+00:00",
+  "updated_at": "2026-09-10T04:02:49.426363+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -49,9 +49,9 @@
     "latest_cleanup": "Only two cleancompletedmergedworktrees4246/6468 removed afterfreshGitHubstate/head/status verification;branchesretained;source-admission/completed-worktrees-removed.json. Recovered~6.55GBfree;no sharedcheckout/production/cacheprune."
   },
   "live_main": {
-    "oid": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "observed_at": "2026-09-10T03:11:00Z",
-    "evidence": "direct-3105/admission/pr-live-0311.json"
+    "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "observed_at": "2026-09-10T04:00:53.065065+00:00",
+    "evidence": "direct-3105/admission/issue6476-start-precheck.json"
   },
   "rules": {
     "required_check": "gate",
@@ -63,263 +63,32 @@
   },
   "admission_policy": "An independent GitHub account is not an extra direct-admission requirement. OWNER/MEMBER/COLLABORATOR noncontributor verdict restrictions govern automated label promotion. Actual independent Opus source review + green required CI + resolved threads permit direct protected queue admission. review:unreviewed is informational; review:needs is a real hold. Never write a fabricated canonical VERDICT:pass as jeswr.",
   "active_lane": {
-    "issue": 3105,
+    "issue": 6476,
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Protected merge queue position1; merge-group CI progressing normally",
-    "started_at": "2026-09-10T00:31:07.235396+00:00",
-    "base": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "local_branch": "codex/capped-rhs-reuse",
-    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
-    "worktree_state": "Clean ed66; author idle, no commands running.",
-    "directory": "direct-3105",
-    "state": "PR6477 exact ed66 admitted through enqueuePullRequest expectedHeadOid, jump=false. No bypass or review:pass fabrication. Current-head313success97skip; gate15368SUCCESS.",
-    "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
-    "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
-    "readiness": "direct-6475/source-admission/perf3105-readiness.json",
+    "phase": "Bounded public-callback runtime reproduction and sound restoration design",
+    "state": "Assigned read/test-only first phase, production correction not yet authorized; no fix claimed.",
+    "started_at": "2026-09-10T04:00:00Z",
+    "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "local_branch": "codex/nested-query-budget",
+    "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476",
+    "directory": "direct-6476",
+    "max_minutes": 15,
+    "scope": "Execute real nested public extension-callback reproduction; inspect affected entry points and previous limits/sticky-error/cancel pointer restoration lifetimes; exact source and test/control plan.",
+    "constraints": "Own newworktree; no production fix/push/remote mutation/modelcall/release/EC2 yet. max2jobs incrementalOFF offline;stopfree<6509559808B. Cache5983 mayreuse asregenerableonly. Preservecompletedworktrees and frozen evidence. No bd commands after readonly bootstrap defect.",
     "fresh_admission": [
-      "direct-6475/source-admission/perf3105-admission.json",
-      "direct-6475/source-admission/perf3105-admission-page2.json"
+      "direct-3105/admission/next6476-admission.json",
+      "direct-3105/admission/next6476-admission-page2.json",
+      "direct-3105/admission/issue6476-start-precheck.json"
     ],
-    "dedupe_scope": "165openPRtitles/branches/arealabels allpages; no3105/RHShoistmatch; noissuecrossrefs; not exhaustiveallPRdiff audit. KnownheldotherenginePRs untouched.",
-    "review_requirement": "ActualindependentClaudeOpus5 xhigh review ofactualcandidate aftersource/tests/controls frozen, then requiredprotectedvalidation. No productionapprovalyet.",
-    "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-    "phase1": {
-      "state": "completed_frozen_root_verified",
-      "manifest_files": 59,
-      "manifest_sha256": "188a6cffeb664756aec40923d18da3ea905ca217b76f654fcb42e7a863676f48",
-      "packet_sha256": "c986b0b52cad99b53556d88625dcb5d340fe394fe1109a4d0e41bc95936f947d",
-      "proof": "direct-3105/admission/root-phase1-verification.json",
-      "tests": "3default+3no-default focused and21existingASK tests pass;1existing timing probe ignored;3runtime controls killed;scopedlibclippyPASS",
-      "preflight": "Bash3mapfile unavailable inprivacy script; no bypass, realLinuxCI required. Initial invalid empty-resultmaxrows assertion corrected, failure/source preserved.",
-      "scope": "Scanrows reuse only. Per-block GOO/bind/hashbuildside choices unchanged; hash builds unhoisted. Memory/latency/wasm/fullCI remain pending."
-    },
-    "review": {
-      "state": "completed_collected",
-      "kind": "exec_command",
-      "session_id": 90599,
-      "actual_model_required": "claude-opus-5",
-      "effort": "xhigh",
-      "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
-      "input": "direct-3105/admission/opus-input.md",
-      "input_bytes": 83887,
-      "input_sha256": "aec96ab6c445162cda2ac78c1afc315f4327f171b9d38ea3258512d77dac313f",
-      "output": "direct-3105/admission/opus-review.json",
-      "collect_policy": "90599completed/collected. Do not poll or relaunch. ActualOpusreviewonlyagain afternewmeaningfulsource/evidence; no merge/perfadmission yet.",
-      "exit_code": 0,
-      "actual_model": "claude-opus-5",
-      "verdict": "approve_for_validation",
-      "result": "direct-3105/admission/opus-result.json",
-      "receipt": "direct-3105/admission/opus-completion.json",
-      "output_sha256": "9dfaed519e80d678574e49e6a2044281f4856a56aae3040b5f207bbfba93408e"
-    },
-    "performance": {
-      "agent": "/root/postmerge_ci",
-      "state": "completed_frozen_root_verified",
-      "directory": "direct-3105/performance-completion",
-      "max_minutes": 20,
-      "scope": "Predeclared exactbaseline/candidaterelease pairedwholequery costs: earlyhit/secondhit/miss/lateLIMIT/multipleRHS retention;allocations/peakheap ifsafe existingharness;overlay/restrictedsortcorrectness ifaffordable",
-      "constraints": "No prodsourcechange/hashhoist/tuning/newdeps/network/EC2;2jobs;incrementalOFF;>=6GiB+64MiBfree;preserve59frozenfiles andsharedcheckout;rootOpusreviewindependent",
-      "admission": "No latency claim beforemeasurements; full CI/ratchets authoritative remote gate beforemerge",
-      "stopped_phase": {
-        "directory": "direct-3105/performance",
-        "manifest_files": 21,
-        "manifest_sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
-        "proof": "direct-3105/admission/performance-stop-root-verification.json",
-        "result": "INCOMPLETE_RESOURCE_LIMIT; zero samples; finalbaselinebinarypreserved. Candidatebuildterminatedon6GiB+64MiBfloor; allfrozenfilesunchanged."
-      },
-      "resume_basis": "Diskfree14,537,830,400bytesat01:09 vsprior6.27GB; no rootcachecleanup. Samefixedprotocolauthorizedcompletion, not requestbudgetretry.",
-      "preliminary": "100/100 timingsamples,59/60 allocation samples. Lastcandidate multi-overlay failedSTARTUPcalibration beforequery. No discard/retry ofoldsample. RootreadsampleJSON; fullmiss candidate/base~0.84-0.85,multi~0.77-0.79;earlyhit rangesoverlap. Localadvisoryonly; heapcompletedmulti+143160bytes~1.3%.",
-      "calibration_followup": "Completed; afterfixture/oracle/twowarmups+globalbroadcast; unchangedcounting.rs/measuredbody, newbothcountbinaries. Originalfailurepreserved. No pendingmeasurement/build/retries.",
-      "coverage": "Actualchanging scan_sort/mixedbind/nonbind anddisconnectedcrossnotyetshown. Rootprovidedconcrete3patternfixture candidate; namedoverlayEXISTS coveragepending.",
-      "source_validity": "direct-3105/admission/source-validity-assessment.json supportsstore/viewscanpurity bysourceinspection; not broadruntimeproof.",
-      "manifest_files": 515,
-      "manifest_sha256": "e97fa98a8fcaae33c78db2c40f85881c2f0417d41e177972f82979c02f24d874",
-      "packet_bytes": 28225,
-      "packet_sha256": "290c5ea6f231ba958a8e3f135f05d95dea74ebe40bfca542324e4f37c53d5355",
-      "root_verification": "direct-3105/admission/performance-completion-root-verification.json",
-      "executed": "220commands:100timingsuccesses,59originalallocsuccesses+1startupcalibrationfailure,60correctedallocsuccesses. Allrawstdout/stderr/samples/rows/binaryhashes/balancedorder verified. Sameallocmetricsat59matchingpoints.",
-      "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
-    },
+    "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
+    "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Next scheduled check: observe PR6477 merge/ejection state and merge-group d41ec9f gate34433648325; no repeated polls, cancellation or requeue while live.",
-      "If merged, byte-verify reviewed source/declaration on main and watch postmerge CI. Issue3105 stays OPEN for planner/hash-build reuse.",
-      "If queue ejected or CI fails, diagnose named failure using same Astra lane; preserve current evidence.",
-      "Keep registryOFF,ALLGREEN,all unrelated holds,no releases/EC2; choose next bounded ready SPARQL lane after current landing."
-    ],
-    "coverage": {
-      "agent": "/root/postmerge_ci",
-      "actual_model": "GPT-6 Astra",
-      "effort": "xhigh",
-      "started_at": "2026-09-10T01:40:19.037861+00:00",
-      "directory": "direct-3105/coverage",
-      "state": "completed_frozen_root_verified",
-      "max_minutes": 20,
-      "base_candidate": "6e86f1d0ba447aa78a50800337a7a379702fa999",
-      "scope": "Path-observed actualpublicquery changing requestedRHSsort acrossblocks/mixedbind-nonbind, fullmultisetoracle, disconnectedcross, affordablenamedviewEXISTS/restrictedsort. Optionalminimaldropstaleslotbeforereplacementscan ifjustified; nohashhoist/cachepolicyrewrite/6476fix. Relevantfeaturetests/clippy/preflighthonest.",
-      "control": "Invertchanging-sortguard; if answerlegitimatelysame, physicalinvalidation/workwitness only\u2014do notclaimsemanticcontrol.",
-      "constraints": "Same isolatedworktree/sharedcontract;2jobs,incrementalOFF,offline,>=6GiB+64MiB;preserveallpriorfrozenbundles; nofullworkspace/newdeps/EC2/remoteGitHub/modelcalls.",
-      "handoff": "Freeze/commitfinaldelta exacthead andpacket; rootfocusedactualOpusreviewbeforepublication.",
-      "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
-      "manifest_files": 89,
-      "manifest_sha256": "a11c8af18d3aafc5f4eec2b62110a34c496f8904d5e51ec3d2786d13b6fa3d15",
-      "root_verification": "direct-3105/admission/coverage-root-verification.json"
-    },
-    "final_review": {
-      "state": "completed_collected",
-      "kind": "exec_command",
-      "session_id": 11803,
-      "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
-      "actual_model_required": "claude-opus-5",
-      "effort": "xhigh",
-      "input": "direct-3105/admission/opus-final-input.md",
-      "input_bytes": 112161,
-      "input_sha256": "8266714025e14167dd2fad08ac86a02c2d3ce8312dc10370a4bca160d0782683",
-      "output": "direct-3105/admission/opus-final-review.json",
-      "collect_policy": "11803 completed collected. Do not poll/relaunch. New substantive source/evidence only warrants followup.",
-      "exit_code": 0,
-      "actual_model": "claude-opus-5",
-      "verdict": "approve_for_ci",
-      "result": "direct-3105/admission/opus-final-result.json",
-      "receipt": "direct-3105/admission/opus-final-completion.json",
-      "output_sha256": "50bab4a9794fe62f0452cbc02cea356401b450fa5a99fb0886a789cace3db55d"
-    },
-    "publication_preparation": {
-      "agent": "/root/postmerge_ci",
-      "state": "completed_read_only",
-      "output": "direct-3105/admission/publication-preparation.json",
-      "scope": "Bounded local PR-template/process and CI-wiring report only; no builds, production edits, remote mutations or new lane.",
-      "sha256": "439faed48b5e6a2522a8e22dda7e037d9577c9efafcbf653743137298c73f21e"
-    },
-    "final_validation": {
-      "agent": "/root/postmerge_ci",
-      "state": "completed_frozen_root_verified",
-      "started_at": "2026-09-10T02:19:44.322565+00:00",
-      "max_minutes": 20,
-      "directory": "direct-3105/final-validation",
-      "scope": "Exact main/final5and8totalpattern all-RHS/allblock miss requestedpeak matrix; existingzk tests plus recorder boundary witness ifaffordable. No prodchanges/timingclaims/newcommit/network/modelcalls.",
-      "resource": "2jobs incrementalOFF offline stopfree<6509559808",
-      "source_finding": "try_capped existingzk::enabled early return at3989 makes capped RHS unavailable with recorder; reviewer missingcallercontext, not establishedbug. Native tests to pin boundary.",
-      "manifest_files": 108,
-      "manifest_sha256": "8cabd47726442047f2bd05334c6af7557c198e03b0bcfd69cdcaf737470e7668",
-      "root_verification": "direct-3105/admission/final-validation-root-verification.json",
-      "result": "NO_GO:8pattern additional11344095bytes+104.911%requestedpeak; 12samples/repeatedmetrics/raw/binaryhashes/rootverified. ZK20existing+2probe tests pass; main/finaltraceexact."
-    },
-    "pr": 6477,
-    "bounded_retention": {
-      "agent": "/root/postmerge_ci",
-      "actual_model": "GPT-6 Astra",
-      "effort": "xhigh",
-      "state": "completed_frozen_root_verified",
-      "started_at": "2026-09-10T02:28:00Z",
-      "max_minutes": 25,
-      "directory": "direct-3105/bounded-retention",
-      "base_head": "19763bfab1dce196a654c899b172e7b24d70bc59",
-      "design": "Private4MiB query-local retainedRHS storageallowance, actualallocatedcapacities includingindexedslots andbindings; failcloseduncachedoversized/nonfittingrows; drop/refundstaleslots before scan. No publicbudget/API/dep/unsafe/planner/hashchange.4MiB isinitialengineeringchoice tovalidate, notnewpolicy orownerapprovalrequirement.",
-      "author_update": "Implementation and all frozen evidence root verified.",
-      "additional_file": "bench/feature-off-declarations/6477.json: existing V2 declarationofintentionalalwayscompiledenginechange, no derived/neutralityclaim orfloorchange; includedinfreshOpusreview.",
-      "validation": "Scopeddefault/compact/semijoin+clippy/preflight,meaningfulboundcontrol, same5/8pattern12allocationmatrixafterprotocol;optionalfeasible2patternmiss/firsthitpair. Freezecommit beforehandoff.",
-      "constraints": "2jobs,incrementalOFF,offline,free>=6509559808; max25minfirsthandoff; nofullworkspace/remote/model/release/registry/EC2/cachecleanup. Preserveallfrozenbundles.",
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "reported_result": "24 allocation samples root verified: five/eight patterns additional ~2.24 million requested peak bytes (20.7%); two-pattern first+192bytes, miss-2064243bytes.",
-      "source_assessment": "direct-3105/admission/bounded-root-source-assessment.json",
-      "freshness_correction": "Wrong optional two-pattern artifact detected before any samples; both package identities renamed and both real builds verified before all24 samples. Original evidence retained.",
-      "manifest_files": 162,
-      "manifest_sha256": "9807d2c72b46c5597ea719a1c00e73100d51a0747ced9bbc7280ab0ebd868ecb",
-      "root_verification": "direct-3105/admission/bounded-root-verification.json"
-    },
-    "bounded_timing": {
-      "state": "completed_frozen_root_verified",
-      "agent": "/root/postmerge_ci",
-      "directory": "direct-3105/bounded-timing",
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "manifest_files": 75,
-      "manifest_sha256": "c384be7f1e142dc18673cf72cf6cb9074a15d651a5036b211ca4c893fd97da17",
-      "root_verification": "direct-3105/admission/bounded-timing-root-verification.json",
-      "result": "20Systemsamples: firsthitmedian+2.0617%,fullmiss-14.4780%; bothrangesdisjoint,localadvisorynotuniversalneutrality. Samepredeclaredscreenpasses.",
-      "commands_running": false
-    },
-    "bounded_review": {
-      "state": "completed_collected",
-      "kind": "exec_command",
-      "session_id": 31817,
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "actual_model_required": "claude-opus-5",
-      "effort": "xhigh",
-      "input": "direct-3105/admission/opus-bounded-input.md",
-      "input_bytes": 69917,
-      "input_sha256": "e86fed49a7241e2d905b924fb24c93f818968b8516700d39817d561e1c9e4bb4",
-      "output": "direct-3105/admission/opus-bounded-review.json",
-      "collect_policy": "Session31817 completed and collected. Do not poll or relaunch.",
-      "packet_limit": "Reviewer input predates System timings; root independently verified all40 timing samples and accepted the disclosed bounded tradeoff.",
-      "exit_code": 0,
-      "actual_model": "claude-opus-5",
-      "verdict": "approve_for_ci",
-      "result": "direct-3105/admission/opus-bounded-result.json",
-      "receipt": "direct-3105/admission/opus-bounded-completion.json"
-    },
-    "bounded_many_timing": {
-      "state": "completed_frozen_root_verified",
-      "directory": "direct-3105/bounded-many-timing",
-      "manifest_files": 75,
-      "manifest_sha256": "7872725eeb6ed66a9f43ad88ec7a46cd6b1d2b082e14176ab30747981fe70a98",
-      "root_verification": "direct-3105/admission/bounded-many-timing-root-verification.json",
-      "result": "20System samples: five-pattern median -7.374%, eight-pattern -5.037%; all pairs same direction and ranges disjoint. Local advisory. Root accepts bounded extra retained memory with measured latency benefit; first-hit+2.06% disclosed.",
-      "commands_running": false
-    },
-    "uncached_lifetime": {
-      "state": "completed_frozen_root_verified",
-      "agent": "/root/postmerge_ci",
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "directory": "direct-3105/uncached-lifetime-triage",
-      "source": "Copilot current-head review 2026-09-10T03:05:43Z, suppressed comment at exec.rs4289",
-      "scope": "Compare uncached RHS drop point with baseline consuming join; no edits/builds/network/model calls yet.",
-      "manifest_files": 5,
-      "manifest_sha256": "9587d1ea11eed25f8b5c9597b5386fcfa6a0682b7443142810af82baa2ab8bb2",
-      "verdict": "Claimed NDV overlap refuted by lexical scope; no production correction warranted.",
-      "root_verification": "direct-3105/admission/uncached-lifetime-root-verification.json"
-    },
-    "current_ci": {
-      "at": "2026-09-10T03:28:47.427171+00:00",
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "gate_run": 34431706773,
-      "gate_job": 102728401318,
-      "state": "success",
-      "checks": "direct-3105/admission/heartbeat-0328.json",
-      "counts": {
-        "success": 313,
-        "skipped": 97
-      },
-      "notes": "No failures. Actual current-head wasm build and initial feature-off exact-equality completed SUCCESS. Normal label-triggered duplicate feature-off run in progress; do not cancel."
-    },
-    "publication_assessment": "direct-3105/admission/source-hold-cleared-receipt.json",
-    "queue_admission": {
-      "state": "AWAITING_CHECKS",
-      "position": 1,
-      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
-      "evidence": "direct-3105/admission/enqueue-6477-result.json",
-      "root_verification": "direct-3105/admission/queue-admission-root-verification.json",
-      "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "verified_at": "2026-09-10T03:43:39.556534+00:00",
-      "verification": "direct-3105/admission/heartbeat-0343.json"
-    },
-    "merge_group_ci": {
-      "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "gate_run": 34433648325,
-      "gate_job": 102734161005,
-      "gate_app": 15368,
-      "state": "in_progress",
-      "at": "2026-09-10T03:43:39.556534+00:00",
-      "counts": {
-        "success": 73,
-        "skipped": 9,
-        "in_progress": 18
-      },
-      "failure_count": 0,
-      "notes": "No queue ejection; all observed remaining jobs started. Normal active validation, no incident or mutation warranted.",
-      "evidence": "direct-3105/admission/heartbeat-0343.json"
-    }
+      "Collect existing Astra reproduction/design phase; do not launchduplicate.",
+      "If runtime findingconfirmed, authorize minimal restoration fix with meaningful public-callback success/error/unwind/cancellation/sticky-state controls and actual Opus5 xhigh soundness review.",
+      "Keep postmerge6477watch active; no mixedpush/merge-group verdict counts or releaseauthorization."
+    ]
   },
   "prs": {
     "4300": {
@@ -709,7 +478,7 @@
       }
     },
     "6477": {
-      "state": "IN_MERGE_QUEUE",
+      "state": "MERGED",
       "issue": 3105,
       "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
       "branch": "codex/capped-rhs-reuse",
@@ -719,15 +488,17 @@
       "threads": "All resolved on fresh preclear observation",
       "gate_run": 34431706773,
       "gate_state": "success",
-      "latest_evidence": "direct-3105/admission/heartbeat-0343.json",
+      "latest_evidence": "direct-3105/admission/merged-source-proof.json",
       "scope": "Partial #3105 scanreuse only; Refs, not Closes.",
       "performance": "Local advisory fullmiss-14.48%,firsthit+2.06%,5/8patterns-7.37%/-5.04%. Bounded4MiB perinvocation; manycaseextra~2.24million requestedpeakbytes. No universal or canonical claim.",
-      "queue_position": 1,
-      "queue_state": "AWAITING_CHECKS",
+      "queue_position": null,
+      "queue_state": null,
       "admission": "direct-3105/admission/enqueue-6477-result.json",
       "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
-      "merge_group_gate": "in_progress",
-      "merge_group_gate_run": 34433648325
+      "merge_group_gate": "success",
+      "merge_group_gate_run": 34433648325,
+      "merged_at": "2026-09-10T03:55:26Z",
+      "merge_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
     }
   },
   "registry": {
@@ -778,13 +549,9 @@
     }
   },
   "next_actions": [
-    "Collect singleAstra xhigh3105 actual-enginebaselinewitness/minimallazyRHSscanreuse phase. Preserveactualblockplanner/bind/buildside decisions; scan-countcontrol mustkill workassertion, notjustmirrorcode. Stage timing/allocation/cold/miss/hitprotocolaftersemanticworkverified; no speedclaims yet. Ownworktree/20minphase/2jobs/CARGO_INCREMENTAL0/6GiBfloor; no newmodelcall/remotePRbeforefrozenreviewpacket.",
-    "6475replay/min-completed-outcome approachSTOPPED after4newW3Cpositivebudgetfailures andactualOpus5review65227. Bothreviews21832/65227completed/collected; neverpoll/relaunch. Issue6475OPEN and6095review:changes retained; no propertyquarantine/erratumclaim/requeue. Detailsinwaiting_lanes6475.",
-    "PR6095 waits on6475 with review:changes retained. Gate34409423697/job102660112366failed on real canonicalization invariant in matrix34409424033/job102661090898 (g20sparq-vectors groupscanon asleg4). Original reviewedPythonhead86b8unchanged; no lucky requeue or cancellationofremainingliveMG2adb evidence.",
-    "Before eventual6095hold reconciliation, freshlyread currentlabeltimeline/humaninterventions, repairmergedmainandnewexactreview/checkevidence. Then normalprotectedqueue only. Afteractual6095merge verifytwofiles/queue47tests/gate, commentbeforeclosing4567 andwatchmain.",
-    "First ordinary scheduled classifier containing6473 fix is34409971933(e534,22:00:34Z),SUCCESS; actual45tests and150writes verified. Onlyremainingmaintenancewatch is eventualgenerator-label recipients:5016correctlyplannedDEFERRED,0currentrecipients. No manualreplay/newlabels.",
-    "PR6473 maincoreCI/matrix/aggregateALLSUCCESS. Releasepackagingfailuretracked6474,deferredduringreleasepause; missingregistryringtokenexpectedpauseeffect. No release/registryenable/rerun. AftercurrentcorrectnessblockerreturntounheldSPARQLperformance frontier.",
-    "Preserve ALLGREEN and6049/6055/registry2305approval holds. RegistryActionsOFF verified21:57; no automaticregistrydispatch. Keep privateGitcheckpoint and one substantiveAstra xhigh lane, yieldbetweenscheduledobservations."
+    "Collect active6476 bounded reproduction and authorize nextphase onlyonconcreteevidence.",
+    "Watch actualpush mainCI/matrix/gate atd41ec9f independentlyfromsuccessfulmerge-group. Diagnose newrequiredfailures; no retries ofknownpausedregistry/releaseadvisories.",
+    "Preserve6049approvalblock,6055ownerhold,6475canonicalizationNO_GO,6095hold,registry2305ActionsOFF;no releases/EC2/groupingchange."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -2058,6 +1825,265 @@
         "verified": "direct-6468/followup-admission/issue-closed-verified.json",
         "remaining_observation": "First ordinary scheduled run on merged source and eventual #5016 label application remain under monitoring; missing-label abort recovery already observed before source merge."
       }
+    },
+    "3105_scan_reuse": {
+      "issue": 3105,
+      "agent": "/root/postmerge_ci",
+      "actual_model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "phase": "Merged; reviewed files byte-verified on main; postmerge CI separately watched",
+      "started_at": "2026-09-10T00:31:07.235396+00:00",
+      "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "local_branch": "codex/capped-rhs-reuse",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
+      "worktree_state": "Clean ed66; author idle, no commands running.",
+      "directory": "direct-3105",
+      "state": "PR6477 merged at03:55:26Z as d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5 after all8 merge-group runs succeeded. Both changed files byte-identical to reviewed ed66. Issue3105 remains open for planner/hash-build reuse.",
+      "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
+      "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
+      "readiness": "direct-6475/source-admission/perf3105-readiness.json",
+      "fresh_admission": [
+        "direct-6475/source-admission/perf3105-admission.json",
+        "direct-6475/source-admission/perf3105-admission-page2.json"
+      ],
+      "dedupe_scope": "165openPRtitles/branches/arealabels allpages; no3105/RHShoistmatch; noissuecrossrefs; not exhaustiveallPRdiff audit. KnownheldotherenginePRs untouched.",
+      "review_requirement": "ActualindependentClaudeOpus5 xhigh review ofactualcandidate aftersource/tests/controls frozen, then requiredprotectedvalidation. No productionapprovalyet.",
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "phase1": {
+        "state": "completed_frozen_root_verified",
+        "manifest_files": 59,
+        "manifest_sha256": "188a6cffeb664756aec40923d18da3ea905ca217b76f654fcb42e7a863676f48",
+        "packet_sha256": "c986b0b52cad99b53556d88625dcb5d340fe394fe1109a4d0e41bc95936f947d",
+        "proof": "direct-3105/admission/root-phase1-verification.json",
+        "tests": "3default+3no-default focused and21existingASK tests pass;1existing timing probe ignored;3runtime controls killed;scopedlibclippyPASS",
+        "preflight": "Bash3mapfile unavailable inprivacy script; no bypass, realLinuxCI required. Initial invalid empty-resultmaxrows assertion corrected, failure/source preserved.",
+        "scope": "Scanrows reuse only. Per-block GOO/bind/hashbuildside choices unchanged; hash builds unhoisted. Memory/latency/wasm/fullCI remain pending."
+      },
+      "review": {
+        "state": "completed_collected",
+        "kind": "exec_command",
+        "session_id": 90599,
+        "actual_model_required": "claude-opus-5",
+        "effort": "xhigh",
+        "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+        "input": "direct-3105/admission/opus-input.md",
+        "input_bytes": 83887,
+        "input_sha256": "aec96ab6c445162cda2ac78c1afc315f4327f171b9d38ea3258512d77dac313f",
+        "output": "direct-3105/admission/opus-review.json",
+        "collect_policy": "90599completed/collected. Do not poll or relaunch. ActualOpusreviewonlyagain afternewmeaningfulsource/evidence; no merge/perfadmission yet.",
+        "exit_code": 0,
+        "actual_model": "claude-opus-5",
+        "verdict": "approve_for_validation",
+        "result": "direct-3105/admission/opus-result.json",
+        "receipt": "direct-3105/admission/opus-completion.json",
+        "output_sha256": "9dfaed519e80d678574e49e6a2044281f4856a56aae3040b5f207bbfba93408e"
+      },
+      "performance": {
+        "agent": "/root/postmerge_ci",
+        "state": "completed_frozen_root_verified",
+        "directory": "direct-3105/performance-completion",
+        "max_minutes": 20,
+        "scope": "Predeclared exactbaseline/candidaterelease pairedwholequery costs: earlyhit/secondhit/miss/lateLIMIT/multipleRHS retention;allocations/peakheap ifsafe existingharness;overlay/restrictedsortcorrectness ifaffordable",
+        "constraints": "No prodsourcechange/hashhoist/tuning/newdeps/network/EC2;2jobs;incrementalOFF;>=6GiB+64MiBfree;preserve59frozenfiles andsharedcheckout;rootOpusreviewindependent",
+        "admission": "No latency claim beforemeasurements; full CI/ratchets authoritative remote gate beforemerge",
+        "stopped_phase": {
+          "directory": "direct-3105/performance",
+          "manifest_files": 21,
+          "manifest_sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+          "proof": "direct-3105/admission/performance-stop-root-verification.json",
+          "result": "INCOMPLETE_RESOURCE_LIMIT; zero samples; finalbaselinebinarypreserved. Candidatebuildterminatedon6GiB+64MiBfloor; allfrozenfilesunchanged."
+        },
+        "resume_basis": "Diskfree14,537,830,400bytesat01:09 vsprior6.27GB; no rootcachecleanup. Samefixedprotocolauthorizedcompletion, not requestbudgetretry.",
+        "preliminary": "100/100 timingsamples,59/60 allocation samples. Lastcandidate multi-overlay failedSTARTUPcalibration beforequery. No discard/retry ofoldsample. RootreadsampleJSON; fullmiss candidate/base~0.84-0.85,multi~0.77-0.79;earlyhit rangesoverlap. Localadvisoryonly; heapcompletedmulti+143160bytes~1.3%.",
+        "calibration_followup": "Completed; afterfixture/oracle/twowarmups+globalbroadcast; unchangedcounting.rs/measuredbody, newbothcountbinaries. Originalfailurepreserved. No pendingmeasurement/build/retries.",
+        "coverage": "Actualchanging scan_sort/mixedbind/nonbind anddisconnectedcrossnotyetshown. Rootprovidedconcrete3patternfixture candidate; namedoverlayEXISTS coveragepending.",
+        "source_validity": "direct-3105/admission/source-validity-assessment.json supportsstore/viewscanpurity bysourceinspection; not broadruntimeproof.",
+        "manifest_files": 515,
+        "manifest_sha256": "e97fa98a8fcaae33c78db2c40f85881c2f0417d41e177972f82979c02f24d874",
+        "packet_bytes": 28225,
+        "packet_sha256": "290c5ea6f231ba958a8e3f135f05d95dea74ebe40bfca542324e4f37c53d5355",
+        "root_verification": "direct-3105/admission/performance-completion-root-verification.json",
+        "executed": "220commands:100timingsuccesses,59originalallocsuccesses+1startupcalibrationfailure,60correctedallocsuccesses. Allrawstdout/stderr/samples/rows/binaryhashes/balancedorder verified. Sameallocmetricsat59matchingpoints.",
+        "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
+      },
+      "next_actions": [
+        "Postmerge watch continues separately; no production work remains on PR6477. Issue3105 partial scope documented in issuecomment5612726887."
+      ],
+      "coverage": {
+        "agent": "/root/postmerge_ci",
+        "actual_model": "GPT-6 Astra",
+        "effort": "xhigh",
+        "started_at": "2026-09-10T01:40:19.037861+00:00",
+        "directory": "direct-3105/coverage",
+        "state": "completed_frozen_root_verified",
+        "max_minutes": 20,
+        "base_candidate": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+        "scope": "Path-observed actualpublicquery changing requestedRHSsort acrossblocks/mixedbind-nonbind, fullmultisetoracle, disconnectedcross, affordablenamedviewEXISTS/restrictedsort. Optionalminimaldropstaleslotbeforereplacementscan ifjustified; nohashhoist/cachepolicyrewrite/6476fix. Relevantfeaturetests/clippy/preflighthonest.",
+        "control": "Invertchanging-sortguard; if answerlegitimatelysame, physicalinvalidation/workwitness only\u2014do notclaimsemanticcontrol.",
+        "constraints": "Same isolatedworktree/sharedcontract;2jobs,incrementalOFF,offline,>=6GiB+64MiB;preserveallpriorfrozenbundles; nofullworkspace/newdeps/EC2/remoteGitHub/modelcalls.",
+        "handoff": "Freeze/commitfinaldelta exacthead andpacket; rootfocusedactualOpusreviewbeforepublication.",
+        "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+        "manifest_files": 89,
+        "manifest_sha256": "a11c8af18d3aafc5f4eec2b62110a34c496f8904d5e51ec3d2786d13b6fa3d15",
+        "root_verification": "direct-3105/admission/coverage-root-verification.json"
+      },
+      "final_review": {
+        "state": "completed_collected",
+        "kind": "exec_command",
+        "session_id": 11803,
+        "head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+        "actual_model_required": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-3105/admission/opus-final-input.md",
+        "input_bytes": 112161,
+        "input_sha256": "8266714025e14167dd2fad08ac86a02c2d3ce8312dc10370a4bca160d0782683",
+        "output": "direct-3105/admission/opus-final-review.json",
+        "collect_policy": "11803 completed collected. Do not poll/relaunch. New substantive source/evidence only warrants followup.",
+        "exit_code": 0,
+        "actual_model": "claude-opus-5",
+        "verdict": "approve_for_ci",
+        "result": "direct-3105/admission/opus-final-result.json",
+        "receipt": "direct-3105/admission/opus-final-completion.json",
+        "output_sha256": "50bab4a9794fe62f0452cbc02cea356401b450fa5a99fb0886a789cace3db55d"
+      },
+      "publication_preparation": {
+        "agent": "/root/postmerge_ci",
+        "state": "completed_read_only",
+        "output": "direct-3105/admission/publication-preparation.json",
+        "scope": "Bounded local PR-template/process and CI-wiring report only; no builds, production edits, remote mutations or new lane.",
+        "sha256": "439faed48b5e6a2522a8e22dda7e037d9577c9efafcbf653743137298c73f21e"
+      },
+      "final_validation": {
+        "agent": "/root/postmerge_ci",
+        "state": "completed_frozen_root_verified",
+        "started_at": "2026-09-10T02:19:44.322565+00:00",
+        "max_minutes": 20,
+        "directory": "direct-3105/final-validation",
+        "scope": "Exact main/final5and8totalpattern all-RHS/allblock miss requestedpeak matrix; existingzk tests plus recorder boundary witness ifaffordable. No prodchanges/timingclaims/newcommit/network/modelcalls.",
+        "resource": "2jobs incrementalOFF offline stopfree<6509559808",
+        "source_finding": "try_capped existingzk::enabled early return at3989 makes capped RHS unavailable with recorder; reviewer missingcallercontext, not establishedbug. Native tests to pin boundary.",
+        "manifest_files": 108,
+        "manifest_sha256": "8cabd47726442047f2bd05334c6af7557c198e03b0bcfd69cdcaf737470e7668",
+        "root_verification": "direct-3105/admission/final-validation-root-verification.json",
+        "result": "NO_GO:8pattern additional11344095bytes+104.911%requestedpeak; 12samples/repeatedmetrics/raw/binaryhashes/rootverified. ZK20existing+2probe tests pass; main/finaltraceexact."
+      },
+      "pr": 6477,
+      "bounded_retention": {
+        "agent": "/root/postmerge_ci",
+        "actual_model": "GPT-6 Astra",
+        "effort": "xhigh",
+        "state": "completed_frozen_root_verified",
+        "started_at": "2026-09-10T02:28:00Z",
+        "max_minutes": 25,
+        "directory": "direct-3105/bounded-retention",
+        "base_head": "19763bfab1dce196a654c899b172e7b24d70bc59",
+        "design": "Private4MiB query-local retainedRHS storageallowance, actualallocatedcapacities includingindexedslots andbindings; failcloseduncachedoversized/nonfittingrows; drop/refundstaleslots before scan. No publicbudget/API/dep/unsafe/planner/hashchange.4MiB isinitialengineeringchoice tovalidate, notnewpolicy orownerapprovalrequirement.",
+        "author_update": "Implementation and all frozen evidence root verified.",
+        "additional_file": "bench/feature-off-declarations/6477.json: existing V2 declarationofintentionalalwayscompiledenginechange, no derived/neutralityclaim orfloorchange; includedinfreshOpusreview.",
+        "validation": "Scopeddefault/compact/semijoin+clippy/preflight,meaningfulboundcontrol, same5/8pattern12allocationmatrixafterprotocol;optionalfeasible2patternmiss/firsthitpair. Freezecommit beforehandoff.",
+        "constraints": "2jobs,incrementalOFF,offline,free>=6509559808; max25minfirsthandoff; nofullworkspace/remote/model/release/registry/EC2/cachecleanup. Preserveallfrozenbundles.",
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "reported_result": "24 allocation samples root verified: five/eight patterns additional ~2.24 million requested peak bytes (20.7%); two-pattern first+192bytes, miss-2064243bytes.",
+        "source_assessment": "direct-3105/admission/bounded-root-source-assessment.json",
+        "freshness_correction": "Wrong optional two-pattern artifact detected before any samples; both package identities renamed and both real builds verified before all24 samples. Original evidence retained.",
+        "manifest_files": 162,
+        "manifest_sha256": "9807d2c72b46c5597ea719a1c00e73100d51a0747ced9bbc7280ab0ebd868ecb",
+        "root_verification": "direct-3105/admission/bounded-root-verification.json"
+      },
+      "bounded_timing": {
+        "state": "completed_frozen_root_verified",
+        "agent": "/root/postmerge_ci",
+        "directory": "direct-3105/bounded-timing",
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "manifest_files": 75,
+        "manifest_sha256": "c384be7f1e142dc18673cf72cf6cb9074a15d651a5036b211ca4c893fd97da17",
+        "root_verification": "direct-3105/admission/bounded-timing-root-verification.json",
+        "result": "20Systemsamples: firsthitmedian+2.0617%,fullmiss-14.4780%; bothrangesdisjoint,localadvisorynotuniversalneutrality. Samepredeclaredscreenpasses.",
+        "commands_running": false
+      },
+      "bounded_review": {
+        "state": "completed_collected",
+        "kind": "exec_command",
+        "session_id": 31817,
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "actual_model_required": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-3105/admission/opus-bounded-input.md",
+        "input_bytes": 69917,
+        "input_sha256": "e86fed49a7241e2d905b924fb24c93f818968b8516700d39817d561e1c9e4bb4",
+        "output": "direct-3105/admission/opus-bounded-review.json",
+        "collect_policy": "Session31817 completed and collected. Do not poll or relaunch.",
+        "packet_limit": "Reviewer input predates System timings; root independently verified all40 timing samples and accepted the disclosed bounded tradeoff.",
+        "exit_code": 0,
+        "actual_model": "claude-opus-5",
+        "verdict": "approve_for_ci",
+        "result": "direct-3105/admission/opus-bounded-result.json",
+        "receipt": "direct-3105/admission/opus-bounded-completion.json"
+      },
+      "bounded_many_timing": {
+        "state": "completed_frozen_root_verified",
+        "directory": "direct-3105/bounded-many-timing",
+        "manifest_files": 75,
+        "manifest_sha256": "7872725eeb6ed66a9f43ad88ec7a46cd6b1d2b082e14176ab30747981fe70a98",
+        "root_verification": "direct-3105/admission/bounded-many-timing-root-verification.json",
+        "result": "20System samples: five-pattern median -7.374%, eight-pattern -5.037%; all pairs same direction and ranges disjoint. Local advisory. Root accepts bounded extra retained memory with measured latency benefit; first-hit+2.06% disclosed.",
+        "commands_running": false
+      },
+      "uncached_lifetime": {
+        "state": "completed_frozen_root_verified",
+        "agent": "/root/postmerge_ci",
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "directory": "direct-3105/uncached-lifetime-triage",
+        "source": "Copilot current-head review 2026-09-10T03:05:43Z, suppressed comment at exec.rs4289",
+        "scope": "Compare uncached RHS drop point with baseline consuming join; no edits/builds/network/model calls yet.",
+        "manifest_files": 5,
+        "manifest_sha256": "9587d1ea11eed25f8b5c9597b5386fcfa6a0682b7443142810af82baa2ab8bb2",
+        "verdict": "Claimed NDV overlap refuted by lexical scope; no production correction warranted.",
+        "root_verification": "direct-3105/admission/uncached-lifetime-root-verification.json"
+      },
+      "current_ci": {
+        "at": "2026-09-10T03:28:47.427171+00:00",
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "gate_run": 34431706773,
+        "gate_job": 102728401318,
+        "state": "success",
+        "checks": "direct-3105/admission/heartbeat-0328.json",
+        "counts": {
+          "success": 313,
+          "skipped": 97
+        },
+        "notes": "No failures. Actual current-head wasm build and initial feature-off exact-equality completed SUCCESS. Normal label-triggered duplicate feature-off run in progress; do not cancel."
+      },
+      "publication_assessment": "direct-3105/admission/source-hold-cleared-receipt.json",
+      "queue_admission": {
+        "state": "MERGED",
+        "position": null,
+        "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+        "evidence": "direct-3105/admission/enqueue-6477-result.json",
+        "root_verification": "direct-3105/admission/queue-admission-root-verification.json",
+        "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "verified_at": "2026-09-10T03:55:43.335876+00:00",
+        "verification": "direct-3105/admission/heartbeat-0343.json"
+      },
+      "merge_group_ci": {
+        "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+        "gate_run": 34433648325,
+        "gate_job": 102734161005,
+        "gate_app": 15368,
+        "state": "success",
+        "at": "2026-09-10T03:59:24.937502+00:00",
+        "counts": {
+          "success": 73,
+          "skipped": 9,
+          "in_progress": 18
+        },
+        "failure_count": 0,
+        "notes": "All8 merge-group workflow runs SUCCESS; newly-started push checks on sameSHA must not be folded into the merge-group verdict.",
+        "evidence": "direct-3105/admission/postmerge-runs-0359.json"
+      },
+      "merged_at": "2026-09-10T03:55:26Z",
+      "merge_commit": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "main_source_proof": "direct-3105/admission/merged-source-proof.json"
     }
   },
   "postmerge_watch": {
@@ -2105,7 +2131,25 @@
         "direct-6468/followup-admission/main-matrix-jobs-2124.json"
       ]
     },
-    "state": "Main CI, feature matrix and required aggregate allSUCCESS; two noncore failure causes under bounded read-only diagnosis"
+    "state": "Main CI, feature matrix and required aggregate allSUCCESS; two noncore failure causes under bounded read-only diagnosis",
+    "6477": {
+      "head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "state": "running",
+      "observed_at": "2026-09-10T03:59:24.937502+00:00",
+      "ci_run": 34435176563,
+      "matrix_run": 34435176570,
+      "gate_run": 34435176404,
+      "registry_ring": {
+        "run": 34435176316,
+        "result": "expected advisory missing-token failure; no dispatch attempted",
+        "evidence": "direct-3105/admission/postmerge-ring-root-verification.json"
+      },
+      "release_plz": {
+        "run": 34435176367,
+        "result": "failed; current diagnostics notyetread, existing packaging issue6474 remainsopen; do not retry/authorize release"
+      },
+      "evidence": "direct-3105/admission/postmerge-runs-0359.json"
+    }
   },
   "classifier_watch": {
     "issue": 6468,
@@ -2499,8 +2543,15 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T03:11:00Z",
+    "at": "2026-09-10T03:59:24.937502+00:00",
     "actions_enabled": false,
-    "evidence": "direct-3105/admission/registry-off-0311.json"
+    "evidence": "direct-3105/admission/postmerge-runs-0359.json"
+  },
+  "frontier_fallback": {
+    "at": "2026-09-10T03:59:18.624949+00:00",
+    "push_frontier": "Cannot run onBash3 because declare-A; no Bashinstallation.",
+    "bd_ready": "Readonly/no-daemon/no-auto-import/no-auto-flush invocation failed: malformedcommentIDs and existingDoltmissingrepo_state/bootstrapdatabaseexists. Startup logged staleLOCKremoval despite readonly. No furtherbd/DBrepair/cleanup attempted.",
+    "evidence": "direct-3105/admission/ready-frontier-0359.json",
+    "selection": "GitHub-native issue6476 with freshsource/PRdedupe and oneengine-lane constraint; no claim that bdfrontier was empty."
   }
 }

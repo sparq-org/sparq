@@ -1,0 +1,20 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": {
+        "target": {
+          "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+        }
+      },
+      "issue": {
+        "state": "OPEN",
+        "comments": {
+          "nodes": []
+        },
+        "timelineItems": {
+          "nodes": []
+        }
+      }
+    }
+  }
+}

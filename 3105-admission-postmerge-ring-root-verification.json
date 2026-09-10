@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-10T04:02:49.419611+00:00",
+  "files_verified": 10,
+  "manifest_sha256": "e201d1941609faee5e86892457fb8c25b2f190e18dec349d9af44072416c20db",
+  "run": 34435176316,
+  "job": 102738627046,
+  "classification": "Expected advisory missing REGISTRY_RING_TOKEN exit before dispatch, not disabled-registry API refusal. No token restoration or retry.",
+  "registry_permission_evidence": "postmerge-runs-0359.json (enabled:false)",
+  "source_reviewed_head_equals_merged_workflow": true
+}

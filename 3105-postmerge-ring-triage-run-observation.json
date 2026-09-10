@@ -1,0 +1,20 @@
+{
+  "evidence_kind": "selected fields transcribed from successful exact run API response; no repeated request",
+  "endpoint": "repos/sparq-org/sparq/actions/runs/34435176316",
+  "id": 34435176316,
+  "name": "batch-merge",
+  "head_branch": "main",
+  "head_sha": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "path": ".github/workflows/batch-merge.yml",
+  "event": "push",
+  "status": "completed",
+  "conclusion": "failure",
+  "run_attempt": 1,
+  "created_at": "2026-09-10T03:55:28Z",
+  "updated_at": "2026-09-10T03:55:36Z",
+  "actor": "github-merge-queue[bot]",
+  "budget_from_parent": {
+    "remaining": 4999,
+    "resets_at_utc": "2026-09-10T04:55:40Z"
+  }
+}

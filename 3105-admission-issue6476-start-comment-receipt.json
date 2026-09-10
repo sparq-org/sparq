@@ -1,0 +1,6 @@
+{
+  "at": "2026-09-10T04:00:53.065065+00:00",
+  "id": 5612755312,
+  "url": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
+  "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nI am taking this as the next bounded engine task after #6477. First I will execute a real public extension-callback reproduction on main `d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5` and pin the guard lifetime/sticky-state requirements. A minimal correction and independent Opus soundness review will follow if the reproduction confirms the source finding. No production correction is claimed yet.\n"
+}

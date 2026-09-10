@@ -1,0 +1,54 @@
+{
+  "files": [
+    {
+      "path": "advisory-content.json",
+      "bytes": 35275,
+      "sha256": "ed0cde2bf20c9355a1e354bebd2079f550da92841a3a636a265528580ab79ffa"
+    },
+    {
+      "path": "advisory-registry.json",
+      "bytes": 24828,
+      "sha256": "f50f05c067201ec5820acb61f42a82d1cce50f7b1d3166316a85ce62a757e869"
+    },
+    {
+      "path": "batch-merge.yml",
+      "bytes": 9320,
+      "sha256": "75c775703e957c182e51433c2609a5723554e2d0f4fda681590537a1bde28515"
+    },
+    {
+      "path": "job.json",
+      "bytes": 1371,
+      "sha256": "e6da48e58a54c4fb4a225687b4ec1842ecc093e4eb40253993b04a53d9097ce2"
+    },
+    {
+      "path": "job.log",
+      "bytes": 3557,
+      "sha256": "27803629bc8db1a6e8effe118870ce143b057c501ba2dba92a4184f99456d1a0"
+    },
+    {
+      "path": "report.json",
+      "bytes": 5529,
+      "sha256": "2dfa7317f96ae40f90e26328d573cf1c2d275c00616694a7f1b80b145c0cb920"
+    },
+    {
+      "path": "reviewed-source-comparison.json",
+      "bytes": 378,
+      "sha256": "cdb49ed07b356881bfeb978bf428628d4caf1412b6657a25969abd6d98d50f31"
+    },
+    {
+      "path": "run-observation.json",
+      "bytes": 660,
+      "sha256": "df42cafecf43317800550e148711d8176ba0e0201e1d6b70303d79e331e56299"
+    },
+    {
+      "path": "source-read.json",
+      "bytes": 279,
+      "sha256": "664894b6142bc669fc3923f474d4ed41bdedb390a399f018edfeb00e2f325ea7"
+    },
+    {
+      "path": "workflow-content.json",
+      "bytes": 13921,
+      "sha256": "20963f5446b5bbae74bab0494755d80d970f1b7073f14cecf8920d809002ea1e"
+    }
+  ]
+}
