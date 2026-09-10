@@ -137,6 +137,26 @@ jobs:
         run: |
           npm ci
           npm ls next --workspace=site --workspace=gui/app
+          node <<'NODE'
+          // [GPT-6 ASTRA] Exercise the installed native dependency, including libvips.
+          const assert = require('node:assert/strict');
+          const sharp = require('sharp');
+          const installed = sharp.versions.sharp;
+          const locked = require('./package-lock.json').packages['node_modules/sharp'].version;
+          console.log(JSON.stringify({ sharp: installed, versions: sharp.versions }));
+          assert.equal(installed, locked, 'installed sharp must match the committed lock');
+          (async () => {
+            const { data, info } = await sharp({
+              create: { width: 1, height: 1, channels: 4, background: '#000000' }
+            }).png().toBuffer({ resolveWithObject: true });
+            assert.equal(info.format, 'png');
+            assert.equal(info.width, 1);
+            assert.equal(info.height, 1);
+            assert.ok(data.length > 8, 'generated PNG must be nonempty');
+            assert.deepEqual(data.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+            console.log(`sharp native PNG smoke: ${data.length} bytes`);
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
           git diff --exit-code -- package-lock.json gui/app/package.json site/package.json
 
       - name: Build (wasm-pack + tsc)
