@@ -1,0 +1,3882 @@
+[
+  {
+    "case": "first",
+    "view": "base",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 1776069.3333333333,
+          "max": 1845791.6666666667,
+          "median": 1800902.6666666667,
+          "mean": 1810997.2,
+          "sample_stddev": 30273.57013101988,
+          "cv_percent": 1.6716519567793855
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38797312,
+            "max": 38830080,
+            "median": 38830080,
+            "mean": 38816972.8,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.04623692026888115
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 38862848,
+            "max": 38912000,
+            "median": 38895616,
+            "mean": 38895616,
+            "sample_stddev": 20066.219972879793,
+            "cv_percent": 0.05158992718582936
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 39043072,
+            "max": 39075840,
+            "median": 39059456,
+            "mean": 39059456,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.04194630872483222
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 1242,
+            "max": 1242,
+            "median": 1242,
+            "mean": 1242,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21370986,
+            "max": 21370986,
+            "median": 21370986,
+            "mean": 21370986,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712554,
+            "max": 8712554,
+            "median": 8712554,
+            "mean": 8712554,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418993,
+            "max": 22418993,
+            "median": 22418993,
+            "mean": 22418993,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38780928,
+            "max": 38813696,
+            "median": 38813696,
+            "mean": 38802773.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04875582850299443
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 38895616,
+            "max": 38944768,
+            "median": 38928384,
+            "mean": 38922922.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.06429880307220204
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 38928384,
+            "max": 38961152,
+            "median": 38961152,
+            "mean": 38950229.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.0485712509133168
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 1242,
+            "max": 1242,
+            "median": 1242,
+            "mean": 1242,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21370986,
+            "max": 21370986,
+            "median": 21370986,
+            "mean": 21370986,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712554,
+            "max": 8712554,
+            "median": 8712554,
+            "mean": 8712554,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418908,
+            "max": 22418908,
+            "median": 22418908,
+            "mean": 22418908,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38813696,
+            "max": 38830080,
+            "median": 38830080,
+            "mean": 38824618.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02436419760260061
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 38912000,
+            "max": 38928384,
+            "median": 38928384,
+            "mean": 38922922.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02430266321830893
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 38944768,
+            "max": 38961152,
+            "median": 38944768,
+            "mean": 38950229.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.0242856254566584
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 1766791.6666666667,
+          "max": 1828833.3333333333,
+          "median": 1791569.3333333333,
+          "mean": 1797880.5333333332,
+          "sample_stddev": 26053.53476828469,
+          "cv_percent": 1.4491249159909712
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38830080,
+            "max": 38862848,
+            "median": 38862848,
+            "mean": 38849740.8,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.04619792151696745
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 38912000,
+            "max": 38961152,
+            "median": 38944768,
+            "mean": 38938214.4,
+            "sample_stddev": 18680.634164824278,
+            "cv_percent": 0.04797506627531508
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 39010304,
+            "max": 39092224,
+            "median": 39075840,
+            "mean": 39062732.8,
+            "sample_stddev": 35519.665584011345,
+            "cv_percent": 0.09092980198254677
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 1243,
+            "max": 1243,
+            "median": 1243,
+            "mean": 1243,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21371162,
+            "max": 21371162,
+            "median": 21371162,
+            "mean": 21371162,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418994,
+            "max": 22418994,
+            "median": 22418994,
+            "mean": 22418994,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38862848,
+            "max": 38862848,
+            "median": 38862848,
+            "mean": 38862848,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 38993920,
+            "max": 39010304,
+            "median": 39010304,
+            "mean": 39004842.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02425162150054435
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 39043072,
+            "max": 39043072,
+            "median": 39043072,
+            "mean": 39043072,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 1243,
+            "max": 1243,
+            "median": 1243,
+            "mean": 1243,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21371162,
+            "max": 21371162,
+            "median": 21371162,
+            "mean": 21371162,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418909,
+            "max": 22418909,
+            "median": 22418909,
+            "mean": 22418909,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38813696,
+            "max": 38813696,
+            "median": 38813696,
+            "mean": 38813696,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 38928384,
+            "max": 38944768,
+            "median": 38944768,
+            "mean": 38939306.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.024292437693813146
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 38961152,
+            "max": 38977536,
+            "median": 38977536,
+            "mean": 38972074.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02427201243790467
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.9948174137858273,
+    "candidate_faster_disjoint_ranges": false,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 176,
+    "peak_live_growth_delta_percent": 0.0020200735628152205,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "first",
+    "view": "overlay",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 1797694.6666666667,
+          "max": 1857583.3333333333,
+          "median": 1841458.3333333333,
+          "mean": 1831172.2666666666,
+          "sample_stddev": 26171.842865313523,
+          "cv_percent": 1.4292398012861374
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43778048,
+            "max": 43794432,
+            "median": 43794432,
+            "mean": 43787878.4,
+            "sample_stddev": 8973.886382164641,
+            "cv_percent": 0.02049399676364462
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 43859968,
+            "max": 43892736,
+            "median": 43876352,
+            "mean": 43876352,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.037341299477221805
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 43991040,
+            "max": 44040192,
+            "median": 44007424,
+            "mean": 44010700.8,
+            "sample_stddev": 21362.12244136804,
+            "cv_percent": 0.04853847371902799
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 1242,
+            "max": 1242,
+            "median": 1242,
+            "mean": 1242,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21370986,
+            "max": 21370986,
+            "median": 21370986,
+            "mean": 21370986,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712554,
+            "max": 8712554,
+            "median": 8712554,
+            "mean": 8712554,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081120,
+            "max": 21081120,
+            "median": 21081120,
+            "mean": 21081120,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43745280,
+            "max": 43794432,
+            "median": 43778048,
+            "mean": 43772586.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.0571749930749325
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 43859968,
+            "max": 43909120,
+            "median": 43892736,
+            "mean": 43887274.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.05702558107212344
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 43892736,
+            "max": 43941888,
+            "median": 43925504,
+            "mean": 43920042.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.05698303525187565
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 1242,
+            "max": 1242,
+            "median": 1242,
+            "mean": 1242,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21370986,
+            "max": 21370986,
+            "median": 21370986,
+            "mean": 21370986,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712554,
+            "max": 8712554,
+            "median": 8712554,
+            "mean": 8712554,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081035,
+            "max": 21081035,
+            "median": 21081035,
+            "mean": 21081035,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43794432,
+            "max": 43810816,
+            "median": 43810816,
+            "mean": 43805354.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021593950973306037
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 43892736,
+            "max": 43909120,
+            "median": 43892736,
+            "mean": 43898197.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02154828076099623
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 43925504,
+            "max": 43941888,
+            "median": 43925504,
+            "mean": 43930965.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021532207950881118
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 1814722.3333333333,
+          "max": 1852444.3333333333,
+          "median": 1844902.6666666667,
+          "mean": 1836186.0666666667,
+          "sample_stddev": 16088.135289018996,
+          "cv_percent": 0.8761712977282692
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43778048,
+            "max": 43810816,
+            "median": 43810816,
+            "mean": 43800985.6,
+            "sample_stddev": 14654.295097342621,
+            "cv_percent": 0.03345654189421395
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 43859968,
+            "max": 43941888,
+            "median": 43892736,
+            "mean": 43892736,
+            "sample_stddev": 30651.657312452127,
+            "cv_percent": 0.06983309792411238
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 43991040,
+            "max": 44007424,
+            "median": 44007424,
+            "mean": 44004147.2,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.01665103862908474
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 1243,
+            "max": 1243,
+            "median": 1243,
+            "mean": 1243,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21371162,
+            "max": 21371162,
+            "median": 21371162,
+            "mean": 21371162,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081121,
+            "max": 21081121,
+            "median": 21081121,
+            "mean": 21081121,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43827200,
+            "max": 43827200,
+            "median": 43827200,
+            "mean": 43827200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 43958272,
+            "max": 43958272,
+            "median": 43958272,
+            "mean": 43958272,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44007424,
+            "max": 44007424,
+            "median": 44007424,
+            "mean": 44007424,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 1243,
+            "max": 1243,
+            "median": 1243,
+            "mean": 1243,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 200,
+            "max": 200,
+            "median": 200,
+            "mean": 200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 21371162,
+            "max": 21371162,
+            "median": 21371162,
+            "mean": 21371162,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081036,
+            "max": 21081036,
+            "median": 21081036,
+            "mean": 21081036,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43761664,
+            "max": 43827200,
+            "median": 43794432,
+            "mean": 43794432,
+            "sample_stddev": 32768.0,
+            "cv_percent": 0.07482229704451927
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 43859968,
+            "max": 43941888,
+            "median": 43909120,
+            "mean": 43903658.666666664,
+            "sample_stddev": 41232.162462491986,
+            "cv_percent": 0.09391509435589936
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 43892736,
+            "max": 43974656,
+            "median": 43941888,
+            "mean": 43936426.666666664,
+            "sample_stddev": 41232.162462491986,
+            "cv_percent": 0.09384505202325356
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 1.001870437832334,
+    "candidate_faster_disjoint_ranges": false,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 176,
+    "peak_live_growth_delta_percent": 0.0020200735628152205,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "second",
+    "view": "base",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 11295250.0,
+          "max": 11587833.333333334,
+          "median": 11396778.0,
+          "mean": 11404586.133333333,
+          "sample_stddev": 111569.95220578002,
+          "cv_percent": 0.9782902325555092
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38797312,
+            "max": 38830080,
+            "median": 38830080,
+            "mean": 38816972.8,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.04623692026888115
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 41009152,
+            "max": 41074688,
+            "median": 41058304,
+            "mean": 41048473.6,
+            "sample_stddev": 29763.014040919985,
+            "cv_percent": 0.07250699339261177
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 41172992,
+            "max": 41254912,
+            "median": 41205760,
+            "mean": 41205760,
+            "sample_stddev": 30651.657312452127,
+            "cv_percent": 0.07438682677482984
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 65828,
+            "max": 65828,
+            "median": 65828,
+            "mean": 65828,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 390,
+            "max": 390,
+            "median": 390,
+            "mean": 390,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 38767905,
+            "max": 38767905,
+            "median": 38767905,
+            "mean": 38767905,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10777001,
+            "max": 10777001,
+            "median": 10777001,
+            "mean": 10777001,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419006,
+            "max": 22419006,
+            "median": 22419006,
+            "mean": 22419006,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38764544,
+            "max": 38797312,
+            "median": 38797312,
+            "mean": 38786389.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.0487764237558118
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 40992768,
+            "max": 41058304,
+            "median": 41025536,
+            "mean": 41025536,
+            "sample_stddev": 32768.0,
+            "cv_percent": 0.07987220447284345
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 41025536,
+            "max": 41107456,
+            "median": 41058304,
+            "mean": 41063765.333333336,
+            "sample_stddev": 41232.162462491986,
+            "cv_percent": 0.10041008691675421
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 65828,
+            "max": 65828,
+            "median": 65828,
+            "mean": 65828,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 390,
+            "max": 390,
+            "median": 390,
+            "mean": 390,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 38767905,
+            "max": 38767905,
+            "median": 38767905,
+            "mean": 38767905,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10777001,
+            "max": 10777001,
+            "median": 10777001,
+            "mean": 10777001,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418921,
+            "max": 22418921,
+            "median": 22418921,
+            "mean": 22418921,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38813696,
+            "max": 38830080,
+            "median": 38813696,
+            "mean": 38819157.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02436762531751375
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 41074688,
+            "max": 41091072,
+            "median": 41091072,
+            "mean": 41085610.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.023023405656903858
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 41107456,
+            "max": 41123840,
+            "median": 41123840,
+            "mean": 41118378.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.023005057877126808
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 10479041.666666666,
+          "max": 10659333.333333334,
+          "median": 10629069.333333334,
+          "mean": 10601594.466666667,
+          "sample_stddev": 73161.62299229528,
+          "cv_percent": 0.6901001846687183
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38813696,
+            "max": 38862848,
+            "median": 38830080,
+            "mean": 38836633.6,
+            "sample_stddev": 18680.634164824278,
+            "cv_percent": 0.048100549489501265
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 39895040,
+            "max": 39944192,
+            "median": 39911424,
+            "mean": 39911424,
+            "sample_stddev": 20066.219972879793,
+            "cv_percent": 0.050276883062052094
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 40058880,
+            "max": 40091648,
+            "median": 40075264,
+            "mean": 40071987.2,
+            "sample_stddev": 13707.837874734294,
+            "cv_percent": 0.034208031177286595
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 65805,
+            "max": 65805,
+            "median": 65805,
+            "mean": 65805,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 294,
+            "max": 294,
+            "median": 294,
+            "mean": 294,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28139966,
+            "max": 28139966,
+            "median": 28139966,
+            "mean": 28139966,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712742,
+            "max": 8712742,
+            "median": 8712742,
+            "mean": 8712742,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419007,
+            "max": 22419007,
+            "median": 22419007,
+            "mean": 22419007,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38862848,
+            "max": 38862848,
+            "median": 38862848,
+            "mean": 38862848,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 39927808,
+            "max": 39927808,
+            "median": 39927808,
+            "mean": 39927808,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 39976960,
+            "max": 39976960,
+            "median": 39976960,
+            "mean": 39976960,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 65805,
+            "max": 65805,
+            "median": 65805,
+            "mean": 65805,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 294,
+            "max": 294,
+            "median": 294,
+            "mean": 294,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28139966,
+            "max": 28139966,
+            "median": 28139966,
+            "mean": 28139966,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712742,
+            "max": 8712742,
+            "median": 8712742,
+            "mean": 8712742,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418922,
+            "max": 22418922,
+            "median": 22418922,
+            "mean": 22418922,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38813696,
+            "max": 38846464,
+            "median": 38846464,
+            "mean": 38835541.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04871469012990795
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 39927808,
+            "max": 39927808,
+            "median": 39927808,
+            "mean": 39927808,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 39944192,
+            "max": 39976960,
+            "median": 39976960,
+            "mean": 39966037.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.047336726088244796
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.9326380959016078,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": -2064259,
+    "peak_live_growth_delta_percent": -19.154299048501528,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "second",
+    "view": "overlay",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 11332166.666666666,
+          "max": 11475041.666666666,
+          "median": 11377430.666666666,
+          "mean": 11394347.2,
+          "sample_stddev": 55785.309791995154,
+          "cv_percent": 0.4895875894671277
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43761664,
+            "max": 43778048,
+            "median": 43778048,
+            "mean": 43771494.4,
+            "sample_stddev": 8973.886382164641,
+            "cv_percent": 0.020501667820974925
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 46006272,
+            "max": 46022656,
+            "median": 46006272,
+            "mean": 46009548.8,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.015925275817247987
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 46153728,
+            "max": 46202880,
+            "median": 46170112,
+            "mean": 46170112,
+            "sample_stddev": 20066.219972879793,
+            "cv_percent": 0.04346149295215007
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 65828,
+            "max": 65828,
+            "median": 65828,
+            "mean": 65828,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 390,
+            "max": 390,
+            "median": 390,
+            "mean": 390,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 38767905,
+            "max": 38767905,
+            "median": 38767905,
+            "mean": 38767905,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10777001,
+            "max": 10777001,
+            "median": 10777001,
+            "mean": 10777001,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081133,
+            "max": 21081133,
+            "median": 21081133,
+            "mean": 21081133,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43761664,
+            "max": 43794432,
+            "median": 43761664,
+            "mean": 43772586.666666664,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04322023225374616
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 45989888,
+            "max": 46022656,
+            "median": 46006272,
+            "mean": 46006272,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03561253561253561
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 46022656,
+            "max": 46055424,
+            "median": 46022656,
+            "mean": 46033578.666666664,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04109742098870275
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 65828,
+            "max": 65828,
+            "median": 65828,
+            "mean": 65828,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 390,
+            "max": 390,
+            "median": 390,
+            "mean": 390,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 38767905,
+            "max": 38767905,
+            "median": 38767905,
+            "mean": 38767905,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10777001,
+            "max": 10777001,
+            "median": 10777001,
+            "mean": 10777001,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081048,
+            "max": 21081048,
+            "median": 21081048,
+            "mean": 21081048,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43794432,
+            "max": 43810816,
+            "median": 43810816,
+            "mean": 43805354.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021593950973306037
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 46055424,
+            "max": 46071808,
+            "median": 46055424,
+            "mean": 46060885.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02053652842742325
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 46088192,
+            "max": 46104576,
+            "median": 46104576,
+            "mean": 46099114.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.020519497779515193
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 10348139.0,
+          "max": 10468403.0,
+          "median": 10435666.666666666,
+          "mean": 10417758.466666667,
+          "sample_stddev": 56297.42267368916,
+          "cv_percent": 0.5403986169752546
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43810816,
+            "max": 43810816,
+            "median": 43810816,
+            "mean": 43810816,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 44859392,
+            "max": 44908544,
+            "median": 44892160,
+            "mean": 44885606.4,
+            "sample_stddev": 18680.634164824278,
+            "cv_percent": 0.041618317458721646
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 45023232,
+            "max": 45072384,
+            "median": 45039616,
+            "mean": 45039616,
+            "sample_stddev": 20066.219972879793,
+            "cv_percent": 0.04455237800624187
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 65805,
+            "max": 65805,
+            "median": 65805,
+            "mean": 65805,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 294,
+            "max": 294,
+            "median": 294,
+            "mean": 294,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28139966,
+            "max": 28139966,
+            "median": 28139966,
+            "mean": 28139966,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712742,
+            "max": 8712742,
+            "median": 8712742,
+            "mean": 8712742,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081134,
+            "max": 21081134,
+            "median": 21081134,
+            "mean": 21081134,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43827200,
+            "max": 43827200,
+            "median": 43827200,
+            "mean": 43827200,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44892160,
+            "max": 44892160,
+            "median": 44892160,
+            "mean": 44892160,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44924928,
+            "max": 44941312,
+            "median": 44941312,
+            "mean": 44935850.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021050690417706335
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 65805,
+            "max": 65805,
+            "median": 65805,
+            "mean": 65805,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 294,
+            "max": 294,
+            "median": 294,
+            "mean": 294,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28139966,
+            "max": 28139966,
+            "median": 28139966,
+            "mean": 28139966,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712742,
+            "max": 8712742,
+            "median": 8712742,
+            "mean": 8712742,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081049,
+            "max": 21081049,
+            "median": 21081049,
+            "mean": 21081049,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43810816,
+            "max": 43827200,
+            "median": 43810816,
+            "mean": 43816277.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021588567961721015
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44892160,
+            "max": 44924928,
+            "median": 44892160,
+            "mean": 44903082.666666664,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04213210429503472
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44941312,
+            "max": 44941312,
+            "median": 44941312,
+            "mean": 44941312,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.9172252481608911,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": -2064259,
+    "peak_live_growth_delta_percent": -19.154299048501528,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "miss",
+    "view": "base",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 12252528.0,
+          "max": 12686375.0,
+          "median": 12532819.333333334,
+          "mean": 12465486.066666666,
+          "sample_stddev": 199033.64841701742,
+          "cv_percent": 1.5966777978216458
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38764544,
+            "max": 38813696,
+            "median": 38780928,
+            "mean": 38790758.4,
+            "sample_stddev": 21981.442646013933,
+            "cv_percent": 0.05666669988595514
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 41336832,
+            "max": 41385984,
+            "median": 41336832,
+            "mean": 41353216,
+            "sample_stddev": 23170.47500592079,
+            "cv_percent": 0.05603064827151724
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 41467904,
+            "max": 41517056,
+            "median": 41484288,
+            "mean": 41487564.8,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.04326060796976274
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70347,
+            "max": 70347,
+            "median": 70347,
+            "mean": 70347,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 50090494,
+            "max": 50090494,
+            "median": 50090494,
+            "mean": 50090494,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10776989,
+            "max": 10776989,
+            "median": 10776989,
+            "mean": 10776989,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418984,
+            "max": 22418984,
+            "median": 22418984,
+            "mean": 22418984,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38764544,
+            "max": 38797312,
+            "median": 38780928,
+            "mean": 38780928,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.04224757076468103
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 41254912,
+            "max": 41353216,
+            "median": 41287680,
+            "mean": 41298602.666666664,
+            "sample_stddev": 50053.94679077099,
+            "cv_percent": 0.12120009772430151
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 41287680,
+            "max": 41385984,
+            "median": 41304064,
+            "mean": 41325909.333333336,
+            "sample_stddev": 52667.19135603619,
+            "cv_percent": 0.12744351474815588
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70347,
+            "max": 70347,
+            "median": 70347,
+            "mean": 70347,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 50090494,
+            "max": 50090494,
+            "median": 50090494,
+            "mean": 50090494,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10776989,
+            "max": 10776989,
+            "median": 10776989,
+            "mean": 10776989,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418899,
+            "max": 22418899,
+            "median": 22418899,
+            "mean": 22418899,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38797312,
+            "max": 38830080,
+            "median": 38813696,
+            "mean": 38813696,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.04221190375685943
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 41336832,
+            "max": 41369600,
+            "median": 41353216,
+            "mean": 41353216,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.039619651347068144
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 41369600,
+            "max": 41402368,
+            "median": 41369600,
+            "mean": 41380522.666666664,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04571864346229055
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 10616694.333333334,
+          "max": 11452069.666666666,
+          "median": 10714888.666666666,
+          "mean": 10868913.866666667,
+          "sample_stddev": 336873.8747877803,
+          "cv_percent": 3.0994253788404933
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 38797312,
+            "max": 38846464,
+            "median": 38830080,
+            "mean": 38826803.2,
+            "sample_stddev": 21362.12244136804,
+            "cv_percent": 0.055019009242996436
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 39911424,
+            "max": 39944192,
+            "median": 39911424,
+            "mean": 39917977.6,
+            "sample_stddev": 14654.295097342621,
+            "cv_percent": 0.03671101588408783
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 39993344,
+            "max": 40075264,
+            "median": 40058880,
+            "mean": 40049049.6,
+            "sample_stddev": 33974.585513292135,
+            "cv_percent": 0.08483243885341073
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70300,
+            "max": 70300,
+            "median": 70300,
+            "mean": 70300,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28834440,
+            "max": 28834440,
+            "median": 28834440,
+            "mean": 28834440,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418985,
+            "max": 22418985,
+            "median": 22418985,
+            "mean": 22418985,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38813696,
+            "max": 38830080,
+            "median": 38813696,
+            "mean": 38819157.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02436762531751375
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 39878656,
+            "max": 39895040,
+            "median": 39878656,
+            "mean": 39884117.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02371697668860574
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 39927808,
+            "max": 39944192,
+            "median": 39927808,
+            "mean": 39933269.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.023687784567408058
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70300,
+            "max": 70300,
+            "median": 70300,
+            "mean": 70300,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28834440,
+            "max": 28834440,
+            "median": 28834440,
+            "mean": 28834440,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418900,
+            "max": 22418900,
+            "median": 22418900,
+            "mean": 22418900,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 38780928,
+            "max": 38797312,
+            "median": 38780928,
+            "mean": 38786389.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.0243882118779059
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 39878656,
+            "max": 39895040,
+            "median": 39895040,
+            "mean": 39889578.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.023713729566934245
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 39927808,
+            "max": 39927808,
+            "median": 39927808,
+            "mean": 39927808,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.8549463916844674,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": -2064259,
+    "peak_live_growth_delta_percent": -19.154320376498482,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "miss",
+    "view": "overlay",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 12473041.666666666,
+          "max": 12704514.0,
+          "median": 12558930.666666666,
+          "mean": 12573666.8,
+          "sample_stddev": 83261.78701828234,
+          "cv_percent": 0.6621917722384876
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43745280,
+            "max": 43778048,
+            "median": 43761664,
+            "mean": 43761664,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.037439161362785474
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 46170112,
+            "max": 46219264,
+            "median": 46202880,
+            "mean": 46193049.6,
+            "sample_stddev": 21981.442646013933,
+            "cv_percent": 0.047586039104060215
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 46317568,
+            "max": 46366720,
+            "median": 46333952,
+            "mean": 46343782.4,
+            "sample_stddev": 21981.442646013933,
+            "cv_percent": 0.047431265873572576
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70347,
+            "max": 70347,
+            "median": 70347,
+            "mean": 70347,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 50090494,
+            "max": 50090494,
+            "median": 50090494,
+            "mean": 50090494,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10776989,
+            "max": 10776989,
+            "median": 10776989,
+            "mean": 10776989,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081111,
+            "max": 21081111,
+            "median": 21081111,
+            "mean": 21081111,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43745280,
+            "max": 43761664,
+            "median": 43745280,
+            "mean": 43750741.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02162090634838194
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 46137344,
+            "max": 46137344,
+            "median": 46137344,
+            "mean": 46137344,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 46153728,
+            "max": 46170112,
+            "median": 46153728,
+            "mean": 46159189.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02049279232807474
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70347,
+            "max": 70347,
+            "median": 70347,
+            "mean": 70347,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 50090494,
+            "max": 50090494,
+            "median": 50090494,
+            "mean": 50090494,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10776989,
+            "max": 10776989,
+            "median": 10776989,
+            "mean": 10776989,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081026,
+            "max": 21081026,
+            "median": 21081026,
+            "mean": 21081026,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43761664,
+            "max": 43778048,
+            "median": 43778048,
+            "mean": 43772586.666666664,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02161011612687308
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 46186496,
+            "max": 46202880,
+            "median": 46186496,
+            "mean": 46191957.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.020478254996085094
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 46219264,
+            "max": 46252032,
+            "median": 46235648,
+            "mean": 46235648,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03543586109142452
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 10501930.666666666,
+          "max": 11109180.666666666,
+          "median": 10593472.333333334,
+          "mean": 10691900.0,
+          "sample_stddev": 241323.08031638587,
+          "cv_percent": 2.2570645097352746
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43778048,
+            "max": 43794432,
+            "median": 43794432,
+            "mean": 43791155.2,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.016732026171054997
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 44892160,
+            "max": 44941312,
+            "median": 44908544,
+            "mean": 44915097.6,
+            "sample_stddev": 24847.566255068123,
+            "cv_percent": 0.055321189494795
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 45039616,
+            "max": 45105152,
+            "median": 45056000,
+            "mean": 45059276.8,
+            "sample_stddev": 26921.659146493927,
+            "cv_percent": 0.0597472064764562
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70300,
+            "max": 70300,
+            "median": 70300,
+            "mean": 70300,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28834440,
+            "max": 28834440,
+            "median": 28834440,
+            "mean": 28834440,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081112,
+            "max": 21081112,
+            "median": 21081112,
+            "mean": 21081112,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43794432,
+            "max": 43810816,
+            "median": 43794432,
+            "mean": 43799893.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021596643485896225
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44892160,
+            "max": 44908544,
+            "median": 44892160,
+            "mean": 44897621.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02106861461584816
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44941312,
+            "max": 44957696,
+            "median": 44941312,
+            "mean": 44946773.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02104557481857688
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70300,
+            "max": 70300,
+            "median": 70300,
+            "mean": 70300,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 28834440,
+            "max": 28834440,
+            "median": 28834440,
+            "mean": 28834440,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 8712730,
+            "max": 8712730,
+            "median": 8712730,
+            "mean": 8712730,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081027,
+            "max": 21081027,
+            "median": 21081027,
+            "mean": 21081027,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43761664,
+            "max": 43778048,
+            "median": 43761664,
+            "mean": 43767125.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.021612812672434204
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44875776,
+            "max": 44908544,
+            "median": 44892160,
+            "mean": 44892160,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.0364963503649635
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44924928,
+            "max": 44957696,
+            "median": 44941312,
+            "mean": 44941312,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03645643456069996
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.8435011399059666,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": -2064259,
+    "peak_live_growth_delta_percent": -19.154320376498482,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "late",
+    "view": "base",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 22615403.0,
+          "max": 23235194.333333332,
+          "median": 22743361.0,
+          "mean": 22841050.0,
+          "sample_stddev": 241259.99390330343,
+          "cv_percent": 1.056256143668104
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 73908224,
+            "max": 73940992,
+            "median": 73908224,
+            "mean": 73918054.4,
+            "sample_stddev": 14654.295097342621,
+            "cv_percent": 0.019825055213226257
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 73908224,
+            "max": 73940992,
+            "median": 73908224,
+            "mean": 73918054.4,
+            "sample_stddev": 14654.295097342621,
+            "cv_percent": 0.019825055213226257
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 73908224,
+            "max": 73940992,
+            "median": 73908224,
+            "mean": 73918054.4,
+            "sample_stddev": 14654.295097342621,
+            "cv_percent": 0.019825055213226257
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 332467,
+            "max": 332467,
+            "median": 332467,
+            "mean": 332467,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 70275472,
+            "max": 70275472,
+            "median": 70275472,
+            "mean": 70275472,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419013,
+            "max": 22419013,
+            "median": 22419013,
+            "mean": 22419013,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 73924608,
+            "max": 73940992,
+            "median": 73940992,
+            "mean": 73935530.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012793993260222168
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 73924608,
+            "max": 73940992,
+            "median": 73940992,
+            "mean": 73935530.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012793993260222168
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 73924608,
+            "max": 73940992,
+            "median": 73940992,
+            "mean": 73935530.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012793993260222168
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 332467,
+            "max": 332467,
+            "median": 332467,
+            "mean": 332467,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 70275472,
+            "max": 70275472,
+            "median": 70275472,
+            "mean": 70275472,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418928,
+            "max": 22418928,
+            "median": 22418928,
+            "mean": 22418928,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 73940992,
+            "max": 73973760,
+            "median": 73940992,
+            "mean": 73951914.66666667,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.02558231751818739
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 73940992,
+            "max": 73973760,
+            "median": 73940992,
+            "mean": 73951914.66666667,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.02558231751818739
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 73940992,
+            "max": 73973760,
+            "median": 73940992,
+            "mean": 73951914.66666667,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.02558231751818739
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 20706597.333333332,
+          "max": 21264653.0,
+          "median": 21104680.333333332,
+          "mean": 21057300.066666666,
+          "sample_stddev": 208846.62145185802,
+          "cv_percent": 0.9918015167692772
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 75055104,
+            "max": 75071488,
+            "median": 75055104,
+            "mean": 75058380.8,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.009761931273464551
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 75055104,
+            "max": 75071488,
+            "median": 75055104,
+            "mean": 75058380.8,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.009761931273464551
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 75055104,
+            "max": 75071488,
+            "median": 75055104,
+            "mean": 75058380.8,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.009761931273464551
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 332420,
+            "max": 332420,
+            "median": 332420,
+            "mean": 332420,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 49019418,
+            "max": 49019418,
+            "median": 49019418,
+            "mean": 49019418,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419014,
+            "max": 22419014,
+            "median": 22419014,
+            "mean": 22419014,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 75055104,
+            "max": 75104256,
+            "median": 75071488,
+            "mean": 75076949.33333333,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.033335096347972944
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 75055104,
+            "max": 75104256,
+            "median": 75071488,
+            "mean": 75076949.33333333,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.033335096347972944
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 75055104,
+            "max": 75104256,
+            "median": 75071488,
+            "mean": 75076949.33333333,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.033335096347972944
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 332420,
+            "max": 332420,
+            "median": 332420,
+            "mean": 332420,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 49019418,
+            "max": 49019418,
+            "median": 49019418,
+            "mean": 49019418,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418929,
+            "max": 22418929,
+            "median": 22418929,
+            "mean": 22418929,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 75022336,
+            "max": 75022336,
+            "median": 75022336,
+            "mean": 75022336,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 75022336,
+            "max": 75022336,
+            "median": 75022336,
+            "mean": 75022336,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 75022336,
+            "max": 75022336,
+            "median": 75022336,
+            "mean": 75022336,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.9279490543782571,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 0,
+    "peak_live_growth_delta_percent": 0.0,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "late",
+    "view": "overlay",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 22728625.0,
+          "max": 23432736.333333332,
+          "median": 22990722.333333332,
+          "mean": 23058008.4,
+          "sample_stddev": 279271.335212668,
+          "cv_percent": 1.211168503228874
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 78446592,
+            "max": 78659584,
+            "median": 78643200,
+            "mean": 78610432,
+            "sample_stddev": 91954.97193735639,
+            "cv_percent": 0.11697553314216157
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 78446592,
+            "max": 78659584,
+            "median": 78643200,
+            "mean": 78610432,
+            "sample_stddev": 91954.97193735639,
+            "cv_percent": 0.11697553314216157
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 78446592,
+            "max": 78659584,
+            "median": 78643200,
+            "mean": 78610432,
+            "sample_stddev": 91954.97193735639,
+            "cv_percent": 0.11697553314216157
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 332467,
+            "max": 332467,
+            "median": 332467,
+            "mean": 332467,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 70275472,
+            "max": 70275472,
+            "median": 70275472,
+            "mean": 70275472,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081140,
+            "max": 21081140,
+            "median": 21081140,
+            "mean": 21081140,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 77332480,
+            "max": 77447168,
+            "median": 77348864,
+            "mean": 77376170.66666667,
+            "sample_stddev": 62028.82289172779,
+            "cv_percent": 0.08016527873800498
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 77332480,
+            "max": 77447168,
+            "median": 77348864,
+            "mean": 77376170.66666667,
+            "sample_stddev": 62028.82289172779,
+            "cv_percent": 0.08016527873800498
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 77332480,
+            "max": 77447168,
+            "median": 77348864,
+            "mean": 77376170.66666667,
+            "sample_stddev": 62028.82289172779,
+            "cv_percent": 0.08016527873800498
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 332467,
+            "max": 332467,
+            "median": 332467,
+            "mean": 332467,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 497,
+            "max": 497,
+            "median": 497,
+            "mean": 497,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 70275472,
+            "max": 70275472,
+            "median": 70275472,
+            "mean": 70275472,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081055,
+            "max": 21081055,
+            "median": 21081055,
+            "mean": 21081055,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 77463552,
+            "max": 77479936,
+            "median": 77479936,
+            "mean": 77474474.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012209578510988842
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 77463552,
+            "max": 77479936,
+            "median": 77479936,
+            "mean": 77474474.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012209578510988842
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 77463552,
+            "max": 77479936,
+            "median": 77479936,
+            "mean": 77474474.66666667,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.012209578510988842
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 20868903.0,
+          "max": 21358583.333333332,
+          "median": 20987083.333333332,
+          "mean": 21052977.8,
+          "sample_stddev": 199061.83496433077,
+          "cv_percent": 0.9455281663971108
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 78397440,
+            "max": 79659008,
+            "median": 79446016,
+            "mean": 79111782.4,
+            "sample_stddev": 650075.3328505858,
+            "cv_percent": 0.8217174649961947
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 78397440,
+            "max": 79659008,
+            "median": 79446016,
+            "mean": 79111782.4,
+            "sample_stddev": 650075.3328505858,
+            "cv_percent": 0.8217174649961947
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 78397440,
+            "max": 79659008,
+            "median": 79446016,
+            "mean": 79111782.4,
+            "sample_stddev": 650075.3328505858,
+            "cv_percent": 0.8217174649961947
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 332420,
+            "max": 332420,
+            "median": 332420,
+            "mean": 332420,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 49019418,
+            "max": 49019418,
+            "median": 49019418,
+            "mean": 49019418,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081141,
+            "max": 21081141,
+            "median": 21081141,
+            "mean": 21081141,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 78348288,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78375594.66666667,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.03193210016692802
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 78348288,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78375594.66666667,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.03193210016692802
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 78348288,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78375594.66666667,
+            "sample_stddev": 25026.973395385496,
+            "cv_percent": 0.03193210016692802
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 332420,
+            "max": 332420,
+            "median": 332420,
+            "mean": 332420,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 305,
+            "max": 305,
+            "median": 305,
+            "mean": 305,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 49019418,
+            "max": 49019418,
+            "median": 49019418,
+            "mean": 49019418,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 15851195,
+            "max": 15851195,
+            "median": 15851195,
+            "mean": 15851195,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081056,
+            "max": 21081056,
+            "median": 21081056,
+            "mean": 21081056,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 78364672,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78381056,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.020903010033444816
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 78364672,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78381056,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.020903010033444816
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 78364672,
+            "max": 78397440,
+            "median": 78381056,
+            "mean": 78381056,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.020903010033444816
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.9128501066234442,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 0,
+    "peak_live_growth_delta_percent": 0.0,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "multi",
+    "view": "base",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 15829930.666666666,
+          "max": 16320111.333333334,
+          "median": 16194875.0,
+          "mean": 16118675.066666666,
+          "sample_stddev": 188571.22736388596,
+          "cv_percent": 1.1698928515151363
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 41074688,
+            "max": 41091072,
+            "median": 41091072,
+            "mean": 41087795.2,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.017832905155911873
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 44679168,
+            "max": 44695552,
+            "median": 44695552,
+            "mean": 44688998.4,
+            "sample_stddev": 8973.886382164641,
+            "cv_percent": 0.020080750751765877
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 44793856,
+            "max": 44826624,
+            "median": 44810240,
+            "mean": 44810240,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03656307129798903
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70499,
+            "max": 70499,
+            "median": 70499,
+            "mean": 70499,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 818,
+            "max": 818,
+            "median": 818,
+            "mean": 818,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 86762344,
+            "max": 86762344,
+            "median": 86762344,
+            "mean": 86762344,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10810085,
+            "max": 10810085,
+            "median": 10810085,
+            "mean": 10810085,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419049,
+            "max": 22419049,
+            "median": 22419049,
+            "mean": 22419049,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 41025536,
+            "max": 41058304,
+            "median": 41058304,
+            "mean": 41047381.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.0460896968485598
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44564480,
+            "max": 44597248,
+            "median": 44597248,
+            "mean": 44586325.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04243142595710135
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44580864,
+            "max": 44613632,
+            "median": 44613632,
+            "mean": 44602709.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04241583953884847
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70499,
+            "max": 70499,
+            "median": 70499,
+            "mean": 70499,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 818,
+            "max": 818,
+            "median": 818,
+            "mean": 818,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 86762344,
+            "max": 86762344,
+            "median": 86762344,
+            "mean": 86762344,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10810085,
+            "max": 10810085,
+            "median": 10810085,
+            "mean": 10810085,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418964,
+            "max": 22418964,
+            "median": 22418964,
+            "mean": 22418964,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 41058304,
+            "max": 41091072,
+            "median": 41074688,
+            "mean": 41074688,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03988831272437176
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44646400,
+            "max": 44679168,
+            "median": 44662784,
+            "mean": 44662784,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.036683785766691124
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44662784,
+            "max": 44711936,
+            "median": 44679168,
+            "mean": 44684629.333333336,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.056008013871374225
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 12607791.666666666,
+          "max": 12891097.333333334,
+          "median": 12773972.0,
+          "mean": 12751641.666666666,
+          "sample_stddev": 106944.99917974495,
+          "cv_percent": 0.8386763208638753
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 41091072,
+            "max": 41123840,
+            "median": 41107456,
+            "mean": 41107456,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03985651654045436
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 44269568,
+            "max": 44335104,
+            "median": 44302336,
+            "mean": 44302336,
+            "sample_stddev": 25905.378592099365,
+            "cv_percent": 0.05847406915991826
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 44384256,
+            "max": 44449792,
+            "median": 44433408,
+            "mean": 44423577.6,
+            "sample_stddev": 24847.566255068123,
+            "cv_percent": 0.05593328497493214
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70404,
+            "max": 70404,
+            "median": 70404,
+            "mean": 70404,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 434,
+            "max": 434,
+            "median": 434,
+            "mean": 434,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 44250148,
+            "max": 44250148,
+            "median": 44250148,
+            "mean": 44250148,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10953245,
+            "max": 10953245,
+            "median": 10953245,
+            "mean": 10953245,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22419050,
+            "max": 22419050,
+            "median": 22419050,
+            "mean": 22419050,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 41058304,
+            "max": 41091072,
+            "median": 41074688,
+            "mean": 41074688,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03988831272437176
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44220416,
+            "max": 44253184,
+            "median": 44236800,
+            "mean": 44236800,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.037037037037037035
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44253184,
+            "max": 44285952,
+            "median": 44253184,
+            "mean": 44264106.666666664,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.0427403037031185
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70404,
+            "max": 70404,
+            "median": 70404,
+            "mean": 70404,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 434,
+            "max": 434,
+            "median": 434,
+            "mean": 434,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 44250148,
+            "max": 44250148,
+            "median": 44250148,
+            "mean": 44250148,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10953245,
+            "max": 10953245,
+            "median": 10953245,
+            "mean": 10953245,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 22418965,
+            "max": 22418965,
+            "median": 22418965,
+            "mean": 22418965,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 41074688,
+            "max": 41074688,
+            "median": 41074688,
+            "mean": 41074688,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 44253184,
+            "max": 44285952,
+            "median": 44269568,
+            "mean": 44269568,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.037009622501850484
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 44302336,
+            "max": 44351488,
+            "median": 44302336,
+            "mean": 44318720,
+            "sample_stddev": 28377.920431208484,
+            "cv_percent": 0.06403145314487531
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.7887663226792426,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 143160,
+    "peak_live_growth_delta_percent": 1.3243189114609182,
+    "experiment_memory_reject": false
+  },
+  {
+    "case": "multi",
+    "view": "overlay",
+    "sources": {
+      "baseline": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 16159361.333333334,
+          "max": 16465236.0,
+          "median": 16429152.666666666,
+          "mean": 16353650.0,
+          "sample_stddev": 129149.47496710058,
+          "cv_percent": 0.789728745369386
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43778048,
+            "max": 43794432,
+            "median": 43794432,
+            "mean": 43791155.2,
+            "sample_stddev": 7327.147548671311,
+            "cv_percent": 0.016732026171054997
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 47120384,
+            "max": 47169536,
+            "median": 47153152,
+            "mean": 47149875.2,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.038065366426100915
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 47235072,
+            "max": 47284224,
+            "median": 47267840,
+            "mean": 47264563.2,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.03797300038166709
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70499,
+            "max": 70499,
+            "median": 70499,
+            "mean": 70499,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 818,
+            "max": 818,
+            "median": 818,
+            "mean": 818,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 86762344,
+            "max": 86762344,
+            "median": 86762344,
+            "mean": 86762344,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10810085,
+            "max": 10810085,
+            "median": 10810085,
+            "mean": 10810085,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081176,
+            "max": 21081176,
+            "median": 21081176,
+            "mean": 21081176,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43745280,
+            "max": 43794432,
+            "median": 43778048,
+            "mean": 43772586.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.0571749930749325
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 47054848,
+            "max": 47104000,
+            "median": 47087616,
+            "mean": 47082154.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.05315596444676766
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 47054848,
+            "max": 47104000,
+            "median": 47087616,
+            "mean": 47082154.666666664,
+            "sample_stddev": 25026.973395385492,
+            "cv_percent": 0.05315596444676766
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 3,
+            "min": 70499,
+            "max": 70499,
+            "median": 70499,
+            "mean": 70499,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 818,
+            "max": 818,
+            "median": 818,
+            "mean": 818,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 86762344,
+            "max": 86762344,
+            "median": 86762344,
+            "mean": 86762344,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10810085,
+            "max": 10810085,
+            "median": 10810085,
+            "mean": 10810085,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081091,
+            "max": 21081091,
+            "median": 21081091,
+            "mean": 21081091,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43778048,
+            "max": 43794432,
+            "median": 43778048,
+            "mean": 43783509.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02160472505387149
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 47120384,
+            "max": 47153152,
+            "median": 47136768,
+            "mean": 47136768,
+            "sample_stddev": 16384.0,
+            "cv_percent": 0.03475842891901286
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 47136768,
+            "max": 47153152,
+            "median": 47136768,
+            "mean": 47142229.333333336,
+            "sample_stddev": 9459.306810402828,
+            "cv_percent": 0.02006546347971359
+          }
+        }
+      },
+      "candidate": {
+        "nanoseconds_per_query": {
+          "n": 5,
+          "min": 12582347.333333334,
+          "max": 12883889.0,
+          "median": 12672236.0,
+          "mean": 12701488.933333334,
+          "sample_stddev": 122494.53874388747,
+          "cv_percent": 0.9644108607016708
+        },
+        "timing_rss": {
+          "setup_peak_rss": {
+            "n": 5,
+            "min": 43794432,
+            "max": 43843584,
+            "median": 43810816,
+            "mean": 43814092.8,
+            "sample_stddev": 17947.772764329282,
+            "cv_percent": 0.0409634700101089
+          },
+          "before_peak_rss": {
+            "n": 5,
+            "min": 49299456,
+            "max": 49364992,
+            "median": 49315840,
+            "mean": 49322393.6,
+            "sample_stddev": 27415.675749468588,
+            "cv_percent": 0.055584641677788704
+          },
+          "after_peak_rss": {
+            "n": 5,
+            "min": 49397760,
+            "max": 49463296,
+            "median": 49414144,
+            "mean": 49420697.6,
+            "sample_stddev": 27415.675749468588,
+            "cv_percent": 0.05547407681567933
+          }
+        },
+        "allocations_quiescent": {
+          "allocs": {
+            "n": 3,
+            "min": 70404,
+            "max": 70404,
+            "median": 70404,
+            "mean": 70404,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 3,
+            "min": 434,
+            "max": 434,
+            "median": 434,
+            "mean": 434,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 3,
+            "min": 44250148,
+            "max": 44250148,
+            "median": 44250148,
+            "mean": 44250148,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 3,
+            "min": 10953245,
+            "max": 10953245,
+            "median": 10953245,
+            "mean": 10953245,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 3,
+            "min": 21081177,
+            "max": 21081177,
+            "median": 21081177,
+            "mean": 21081177,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 3,
+            "min": 43778048,
+            "max": 43810816,
+            "median": 43810816,
+            "mean": 43799893.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.04319328697179245
+          },
+          "before_peak_rss": {
+            "n": 3,
+            "min": 49250304,
+            "max": 49283072,
+            "median": 49283072,
+            "mean": 49272149.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.03839616066435108
+          },
+          "after_peak_rss": {
+            "n": 3,
+            "min": 49266688,
+            "max": 49299456,
+            "median": 49299456,
+            "mean": 49288533.333333336,
+            "sample_stddev": 18918.613620805656,
+            "cv_percent": 0.03838339739764825
+          }
+        },
+        "allocations_original": {
+          "allocs": {
+            "n": 2,
+            "min": 70404,
+            "max": 70404,
+            "median": 70404.0,
+            "mean": 70404,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "reallocs": {
+            "n": 2,
+            "min": 434,
+            "max": 434,
+            "median": 434.0,
+            "mean": 434,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "requested_bytes": {
+            "n": 2,
+            "min": 44250148,
+            "max": 44250148,
+            "median": 44250148.0,
+            "mean": 44250148,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "peak_live_growth": {
+            "n": 2,
+            "min": 10953245,
+            "max": 10953245,
+            "median": 10953245.0,
+            "mean": 10953245,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "live_after": {
+            "n": 2,
+            "min": 21081092,
+            "max": 21081092,
+            "median": 21081092.0,
+            "mean": 21081092,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "setup_peak_rss": {
+            "n": 2,
+            "min": 43778048,
+            "max": 43778048,
+            "median": 43778048.0,
+            "mean": 43778048,
+            "sample_stddev": 0.0,
+            "cv_percent": 0.0
+          },
+          "before_peak_rss": {
+            "n": 2,
+            "min": 49266688,
+            "max": 49299456,
+            "median": 49283072.0,
+            "mean": 49283072,
+            "sample_stddev": 23170.47500592079,
+            "cv_percent": 0.0470150785363396
+          },
+          "after_peak_rss": {
+            "n": 2,
+            "min": 49315840,
+            "max": 49332224,
+            "median": 49324032.0,
+            "mean": 49324032,
+            "sample_stddev": 11585.237502960395,
+            "cv_percent": 0.023488017976633368
+          }
+        }
+      }
+    },
+    "candidate_baseline_median_latency_ratio": 0.771326206354566,
+    "candidate_faster_disjoint_ranges": true,
+    "candidate_slower_disjoint_ranges": false,
+    "peak_live_growth_delta_bytes": 143160,
+    "peak_live_growth_delta_percent": 1.3243189114609182,
+    "experiment_memory_reject": false
+  }
+]

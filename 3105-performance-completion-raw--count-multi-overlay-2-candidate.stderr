@@ -1,0 +1,6 @@
+
+thread 'main' (3595269) panicked at src/counting.rs:129:5:
+assertion `left == right` failed
+  left: (2, 1, 448, 320, 12804)
+ right: (2, 1, 448, 320, 10500)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

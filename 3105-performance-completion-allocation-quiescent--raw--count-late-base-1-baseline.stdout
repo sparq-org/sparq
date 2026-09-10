@@ -1,0 +1,2 @@
+{"kind":"fixture","query":"SELECT ?s ?o WHERE { ?s <urn:p> ?o . ?s <urn:q> ?o . FILTER(?o + 0 >= 0) } LIMIT 65537","seed_position":0,"threshold":0,"triples":218192}
+{"case":"late","view":"base","counting":true,"rep":1,"iterations":1,"nanos":22965750,"rows":65537,"allocs":332467,"reallocs":497,"requested_bytes":70275472,"peak_live_growth":15851195,"live_after":22419013,"setup_peak_rss":73940992,"before_peak_rss":73940992,"after_peak_rss":73940992}

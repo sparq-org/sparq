@@ -1,0 +1,9 @@
+{
+  "utc": "2026-09-10T01:11:49.503569+00:00",
+  "reason": "Root explicitly authorized resumption after free disk increased materially",
+  "free_bytes": 14504132608,
+  "previous_samples": 0,
+  "previous_manifest_sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+  "scope": "same unchanged predeclared protocol; no source or tuning change",
+  "process_check": "exact release/debug Cargo lock lsof returned no owners; no earlier tool command pending"
+}

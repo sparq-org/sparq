@@ -1,0 +1,24 @@
+--- baseline/old-main.rs
++++ baseline/quiescent-main.rs
+@@ -59,8 +59,6 @@
+         .num_threads(1)
+         .build_global()
+         .unwrap();
+-    #[cfg(feature = "count-alloc")]
+-    counting::calibrate();
+     let args: Vec<String> = std::env::args().collect();
+     let case = &args[1];
+     let overlay = args[2] == "overlay";
+@@ -135,6 +133,12 @@
+     for _ in 0..2 {
+         assert_eq!(run(&graph, &q, select), expected);
+     }
++    #[cfg(feature = "count-alloc")]
++    {
++        // Complete worker startup after fixture/oracle and both query warmups.
++        rayon::broadcast(|_| ());
++        counting::calibrate();
++    }
+     for _ in 0..reps {
+         let rep = sample;
+         let before_rss = rss();

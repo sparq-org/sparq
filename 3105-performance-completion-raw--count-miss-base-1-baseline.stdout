@@ -1,0 +1,2 @@
+{"kind":"fixture","query":"ASK { ?s <urn:p> ?o . ?s <urn:q> ?o . FILTER(?o + 0 < 0) }","seed_position":0,"threshold":0,"triples":218192}
+{"case":"miss","view":"base","counting":true,"rep":1,"iterations":1,"nanos":12277083,"rows":0,"allocs":70347,"reallocs":497,"requested_bytes":50090494,"peak_live_growth":10776989,"live_after":22418899,"setup_peak_rss":38813696,"before_peak_rss":41353216,"after_peak_rss":41369600}

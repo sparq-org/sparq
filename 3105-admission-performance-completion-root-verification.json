@@ -1,0 +1,97 @@
+{
+  "at": "2026-09-10T01:37:47.774426+00:00",
+  "manifest_files": 515,
+  "manifest_sha256": "e97fa98a8fcaae33c78db2c40f85881c2f0417d41e177972f82979c02f24d874",
+  "packet_sha256": "290c5ea6f231ba958a8e3f135f05d95dea74ebe40bfca542324e4f37c53d5355",
+  "all_manifest_hashes_and_sizes_verified": true,
+  "executions": [
+    {
+      "phase": "original",
+      "commands": 160,
+      "successes": 159,
+      "failures": 1
+    },
+    {
+      "phase": "allocation-quiescent",
+      "commands": 60,
+      "successes": 60,
+      "failures": 0
+    }
+  ],
+  "checks": "220 command receipts and rawstdout/stderr verified against samples and namedbinary hashes; generated result assertions passed on219successes; matrices/sourceorder/correction equivalence verified",
+  "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "summary": [
+    {
+      "case": "first",
+      "view": "base",
+      "candidate_baseline_median_latency_ratio": 0.9948174137858273,
+      "peak_live_growth_delta_bytes": 176,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "first",
+      "view": "overlay",
+      "candidate_baseline_median_latency_ratio": 1.001870437832334,
+      "peak_live_growth_delta_bytes": 176,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "second",
+      "view": "base",
+      "candidate_baseline_median_latency_ratio": 0.9326380959016078,
+      "peak_live_growth_delta_bytes": -2064259,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "second",
+      "view": "overlay",
+      "candidate_baseline_median_latency_ratio": 0.9172252481608911,
+      "peak_live_growth_delta_bytes": -2064259,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "miss",
+      "view": "base",
+      "candidate_baseline_median_latency_ratio": 0.8549463916844674,
+      "peak_live_growth_delta_bytes": -2064259,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "miss",
+      "view": "overlay",
+      "candidate_baseline_median_latency_ratio": 0.8435011399059666,
+      "peak_live_growth_delta_bytes": -2064259,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "late",
+      "view": "base",
+      "candidate_baseline_median_latency_ratio": 0.9279490543782571,
+      "peak_live_growth_delta_bytes": 0,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "late",
+      "view": "overlay",
+      "candidate_baseline_median_latency_ratio": 0.9128501066234442,
+      "peak_live_growth_delta_bytes": 0,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "multi",
+      "view": "base",
+      "candidate_baseline_median_latency_ratio": 0.7887663226792426,
+      "peak_live_growth_delta_bytes": 143160,
+      "experiment_memory_reject": false
+    },
+    {
+      "case": "multi",
+      "view": "overlay",
+      "candidate_baseline_median_latency_ratio": 0.771326206354566,
+      "peak_live_growth_delta_bytes": 143160,
+      "experiment_memory_reject": false
+    }
+  ],
+  "decision": "Positive local screening supports proceeding to targeted coverage; no fullmerge/performance admission. More/larger-RHS retention, changed-order path, full CI/wasm remain pending."
+}

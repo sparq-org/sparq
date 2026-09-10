@@ -1,0 +1,27 @@
+{
+  "capped-rhs-diagnostic": [],
+  "libc": [
+    "default",
+    "std"
+  ],
+  "oxrdf": [
+    "default",
+    "rdf-12"
+  ],
+  "rayon": [],
+  "spargebra": [
+    "default",
+    "sep-0006",
+    "sparql-12"
+  ],
+  "sparq-core": [
+    "default",
+    "parallel"
+  ],
+  "sparq-engine": [
+    "default",
+    "digest",
+    "parallel",
+    "regex"
+  ]
+}

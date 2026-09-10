@@ -1,0 +1,10 @@
+{
+  "declared_utc": "2026-09-10T01:18:50.135042+00:00",
+  "reason": "Authorized single full allocation rerun after one original startup calibration failed before fixture/query. Keep original 59 successes and one failure. No timing rerun.",
+  "original_successful_count_samples": 59,
+  "original_count_commands": 60,
+  "new_count_samples_before_declaration": 0,
+  "change": "Move unchanged counting::calibrate after fixture, full oracle, and two unchanged query warmups; execute global rayon::broadcast barrier before calibration. Counting module and measured query body unchanged.",
+  "matrix": "Same all ten case/view points, three pairs each, AB/BA/AB; stop on any calibration failure, no further retries.",
+  "limit": "Within original 20-minute phase ending 2026-09-10T01:30:55Z; 2 build jobs, incremental false, offline locked, disk floor 6509559808 bytes."
+}

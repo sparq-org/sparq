@@ -1,0 +1,842 @@
+[
+  {
+    "name": "count-first-base-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.727828708,
+    "order": 0,
+    "free_bytes": 13992800256
+  },
+  {
+    "name": "count-first-base-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.5345547920000001,
+    "order": 1,
+    "free_bytes": 13991747584
+  },
+  {
+    "name": "count-first-base-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.19260241700000003,
+    "order": 2,
+    "free_bytes": 13990592512
+  },
+  {
+    "name": "count-first-base-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.19197233300000005,
+    "order": 3,
+    "free_bytes": 13990588416
+  },
+  {
+    "name": "count-first-base-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.19233479200000003,
+    "order": 4,
+    "free_bytes": 13990584320
+  },
+  {
+    "name": "count-first-base-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.191939125,
+    "order": 5,
+    "free_bytes": 13989904384
+  },
+  {
+    "name": "count-first-overlay-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.23754549999999997,
+    "order": 6,
+    "free_bytes": 13989900288
+  },
+  {
+    "name": "count-first-overlay-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.19519541699999987,
+    "order": 7,
+    "free_bytes": 13989896192
+  },
+  {
+    "name": "count-first-overlay-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.19926666700000029,
+    "order": 8,
+    "free_bytes": 13989597184
+  },
+  {
+    "name": "count-first-overlay-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.19935995800000006,
+    "order": 9,
+    "free_bytes": 13989584896
+  },
+  {
+    "name": "count-first-overlay-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "first",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.19619679199999984,
+    "order": 10,
+    "free_bytes": 13989576704
+  },
+  {
+    "name": "count-first-overlay-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "first",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.195252875,
+    "order": 11,
+    "free_bytes": 13989560320
+  },
+  {
+    "name": "count-second-base-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22905437500000003,
+    "order": 12,
+    "free_bytes": 13988745216
+  },
+  {
+    "name": "count-second-base-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22393200000000002,
+    "order": 13,
+    "free_bytes": 13988737024
+  },
+  {
+    "name": "count-second-base-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.2198506659999997,
+    "order": 14,
+    "free_bytes": 13988732928
+  },
+  {
+    "name": "count-second-base-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22037166700000022,
+    "order": 15,
+    "free_bytes": 13988728832
+  },
+  {
+    "name": "count-second-base-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22032887499999987,
+    "order": 16,
+    "free_bytes": 13988339712
+  },
+  {
+    "name": "count-second-base-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.21945812500000006,
+    "order": 17,
+    "free_bytes": 13988323328
+  },
+  {
+    "name": "count-second-overlay-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22487654199999962,
+    "order": 18,
+    "free_bytes": 13988319232
+  },
+  {
+    "name": "count-second-overlay-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22280395800000008,
+    "order": 19,
+    "free_bytes": 13987901440
+  },
+  {
+    "name": "count-second-overlay-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22391508300000051,
+    "order": 20,
+    "free_bytes": 13987889152
+  },
+  {
+    "name": "count-second-overlay-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22980587499999938,
+    "order": 21,
+    "free_bytes": 13987848192
+  },
+  {
+    "name": "count-second-overlay-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "second",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22741470799999952,
+    "order": 22,
+    "free_bytes": 13987602432
+  },
+  {
+    "name": "count-second-overlay-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "second",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.2309822920000002,
+    "order": 23,
+    "free_bytes": 13987594240
+  },
+  {
+    "name": "count-miss-base-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.2270722919999999,
+    "order": 24,
+    "free_bytes": 13987577856
+  },
+  {
+    "name": "count-miss-base-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.21768900000000002,
+    "order": 25,
+    "free_bytes": 13987573760
+  },
+  {
+    "name": "count-miss-base-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.2219645830000001,
+    "order": 26,
+    "free_bytes": 13987569664
+  },
+  {
+    "name": "count-miss-base-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.26514533299999954,
+    "order": 27,
+    "free_bytes": 13986271232
+  },
+  {
+    "name": "count-miss-base-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.23708566699999967,
+    "order": 28,
+    "free_bytes": 13986254848
+  },
+  {
+    "name": "count-miss-base-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22165570800000012,
+    "order": 29,
+    "free_bytes": 13986246656
+  },
+  {
+    "name": "count-miss-overlay-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.2642195000000003,
+    "order": 30,
+    "free_bytes": 13986217984
+  },
+  {
+    "name": "count-miss-overlay-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22268062499999974,
+    "order": 31,
+    "free_bytes": 13986201600
+  },
+  {
+    "name": "count-miss-overlay-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22551729100000006,
+    "order": 32,
+    "free_bytes": 13986193408
+  },
+  {
+    "name": "count-miss-overlay-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.23025283399999985,
+    "order": 33,
+    "free_bytes": 13986189312
+  },
+  {
+    "name": "count-miss-overlay-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "miss",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.22946699999999964,
+    "order": 34,
+    "free_bytes": 13986181120
+  },
+  {
+    "name": "count-miss-overlay-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "miss",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22544412499999922,
+    "order": 35,
+    "free_bytes": 13986177024
+  },
+  {
+    "name": "count-late-base-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.34441195800000024,
+    "order": 36,
+    "free_bytes": 13986156544
+  },
+  {
+    "name": "count-late-base-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.3527821660000008,
+    "order": 37,
+    "free_bytes": 13985738752
+  },
+  {
+    "name": "count-late-base-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.3429034590000004,
+    "order": 38,
+    "free_bytes": 13984747520
+  },
+  {
+    "name": "count-late-base-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.3455290830000006,
+    "order": 39,
+    "free_bytes": 13984796672
+  },
+  {
+    "name": "count-late-base-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.34266141699999864,
+    "order": 40,
+    "free_bytes": 13984722944
+  },
+  {
+    "name": "count-late-base-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.3330770420000011,
+    "order": 41,
+    "free_bytes": 13984710656
+  },
+  {
+    "name": "count-late-overlay-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.34270000000000067,
+    "order": 42,
+    "free_bytes": 13984616448
+  },
+  {
+    "name": "count-late-overlay-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.33291295899999973,
+    "order": 43,
+    "free_bytes": 13984350208
+  },
+  {
+    "name": "count-late-overlay-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.35634112500000015,
+    "order": 44,
+    "free_bytes": 13984325632
+  },
+  {
+    "name": "count-late-overlay-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.3592434999999998,
+    "order": 45,
+    "free_bytes": 13984284672
+  },
+  {
+    "name": "count-late-overlay-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "late",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.34412400000000076,
+    "order": 46,
+    "free_bytes": 13984014336
+  },
+  {
+    "name": "count-late-overlay-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "late",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.3360807089999991,
+    "order": 47,
+    "free_bytes": 13983854592
+  },
+  {
+    "name": "count-multi-base-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.2757017079999997,
+    "order": 48,
+    "free_bytes": 13983846400
+  },
+  {
+    "name": "count-multi-base-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "base",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22695033400000142,
+    "order": 49,
+    "free_bytes": 13983232000
+  },
+  {
+    "name": "count-multi-base-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.22932095800000063,
+    "order": 50,
+    "free_bytes": 13983211520
+  },
+  {
+    "name": "count-multi-base-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "base",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.23967179100000102,
+    "order": 51,
+    "free_bytes": 13983002624
+  },
+  {
+    "name": "count-multi-base-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.23982366700000135,
+    "order": 52,
+    "free_bytes": 13982982144
+  },
+  {
+    "name": "count-multi-base-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "base",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.2294485420000001,
+    "order": 53,
+    "free_bytes": 13975121920
+  },
+  {
+    "name": "count-multi-overlay-0-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.24351591599999978,
+    "order": 54,
+    "free_bytes": 13975117824
+  },
+  {
+    "name": "count-multi-overlay-0-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "overlay",
+      "0"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.23369274999999945,
+    "order": 55,
+    "free_bytes": 13974831104
+  },
+  {
+    "name": "count-multi-overlay-1-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.23361512500000003,
+    "order": 56,
+    "free_bytes": 13974769664
+  },
+  {
+    "name": "count-multi-overlay-1-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "overlay",
+      "1"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.2417523329999991,
+    "order": 57,
+    "free_bytes": 13974388736
+  },
+  {
+    "name": "count-multi-overlay-2-baseline",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/baseline-count",
+      "multi",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "67fbeebeb389a2e1e6a751d6519618d72b895dbf5648bc273852852ed71ac348",
+    "exit": 0,
+    "seconds": 0.24184187500000043,
+    "order": 58,
+    "free_bytes": 13974208512
+  },
+  {
+    "name": "count-multi-overlay-2-candidate",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/allocation-quiescent/binary/candidate-count",
+      "multi",
+      "overlay",
+      "2"
+    ],
+    "binary_sha256": "f8803d2528cf472e60f8805d7a2b135115eece79da640a498cbc0cc23db299a8",
+    "exit": 0,
+    "seconds": 0.23754470799999972,
+    "order": 59,
+    "free_bytes": 13974007808
+  }
+]

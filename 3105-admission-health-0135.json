@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-10T01:40:19.037861+00:00",
+  "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "issue3105": "OPEN",
+  "registry_actions_enabled": false,
+  "pr6095": {
+    "state": "OPEN",
+    "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+    "queue": null,
+    "labels": [
+      "review:changes",
+      "area:ci",
+      "trust-surface"
+    ]
+  },
+  "graphql_remaining": 4996,
+  "graphql_reset": "2026-09-10T02:33:59Z",
+  "free_bytes": 12243394560,
+  "mutation": "None"
+}

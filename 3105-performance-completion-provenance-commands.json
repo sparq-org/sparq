@@ -1,0 +1,84 @@
+[
+  {
+    "name": "rustc-version",
+    "argv": [
+      "rustc",
+      "-Vv"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/candidate",
+    "exit": 0
+  },
+  {
+    "name": "cargo-version",
+    "argv": [
+      "cargo",
+      "-V"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/candidate",
+    "exit": 0
+  },
+  {
+    "name": "host",
+    "argv": [
+      "uname",
+      "-a"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion",
+    "exit": 0
+  },
+  {
+    "name": "candidate-git",
+    "argv": [
+      "git",
+      "status",
+      "--porcelain=v1"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
+    "exit": 0
+  },
+  {
+    "name": "baseline-git",
+    "argv": [
+      "git",
+      "status",
+      "--porcelain=v1"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
+    "exit": 0
+  },
+  {
+    "name": "candidate-head",
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
+    "exit": 0
+  },
+  {
+    "name": "baseline-head",
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
+    "exit": 0
+  },
+  {
+    "name": "candidate-features",
+    "argv": [
+      "cargo",
+      "metadata",
+      "--locked",
+      "--offline",
+      "--format-version",
+      "1",
+      "--manifest-path",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/candidate/Cargo.toml"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance-completion/candidate",
+    "exit": 0
+  }
+]
