@@ -432,6 +432,12 @@ for evidence_name in ['opus-design-review.json', 'opus-design-stderr.log', 'opus
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 FILES["3105-admission-heartbeat-0450.json"] = ROOT / "direct-3105/admission/heartbeat-0450.json"
 
+# Issue6476 frozen implementation draft and WIP commit.
+for evidence_name in ['affected-context.md', 'build-default.json', 'build-default.log', 'caller-scope-audit.json', 'diff-check.log', 'full.diff', 'installer-import-audit.log', 'packet.md', 'preflight-after.log', 'preflight-before.log', 'report-draft.json', 'report.json', 'scope-migration.json', 'source/crates/sparq-engine/src/cache.rs', 'source/crates/sparq-engine/src/construct.rs', 'source/crates/sparq-engine/src/exec.rs', 'source/crates/sparq-engine/src/explain.rs', 'source/crates/sparq-engine/src/explain_json.rs', 'source/crates/sparq-engine/src/lib.rs', 'source/crates/sparq-engine/src/update.rs', 'static-commands.json', 'workspace-budget-consumers.txt', 'worktree-status.txt', 'manifest.json']:
+    FILES["6476-implementation-draft-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/implementation" / evidence_name
+for evidence_name in ["implementation-draft-root-verification.json", "draft-commit-root-verification.json"]:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

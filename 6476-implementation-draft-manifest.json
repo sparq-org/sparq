@@ -1,0 +1,120 @@
+{
+  "kind": "frozen resource-stopped draft; source uncommitted",
+  "files": [
+    {
+      "path": "affected-context.md",
+      "bytes": 55647,
+      "sha256": "16cea15bf39bcc6f4f88a8bb6e226485b897f1f410195c6b0d666c1d5e6c6952"
+    },
+    {
+      "path": "build-default.json",
+      "bytes": 615,
+      "sha256": "b1bd9f89291a483f45d9b2ecd2549928069ba788c661a0835147a95aa968358d"
+    },
+    {
+      "path": "build-default.log",
+      "bytes": 178561,
+      "sha256": "0db3c09a383a67b0572140b366db6e396ac66c562267644a00ee23efaba9c9d2"
+    },
+    {
+      "path": "caller-scope-audit.json",
+      "bytes": 729,
+      "sha256": "b34db6968dafd9c28a6c119ea5f5fc91547372e5db7d4f4413d45d0dec4d1ea8"
+    },
+    {
+      "path": "diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "full.diff",
+      "bytes": 48881,
+      "sha256": "d86208f6f27a80257006368bed7afcedd5c30b240d326301a408f37b6f63a7c7"
+    },
+    {
+      "path": "installer-import-audit.log",
+      "bytes": 3431,
+      "sha256": "9d633508244baa3b7264b3fd9c090713d7f36c02e9f92e112a07f494f5a8715b"
+    },
+    {
+      "path": "packet.md",
+      "bytes": 55771,
+      "sha256": "00a6c95942421b4f300bc52be0ee9b27eeb9f4bd19902af29cbbc954fd7d2f23"
+    },
+    {
+      "path": "preflight-after.log",
+      "bytes": 1834,
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a"
+    },
+    {
+      "path": "preflight-before.log",
+      "bytes": 1834,
+      "sha256": "8717a7ef4ed88ecbfd82b9fe6a45b1e6a51d477ac3468a1a54336de9317fe05a"
+    },
+    {
+      "path": "report-draft.json",
+      "bytes": 4775,
+      "sha256": "379861fafbe882e20e9c0b86c64d2d405a3037e141e627008caca21968fff11a"
+    },
+    {
+      "path": "report.json",
+      "bytes": 5649,
+      "sha256": "18f8fbbb2fd3b3cdea8ac7193cb6dbd48e677a3ea77c272420e04aaaec031542"
+    },
+    {
+      "path": "scope-migration.json",
+      "bytes": 4890,
+      "sha256": "3a22b4177ef21423c286b5ab129a75393b901f1f9147114a4e5dc0ca9ce9ef12"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/cache.rs",
+      "bytes": 15827,
+      "sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/construct.rs",
+      "bytes": 23324,
+      "sha256": "8b4c28da9fd8cb0b2d6f22439113ebe5f89b2b42c8938c02a0e6ef6ddbd3f6e5"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/exec.rs",
+      "bytes": 1065238,
+      "sha256": "207f3abe106301d11a9d57da212b7026612e53bd17c1b4b4a03072a7cd5ca247"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/explain.rs",
+      "bytes": 34326,
+      "sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/explain_json.rs",
+      "bytes": 25987,
+      "sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/lib.rs",
+      "bytes": 168716,
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+    },
+    {
+      "path": "source/crates/sparq-engine/src/update.rs",
+      "bytes": 124166,
+      "sha256": "5f638ac92382082e6a65080eb579ee61ce0861d843805a761236b73d81e842fe"
+    },
+    {
+      "path": "static-commands.json",
+      "bytes": 558,
+      "sha256": "ae25c02a49a488cbc43f12cc4ad7a7e155537c6aed02f742381546ac5b56e0ed"
+    },
+    {
+      "path": "workspace-budget-consumers.txt",
+      "bytes": 3264,
+      "sha256": "a560dee58610910b4a63b65986586e2fec0750a360f552cc00d696f3881fe3aa"
+    },
+    {
+      "path": "worktree-status.txt",
+      "bytes": 263,
+      "sha256": "9a2d1ca9a702ac04e0632232758c1f778eef3aae9d3a556478b57f568750603b"
+    }
+  ]
+}

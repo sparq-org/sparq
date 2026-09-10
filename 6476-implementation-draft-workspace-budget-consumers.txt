@@ -1,0 +1,38 @@
+crates/sparq-engine/src/cache.rs:368:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/construct.rs:60:            crate::exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/construct.rs:97:            crate::exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/construct.rs:125:    crate::exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/exec.rs:391:    pub(crate) struct ByteSavepoint {
+crates/sparq-engine/src/exec.rs:399:    pub(crate) fn byte_savepoint() -> ByteSavepoint {
+crates/sparq-engine/src/exec.rs:400:        ByteSavepoint {
+crates/sparq-engine/src/exec.rs:406:    /// Rewind the byte accumulator + exhaustion flag to a [`ByteSavepoint`]. Only the
+crates/sparq-engine/src/exec.rs:419:    pub(crate) fn restore_bytes(sp: ByteSavepoint) {
+crates/sparq-engine/src/exec.rs:655:                let mark = byte_savepoint();
+crates/sparq-engine/src/exec.rs:661:                restore_bytes(mark);
+crates/sparq-engine/src/exec.rs:2456:/// flattened [`budget::Limits`] (the installing thread's sticky flag is invisible to rayon
+crates/sparq-engine/src/exec.rs:2461:struct EngineSnapshot(budget::Limits);
+crates/sparq-engine/src/exec.rs:2550:    /// retained memory. Pairs with a `budget::ByteSavepoint` (which refunds the bytes
+crates/sparq-engine/src/exec.rs:2832:        if let Some(limits) = budget::parallel_json_fanout() {
+crates/sparq-engine/src/exec.rs:3034:        let limits = budget::snapshot();
+crates/sparq-engine/src/exec.rs:5628:    let byte_mark = budget::byte_savepoint();
+crates/sparq-engine/src/exec.rs:5649:            budget::restore_bytes(byte_mark);
+crates/sparq-engine/src/exec.rs:5728:    let byte_mark = budget::byte_savepoint();
+crates/sparq-engine/src/exec.rs:5756:            budget::restore_bytes(byte_mark);
+crates/sparq-engine/src/exec.rs:5970:    let byte_mark = budget::byte_savepoint();
+crates/sparq-engine/src/exec.rs:6005:                budget::restore_bytes(byte_mark);
+crates/sparq-engine/src/exec.rs:9098:        let snap = EngineSnapshot(budget::snapshot());
+crates/sparq-engine/src/exec.rs:10063:            let limits = budget::snapshot();
+crates/sparq-engine/src/exec.rs:17757:        budget::with_budget(&b, || {
+crates/sparq-engine/src/exec.rs:17780:        budget::with_budget(&b, || {
+crates/sparq-engine/src/exec.rs:18295:        budget::with_budget(&b, || {
+crates/sparq-engine/src/exec.rs:18303:            budget::with_budget(&b2, || {
+crates/sparq-engine/src/explain.rs:93:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/explain_json.rs:222:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1041:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1079:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1116:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1142:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1198:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/lib.rs:1237:    exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/update.rs:535:    crate::exec::budget::with_budget(budget, || {
+crates/sparq-engine/src/update.rs:729:    crate::exec::budget::with_budget(budget, || {

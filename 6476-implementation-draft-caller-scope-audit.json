@@ -1,0 +1,32 @@
+[
+  {
+    "path": "crates/sparq-engine/src/cache.rs",
+    "production_sites": 1,
+    "exact_mechanical_match": true
+  },
+  {
+    "path": "crates/sparq-engine/src/construct.rs",
+    "production_sites": 3,
+    "exact_mechanical_match": true
+  },
+  {
+    "path": "crates/sparq-engine/src/explain.rs",
+    "production_sites": 1,
+    "exact_mechanical_match": true
+  },
+  {
+    "path": "crates/sparq-engine/src/explain_json.rs",
+    "production_sites": 1,
+    "exact_mechanical_match": true
+  },
+  {
+    "path": "crates/sparq-engine/src/lib.rs",
+    "production_sites": 6,
+    "exact_mechanical_match": true
+  },
+  {
+    "path": "crates/sparq-engine/src/update.rs",
+    "production_sites": 2,
+    "exact_mechanical_match": true
+  }
+]

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T04:54:38.541119+00:00",
+  "updated_at": "2026-09-10T05:12:38.811882+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Astra implementation of scoped budget-state restoration",
-    "state": "Production implementation authorized at04:52 in existingissue6476worktree following actualOpusB1-B4 andsnapshotvisibilityconditions. One engine lane. No source/fix/testpass claimed until author freeze.",
+    "phase": "Draft committed; bounded warm-cache validation planning",
+    "state": "Exact seven-file draft root-verified and committed, not compiled/tested/review-approved. Existing Astra lane assessing matched cache and bounded resource plan.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -76,7 +76,7 @@
     "directory": "direct-6476",
     "max_minutes": 25,
     "scope": "Execute real nested public extension-callback reproduction; inspect affected entry points and previous limits/sticky-error/cancel pointer restoration lifetimes; exact source and test/control plan.",
-    "constraints": "Own newworktree; no production fix/push/remote mutation/modelcall/release/EC2 yet. max2jobs incrementalOFF offline;stopfree<6509559808B. Cache5983 mayreuse asregenerableonly. Preservecompletedworktrees and frozen evidence. No bd commands after readonly bootstrap defect. Disk floor remains live; stop again if reserve crossed. No evidence was deleted.",
+    "constraints": "Own issue6476 worktree, one engine lane, no remote push/model/release/EC2 yet. No build until resource plan accepted; no broad cleanup. No bd commands after readonly bootstrap defect.",
     "fresh_admission": [
       "direct-3105/admission/next6476-admission.json",
       "direct-3105/admission/next6476-admission-page2.json",
@@ -85,10 +85,9 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect sameAstra implementation phase; verify finalcommit/diff/scope preservation and realtest/control evidence. Do not duplicateagent orclaimreadybeforefreeze.",
-      "ActualOpus5 xhigh finalimplementedsource review before protectedpublication; design approval is not finalapproval.",
-      "If resource/compilefailures arise, recover within known task-owned scope; no blindcleanup orrequestbudgetretries.",
-      "Postmerge6477CI/matrix/aggregate/fuzz allSUCCESS; retainknownadvisoryringpause/release6474 separately. No ongoingmergeblocker."
+      "Reuse same Astra lane to perform bounded matched warm-profile validation after resource assessment. Preserve complete gates and evidence.",
+      "Review actual final implemented source and validation with Claude Opus 5 xhigh before protected publication.",
+      "Continue normal protected PR/queue/main verification; registry remains off."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -98,7 +97,12 @@
       "system_process_check": "Sandbox ps read was unavailable; no cleanup or escalation attempted on that evidence.",
       "no_cache_cleanup": false,
       "second_stop": "Runtimecompleted; export initiallyblockedat6436810752B. Rootexplicitlyallowed\u226410MiBcompleted-evidence export at\u22651GiBfree; no buildfloor waiver.",
-      "debug_cache_cleanup": "Rootverifiedno symlink/CACHEDIRtag andlsofno consumers, then removedonly regenerabletarget/debug:1795588KiB. Free5538918400\u21927359512576B. Releasecacheandsavedresultsretained. Receipts direct-6476/debug-cache-cleanup-{precheck,receipt}.json."
+      "debug_cache_cleanup": "Rootverifiedno symlink/CACHEDIRtag andlsofno consumers, then removedonly regenerabletarget/debug:1795588KiB. Free5538918400\u21927359512576B. Releasecacheandsavedresultsretained. Receipts direct-6476/debug-cache-cleanup-{precheck,receipt}.json.",
+      "draft_stop": {
+        "at": "2026-09-10T05:12:38.811882+00:00",
+        "free_bytes": 4287991808,
+        "finding": "Original 6509559808B guard was coordinator operational limit, not repo fixed build gate. Repo disk guard thresholds are advisory and disable new wave dispatch; assess bounded continuation of existing lane without broad cleanup."
+      }
     },
     "runtime_scope": "Outer query_with_functions_and_budget extension callback optionally invokes public inner ASK, then sets outer cancel flag. Must calibrate no-nesting control to actual cancelled outcome; no inference if no subsequent budget polling. Expand entry-point inventory/design without patching.",
     "reproduction": {
@@ -150,7 +154,7 @@
       "output_sha256": "c2dd7517cbf616c8e265e91d08653e6f9fc7f24c50550990ceacf95e6e6ce4eb"
     },
     "implementation": {
-      "state": "running",
+      "state": "draft_committed_unvalidated",
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
@@ -158,7 +162,12 @@
       "started_at": "2026-09-10T04:54:38.540163+00:00",
       "scope": "Private restoringGuard/install; scoped with_budget FnOnce seam;14caller scopeequivalence; full Limits+EXCEEDED restore; narrowed rawsnapshot visibility/lifetime comments; QueryBudget behavior docs; calibratedruntime/state/unwind/parallel tests andcontrols.",
       "source_review": "Opus design approvedwithconditions, not implementationapproval. SERVICE savepointstraddling mustbeassessed forsameouterstateafterreturnednestedcall, not prohibitedwithoutcause.",
-      "constraints": "25minfirstphase2jobsincrementalOFF/offline/free>=6509559808B;preferpreservedreleasecache;no cleanup/bd/fullworkspace/localwasmbuild/newdep/publicAPI/ArcTLSrewrite/remoteGitHub/model/EC2/release. Preserve32frozenreproductionfiles."
+      "constraints": "25minfirstphase2jobsincrementalOFF/offline/free>=6509559808B;preferpreservedreleasecache;no cleanup/bd/fullworkspace/localwasmbuild/newdep/publicAPI/ArcTLSrewrite/remoteGitHub/model/EC2/release. Preserve32frozenreproductionfiles.",
+      "head": "e0aa233d59321c5a437ced8c072d359b272b6222",
+      "manifest_sha256": "bd5db57c5fd83cac7c3998a06b5701bd5da6980d480b263e8428d6c15316ba39",
+      "root_verification": "direct-6476/admission/implementation-draft-root-verification.json",
+      "tests_executed": false,
+      "build_result": "Stopped initial mismatched release-profile dependency rebuild at operational disk reserve before engine compile. No source compiler error reached."
     }
   },
   "prs": {

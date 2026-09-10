@@ -1,0 +1,34 @@
+[
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "log": "diff-check.log"
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/preflight.py",
+      "--base",
+      "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+    ],
+    "exit_code": 1,
+    "log": "preflight-after.log"
+  },
+  {
+    "command": [
+      "git",
+      "grep",
+      "-n",
+      "-E",
+      "use .*budget|budget::\\{|budget::install|budget::Guard",
+      "--",
+      "*.rs"
+    ],
+    "exit_code": 0,
+    "log": "installer-import-audit.log"
+  }
+]

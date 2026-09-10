@@ -1,0 +1,88 @@
+{
+  "issue": 6476,
+  "phase": "implementation first bounded phase; resource-stopped before engine compilation",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "model": "GPT-6 Astra xhigh",
+  "source_status": "uncommitted draft; not validated or review-ready",
+  "implemented": [
+    "Private Guard/install; crate-visible synchronous FnOnce boundary; full Limits and EXCEEDED restored by RAII",
+    "14 production callers migrated; exact unchanged-body audit passed for all six caller files; view guards remain outside and trace guards inside",
+    "Limits/snapshot/fanout/hit/why limited to exec; owning-frame safety invariant documented",
+    "Seven new test functions cover nested state, sticky errors, distinct cancellation, deadline, SERVICE savepoint, two scoped workers, and real public callback cases"
+  ],
+  "static_checks": {
+    "diff_check": "pass",
+    "preflight": "exit1: existing Bash3 privacy checker mapfile unavailable; no other finding",
+    "caller_scope_audit": "14sites match canonical mechanical wrapping"
+  },
+  "build": {
+    "command": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "-p",
+      "sparq-engine",
+      "--lib",
+      "-vv"
+    ],
+    "exit_code": -15,
+    "seconds": 26.463041292,
+    "min_free": 6504886272,
+    "stop": "disk-floor",
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+    }
+  },
+  "fresh_engine_compiled": false,
+  "new_tests_executed": 0,
+  "compiled_mutation_controls_executed": 0,
+  "resource_limit": "Stop at free <6509559808B; first release build recompiled dependencies because workspace profile is panic=abort/LTO/codegen1, while warm diagnostic cache is unwind/no-LTO/codegen16. No compiler source failure established. No cleanup by agent.",
+  "service_audit": {
+    "sites": [
+      {
+        "capture": 5628,
+        "restore": 5649,
+        "path": "remote verbatim synchronous streaming"
+      },
+      {
+        "capture": 5728,
+        "restore": 5756,
+        "path": "local handler, can synchronously invoke a public query"
+      },
+      {
+        "capture": 5970,
+        "restore": 6005,
+        "path": "remote bound-join synchronous chunk loop"
+      }
+    ],
+    "argument": "Savepoint owns only extra_bytes and sticky-error values, not raw cancellation pointers. A nested with_budget has completed and restored the parent before the surrounding parent handler result is interned or its speculative burst is rolled back. No current production restore runs while a different budget frame is active. Preserve parent max_rows/max_bytes/width/deadline/cancel on rollback. Deadline/cancel may trip anew at next poll.",
+    "dynamic_proof": "New private savepoint test drafted; not executed. Existing SERVICE suites remain required."
+  },
+  "snapshot_audit": {
+    "sites": [
+      2832,
+      3034,
+      9098,
+      10063
+    ],
+    "argument": "All four production fanouts synchronously collect/fold/reduce before enclosing evaluation returns. Parent budget owner remains borrowed throughout. Workers do not install parent TLS. Limits remains a lifetime-free Copy trusted within exec: visibility restriction reduces surface but is not a type-level lifetime proof against arbitrary future escapes.",
+    "dynamic_proof": "New two-thread snapshot test is a scoped-module witness, not proof of production Rayon branch engagement; not executed yet."
+  },
+  "next_checks": [
+    "Build exact draft with cached unwind/no-LTO/codegen16 native profile after reserve recovers; freshlink original 4-case callback harness and require all true",
+    "Run full focused actual budget module tests and relevant no-parallel/SERVICE-local/params/vectorized/cs-planner paths as affordable; top-level unwind cleanup deserves an explicit additional assertion",
+    "Run omit-Limits, omit-sticky, omit-byte restoration mutants; internal sibling-module sealing compile-fail plus visibility-open compile-only control; never execute dangling-pointer sequences",
+    "Actual >1-worker production Rayon snapshot path witness and scoped clippy pending",
+    "Full Linux workspace/wasm/ratchet gates remain authoritative after reviewed publication"
+  ],
+  "holds": "No remote changes; 6095/5357 holds and registry OFF preserved",
+  "known_followups": [
+    "No claim of measured performance, successful source compilation, fresh regression green, or executed feature coverage. Prior frozen public witness still proves baseline defect only."
+  ]
+}

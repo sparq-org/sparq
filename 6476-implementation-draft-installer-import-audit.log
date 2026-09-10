@@ -1,0 +1,30 @@
+bench/parse/src/compress.rs:22:use sparq_engine::{query, query_json, query_json_chunks_with_budget, QueryBudget};
+crates/sparq-engine/src/dp.rs:53://! budget different from the compiled-in default, use [`with_dp_planner_budget`].
+crates/sparq-engine/src/eqjoin.rs:567:    use crate::{query, query_with_budget, QueryBudget};
+crates/sparq-engine/src/exec.rs:87:    // sound because only atomic loads occur while the owning `with_budget` frame
+crates/sparq-engine/src/lib.rs:137:pub use dp::{with_dp_planner, with_dp_planner_budget, without_dp_planner};
+crates/sparq-engine/src/lib.rs:138:pub use explain::{explain, explain_analyze, explain_analyze_with_budget};
+crates/sparq-engine/src/lib.rs:472:pub use window_syntax::{query_over, query_over_with_budget};
+crates/sparq-engine/src/lib.rs:2768:        // Tiny row cap on a 60k scan: must refuse with the budget error.
+crates/sparq-engine/tests/ask_early_exit.rs:47:use sparq_engine::{ask, ask_with_budget, query, query_with_budget, QueryBudget};
+crates/sparq-engine/tests/differentials/chunk_select_tri_mask.rs:25:use sparq_engine::{query_json, query_json_with_budget, reset_stats, stats_snapshot, QueryBudget};
+crates/sparq-engine/tests/differentials/vectorized_byte_identity.rs:274:    use sparq_engine::{query_json_with_budget, reset_stats, stats_snapshot, QueryBudget};
+crates/sparq-engine/tests/differentials/vectorized_byte_identity.rs:419:    use sparq_engine::{query_json_with_budget, reset_stats, stats_snapshot, QueryBudget};
+crates/sparq-engine/tests/stream_pipeline_equivalence.rs:61:use sparq_engine::{query_json, query_json_chunks_with_budget, query_json_stream_with_budget, QueryBudget};
+crates/sparq-fedclient/src/discovery.rs:579:    /// Whether at least one needed request was skipped because the budget was exhausted.
+crates/sparq-mpc/src/auth_disclose.rs:1823:    /// left every other test green. This one goes red, because the budget drops by one.
+crates/sparq-nlq/src/cite.rs:171:    use sparq_engine::{query_with_budget, QueryBudget};
+crates/sparq-nlq/src/eval.rs:35:use sparq_engine::{query_with_budget, QueryBudget, QueryResult};
+crates/sparq-nlq/src/lib.rs:12:use sparq_engine::query_with_budget;
+crates/sparq-nlq/src/provenance.rs:39:use sparq_engine::{query_with_budget, QueryBudget, QueryResult};
+crates/sparq-nlq/src/qualify.rs:362:    use sparq_engine::{query_with_budget, QueryBudget};
+crates/sparq-prov/src/lib.rs:78:pub use update::{derive_update, derive_update_with_budget, UpdateDerivation};
+crates/sparq-rsp/src/multi.rs:129:use crate::budget::BudgetSpec;
+crates/sparq-rsp/src/query.rs:45:use crate::budget::BudgetSpec;
+crates/sparq-serve/src/cache.rs:649:            // mis-config): refuse admission rather than overflow the budget.
+crates/sparq-serve/src/ring.rs:29:/// the low end because the memory budget is `live + K × delta` (~50 MB/generation
+crates/sparq-server/src/subscriptions.rs:62:use crate::http::{make_budget, AppState, ServerConfig, TIMEOUT_GRACE};
+crates/sparq-text/src/lib.rs:22:pub use rewrite::{prepare_text, query_text, query_text_with_budget, rewrite_query};
+crates/sparq-text/tests/rewrite_paths.rs:17:use sparq_text::{prepare_text, query_text, query_text_with_budget, TextIndex};
+crates/sparq-vectors/src/lib.rs:267:pub use rewrite::{prepare_vec, query_vec, query_vec_with_budget, rewrite_query};
+crates/sparq-vectors/src/lib.rs:286:pub use rewrite::{prepare_vec_approx, query_vec_approx, query_vec_approx_with_budget};

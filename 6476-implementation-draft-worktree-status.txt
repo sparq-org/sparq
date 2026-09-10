@@ -1,0 +1,7 @@
+ M crates/sparq-engine/src/cache.rs
+ M crates/sparq-engine/src/construct.rs
+ M crates/sparq-engine/src/exec.rs
+ M crates/sparq-engine/src/explain.rs
+ M crates/sparq-engine/src/explain_json.rs
+ M crates/sparq-engine/src/lib.rs
+ M crates/sparq-engine/src/update.rs
