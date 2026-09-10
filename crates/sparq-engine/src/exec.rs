@@ -701,7 +701,7 @@ pub(crate) mod budget {
             use oxrdf::{Literal, Term};
             use sparq_core::Graph;
             use std::sync::atomic::AtomicUsize;
-            for inner in 0..4 {
+            for inner in 0..5 {
                 let graph = Graph::load_str("", "turtle").unwrap();
                 let nested = Graph::load_str("", "turtle").unwrap();
                 let flag = Arc::new(AtomicBool::new(false));
@@ -733,8 +733,21 @@ pub(crate) mod budget {
                                 1
                             );
                         }
-                        _ => {
+                        3 => {
+                            // Parse rejection occurs before a child budget is installed.
                             assert!(crate::query(&nested, "not SPARQL").is_err());
+                        }
+                        _ => {
+                            // [GPT-6 Astra] This valid graph form reaches the error
+                            // arm inside query_prepared_with_budget's budget scope.
+                            let sparql = "CONSTRUCT { ?s ?p ?o } WHERE {}";
+                            assert!(crate::PreparedQuery::parse(sparql).unwrap().is_graph_form());
+                            let outer = ACTIVE.with(Cell::get);
+                            assert_eq!(
+                                crate::query(&nested, sparql).unwrap_err(),
+                                "only SELECT and ASK queries are supported"
+                            );
+                            assert_state(outer, None);
                         }
                     }
                     callback_flag.store(true, Ordering::Relaxed);
