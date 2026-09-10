@@ -465,6 +465,14 @@ for evidence_name in ['NB1-source.txt', 'binary/in-tree-default', 'binary/in-tre
 for evidence_name in ['followup-root-verification.json', 'opus-followup-input.md', 'opus-followup-input-receipt.json', 'issue-pr-progress.json', 'issue-pr-progress-precheck.json', 'issue-pr-progress-receipt.json', 'query-base-followup-dedupe.json', 'query-base-main-source.txt', 'query-base-issue-input.json', 'query-base-precreate.json', 'query-base-issue-created.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 completed supplement review, full-CI admission and operator route evidence.
+for evidence_name in ['report.json', 'source-excerpts.txt', 'manifest.json']:
+    FILES["6476-operator-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/operator-readiness" / evidence_name
+for evidence_name in ['report.json', 'source-excerpts.txt', 'manifest.json']:
+    FILES["6476-bench-dispatch-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/bench-dispatch-readiness" / evidence_name
+for evidence_name in ['opus-followup-review.json', 'opus-followup-stderr.log', 'opus-followup-result.json', 'opus-followup-completion.json', 'pr-ci-body.md', 'publish-followup.py', 'followup-publication-receipt.json', 'ready-followup.py', 'ready-followup-receipt.json', 'copilot-request.json', 'copilot-request-receipt.json', 'pr-ready-verified.json', 'initial-full-ci-runs.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

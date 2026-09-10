@@ -1,0 +1,14 @@
+{
+  "files": [
+    {
+      "path": "report.json",
+      "bytes": 6777,
+      "sha256": "7b6c6119336cf7da5d67ac49b8dc155c8807154c5620f93faad1834bbfb01bda"
+    },
+    {
+      "path": "source-excerpts.txt",
+      "bytes": 12223,
+      "sha256": "728de31d768118a2ff40b383212eff3539a065d0d1029232a849383ed3655dbf"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "execution": "Read-only source/artifact inventory; no commands built or ran benchmark code.",
+  "answer": "The deterministic-only PR bench does execute six qlever-synthetic count queries while collecting load-layout metrics, but it exits before the separate 28-query operator-coverage block. It therefore supplies some real query execution, not the registered operator-coverage suite.",
+  "evidence": [
+    {
+      "path": "scripts/ci-bench.sh",
+      "lines": "63-68,290-324,378-396",
+      "fact": "Q points to bench/qlever-synthetic/queries; DET_ONLY calls CLI bench with Q in count mode three times (normal, compressed, smaller fixed corpus), emits metrics and exits0. OPQ count/materialize/json loop occurs later and cannot be reached."
+    },
+    {
+      "path": ".github/workflows/bench.yml",
+      "lines": "284-301",
+      "fact": "Builds CLI and generator; PR event uses --deterministic-only. Non-PR full-script route can reach operator loop, subject to earlier commands succeeding; no actual run verified here."
+    },
+    {
+      "path": "AGENTS.md",
+      "lines": "224-233",
+      "fact": "Change-triggered re-evaluation expectation includes operator-coverage; enforcement column identifies E conformance ratchet, not a separate hard operator latency gate."
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "lines": "18",
+      "fact": "Query execution/operator checklist asks for operator-coverage bench plus conformance and builtin error table."
+    },
+    {
+      "path": "bench/benchmarks.toml",
+      "lines": "249-263",
+      "fact": "Registered operator-coverage uses generated2000 entities,28 query files,3 iterations in count/materialize/json; timing is trend-only, not deterministic perf-gate."
+    },
+    {
+      "path": "scripts/bench/run-all-benchmarks.sh",
+      "lines": "78,153-157,203",
+      "fact": "--only operator-coverage exists, but requires prebuilt CLI/generator; it does not silently build absent binaries. Direct per-suite command is generator dump2000 then three modes."
+    },
+    {
+      "path": "crates/sparq-cli/src/main.rs",
+      "lines": "2199-2265",
+      "fact": "run_query_suite routes graph forms to construct_or_describe; other modes dispatch count/query/query_json. A query error prints ERROR and runner continues; stdout/JSON must be checked, exit0 alone insufficient. JSON mode rows denotes output byte count, not solution count."
+    }
+  ],
+  "narrowest_complete_existing_route": {
+    "build_prerequisite": "cargo build --release -p sparq-cli -p sparq-bench (actual workflow command; scope limited to two binaries, but transitive dependencies are not all warm)",
+    "once_built": [
+      "$GEN dump 2000 \"$SCRATCH/op.nt\"",
+      "for mode in count materialize json; do \"$CLI\" bench \"$SCRATCH/op.nt\" ntriples bench/operators/queries 3 \"$mode\"; done"
+    ],
+    "evidence": "Exact source/compiler/features/binary hashes; generated dataset hash; full stdout/stderr for each mode; exactly28 named non-ERROR rows per mode (84 total), and no missing/failed queries. Do not equate JSON byte counts with count/materialize row counts. Timing is local advisory; no admission speedup or automated ratchet claim.",
+    "recommended_scope": "Only the registered operator suite, not ci-bench.sh full or run-all-benchmarks without --only. Do not use ||true or discard ERROR rows for validation."
+  },
+  "current_footprint": {
+    "private_target": "direct-5983/implementation/target (regenerable cache only)",
+    "cli_binary_present": false,
+    "generator_binary_present": false,
+    "known_missing_release_rlibs": [
+      "oxigraph",
+      "sparq-canon",
+      "sparq-difftest",
+      "sparq-reason",
+      "mimalloc",
+      "oxjsonld"
+    ],
+    "warm": "Current engine/core/common default+test-feature artifacts in O3/unwind/noLTO/codegen16. Repository shipping release uses fatLTO/codegen1/abort and would not match those profiles.",
+    "constraint": "Cannot truthfully promise the full two-bin default-feature build fits the remaining512MiB allowance from this source-only inventory. No byte/time estimate manufactured; requires explicit bounded build feasibility decision. Avoid starting a default fat-LTO build as a supposedly cheap check.",
+    "free_at_read_bytes": 5845540864
+  },
+  "smaller_existing_partial_check": {
+    "route": "bench/alloc-track: cargo run --release --bin alloc_track -- --smoke",
+    "scope": "Registered existing28-query corpus,200entities,iters2; real query for SELECT/ASK and construct_or_describe for graph forms. Dependencies only core,engine,rayon; no CLI/generator/Oxigraph. ThinLTO profile differs from warm noLTO and detached lock/provenance has not been assessed.",
+    "limitations": "Only public query/materialized and graph-form paths, not count/json. Smoke performs one measured iteration after warmup, so it cannot prove repeat-allocation determinism; alloc output is unrelated to the current correctness obligation. Useful smaller corpus smoke if specifically authorized, not full three-mode template fulfillment and no new allocator/performance campaign recommended."
+  },
+  "recommendation": "Do not mark operator-coverage completed from PR deterministic metrics. Keep template item pending; prefer the one registered2000-entity/three-mode suite using correctly sourced CLI/generator if already available on an authorized runner, or after a separately bounded local two-bin build feasibility decision. No workflow change, dispatch, threshold change or broad campaign needed. Existing full CI conformance remains the automated semantic ratchet.",
+  "source_hashes": {
+    "scripts/ci-bench.sh": "85a12328525acb7099ac37eb46b8701911948ad233e493e99a316d008b87c3b0",
+    ".github/workflows/bench.yml": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+    "AGENTS.md": "323dd6196eb23f8b7ade9adf333b76d948850630d7a1f1f450504b4bd3536508",
+    ".github/PULL_REQUEST_TEMPLATE.md": "4f800f40af2c1d0715617c79aa66f82c6ef5cb72596eb9bd062cf619233f7b3b",
+    "bench/benchmarks.toml": "2bd1851c08e8e0b14ba9f7c5f0930584931ac8259a1d2000ad64870926250b2d",
+    "scripts/bench/run-all-benchmarks.sh": "bc2d04784237070e1650d5db43512b24c730504af711236668320bf1fcf026a6",
+    "crates/sparq-cli/src/main.rs": "b6d5ad1fe0afa1b395aae321b840dded80fe971447f5e29a846f427c88a20f31",
+    "crates/sparq-cli/Cargo.toml": "c3be37af446bad27eeaec8bc68bfe616b970fc440a16316c1eb396c47e479cb9",
+    "crates/sparq-bench/Cargo.toml": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a",
+    "bench/alloc-track/Cargo.toml": "cd0c76738a52170dcbac5a51063c9d787356a7cb67760562ea762f35a1ef94cc",
+    "bench/alloc-track/src/main.rs": "3eaed970bc806117be432c6879ee7bd40e4dd4bfa3ba135d61124e3596f4e3d6"
+  }
+}

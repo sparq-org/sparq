@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T06:30:58.157921+00:00",
+  "updated_at": "2026-09-10T06:43:55.067814+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Actual Opus supplement review running; draft6478 awaits reviewed follow-up push",
-    "state": "Clean bcba candidate and 205-file validation bundle root-verified. Final public witness4/4, exact copied module15/15, three mutants killed, internal seal calibrated, one actual production snapshot path observed on two workers. No merge or full-CI approval claimed.",
+    "phase": "PR6478 full CI and Copilot; narrow operator-corpus check running",
+    "state": "Source and follow-up independently approved; normal fast-forward publication completed, ready-for-review and Copilot request verified. No merge approval yet.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,10 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect actual Opus supplement54920 once; if clear, fresh draft PR/main/head/remote checks and fast-forward d07, update PR body then ready and Copilot.",
-      "Collect bounded operator-coverage clarification; resolve actual template/gate coverage before merge without inventing full local gate.",
-      "Verify normal full current-head CI and review threads, then protected queue/main checks.",
-      "Next source-only issue6479 requires runtime witness; do not mix into6478 or claim broader TLS audit."
+      "Collect same Astra operator-corpus protocol/results and verify exact84 records/control/source provenance; preserve honest equivalence scope.",
+      "Inspect current-head full CI and actual Copilot review/threads; fix or respond to findings and normal holds.",
+      "After all full gates and operator expectation satisfied, fresh protected queue admission, then main verification and issue6476 link/close.",
+      "Issue6479 remains separate source-only follow-up requiring runtime witness; do not mix into6478."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -314,7 +314,7 @@
       "result": "direct-6476/admission/opus-final-result.json",
       "receipt": "direct-6476/admission/opus-final-completion.json"
     },
-    "agent_state": "Same Astra doing bounded read-only operator-coverage route clarification; no source edits/build/dispatch/model",
+    "agent_state": "Same Astra implementing/running bounded task-private operator harness; production d07 stays clean",
     "publication_readiness": {
       "state": "completed_root_hash_verified",
       "directory": "direct-6476/publication-readiness",
@@ -334,11 +334,13 @@
       "pr": 6478,
       "url": "https://github.com/sparq-org/sparq/pull/6478",
       "state": "OPEN",
-      "draft": true,
-      "head": "bcba08207b03714a25ad7a2a4774370c7f6f6bfa",
+      "draft": false,
+      "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
       "branch": "codex/nested-query-budget",
-      "verified": "direct-6476/admission/pr-created.json",
-      "receipt": "direct-6476/admission/draft-publication-receipt.json"
+      "verified": "direct-6476/admission/pr-ready-verified.json",
+      "receipt": "direct-6476/admission/ready-followup-receipt.json",
+      "push_receipt": "direct-6476/admission/followup-publication-receipt.json",
+      "push_state_note": "Push succeeded; immediate PR head read lagged at bcba, so continuation stopped before later mutations. Subsequent fresh read showed d07; dedicated continuation did not repeat push."
     },
     "followup": {
       "state": "completed_frozen_root_verified",
@@ -364,7 +366,7 @@
       }
     },
     "supplement_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 54920,
       "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
@@ -376,7 +378,148 @@
       "input_sha256": "959e6f7105f832da23a91bd76189d752ff2b79067e6065e268b8874500adef14",
       "output": "direct-6476/admission/opus-followup-review.json",
       "started_at": "2026-09-10T06:28:49.369702+00:00",
-      "collect_policy": "Collect54920 once before reading output; verify outer result/modelUsage/head and declaration assessment. No duplicate/retry after exhaustion. Parent full review32484 done and collected."
+      "collect_policy": "54920 completed/collected. Never poll/relaunch. Parent32484 also done.",
+      "completed": true,
+      "actual_model": "claude-opus-5",
+      "verdict": "approve_delta_for_ci",
+      "declaration_approved": true,
+      "result": "direct-6476/admission/opus-followup-result.json",
+      "receipt": "direct-6476/admission/opus-followup-completion.json"
+    },
+    "ci": {
+      "evidence": "direct-6476/admission/initial-full-ci-runs.json",
+      "latest_per_workflow": {
+        "Running Copilot Code Review": {
+          "id": 34446065585,
+          "name": "Running Copilot Code Review",
+          "status": "in_progress",
+          "conclusion": null,
+          "event": "dynamic",
+          "created_at": "2026-09-10T06:37:49Z"
+        },
+        "Changed-code mutation review": {
+          "id": 34446058044,
+          "name": "Changed-code mutation review",
+          "status": "in_progress",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "docs-quality": {
+          "id": 34446057905,
+          "name": "docs-quality",
+          "status": "in_progress",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "ci-summary": {
+          "id": 34446057897,
+          "name": "ci-summary",
+          "status": "in_progress",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "pr-area-label": {
+          "id": 34446057903,
+          "name": "pr-area-label",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "supply-chain": {
+          "id": 34446057963,
+          "name": "supply-chain",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "formal-verification": {
+          "id": 34446057901,
+          "name": "formal-verification",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "flow-on-gates": {
+          "id": 34446057898,
+          "name": "flow-on-gates",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "fuzz": {
+          "id": 34446058092,
+          "name": "fuzz",
+          "status": "in_progress",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "CI": {
+          "id": 34446058088,
+          "name": "CI",
+          "status": "queued",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "vectorized-feature-off": {
+          "id": 34446057925,
+          "name": "vectorized-feature-off",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "feature-matrix": {
+          "id": 34446058093,
+          "name": "feature-matrix",
+          "status": "queued",
+          "conclusion": null,
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "xpath-differential": {
+          "id": 34446057959,
+          "name": "xpath-differential",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "Benchmarks": {
+          "id": 34446058079,
+          "name": "Benchmarks",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:43Z"
+        },
+        "pr-title": {
+          "id": 34446055915,
+          "name": "pr-title",
+          "status": "completed",
+          "conclusion": "success",
+          "event": "pull_request",
+          "created_at": "2026-09-10T06:37:41Z"
+        }
+      },
+      "observed_at": "2026-09-10T06:43:55.065159+00:00",
+      "state": "Full current-head workflows started; results not yet complete",
+      "copilot": "Requested through normal API; receipt direct-6476/admission/copilot-request-receipt.json"
+    },
+    "operator_validation": {
+      "state": "running",
+      "agent": "/root/postmerge_ci",
+      "scope": "Registered2000-entity28-query corpus,3iterations,count/materialize/json; exact existing generator and CLI publicAPI dispatch semantics reused in small harness.84 query/mode records and failclosedinvalid-querycontrol; no perfclaim.",
+      "constraints": "Original aggregate512MiB/2GiBfree, offlinejobs1, warmprofile; no newdeps/sourceedits/GitHub/model/EC2;15minbound;stop if faithful reuse/footprint unavailable.",
+      "decision": "Full bench.yml dispatch is supported GitHub-hosted and concurrency-isolated but expands to SCALE200000+unrelated suites and issue/label writes; choose narrow equivalent corpus execution first, not broad dispatch. No dispatch performed."
     }
   },
   "prs": {
@@ -2849,6 +2992,17 @@
       "evidence": "direct-6476/admission/query-base-issue-created.json",
       "dedupe": "direct-6476/admission/query-base-followup-dedupe.json",
       "constraint": "Separate from6478, view_scope already restores state; no broad TLS redesign claim"
+    }
+  },
+  "pending_operational_notes": {
+    "dependabot_notice": {
+      "source": "direct-6476/admission/followup-publication-receipt.json git-push stderr",
+      "reported_counts": {
+        "critical": 2,
+        "high": 41,
+        "moderate": 20
+      },
+      "state": "GitHub default-branch notice only; exposure/deduplication not yet assessed. Plan bounded actual alert triage after current critical-path work; no unsupported vulnerability claim or new issue."
     }
   }
 }

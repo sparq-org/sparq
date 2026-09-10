@@ -1,0 +1,139 @@
+.github/workflows/bench.yml
+196:    if: >-
+197:      (github.event_name != 'pull_request' ||
+198:       !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
+199:       contains(fromJSON('["ci-full","bench-full"]'), github.event.label.name)) &&
+200:      (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&
+201:      (needs.select.outputs.mode != 'selected' ||
+202:       contains(needs.select.outputs.affected, '"sparq-engine"') ||
+203:       contains(needs.select.outputs.affected, '"sparq-cli"') ||
+204:       contains(needs.select.outputs.affected, '"sparq-bench"') ||
+205:       contains(needs.select.outputs.affected, '"sparq-wasm"'))
+206:    runs-on: ubuntu-latest
+216:    permissions:
+217:      contents: write
+218:      deployments: write
+219:      pull-requests: write
+220:      issues: write
+
+.github/workflows/bench.yml
+299:      - name: Run benchmarks (full suite — main / schedule / dispatch)
+300:        if: github.event_name != 'pull_request'
+301:        run: bash scripts/ci-bench.sh 200000 bench-results.json
+
+.github/workflows/bench.yml
+603:      - name: Store + compare against history
+604:        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+605:        with:
+606:          name: sparq engine
+607:          tool: customSmallerIsBetter
+608:          output-file-path: bench-results.json
+609:          github-token: ${{ secrets.GITHUB_TOKEN }}
+618:          auto-push: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
+622:          gh-pages-branch: benchmark-data
+623:          benchmark-data-dir-path: dev/bench
+634:          max-items-in-chart: 20
+637:          comment-always: true
+638:          summary-always: true
+
+.github/workflows/bench.yml
+669:          alert-threshold: '175%'
+670:          comment-on-alert: true
+671:          fail-on-alert: false
+685:      - name: Soft-zone triage (file a deduped bench-flake issue; no @mentions)
+686:        if: always() && github.repository == 'sparq-org/sparq'
+687:        env:
+688:          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+689:        run: |
+690:          set -uo pipefail
+691:          if [ ! -f bench-results.json ]; then
+692:            echo "no bench-results.json (bench did not run to completion) — nothing to triage."
+693:            exit 0
+694:          fi
+697:          python3 scripts/bench-triage.py --mode build-comparison \
+698:            --results bench-results.json \
+699:            --prev-data-js prev-data.js \
+700:            --suite 'sparq engine' \
+701:            --out bench-comparison.json || { echo "::warning::comparison build failed (non-fatal)"; exit 0; }
+704:          python3 scripts/bench-triage.py --mode soft \
+705:            --comparison bench-comparison.json \
+706:            --hardzone-report bench-hardzone-report.json \
+707:            --soft 175 --hard 200 \
+708:            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+709:            || echo "::warning::soft-zone triage filer failed (non-fatal)"
+
+scripts/bench-triage.py
+390:    return subprocess.run(["gh", *argv], check=True, capture_output=True, text=True).stdout.strip()
+391:
+392:
+393:def ensure_label(name: str, color: str, desc: str) -> None:
+394:    """Create the label if missing (idempotent via --force). Fail-soft."""
+395:    try:
+396:        gh("label", "create", name, "--color", color, "--description", desc, "--force")
+397:    except subprocess.CalledProcessError as e:
+398:        log(f"warning: label create {name} failed (non-fatal): {e.stderr.strip() if e.stderr else e}")
+399:
+400:
+401:def find_open_issue(marker: str, key: str) -> str | None:
+402:    try:
+403:        out = gh(
+404:            "issue", "list", "--state", "open",
+405:            "--search", f'in:title "{marker} {key}"',
+406:            "--json", "number,title", "--limit", "10",
+407:        )
+408:        for item in json.loads(out or "[]"):
+409:            title = item.get("title", "")
+410:            if marker in title and key in title:
+411:                return str(item["number"])
+412:    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+413:        log(f"warning: issue dedupe search failed ({e})")
+414:    return None
+415:
+416:
+417:def _post_issue(title: str, body: str, labels: list[str], existing: str | None) -> str | None:
+418:    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
+419:        tf.write(body)
+420:        body_file = tf.name
+421:    try:
+422:        if existing:
+423:            gh("issue", "comment", existing, "--body-file", body_file)
+424:            log(f"commented on existing issue #{existing} (deduped)")
+425:            return existing
+426:        argv = ["issue", "create", "--title", title, "--body-file", body_file]
+427:        for lab in labels:
+428:            argv += ["--label", lab]
+429:        url = gh(*argv)
+430:        log(f"filed issue: {url}")
+431:        return url
+
+scripts/bench-triage.py
+578:def file_flake_issues(part: dict, soft: float, hard: float, run_url: str) -> list[str]:
+579:    soft_rows = part["soft"]
+580:    if not soft_rows:
+581:        log("no soft-zone regressions — nothing to file.")
+582:        return []
+583:    ensure_label(FLAKE_LABEL, "fbca04", "benchmark soft-zone (possible runner flakiness)")
+584:    by_suite: dict[str, list[dict]] = {}
+585:    for r in soft_rows:
+586:        by_suite.setdefault(suite_of(r["name"]), []).append(r)
+587:    filed = []
+588:    for suite, rows in sorted(by_suite.items()):
+589:        key = f"suite={suite}"
+590:        title = f"{FLAKE_MARKER} {key}: benchmarks in the soft zone (possible runner noise)"
+591:        existing = find_open_issue(FLAKE_MARKER, key)
+592:        body = build_flake_body(suite, rows, soft, hard, run_url)
+593:        res = _post_issue(title, body, [FLAKE_LABEL], existing)
+594:        if res:
+595:            filed.append(res)
+
+scripts/ci-bench.sh
+385:if [ -d "$OPQ" ]; then
+386:  for mode in count materialize json; do
+387:    "$CLI" bench "$TMP/data.nt" ntriples "$OPQ" 3 "$mode" 2>/dev/null > "$TMP/op" || true
+388:    while IFS=$'\t' read -r name rows us; do
+390:      [ "${rows:-}" = "ERROR" ] && continue
+391:      [ -n "${us:-}" ] && add "op_${name}_${mode}_us" us "$us"
+392:    done < "$TMP/op"
+393:  done
+394:fi
+395:

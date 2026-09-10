@@ -1,0 +1,42 @@
+{
+  "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "scope": "Read-only bench.yml dispatch execution surface; no dispatch/build/API/model invocation.",
+  "route_available": true,
+  "workflow": "bench.yml (Benchmarks)",
+  "runner": "ubuntu-latest (select, dashboard-labels and run + track benchmarks)",
+  "inputs": null,
+  "branch": "codex/nested-query-budget",
+  "invocation_for_coordinator_only": "/opt/homebrew/bin/gh workflow run bench.yml --repo sparq-org/sparq --ref codex/nested-query-budget",
+  "revalidate_before_any_use": "Remote branch must still be exact reviewed d07ca79f89e3a8945be46b516c3cd2f770ccd618; workflow_dispatch ref is mutable, so inspect returned run head_sha,event=workflow_dispatch,head_branch and runner before attributing evidence. Never use --ref main for this task.",
+  "operator_route": {
+    "source": ".github/workflows/bench.yml:77,196-206,284-301; scripts/ci-bench.sh:378-396",
+    "behavior": "Dispatch has no inputs and is non-PR, so invokes full ci-bench.sh at SCALE200000. It reaches28 operator files \u00d73 modes \u00d73 iterations if preceding build/script phases succeed. Not the narrow2000-entity standalone command.",
+    "selection": "Reusable ci-select receives workflow_dispatch and uses full mode; draft guard applies only to PR events.",
+    "concurrency": "run_id-isolated group and cancel-in-progress false for dispatch (bench.yml109-110), so this dispatch does not cancel ordinary PR/push or merge-group work."
+  },
+  "unrelated_work": [
+    "Dashboard drift/syntax/smoke checks; Rust/wasm toolchain and binaryen setup; default shipping release builds CLI+generator; wasm builds/probe/optimization; generic load/parse/query/inference and available well-known external-corpus suites.",
+    "Non-main branch ref skips main/local-only geo,FTS,vector,RSP,HDT,ZK,solid and NLQ example hooks. Main-only extra suite toolchain install is skipped; existing runner/cached tools can still enable other corpus suites. No operator-only input exists.",
+    "Perf-gate selftest/history fetch and deterministic gate; existing parse-only remeasurement option remains wired. No knob to disable it in dispatch inputs."
+  ],
+  "remote_side_effects": {
+    "permissions": "bench job requests contents/deployments/pull-requests/issues write; workflow-level contents read.",
+    "branch_writes": "Auto-ratchet main commit, history bootstrap/push and Pages seeding are gated refs/heads/main, so skipped on this branch. A manual MAIN dispatch would enable them (event != schedule), despite older prose saying push-only.",
+    "comments": "Pinned github-action-benchmark step is unconditional, has GITHUB_TOKEN, comment-always:true/comment-on-alert:true and auto-push:false off main. Comment/deployment-related behavior is configured; third-party action internals not newly audited, so do not claim zero writes.",
+    "issue_and_label_writes": "Soft-zone triage runs always() for sparq-org/sparq even on branch dispatch. If completed results contain soft-zone regressions, scripts/bench-triage.py ensures bench-flake via gh label create --force, then comments on an existing issue or creates one (lines390-431,578-595). No dispatch input disables this.",
+    "infra": "No direct AWS/EC2 provisioning, release publication or registry dispatch call in inspected workflow/driver. No id-token/AWS credential setup. SP2B_EC2 defaults0 and is not supplied; its separately named heavy runner is not activated. Registry-OFF is not changed. This is scoped source evidence, not a blanket audit of all third-party/downstream automation."
+  },
+  "result_evidence": {
+    "artifact": "No actions/upload-artifact step in bench.yml. bench-results.json is runner-local; on branch auto-push is false. There is no downloadable named operator artifact promised by this workflow.",
+    "available": "If ci-bench.sh finishes, it prints full bench-results.json at end of Run benchmarks step. Capture that exact job log and parse JSON there. Expected set is op_<each28queryfilename_without_rq>_<count|materialize|json>_us:84 unique finite nonnegative metrics,unitus,with no missing/extra/duplicate operator keys.",
+    "limits": "Operator loop drops ERROR records and overwrites temporary TSV per mode. Raw solution counts are not preserved in emitted metrics.84 expected metrics establish successful execution of all query/mode cases under existing loop semantics, not independent expected-answer correctness. If a later unrelated suite fails before final emit_json, early operator work may produce no recoverable complete JSON; do not retry automatically.",
+    "safe_source": "scripts/ci-bench.sh:210-219,385-395,final emit_json; bench.yml has no upload."
+  },
+  "recommendation": "Supported GitHub-hosted route, but NOT a side-effect-free/operator-only check. It avoids EC2/release/registry actions in the inspected path yet can post history comments and create/update bench-flake issues/label, and runs unrelated suites. Do not represent it as the narrow read-only84-record route. Coordinator can choose the exact branch dispatch only accounting for those existing writes/costs and log-only evidence; no dispatch performed here. If those side effects are outside authorized scope, this existing route is unavailable without a separately reviewed narrower route.",
+  "source_sha256": {
+    ".github/workflows/bench.yml": "135b956886db9016f514924290f987e79649f9ffe91886bc55db7e9435dbf0e0",
+    ".github/workflows/ci-select.yml": "d951f53a79370643e6350b585f2f8310e5061a241d4a9db27a0065d243d14bae",
+    "scripts/ci-bench.sh": "85a12328525acb7099ac37eb46b8701911948ad233e493e99a316d008b87c3b0",
+    "scripts/bench-triage.py": "b95ee76483bd7b647cce88a70662e5ddc53876999c9c3c71ee53da70e7b7b38c"
+  }
+}

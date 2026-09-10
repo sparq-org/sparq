@@ -1,0 +1,184 @@
+scripts/ci-bench.sh
+283: # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) --deterministic-only: emit ONLY the DETERMINISTIC
+284: # byte-count / memory-layout metrics the perf-gate HARD-gates, then exit. This is the FAST per-PR /
+285: # merge_group form (bench.yml): NO timing loops, NO well-known / crate-example suites. Every command
+286: # here is byte-for-byte the same one the full run below uses (one load summary for store/dict bytes,
+287: # one compressed-profile load, one fixed-scale small load, one wasm build) — so the ratchet compares
+288: # the identical values, just measured without the noisy latency work. `add` is idempotent-per-name;
+289: # the full run measures these too when it runs on the nightly EC2 lane.
+290: if [ "$DET_ONLY" = "1" ]; then
+291:   "$GEN" dump "$SCALE" "$TMP/data.nt" >/dev/null 2>&1
+292:   # store/dict bytes-per-{triple,term} — DETERMINISTIC memory-layout from the load summary line.
+293:   "$CLI" bench "$TMP/data.nt" ntriples "$Q" 1 count >/dev/null 2>"$TMP/e" || true
+294:   dbtriple=$(grep -oE '\([0-9]+ B/triple\)' "$TMP/e" | head -1 | grep -oE '[0-9]+' | head -1)
+295:   [ -n "${dbtriple:-}" ] && add store_bytes_per_triple bytes "$dbtriple"
+296:   dbterm=$(grep -oE '[0-9]+ B/term' "$TMP/e" | head -1 | grep -oE '[0-9]+' | head -1)
+297:   [ -n "${dbterm:-}" ] && add dict_bytes_per_term bytes "$dbterm"
+298:   # compressed-profile B/triple (SPARQ_STORE_PROFILE=compressed => into_compressed()) — DETERMINISTIC.
+299:   SPARQ_STORE_PROFILE=compressed "$CLI" bench "$TMP/data.nt" ntriples "$Q" 1 count >/dev/null 2>"$TMP/e_comp" || true
+300:   dcbtriple=$(grep -oE '\([0-9]+ B/triple\)' "$TMP/e_comp" | head -1 | grep -oE '[0-9]+' | head -1)
+301:   [ -n "${dcbtriple:-}" ] && add comp_store_bytes_per_triple bytes "$dcbtriple"
+302:   # store bytes-per-triple at the SECOND (fixed 50k) scale — catches per-triple-overhead regressions.
+303:   DET_FIX="${PARSE_FIX:-50000}"
+304:   "$GEN" dump "$DET_FIX" "$TMP/fix.nt" >/dev/null 2>&1
+305:   "$CLI" bench "$TMP/fix.nt" ntriples "$Q" 1 count >/dev/null 2>"$TMP/fe" || true
+306:   dbtriple2=$(grep -oE '\([0-9]+ B/triple\)' "$TMP/fe" | head -1 | grep -oE '[0-9]+' | head -1)
+307:   [ -n "${dbtriple2:-}" ] && add store_bytes_per_triple_small bytes "$dbtriple2"
+308:   # wasm bundle size (bytes, DETERMINISTIC) — same release-wasm profile the shipped bundle uses.
+309:   if rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
+310:     if cargo build --profile release-wasm -q -p sparq-wasm --target wasm32-unknown-unknown 2>/dev/null; then
+311:       DET_WASM=$(ls target/wasm32-unknown-unknown/release-wasm/*.wasm 2>/dev/null | head -1)
+312:       [ -n "${DET_WASM:-}" ] && add wasm_bundle_bytes bytes "$(wc -c < "$DET_WASM" | tr -d ' ')"
+313:     fi
+314:   fi
+315:   # [FABLE-5] (sq-3ul2n.2) assert the gate build carries +simd128 — AFTER wasm_bundle_bytes read the
+316:   # stripped artifact (this clobbers it with an unstripped probe; nothing below reuses it).
+317:   assert_wasm_simd128
+318:   emit_json > "$OUT"
+319:   echo "wrote $OUT (--deterministic-only):"; cat "$OUT"
+320:   exit 0
+321: fi
+322: 
+323: "$GEN" dump "$SCALE" "$TMP/data.nt" >/dev/null 2>&1
+324: 
+
+scripts/ci-bench.sh
+378: # [OPUS-4.8] operator-coverage latencies — one *.rq per SPARQL operator family
+379: # (BGP/star/chain/triangle, UNION, OPTIONAL/!bound, MINUS, FILTER {num,string,IN,EXISTS},
+380: # BIND, VALUES, aggregates+GROUP BY+HAVING, DISTINCT, ORDER BY+LIMIT/OFFSET, property paths
+381: # {+,*,?,seq,alt,inverse,negated-set}, subquery, ASK/CONSTRUCT/DESCRIBE). Same TSV runner +
+382: # naming as the query latencies, namespaced `op_<query>_<mode>_us`. Graph forms (CONSTRUCT/
+383: # DESCRIBE) are routed by `bench` to the construct/describe executor (rows = produced triples).
+384: # Wall-clock / trend-only: these are NOT in the deterministic perf-gate (scripts/perf-gate.py).
+385: if [ -d "$OPQ" ]; then
+386:   for mode in count materialize json; do
+387:     "$CLI" bench "$TMP/data.nt" ntriples "$OPQ" 3 "$mode" 2>/dev/null > "$TMP/op" || true
+388:     while IFS=$'\t' read -r name rows us; do
+389:       # skip any query that errored (rows == ERROR) so the JSON stays valid + numeric.
+390:       [ "${rows:-}" = "ERROR" ] && continue
+391:       [ -n "${us:-}" ] && add "op_${name}_${mode}_us" us "$us"
+392:     done < "$TMP/op"
+393:   done
+394: fi
+395: 
+396: # [OPUS-4.8] SP2Bench per-commit subset (sq-0jp). Builds+caches the real Freiburg sp2b_gen
+
+.github/workflows/bench.yml
+284:       - name: Build release binaries
+285:         run: cargo build --release -p sparq-cli -p sparq-bench
+286:       # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) On a PR run ONLY the DETERMINISTIC byte-count
+287:       # metrics (`--deterministic-only`): the hard-gated store/dict/wasm bytes ratchet — a pure
+288:       # function of the code, seconds not minutes, immune to shared-runner noise. The full noisy
+289:       # timing suite (query latencies + well-known / crate-example suites + the parse timing metric)
+290:       # is RELOCATED to the EC2 full-suite lane (bench-ec2.yml — MANUAL DISPATCH ONLY since #3784
+291:       # retired its cron) so it no longer drags the merge queue or
+292:       # flaps the gate. On push-to-main / schedule / workflow_dispatch (NOT a PR) the FULL suite runs,
+293:       # so the auto-ratchet floor + the benchmark-data history (main-only steps below) stay continuous
+294:       # exactly as before — the per-commit trend on the Pages dashboard is unaffected. The two-line
+295:       # split keeps the emitted JSON path identical (bench-results.json) for every downstream step.
+296:       - name: Run benchmarks (PR — deterministic byte-count ratchet only)
+297:         if: github.event_name == 'pull_request'
+298:         run: bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json
+299:       - name: Run benchmarks (full suite — main / schedule / dispatch)
+300:         if: github.event_name != 'pull_request'
+301:         run: bash scripts/ci-bench.sh 200000 bench-results.json
+
+scripts/bench/run-all-benchmarks.sh
+149:     deep-taxonomy|owl-sameas|owl-bench)
+150:       have python3 || { echo "python3 missing"; return; }
+151:       [ -x "$CLI" ] || echo "sparq-cli not built (run the build-core suite first)" ;;
+152:     fuzz-smoke|sparq-bench-compare) have cargo || echo "cargo not on PATH" ;;
+153:     operator-coverage|selective-bindjoin|u64-valueids|ingest-index|bench-remap|cli-scaling)
+154:       [ -x "$CLI" ] || { echo "sparq-cli not built (run the build-core suite first)"; return; }
+155:       case "$id" in operator-coverage|ingest-index|cli-scaling)
+156:         [ -x "$GEN" ] || echo "sparq-bench not built (run the build-core suite first)" ;; esac ;;
+157:     sp2b) have g++ || echo "g++ missing (SP2Bench generator build)"
+
+scripts/bench/run-all-benchmarks.sh
+203:     operator-coverage) echo '"$GEN" dump 2000 "$SCRATCH/op.nt" && for m in count materialize json; do "$CLI" bench "$SCRATCH/op.nt" ntriples bench/operators/queries 3 "$m"; done' ;;
+
+bench/benchmarks.toml
+249: # [OPUS-4.8] sq-ca4 — one query per SPARQL operator family; trend-only latency coverage.
+250: [[benchmark]]
+251: id          = "operator-coverage"
+252: name        = "SPARQL operator-coverage latency suite"
+253: category    = "query"
+254: measures    = "per-operator min-of-iters latency (us) across count/materialize/json for one query per operator family (BGP/star/chain/triangle, UNION, OPTIONAL/!bound, MINUS, FILTER {numeric,string,IN,EXISTS}, BIND, VALUES, aggregates+GROUP BY+HAVING, DISTINCT, ORDER BY+LIMIT/OFFSET, property paths {+,*,?,seq,alt,inverse,negated-set}, subquery, ASK/CONSTRUCT/DESCRIBE); each query returns a small stable non-empty result"
+255: invoke      = "cargo build -p sparq-cli sparq-bench --release && ./target/release/sparq-bench dump 2000 /tmp/op.nt && ./target/release/sparq-cli bench /tmp/op.nt ntriples bench/operators/queries 3 count   # also materialize|json; CI runs all three via scripts/ci-bench.sh -> op_<query>_<mode>_us"
+256: source      = "bench/operators/queries/*.rq; crates/sparq-cli/src/main.rs (run_query_suite — routes CONSTRUCT/DESCRIBE to construct_or_describe via PreparedQuery::is_graph_form); scripts/ci-bench.sh"
+257: dataset     = "sparq-bench synthetic dump (deterministic WatDiv-flavoured social graph); queries hit fixed subjects/cities so row counts are stable across scales"
+258: quiet_box_sensitive = true  # wall-clock latency; trend-only, NOT in the deterministic perf-gate (scripts/perf-gate.py)
+259: pinning     = "query dir + mode; dataset deterministic; queries pinned to fixed subjects so result counts are scale-stable"
+260: records_to  = "stdout (TSV); CI emits op_<query>_<mode>_us into benchmark-data (dev/bench) via scripts/ci-bench.sh"
+261: # [OPUS-4.8] sq-5o5.2: trend-only operator-latency coverage, not a head-to-head competitor
+262: # card — featured = false is a dashboard DISPOSITION (no perf claim). Promotion deferred to a maintainer.
+263: featured    = false
+
+crates/sparq-cli/src/main.rs
+2199: fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, json_path: Option<&str>) {
+2200:     let mut entries: Vec<_> = std::fs::read_dir(dir)
+2201:         .unwrap_or_else(|e| {
+2202:             eprintln!("error reading {dir}: {e}");
+2203:             std::process::exit(1);
+2204:         })
+2205:         .filter_map(Result::ok)
+2206:         .map(|e| e.path())
+2207:         .filter(|p| p.extension().map(|x| x == "rq").unwrap_or(false))
+2208:         .collect();
+2209:     entries.sort();
+2210: 
+2211:     let mut results: Vec<SuiteRow> = Vec::with_capacity(entries.len());
+2212:     for path in entries {
+2213:         let name = path.file_stem().unwrap().to_string_lossy().to_string();
+2214:         let sparql = std::fs::read_to_string(&path).unwrap();
+2215:         // [OPUS-4.8] Route the graph-valued forms (CONSTRUCT / DESCRIBE) through the
+2216:         // construct/describe executor — count()/query()/query_json() only handle SELECT/ASK.
+2217:         // This lets the operator-coverage suite (bench/operators/queries) exercise every
+2218:         // SPARQL query form through the same `bench` runner; "rows" = produced triples.
+2219:         let graph_form = sparq_engine::PreparedQuery::parse(&sparql).map(|p| p.is_graph_form()).unwrap_or(false);
+2220:         let mut best = f64::INFINITY;
+2221:         let mut rows = 0;
+2222:         let mut err = None;
+2223:         for _ in 0..iters {
+2224:             let t = Instant::now();
+2225:             let r: Result<usize, String> = if graph_form {
+2226:                 sparq_engine::construct_or_describe(g, &sparql).map(|ts| ts.len())
+2227:             } else {
+2228:                 match mode {
+2229:                     "count" => sparq_engine::count(g, &sparql),
+2230:                     "json" => sparq_engine::query_json(g, &sparql).map(|s| {
+2231:                         let n = s.len();
+2232:                         std::hint::black_box(s);
+2233:                         n
+2234:                     }),
+2235:                     _ => sparq_engine::query(g, &sparql).map(|r| r.len()),
+2236:                 }
+2237:             };
+2238:             match r {
+2239:                 Ok(n) => {
+2240:                     rows = n;
+2241:                     best = best.min(t.elapsed().as_secs_f64() * 1e6);
+2242:                 }
+2243:                 Err(e) => {
+2244:                     err = Some(e);
+2245:                     break;
+2246:                 }
+2247:             }
+2248:         }
+2249:         match &err {
+2250:             None => println!("{name}\t{rows}\t{best:.1}"),
+2251:             Some(e) => println!("{name}\tERROR\t{e}"),
+2252:         }
+2253:         let outcome = match err {
+2254:             None => Ok((rows, best)),
+2255:             Some(e) => Err(e),
+2256:         };
+2257:         results.push(SuiteRow { name, outcome });
+2258:     }
+2259: 
+2260:     if let Some(p) = json_path {
+2261:         let doc = suite_results_json(mode, iters, &results);
+2262:         if let Err(e) = std::fs::write(p, doc) {
+2263:             eprintln!("error writing --json results to {p}: {e}");
+2264:             std::process::exit(1);
+2265:         }

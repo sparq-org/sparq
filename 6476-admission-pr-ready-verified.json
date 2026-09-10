@@ -1,0 +1,1235 @@
+{
+  "headRefOid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "isDraft": false,
+  "labels": [
+    {
+      "id": "LA_kwDOSz3qKM8AAAACsH2GRA",
+      "name": "area:bench",
+      "description": "workspace crate/area",
+      "color": "0e8a16"
+    },
+    {
+      "id": "LA_kwDOSz3qKM8AAAACsIllrQ",
+      "name": "area:sparq-engine",
+      "description": "Work scoped to crates/sparq-engine",
+      "color": "1d76db"
+    }
+  ],
+  "number": 6478,
+  "reviewRequests": [],
+  "reviews": [],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446058079/job/102770988073",
+      "name": "select / select (change-based test selection)",
+      "startedAt": "2026-09-10T06:37:44Z",
+      "status": "QUEUED",
+      "workflowName": "Benchmarks"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446058044/job/102770987697",
+      "name": "changed-code mutation review (advisory)",
+      "startedAt": "2026-09-10T06:37:44Z",
+      "status": "QUEUED",
+      "workflowName": "Changed-code mutation review"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057905/job/102770987037",
+      "name": "docs-quality quick-gates",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "docs-quality"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057898/job/102770986843",
+      "name": "flow-on-gates quick-gates (G1 + G2 + G6)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "flow-on-gates"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057901/job/102770987155",
+      "name": "fv-select (change-based test selection) + fv-manifest (proof inventory)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "formal-verification"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057903/job/102770986886",
+      "name": "derive area labels",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "pr-area-label"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446055915/job/102770981058",
+      "name": "conventional-commits (advisory)",
+      "startedAt": "2026-09-10T06:37:42Z",
+      "status": "QUEUED",
+      "workflowName": "pr-title"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057963/job/102770987126",
+      "name": "supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "supply-chain"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057925/job/102770987001",
+      "name": "vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "vectorized-feature-off"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057959/job/102770987238",
+      "name": "xpath differential oracle (nargo)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "xpath-differential"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900719/job/102770511782",
+      "name": "gate, draft-tier",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "ci-summary"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:38Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900694/job/102770512517",
+      "name": "changed-code mutation review (advisory)",
+      "startedAt": "2026-09-10T06:35:39Z",
+      "status": "COMPLETED",
+      "workflowName": "Changed-code mutation review"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:10Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900993/job/102770512941",
+      "name": "select / select (change-based test selection, draft-tier)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "Benchmarks"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:09Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770581668",
+      "name": "detect rust changes",
+      "startedAt": "2026-09-10T06:36:00Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:27Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900700/job/102770512143",
+      "name": "docs-quality quick-gates",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "docs-quality"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:50Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770512557",
+      "name": "detect rust changes (feature-matrix)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:55Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900604/job/102770511713",
+      "name": "flow-on-gates quick-gates (G1 + G2 + G6)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "flow-on-gates"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:58Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900649/job/102770511446",
+      "name": "fv-select (change-based test selection) + fv-manifest (proof inventory)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "formal-verification"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:09Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900872/job/102770512568",
+      "name": "select / select (change-based test selection, draft-tier)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "fuzz"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:54Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900592/job/102770511046",
+      "name": "derive area labels",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "pr-area-label"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900659/job/102770511228",
+      "name": "conventional-commits (advisory)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "pr-title"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:45Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900822/job/102770511943",
+      "name": "supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "supply-chain"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900743/job/102770512075",
+      "name": "vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "vectorized-feature-off"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:42Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900763/job/102770512069",
+      "name": "xpath differential oracle (nargo)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "xpath-differential"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446058079/job/102770987731",
+      "name": "dashboard labels (lint + drift)",
+      "startedAt": "2026-09-10T06:37:44Z",
+      "status": "QUEUED",
+      "workflowName": "Benchmarks"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057905/job/102770986905",
+      "name": "docs-quality quick-advisory (advisory)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "docs-quality"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057898/job/102770986667",
+      "name": "new-bench-registry-dashboard (G3, advisory)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "flow-on-gates"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34446057925/job/102770986678",
+      "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+      "startedAt": "2026-09-10T06:37:43Z",
+      "status": "QUEUED",
+      "workflowName": "vectorized-feature-off"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:58Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900649/job/102770591607",
+      "name": "kani ${{ matrix.suite.name }} (change-coupled proofs)",
+      "startedAt": "2026-09-10T06:35:59Z",
+      "status": "COMPLETED",
+      "workflowName": "formal-verification"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:09Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900872/job/102770628952",
+      "name": "cargo-fuzz (parsers + mmap loader, bounded)",
+      "startedAt": "2026-09-10T06:36:09Z",
+      "status": "COMPLETED",
+      "workflowName": "fuzz"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:52Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900993/job/102770512686",
+      "name": "dashboard labels (lint + drift)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "Benchmarks"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:28Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770582024",
+      "name": "select / select (change-based test selection, draft-tier)",
+      "startedAt": "2026-09-10T06:36:00Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:17Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900700/job/102770511793",
+      "name": "docs-quality quick-advisory (advisory)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "docs-quality"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:09Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770512875",
+      "name": "select / select (change-based test selection, draft-tier)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:54Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900604/job/102770511354",
+      "name": "new-bench-registry-dashboard (G3, advisory)",
+      "startedAt": "2026-09-10T06:35:41Z",
+      "status": "COMPLETED",
+      "workflowName": "flow-on-gates"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:37Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900743/job/102770511886",
+      "name": "artifact-exact-equality (wasm bundle feature-OFF)",
+      "startedAt": "2026-09-10T06:35:42Z",
+      "status": "COMPLETED",
+      "workflowName": "vectorized-feature-off"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900872/job/102770628096",
+      "name": "differential smoke (sparq vs Oxigraph, fixed regression windows)",
+      "startedAt": "2026-09-10T06:36:13Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "fuzz"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:10Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900993/job/102770632515",
+      "name": "run + track benchmarks",
+      "startedAt": "2026-09-10T06:36:10Z",
+      "status": "COMPLETED",
+      "workflowName": "Benchmarks"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770582848",
+      "name": "nightly-gate",
+      "startedAt": "2026-09-10T06:35:57Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770556441",
+      "name": "pre-merge C1 (feature-gated test execution)",
+      "startedAt": "2026-09-10T06:35:53Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:09Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900872/job/102770630124",
+      "name": "file demoted randomized-fuzz finding (P1 bead + issue)",
+      "startedAt": "2026-09-10T06:36:10Z",
+      "status": "COMPLETED",
+      "workflowName": "fuzz"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:12Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770581978",
+      "name": "unsafe-register (count ratchet)",
+      "startedAt": "2026-09-10T06:36:00Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770556420",
+      "name": "fedclient dependency-boundary guard",
+      "startedAt": "2026-09-10T06:35:52Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770629130",
+      "name": "clippy (gate) + fmt (non-blocking)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:11Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630464",
+      "name": "assemble feature matrix",
+      "startedAt": "2026-09-10T06:36:13Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770629080",
+      "name": "MSRV check (Rust 1.88, declared floor)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:24Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630570",
+      "name": "feature-matrix check-tier (engine)",
+      "startedAt": "2026-09-10T06:36:13Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:25Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630573",
+      "name": "feature-matrix check-tier (rest)",
+      "startedAt": "2026-09-10T06:36:17Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630532",
+      "name": "sparq-lws-core pure Solid (--no-default-features)",
+      "startedAt": "2026-09-10T06:36:15Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:18Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770629071",
+      "name": "coverage floors (presence + monotonicity + shard-partition, no compile)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630530",
+      "name": "sparq-server pure-serialiser (--no-default-features)",
+      "startedAt": "2026-09-10T06:36:13Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:40Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770629183",
+      "name": "unsafe report (cargo-geiger, informational)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770629157",
+      "name": "docker image smoke (run + curl /health + query)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:21Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770630535",
+      "name": "sparq-geo pure-geometry (--no-default-features)",
+      "startedAt": "2026-09-10T06:36:12Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:43Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864451",
+      "name": "opt-in group (g01 sparq-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:28Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770701283",
+      "name": "nightly selection backstop (full-matrix guard)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:43Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864473",
+      "name": "opt-in group (g02 sparq-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:43Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864596",
+      "name": "opt-in group (g03 sparq-wrapper)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864459",
+      "name": "opt-in group (g04 sparq-cli)",
+      "startedAt": "2026-09-10T06:37:30Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864532",
+      "name": "opt-in group (g05 sparq-reason-el)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864503",
+      "name": "opt-in group (g06 sparq-trust)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864555",
+      "name": "opt-in group (g07 sparq-trust)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864477",
+      "name": "opt-in group (g08 sparq-solid)",
+      "startedAt": "2026-09-10T06:37:25Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864478",
+      "name": "opt-in group (g09 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864471",
+      "name": "opt-in group (g10 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864453",
+      "name": "opt-in group (g11 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864492",
+      "name": "opt-in group (g12 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864489",
+      "name": "opt-in group (g13 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864733",
+      "name": "opt-in group (g14 sparq-reason)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864603",
+      "name": "opt-in group (g15 sparq-reason)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864633",
+      "name": "opt-in group (g16 sparq-reason)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864763",
+      "name": "opt-in group (g17 sparq-geo)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864744",
+      "name": "opt-in group (g18 sparq-mcp)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864666",
+      "name": "opt-in group (g19 sparq-vectors)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864631",
+      "name": "opt-in group (g20 sparq-vectors)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864627",
+      "name": "opt-in group (g21 sparq-lws-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864684",
+      "name": "opt-in group (g22 sparq-lws-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864697",
+      "name": "opt-in group (g23 sparq-lws-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864863",
+      "name": "opt-in group (g24 sparq-lws-core)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864626",
+      "name": "opt-in group (g25 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864706",
+      "name": "opt-in group (g26 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864571",
+      "name": "opt-in group (g27 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864761",
+      "name": "opt-in group (g28 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864775",
+      "name": "opt-in group (g29 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864730",
+      "name": "opt-in group (g30 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864705",
+      "name": "opt-in group (g31 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864774",
+      "name": "opt-in group (g32 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864735",
+      "name": "opt-in group (g33 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864728",
+      "name": "opt-in group (g34 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864779",
+      "name": "opt-in group (g35 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864725",
+      "name": "opt-in group (g36 sparq-engine)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864842",
+      "name": "opt-in group (g37 sparq-shacl)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864780",
+      "name": "opt-in group (g38 sparq-server)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864807",
+      "name": "opt-in group (g39 sparq-kb)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864742",
+      "name": "opt-in group (g40 sparq-zk)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864756",
+      "name": "opt-in group (g41 sparq-reason-el)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864738",
+      "name": "opt-in group (g42 sparq-sim)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864809",
+      "name": "opt-in group (g43 sparq-nlq)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864944",
+      "name": "opt-in group (g44 sparq-reason-dl)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864829",
+      "name": "opt-in group (g45 sparq-reason-ql)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:45Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864794",
+      "name": "opt-in group (g46 sparq-mpc)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:45Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445901003/job/102770864918",
+      "name": "opt-in group (g47 sparq-introspect)",
+      "startedAt": "2026-09-10T06:37:11Z",
+      "status": "COMPLETED",
+      "workflowName": "feature-matrix"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700158",
+      "name": "build + archive test binaries (+ doctests once)",
+      "startedAt": "2026-09-10T06:36:48Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700230",
+      "name": "wasm build (sparq-wasm + sparq-reason-wasm + sparq-rsp-wasm + sparq-text-wasm + sparq-shacl-wasm ...",
+      "startedAt": "2026-09-10T06:36:31Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700213",
+      "name": "W3C SPARQL conformance (ratchet >= 1229 pass+divergence)",
+      "startedAt": "2026-09-10T06:36:45Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700204",
+      "name": "W3C SHACL conformance (ratchet \u2014 core >= 98, sparql >= 5; full 1.2 ratchets in-runner)",
+      "startedAt": "2026-09-10T06:36:28Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700189",
+      "name": "W3C/OGC GeoSPARQL conformance (ratchet \u2014 topology >= 119, query-rewrite >= 38)",
+      "startedAt": "2026-09-10T06:37:40Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700234",
+      "name": "Solid WAC/ACP conformance (ratchet \u2014 wac >= 13, acp >= 13)",
+      "startedAt": "2026-09-10T06:36:43Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:44Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700330",
+      "name": "SolidLab ODRL conformance (ratchet \u2014 pass >= 59)",
+      "startedAt": "2026-09-10T06:36:28Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:43Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700146",
+      "name": "sparq-text BM25 differential oracle (extension ratchet \u2014 assertions >= 18750)",
+      "startedAt": "2026-09-10T06:36:31Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700170",
+      "name": "sparq-rsp RSP expressivity / SRBench correctness (extension ratchet \u2014 assertions >= 149)",
+      "startedAt": "2026-09-10T06:37:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:37:45Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700295",
+      "name": "W3C JSON-LD 1.1 conformance (ratchet \u2014 toRdf >= 413, fromRdf >= 52, compact >= 228, frame >= 92)",
+      "startedAt": "2026-09-10T06:36:32Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700177",
+      "name": "SERVICE-federation harness (in-process loopback smoke + egress scoping)",
+      "startedAt": "2026-09-10T06:36:31Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770700271",
+      "name": "Inference conformance (ratchet >= 1967 pass+divergence)",
+      "startedAt": "2026-09-10T06:36:46Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770583211",
+      "name": "coverage (nightly, full incl. heavy vectors)",
+      "startedAt": "2026-09-10T06:35:57Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:35:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770583204",
+      "name": "mutation ratchet (cargo-mutants, advisory)",
+      "startedAt": "2026-09-10T06:35:57Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:28Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770701349",
+      "name": "coverage ratchet (shard ${{ matrix.shard }}/3)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:28Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770701087",
+      "name": "coverage engine run (partition ${{ matrix.part }}/3)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:28Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770701961",
+      "name": "coverage engine merge + ratchet (per-crate)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:29Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770702408",
+      "name": "coverage ratchet + test-presence gate (per-crate)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T06:36:29Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/sparq-org/sparq/actions/runs/34445900873/job/102770703135",
+      "name": "coverage demoted-lane safety-net (push-to-main)",
+      "startedAt": "2026-09-10T06:36:29Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ],
+  "url": "https://github.com/sparq-org/sparq/pull/6478"
+}
