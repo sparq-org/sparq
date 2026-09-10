@@ -1,0 +1,1 @@
+{"query": "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft headRefOid}}}", "variables": {"id": "PR_kwDOSz3qKM8AAAABDCFthg"}}

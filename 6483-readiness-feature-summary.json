@@ -1,0 +1,50 @@
+{
+  "edition": "2021",
+  "native_target": "aarch64-apple-darwin",
+  "recorded_feature_proof_sha256": "9de5da65386c2c87bf6ff20e95294020c881d8e2c30a9f0d938d9ffcd96a3faf",
+  "selected_features": {
+    "oxigraph@0.5.9": [
+      "rdf-12"
+    ],
+    "oxrdf@0.2.4": [
+      "default"
+    ],
+    "oxrdf@0.3.3": [
+      "default",
+      "oxsdatatypes",
+      "rdf-12",
+      "rdfc-10"
+    ],
+    "rdf-canon@0.15.3": [],
+    "spargebra@0.4.6": [
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "sparq-canon@0.1.1": [
+      "default",
+      "parallel",
+      "rdf12-triple-terms"
+    ],
+    "sparq-core@0.1.1": [
+      "default",
+      "dict-spill",
+      "mmap",
+      "parallel"
+    ],
+    "sparq-engine@0.1.1": [
+      "algebra-rewrite",
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "sparq-substrate@0.1.1": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ]
+  }
+}

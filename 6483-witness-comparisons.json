@@ -1,0 +1,45 @@
+{
+  "inputs": {
+    "distinct": [
+      "_:x <http://ex/p> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/q> \"21\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/q> \"21\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "identical": [
+      "_:x <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/q> \"021\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/q> \"021\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "left": [
+      "_:x <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+      "_:x <http://ex/q> \"021\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ]
+  },
+  "observations": [
+    {
+      "allow_integer_lexical": false,
+      "case": "distinct_lexical_control",
+      "detail": "only in left:\n  _:c14n0 <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n  _:c14n0 <http://ex/q> \"021\"^^<http://www.w3.org/2001/XMLSchema#integer> .\nonly in right:\n  _:c14n0 <http://ex/p> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n  _:c14n0 <http://ex/q> \"21\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "verdict": "Differs"
+    },
+    {
+      "allow_integer_lexical": false,
+      "case": "identical_lexical_redistribution",
+      "detail": null,
+      "verdict": "Same"
+    },
+    {
+      "allow_integer_lexical": true,
+      "case": "distinct_lexical_control",
+      "detail": "integer-lexical adjudication refused: left: integer normalization merges or duplicates rows\nonly in left:\n  _:c14n0 <http://ex/p> \"020\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n  _:c14n0 <http://ex/q> \"021\"^^<http://www.w3.org/2001/XMLSchema#integer> .\nonly in right:\n  _:c14n0 <http://ex/p> \"20\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n  _:c14n0 <http://ex/q> \"21\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+      "verdict": "Differs"
+    },
+    {
+      "allow_integer_lexical": true,
+      "case": "identical_lexical_redistribution",
+      "detail": null,
+      "verdict": "Same"
+    }
+  ]
+}

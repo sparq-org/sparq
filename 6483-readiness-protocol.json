@@ -1,0 +1,49 @@
+{
+  "status": "READINESS ONLY; requires new explicit execution grant",
+  "source_ref": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "source_path": "crates/sparq-bench/src/update_fuzz.rs",
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "method": "New task-private exact module copy plus one appended cfg(test) isolated test; compile module itself with recorded Rust2021 --test command and six hash-pinned direct libraries; do not mirror compare implementation. Only unique crate/metadata/output/source paths change. No cargo/dependency compilation.",
+  "cases": [
+    {
+      "name": "distinct lexical existing behavior control",
+      "left": "_:x p 020, _:x p 020, _:x q 021 (xsd:integer literals; expanded http://ex predicates)",
+      "right": "_:x p 20, _:x q 21, _:x q 21",
+      "allow_integer_lexical": [
+        false,
+        true
+      ],
+      "required_result": "Differs for both; print full diagnostic"
+    },
+    {
+      "name": "identical lexical equal-total redistribution observation",
+      "left": "_:x p 020, _:x p 020, _:x q 021",
+      "right": "_:x p 020, _:x q 021, _:x q 021",
+      "allow_integer_lexical": [
+        false,
+        true
+      ],
+      "required_result": "Print actual Verdict/detail and raw datasets; do not assert Same a priori."
+    }
+  ],
+  "finite_scope": "One compiled test executes four comparisons. No seed replay, no candidate mutation, no full suite. Raw lengths both three; duplicate multiplicities differ.",
+  "environment": "Remove ambient SPARQ_* and RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS; retain recorded default-mode profile, RAYON_NUM_THREADS=1, CARGO_INCREMENTAL=0, offline/jobs1. CARGO_MANIFEST_DIR must point to faithful task-private crates/sparq-bench layout with existing unchanged divergence allowlist semantics; no actual LOAD or generator run invoked.",
+  "proposed_limits": {
+    "aggregate_seconds": 90,
+    "build_seconds": 60,
+    "filtered_test_seconds": 20,
+    "allocated_bytes": 67108864,
+    "start_free_bytes": 2214592512,
+    "continuous_minimum_free_bytes": 2147483648,
+    "export_reserve_bytes": 4194304,
+    "builds": 1,
+    "test_processes": 1
+  },
+  "stop_policy": "Revalidate disk, source/compiler/extern hashes before execution; monitor floor/growth/time. Stop on build/path/resource/control failure without retry or expanded closure. Preserve observed outcomes.",
+  "claims_excluded": [
+    "Whole-workspace CI or public engine regression",
+    "Production comparator fix",
+    "Confirmed runtime identical-lexical behavior until execution",
+    "RDF graph duplicates necessarily being semantically distinct: scope is comparator raw-output multiplicity diagnostic contract."
+  ]
+}

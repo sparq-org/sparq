@@ -1,0 +1,8 @@
+{
+  "based_on": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/copilot-duplicate-witness/execute.py",
+  "source_sha256": "55057aaed2a0d3881e1af0e9944b1d07cd8827e671671ccaf1313eacbb976b02",
+  "controller_sha256": "9ae87d7c2bce4617d3d88fbe756d33d25bf213b6f031751086d36b11d26a85f4",
+  "changes": "New witness paths/identity, current compiler hash assertion, explicit raw input record; same fixed four comparisons and controller stop policy.",
+  "allowlist_relative_layout_verified": true,
+  "initial_free_bytes": 14833364992
+}

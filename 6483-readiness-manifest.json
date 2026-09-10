@@ -1,0 +1,70 @@
+{
+  "files": [
+    {
+      "path": "artifact-source-readiness.json",
+      "bytes": 2951,
+      "sha256": "16594d9d2b35eb3617b858406646282d21adb1f917afd1d7549874cfe2d3aceb"
+    },
+    {
+      "path": "budget.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "budget.stderr",
+      "bytes": 94,
+      "sha256": "eed65211f0fcee1b82c2661764250c1adaebcb36f0cb78a702d59632f056c439"
+    },
+    {
+      "path": "comparable.rs.txt",
+      "bytes": 456,
+      "sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786"
+    },
+    {
+      "path": "current-test-context.rs.txt",
+      "bytes": 4120,
+      "sha256": "3aed2a6f103c5bf671146d1a87adfeee95b09bbe09f3e73b7176d01e93227a5e"
+    },
+    {
+      "path": "feature-summary.json",
+      "bytes": 940,
+      "sha256": "f6813a2e682a46ab3c833c813d0338d4f446e83da5bbadab053a5889268d11c5"
+    },
+    {
+      "path": "frozen-reference-hashes.json",
+      "bytes": 963,
+      "sha256": "51db2ea8ed2ca9f05079adb1c8dee60ceafdda88ff346e2e6a19da8105e7c434"
+    },
+    {
+      "path": "launcher-error.json",
+      "bytes": 290,
+      "sha256": "68dcf5fcbfea3587112ca3354a0a7a9c99733a524cd08e603123d05ca8bc496c"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 2707,
+      "sha256": "ee0f381c34aca3eea70111804d108d0e86562bec58fe4b8c0f8056ef4f1785db"
+    },
+    {
+      "path": "read-receipts.json",
+      "bytes": 109,
+      "sha256": "631c87485b7fd28987fb25c66f791681407fe294572c0007793daf5256390c9c"
+    },
+    {
+      "path": "recorded-compiler-argv.json",
+      "bytes": 1753,
+      "sha256": "2dad221759db466f66562c1c81ad546217314a45aa66507b66e9631b358fc925"
+    },
+    {
+      "path": "report.json",
+      "bytes": 2374,
+      "sha256": "890f8bfcb2ccb42b7e651c75a03f3107b85a20113db14139c6f5aced072aef84"
+    },
+    {
+      "path": "strict-Same-prologue.rs.txt",
+      "bytes": 1009,
+      "sha256": "73d7078360d7275f11179441e711fbe6b78b3b7c879b3380ba5d615a37036fee"
+    }
+  ],
+  "file_count": 13
+}

@@ -1,0 +1,94 @@
+    fn lexical_adjudication_preserves_rows_and_blank_node_structure() {
+        // The blank-node case reaches canon's set conversion; without it the
+        // ordinary vector comparison alone rejects the differing multiplicities.
+        for subject in ["<http://ex/s>", "_:x"] {
+            let p = format!("{subject} <http://ex/p> \"020\"^^{XSD_INTEGER} .");
+            let q = format!("{subject} <http://ex/q> \"021\"^^{XSD_INTEGER} .");
+            let a = vec![p.clone(), p.clone(), q.clone()];
+            let b = vec![
+                p.replace("020", "20"),
+                q.replace("021", "21"),
+                q.replace("021", "21"),
+            ];
+            assert!(
+                matches!(compare("a", &a, "b", &b, true), Verdict::Differs(_)),
+                "equal totals cannot hide duplicate redistribution for {subject}"
+            );
+        }
+        let a = vec![
+            format!("_:a <http://ex/p> \"020\"^^{XSD_INTEGER} ."),
+            "_:a <http://ex/q> <http://ex/o> .".into(),
+        ];
+        let good = vec![
+            format!("_:x <http://ex/p> \"20\"^^{XSD_INTEGER} ."),
+            "_:x <http://ex/q> <http://ex/o> .".into(),
+        ];
+        assert!(matches!(
+            compare("a", &a, "b", &good, true),
+            Verdict::AdjudicatedIntegerLexical
+        ));
+        let split = vec![good[0].clone(), "_:y <http://ex/q> <http://ex/o> .".into()];
+        match compare("a", &a, "b", &split, true) {
+            Verdict::Differs(detail) => {
+                assert!(
+                    detail.contains("blank-node counts differ (1 vs 2)"),
+                    "{detail}"
+                );
+                assert!(detail.contains("only in a:"), "{detail}");
+                assert!(detail.contains("only in b:"), "{detail}");
+                assert!(
+                    detail.contains("\"020\""),
+                    "original lexical missing: {detail}"
+                );
+                assert!(
+                    detail.contains("\"20\""),
+                    "reference lexical missing: {detail}"
+                );
+            }
+            _ => panic!("different blank-node counts must fail with original dataset details"),
+        }
+        let extra = vec![good[0].clone(), "_:x <http://ex/r> <http://ex/o> .".into()];
+        assert!(
+            matches!(compare("a", &a, "b", &extra, true), Verdict::Differs(_)),
+            "same node/row counts do not license a changed predicate"
+        );
+        for (left, right) in [
+            (
+                "\"20.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                "\"20\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+            ),
+            ("\"x\"@en", "\"x\"@fr"),
+        ] {
+            let left = vec![format!("<http://ex/s> <http://ex/p> {left} .")];
+            let right = vec![format!("<http://ex/s> <http://ex/p> {right} .")];
+            assert!(matches!(
+                compare("a", &left, "b", &right, true),
+                Verdict::Differs(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn nested_noncanonical_terms_remain_exact_in_sparq() {
+        let expected = vec![format!(
+            "<http://ex/s> <http://ex/p> <<( <http://ex/a> <http://ex/q> <<( <http://ex/b> <http://ex/r> \"020\"^^{XSD_INTEGER} )>> )>> ."
+        )];
+        let op = format!("INSERT DATA {{ {} }}", expected[0]);
+        let rebuilt = sparq_engine::update(&Graph::new(), &op).unwrap();
+        let mut inplace = Graph::new();
+        sparq_engine::update_in_place(&mut inplace, &op).unwrap();
+        for graph in [&rebuilt, &inplace] {
+            assert_eq!(sparq_nquads(graph), expected);
+            assert_eq!(sparq_probe(graph, PROBES[0].0).unwrap(), expected);
+        }
+        let canonical: Vec<_> = expected.iter().map(|s| s.replace("020", "20")).collect();
+        assert!(matches!(
+            compare("sparq", &expected, "reference", &canonical, true),
+            Verdict::AdjudicatedIntegerLexical
+        ));
+        assert!(matches!(
+            compare("sparq", &expected, "other sparq", &canonical, false),
+            Verdict::Differs(_)
+        ));
+    }
+

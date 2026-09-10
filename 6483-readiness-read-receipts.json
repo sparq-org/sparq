@@ -1,0 +1,10 @@
+[
+  {
+    "argv": [
+      "/opt/homebrew/bin/gh",
+      "api",
+      "rate_limit"
+    ],
+    "exit": 1
+  }
+]

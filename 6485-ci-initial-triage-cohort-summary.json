@@ -1,0 +1,276 @@
+{
+  "source": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/admission/pr6486-first-final-runs.json",
+  "sha256": "e87a18667ca5c126b3dfcd2d059054cf9f756582b9b251c1c75ef244f9a33349",
+  "runs": [
+    {
+      "id": 34511340101,
+      "name": "Running Copilot Code Review",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "dynamic",
+      "created_at": "2026-09-10T17:57:13Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511328981,
+      "name": "Changed-code mutation review",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329019,
+      "name": "vectorized-feature-off",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329086,
+      "name": "supply-chain",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329028,
+      "name": "ci-summary",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329318,
+      "name": "Benchmarks",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329203,
+      "name": "fuzz",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511328996,
+      "name": "formal-verification",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511328864,
+      "name": "flow-on-gates",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329017,
+      "name": "pr-area-label",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511328905,
+      "name": "docs-quality",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329235,
+      "name": "CI",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "queued",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511329512,
+      "name": "feature-matrix",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:07Z",
+      "status": "queued",
+      "conclusion": null,
+      "run_attempt": 1
+    },
+    {
+      "id": 34511325321,
+      "name": "pr-title",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:04Z",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322619,
+      "name": "Changed-code mutation review",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "skipped",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322949,
+      "name": "CI",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322577,
+      "name": "pr-area-label",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322793,
+      "name": "feature-matrix",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322595,
+      "name": "docs-quality",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322749,
+      "name": "supply-chain",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322607,
+      "name": "flow-on-gates",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322564,
+      "name": "pr-title",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511323112,
+      "name": "fuzz",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322648,
+      "name": "formal-verification",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322616,
+      "name": "vectorized-feature-off",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322498,
+      "name": "ci-summary",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    },
+    {
+      "id": 34511322950,
+      "name": "Benchmarks",
+      "head_sha": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "event": "pull_request",
+      "created_at": "2026-09-10T17:57:03Z",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "run_attempt": 1
+    }
+  ]
+}

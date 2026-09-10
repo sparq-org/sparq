@@ -1,0 +1,72 @@
+{
+  "at": "2026-09-10T18:02:31.174954+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "gate": {
+    "run_id": 34511329028,
+    "job_id": 102985912054,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "tier": "full",
+    "time": "2026-09-10T17:58:23Z",
+    "mechanism": "fail-fast after one immediate grace re-poll; resolver ignored23 then24 superseded check-runs"
+  },
+  "required_source_failure": {
+    "run_id": 34511329019,
+    "job_id": 102985915502,
+    "name": "vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)",
+    "phase": "dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 listFiles(pull_number:6486,per_page:100)",
+    "error": "Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {\"resource\":\"PullRequest\",\"field\":\"diff\",\"code\":\"not_available\"}",
+    "error_at": "2026-09-10T17:57:42.4572750Z",
+    "downstream_feature_metadata_and_cfg_tests": "skipped; never reached",
+    "classification": "GitHub upstream transient diff-service availability failure; no candidate Rust/check assertion or missing declaration demonstrated"
+  },
+  "causality": "Current ready-for-review cohort carries the actual failing source job. Earlier same-head synchronize runs were cancelled by normal workflow concurrency; aggregate explicitly filtered superseded evidence. Thus old cancellation is not the observed cause. No actor cancellation is inferred from metadata alone; root confirms no manual cancellation.",
+  "not_observed": [
+    "Rate-limit exhaustion or permission denial: source error is diff not_available, job has PullRequests:read; fresh observercore budget4940.",
+    "Reporter timeout: gate finished in about8seconds after starting its script, not poll exhaustion.",
+    "Draft/admission hold: gate envPR_DRAFTfalse/tierfull; no stale-tier failure."
+  ],
+  "progress_snapshot": {
+    "ci": {
+      "total_returned": 24,
+      "total_count": 24,
+      "counts": {
+        "success": 5,
+        "skipped": 4,
+        "in_progress": 2,
+        "queued": 13
+      },
+      "failed_job_ids": []
+    },
+    "matrix": {
+      "total_returned": 10,
+      "total_count": 10,
+      "counts": {
+        "success": 4,
+        "in_progress": 3,
+        "queued": 3
+      },
+      "failed_job_ids": []
+    }
+  },
+  "other_vectorized_leg": {
+    "job_id": 102985915829,
+    "conclusion": "success",
+    "metadata": "Actual BuildBASE/BuildHEAD/Leg2/tripwire steps success. Raw wasm bytes/size not read in this narrow incident, no new size/neutrality claim."
+  },
+  "least_invasive_next_step": "Preserve all running sibling evidence. Root may separately authorize one normal failed-job-only recovery of vectorized run34511329019 after fresh exact-head/run/attempt/hold checks; do not rerun successful heavy siblings. Aggregate-only recovery is insufficient while that latest required quick-gate failure remains. Reaggregate only after intended latest same-head required peers, including recovered quick-gates, are actually green and no hold/stale evidence blocks admission. No rerun performed here.",
+  "source_changes_needed": "None established by this incident; do not weaken gate or change permissions/concurrency.",
+  "limits": [
+    "Snapshot job counts can grow as dependent/matrix jobs materialize; not whole-CI completion.",
+    "No full check census/admission proof; only named aggregate/source failure and current CI/matrix jobs inspected.",
+    "HTTP status not printed in action log; do not invent exact status code."
+  ],
+  "logical_github_reads": 8,
+  "read_failures": 0,
+  "retries": 0,
+  "remote_mutations": 0,
+  "builds": 0,
+  "pending_commands": 0
+}

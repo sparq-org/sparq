@@ -1,0 +1,40 @@
+--- production/update_fuzz.rs
++++ witness/update_fuzz.rs
+@@ -2331,3 +2331,37 @@
+         });
+     }
+ }
++
++// [GPT-6 Astra] Isolated Copilot witness; observes the strict identical-lexical path.
++#[cfg(test)]
++mod copilot_duplicate_probe {
++    use super::*;
++
++    fn observation(case: &str, allow: bool, verdict: &Verdict) {
++        let (name, detail) = match verdict {
++            Verdict::Same => ("Same", None),
++            Verdict::AdjudicatedIntegerLexical => ("AdjudicatedIntegerLexical", None),
++            Verdict::Differs(detail) => ("Differs", Some(detail.as_str())),
++        };
++        println!("duplicate_witness {}", serde_json::json!({
++            "case": case, "allow_integer_lexical": allow, "verdict": name, "detail": detail
++        }));
++    }
++
++    #[test]
++    fn distinct_control_and_identical_lexical_observation() {
++        let p = format!("_:x <http://ex/p> \"020\"^^{XSD_INTEGER} .");
++        let q = format!("_:x <http://ex/q> \"021\"^^{XSD_INTEGER} .");
++        let left = vec![p.clone(), p.clone(), q.clone()];
++        let distinct = vec![p.replace("020", "20"), q.replace("021", "21"), q.replace("021", "21")];
++        let identical = vec![p, q.clone(), q];
++        println!("duplicate_inputs {}", serde_json::json!({"left": left, "distinct": distinct, "identical": identical}));
++        for allow in [false, true] {
++            let control = compare("left", &left, "right", &distinct, allow);
++            observation("distinct_lexical_control", allow, &control);
++            assert!(matches!(control, Verdict::Differs(_)), "current differing-lexical control must refuse");
++            let observed = compare("left", &left, "right", &identical, allow);
++            observation("identical_lexical_redistribution", allow, &observed);
++        }
++    }
++}

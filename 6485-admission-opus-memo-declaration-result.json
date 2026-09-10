@@ -1,0 +1,26 @@
+{
+  "verdict": "APPROVE_FOR_CI",
+  "reviewed_head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "parent": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "blocking_findings": [],
+  "declaration_assessment": {
+    "mechanism_match": "Adds exactly one file, bench/feature-off-declarations/6486.json. Name matches _DECL_FILE_RE ^\\d+\\.(?:json|md)$, so _new_declaration_files(base,head) returns a non-empty set difference and check_leg2_dynamic takes the V2 DECLARED branch. Legacy scalar bench/feature-off-declaration.json is untouched, correctly (V2 is the going-forward path; token inequality not needed and not asserted).",
+    "content": "Shape {pr,date,reason} matches the documented README schema; pr=6486 and date=2026-09-10 match the assigned PR and today. Reason is one line, names the always-compiled change (memo preserved when a delta interns no stored dictionary term), and explicitly disclaims byte-neutrality while noting the wasm size ratchet is unchanged \u2014 no claim beyond intent. The checker never parses JSON fields, so content correctness is a review obligation, not a gate obligation; json.tool exit 0 confirms parseability.",
+    "process_fit": "Correct branch of the documented procedure: this is an intentional always-compiled optimisation, exactly the class scripts/feature_off_autodeclare.py refuses by design ('intent cannot be derived'), so a hand-written declaration is the prescribed route. Declaration governs INTENT only; magnitude remains governed by metrics.wasm_bundle_bytes floor (\u00b12% band) in bench/perf-baseline.json / bench.yml, which this change does not touch.",
+    "gate_integrity": "No gate, floor, workflow, threshold or helper is modified; the independent size ratchet and protected CI legs remain fully intact. If the feature-OFF bundle happens to be byte-identical, leg 2 passes on identity and the extra file is inert \u2014 no false pass is created either way. Self-test tripwires 1\u20135 all fired correctly (undeclared rejected, V2 declared accepted); git diff --check and staged diff --check clean; zero remote mutations."
+  },
+  "correction_acknowledgement": {
+    "accepted": true,
+    "statement": "My prior non-blocking note that 'the memo depends only on dict terms, not on numerics' was factually wrong. has_high_precision_decimal evaluates self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id) per id. The dict-only property belongs to the helper, not to the caller's predicate. The existing guard comment ('preserve every term/numeric value read by the memo') is therefore ACCURATE; retaining it unchanged is correct, and my suggested dict-only rewording is withdrawn \u2014 applying it would have weakened the PR 4354 forward-hazard warning.",
+    "soundness_impact": "Prior proof CONCLUSION stands; only its characterisation of the read set narrows nothing that matters. Under the guard (dict.len() unchanged) the memo is preserved iff both conjuncts are pointwise unchanged for every id in 1..=len: (a) scan range identical (len equal); (b) term side \u2014 Dict is append-only with no interior mutability and the delete/resolve path is &self, so no existing term entry can change; (c) numeric side \u2014 extend_for iterates only old_len..dict.len(), so at equal length it performs zero iterations and writes no existing id's cache entry, and nothing removes entries for surviving ids. Both old terms AND cache entries are thus unchanged under this mutation, as the design already argued. No new blocker; F6 (lazy sparse numeric repair populating numerics for an already-existing >15-digit decimal id) is now visibly the material forward hazard and is already covered verbatim by the retained comment.",
+    "claim_wording_fix": "My safe_performance_claim should read 'avoids one O(dict.len()) scan of numeric-cache lookups with conditional, short-circuiting term-part checks', not 'one term_parts rescan per dictionary id'. No term_parts call occurs for ids absent from numerics, and .any short-circuits on the first offender."
+  },
+  "inherited_source_approval": "APPROVE_FOR_CI for 73769114 carries forward unchanged: core source SHA256 e332be51\u2026 is byte-identical, root hash/size-verified all 14 frozen files, and no source blocker existed. Behavioral tests not repeated; unchanged full source not re-reviewed.",
+  "remaining_requirements": [
+    "Push the metadata child so the declaration file is present in the HEAD TREE CI builds; if only 73769114 is published, leg 2 will fail as UNDECLARED.",
+    "Confirm the live PR number is 6486 (filename must match the PR; a renumbered PR needs the file renamed).",
+    "All prior required_CI legs unchanged: full-workspace cargo test + clippy -D warnings; the eight sparq-core feature-matrix legs; cargo doc RUSTDOCFLAGS='-D warnings' for the new intra-doc links; Linux privacy-claims re-run.",
+    "vectorized-feature-off leg 2 dynamic base-vs-head compare must pass via the V2 file; separately, if the bundle moves > \u00b12%, metrics.wasm_bundle_bytes.floor in bench/perf-baseline.json must ALSO be raised \u2014 not done here and not asserted unnecessary."
+  ],
+  "merge_status": "Not a merge approval and not a gate bypass. Protected CI, external review state, and the size ratchet remain required. PRs 4354/4097/4247 untouched; issue 3113 open."
+}

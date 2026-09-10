@@ -1,0 +1,29 @@
+{
+  "source_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "source_unchanged_prefix_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "method": "One direct Rust2021 driver/module build and one filtered test. Current distinct lexical fixture assertsDiffers; identical lexical variant prints actualverdict without expectation, allowfalse/true in same test.",
+  "limits": {
+    "seconds": 90,
+    "new_bytes": 67108864,
+    "free_bytes": 2147483648,
+    "jobs": 1
+  },
+  "controlled_environment": {
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/witness/tmp",
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+    "CARGO_PROFILE_RELEASE_DEBUG": "false",
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_PANIC": "unwind",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+    "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "RUST_BACKTRACE": "1",
+    "RAYON_NUM_THREADS": "1",
+    "CARGO_MANIFEST_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6483/witness/harness/crates/sparq-bench"
+  },
+  "initial_free": 14833389568,
+  "no_dependency_build_or_retry": true
+}

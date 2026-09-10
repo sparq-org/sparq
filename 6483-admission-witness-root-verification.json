@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-10T18:13:27.800060+00:00",
+  "verified_files": 33,
+  "manifest_sha256": "bd68b93c546c1f74066d3f70e0812ab2b7a36621589dddd821c2e244f37823db",
+  "findings": {
+    "distinct_lexical_allow_false": "Differs with original datasets",
+    "distinct_lexical_allow_true": "Differs: integer normalization merges or duplicates rows; original datasets retained",
+    "identical_lexical_allow_false": "Same",
+    "identical_lexical_allow_true": "Same"
+  },
+  "source": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "production_change": false
+}

@@ -1,0 +1,312 @@
+.github/workflows/vectorized-feature-off.yml:54-178
+54: name: vectorized-feature-off
+55: 
+56: on:
+57:   push:
+58:     branches: [main]
+59:   # [FABLE-5] Draft-tier CI: default types + ready_for_review (the un-draft moment
+60:   # must re-run the wasm-equality leg a draft head may have scoped out) +
+61:   # labeled/unlabeled (the `ci-full` label toggle must re-evaluate the draft-tier
+62:   # scope decision in the artifact-exact-equality decide step below).
+63:   pull_request:
+64:     types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+65:   merge_group:
+66: 
+67: permissions:
+68:   contents: read
+69: 
+70: concurrency:
+71:   group: vectorized-feature-off-${{ github.workflow }}-${{ github.ref }}
+72:   cancel-in-progress: true
+73: 
+74: env:
+75:   CARGO_TERM_COLOR: always
+76:   RUST_BACKTRACE: 1
+77: 
+78: jobs:
+79:   # ---------------------------------------------------------------------------
+80:   # Quick gates: in-job path filter + Leg 1 (feature-resolution) + Leg 3 (cfg-audit).
+81:   # [FABLE-5] sq-6vshe.20: formerly three separate runner claims. The path filter
+82:   # detects whether Rust changed so a doc-only PR can skip the substantive steps
+83:   # while the ci-summary gate still resolves SUCCESS (a skipped step is non-failing,
+84:   # exactly as the formerly `if:`-skipped jobs were). SAFE-BY-DEFAULT: rust_changed
+85:   # is forced 'true' on every event except `pull_request`, so push/merge_group runs
+86:   # ALWAYS execute the full gate — only purely non-Rust PR diffs skip.
+87:   # ---------------------------------------------------------------------------
+88:   quick-gates:
+89:     name: vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit)
+90:     runs-on: ubuntu-latest
+91:     permissions:
+92:       contents: read
+93:       # dorny/paths-filter lists the PR's changed files via the API.
+94:       pull-requests: read
+95:     steps:
+96:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+97:         with:
+98:           persist-credentials: false
+99: 
+100:       # ---- former job: detect rust changes (vectorized-feature-off) ----
+101:       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+102:         id: filter
+103:         if: github.event_name == 'pull_request'
+104:         with:
+105:           filters: |
+106:             rust:
+107:               - '**/*.rs'
+108:               - '**/Cargo.toml'
+109:               - 'Cargo.lock'
+110:               - 'rust-toolchain*'
+111:               - '.github/workflows/vectorized-feature-off.yml'
+112:               - 'scripts/check-vectorized-feature-off.py'
+113:               - 'scripts/tests/test_vectorized_feature_off.py'
+114:               - 'scripts/feature_off_autodeclare.py'
+115:               - 'scripts/tests/test_feature_off_autodeclare.py'
+116:               - 'bench/perf-baseline.json'
+117:               - 'bench/feature-off-declaration.json'
+118:               - 'bench/feature-off-declarations/**'
+119:       - name: Decide rust_changed (safe-by-default off the PR path)
+120:         id: changes
+121:         run: |
+122:           set -euo pipefail
+123:           if [ "${{ github.event_name }}" != "pull_request" ]; then
+124:             echo "rust_changed=true" >> "$GITHUB_OUTPUT"
+125:             echo "event=${{ github.event_name }} -> forcing rust_changed=true (full gate)"
+126:           else
+127:             echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
+128:             echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
+129:           fi
+130: 
+131:       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+132:         with:
+133:           python-version: "3.12"
+134: 
+135:       # ---- former job: feature-resolution (vectorized OFF guard) ----
+136:       # Leg 1: checks cargo metadata (no build required) that `vectorized` is absent
+137:       # from the resolved default feature set of sparq-engine and sparq-wasm.
+138:       - name: Rust (preinstalled stable)
+139:         if: steps.changes.outputs.rust_changed == 'true'
+140:         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+141:         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+142:         # toolchain install stable` re-downloads the whole toolchain whenever
+143:         # the image lags the newest release. Use the preinstalled one —
+144:         # `rustup default`/`component add` never trigger a toolchain download.
+145:         run: |
+146:           rustup default stable
+147:           rustup show active-toolchain
+148:       - name: Dump cargo metadata (default features, no build)
+149:         if: steps.changes.outputs.rust_changed == 'true'
+150:         run: cargo metadata --format-version 1 > metadata.json
+151: 
+152:       - name: Leg 1 — vectorized absent from resolved default features
+153:         if: steps.changes.outputs.rust_changed == 'true'
+154:         run: python3 scripts/check-vectorized-feature-off.py --leg1 metadata.json
+155: 
+156:       - name: Tripwire self-test (leg 1 guard can fail)
+157:         # The self-test runs tripwires that MUST exit non-zero; if the guard is broken,
+158:         # the self-test itself exits non-zero and fails this step. Fast: no build.
+159:         if: steps.changes.outputs.rust_changed == 'true'
+160:         run: |
+161:           python3 scripts/check-vectorized-feature-off.py --self-test
+162:           echo "Tripwires verified — guards correctly reject bad synthetic fixtures"
+163: 
+164:       # ---- former job: cfg-audit (vectorized call-site gates) ----
+165:       # Leg 3: grep-only — no Rust toolchain needed. Asserts every `mod chunk`,
+166:       # `pub use chunk`, and every DataChunk/SelVec/VecCmp/chunk:: reference in
+167:       # lib.rs and exec.rs is inside a `#[cfg(feature = "vectorized")]` guard.
+168:       - name: Leg 3 — cfg-audit of vectorized registrations and call sites
+169:         if: steps.changes.outputs.rust_changed == 'true'
+170:         run: |
+171:           python3 scripts/check-vectorized-feature-off.py --leg3 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+172:           python3 scripts/check-vectorized-feature-off.py --leg3
+173:         env:
+174:           # Ensure the script resolves paths relative to the repo root (cwd = repo root).
+175:           PYTHONPATH: "."
+176: 
+177:       - name: Write invariant summary
+178:         # `always()` preserved from the former standalone job; the rust_changed guard
+
+.github/workflows/ci-summary.yml:205-274
+205:   pull_request:
+206:     types: [opened, synchronize, reopened, ready_for_review]
+207:   # [OPUS-4.8] Merge queue: GitHub runs the required check(s) on a temporary
+208:   # `merge_group` ref before merging. ci-summary is the SINGLE required check, so it
+209:   # MUST run here to produce the `ci-summary / gate` check on that ref. Without this
+210:   # the queue would hang forever waiting for the check.
+211:   #
+212:   # [FABLE-5] TIERED / SUBSET MERGE-QUEUE CHECK-SET (2026-07-18 maintainer directive —
+213:   # honesty fix, PR #3511 review finding 6a). The queue does NOT run an identical
+214:   # check-set to a PR. By explicit maintainer direction the merge_group runs only the
+215:   # PR-RELEVANT SUBSET: several heavy siblings dropped their `merge_group` trigger
+216:   # because they already ran + gated on the PR head and the queue re-run added
+217:   # wall-clock per enqueue with NO new signal — notably formal-verification.yml and
+218:   # fuzz.yml (both now PR-head + post-merge-push only), and CodeQL, which is DISABLED
+219:   # repo-wide by separate maintainer direction. The gate stays sound because it POLLS
+220:   # whatever sibling check-runs actually exist on the ref (it never hard-codes a
+221:   # required list): a sibling that does not trigger on merge_group is simply absent
+222:   # (never "expected but missing"), and a docs/orchestration-only queued batch further
+223:   # narrows the Rust lanes via the merge-group change-class gate (ci.yml/feature-
+224:   # matrix.yml `changes` jobs). The SAFETY NET for a lane the queue skips is the
+225:   # POST-MERGE push-to-main run of that lane (+ the nightly-full-sweep backstop and
+226:   # the formal-/selection-alarm liveness monitors) — detection-after-merge with
+227:   # revert / fix-forward, deliberately traded against per-enqueue wall-clock. This is
+228:   # a maintainer-directed RISK POSTURE, not an accident; see docs/branch-protection.md
+229:   # and each lane's header for the per-lane rationale.
+230:   merge_group:
+231:   push:
+232:     branches: [main]
+233: 
+234: # The gate READS check-runs + commit statuses for the head commit, plus
+235: # the repo's queued workflow-run count (the read side of `actions` — the sq-90cv4
+236: # saturation signal; a permissions failure there degrades to the progress-only signal, it never
+237: # fails the gate by itself), plus the PR's live draft state (`pull-requests: read`
+238: # — the draft-tier conclusion-time re-check; a failure there fail-closes to RED,
+239: # never to a pass). `actions: write` is narrowly required by #3505 for the bounded
+240: # once-only POST that re-runs a newest cancelled workflow; it grants no source write
+241: # and the gate remains test-execution-free.
+242: permissions:
+243:   checks: read
+244:   statuses: read
+245:   contents: read
+246:   actions: write
+247:   pull-requests: read
+248: 
+249: # One in-flight gate per PR (or per branch on push). Cancel a superseded run so a
+250: # new push doesn't leave a stale, slowly-timing-out gate behind.
+251: concurrency:
+252:   group: ci-summary-${{ github.event.pull_request.number || github.ref }}
+253:   cancel-in-progress: true
+254: 
+255: jobs:
+256:   gate:
+257:     # [FABLE-5] Draft-tier CI: the check-run name is TIERED (the same marker
+258:     # expression ci-select.yml uses). A draft pull_request payload renders
+259:     # `gate, draft-tier`; every other event/state (non-draft PR, merge_group,
+260:     # push) renders EXACTLY `gate` — the branch-protection ruleset's required
+261:     # context, which a draft-tier run therefore can never satisfy (the
+262:     # structural half of the integrity invariant above). Pinned by
+263:     # scripts/tests/test_ci_select_wiring.py::TestRequiredCheckAnchor.
+264:     name: gate${{ github.event.pull_request.draft == true && ', draft-tier' || '' }}
+265:     runs-on: ubuntu-latest
+266:     # > the loop's ABSOLUTE budget: ~37 min base (unchanged from the pre-sq-90cv4
+267:     # cap) + up to ~30 min of saturation extension + API overhead. The loop caps
+268:     # itself under this wall-clock so it emits a clear timeout error first. In the
+269:     # normal (unsaturated) case the gate converges exactly as fast as before —
+270:     # the extension only ever activates at base-budget exhaustion under a
+271:     # saturated/progressing queue.
+272:     timeout-minutes: 80
+273:     steps:
+274:       # Sparse checkout of ONLY the gate script + the advisory registry it reads: the
+
+scripts/ci_summary_gate.py:1720-1765
+1720:         ),
+1721:         summary_path,
+1722:     )
+1723:     if select_runs:
+1724:         _emit(
+1725:             f"selection: {len(gating) - skipped_ct} of {len(gating)} gating check(s) ran, "
+1726:             f"{skipped_ct} skipped (selection and/or path-filter; selection pre-job succeeded).",
+1727:             summary_path,
+1728:         )
+1729:     return 0
+1730: 
+1731: 
+1732: def failfast_failures(runs: list[dict]) -> list[dict]:
+1733:     """[FABLE-5] Fail-fast (2026-07-17 directive, header §FAIL-FAST): the GATING
+1734:     legs whose CONCLUDED failure already decides the verdict. `runs` must be the
+1735:     poll loop's post-forgive_superseded, post-self-exclusion, post-draft-gate-
+1736:     artifact sibling set — i.e. EXACTLY the set render_verdict would judge — so
+1737:     this helper inherits the final render's supersession/forgiveness
+1738:     classification instead of reimplementing it (a forgiven race-loser is
+1739:     already gone; a surviving cancelled/stale run is not `failure` and never
+1740:     fires this). A leg qualifies iff it is completed with conclusion=failure,
+1741:     is not advisory (the same is_advisory predicate the verdict excludes by),
+1742:     and no same-tier-normalized-name run on the SHA is still in flight (a rerun
+1743:     already underway must be allowed to finish — the gate keeps waiting on it,
+1744:     exactly as the settle loop always has). `timed_out`/`cancelled`/`stale`
+1745:     conclusions deliberately do NOT qualify: only an unambiguous `failure`
+1746:     fails fast; everything else waits for the full render."""
+1747:     inflight = {_leg_identity(r) for r in runs if r.get("status") != "completed"}
+1748:     out: list[dict] = []
+1749:     for r in runs:
+1750:         if r.get("status") != "completed" or r.get("conclusion") != "failure":
+1751:             continue
+1752:         name = r.get("name", "")
+1753:         if is_advisory(name):
+1754:             continue
+1755:         if _leg_identity(r) in inflight:
+1756:             continue
+1757:         out.append(r)
+1758:     return out
+1759: 
+1760: 
+1761: # [OPUS-5] #3783 — the LIVENESS VETO's single source of truth.
+1762: LIVE_STATUS = "in_progress"
+1763: 
+1764: 
+1765: def live_siblings(runs: list[dict]) -> list[dict]:
+
+scripts/ci_summary_gate.py:1873-1889
+1873:                 else (cfg.sat_interval if extension_started else cfg.interval)
+1874:             )
+1875:             continue
+1876:         consec_fetch_failures = 0
+1877: 
+1878:         # [FABLE-5] Draft-tier CI: forgive cancelled/stale check-runs a later
+1879:         # same-normalized-name run supersedes — over the RAW list (self included)
+1880:         # so this run's own fresh `gate` check-run supersedes a cancelled
+1881:         # predecessor left on the SHA by the ready_for_review concurrency cancel.
+1882:         # Then drop (a) this run's own check-run and (b) any `gate, draft-tier`
+1883:         # check-run — a draft-tier gate VERDICT is a tier artifact of a
+1884:         # superseded evaluation, never a leg (a completed draft-tier gate
+1885:         # FAILURE on the SHA must not permanently RED the full-tier gate, and
+1886:         # its SUCCESS never was the required context).
+1887:         kept, forgiven = forgive_superseded(raw)
+1888:         runs = [
+1889:             r for r in kept
+
+scripts/ci_summary_gate.py:1973-2017
+1973:                 "extend an ordinary pending sibling, and expiry remains fail-closed."
+1974:             )
+1975: 
+1976:         # [FABLE-5] FAIL-FAST (header §FAIL-FAST): a concluded gating failure in
+1977:         # the (already forgiveness-filtered) sibling set decides the verdict now
+1978:         # — a genuine `failure` in the authoritative newest run is never forgiven,
+1979:         # so every later render REDs
+1980:         # anyway; waiting out the remaining legs only delays the red and the
+1981:         # fast-fix trigger behind it. Applies only while siblings are still
+1982:         # outstanding (pending / awaiting_full): an all-terminal set renders via
+1983:         # the normal settle path below, byte-identical to before. The first
+1984:         # observation arms a grace re-poll (immediate, no sleep — dodges an API
+1985:         # read race); the red fires when a fresh fetch re-observes the same set.
+1986:         # awaiting_report is included so a real failing leg still fails FAST while
+1987:         # the gate is (correctly) holding for the reporter verdict.
+1988:         if pending or awaiting_full or awaiting_report:
+1989:             ff = failfast_failures(runs)
+1990:             if ff:
+1991:                 key = tuple(sorted((r.get("name", ""), r.get("id") or 0) for r in ff))
+1992:                 if key == ff_suspect:
+1993:                     _emit(
+1994:                         f"### ci-summary: FAILED (fail-fast) — {len(ff)} gating "
+1995:                         f"check(s) concluded failure while {pending} sibling(s) "
+1996:                         f"were still running; no later state can turn this verdict "
+1997:                         f"green (a newest-run failure is never forgiven), so the gate "
+1998:                         f"REDs now instead of waiting out the remaining legs.",
+1999:                         cfg.summary_path,
+2000:                     )
+2001:                     for r in ff:
+2002:                         _emit(f"- ✗ {r.get('name')}: failure", cfg.summary_path)
+2003:                     print(
+2004:                         "::error::ci-summary failed fast — a gating check concluded "
+2005:                         "failure; the remaining siblings were not waited on."
+2006:                     )
+2007:                     return 1
+2008:                 ff_suspect = key
+2009:                 print(
+2010:                     f"  fail-fast: {len(ff)} concluded gating failure(s) observed — "
+2011:                     f"immediate grace re-poll to confirm before concluding."
+2012:                 )
+2013:                 continue  # no sleep: the grace re-poll is deliberately immediate
+2014:             ff_suspect = None
+2015: 
+2016:         # [OPUS-5] #3781 — UNSATISFIABLE HOLD: detect it, do not wait it out.
+2017:         # The draft-tier hold (awaiting_full) is a WAIT for the ready_for_review

@@ -1,0 +1,11 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The exact synthetic witness is now confirmed against the unchanged UPDATE comparison module on main `f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464`.
+
+For complete quads `p` and `q` sharing a blank-node subject, `[p,p,q]` versus `[p,q,q]` returns `Same` when both sides use identical integer spellings, with integer-lexical adjudication both disabled and enabled. Both distinct-spelling controls return `Differs`; the enabled control retains the diagnostic that normalization merges or duplicates rows.
+
+This ran as one focused Rust 2021 test of the actual module with its recorded dependencies: four comparisons, one build/run, no production change. The earlier attempt stopped before compiling because of the disk reserve; it is not counted as an execution. The confirmed path canonicalizes blank-node datasets as sets, then accepts equal total raw counts before reaching lexical adjudication. That strict path predates #6482.
+
+This establishes a comparator diagnostic gap, not a demonstrated engine wrong-answer bug. The repair must respect the complete-quad/probe contract, sound blank-node comparison and the fact that arbitrary SPARQL result bags can legitimately contain duplicate rows. I’m checking those call sites before selecting the smallest correction.
+
+<!-- sparq-direct-6483-witness-v1 -->

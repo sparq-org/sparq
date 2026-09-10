@@ -1,0 +1,16 @@
+2026-09-10T17:58:16.2239284Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T17:58:18.1840782Z   SHA: 9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed
+2026-09-10T17:58:18.1841126Z   SELF_RUN_ID: 34511329028
+2026-09-10T17:58:18.1841672Z   PR_DRAFT: false
+2026-09-10T17:58:21.7418966Z ci-summary: evaluating tier=full (event=pull_request).
+2026-09-10T17:58:21.7419869Z   workflow-run resolver: ignored 23 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T17:58:21.7420855Z attempt 1: 25 check-run(s), 20 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T17:58:23.8109119Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+2026-09-10T17:58:23.8110278Z   workflow-run resolver: ignored 24 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T17:58:23.8111371Z attempt 2: 25 check-run(s), 18 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T17:58:23.8113684Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 18 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+2026-09-10T17:58:23.8116093Z - ✗ vectorized-feature-off quick-gates (changes + feature-resolution + cfg-audit): failure
+
+2026-09-10T17:57:36.1465900Z PullRequests: read
+2026-09-10T17:57:41.9750574Z Invoking listFiles(pull_number: 6486, per_page: 100)
+2026-09-10T17:57:42.4572750Z ##[error]Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {"resource":"PullRequest","field":"diff","code":"not_available"}

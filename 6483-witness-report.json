@@ -1,0 +1,50 @@
+{
+  "at": "2026-09-10T18:10:05.932957+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "status": "DIAGNOSTIC_COMPLETE",
+  "source_ref": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "production_prefix_unchanged": true,
+  "worktree_head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "clean": true,
+  "findings": {
+    "distinct_lexical_allow_false": "Differs with original datasets",
+    "distinct_lexical_allow_true": "Differs: integer normalization merges or duplicates rows; original datasets retained",
+    "identical_lexical_allow_false": "Same",
+    "identical_lexical_allow_true": "Same"
+  },
+  "causality": "Both sides contain3rawquads, but per-quad multiplicities are[p,p,q]vs[p,q,q]. With identical lexical forms, blank-node canonicalization yields equal sets, raw total lengths match, and strictSame returns before lexical adjudication. This prologue/comparable behavior predates5183 repair, byte-equivalent to459.",
+  "contract_scope": "The actual production consumers supply complete N-Quads datasets or bound rows from a finite full(s,p,o[,g]) probe inventory; this is a raw duplicate-output detection gap in the comparator. RDF datasets themselves use set semantics. Arbitrary SPARQL projection/join/UNION bags can legitimately contain duplicates; no universal bag policy or engine result failure is established.",
+  "validation": {
+    "builds": 1,
+    "filtered_processes": 1,
+    "test_summary": "1passed;20filteredout",
+    "comparison_records": 4,
+    "phase_seconds": 13.424612791000001,
+    "compile_seconds": 12.5258985,
+    "test_process_seconds": 0.7356973339999993,
+    "all_commands_exit0": true,
+    "minimum_observed_free_bytes": 14817988608,
+    "peak_observed_allocated_bytes": 14270464
+  },
+  "limits": {
+    "aggregate_seconds": 90,
+    "build_seconds": 60,
+    "test_seconds": 20,
+    "new_allocated_bytes": 67108864,
+    "start_free_bytes": 2214592512,
+    "continuous_free_bytes": 2147483648
+  },
+  "provenance": "Rust1.97.1/2021/O3/codegen16/strip recorded compiler; six direct dependency hashes rechecked, same feature-qualified libraries as completed5183 module tests. No Cargo or dependency build. Faithful manifest-relative allowlist copied byte-for-byte fromf50; compare modes are explicit and do not depend on ambient allowlist.",
+  "binary_sha256": "2f3cbf7a61470d21d34c9df82616ff57560353b7d0e91f0c3d52341d9b98173e",
+  "preparation_error": "One controller-writing tool input had a Python quoting SyntaxError before any directory/source/process. Preserved receipt; corrected controller preparation preceded the sole build/test. No failed behavioral outcome was retried.",
+  "limits_of_evidence": [
+    "No seed replay, fullsuite rerun, publicengine bug, productionfix or timingbenefit claim.",
+    "Only one synthetic blank-node duplicate-redistribution structure and lexical control, two allow modes.",
+    "Current futurecorrection should be scoped to completequad/raw-output contract; retain isomorphism and error checks."
+  ],
+  "next_smallest_step": "Root may update existing6483 with this concrete witness, then obtain a bounded source design for rejecting rawduplicate emissions or preserving multiplicity underblank-node mapping. No correction selected or implemented here.",
+  "pending_commands": 0,
+  "production_edits": 0,
+  "remote_mutations": 0
+}

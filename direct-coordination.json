@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T17:51:55.525934+00:00",
+  "updated_at": "2026-09-10T18:15:16.370789+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Metadata-only declaration committed locally; actual Opus followup running before push/ready.",
+    "phase": "Reviewed9ac head ready; Copilot recommends approval/no threads; paths-filter recovered on one failed-job rerun; core CI/matrix still pending.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,15 +85,15 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "draft6486_declaration_review_running",
+    "state": "pr6486_required_CI_pending_source_incident_recovered",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect actual Opus98501 declaration review, then publish metadata/mark6486 ready if approved and fresh checks hold.",
-      "Collect existing Astra6483 source-only witness readiness, consider bounded execution while6486 CI runs.",
-      "Keep all protections/holds and registryOFF; do not replay source publication70658 (completed)."
+      "Wait for relevant6486 CI/matrix completion; obtain actual execution proof of memo tests/currenthead feature legs/doclinks. Otherlatestworkflows already succeeded.",
+      "Once peers are green, fresh exacthead/gate/budget validation permits one aggregate-only recovery. Then normal protected queue if current reviews/holds clear; no bypass/jump.",
+      "Collect Astra6483 source-only repair design, obtain actual Opus soundness review before new code."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -125,7 +125,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "Read-only6483 deferred-witness readiness; no builds/source edits/publication.",
+    "agent_current_task": "6483 source-only repair/caller-contract design for independent Opus; no production edits.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -166,9 +166,9 @@
     "pr": 6486,
     "url": "https://github.com/sparq-org/sparq/pull/6486",
     "publication": {
-      "receipt": "direct-6485/admission/publication-receipt.json",
-      "draft": true,
-      "head": "73769114f081c8455aa21a393d0b992bd1283b67"
+      "receipt": "direct-6485/admission/publish-declaration-ready-receipt.json",
+      "draft": false,
+      "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed"
     },
     "publication_readiness": {
       "directory": "direct-6485/publication-readiness",
@@ -186,7 +186,7 @@
       "JSON_selftest_diff_checks": "pass"
     },
     "declaration_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 98501,
       "requested_model": "claude-opus-5",
@@ -195,7 +195,40 @@
       "input_sha256": "41d60515dac7b38af29a43875dd6f44aede5697a0f106314d07b710902ce391f",
       "output": "direct-6485/admission/opus-memo-declaration-review.json",
       "completion": "direct-6485/admission/opus-memo-declaration-completion.json",
-      "policy": "Collect98501; no relaunch. Correct dict-only review imprecision. No push/ready until review/current targets reconciled."
+      "policy": "98501 completed/collected; no poll/relaunch. Numeric-conjunct correction acknowledged.",
+      "actual_primary_model": "claude-opus-5",
+      "verdict": "APPROVE_FOR_CI",
+      "result": "direct-6485/admission/opus-memo-declaration-result.json",
+      "root_disposition": "direct-6485/admission/opus-memo-declaration-root-disposition.json",
+      "output_sha256": "8fa4f54f0e0dcd1f085050be355ecdd69bad75bd7c9b4683682295dec720bc7b"
+    },
+    "CI": {
+      "latest": "direct-6485/admission/pr6486-runs1808.json",
+      "CI": 34511329235,
+      "feature_matrix": 34511329512,
+      "gate": 34511329028,
+      "state": "CoreCI/matrix workflowstatusqueued but prior job snapshots showed progress. Otherlatestworkflows success; gate failed before source recovery."
+    },
+    "copilot": {
+      "state": "COMMENTED_APPROVAL_RECOMMENDED",
+      "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+      "open_review_threads": 0,
+      "evidence": "direct-6485/admission/watch6486-first-review.json",
+      "request_receipt": "direct-6485/admission/copilot-request-receipt.json"
+    },
+    "recovery": {
+      "source_run": 34511329019,
+      "failed_job": 102985915502,
+      "cause": "GitHub diff-service PullRequest.diff not_available before paths-filter checks",
+      "triage_directory": "direct-6485/ci-initial-triage",
+      "triage_manifest_sha256": "295fd16738fe6ba34cb6b2a80352527852ef4194754c9f1ff4264be95915f071",
+      "triage_files": 22,
+      "receipt": "direct-6485/admission/recover-paths-filter-receipt.json",
+      "status": "CompletedSUCCESSattempt2 at18:04:58",
+      "verification": "direct-6485/admission/paths-filter-recovery-watch.json",
+      "reruns_requested": 1,
+      "aggregate_rerun_performed": false,
+      "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes."
     }
   },
   "prs": {
@@ -670,15 +703,36 @@
       "issue5183_closed": true
     },
     "6486": {
-      "state": "DRAFT_SOURCE_REVIEWED_DECLARATION_PENDING",
+      "state": "OPEN_CI_PENDING_SOURCE_RECOVERY_SUCCEEDED",
       "url": "https://github.com/sparq-org/sparq/pull/6486",
-      "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+      "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
       "branch": "codex/preserve-numeric-memo",
       "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
       "issue": 6485,
-      "review": "Actual Opus5xhigh source APPROVE_FOR_CI; metadata-only followup pending",
-      "publication": "direct-6485/admission/publication-receipt.json",
-      "merge_admitted": false
+      "review": "Actual Opus5xhigh finalsource+declaration APPROVE_FOR_CI; Copilot recommends approval; zero threads at18:06",
+      "publication": "direct-6485/admission/publish-declaration-ready-receipt.json",
+      "merge_admitted": false,
+      "CI": {
+        "latest": "direct-6485/admission/pr6486-runs1808.json",
+        "CI": 34511329235,
+        "feature_matrix": 34511329512,
+        "gate": 34511329028,
+        "state": "CoreCI/matrix workflowstatusqueued but prior job snapshots showed progress. Otherlatestworkflows success; gate failed before source recovery."
+      },
+      "recovery": {
+        "source_run": 34511329019,
+        "failed_job": 102985915502,
+        "cause": "GitHub diff-service PullRequest.diff not_available before paths-filter checks",
+        "triage_directory": "direct-6485/ci-initial-triage",
+        "triage_manifest_sha256": "295fd16738fe6ba34cb6b2a80352527852ef4194754c9f1ff4264be95915f071",
+        "triage_files": 22,
+        "receipt": "direct-6485/admission/recover-paths-filter-receipt.json",
+        "status": "CompletedSUCCESSattempt2 at18:04:58",
+        "verification": "direct-6485/admission/paths-filter-recovery-watch.json",
+        "reruns_requested": 1,
+        "aggregate_rerun_performed": false,
+        "policy": "Do not replay recovery; reaggregate only after current required peers actually green, with fresh head/budget/check evidence. No cancellations or gate/floor changes."
+      }
     }
   },
   "registry": {
@@ -729,9 +783,10 @@
     }
   },
   "next_actions": [
-    "Collect actual Opus98501 declaration review, then publish metadata/mark6486 ready if approved and fresh checks hold.",
-    "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
-    "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
+    "Wait for relevant6486 CI/matrix completion; obtain actual execution proof of memo tests/currenthead feature legs/doclinks. Otherlatestworkflows already succeeded.",
+    "Once peers are green, fresh exacthead/gate/budget validation permits one aggregate-only recovery. Then normal protected queue if current reviews/holds clear; no bypass/jump.",
+    "Collect Astra6483 source-only repair design, obtain actual Opus soundness review before new code.",
+    "RegistryOFF/heartbeatACTIVE; preserveALLGREEN/gate15368/6049/6055/canon/EC2/releases/rate-fail-closed holds."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1001,6 +1056,36 @@
       "implementation": "active_lane",
       "creation_receipt": "direct-3113/admission/memo-followup-issue-receipt.json",
       "pr": 6486
+    },
+    "6483": {
+      "state": "open",
+      "runtime_gap_confirmed": true,
+      "implementation": {
+        "issue": 6483,
+        "agent": "/root/postmerge_ci",
+        "state": "repair_design_source_only_running",
+        "directory": "direct-6483/repair-readiness",
+        "production_edits_authorized": false,
+        "readiness": {
+          "directory": "direct-6483/readiness",
+          "manifest_sha256": "d8c96dfa61b3b93582bb304e5f69490f0d161addf168438238911ad415933866",
+          "files": 13,
+          "remote_validation": "Root normal scoped checks succeeded; agent restricted-network request failed without observed budget exhaustion."
+        },
+        "witness": {
+          "directory": "direct-6483/witness",
+          "manifest_sha256": "bd68b93c546c1f74066d3f70e0812ab2b7a36621589dddd821c2e244f37823db",
+          "files": 33,
+          "root_verification": "direct-6483/admission/witness-root-verification.json",
+          "result": "Identicallexical redistribution Same in both modes; distinctlexical controls Differs. Comparator diagnostic gap, notenginefailure.",
+          "builds": 1,
+          "filtered_tests": 1,
+          "comparisons": 4,
+          "pending_commands": false
+        },
+        "public_update": "direct-6483/admission/witness-comment-receipt.json"
+      },
+      "scope": "Raw duplicate-output diagnostic contract; legitimate arbitrary query bags require separate semantics."
     }
   },
   "usage_observation": {
@@ -4345,9 +4430,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T17:10:14.961590+00:00",
+    "at": "2026-09-10T17:57:06.423252+00:00",
     "enabled": false,
-    "evidence": "monitor-20260910-1712/registry-actions.json"
+    "evidence": "direct-6485/admission/publish-declaration-ready-receipt.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
@@ -4445,9 +4530,26 @@
   "next_lane_readiness": {
     "issue": 6483,
     "agent": "/root/postmerge_ci",
-    "directory": "direct-6483/readiness",
-    "state": "source_only_running",
-    "execution_authorized": false,
-    "scope": "Revisit preserved pre-build disk stop; verify warm actual module route/issue/source/current reserve. No repeated5183diagnosis."
+    "state": "repair_design_source_only_running",
+    "directory": "direct-6483/repair-readiness",
+    "production_edits_authorized": false,
+    "readiness": {
+      "directory": "direct-6483/readiness",
+      "manifest_sha256": "d8c96dfa61b3b93582bb304e5f69490f0d161addf168438238911ad415933866",
+      "files": 13,
+      "remote_validation": "Root normal scoped checks succeeded; agent restricted-network request failed without observed budget exhaustion."
+    },
+    "witness": {
+      "directory": "direct-6483/witness",
+      "manifest_sha256": "bd68b93c546c1f74066d3f70e0812ab2b7a36621589dddd821c2e244f37823db",
+      "files": 33,
+      "root_verification": "direct-6483/admission/witness-root-verification.json",
+      "result": "Identicallexical redistribution Same in both modes; distinctlexical controls Differs. Comparator diagnostic gap, notenginefailure.",
+      "builds": 1,
+      "filtered_tests": 1,
+      "comparisons": 4,
+      "pending_commands": false
+    },
+    "public_update": "direct-6483/admission/witness-comment-receipt.json"
   }
 }

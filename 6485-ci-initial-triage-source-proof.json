@@ -1,0 +1,17 @@
+[
+  {
+    "path": ".github/workflows/vectorized-feature-off.yml",
+    "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15",
+    "equals_main_f50": true
+  },
+  {
+    "path": ".github/workflows/ci-summary.yml",
+    "sha256": "be42f933e62ef681e9f45fc515afee8398bcf9d809d589d8b3c2bb9f9fa79884",
+    "equals_main_f50": true
+  },
+  {
+    "path": "scripts/ci_summary_gate.py",
+    "sha256": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+    "equals_main_f50": true
+  }
+]

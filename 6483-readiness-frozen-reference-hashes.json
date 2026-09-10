@@ -1,0 +1,26 @@
+[
+  {
+    "path": "direct-5183/copilot-duplicate-witness/report.json",
+    "sha256": "841ad44bb30220a1bb759486023c6abedaeac5d5409c6e1cafc32c410d4459e0"
+  },
+  {
+    "path": "direct-5183/copilot-duplicate-witness/initial.json",
+    "sha256": "7e2e07569ac702288e5c1a6da7f4e86345e14ce689c20a1eaac5065f66ac31b9"
+  },
+  {
+    "path": "direct-5183/copilot-duplicate-witness/old-compiler-argv.json",
+    "sha256": "2dad221759db466f66562c1c81ad546217314a45aa66507b66e9631b358fc925"
+  },
+  {
+    "path": "direct-5183/copilot-duplicate-triage/source-provenance.json",
+    "sha256": "29b05b39473c7d79a816a89635b6987ea5a4d1e44741be2f04664b0c5a1f18de"
+  },
+  {
+    "path": "direct-5183/review-followup/feature-edition-proof.json",
+    "sha256": "9de5da65386c2c87bf6ff20e95294020c881d8e2c30a9f0d938d9ffcd96a3faf"
+  },
+  {
+    "path": "direct-5183/review-followup/compiler-provenance.json",
+    "sha256": "27d31a377e4f4ada52baf9f800f595245a337b9661cea18d2db84bb51fe16272"
+  }
+]

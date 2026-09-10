@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "gh",
+    "api",
+    "rate_limit"
+  ],
+  "error": "FileNotFoundError: gh not in shell PATH",
+  "process_started": false,
+  "github_requests_sent": 0,
+  "disposition": "Root authorized correcting the executable to /opt/homebrew/bin/gh; no failed remote request retried."
+}

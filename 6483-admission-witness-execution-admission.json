@@ -1,0 +1,26 @@
+{
+  "at": "2026-09-10T18:15:16.370789+00:00",
+  "admission_issued_before_execution": true,
+  "scope": "One actual module build/filtered test/four comparisons; exact f50source; no production edit",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "fresh_remote_evidence": [
+    "execution-budget.json",
+    "execution-main.json",
+    "execution-issue.json"
+  ],
+  "limits": {
+    "aggregate_seconds": 90,
+    "build_seconds": 60,
+    "filtered_test_seconds": 20,
+    "allocated_bytes": 67108864,
+    "start_free_bytes": 2214592512,
+    "continuous_minimum_free_bytes": 2147483648,
+    "export_reserve_bytes": 4194304,
+    "builds": 1,
+    "test_processes": 1
+  },
+  "status": "Completed; no commands pending",
+  "witness": "direct-6483/witness"
+}

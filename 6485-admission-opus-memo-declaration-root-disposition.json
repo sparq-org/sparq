@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T17:56:27.328978+00:00",
+  "head": "9ac4a59e96b1c69c8d617fbde9e98fe8c0436fed",
+  "verdict": "APPROVE_FOR_CI",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 98501,
+  "state": "completed_collected",
+  "output_sha256": "8fa4f54f0e0dcd1f085050be355ecdd69bad75bd7c9b4683682295dec720bc7b",
+  "publish_and_ready_approved": true,
+  "merge_approved": false,
+  "correction": "Reviewer acknowledged numeric-cache conjunct and withdrew inaccurate dict-only suggestion; correct existing comment retained.",
+  "ratchet_policy": "No automatic floor/baseline changes are authorized by reviewer prose. Existing wasm comparison/size gates remain intact; any actual failure requires evidence and separate scoped diagnosis, not a floor bump to green."
+}
