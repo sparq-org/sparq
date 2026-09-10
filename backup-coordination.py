@@ -440,6 +440,10 @@ for evidence_name in ["implementation-draft-root-verification.json", "draft-comm
 
 FILES["6476-admission-heartbeat-0513.json"] = ROOT / "direct-6476/admission/heartbeat-0513.json"
 
+# Issue6476 verified warm-profile resource assessment.
+for evidence_name in ['report.json', 'stopped-profile-artifact-inventory.json', 'warm-artifacts.json', 'warm-harness-Cargo.toml', 'warm-provenance.json', 'manifest.json']:
+    FILES["6476-profile-assessment-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/profile-assessment" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

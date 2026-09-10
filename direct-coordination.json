@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T05:15:12.085818+00:00",
+  "updated_at": "2026-09-10T05:29:26.557951+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,16 +67,16 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Bounded warm-profile validation authorized; existing Astra lane",
-    "state": "Exact seven-file draft root-verified and committed, not compiled/tested/review-approved. Existing Astra lane assessing matched cache and bounded resource plan.",
+    "phase": "Fresh public witness repaired; remaining scoped tests/controls running",
+    "state": "Agent reports matched-profile fresh build success and exact public witness repaired to all four cases enforced. Root verification pending final frozen validation packet.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6476",
     "directory": "direct-6476",
     "max_minutes": 25,
-    "scope": "Execute real nested public extension-callback reproduction; inspect affected entry points and previous limits/sticky-error/cancel pointer restoration lifetimes; exact source and test/control plan.",
-    "constraints": "Own issue6476 worktree, one engine lane, no remote push/model/release/EC2 yet. No build until resource plan accepted; no broad cleanup. No bd commands after readonly bootstrap defect.",
+    "scope": "Implement scoped nested QueryBudget restoration, validate actual public reentrancy and private state/lifetime boundaries, obtain final Opus review, then protected PR/merge.",
+    "constraints": "Existing lane only; exact warm profile must be confirmed before build. One compiler process at a time, jobs1, incrementalOFF/offline; stop free<2GiB OR aggregate task output/target allocated growth>512MiB. No fullworkspace/wasm build, broad cleanup, remote push/model/EC2/release. Keep frozen draft and reproduction immutable.",
     "fresh_admission": [
       "direct-3105/admission/next6476-admission.json",
       "direct-3105/admission/next6476-admission-page2.json",
@@ -161,7 +161,7 @@
       "output_sha256": "c2dd7517cbf616c8e265e91d08653e6f9fc7f24c50550990ceacf95e6e6ce4eb"
     },
     "implementation": {
-      "state": "draft_committed; cache assessment and conditional validation running",
+      "state": "bounded scoped validation running",
       "agent": "/root/postmerge_ci",
       "actual_model": "GPT-6 Astra",
       "effort": "xhigh",
@@ -174,7 +174,18 @@
       "manifest_sha256": "bd5db57c5fd83cac7c3998a06b5701bd5da6980d480b263e8428d6c15316ba39",
       "root_verification": "direct-6476/admission/implementation-draft-root-verification.json",
       "tests_executed": false,
-      "build_result": "Stopped initial mismatched release-profile dependency rebuild at operational disk reserve before engine compile. No source compiler error reached."
+      "build_result": "Stopped initial mismatched release-profile dependency rebuild at operational disk reserve before engine compile. No source compiler error reached.",
+      "profile_assessment": {
+        "directory": "direct-6476/profile-assessment",
+        "manifest_sha256": "568bacf710150b00f720ab569098aafbd70f362caef77788dc2310e3fe229fa7",
+        "root_hash_verified": true
+      },
+      "reported_progress": {
+        "at": "2026-09-10T05:26:00Z",
+        "fresh_engine_build": "Agent reports success in matched warm profile; aggregate growth approximately25MB. Root waiting frozen final evidence.",
+        "public_callback": "Freshly linked four-case witness reports enforced=[true,true,true,true], versus baseline=[true,false,false,true].",
+        "remaining": "Actual-module tests, calibrated mutants, internal sealing control, production >1-worker snapshot witness, final clean commit/packet, actual Opus final review."
+      }
     }
   },
   "prs": {
@@ -2582,12 +2593,8 @@
     },
     "6476": {
       "issue": 6476,
-      "url": "https://github.com/sparq-org/sparq/issues/6476",
-      "state": "OPEN out-of-scope baselinebudgetrestorationfinding; runtime repro pending",
-      "source_main": "e53464c73f31f7aca800f3867ac054c36408e346",
-      "summary": "Nested publicquery throughExtFn overwrites ACTIVE/EXCEEDED; innerGuardDropclearsOFF/None instead ofrestoringouter. OrdinaryEXISTSinternalrecursion notsame path. Sourceconfirmed,no runtimeclaim.",
-      "proof": "direct-3105/admission/nested-budget-issue-verified.json",
-      "implementation": "Not mixedinto3105; one substantive lane preserved."
+      "state": "Moved to active_lane; do not select or reproduce again",
+      "active_branch": "codex/nested-query-budget"
     }
   },
   "performance_readiness": {

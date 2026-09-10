@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "report.json",
+      "bytes": 3106,
+      "sha256": "ee84d4180f114ab469bc0f47b4d05d5de2b34ca372d5f0b29ae60408cc4fbf54"
+    },
+    {
+      "path": "stopped-profile-artifact-inventory.json",
+      "bytes": 166973,
+      "sha256": "7572e7e144458928b122f004701c676f37ce934700bcbd9c398d6bf3a79947ef"
+    },
+    {
+      "path": "warm-artifacts.json",
+      "bytes": 1723,
+      "sha256": "086e263b1957c7f892b90c8f97071cda8944d414d6ff64d246a4fadab27848dc"
+    },
+    {
+      "path": "warm-harness-Cargo.toml",
+      "bytes": 740,
+      "sha256": "905fbe4e6b7cd4d93ab613ce446dd5591f47aa77b0fca5519edc726d4b8b4197"
+    },
+    {
+      "path": "warm-provenance.json",
+      "bytes": 3026,
+      "sha256": "ac6d629b893df98eb6cdd8804e042f32b08582819ca5eb125247cf8e906be1c5"
+    }
+  ]
+}

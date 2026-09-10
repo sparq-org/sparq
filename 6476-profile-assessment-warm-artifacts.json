@@ -1,0 +1,38 @@
+[
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-17d69fdf30aada97.rlib",
+    "bytes": 5276032,
+    "allocated_bytes": 5279744,
+    "sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-17d69fdf30aada97.rmeta",
+    "bytes": 865480,
+    "allocated_bytes": 868352,
+    "sha256": "e78072f8aa3a60692f2f2b025b768391793f86c73230d71089f7384f8aa42f19"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-e9ed6f0c10ca33fd.rlib",
+    "bytes": 2820984,
+    "allocated_bytes": 2822144,
+    "sha256": "9c6042a15b38ebfddaaef9b24e53df598201b72ec631310f201378c0b06ff7c2"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-e9ed6f0c10ca33fd.rmeta",
+    "bytes": 803792,
+    "allocated_bytes": 806912,
+    "sha256": "e6fba4c2f9f3a2b73d5e7eb0416974ec22e8ffc8e68aba511bd3a1eaead4a5d4"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib",
+    "bytes": 1889456,
+    "allocated_bytes": 1892352,
+    "sha256": "39c12e127a3f154f092a9bdb0301dc4eef27456adb5a7576fca063a52acf3abd"
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-fb353b242d14de3d.rlib",
+    "bytes": 4519144,
+    "allocated_bytes": 4521984,
+    "sha256": "ee009cb5d311d96b6b5e3d8088a22c7317cae93104dd6fbd55e91fd98796556f"
+  }
+]

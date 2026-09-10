@@ -1,0 +1,50 @@
+{
+  "checkpoint": "e0aa233d59321c5a437ced8c072d359b272b6222",
+  "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "clean": true,
+  "diff_sha256": "d86208f6f27a80257006368bed7afcedd5c30b240d326301a408f37b6f63a7c7",
+  "warm_profile": {
+    "opt_level": 3,
+    "panic": "unwind (default in detached harness)",
+    "lto": false,
+    "codegen_units": 16,
+    "debug": false,
+    "engine_features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "core_features": [
+      "default",
+      "parallel"
+    ],
+    "compiler": "1.97.1-aarch64-apple-darwin",
+    "reuse_evidence": "Exact frozen detached Cargo.toml/root rustc invocation and surviving matching rlib hashes/fingerprint feature-profile IDs; changed path dependencies require fresh compile."
+  },
+  "footprint": {
+    "release_target_allocated_bytes": 394108928,
+    "warm_engine_rlib_bytes": 5276032,
+    "warm_core_rlib_bytes": 2820984,
+    "expected_outputs": "A fresh engine/core/substrate/spargebra path dependency set plus public witness and several small direct actual-module test/control binaries. Existing engine+core rlib/rmeta total9.77MB; fixed small tests expected tens of MB, not a workspace test binary. Final and transient outputs are not exactly predictable; enforce aggregate512MiB growth cap.",
+    "decision": "Warm-profile scoped continuation is defensible under root explicit512MiB/2GiB bounds. Avoid shipping release and engine-wide Cargo test dev-dependency graph. Not a promise the compiler fits."
+  },
+  "stopped_profile": {
+    "incompatible_invocations": 38,
+    "matching_files": 112,
+    "matching_allocated_bytes": 100646912,
+    "attribution": "Recorded exact rustc suffixes and explicit abort/LTO/codegen1 flags; matched files have stopped-run mtimes. No pre-build inventory exists, so cannot prove each file was newly created rather than regenerated. Build-script/host-profile/shared artifacts excluded from incompatible subtotal. Nothing proposed for automatic deletion."
+  },
+  "repository_policy": {
+    "AGENTS.md:777-781": "Per-tick WARN <20G / CRITICAL <10G classification.",
+    "AGENTS.md:790-799": "Advisory/nonfatal return codes; scheduler backs off new waves. No fixed per-command6.5GB reserve found in these authoritative instructions.",
+    "AGENTS.md:189-193": "Orchestrator owns safe worktree/build-cache cleanup.",
+    "operational_bound": "Prior6509559808B floor was root per-task choice; root now authorizes active-lane512MiB aggregate growth / >=2GiB free, one sequential lane/jobs1; not a CI-gate exception."
+  },
+  "smallest_validation_path": [
+    "New task-owned detached harness using frozen Cargo.lock and identical warm profile/dependency features, paths changed only to clean issue6476; original public callback source unchanged",
+    "Fresh default-engine public witness + exact copied private budget module tests; mutations and internal-sibling sealing compile control",
+    "Only then no-parallel and relevant source-feature checks if caps permit; production Rayon path proof remains explicitly pending if not feasible"
+  ],
+  "free_bytes": 5807194112
+}
