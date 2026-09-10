@@ -1,0 +1,81 @@
+{
+  "decision": "GO_FOR_NARROW_IMPLEMENTATION_AFTER_ROOT_OWNERSHIP_AND_EXECUTION_GRANT",
+  "source_base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "production_edit_now": false,
+  "scope": {
+    "rust": [
+      "crates/sparq-engine/src/exec.rs",
+      "crates/sparq-engine/src/lib.rs",
+      "crates/sparq-engine/src/explain.rs",
+      "crates/sparq-engine/src/explain_json.rs",
+      "crates/sparq-engine/src/cache.rs"
+    ],
+    "docs": [
+      "skills/sparql-query/SKILL.md (public nesting/BASE behavior)",
+      "crates/sparq-engine/README.md (same-thread scope/panic qualification)"
+    ],
+    "metadata_later": "Always-compiled behavior correction likely needs ordinary numbered feature-off V2 intent declaration once root assigns PR; no neutrality claim or gate change."
+  },
+  "design": {
+    "boundary": "pub(crate) synchronous generic with_query_base(base: Option<&str>, f: impl FnOnce()->T)->T; private owned guard in exec, never returned, no public guard/installer.",
+    "state": "Own the previous Option<oxiri::Iri<String>> by value; PhantomData<Rc<()>> matches existing budget guard pattern and implies !Send + !Sync without allocation/dependency.",
+    "install": "Compute next using the exact old base.and_then(|s| Iri::parse(s.to_string()).ok()) before touching TLS; then one short RefCell::replace to take predecessor. Release borrow before invoking f.",
+    "drop": "QUERY_BASE.try_with; inside short borrow replace/take previous owned Option, including None; ignore only AccessError from destroyed TLS. Do not hide borrow failure or carry any RefCell borrow over user code.",
+    "unwind": "RAII restores during panic=unwind; release/release-fast/release-wasm are panic=abort so no caught-unwind claim for those binaries. Thread teardown AccessError tolerance is a design invariant; no contrived destructor-order runtime proof promised.",
+    "order": "Wrap the exact setter-to-return region independently at each site. ANALYZE differs materially from ordinary query/cache sites; see site-plan.json.",
+    "removal": "Delete set_query_base entirely; workspace tracked-source search currently finds exactly11 calls and only its TLS reads/writes in exec. Removing the old function makes any future stale caller fail compilation.",
+    "unchanged": "resolve_iri, parser/rewrite, dataset/view, functions, trace, cache key/locking, all worker dispatch, budget and query-now logic remain unchanged."
+  },
+  "missing_context_resolved": {
+    "functions": "ExtFn is Arc<dyn Fn + Send + Sync>; functions::lookup clones the Arc within a short TLS borrow and returns it before f(&terms) is called synchronously. No async/future/await at this seam. Nested calls to public query methods are type-legal. Functions install itself clears on Drop rather than restoring: no new nested with_functions scopes in the BASE regression fixture, and no claim this patch repairs that independent behavior.",
+    "prepared": "PreparedQuery owns Query; parse validates via SparqlParser and optional algebra-rewrite. Query::base_iri returns borrowed owned Option<Iri<String>> for all4 forms. Public malformed SPARQL can fail before install; malformed private &str parse-to-None test is distinct. Relative IRI expression failure may yield unbound, not public Err.",
+    "dataset": "active_dataset/build_active executes before BASE; view_scope suspends a previously intersected view and restores it. Do not reorder that preparation.",
+    "trace": "Both ANALYZE APIs install BASE before their budget closure; trace guard is installed inside it and trace::take drains before trace guard drop. Preserve this order. Trace install/drop itself clears shared trace rather than stacking; avoid simultaneous nested ANALYZE claims. Use normal query as the nested call when testing an ANALYZE outer.",
+    "cache": "Key includes version and full owned Query (including base). Hit returns under short mutex scope without eval or BASE install. Miss/uncacheable eval occurs outside mutex; custom functions are noncacheable. No lock crosses callback. Test cache hits separately from callback paths.",
+    "cfg": "result-cache and explain-json gate3of11sites; each feature plus algebra-rewrite has empty dependency list. Default covers8sites; addon cfg must cover all11. No external/test/bench setter consumers found in tracked workspace. exec module is crate-private.",
+    "worker": "Six expression worker branches explicitly snapshot/install functions/view/etc; QUERY_BASE has no worker snapshot/installation. PAR_THRESHOLD50000; planned empty-graph/unit-row cases stay serial and must assert thread identity. No propagation fix or >1worker BASE correctness claim. A spawned-thread isolation test may test own scopes only, not executor fanout propagation.",
+    "profiles": "Workspace release abort, release-fast inherits abort, wasm inherits abort; python-release explicitly unwind. Diagnostic native cfg(test) profile explicitly unwind; default debug test panic behavior supports catch_unwind."
+  },
+  "coverage_plan": {
+    "private_module": "New cfg(test) exec::query_base_tests beside the private BASE helper; direct read access without a new production accessor. Serial tests/small fixed inputs.",
+    "private_cases": [
+      "Three nested owned Options: Some(outer)->Some(inner)->None->inner->outer->idle, exact strings including paths; each scope resolves its own relative suffix.",
+      "Private malformed base string installs None during child, restores outer; do not construct malformed public Query algebra or conflate with public parser rejection.",
+      "Ok and Result::Err returns; child catch_unwind inside outer checks outer restored; top-level catch_unwind checks exact prior idle; #[cfg(panic=\"unwind\")] for unwind assertions.",
+      "Owned-string lifetime: supply scoped String, ensure saved owned predecessor lives through child; no borrowed guard.",
+      "!Send and !Sync trait checks without new dependency: candidate compile-fail requests both traits from an internal exec child module; positive calibration deletes only PhantomData in a scratch copy and must type-check. No unsafe/UB execution.",
+      "Internal sibling cannot access private guard/installer; allowed closure returns values only. No safe guard escape."
+    ],
+    "public_cases": [
+      "All11inner entrypoints invoked synchronously from one serial outer SELECT IRI(callback()) projection. Inner BASE and absent-BASE modes; verify each inner API succeeds/form result, callback exactlyonce/current thread, outer output correct, then idle exact previous state.",
+      "Original5-case protocol remains a fixed regression input; parse rejection kept separate from post-install valid unsupported CONSTRUCT Err; assert exact actual error form rather than assume IRI failure is Err.",
+      "Evaluating outer8pluscacheeval sites: SELECT projection for query/JSON/stream/ANALYZE; ASK/count use required FILTER(sameTerm(IRI(callback()), expected)) so optimizer cannot discard callback. Observe callback and row/boolean/count/JSON oracle.",
+      "Planning-only explain and explain_plan: inner-call restoration and direct idle checks; a custom-function-bearing plan must not be counted as callback evaluation.",
+      "Cache actual miss then hit: existing stats/Arc identity semantics unchanged; prewarm same deterministic query, install sentinel BASE privately, hit does not alter state; custom-function outer deliberately always-eval and has no cache-hit claim.",
+      "JSON streaming sink is FnMut(String)->ControlFlow<()>, not Result. Collect fixed output; an early ControlFlow::Break checks cleanup without inventing a sink Err. Synchronous callback/chunk scope is preserved.",
+      "Existing budget restoration tests, public registry tests, dataset unit/view tests and selected text/JSON explain tests remain unchanged. Do not turn baseline nested registry/trace limitations into asserted new semantics."
+    ],
+    "ordering_case": "For ordinary query, live outer budget remains installed across nested child until original budget scope ends; for ANALYZE, private BASE stays active through form rejection/render/budget/trace. Use existing state helpers/behavior checks rather than move any guard.",
+    "controls": [
+      "Guard-removal scratch mutant keeps parsing/installation but omits restoration; compile succeeds and nested-BASE/None/idle tests must fail at runtime.",
+      "Trait negative/positive calibration is compile evidence only; it must not be presented as behavioral regression evidence."
+    ],
+    "feature_matrix": "Default cfg(test) and addon default+explain-json+result-cache+algebra-rewrite; all11 functions have actual execution/idle coverage under addon. No-default/native/wasm fullCI remains authoritative if not separately admitted."
+  },
+  "execution_readiness": "See local-validation/warm-profile.json:17directlibs and compiler currently hash-match their recorded actual engine cfg(test) invocation;32engine source files match the recorded pre-observer base and publicf50. Existing fixed-witness observer code must NOT be copied into candidate. Derive a fresh clean source tree from new implementation HEAD.",
+  "proposed_validation_sequence": [
+    "Root creates isolated issue6479 worktree from freshly verified main and confirms hunk ownership; implement5Rustfiles+matchingdocs only.",
+    "Source/hash/diff checks, touched formatting; exact candidate actual-engine cfg(test) default build then named test run, offline jobs1.",
+    "Same dependencies with addon features (manifest-justified but currently uncompiled route), build/run named matrix; no Cargo dependency build.",
+    "One guard-restoration-removal behavioral mutant build/filter; two cheap metadata trait compile controls if within aggregatebudget. Scoped Clippy only if existing directclippy route confirmed; no cold fallback.",
+    "Freeze every output/limitation; root actualOpus finalpatch review and LinuxCI/fullfeature/wasm/ratchets. No automatic admission."
+  ],
+  "budget_projection": "Propose600s aggregate/180sperbuild/256MiB total new outputs, start>=2GiB+64MiB/continuous>=2GiB, jobs1 offline incremental0. Prior actual default compile17.787s/peak19,656,704B is historical feasibility evidence, not guarantee or candidate result. Stop on missing artifact/profile, compile, real semantic or resource failure; no dependency rebuild/cleanup escalation.",
+  "unresolved": [
+    "Fresh hunk/PR ownership is root-owned and pending. No production edits authorized by this readiness.",
+    "Combined addon test profile not yet compiled. Full compiler/feature success and actual testcase nonvacuity remain obligations.",
+    "Public callback worker propagation is intentionally unchanged and unproven; release panic=abort has no restoration-after-abort behavior.",
+    "Do not claim universal guard order, global TLS restoration, registry/trace nesting repair, full test matrix or performance neutrality."
+  ],
+  "public_export_boundary": "Only public-context/payload.md and public-context/origin-map.json are proposed for any later independent public-source-only review. They contain exact public source snippets/URLs, no local witness outcomes/rawlogs/commands/resources/toolchain/cache/nativepaths. All validation planning/recordedartifact details are local-validation/ or this local report; do not send the whole directory."
+}

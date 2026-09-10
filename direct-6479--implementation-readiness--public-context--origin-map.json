@@ -1,0 +1,292 @@
+[
+  {
+    "label": "Extension closure and registry contract",
+    "path": "crates/sparq-engine/src/lib.rs",
+    "start": 329,
+    "end": 387,
+    "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+    "source_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "excerpt_sha256": "69f653e2788f8f5c03533a195ff0064874ba5df3a536a5e206f2e33f5d53e7b3",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L329-L387"
+  },
+  {
+    "label": "Registry synchronous closure",
+    "path": "crates/sparq-engine/src/lib.rs",
+    "start": 401,
+    "end": 404,
+    "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+    "source_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "excerpt_sha256": "82b1cc89b77dce30941242d059e6deea65dcd8b051ad89f76817514d82d02823",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L401-L404"
+  },
+  {
+    "label": "Complete function registry TLS module",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 1923,
+    "end": 1981,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "ede57c2ae1b62665e74aabeac7ac9a8dc2a139645e832a4990aa71e517cdf263",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L1923-L1981"
+  },
+  {
+    "label": "Synchronous custom-function invocation after lookup returns",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 14515,
+    "end": 14538,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "551c13e34d2b584639d2960d06b2de7f49b8d5bde2e188e2823be06efb0f9c02",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L14515-L14538"
+  },
+  {
+    "label": "PreparedQuery owned query and parse feature branches",
+    "path": "crates/sparq-engine/src/lib.rs",
+    "start": 836,
+    "end": 869,
+    "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+    "source_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "excerpt_sha256": "38123c42ac563f1b99c6c4e8509ddc961cf58dc9bab6b900e8c0c71e5bc1197c",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L836-L869"
+  },
+  {
+    "label": "Owned query algebra and dataset/base accessors",
+    "path": "vendor/spargebra/src/query.rs",
+    "start": 24,
+    "end": 110,
+    "blob_oid": "c9558bac47749d7e09c8cb50047253104984157e",
+    "source_sha256": "2898f8381294337f29224b5d016cfcdd34e89c93d66a0c68140b4b3d2bb259b6",
+    "excerpt_sha256": "bbe84de88ede9369412c19d30687e2a19ea72d168935bf5442ebea1560304136",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/vendor/spargebra/src/query.rs#L24-L110"
+  },
+  {
+    "label": "Active dataset and view scoping",
+    "path": "crates/sparq-engine/src/lib.rs",
+    "start": 811,
+    "end": 829,
+    "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+    "source_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "excerpt_sha256": "f3f85ab6d740a03475812343d9aabb1f38ef2256e94bbdd74ee142cdce720650",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L811-L829"
+  },
+  {
+    "label": "Complete production dataset reconstruction helpers",
+    "path": "crates/sparq-engine/src/dataset.rs",
+    "start": 13,
+    "end": 96,
+    "blob_oid": "13ef5cb15c0d0886d310a7523b7f3bb329186aa7",
+    "source_sha256": "c9ac7f144c6084a2032662324ff95e39808f2e607aab3cbd4ae6e0f18f4b180d",
+    "excerpt_sha256": "c3b30074a0d8c61ce44a8587662b6139d5b5781d96e65f51adc327a9149d54fc",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/dataset.rs#L13-L96"
+  },
+  {
+    "label": "Complete dataset-view TLS module",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 2332,
+    "end": 2440,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "7508cd582bf9cfaceb0c8a757bb20cc0ef4dd37fe8787784bb91fd1fe4de1137",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L2332-L2440"
+  },
+  {
+    "label": "Complete trace TLS module",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 962,
+    "end": 1058,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "c16d02a35716d0caa56862d08b044d7fe605a710a91ef811af178be2523d25a2",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L962-L1058"
+  },
+  {
+    "label": "Complete cache eligibility grammar",
+    "path": "crates/sparq-engine/src/cache.rs",
+    "start": 58,
+    "end": 197,
+    "blob_oid": "163b4fa1435a02c40f9eacbe529bed3b24d66ca7",
+    "source_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "excerpt_sha256": "16ba7e16d82037e91770bdd4b5f75fa627f6c8d1239bd0602d60e20df2c6a5ae",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/cache.rs#L58-L197"
+  },
+  {
+    "label": "Cache key includes full owned Query",
+    "path": "crates/sparq-engine/src/cache.rs",
+    "start": 204,
+    "end": 208,
+    "blob_oid": "163b4fa1435a02c40f9eacbe529bed3b24d66ca7",
+    "source_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "excerpt_sha256": "4289871fb1a03205a6478b8494dddac3f6bcc0ae6fb3d8888b8a0f2e380729de",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/cache.rs#L204-L208"
+  },
+  {
+    "label": "Cache get/hit/miss/insert scope",
+    "path": "crates/sparq-engine/src/cache.rs",
+    "start": 271,
+    "end": 332,
+    "blob_oid": "163b4fa1435a02c40f9eacbe529bed3b24d66ca7",
+    "source_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "excerpt_sha256": "00b70f073f136d70fdd52b7450503df67d901494344987d286ef0694d64d9d41",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/cache.rs#L271-L332"
+  },
+  {
+    "label": "Cache hit/miss observability",
+    "path": "crates/sparq-engine/src/cache.rs",
+    "start": 342,
+    "end": 349,
+    "blob_oid": "163b4fa1435a02c40f9eacbe529bed3b24d66ca7",
+    "source_sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e",
+    "excerpt_sha256": "a87301ff38db66cb7b6ca36961dc841cb6c7cad412cdb273b96c609c4dba921a",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/cache.rs#L342-L349"
+  },
+  {
+    "label": "Feature-gated cache and explain-json modules",
+    "path": "crates/sparq-engine/src/lib.rs",
+    "start": 1,
+    "end": 35,
+    "blob_oid": "613454a8d0cbfaa4ffa6f0d47d569af97703972d",
+    "source_sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538",
+    "excerpt_sha256": "df3df425f67b94fc22545b9abf19d54f40f46c96bc4849756a41c7c7664fc575",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/lib.rs#L1-L35"
+  },
+  {
+    "label": "Engine defaults and parallel forwarding",
+    "path": "crates/sparq-engine/Cargo.toml",
+    "start": 30,
+    "end": 35,
+    "blob_oid": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce",
+    "source_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "excerpt_sha256": "1f5041f3d4efc463400c434d905033199fcfa08165b0b695049bb2c1232e4a25",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/Cargo.toml#L30-L35"
+  },
+  {
+    "label": "No-dependency opt-in feature 231",
+    "path": "crates/sparq-engine/Cargo.toml",
+    "start": 231,
+    "end": 231,
+    "blob_oid": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce",
+    "source_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "excerpt_sha256": "0358a57ff99b119ce4abd657d8c432a649aeeb7c983de148cc43f13026dc7228",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/Cargo.toml#L231-L231"
+  },
+  {
+    "label": "No-dependency opt-in feature 293",
+    "path": "crates/sparq-engine/Cargo.toml",
+    "start": 293,
+    "end": 293,
+    "blob_oid": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce",
+    "source_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "excerpt_sha256": "be30f310a14c03a61b93726c522e621610448be855b0f1e2e9f3bd32a9ff5595",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/Cargo.toml#L293-L293"
+  },
+  {
+    "label": "No-dependency opt-in feature 348",
+    "path": "crates/sparq-engine/Cargo.toml",
+    "start": 348,
+    "end": 348,
+    "blob_oid": "ac05dcf9c7b70a03a63310c03dfb9103a6f9a9ce",
+    "source_sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+    "excerpt_sha256": "02a0ac57405258d4ca69df65dbdf69009ed1d2a1fbe4e3ed953af98e01df3231",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/Cargo.toml#L348-L348"
+  },
+  {
+    "label": "Production panic profiles",
+    "path": "Cargo.toml",
+    "start": 97,
+    "end": 139,
+    "blob_oid": "ee48e62dcb029c5960265fd2a21b2bb310cc1662",
+    "source_sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+    "excerpt_sha256": "2aba5a9ff951fb4ff4a0cb40814a4ab16b1e4275f46627290acb4d0e3066474c",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/Cargo.toml#L97-L139"
+  },
+  {
+    "label": "Parallel threshold",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 2451,
+    "end": 2454,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "4cc1699ba325e7230606f6d8bff14b1c85f036a1931b349ea973c649a071608f",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L2451-L2454"
+  },
+  {
+    "label": "BIND parallel/serial expression branches",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 10660,
+    "end": 10707,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "93fa21c9eb6550447f176e7e08104e3591a65519b3eea11dd17e9d22bcde002e",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L10660-L10707"
+  },
+  {
+    "label": "FILTER parallel/serial expression branches",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 12786,
+    "end": 12836,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "58144e716c6870cfc1f92b034519a26abd371b988392469f85bf7f9f85d93612",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L12786-L12836"
+  },
+  {
+    "label": "Left-join worker context",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 10090,
+    "end": 10124,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "7bce0ffc6d218afee29cbf0a81d57773084d3d2c90b79e634f4f3bfa7bb3124e",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L10090-L10124"
+  },
+  {
+    "label": "Grouped expression worker context",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 10861,
+    "end": 10900,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "beea4ff7541da0d6803857b752d4df3bce148687e4e1aa93b4aae99f178f0cdd",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L10861-L10900"
+  },
+  {
+    "label": "ORDER-key worker context",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 11801,
+    "end": 11831,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "eaefe4139d4e8a14159f6cd377cf562d100b2b2a962c58aee15fca5c1bb9c48d",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L11801-L11831"
+  },
+  {
+    "label": "General ORDER-key worker context",
+    "path": "crates/sparq-engine/src/exec.rs",
+    "start": 11883,
+    "end": 11909,
+    "blob_oid": "dc532c380149aee857d2109a1e476cf5d524edb5",
+    "source_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+    "excerpt_sha256": "b2b7485d4cf704c1e538c9bde32d22aad49e92b2aa561daa52d4a809057973b5",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/exec.rs#L11883-L11909"
+  },
+  {
+    "label": "Text ANALYZE actual BASE/budget/trace order",
+    "path": "crates/sparq-engine/src/explain.rs",
+    "start": 73,
+    "end": 115,
+    "blob_oid": "9ce46fc0b01e3f9af99079d6dd22f9a3d675f9a9",
+    "source_sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4",
+    "excerpt_sha256": "1a79db7c253f8964d93cb5770b67061c520e9bf41f07e2576e72263cd57624a9",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain.rs#L73-L115"
+  },
+  {
+    "label": "Structured ANALYZE actual BASE/budget/trace order",
+    "path": "crates/sparq-engine/src/explain_json.rs",
+    "start": 210,
+    "end": 236,
+    "blob_oid": "934cf0bbda1c5bda35a586fbb0b7cfda5fab0949",
+    "source_sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d",
+    "excerpt_sha256": "e7317153519e483246defe4f4917b824053d074fe0b2dff445132246c0b772a3",
+    "url": "https://github.com/sparq-org/sparq/blob/f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464/crates/sparq-engine/src/explain_json.rs#L210-L236"
+  }
+]

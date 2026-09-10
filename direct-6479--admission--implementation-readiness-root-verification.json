@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T19:58:15.687033+00:00",
+  "verified_files": 9,
+  "manifest_sha256": "d09d0a618ffdacf531e9ddabaf0ce6fbf67adcb3beddc25499c513b879df072a",
+  "decision": "Proceedwithconditionalnarrowimplementation; initiallocalownership/disjointnessandcurrentmain dependencyqualificationrequired beforeedit/build.",
+  "ordering": "Per-siteexactsetter-to-return scope; ANALYZEviewBASEbudgettrace; no universalBASEinnermost."
+}

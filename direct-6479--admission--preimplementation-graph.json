@@ -1,0 +1,4174 @@
+{
+  "data": {
+    "rateLimit": {
+      "remaining": 4988,
+      "resetAt": "2026-09-10T20:02:29Z"
+    },
+    "repository": {
+      "defaultBranchRef": {
+        "target": {
+          "oid": "202879e9b4104f4b5ae8d9e8e5206eb2ff454b7f"
+        }
+      },
+      "issue": {
+        "number": 6479,
+        "state": "OPEN",
+        "title": "Preserve outer BASE IRI after a nested public query",
+        "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nA separate source-confirmed query-context problem was found while reviewing #6478: a nested public query can overwrite the outer query's BASE IRI. This predates the QueryBudget restoration patch.\n\nAt main `d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5`, [`QUERY_BASE`, `set_query_base`, and `resolve_iri`](https://github.com/sparq-org/sparq/blob/d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5/crates/sparq-engine/src/exec.rs#L14715) use one thread-local `Option<Iri<String>>`. `set_query_base` assigns the new query's value directly, and `resolve_iri` later reads it for relative `IRI()`/`URI()` evaluation. There is no saved previous base or restoration on nested return. The public query entry points set this value before evaluation.\n\nA concrete proposed regression is an outer query with `BASE <https://outer.example/>` whose extension callback synchronously calls an inner query with `BASE <https://inner.example/>`, then evaluates `IRI(\"resource\")` in the outer query on the same thread. The outer result must resolve against `https://outer.example/`. Source analysis predicts it currently reads the inner base instead. An inner query with no BASE can instead clear the outer base. **This issue records source analysis; the targeted runtime witness has not yet been executed.**\n\nImplement a scoped save/restore boundary for the query base and migrate its entry points without changing query semantics. First calibrate the proposed public-callback witness against main, then cover successful nesting, nested errors/unwind, clearing via no BASE, and subsequent top-level evaluation. Use the existing protected review and CI process.\n\nKeep this separate from #6478. The existing `view_scope` guard already saves and restores its own state; this report does not claim it has the same defect. Other thread-local contexts and optional snapshot hardening remain outside this issue's confirmed scope.\n",
+        "assignees": {
+          "nodes": []
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "priority:P3"
+            },
+            {
+              "name": "role:impl"
+            },
+            {
+              "name": "status:ready"
+            },
+            {
+              "name": "self-improvement"
+            },
+            {
+              "name": "area:sparq-engine"
+            }
+          ]
+        }
+      },
+      "pullRequests": {
+        "totalCount": 166,
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wOC0zMVQxOToyNjoyM1rO-SElQA=="
+        },
+        "nodes": [
+          {
+            "number": 6487,
+            "title": "fix(bench): reject duplicate raw quads in UPDATE comparisons",
+            "headRefOid": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:sparq-bench"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-bench/src/update_fuzz.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6238,
+            "title": "ci: route implementation to Sol and review to Opus",
+            "headRefOid": "37e56831ca49c1215f2f24a2cebd216d7867c90e",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "backlog:stale"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "orchestration/routing.toml"
+                },
+                {
+                  "path": "scripts/dispatch-plan.py"
+                },
+                {
+                  "path": "scripts/route-resolve.py"
+                },
+                {
+                  "path": "scripts/tests/test_no_deprecated_models.py"
+                },
+                {
+                  "path": "scripts/triage.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6095,
+            "title": "ci(ci): triage-area: _DECL has no left word boundary \u2014 prose can impersonate a T0 author declaration",
+            "headRefOid": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/tests/test_triage_area.py"
+                },
+                {
+                  "path": "scripts/triage-area.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6470,
+            "title": "build(deps-dev): Bump js-yaml from 4.3.0 to 4.3.2",
+            "headRefOid": "5b28ad9737907b366d97a4c03abfe40c10a4d572",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "dependencies"
+                },
+                {
+                  "name": "javascript"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "package-lock.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5983,
+            "title": "perf(sparq-engine/sparq-serve): close most of the claim-queue throughput gap to Postgres SKIP LOCKED",
+            "headRefOid": "59bfc6c44b25a4e107d5d957ca3287ba0bc22c1a",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "backlog:stale"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 11,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/feature-matrix.d/sparq-serve.yml"
+                },
+                {
+                  "path": "crates/sparq-engine/src/exec.rs"
+                },
+                {
+                  "path": "crates/sparq-engine/src/txn.rs"
+                },
+                {
+                  "path": "crates/sparq-engine/tests/topk_orderby_indexed_differential.rs"
+                },
+                {
+                  "path": "crates/sparq-serve/Cargo.toml"
+                },
+                {
+                  "path": "crates/sparq-serve/README.md"
+                },
+                {
+                  "path": "crates/sparq-serve/src/applier.rs"
+                },
+                {
+                  "path": "crates/sparq-serve/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-serve/tests/prepared_applier.rs"
+                },
+                {
+                  "path": "scripts/tests/feature-matrix-legnames.golden.txt"
+                },
+                {
+                  "path": "skills/sparql-query/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6441,
+            "title": "fix(solid): preserve revocation when an ACP matcher becomes empty",
+            "headRefOid": "e5813c5c75095e38f63be81c1ed20bceec8e64a5",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:sparq-solid"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-solid/README.md"
+                },
+                {
+                  "path": "crates/sparq-solid/rules/acp-a.n3"
+                },
+                {
+                  "path": "crates/sparq-solid/tests/acp_empty_matcher.rs"
+                },
+                {
+                  "path": "crates/sparq-solid/tests/reference/acp.rs"
+                },
+                {
+                  "path": "skills/access-control/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6055,
+            "title": "ci: skip vectorized jobs on ordinary label changes",
+            "headRefOid": "50607e5f9d6b3fc68400918bfedf419330a91f73",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/vectorized-feature-off.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6049,
+            "title": "ci: validate merge groups at the combined head",
+            "headRefOid": "93ed3cf1d8137e2237ea2256d7f96e1768894c1e",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "trust-surface"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 8,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci-select.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "research/change-based-test-selection.md"
+                },
+                {
+                  "path": "research/ci-mergequeue-speedup-2026-07.md"
+                },
+                {
+                  "path": "scripts/batch-merge.py"
+                },
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6435,
+            "title": "perf(engine): avoid bind-join index allocation for sorted rows",
+            "headRefOid": "f90aeb799d8c00e7a3555df6aafa722947555d87",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:bench"
+                },
+                {
+                  "name": "area:sparq-engine"
+                },
+                {
+                  "name": "area:sparq-substrate"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "bench/feature-off-declarations/6435.json"
+                },
+                {
+                  "path": "crates/sparq-engine/src/exec.rs"
+                },
+                {
+                  "path": "crates/sparq-substrate/README.md"
+                },
+                {
+                  "path": "crates/sparq-substrate/src/join.rs"
+                },
+                {
+                  "path": "skills/substrate/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 4300,
+            "title": "perf(sparq-engine-exec): OPT-IN compiled scalar-expression programs for FILTER/BIND (f (sq-7d3dj.11)",
+            "headRefOid": "d0514971eaae6cc9662435ce9d73c475ea0771f8",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "needs:user"
+                },
+                {
+                  "name": "area:bench"
+                },
+                {
+                  "name": "area:sparq-engine"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 8,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/feature-matrix.d/sparq-engine.yml"
+                },
+                {
+                  "path": "bench/feature-off-declarations/4300.json"
+                },
+                {
+                  "path": "crates/sparq-engine/Cargo.toml"
+                },
+                {
+                  "path": "crates/sparq-engine/README.md"
+                },
+                {
+                  "path": "crates/sparq-engine/src/exec.rs"
+                },
+                {
+                  "path": "crates/sparq-engine/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-engine/tests/differentials.rs"
+                },
+                {
+                  "path": "crates/sparq-engine/tests/differentials/expr_program_differential.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6410,
+            "title": "ci(ci): ci_select: scripts/promote.py is missing from _ORCHESTRATION_SAFE while its two siblings are",
+            "headRefOid": "6bfb4e37ba7d263f0f8db4ce2a759e97ccc12508",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6318,
+            "title": "ci(ci): ci-close-merged-beads.py's JSONL re-serialisation does not round-trip `bd export` (escapes n",
+            "headRefOid": "12fe4ff35d527339557e90ec171ec600a108962d",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci-close-merged-beads.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6305,
+            "title": "ci(ci): ci-file-differential-failure.py: fence-escape the inline repro block (same markdown-injectio",
+            "headRefOid": "a0380f044106a620da61fb4a92cfce6872784a5d",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci-file-differential-failure.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6421,
+            "title": "ci(ci): ci-file-differential-failure.py / ci-file-metamorph-failure.py self-tests never run at PR ti",
+            "headRefOid": "7e27cb0c51178d922bc2d46555267b3b6f65fcad",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6413,
+            "title": "ci(ci): merge-group-watchdog.yml jobs are undeclared in the advisory registry and can RED the main-b",
+            "headRefOid": "873c329db40a4221c963d0251964e5d2abe60009",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/merge-group-watchdog.yml"
+                },
+                {
+                  "path": "scripts/tests/test_merge_group_watchdog.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6409,
+            "title": "ci(ci): the cone --divergence-log artifact is written every run, never uploaded, and is now empty by",
+            "headRefOid": "4cb4cdd6b2c75284039cba5c363875395f8f282f",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6388,
+            "title": "feat(sparq-lws-core): sparq-lws-core: wire per-resource WAC into notification subscribe/receive (the",
+            "headRefOid": "1f35b6b9fe3ae910e507654fefc5d318b91fccf5",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:sparq-lws-core"
+                },
+                {
+                  "name": "review:needs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-lws-core/src/app.rs"
+                },
+                {
+                  "path": "crates/sparq-lws-core/src/notifications/mod.rs"
+                },
+                {
+                  "path": "crates/sparq-lws-core/src/notifications/ws.rs"
+                },
+                {
+                  "path": "crates/sparq-lws-core/tests/notifications_http.rs"
+                },
+                {
+                  "path": "skills/solid-lws-server/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6405,
+            "title": "ci(ci): ci_selection_alarm: open_issue_exists `--paginate` flag is not pinned by a test",
+            "headRefOid": "d3b080c3541f12b3e604d624326d62c7c1ef1821",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_selection_alarm.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_selection_alarm.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6402,
+            "title": "feat(sparq-conformance): Named-graph (qt:graphData) entailment: per-graph materialization (sq-6qpyf)",
+            "headRefOid": "47f3b949adc9b04f661e97ab7060c3390e48a31e",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:sparq-conformance"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-conformance/src/inference/sparql_entail.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/named_graph_entailment_census.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6400,
+            "title": "ci(ci): 12 workflow step names are silently truncated by YAML plain-scalar comment parsing (` #NNNN`",
+            "headRefOid": "4d5de1f8aaf46278f691a326f7b8328ea69c857e",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": ".github/workflows/refresh-start-here.yml"
+                },
+                {
+                  "path": ".github/workflows/release-plz.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6397,
+            "title": "ci(ci): docs anti-drift \u00a75: BEGIN-INJECT generator must also delete the doc-duplication allowlist en",
+            "headRefOid": "985638f397903ec85482ec67c0dd698b343b38d2",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "area:sparq-vc"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "crates/sparq-vc/README.md"
+                },
+                {
+                  "path": "research/docs-site-single-sourcing-anti-drift.md"
+                },
+                {
+                  "path": "scripts/gen-doc-inject.py"
+                },
+                {
+                  "path": "skills/verifiable-credentials/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6416,
+            "title": "ci(ci): ci-summary: implement schedule-event scoping of the gate's sibling set (research/ci-gate-sch",
+            "headRefOid": "68e19a3da3f5aac343356edf79c814f878b5b2eb",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_summary_gate.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_summary_gate.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6379,
+            "title": "feat(sparq-solid): sparq-solid: incremental (counting-based) re-materialization \u2014 the auth-view rebu",
+            "headRefOid": "d5d5c1c441f648ed7fdb055281464b9b46af8424",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:sparq-solid"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-solid/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-solid/src/loader.rs"
+                },
+                {
+                  "path": "crates/sparq-solid/tests/skolem_stability.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6348,
+            "title": "ci(ci): promote-on-approval.yml: the per-issue reactions read is unpaginated (silently caps at one p",
+            "headRefOid": "587ec80bb88af81482dd0a27f93f349ebb589cb1",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/promote-on-approval.yml"
+                },
+                {
+                  "path": "scripts/promote.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6411,
+            "title": "ci(ci): The DECLARATIVE half of #5799 is still uncovered: no checker exists for step-level `continue",
+            "headRefOid": "71e32398dc0724aca8db995b6554a712b42e126a",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/run-swallow-waivers.json"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/check-workflow-run-swallow.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6412,
+            "title": "ci(ci): ci-select: consider rescuing scripts/tests/test_flow_on.py too, else the #6060 flow-on carve",
+            "headRefOid": "7da6f6ef16b73659c25e7f8a28e6f55e6c36a1c8",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6147,
+            "title": "ci(ci): bd-to-issues.py: fetch_bd_map silently collapses a duplicate bd-id on the TRUSTED resume pat",
+            "headRefOid": "2e3f649ff4070b24f6709f78383f20ae1af0cb25",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/bd-to-issues.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6135,
+            "title": "ci(ci): extend the sq-3sbrr save-if discipline to the non-merge_group rust-cache lanes",
+            "headRefOid": "f66bc8213e06d8679a0452269500ef514710276b",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 7,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/bench.yml"
+                },
+                {
+                  "path": ".github/workflows/formal-verification.yml"
+                },
+                {
+                  "path": ".github/workflows/fuzz.yml"
+                },
+                {
+                  "path": ".github/workflows/python.yml"
+                },
+                {
+                  "path": ".github/workflows/xpath-differential.yml"
+                },
+                {
+                  "path": ".github/workflows/zk-toolchain.yml"
+                },
+                {
+                  "path": "scripts/tests/test_mergequeue_cache_posture.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6130,
+            "title": "docs(ci): ready-issues.py carries the retracted pre-bugfix collision table (ci 5% / docs 3%) \u2014 the r",
+            "headRefOid": "a8ad49f3f746458a2754f1daefedf5c239818492",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ready-issues.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6120,
+            "title": "ci(ci): bench/coverage-presence.json is missing 25 crates, including sparq-lws-wasm",
+            "headRefOid": "bf2d5556bf0722374bbd664b7d6d640bb4e02a87",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:bench"
+                },
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "bench/coverage-presence.json"
+                },
+                {
+                  "path": "scripts/coverage-presence.py"
+                },
+                {
+                  "path": "scripts/tests/test_coverage_presence.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6112,
+            "title": "ci(ci): sparq-lws-core has no line-% coverage floor; seeding one needs a measured run + a congestion",
+            "headRefOid": "153c7d76a7a611590feae227c8ffa8ae3941ca44",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:bench"
+                },
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "bench/coverage-floor.json"
+                },
+                {
+                  "path": "bench/coverage-presence.json"
+                },
+                {
+                  "path": "scripts/coverage.sh"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6422,
+            "title": "docs(sparq-conformance): el_suite: refresh the New-Feature-SelfRestriction-002 divergence rationale",
+            "headRefOid": "98afb763e8a4cf6f4b1c068fec0f020f53e91e77",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:sparq-conformance"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-conformance/tests/el_suite.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6420,
+            "title": "ci(ci): scripts/bench-triage.py --self-test is wired into NO CI lane",
+            "headRefOid": "b94c1972af49544ddba1e25d27007f0f3fe9ade0",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6391,
+            "title": "ci(ci): Unquoted `#NNNN` in docs-quality.yml step names is parsed as a YAML comment and truncates th",
+            "headRefOid": "514dc6485c69ba00dcb2e381bd7d835b01dff7b9",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": ".github/workflows/refresh-start-here.yml"
+                },
+                {
+                  "path": ".github/workflows/release-plz.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                },
+                {
+                  "path": "scripts/check-workflow-name-truncation.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6385,
+            "title": "ci(ci): bench/coverage-floor.json is missing 28 crates \u2014 the line-% ratchet has the same drift #5140",
+            "headRefOid": "c78d9e02f04d130c8033ecf4b47859e81ed91c7e",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:bench"
+                },
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "bench/coverage-floor.json"
+                },
+                {
+                  "path": "scripts/coverage-gate.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6384,
+            "title": "ci(ci): Verify `workflow_run` delivery for merge_group sibling runs (sq-lfmvd stage-1 item, design \u00a7",
+            "headRefOid": "4d9db8d52e3d9b60ec15d7b7c378d10297d34c08",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "research/ci-gate-slotless-aggregation.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6162,
+            "title": "ci(ci): The registry review-lane head-ref regex is replicated in 4 in-repo copies with no cross-chec",
+            "headRefOid": "7d31b9999aa333a5e0779bda9bcd2c46686d7b0f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/tests/test_head_ref_regex_singleton.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6419,
+            "title": "ci(ci): Adopt actionlint in CI (the #5654 guard covers only one of its rules)",
+            "headRefOid": "cfa25d28dbd9150cdaf1481d80129a7f169fcc9f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/actionlint.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6108,
+            "title": "docs(ci): CI-infra: event-driven ci-summary evaluation (no resident waiter) \u2014 required-ch (sq-lfmvd)",
+            "headRefOid": "ed1a303d8f8176e9db5e0cdb623a062e706390a4",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 8,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/ci-gate-status.yml"
+                },
+                {
+                  "path": ".github/workflows/ci-summary.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "research/ci-gate-slotless-aggregation.md"
+                },
+                {
+                  "path": "scripts/ci_summary_gate.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_summary_gate.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6148,
+            "title": "docs(docs): Backfill: existing published crates have no website page and no guide chapter",
+            "headRefOid": "4c06331ecfb80a405b9d547f8c72399e72e764ce",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:site"
+                },
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "area:release"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "book/src/SUMMARY.md"
+                },
+                {
+                  "path": "book/src/getting-started/rust-crates.md"
+                },
+                {
+                  "path": "docs/release.md"
+                },
+                {
+                  "path": "scripts/tests/test_published_crate_catalogue.py"
+                },
+                {
+                  "path": "site/src/data/surfaces.ts"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6100,
+            "title": "ci(ci): feature-matrix guard blind spot: a cargo feature with ZERO legs is never classified (sparq-s",
+            "headRefOid": "e570befb3413db8dca360a53af13062a74fe22f4",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/feature-matrix.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "research/feature-matrix-pyramid.md"
+                },
+                {
+                  "path": "scripts/feature-matrix-tiers.py"
+                },
+                {
+                  "path": "scripts/tests/test_feature_matrix_tiers.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6366,
+            "title": "feat(sparq-solid): MPC seam Phase 7 (needs-user): B7 WAC/ACP-aware source-skipping authori (sq-lzvl)",
+            "headRefOid": "eca1e085678751198a32dbd16ef7d78d8b745e86",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "area:sparq-solid"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 7,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "crates/sparq-solid/Cargo.toml"
+                },
+                {
+                  "path": "crates/sparq-solid/README.md"
+                },
+                {
+                  "path": "crates/sparq-solid/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-solid/src/source_auth.rs"
+                },
+                {
+                  "path": "research/feature-research-federation.md"
+                },
+                {
+                  "path": "research/mpc-untrusted-planner-routing-design.md"
+                },
+                {
+                  "path": "skills/access-control/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6086,
+            "title": "docs(ci): Durable bead persistence: bead CREATEs accumulate only in the work-box DB + unco (sq-2xdg)",
+            "headRefOid": "5f3933ab2517244dab5b1ba45b4cacb5570e4232",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/beads-sync.yml"
+                },
+                {
+                  "path": ".github/workflows/routing-self-tests.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/beads-export-sync.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6376,
+            "title": "ci(ci): gate: G1 does not check that a new npm package's tests are actually invoked by a CI leg",
+            "headRefOid": "d8ba0589a7ad51c1072b41359a917b932f9f957d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/flow-on-gates.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/gate-new-crate.py"
+                },
+                {
+                  "path": "scripts/tests/test_gates.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6374,
+            "title": "ci(ci): flow-on: the documented `<!-- flow-on-exempt: reason -->` escape hatch is not implemented",
+            "headRefOid": "f7e8899458d8f7f9f7628bd450227190902371f4",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "research/maintenance-flow-on-automation-design.md"
+                },
+                {
+                  "path": "scripts/flow-on.py"
+                },
+                {
+                  "path": "scripts/gate-new-crate.py"
+                },
+                {
+                  "path": "scripts/tests/test_flow_on.py"
+                },
+                {
+                  "path": "scripts/tests/test_gates.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6166,
+            "title": "ci(ci): sq-6vshe.15 item 3: run the sccache (GHA backend) A/B on ci.yml build-archive \u2014 measure-firs",
+            "headRefOid": "720a6e06297fca1037774dd0a5dcd05f568e9c2b",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 7,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/sccache-ab.yml"
+                },
+                {
+                  "path": "research/ci-mergequeue-speedup-2026-07.md"
+                },
+                {
+                  "path": "scripts/sccache-ab-namespace.sh"
+                },
+                {
+                  "path": "scripts/sccache_ab_verdict.py"
+                },
+                {
+                  "path": "scripts/tests/test_sccache_ab_harness.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6157,
+            "title": "ci(ci): No gate covers the STEP-level YAML seam \u2014 deleting a test step or adding `continue-on-error:",
+            "headRefOid": "9fde46ff2cf173993e6ab9fcd84b0a97ec621832",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/step-seam-registry.json"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/check-step-seams.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6414,
+            "title": "ci(ci): the nextest-archive opt-in feature set is duplicated in heavy-set-alarm.yml with nothing ass",
+            "headRefOid": "209a980806aff29d838d85315661ad708071e65f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/heavy-set-alarm.yml"
+                },
+                {
+                  "path": "scripts/ec2-buildfarm.sh"
+                },
+                {
+                  "path": "scripts/tests/test_archive_feature_parity.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6152,
+            "title": "ci(ci): #3005's \"CodeQL-rust ~20-40min\" sizing is stale \u2014 re-measure the real merge_group wall-clock",
+            "headRefOid": "9287a24f255104d80d44805839c95b38b44ad099",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "research/ci-mergequeue-speedup-2026-07.md"
+                },
+                {
+                  "path": "scripts/ci_mergegroup_poles.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_mergegroup_poles.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6142,
+            "title": "docs(ci): make sure appropriate follow on actions are being created automatically",
+            "headRefOid": "fd53cba36e669dc9442668f1f8cbb0ff64cf0f8f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/flow-on.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/flow-on-rules.toml"
+                },
+                {
+                  "path": "scripts/flow-on.py"
+                },
+                {
+                  "path": "scripts/gate-new-crate.py"
+                },
+                {
+                  "path": "scripts/tests/test_flow_on.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6131,
+            "title": "ci(ci): docs anti-drift: add scripts/check-doc-duplication.py + wire it into docs-quality.yml",
+            "headRefOid": "c6b485247942a0e2e78ac2fb8e51d302da755ecb",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/check-doc-duplication.py"
+                },
+                {
+                  "path": "scripts/doc-duplication-allowlist.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6126,
+            "title": "ci(ci): routing-self-tests: a new root-level file can merge without running the totality gate that i",
+            "headRefOid": "bce2cc7f2a1522d687012ccf783d208aaec800ac",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "ci/area-labels.toml"
+                },
+                {
+                  "path": "scripts/pr-area-labels.py"
+                },
+                {
+                  "path": "scripts/tests/test_pr_area_labels.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6185,
+            "title": "docs(sparq-mpc): Phase 6: sparq-mpc method secprop annotations (HonestMajority / SemiHone (sq-dz10l)",
+            "headRefOid": "a1b7c4f5abf9c4024e0ec227b33289b50071d400",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:deps"
+                },
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:sparq-mpc"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/feature-matrix.d/sparq-mpc.yml"
+                },
+                {
+                  "path": "Cargo.lock"
+                },
+                {
+                  "path": "crates/sparq-mpc/Cargo.toml"
+                },
+                {
+                  "path": "crates/sparq-mpc/README.md"
+                },
+                {
+                  "path": "crates/sparq-mpc/ontologies/secprop-methods.ttl"
+                },
+                {
+                  "path": "crates/sparq-mpc/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-mpc/src/secprop.rs"
+                },
+                {
+                  "path": "crates/sparq-mpc/tests/secprop_annotations.rs"
+                },
+                {
+                  "path": "scripts/tests/feature-matrix-legnames.golden.txt"
+                },
+                {
+                  "path": "skills/mpc/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6220,
+            "title": "ci(ci): ~14 ci.yml conformance/oracle jobs each keep a SEPARATE rust-cache dep entry (no shared-key)",
+            "headRefOid": "263c9efee6495f7d7210e90e1e070e665c9fc475",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "scripts/tests/test_mergequeue_cache_posture.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6195,
+            "title": "ci(ci): verify `coverage-engine-merge`'s `key: coverage-engine-run-1` actually restores the run part",
+            "headRefOid": "6de9df866e2809ee3bbf6fa579b5b5e213005ba9",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "scripts/tests/test_mergequeue_cache_posture.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6174,
+            "title": "ci(ci): flow-on: new-package follow-ons cover Rust crates only, not the JS/Python packages",
+            "headRefOid": "437da37a41456033bde51bdc3d7ce8b37e08882c",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/flow-on-gates.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/flow-on-rules.toml"
+                },
+                {
+                  "path": "scripts/flow-on.py"
+                },
+                {
+                  "path": "scripts/tests/test_flow_on.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6177,
+            "title": "ci(ci): 11 workflow step names are silently truncated by an unquoted YAML trailing comment",
+            "headRefOid": "c6c95e2fb3b243fb07b37984d6b40a6e4b96737f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 7,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": ".github/workflows/refresh-start-here.yml"
+                },
+                {
+                  "path": ".github/workflows/release-plz.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/check-workflow-step-names.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6169,
+            "title": "ci(ci): ci.yml: coverage-engine-merge's `key: coverage-engine-run-1` does not actually reuse the run",
+            "headRefOid": "dafbc796f435b1af93df38a443fac3aad5678b55",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/tests/test_mergequeue_cache_posture.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6418,
+            "title": "ci(ci): docs-quality: MD018 false-positive class \u2014 a wrapped `#<issue>` reference at column 0 reds m",
+            "headRefOid": "48c09f30d6637a0c27309272f4fe1a410b1b2fab",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/bench/README.md"
+                },
+                {
+                  "path": "scripts/preflight.py"
+                },
+                {
+                  "path": "scripts/tests/test_preflight.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6417,
+            "title": "ci(ci): advisory-registry: sweep the four schedule-only alarm entries once gate schedule-scoping has",
+            "headRefOid": "3f344a4354fe531b6cdc28c6c32fd79cd8844307",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 7,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/ci-latency-alarm.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/formal-alarm.yml"
+                },
+                {
+                  "path": ".github/workflows/heavy-set-alarm.yml"
+                },
+                {
+                  "path": ".github/workflows/review-alarm.yml"
+                },
+                {
+                  "path": "scripts/tests/test_alarm_lanes_non_gating.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6077,
+            "title": "docs(ci): be more intelligent with skipping tests in PRs",
+            "headRefOid": "e9d35fc96af2869d08b29cab7941f1c62e2691b5",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/codeql.yml"
+                },
+                {
+                  "path": ".github/workflows/feature-matrix.yml"
+                },
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6244,
+            "title": "ci(ci): ci-select: 42 non-Rust workflow files still force the FULL Rust matrix via the `.github/` tr",
+            "headRefOid": "746214bd02c5b526ea1c12d853414c3fcf15813f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5907,
+            "title": "ci(ci): flip the fmt+clippy gate from informational to hard (sq-0lk)",
+            "headRefOid": "511ed029d44cbd12fc7a00b6676363275c55044d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 783,
+              "pageInfo": {
+                "hasNextPage": true
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "bench/dict/README.md"
+                },
+                {
+                  "path": "bench/feature-off-declarations/5907.json"
+                },
+                {
+                  "path": "compliance/openssf/evidence.md"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/consortium.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/financial.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/oracle.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/personal.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/project_mgmt.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/src/workload.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/consortium.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/determinism.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/financial.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/personal.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/project_mgmt.rs"
+                },
+                {
+                  "path": "crates/sparq-acbench/tests/workloads.rs"
+                },
+                {
+                  "path": "crates/sparq-algos/examples/graphalytics.rs"
+                },
+                {
+                  "path": "crates/sparq-algos/tests/topology_oracles.rs"
+                },
+                {
+                  "path": "crates/sparq-arrow/src/csv.rs"
+                },
+                {
+                  "path": "crates/sparq-bench/src/dataset.rs"
+                },
+                {
+                  "path": "crates/sparq-bench/src/fuzz.rs"
+                },
+                {
+                  "path": "crates/sparq-bench/src/main.rs"
+                },
+                {
+                  "path": "crates/sparq-bench/src/neutral.rs"
+                },
+                {
+                  "path": "crates/sparq-bench/src/update_fuzz.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/examples/canon_bench.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/src/concept.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/src/rdf12.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/tests/concept_urn.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/tests/fuzz_seed_dedup.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/tests/proptest_canon_determinism.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/tests/rdf12_nquads_token_tracking.rs"
+                },
+                {
+                  "path": "crates/sparq-canon/tests/rdf12_triple_term_canon.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/src/main.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/src/tabular.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/cli_contract.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/datalog_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/dump_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/el_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/emit_format_v2.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/hdt_write_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/store_profile.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/tabular_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-cli/tests/terse_cli.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance-floors/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/bin/inference.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/bin/scoreboard.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/bin/served-conformance-report.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/compare.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/differential.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/http_protocol.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/dl_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/entail.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/n3_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/owl_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/rdfmt.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/report.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/inference/sparql_entail.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/line_syntax.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/main.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/manifest.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/quadset.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/rdf.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/results.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/run.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/scoreboard.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/sd_gsp.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/service_eval.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/src/turtle_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/d_entail_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/dl_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/el_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/inference_smoke.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite/common.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite/compact.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite/expand.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite/frame.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/jsonld_suite/from_rdf.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/native_ttl_ratchet.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/parser_differential.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/ql_entailment_floor.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/ql_experimental_arm.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/rdf_line_syntax_ratchet.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/rif_core_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/rif_wg_core_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/scoreboard_floors.rs"
+                },
+                {
+                  "path": "crates/sparq-conformance/tests/service_eval_suite.rs"
+                },
+                {
+                  "path": "crates/sparq-core/examples/bench_id_width.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/compress.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/dict.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/dictspill.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/eliasfano.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/extsort.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/iri.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/lib.rs"
+                },
+                {
+                  "path": "crates/sparq-core/src/nt.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 3437,
+            "title": "ci(sparq-vectors): sparq-vectors: headless wasm-pack smoke test (run open_from_bytes + ne (sq-139hh)",
+            "headRefOid": "e2095992a4fd9661def3fa3429ca71c7722bd381",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:sparq-vectors"
+                },
+                {
+                  "name": "area:deps"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "Cargo.lock"
+                },
+                {
+                  "path": "crates/sparq-vectors/Cargo.toml"
+                },
+                {
+                  "path": "crates/sparq-vectors/tests/wasm.rs"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5794,
+            "title": "ci(ci): Decide the durable CodeQL posture: re-enable as advisory, or record why it stays disabled",
+            "headRefOid": "6eaa1fe45dd2bb91a31fb1820fc4130b86ca8d87",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "compliance/openssf/best-practices-self-cert.json"
+                },
+                {
+                  "path": "compliance/openssf/evidence.md"
+                },
+                {
+                  "path": "compliance/openssf/gap-register.md"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "docs/decisions/README.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6028,
+            "title": "docs(ci): design a safe slotless ci-summary gate (sq-6vshe.19)",
+            "headRefOid": "e93a2c159540569521cda8b5c9730acdb9de89e1",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "research/ci-gate-slotless-aggregation.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6325,
+            "title": "ci(ci): Six dedupe call sites use `gh issue list --search`, the mechanism two siblings document as u",
+            "headRefOid": "283f08a69a7c20d400f4e9cc245cfb31099ebf15",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 8,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/bench-triage.py"
+                },
+                {
+                  "path": "scripts/ci-file-demoted-lane-failure.py"
+                },
+                {
+                  "path": "scripts/ci-file-differential-failure.py"
+                },
+                {
+                  "path": "scripts/ci-file-metamorph-failure.py"
+                },
+                {
+                  "path": "scripts/coverage-gate.py"
+                },
+                {
+                  "path": "scripts/gh_dedupe.py"
+                },
+                {
+                  "path": "scripts/tests/test_gh_dedupe.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 3431,
+            "title": "fix(sparq-vectors): big-endian .spqv swap-on-read (sq-i7w)",
+            "headRefOid": "0a835b9d8a9acaa86709eee54221cba88de859b4",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "needs:user"
+                },
+                {
+                  "name": "area:sparq-vectors"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "CHANGELOG.md"
+                },
+                {
+                  "path": "compliance/memsafety/unsafe-register.md"
+                },
+                {
+                  "path": "crates/sparq-vectors/README.md"
+                },
+                {
+                  "path": "crates/sparq-vectors/src/store.rs"
+                },
+                {
+                  "path": "skills/SKILL.md"
+                },
+                {
+                  "path": "skills/vector-search/SKILL.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 4368,
+            "title": "fix(ci): liveness alarm for cron-only lanes + correct the stale org in the EC2 OIDC design record (#4328)",
+            "headRefOid": "f5383f872308cfb0a0b20c4a56b4ed809eda6eba",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "backlog:stale"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 8,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/cron-liveness.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/formal-alarm.yml"
+                },
+                {
+                  "path": ".github/workflows/review-alarm.yml"
+                },
+                {
+                  "path": "research/ci-ec2-design.md"
+                },
+                {
+                  "path": "scripts/cron_lane_liveness.py"
+                },
+                {
+                  "path": "scripts/tests/test_cron_lane_liveness.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5911,
+            "title": "build(deps): Bump undici",
+            "headRefOid": "c77934be910e71907076112766d580ef9eed1e45",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "dependencies"
+                },
+                {
+                  "name": "javascript"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "package-lock.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5910,
+            "title": "build(deps): Bump ip-address from 10.2.0 to 10.4.0",
+            "headRefOid": "d4155f9cd83f9f21753933aa56e15814046f6012",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "dependencies"
+                },
+                {
+                  "name": "javascript"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "package-lock.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6321,
+            "title": "ci(ci): sq-2xdg residual half: box-side `bd export` push \u2014 beads never migrated to a GitHub issue ca",
+            "headRefOid": "0964bb26478eb8bc80a74408c3a02d7ac868a0e5",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/beads-export-push.sh"
+                },
+                {
+                  "path": "scripts/tests/test_beads_export_push.sh"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6064,
+            "title": "chore: release v0.1.0",
+            "headRefOid": "ce36fb3a8052ae11e1381049068ad11dd4bb0e0e",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".beads/interactions.jsonl"
+                },
+                {
+                  "path": "crates/sparq-arrow/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-fedplan/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-forms/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-mcp/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-reason-el/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-reason-ql/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-shaclc/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-substrate/CHANGELOG.md"
+                },
+                {
+                  "path": "crates/sparq-wrapper/CHANGELOG.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6278,
+            "title": "docs(ci): Labeller marks PRs review:unreviewed that the (cross-repo) review lane structurally cannot",
+            "headRefOid": "7204436dd44572fe839cadb9510f1f5e13e5537d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/review-alarm.yml"
+                },
+                {
+                  "path": ".github/workflows/verdict-bridge.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "docs/release.md"
+                },
+                {
+                  "path": "scripts/review_lane_alarm.py"
+                },
+                {
+                  "path": "scripts/review_lane_reach.py"
+                },
+                {
+                  "path": "scripts/tests/test_review_lane_alarm.py"
+                },
+                {
+                  "path": "scripts/tests/test_verdict_bridge.py"
+                },
+                {
+                  "path": "scripts/verdict-bridge.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6289,
+            "title": "ci(ci): make HEADGREEN safe with full combined-head validation",
+            "headRefOid": "669321c4a0f11865551782c3a39f482ed1c79460",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 6,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci-select.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "research/change-based-test-selection.md"
+                },
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6268,
+            "title": "ci(ci): cancel workflow runs for obsolete merge-group refs",
+            "headRefOid": "72312ac4f477a29dd461362caec0c710f25d191b",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/merge-group-watchdog.yml"
+                },
+                {
+                  "path": "scripts/merge-group-watchdog.py"
+                },
+                {
+                  "path": "scripts/tests/test_merge_group_watchdog.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6296,
+            "title": "ci(ci): gate: no proactive merge gate (a G1 analogue) exists for new npm packages",
+            "headRefOid": "c88a619edb446424b4a0b13f4075a606cd25441d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/flow-on-gates.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/gate-new-crate.py"
+                },
+                {
+                  "path": "scripts/preflight.py"
+                },
+                {
+                  "path": "scripts/tests/test_gates.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6291,
+            "title": "ci(ci): Decide whether a `schedule`-triggered workflow's check-runs belong in the push gate's siblin",
+            "headRefOid": "0b1233e483b332623d35b6ad0efe13e04d1b404a",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "research/ci-gate-schedule-event-scoping.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6283,
+            "title": "ci(ci): Audit other generated-golden companions for the same one-file-scope trap as #2384",
+            "headRefOid": "ff7f5d0a91c9c8887b4d98cc8a7d64db20d6b6cc",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/fast-fix-ring.yml"
+                },
+                {
+                  "path": "scripts/check-fast-fix-ring-guard.py"
+                },
+                {
+                  "path": "scripts/tests/fast-fix-ring.golden.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6272,
+            "title": "ci(ci): x86_64 lanes arm the AVX2 guard via `CI` only \u2014 consider an explicit runner-capability prefl",
+            "headRefOid": "896f1591719c6261796a3a0d59e02a9dca362a4d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6249,
+            "title": "ci(ci): Contributor-facing wasm-pack install hints are unversioned, so a local build can use a diffe",
+            "headRefOid": "bbf572f65057701f6abb0e23ee857d5bab252948",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 5,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "js/README.md"
+                },
+                {
+                  "path": "js/guardrails/prepare-build.mjs"
+                },
+                {
+                  "path": "packages/eyereasoner-compat/guardrails/prepare-build.mjs"
+                },
+                {
+                  "path": "scripts/tests/test_js_wasm_pack_install.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6215,
+            "title": "ci(ci): 16 CI lanes still source-compile wasm-pack via `cargo install` instead of the SHA-pinned pre",
+            "headRefOid": "f4fcd650e3e8daaba8048193cf798942431b7d3d",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 9,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": ".github/workflows/nightly-full-sweep.yml"
+                },
+                {
+                  "path": ".github/workflows/pages.yml"
+                },
+                {
+                  "path": ".github/workflows/publish.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                },
+                {
+                  "path": ".github/workflows/site-e2e-hero.yml"
+                },
+                {
+                  "path": ".github/workflows/site-visual.yml"
+                },
+                {
+                  "path": "scripts/tests/test_js_wasm_pack_install.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6263,
+            "title": "ci(ci): 84% of check-runs are 'skipped' no-ops (538/639 on one PR) \u2014 they cost the registry dispatch",
+            "headRefOid": "52bfea68cc225bf3fd4816cbf10f25162932a235",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:changes"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/bench.yml"
+                },
+                {
+                  "path": ".github/workflows/ci-select.yml"
+                },
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/feature-matrix.yml"
+                },
+                {
+                  "path": ".github/workflows/fuzz.yml"
+                },
+                {
+                  "path": ".github/workflows/vectorized-feature-off.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select_wiring.py"
+                },
+                {
+                  "path": "scripts/tests/test_label_trigger_economy.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6265,
+            "title": "build(deps): Bump fast-uri",
+            "headRefOid": "d737a4d3955b397d2cc86eec8a8e7d5966b9b951",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "dependencies"
+                },
+                {
+                  "name": "javascript"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "package-lock.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6266,
+            "title": "build(deps-dev): Bump fastify from 5.10.0 to 5.12.1",
+            "headRefOid": "d936c1f4d0753ebac8903ddc4d33450922d9dba0",
+            "isDraft": false,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:js"
+                },
+                {
+                  "name": "dependencies"
+                },
+                {
+                  "name": "javascript"
+                },
+                {
+                  "name": "review:unreviewed"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "package-lock.json"
+                },
+                {
+                  "path": "packages/solid-server/package.json"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6255,
+            "title": "feat(gui): GUI: Import drawer \u2014 real disk/URL/paste ingest into the active workspace vi (sq-ixc3.13)",
+            "headRefOid": "c47af9d60bfaf7634adf909cb879875b641e630c",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "gui/app/package.json"
+                },
+                {
+                  "path": "gui/app/src/components/workbench/import-drawer.tsx"
+                },
+                {
+                  "path": "gui/app/src/components/workbench/left-rail.tsx"
+                },
+                {
+                  "path": "gui/app/src/components/workbench/status-bar.tsx"
+                },
+                {
+                  "path": "gui/app/src/lib/import-url.test.ts"
+                },
+                {
+                  "path": "gui/app/src/lib/import-url.ts"
+                },
+                {
+                  "path": "gui/app/src/lib/utils.ts"
+                },
+                {
+                  "path": "gui/app/src/lib/workspace-context.tsx"
+                },
+                {
+                  "path": "gui/app/src/lib/workspace-sources.test.ts"
+                },
+                {
+                  "path": "gui/app/src/lib/workspace-sources.ts"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6225,
+            "title": "ci(ci): Step-level failure swallow via `|| true` / `set +e` inside a `run:` body is still undetected",
+            "headRefOid": "5955b5f9ff4df8715bf1a3197a922bfdb4f635b1",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/run-swallow-waivers.json"
+                },
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/check-workflow-run-swallow.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6239,
+            "title": "ci(ci): ci-select: orchestration-only scripts/flow-on.py fires the FULL Rust CI matrix on every reac",
+            "headRefOid": "e6bcd7e55213c9a67fc8b370bf168f6506b98733",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "area:ci"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ci_select.py"
+                },
+                {
+                  "path": "scripts/tests/test_ci_select.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 6212,
+            "title": "ci(ci): CI fold candidate: site-e2e-foundation.yml `determinism-gate` is a whole runner claim for on",
+            "headRefOid": "becae577110b2e2ec2534e632becd38127a42f7f",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/site-e2e-foundation.yml"
+                },
+                {
+                  "path": "research/ci-runner-consolidation-2026-07.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5885,
+            "title": "ci(ci): Native issue-dependency graph now exists (175 edges) but ready-issues.py still reads body ma",
+            "headRefOid": "ebadd8a415ec1cf2fa9f9d32ab650bf2ee69aedf",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/ready-issues.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5827,
+            "title": "ci(ci): CI fold candidate: gui.yml `gui-hermetic-guards` is a whole runner claim for two greps",
+            "headRefOid": "f7502a746d09fab114459672bd284178c3ea45c2",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/E2E-GATING-POLICY.md"
+                },
+                {
+                  "path": ".github/advisory-registry.json"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": "scripts/tests/test_ci_summary_gate.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5904,
+            "title": "feat(ci): beads-infra: .beads/issues.jsonl git export is STALE/incomplete vs the live bd (sq-0b0sh)",
+            "headRefOid": "1747c9090f2b734cc029d8dee61adaee4076f7c7",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "scripts/drift-scan.py"
+                },
+                {
+                  "path": "scripts/tests/test_drift_scan.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5875,
+            "title": "ci(ci): Consolidate the wasm-pack install-posture tests once #5304 lands",
+            "headRefOid": "47019fad0f9016dbc94dbd82d2f210fc660772a2",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                },
+                {
+                  "path": "scripts/tests/test_js_wasm_pack_install.py"
+                },
+                {
+                  "path": "scripts/tests/test_wasm_pack_install.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5877,
+            "title": "ci(ci): wasm-pack version is unpinned in 16 lanes and diverges between js.yml (v0.15.0) and ci.yml (",
+            "headRefOid": "f3b3df25aaa3e804a6dbf6c07d9eff0792285682",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/ci.yml"
+                },
+                {
+                  "path": "scripts/tests/test_js_wasm_pack_install.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5770,
+            "title": "ci(ci): Extend the wasm-pack prebuilt-binary install (sq-khm3f) to the remaining lanes",
+            "headRefOid": "1ee46b27643fb103af20f886b6619446b6be18a2",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 10,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": ".github/workflows/gui.yml"
+                },
+                {
+                  "path": ".github/workflows/nightly-full-sweep.yml"
+                },
+                {
+                  "path": ".github/workflows/pages.yml"
+                },
+                {
+                  "path": ".github/workflows/publish.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml"
+                },
+                {
+                  "path": ".github/workflows/site-e2e-hero.yml"
+                },
+                {
+                  "path": ".github/workflows/site-visual.yml"
+                },
+                {
+                  "path": "scripts/tests/test_js_wasm_pack_install.py"
+                },
+                {
+                  "path": "scripts/tests/test_wasm_pack_install.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5819,
+            "title": "ci(ci): scripts/tests/test_preflight.py::TheYamlSeamIsGating cannot run without PyYAML and errors ra",
+            "headRefOid": "11da5e941f923b923570995de6d95dfee4fdb14c",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 1,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/tests/test_preflight.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5733,
+            "title": "docs(ci): merge_group selection-soundness memo \u2014 codify the fmx4u \u00a77 P8 union-diff arg (sq-6vshe.18)",
+            "headRefOid": "7a4fbe7842eaf5c77886ca608bcabd907a6269ff",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:docs"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 2,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "research/change-based-test-selection.md"
+                },
+                {
+                  "path": "research/ci-mergequeue-speedup-2026-07.md"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5728,
+            "title": "ci(ci): flow-on: a PR that adds TWO crates only mints follow-ons for the first",
+            "headRefOid": "a575bfb6c297a8e97e6331b9590c053e32c59c04",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "review:needs"
+                },
+                {
+                  "name": "review:needs-user"
+                },
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "trust-surface"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": "scripts/flow-on-rules.toml"
+                },
+                {
+                  "path": "scripts/flow-on.py"
+                },
+                {
+                  "path": "scripts/gate-new-crate.py"
+                },
+                {
+                  "path": "scripts/tests/test_flow_on.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5647,
+            "title": "ci(ci): steer(ruleset): raise merge_queue max_entries_to_build 3 -> 5 once sq-6vshe.14 (push-skip) l",
+            "headRefOid": "35c40c698624ecad7d4f673da459613935c7060e",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 3,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/docs-quality.yml"
+                },
+                {
+                  "path": "docs/branch-protection.md"
+                },
+                {
+                  "path": "scripts/tests/test_mergequeue_throughput_posture.py"
+                }
+              ]
+            }
+          },
+          {
+            "number": 5397,
+            "title": "ci(ci): An infra-flavoured merge-queue dequeue (CI_TIMEOUT) routes to review:changes \u2014 an exit the a",
+            "headRefOid": "07cd27f14c997fc5462e7faa1ca24e09ffcb5810",
+            "isDraft": true,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "area:ci"
+                },
+                {
+                  "name": "area:docs"
+                },
+                {
+                  "name": "review:parked"
+                }
+              ]
+            },
+            "files": {
+              "totalCount": 4,
+              "pageInfo": {
+                "hasNextPage": false
+              },
+              "nodes": [
+                {
+                  "path": ".github/workflows/merge-queue-feedback.yml"
+                },
+                {
+                  "path": "AGENTS.md"
+                },
+                {
+                  "path": "scripts/merge-group-watchdog.py"
+                },
+                {
+                  "path": "scripts/tests/test_merge_group_watchdog.py"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

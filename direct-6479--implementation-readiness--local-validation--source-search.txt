@@ -1,0 +1,15 @@
+crates/sparq-engine/src/cache.rs:369:        exec::set_query_base(query.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/exec.rs:15026:    static QUERY_BASE: std::cell::RefCell<Option<oxiri::Iri<String>>> = const { std::cell::RefCell::new(None) };
+crates/sparq-engine/src/exec.rs:15031:pub(crate) fn set_query_base(base: Option<&str>) {
+crates/sparq-engine/src/exec.rs:15032:    QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+crates/sparq-engine/src/exec.rs:15041:    QUERY_BASE.with(|b| {
+crates/sparq-engine/src/explain.rs:53:    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/explain.rs:81:    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/explain_json.rs:196:    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/explain_json.rs:215:    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1042:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1080:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1117:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1143:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1199:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+crates/sparq-engine/src/lib.rs:1238:        exec::set_query_base(q.base_iri().map(|b| b.as_str()));

@@ -1,0 +1,18 @@
+{
+  "source_commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "repo": "https://github.com/sparq-org/sparq",
+  "independently_extracted": true,
+  "excerpts": 29,
+  "exact_byte_origin_map": "origin-map.json",
+  "excluded": [
+    "local witness outcomes",
+    "logs",
+    "execution commands",
+    "artifact/compiler/cache identities",
+    "native filesystem paths",
+    "resource and timing receipts",
+    "private coordination/reviewer output"
+  ],
+  "forbidden_native_prefixes_present": false,
+  "not_exportable": "Other files in the parent readiness directory are local audit material; not part of this public payload."
+}
