@@ -1,0 +1,101 @@
+{
+  "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "run_id": 34475426945,
+  "attempt": 1,
+  "event": "push",
+  "branch": "main",
+  "gate_job_id": 102864922275,
+  "gate_check_app_id": 15368,
+  "finding": "Absolute polling budget exhausted with live feature-matrix siblings; fail-closed UNDETERMINED, not a failed test or API quota verdict.",
+  "evidence": {
+    "job_started": "2026-09-10T12:13:19Z",
+    "job_completed": "2026-09-10T13:29:51Z",
+    "aggregate_step": "2026-09-10T12:13:21Z through 13:29:50Z",
+    "polls": 155,
+    "base_extension": "At poll110/111, queued runs=6 and 10 executing peers justified saturation/progress extension to155.",
+    "final": "At poll155, 530 resolved check rows, 10 not terminal; final liveness diagnostic names seven still-executing opt-in groups; reporter verdict awaited. Exit1 came from Python, not GitHub job timeout.",
+    "stale_evidence": "194 superseded check rows were ignored on final polls. No stale-leg failure verdict was emitted.",
+    "later_matrix": "Last group completion13:33:24Z; correlated app15368 report success13:35:12Z, external_id34475427058. Therefore this was not merely reporter posting latency: groups were still running at gate exit.",
+    "source_failure": "No failing required-peer verdict is established by this aggregate failure. Underlying duration/capacity reason for the long matrix is outside this bounded diagnosis."
+  },
+  "later_peers": {
+    "ci-jobs.json": {
+      "total": 39,
+      "conclusions": {
+        "success": 33,
+        "skipped": 6
+      },
+      "last_completed_at": "2026-09-10T13:21:30Z",
+      "attempts": [
+        1
+      ]
+    },
+    "matrix-jobs.json": {
+      "total": 57,
+      "conclusions": {
+        "success": 56,
+        "skipped": 1
+      },
+      "last_completed_at": "2026-09-10T13:33:24Z",
+      "attempts": [
+        1
+      ]
+    },
+    "triage-jobs.json": {
+      "total": 1,
+      "conclusions": {
+        "success": 1
+      },
+      "last_completed_at": "2026-09-10T13:49:13Z",
+      "attempts": [
+        1
+      ]
+    }
+  },
+  "reporter": [
+    {
+      "id": 102892067197,
+      "head_sha": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+      "name": "feature-matrix report",
+      "status": "completed",
+      "conclusion": "success",
+      "external_id": "34475427058",
+      "started_at": "2026-09-10T13:35:12Z",
+      "completed_at": "2026-09-10T13:35:12Z",
+      "app_id": 15368
+    }
+  ],
+  "rate_limit": {
+    "job_exhaustion_observed": false,
+    "job_explicit_reset": null,
+    "job_eligible_reset_recovery": null,
+    "observer_budget": {
+      "limit": 5000,
+      "used": 335,
+      "remaining": 4665,
+      "reset": 1789048478
+    },
+    "qualification": "Observer core4665 remaining is not evidence of the separate workflow GITHUB_TOKEN budget. The exact job log has no explicit quota/rate/403 exhaustion verdict. No credential substitution or reset retry used."
+  },
+  "known_nonpassing_checks": {
+    "self_gate": "excluded by exact self workflow identity on a rerun",
+    "review_alarm34476250771": "Exact job name is explicitly advisory; cause left for later, no log downloaded.",
+    "release34475426835": "Exact failed job declared advisory; existing release hold preserved.",
+    "batch34475426864": "Declared advisory ring dispatcher; a newer same-head batch run34483002453 succeeded. Newer success supersedes for aggregation, not proof the original missing-token cause was repaired."
+  },
+  "rerun_assessment": {
+    "conditional_legitimacy": true,
+    "documented_predicate": "A single failed-aggregate-only rerun is the documented recovery AFTER all intended latest same-head required peers and the correctly correlated reporter have actually concluded green/allowed skipped/neutral with selection success; the head/run/attempt must still be current, no review/approval hold or active replacement is bypassed, and readable API budget is available. Only aggregate34475426945 should be rerun; no sibling reruns, gate-policy change, token substitution or registry/release action.",
+    "current_certification": false,
+    "concrete_remaining_gap": "Check pagination page5 failed EOF: 400 of449 rows captured. Last page4 rows belong to old merge-group feature matrix, but that does not prove all49 unseen rows harmless. A complete fresh target/peer read is required before action. The initially pending triage peer subsequently succeeded13:49:13Z, so it is no longer an observed blocker.",
+    "observed_technical_blocker": "No additional non-advisory failure in observed current peers; current CI39 jobs and matrix57 jobs are fully terminal success/skip, correlated reporter green. This is not an exhaustive guarantee because of missing check page and possible later same-head arrivals.",
+    "scheduled_path": "ci-summary has no cron trigger; inspected fast-fix-ring is PR-only and watchdog is zero-dispatch merge-group recovery. No applicable automatic main-gate recovery route established here; quota-reset recovery is not applicable to this non-quota failure."
+  },
+  "recommended_single_followup": "Root obtains complete fresh head/latest-attempt/peer/budget evidence, then if the documented predicate holds performs at most one aggregate-only rerun. Do not act on core/matrix success alone.",
+  "limits": [
+    "14 logical GH reads; one EOF, zero retries; one named terminal gate log downloaded.",
+    "No independent live policy evaluation, broad runner/capacity audit, secondary review-alarm cause diagnosis, source changes, builds, model calls or remote mutations.",
+    "Registry OFF/release holds and live merge-group/current review evidence preserved.",
+    "No commands pending; all invoked commands returned terminal."
+  ]
+}

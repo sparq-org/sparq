@@ -1,0 +1,37 @@
+{
+  "started_at": "2026-09-10T13:57:58.729242+00:00",
+  "scope": "One failed aggregate-only rerun; no sibling cancellation/rerun, protection change, registry enablement or release",
+  "evidence": "main459-gate-failure/gate.log explicitly calls for rerun after long legs finish; fresh complete451 check inventory and45 workflow runs have no pending work",
+  "advisory_nonpassing": [
+    "review-lane blind-spot alarm",
+    "ring registry dispatcher",
+    "release-plz / Release-PR (advisory)"
+  ],
+  "budget": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "main": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "runs": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "registry": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "immediate-run": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "mutation_started_at": "2026-09-10T13:58:02.917086+00:00",
+  "single-rerun": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "completed_at": "2026-09-10T13:58:03.566251+00:00",
+  "result": "single aggregate failed-job rerun accepted; wait for actual result"
+}

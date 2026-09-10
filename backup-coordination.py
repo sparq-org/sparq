@@ -639,6 +639,13 @@ for evidence_name in ['implementation-root-verification.json', 'opus-injective-p
 for evidence_name in ['budget-1343.json', 'main459-runs-1344.json']:
     FILES['6480-admission-' + evidence_name] = ROOT / 'direct-6480/admission' / evidence_name
 
+
+# Frozen main459 aggregate diagnosis and single documented recovery.
+for evidence_name in ['budget.json', 'checks-page1.json', 'checks-page2.json', 'checks-page3.json', 'checks-page4.json', 'checks-page5.json', 'ci-jobs.json', 'gate-check.json', 'gate-excerpts.txt', 'gate.log', 'jobs.json', 'matrix-jobs.json', 'peer-runs.json', 'peer-summary.json', 'report.json', 'requests.json', 'run.json', 'source-evidence.json', 'triage-jobs.json', 'manifest.json']:
+    FILES["6480-main459-gate-failure-" + evidence_name.replace("/", "--")] = ROOT / "direct-6480/main459-gate-failure" / evidence_name
+for evidence_name in ['gate-recovery-budget.json', 'gate-recovery-immediate-run.json', 'gate-recovery-main.json', 'gate-recovery-receipt.json', 'gate-recovery-registry.json', 'gate-recovery-runs.json', 'gate-recovery-single-rerun.json', 'gate-recovery1357-budget.json', 'gate-recovery1357-budget.stderr', 'gate-recovery1357-main.json', 'gate-recovery1357-main.stderr', 'gate-recovery1357-runs.json', 'gate-recovery1357-runs.stderr', 'gate-recovery1400-checks-page1.json', 'gate-recovery1400-checks-page1.stderr', 'gate-recovery1400-checks-page2.json', 'gate-recovery1400-checks-page2.stderr', 'gate-recovery1400-checks-page3.json', 'gate-recovery1400-checks-page3.stderr', 'gate-recovery1400-checks-page4.json', 'gate-recovery1400-checks-page4.stderr', 'gate-recovery1400-checks-page5.json', 'gate-recovery1400-checks-page5.stderr', 'gate-recovery1400-checks-summary.json', 'main459-gate-failure-root-verification.json', 'recover-main459-gate.py']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

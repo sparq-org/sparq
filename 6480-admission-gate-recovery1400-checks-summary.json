@@ -1,0 +1,38 @@
+{
+  "at": "2026-09-10T13:56:44.197922+00:00",
+  "total": 451,
+  "nonpassing": [
+    {
+      "id": 102867610599,
+      "name": "review-lane blind-spot alarm",
+      "status": "completed",
+      "conclusion": "failure",
+      "details_url": "https://github.com/sparq-org/sparq/actions/runs/34476250771/job/102867610599",
+      "external_id": "37c91329-88ac-504c-a546-8e70d00f4d12"
+    },
+    {
+      "id": 102864931546,
+      "name": "ring registry dispatcher",
+      "status": "completed",
+      "conclusion": "failure",
+      "details_url": "https://github.com/sparq-org/sparq/actions/runs/34475426864/job/102864931546",
+      "external_id": "6958e41e-8d76-58cd-9a6f-dfe1f16d1a5e"
+    },
+    {
+      "id": 102864922275,
+      "name": "gate",
+      "status": "completed",
+      "conclusion": "failure",
+      "details_url": "https://github.com/sparq-org/sparq/actions/runs/34475426945/job/102864922275",
+      "external_id": "51d91285-2815-5d4a-9e8b-4b217763a46e"
+    },
+    {
+      "id": 102864921752,
+      "name": "release-plz / Release-PR (advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "details_url": "https://github.com/sparq-org/sparq/actions/runs/34475426835/job/102864921752",
+      "external_id": "a37db701-5c72-5894-9242-d4c826372393"
+    }
+  ]
+}

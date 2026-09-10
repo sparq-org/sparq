@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T13:59:11.819114+00:00",
+  "manifest_files_verified": 19,
+  "manifest_sha256": "1f05a4e8d22783b99e1a76ee19c974f0b2dae8b3a41c5e15d611720a5a26b4a4",
+  "finding": "Exact gate log explicitly UNDETERMINED poll155 with seven matrix jobs executing. No API exhaustion indicated.",
+  "fresh_followup": "Complete451-row check inventory, all terminal. Only self gate and three declared advisory jobs failed;45 workflow runs complete; CI/matrixsuccess. Earlier400/449EOFgap is preserved and superseded by a complete fresh snapshot, not assumed harmless.",
+  "advisory_proof": "Each nonself failed check exact name is a key in committed main459 advisory registry.",
+  "recovery": "Single aggregate rerun accepted2026-09-10T13:58:03Z; exact main/run/attempt/registryOFF revalidated. No sibling rerun or cancellation.",
+  "receipt": "direct-6480/admission/gate-recovery-receipt.json",
+  "limits": "No claim rerun passed until real result; review-alarm cause still untriaged; registry and releases remain off."
+}

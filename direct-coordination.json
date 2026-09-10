@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T13:53:12.221217+00:00",
+  "updated_at": "2026-09-10T13:59:11.819114+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -91,7 +91,7 @@
       "receipt": "direct-5183/admission/original-seed-comment-receipt.json"
     },
     "next_scope": "Collect actual Opus patch review, resolve any material findings, publish scoped5183 PR for ordinary CI. Keep issue open for seven original unresolved inputs.",
-    "agent_current_task": "Existing Astra read-only main459 aggregate failure triage; implementation complete",
+    "agent_current_task": "ExistingAstra read-only readiness for seven original5183 failures; patch review14761 still running",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -675,10 +675,10 @@
     "postmerge_directory": "direct-6480/postmerge459-validation",
     "manifest_sha256": "34678b4fe632a678c4bd0affc6cc9a19845b8813c6025bf516a7af4ea5ee347d",
     "root_verification": "direct-6480/admission/postmerge459-root-verification.json",
-    "agent": "/root/postmerge_ci read-only failure triage",
+    "agent": "root observing; existingAstra on5183 remainingoriginal readiness",
     "CI": "completed_success",
     "feature_matrix": "completed_success",
-    "aggregate": "failure_poll_cap_pending_final_triage",
+    "aggregate": "single_recovery_rerun_requested",
     "known_advisory_failures": {
       "batch_merge": "intentionalemptyREGISTRY_RING_TOKENguard; nodispatch",
       "release_plz": "sameOPEN6474packaging;noauthorizationorremediation"
@@ -3439,7 +3439,7 @@
     "pr": 6481,
     "observed_at": "2026-09-10T13:53:12.221217+00:00",
     "evidence": "direct-6480/admission/main459-runs-1344.json",
-    "state": "CIandmatrixsuccess; aggregatefailure; existingAstra triage collecting no rate-exhaustion evidence; fullcurrentpeerinventorygap atEOF, no rerun yet",
+    "state": "MainCI/matrixsuccess; failed poll-cap aggregate rerun once after complete fresh451checks/45runs andtarget/budget validation",
     "changed_surface_checks": "js/docs/supply verifiedsuccess;6480closed",
     "release_authorized": false,
     "unresolved_noncore_failures": [
@@ -3453,13 +3453,11 @@
         "skipped": 6
       },
       "matrix": {
-        "success": 45,
-        "skipped": 1,
-        "in_progress": 7,
-        "queued": 4
+        "success": 56,
+        "skipped": 1
       }
     },
-    "aggregate": "failure",
+    "aggregate": "single_recovery_rerun_requested",
     "fuzz": {
       "run": 34475427065,
       "event": "push",
@@ -3477,7 +3475,16 @@
       "status": "completed",
       "conclusion": "success"
     },
-    "triage_directory": "direct-6480/main459-gate-failure"
+    "triage_directory": "direct-6480/main459-gate-failure",
+    "recovery": {
+      "run": 34475426945,
+      "prior_attempt": 1,
+      "session": 99564,
+      "session_state": "completed_collected",
+      "receipt": "direct-6480/admission/gate-recovery-receipt.json",
+      "root_verification": "direct-6480/admission/main459-gate-failure-root-verification.json",
+      "policy": "No second rerun without new diagnosis; verify actual attempt2 result on next bounded observation"
+    }
   },
   "classifier_watch": {
     "issue": 6468,
@@ -3867,9 +3874,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T12:48:26.141936+00:00",
+    "at": "2026-09-10T13:59:11.819114+00:00",
     "enabled": false,
-    "evidence": "direct-6480/admission/close6480-registry.json"
+    "evidence": "direct-6480/admission/gate-recovery-registry.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

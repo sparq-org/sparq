@@ -1,0 +1,41 @@
+{
+  "commit": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "inspected_source_refs": [
+    {
+      "path": ".github/workflows/ci-summary.yml",
+      "lines": "202-253, 268-317",
+      "facts": "Push main uses github.sha, full gate, SELF_RUN_ID, GH_TOKEN=github.token; 80-minute job timeout. No schedule/workflow_dispatch trigger. Permissions checks/statuses/contents read, actions write, pull-requests read."
+    },
+    {
+      "path": "scripts/ci_summary_gate.py",
+      "lines": "520-527, 620-735",
+      "facts": "Latest workflow selected by workflow identity and created_at/run_id/attempt; own workflow excluded, older runs superseded. Completed/attempt job inventory is authoritative. Advisory-only terminal workflow failures do not acquire synthetic gating failure when full inventory proves that classification."
+    },
+    {
+      "path": "scripts/ci_summary_gate.py",
+      "lines": "1330-1466",
+      "facts": "Feature-matrix reporter is structurally required when real opt-in groups ran, and correlated via external_id to latest group run."
+    },
+    {
+      "path": "scripts/ci_summary_gate.py",
+      "lines": "1476-1484, 1680-1712",
+      "facts": "Explicit rate limit is a separate no-more-requests fail-closed path. Normal verdict requires every non-advisory check success/skipped/neutral with successful select."
+    },
+    {
+      "path": ".github/advisory-registry.json",
+      "lines": "4-10, 219-232",
+      "facts": "Exact declared advisory names: review-lane blind-spot alarm; ring registry dispatcher; release-plz / Release-PR (advisory). clear the needs:area park is not declared advisory."
+    },
+    {
+      "path": ".github/workflows/fast-fix-ring.yml",
+      "lines": "85-109",
+      "facts": "Completion recovery doorbell is restricted to failed same-repo pull_request aggregate events; push/merge_group is not eligible."
+    },
+    {
+      "path": ".github/workflows/merge-group-watchdog.yml",
+      "lines": "46-74",
+      "facts": "Scheduled path is zero-dispatch merge-group recovery; not a failed push-main aggregate recovery route."
+    }
+  ],
+  "scope": "Read-only source inspection already completed; no policy execution or source changes. Exact commit/path citations are reproducible from Git; this freeze performs no additional source/API investigation."
+}
