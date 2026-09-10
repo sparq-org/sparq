@@ -1,0 +1,75 @@
+{
+  "setter_sites": 11,
+  "entries": [
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1042,
+      "function": "query_prepared_with_budget",
+      "scope": "inside budget closure after view guard; SELECT/ASK"
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1080,
+      "function": "ask_prepared_with_budget",
+      "scope": "inside budget closure after view guard; ASK"
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1117,
+      "function": "query_json_prepared_with_budget",
+      "scope": "inside budget closure after view guard; SELECT/ASK JSON"
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1143,
+      "function": "query_json_chunks_with_budget",
+      "scope": "inside budget closure after view guard; chunk result"
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1199,
+      "function": "query_json_stream_prepared_with_budget",
+      "scope": "inside budget closure after view guard; synchronous sink reentry also matters"
+    },
+    {
+      "file": "crates/sparq-engine/src/lib.rs",
+      "line": 1238,
+      "function": "count_prepared_with_budget",
+      "scope": "inside budget closure after view guard; count/ASK"
+    },
+    {
+      "file": "crates/sparq-engine/src/explain.rs",
+      "line": 53,
+      "function": "explain",
+      "scope": "planning-only; setter still overwrites surrounding callback context"
+    },
+    {
+      "file": "crates/sparq-engine/src/explain.rs",
+      "line": 81,
+      "function": "explain_analyze_with_budget",
+      "scope": "before validation/planning and inner budget/trace"
+    },
+    {
+      "file": "crates/sparq-engine/src/explain_json.rs",
+      "line": 196,
+      "function": "explain_plan",
+      "scope": "planning-only structured plan"
+    },
+    {
+      "file": "crates/sparq-engine/src/explain_json.rs",
+      "line": 215,
+      "function": "explain_plan_analyze_with_budget",
+      "scope": "before validation and budget/trace"
+    },
+    {
+      "file": "crates/sparq-engine/src/cache.rs",
+      "line": 369,
+      "function": "eval via ResultCache::get_or_eval",
+      "scope": "cache miss/noncacheable execution inside budget; cache hits return without setter"
+    }
+  ],
+  "search": "rg set_query_base|QUERY_BASE crates --glob *.rs",
+  "other_setters_or_direct_QUERY_BASE_writes_found": false,
+  "public_wrappers": "query/ask/count/JSON/prepared/budget wrappers feed these sites; query_with_functions[_and_budget] calls with_functions then query_with_budget. ResultCache, text/JSON explain exported.",
+  "not_a_complete_all_context_audit": true
+}

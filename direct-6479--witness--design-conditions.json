@@ -1,0 +1,20 @@
+{
+  "status": "Runtime-confirmed bug supports scoped repair design review; no production patch approved or written in this task.",
+  "state": "Save and restore the full previous owned Option<oxiri::Iri<String>>, including None, verbatim. Preserve child independent BASE and parse behavior. No pointer lifetime or external reference needed.",
+  "seam": "Private RAII guard held by pub(crate) synchronous with_query_base(base,FnOnce)->T. Do not expose a freely droppable/movable guard; prevent safe out-of-order or cross-thread restoration. End the RefCell mutable borrow before invoking user code, retain no borrow across callback or Drop.",
+  "sites": "All11set_query_base production sites from frozen caller inventory, not only query_prepared_with_budget. Include early unsupported form and planning-only explain paths, cache miss/noncacheable evaluation; leave cache hits and parsing-before-install unchanged.",
+  "scope_order": "Install at exact currentsetter position; newBASErestorer drops before enclosing budget guard in6lib+cache closures, while existingview/functionguards retaintheirorder. Explain scopes cover remainder from currentsetter, including validation/planning/trace/budget, soearlyErrrestoresBASE.",
+  "required_tests": [
+    "Convert this exact public5case fixture into regression: nestedBASE/noBASE/post-installErr become outerhttps://outer.example/resource; no-nesting/parseErr staycorrect.",
+    "Three nestedBASEscopes; privateNone/restoredouterstate including top-level idle; normalreturn/Err/caughtunwind. A public noBASEfollowup alone cannot prove idlecleanup because itwritesNone.",
+    "Exercise prepared/ASK/count/JSON/chunks/stream reentrant sink plus text/structuredexplain and cacheevaluation through existingboundaries wherecheap; preserveexistingguarddroporder.",
+    "Compiled omit-restoration control must break dependentIRI publicregression; no canonicalizer/storage/timing changes."
+  ],
+  "not_established": [
+    "No unwind runtime test in this fivecase baseline; candidate mustproveit.",
+    "No >1workerBASEpropagation claim. Single-row witness explicitlypinscallback tocallerthread andRAYON_NUM_THREADS1; broadworkercontext work remainsoutofscope unlessactualreview findsrequired.",
+    "OtherTLSstates, functionregistry nesting, construction/updatecontext behavior are not diagnosed bythiswitness.",
+    "No performanceclaim; executabletimes onlybounded receipts."
+  ],
+  "ownership": "Rootrevalidatesmain/currentenginehunkownershipbeforeproduction grant;6486coreand6487benchworktreesremainunchanged."
+}

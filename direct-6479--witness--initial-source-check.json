@@ -1,0 +1,70 @@
+{
+  "free_bytes": 11918893056,
+  "clean_head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+  "selected_sources": [
+    {
+      "path": "crates/sparq-engine/src/lib.rs",
+      "sha256": "074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538"
+    },
+    {
+      "path": "crates/sparq-engine/src/exec.rs",
+      "sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af"
+    },
+    {
+      "path": "crates/sparq-engine/src/explain.rs",
+      "sha256": "953c36345e5e54a99b04478a2515b4ea2ba06cdd6ebffe9f376153e1ef0bffd4"
+    },
+    {
+      "path": "crates/sparq-engine/src/explain_json.rs",
+      "sha256": "59951ec3db080ec591697398e89586b1d29e5d6377883bfa1a3400efc807470d"
+    },
+    {
+      "path": "crates/sparq-engine/src/cache.rs",
+      "sha256": "ce140e15be0ad8f72584dccca0d33eb93acc526756f8cb1a2ec69e872c4da62e"
+    },
+    {
+      "path": "crates/sparq-engine/Cargo.toml",
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73"
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "sha256": "7f22197dc4df197f236ad2f0d4668814a47a831a6dbd398efcfd1d5f47a43c37"
+    }
+  ],
+  "compiler": {
+    "path": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "exists": true,
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "bytes": 412504
+  },
+  "libs": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "exists": true,
+      "expected_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "bytes": 1921384,
+      "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "exists": true,
+      "expected_sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "bytes": 4397856,
+      "sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "matches": true
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "exists": true,
+      "expected_sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "bytes": 5404992,
+      "sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "matches": true
+    }
+  ]
+}

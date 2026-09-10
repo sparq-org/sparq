@@ -1,0 +1,47 @@
+[
+  {
+    "name": "link",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--edition=2021",
+      "--crate-name",
+      "issue6479_public_base",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6479/witness/public_base.rs",
+      "--emit=link,dep-info",
+      "-C",
+      "opt-level=3",
+      "-C",
+      "embed-bitcode=no",
+      "-C",
+      "codegen-units=16",
+      "-C",
+      "debuginfo=0",
+      "-C",
+      "strip=debuginfo",
+      "-C",
+      "panic=unwind",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "sparq_engine=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "--extern",
+      "sparq_core=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "--extern",
+      "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "-o",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6479/witness/public-base"
+    ],
+    "exit": 0,
+    "seconds": 6.1205697080000006,
+    "stop_reason": null
+  },
+  {
+    "name": "fixed-cases",
+    "argv": [
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6479/witness/public-base"
+    ],
+    "exit": 0,
+    "seconds": 0.8533219579999995,
+    "stop_reason": null
+  }
+]

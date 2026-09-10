@@ -1,0 +1,33 @@
+{
+  "frozen_input": "direct-6479/readiness/witness-protocol.json",
+  "sha256": "3badb864f8cac68026597d785829f6971293091dee6c6af80b2b14130d9aec27",
+  "cases": 5,
+  "links": 1,
+  "processes": 1,
+  "source_sha256": "019c853ca1e40b16c59e6de46daf11ea96d0f66daf7f3c76500c41b6eaa0a3d8",
+  "driver_profile": "Rust2021/O3/unwind/default-no-LTO/codegen16",
+  "env": {
+    "RAYON_NUM_THREADS": "1",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "RUST_BACKTRACE": "1",
+    "TMPDIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6479/witness/tmp"
+  },
+  "limits": {
+    "aggregate_seconds": 120,
+    "link_seconds": 60,
+    "test_seconds": 30,
+    "max_allocated_bytes": 67108864,
+    "start_free_bytes": 2214592512,
+    "continuous_minimum_free_bytes": 2147483648,
+    "export_reserve_bytes": 4194304,
+    "builds": 1,
+    "test_processes": 1,
+    "fixed_cases": 5,
+    "jobs": 1,
+    "offline": true,
+    "dependency_builds": 0
+  },
+  "written_before_execution": true
+}

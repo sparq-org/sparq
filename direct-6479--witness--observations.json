@@ -1,0 +1,47 @@
+[
+  {
+    "case": "NoNestedCall",
+    "callback_count": 1,
+    "same_thread": true,
+    "outer_base_restored": true,
+    "outer_query_result": "Ok",
+    "outer_binding": "https://outer.example/resource",
+    "raw": "case=NoNestedCall callback_count=1 same_thread=true restored=true outer=Ok(QueryResult { vars: [Variable { name: \"iri\" }], rows: [[Some(NamedNode(NamedNode { iri: \"https://outer.example/resource\" }))]] })"
+  },
+  {
+    "case": "InnerBase",
+    "callback_count": 1,
+    "same_thread": true,
+    "outer_base_restored": false,
+    "outer_query_result": "Ok",
+    "outer_binding": "https://inner.example/resource",
+    "raw": "case=InnerBase callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: \"iri\" }], rows: [[Some(NamedNode(NamedNode { iri: \"https://inner.example/resource\" }))]] })"
+  },
+  {
+    "case": "InnerNoBase",
+    "callback_count": 1,
+    "same_thread": true,
+    "outer_base_restored": false,
+    "outer_query_result": "Ok",
+    "outer_binding": null,
+    "raw": "case=InnerNoBase callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: \"iri\" }], rows: [[None]] })"
+  },
+  {
+    "case": "InnerParseError",
+    "callback_count": 1,
+    "same_thread": true,
+    "outer_base_restored": true,
+    "outer_query_result": "Ok",
+    "outer_binding": "https://outer.example/resource",
+    "raw": "case=InnerParseError callback_count=1 same_thread=true restored=true outer=Ok(QueryResult { vars: [Variable { name: \"iri\" }], rows: [[Some(NamedNode(NamedNode { iri: \"https://outer.example/resource\" }))]] })"
+  },
+  {
+    "case": "InnerPostInstallError",
+    "callback_count": 1,
+    "same_thread": true,
+    "outer_base_restored": false,
+    "outer_query_result": "Ok",
+    "outer_binding": "https://inner.example/resource",
+    "raw": "case=InnerPostInstallError callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: \"iri\" }], rows: [[Some(NamedNode(NamedNode { iri: \"https://inner.example/resource\" }))]] })"
+  }
+]

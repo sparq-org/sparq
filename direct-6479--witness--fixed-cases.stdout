@@ -1,0 +1,16 @@
+case=NoNestedCall child=none
+case=NoNestedCall callback_count=1 same_thread=true restored=true outer=Ok(QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://outer.example/resource" }))]] })
+case=NoNestedCall followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://followup.example/resource" }))]] } no_base_followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] }
+case=InnerBase child=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://inner.example/child" }))]] }
+case=InnerBase callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://inner.example/resource" }))]] })
+case=InnerBase followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://followup.example/resource" }))]] } no_base_followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] }
+case=InnerNoBase child=QueryResult { vars: [], rows: [[]] }
+case=InnerNoBase callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] })
+case=InnerNoBase followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://followup.example/resource" }))]] } no_base_followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] }
+case=InnerParseError child=Err("error at 1:10: expected CONSTRUCT")
+case=InnerParseError callback_count=1 same_thread=true restored=true outer=Ok(QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://outer.example/resource" }))]] })
+case=InnerParseError followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://followup.example/resource" }))]] } no_base_followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] }
+case=InnerPostInstallError child=Err("only SELECT and ASK queries are supported")
+case=InnerPostInstallError callback_count=1 same_thread=true restored=false outer=Ok(QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://inner.example/resource" }))]] })
+case=InnerPostInstallError followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[Some(NamedNode(NamedNode { iri: "https://followup.example/resource" }))]] } no_base_followup=QueryResult { vars: [Variable { name: "iri" }], rows: [[None]] }
+completed_fixed_cases=5

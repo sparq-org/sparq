@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T19:31:58.965000+00:00",
+  "status": "rejected_before_process_started",
+  "session_id": null,
+  "original_input": "opus-base-design-input.md",
+  "original_input_sha256": "2e9476c6ab61caa4ea6074e69e2fdbf8da8e2ff107b83b932047fc5a3c9266be",
+  "reason": "Auto-review classified original packet containing source-derived evidence/local execution details as sensitive and rejected export toClaude.",
+  "policy": "Do not replay original invocation or send samepayload byalternate route. Prepare source-only packet from verifiedpublicrepo/commit; exclude all localruntime/provenance/resources/rawlogs."
+}

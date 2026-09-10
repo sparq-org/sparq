@@ -1,0 +1,83 @@
+{
+  "decision": "CONFIRMED public nested-query BASE restoration defect in main-f50-qualified production libraries",
+  "issue": 6479,
+  "model": "GPT-6 Astra xhigh",
+  "source": {
+    "readonly_worktree_head": "0b4554b924a80432cc1b572bd19f8e58cdbfb4e6",
+    "known_main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "engine_core_lock_identical": true,
+    "recorded113core_engine_sourcefiles_match": true,
+    "library_build_source": "781f667c19a8ebb779cfccb24b05ea432360b025 with identical relevant sources to f50; actualengine cachedbuild features default+algebra-rewrite, coredefault+mmap+dict-spill",
+    "edition": "2021",
+    "compiler": "Rust1.97.1 aarch64-apple-darwin",
+    "profile": "O3/unwind/no-LTO/codegen16; macOSdiagnostic, not LinuxCI"
+  },
+  "results": [
+    {
+      "case": "NoNestedCall",
+      "callback_count": 1,
+      "same_thread": true,
+      "outer_base_restored": true,
+      "outer_query_result": "Ok",
+      "outer_binding": "https://outer.example/resource"
+    },
+    {
+      "case": "InnerBase",
+      "callback_count": 1,
+      "same_thread": true,
+      "outer_base_restored": false,
+      "outer_query_result": "Ok",
+      "outer_binding": "https://inner.example/resource"
+    },
+    {
+      "case": "InnerNoBase",
+      "callback_count": 1,
+      "same_thread": true,
+      "outer_base_restored": false,
+      "outer_query_result": "Ok",
+      "outer_binding": null
+    },
+    {
+      "case": "InnerParseError",
+      "callback_count": 1,
+      "same_thread": true,
+      "outer_base_restored": true,
+      "outer_query_result": "Ok",
+      "outer_binding": "https://outer.example/resource"
+    },
+    {
+      "case": "InnerPostInstallError",
+      "callback_count": 1,
+      "same_thread": true,
+      "outer_base_restored": false,
+      "outer_query_result": "Ok",
+      "outer_binding": "https://inner.example/resource"
+    }
+  ],
+  "controls": "Five exact same-thread callbacks, eachcalledonce. ChildBASE resolves ownchildIRI; noBASEASKhasoneunitrow; parseerrorrejects beforesetter; validCONSTRUCTreturnsexactunsupportedformerroraftersetter. EveryindependentBASEfollowupcorrect andeveryindependentnoBASEfollowupunbound.",
+  "interpretation": "IRI() evaluates its customcallbackoperand first, so source andactualresults bindleak tochildoverwritingQUERY_BASE beforeouterresolve_iri. WronginnerIRI andunboundouter areactualreturnedbindings, nottiming/plannerinferences. Parse rejection remains a usefulnegativecontrol forpreinstallpath.",
+  "limits": "No productionfix, norepeatedoutcomes/seeds, no engine/dependencybuild, no GitHub/networkrequest. Existinglibsrehashmatchedimmediatelybeforelink; fullsourceequivalenceproofretained. Nestedoutcomeswereobservedwithoutassertingpredicteddefect.",
+  "build_warnings": "rustc adapts explicitly named output for link+dep-info; hostlinker reported FSEvent/usercachedirectorywarnings with fallback. Link andfixedcaseprocessboth exit0, no request to retry. Fullstderrretained.",
+  "resources": {
+    "aggregate_seconds": 7.826659625,
+    "link_seconds": 6.1205697080000006,
+    "fixed_case_seconds": 0.8533219579999995,
+    "max_allocated_bytes": 5832704,
+    "min_free_bytes": 11910578176,
+    "limit_bytes": 67108864,
+    "export_reserve_bytes": 4194304,
+    "jobs": 1,
+    "links": 1,
+    "processes": 1,
+    "candidate_edits": 0,
+    "dependency_builds": 0,
+    "enoent_tolerated": 0
+  },
+  "binary": {
+    "path": "public-base",
+    "sha256": "1fd5f36ec7b45204b657a917167cf7034a21924c0f21f9b685c1ee5aedf96164",
+    "bytes": 5339904
+  },
+  "next": "Actual Opus scoped restoration design review using design-conditions.json, current eleven-callsite context and this rawpublicwitness; then root choosesproductiongrant.",
+  "pending_commands": false
+}

@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-10T19:30:29.300020+00:00",
+  "verified_files": 25,
+  "manifest_sha256": "a5e01d4fc146bf958aa2fa30f91db05f343d5d02c49976815ee8a303b42b5df9",
+  "packet_sha256": "1995edf0cc6a4a2b71a6d7750c42df724145e92994ec1ec905106110e0b6fe00",
+  "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "binary_sha256": "1fd5f36ec7b45204b657a917167cf7034a21924c0f21f9b685c1ee5aedf96164",
+  "result": "Confirmed3nestedcases;2controls pass; callbackcount/thread/child/followup assertions pass. One link/process; no production edit/dependencybuild.",
+  "profile": "Rust1.97.1/edition2021 nativeDiagnostic,3recordedlibs from781f with113relevant sourcefiles identical tof50; not LinuxCI or multithread propagation proof."
+}
