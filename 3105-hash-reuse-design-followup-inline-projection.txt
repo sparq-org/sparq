@@ -1,0 +1,160 @@
+crates/sparq-core/src/dict.rs full-source SHA256 abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3
+lines18-86
+18: /// and cache-friendly; the id space is widened to `u64` only if a dataset needs
+19: /// it. Id 0 is reserved as a sentinel ("no such term").
+20: pub type Id = u32;
+21: 
+22: pub const NO_ID: Id = 0;
+23: 
+24: /// Tagged-ValueId base: ids in `[INLINE_BASE, INLINE_BASE + 2^30)` encode an
+25: /// `xsd:integer` whose value is `id - INLINE_BASE` *inline* — no dictionary entry,
+26: /// no string parse. Numeric FILTER / comparison / ORDER BY read the value straight
+27: /// from the id (QLever's value-id idea, kept in `u32` so the index stays compact).
+28: /// Inline integers also sort by value in the permutations (enabling range pruning).
+29: ///
+30: /// The `u32` id space is partitioned: dictionary ids `[1, INLINE_BASE)` (≈2.1 billion
+31: /// distinct terms — enough for e.g. full-Wikidata's term count without widening to `u64`,
+32: /// which would double the index), inline integers `[INLINE_BASE, INLINE_BASE + 2^30)`, and
+33: /// the engine's local-vocab ids `[INLINE_BASE + 2^30, 2^32)`. `0` is `NO_ID`.
+34: pub const INLINE_BASE: Id = 1 << 31;
+35: /// The largest value encodable inline (the inline range stays 2^30 wide; bigger integers
+36: /// fall back to the dictionary).
+37: const INLINE_MAX: u32 = (1 << 30) - 1;
+38: 
+39: /// [OPUS-4.8] (review 1409) On-disk format marker for the mmap dictionary (`dict-meta.bin`).
+40: /// `INLINE_BASE` partitions the `u32` id space, so persisted RAW ids only mean what they say
+41: /// under the SAME partition the file was written with. A file written before `INLINE_BASE`
+42: /// moved (from `1 << 30` to `1 << 31`) encodes inline integers in `[1<<30, 1<<31)`, which the
+43: /// current code would misread as dictionary ids — silent numeric corruption / panics. The
+44: /// header records the partition so `open_mmap` can REJECT a mismatched/legacy store with a
+45: /// clear rebuild-required error instead of silently misinterpreting its ids.
+46: ///
+47: /// `dict-meta.bin` previously began with `prefixes.len() as u32` (a small count). This magic
+48: /// is chosen to be distinguishable from any plausible legacy prefix count, so the reader can
+49: /// detect header-less legacy files. ("DMV1" — Dict Meta, V1; little-endian.)
+50: // clippy/dead_code: the on-disk meta header is read/written only by the `mmap`/`dict-spill`
+51: // persistence paths, which are cfg'd out of the default feature set.
+52: #[allow(dead_code)]
+53: pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
+54: /// Bump when the on-disk meta layout changes incompatibly.
+55: #[allow(dead_code)]
+56: pub(crate) const DICT_META_VERSION: u32 = 1;
+57: 
+58: /// If a literal `value`/`datatype` is a canonical non-negative `xsd:integer` in
+59: /// range, its inline id. Only the canonical lexical form (no leading zeros / sign)
+60: /// inlines, so `"030"^^integer` stays a distinct dictionary term.
+61: #[inline]
+62: fn try_inline_lit(value: &str, datatype: &str) -> Option<Id> {
+63:     if datatype == xsd::INTEGER.as_str() {
+64:         if let Ok(v) = value.parse::<u32>() {
+65:             if v <= INLINE_MAX && v.to_string() == value {
+66:                 return Some(INLINE_BASE + v);
+67:             }
+68:         }
+69:     }
+70:     None
+71: }
+72: 
+73: /// If `term` is a canonical non-negative `xsd:integer` in range, its inline id.
+74: fn try_inline(term: &Term) -> Option<Id> {
+75:     match term {
+76:         Term::Literal(l) => try_inline_lit(l.value(), l.datatype().as_str()),
+77:         _ => None,
+78:     }
+79: }
+80: 
+81: /// Whether an id encodes an inline integer value. (`INLINE_BASE << 1` would overflow `u32`,
+82: /// so the upper bound is expressed via the inline width.)
+83: #[inline]
+84: pub fn is_inline(id: Id) -> bool {
+85:     id >= INLINE_BASE && id - INLINE_BASE <= INLINE_MAX
+86: }
+crates/sparq-engine/src/exec.rs full-source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+lines6470-6497
+6470: /// scan whose filter column holds inline integers (which sort by value). A TEMPORAL
+6471: /// predicate over an all-inline (integer) column is a type error on every row —
+6472: /// `None`, the empty range.
+6473: fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
+6474:     let cmp = match cmp {
+6475:         ScanCmp::Num(c) => c,
+6476:         ScanCmp::Temp(..) => return None,
+6477:     };
+6478:     let max = (dict::INLINE_BASE - 1) as i64;
+6479:     let (lo, hi): (i64, i64) = match cmp {
+6480:         NumCmp::Gt(t) => (t.floor() as i64 + 1, max),
+6481:         NumCmp::Ge(t) => (t.ceil() as i64, max),
+6482:         NumCmp::Lt(t) => (0, t.ceil() as i64 - 1),
+6483:         NumCmp::Le(t) => (0, t.floor() as i64),
+6484:         NumCmp::Eq(t) => {
+6485:             if t.fract() != 0.0 || t < 0.0 || t > max as f64 {
+6486:                 return None;
+6487:             }
+6488:             let v = t as i64;
+6489:             (v, v)
+6490:         }
+6491:     };
+6492:     let (lo, hi) = (lo.max(0), hi.min(max));
+6493:     (lo <= hi).then_some((lo as u32, hi as u32))
+6494: }
+6495: 
+6496: /// Recognises a FILTER of the form `?v OP constant` (or the symmetric
+6497: /// `constant OP ?v`) over a numeric or temporal constant, returning the variable
+lines11295-11318
+11295: // ---- Modifiers ----------------------------------------------------------------
+11296: 
+11297: fn project_bindings(b: Bindings, vars: &[Variable]) -> Bindings {
+11298:     let cols: Vec<Option<usize>> = vars.iter().map(|v| b.col(v)).collect();
+11299:     let rows = b
+11300:         .rows
+11301:         .iter()
+11302:         .map(|row| cols.iter().map(|c| c.map(|i| row[i]).unwrap_or(NO_ID)).collect())
+11303:         .collect();
+11304:     let sorted_by = b.sorted_by.filter(|sv| vars.contains(sv));
+11305:     Bindings { vars: vars.to_vec(), rows, sorted_by }
+11306: }
+11307: 
+11308: fn distinct_bindings(b: &mut Bindings) {
+11309:     let mut seen = std::collections::HashSet::new();
+11310:     b.rows.retain(|r| seen.insert(r.clone()));
+11311: }
+11312: 
+11313: fn slice_bindings(b: &mut Bindings, start: usize, length: Option<usize>) {
+11314:     if start > 0 {
+11315:         b.rows.drain(0..start.min(b.rows.len()));
+11316:     }
+11317:     if let Some(l) = length {
+11318:         b.rows.truncate(l);
+crates/sparq-substrate/src/join.rs full-source SHA256 cd708a74d9f77a9c4ab2e519a1d6475c4863fb68f909889d2d62d8e1b9cefae5
+lines166-197
+166: 
+167: /// Equality predicate used by the raw hash-table probe.
+168: ///
+169: /// [FABLE-5] #3644: `SmallVec`'s general slice equality may lower to an outlined
+170: /// `bcmp` even for the dominant one-id join key. Keep that shape as a scalar
+171: /// comparison and retain the exact prior equality operation for every other key
+172: /// width.
+173: #[inline(always)]
+174: fn probe_key_eq(candidate: &Key, key: &Key) -> bool {
+175:     match key.as_slice() {
+176:         [id] => matches!(candidate.as_slice(), [candidate_id] if candidate_id == id),
+177:         _ => candidate == key,
+178:     }
+179: }
+180: 
+181: /// Select the serial table or the radix partition for a precomputed key hash.
+182: ///
+183: /// Converting the documented 64-partition shape to an array reference gives LLVM
+184: /// a statically-known bound; the masked partition index therefore needs no slice
+185: /// bounds check. The fallback preserves the former behavior for malformed or
+186: /// non-standard table slices.
+187: #[inline(always)]
+188: fn probe_table(tables: &[JoinTable], hash: u64) -> &JoinTable {
+189:     if let [table] = tables {
+190:         return table;
+191:     }
+192:     let partition = (hash % JOIN_PARTS as u64) as usize;
+193:     if let Ok(partitioned) = <&[JoinTable; JOIN_PARTS]>::try_from(tables) {
+194:         return &partitioned[partition];
+195:     }
+196:     &tables[partition]
+197: }

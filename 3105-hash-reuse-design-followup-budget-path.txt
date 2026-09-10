@@ -1,0 +1,353 @@
+crates/sparq-engine/src/lib.rs full-source SHA256 074740149d0649b0334d1814ca289feaad54070ca0d90bf5737601f7021a7538
+lines265-328
+265: /// The executor checks it at coarse sites only (operator entry, once per outer
+266: /// iteration of the big scan/join loops), so enforcement is approximate but cheap:
+267: /// an unlimited budget (the default) costs nothing on the hot paths. When a limit
+268: /// trips, evaluation stops and the query fails with
+269: /// `"query budget exceeded (timeout)"` / `"query budget exceeded (max-rows)"` /
+270: /// `"query budget exceeded (max-bytes)"` / `"query budget exceeded (cancelled)"`.
+271: ///
+272: /// [GPT-6 Astra] A nested engine call from a callback uses its own budget. The
+273: /// outer budget resumes when that call returns (also after errors or unwind).
+274: /// Its deadline and cancellation are checked at the next outer poll; this does
+275: /// not interrupt arbitrary callback work or combine budgets across queries.
+276: #[derive(Debug, Clone, Default)]
+277: pub struct QueryBudget {
+278:     /// Wall-clock deadline. Native only: `std::time::Instant` is unusable on
+279:     /// `wasm32-unknown-unknown` (it panics), so the field does not exist there —
+280:     /// the row budget below stays fully portable.
+281:     #[cfg(not(target_arch = "wasm32"))]
+282:     pub deadline: Option<std::time::Instant>,
+283:     /// Upper bound on the rows of any materialised (intermediate or final) result.
+284:     /// This is a *working-set* bound: a query whose intermediate result exceeds it
+285:     /// is refused even if a later operator (e.g. LIMIT) would have shrunk it.
+286:     pub max_rows: Option<usize>,
+287:     /// [OPUS-4.8] (sq-s5is) Upper bound, in BYTES, on the estimated working-set size of
+288:     /// any materialised (intermediate or final) result — the byte-accounted twin of
+289:     /// `max_rows`. Where `max_rows` counts ROWS and so misses a query with FEW but very
+290:     /// WIDE rows (many projected variables, or huge computed string literals), this bounds
+291:     /// the estimated heap footprint of the id-level working set: `rows × width ×
+292:     /// size_of::<Id>()` for each materialised intermediate, PLUS the bytes of any
+293:     /// query-computed terms (BIND / aggregate / CONSTRUCT scratch) interned into the
+294:     /// per-query local vocabulary. Checked cooperatively at the same coarse sites as
+295:     /// `max_rows` (operator entry / per outer-loop iteration); a query whose estimate
+296:     /// crosses it aborts with `"query budget exceeded (max-bytes)"`. The estimate is a
+297:     /// portable LOWER bound on real heap (it ignores allocator overhead and `SmallVec`
+298:     /// inline storage), so it is conservative in the SAME direction `max_rows` is — a blunt
+299:     /// anti-OOM ceiling, not an exact RSS quota. `None` (the default) disables it; it
+300:     /// composes with `max_rows` (whichever trips first aborts).
+301:     pub max_bytes: Option<usize>,
+302:     /// Cross-thread cooperative cancellation flag. The executor observes `true`
+303:     /// at the same coarse polling sites as the other limits and aborts with
+304:     /// `"query budget exceeded (cancelled)"`; cancellation is therefore prompt at
+305:     /// the next poll, not immediate. The flag controls evaluation only and does
+306:     /// not publish shared query data.
+307:     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+308: }
+309: 
+310: impl QueryBudget {
+311:     /// The do-nothing budget every non-budgeted entry point uses.
+312:     pub fn unlimited() -> Self {
+313:         Self::default()
+314:     }
+315: 
+316:     /// Creates an otherwise unlimited budget cancelled by `flag`.
+317:     pub fn cancelled_by(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+318:         Self::unlimited().with_cancel(flag)
+319:     }
+320: 
+321:     /// Adds a cross-thread cooperative cancellation flag to this budget.
+322:     #[must_use]
+323:     pub fn with_cancel(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+324:         self.cancel = Some(flag);
+325:         self
+326:     }
+327: }
+328: 
+crates/sparq-engine/src/exec.rs full-source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+lines68-254
+68: pub(crate) mod budget {
+69:     use crate::QueryBudget;
+70:     use sparq_core::dict::Id;
+71:     use std::cell::Cell;
+72:     use std::ptr::NonNull;
+73:     use std::sync::atomic::{AtomicBool, Ordering};
+74: 
+75:     /// Copyable view of a cancellation flag owned by the installed [`QueryBudget`].
+76:     ///
+77:     /// [GPT-6 Astra] ACTIVE belongs to the innermost live `with_budget` frame.
+78:     /// Each pointer is owned by a QueryBudget borrowed by a still-live frame on
+79:     /// this thread's stack. Private installation/restoration enforces nesting:
+80:     /// a restored parent's borrow outlives the child. Only `install`/`Guard::drop`
+81:     /// change ACTIVE's `cancel` pointer; other writers update width/bytes for the
+82:     /// innermost frame. Private construction and the four synchronous snapshot
+83:     /// consumers documented on `snapshot` uphold this usage-level invariant:
+84:     /// their parallel work joins before the owning frame returns, and pointer
+85:     /// dereferences are atomic loads.
+86:     #[derive(Clone, Copy)]
+87:     struct CancelPtr(NonNull<AtomicBool>);
+88: 
+89:     // SAFETY: `AtomicBool` is `Sync`; moving this shared pointer to a worker is
+90:     // sound because only atomic loads occur while the owning `with_budget` frame
+91:     // borrows its QueryBudget, including until scoped rayon work joins. This relies
+92:     // on private construction and the four audited consumers documented on `snapshot`.
+93:     unsafe impl Send for CancelPtr {}
+94:     // SAFETY: `AtomicBool` is `Sync`; all shared access through `CancelPtr` is an
+95:     // atomic load; private construction and the four audited scoped-join consumers
+96:     // documented on `snapshot` keep the owning `with_budget` frame alive.
+97:     unsafe impl Sync for CancelPtr {}
+98: 
+99:     /// Bytes one id-level binding cell occupies in a materialised `Row`. The
+100:     /// byte-accounted cap ([OPUS-4.8] sq-s5is) costs the id-level working set as
+101:     /// `rows × width × BYTES_PER_ID` — a portable LOWER bound on real heap (it
+102:     /// ignores allocator overhead / `SmallVec` inline-vs-spill), conservative in the
+103:     /// same direction the row cap is.
+104:     pub(crate) const BYTES_PER_ID: usize = std::mem::size_of::<Id>();
+105: 
+106:     /// The installed limits, flattened for a cheap per-check read.
+107:     #[derive(Clone, Copy)]
+108:     pub(in crate::exec) struct Limits {
+109:         on: bool,
+110:         #[cfg(not(target_arch = "wasm32"))]
+111:         deadline: Option<std::time::Instant>,
+112:         max_rows: usize,
+113:         /// [OPUS-4.8] (sq-s5is) Byte ceiling on the estimated working set; `usize::MAX`
+114:         /// when no byte cap is set. Compared against `rows × byte_width + extra_bytes`.
+115:         max_bytes: usize,
+116:         /// [OPUS-4.8] (sq-s5is) Bytes per row of the working set CURRENTLY being checked
+117:         /// — `width(in ids) × BYTES_PER_ID`. Set per operator by [`set_width`] so the
+118:         /// row-count check sites also price WIDTH (the dimension the row cap misses). A
+119:         /// scalar/streaming path that never sets a width leaves this at `BYTES_PER_ID`
+120:         /// (one id per "row"), so the byte cap degrades to the row cap there, never wider.
+121:         byte_width: usize,
+122:         /// [OPUS-4.8] (sq-s5is) Bytes of query-computed terms interned into the per-query
+123:         /// local vocabulary (BIND / aggregate / CONSTRUCT scratch) — the NON-row dimension
+124:         /// the row cap also misses. A running high-water sum, added to the working-set
+125:         /// estimate on every check.
+126:         extra_bytes: usize,
+127:         cancel: Option<CancelPtr>,
+128:     }
+129: 
+130:     const OFF: Limits = Limits {
+131:         on: false,
+132:         #[cfg(not(target_arch = "wasm32"))]
+133:         deadline: None,
+134:         max_rows: usize::MAX,
+135:         max_bytes: usize::MAX,
+136:         byte_width: BYTES_PER_ID,
+137:         extra_bytes: 0,
+138:         cancel: None,
+139:     };
+140: 
+141:     impl Limits {
+142:         /// `rows × byte_width + extra_bytes`, saturating — the estimated working-set
+143:         /// byte size compared against `max_bytes`. [OPUS-4.8] (sq-s5is)
+144:         #[inline]
+145:         fn bytes(&self, rows: usize) -> usize {
+146:             rows.saturating_mul(self.byte_width).saturating_add(self.extra_bytes)
+147:         }
+148: 
+149:         /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
+150:         /// thread-local) counterpart of [`exhausted`]'s reason, for rayon closures where
+151:         /// the installing thread's sticky flag is out of reach. The reasons are the SAME
+152:         /// strings [`exhausted`] records, so a worker can raise EXACTLY the error
+153:         /// [`check`] would rather than inventing one (or guessing a result). [SONNET-4.6]
+154:         /// (sq-qk6ac)
+155:         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+156:         #[inline]
+157:         pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
+158:             if !self.on {
+159:                 return None;
+160:             }
+161:             if rows > self.max_rows {
+162:                 return Some("max-rows");
+163:             }
+164:             if self.bytes(rows) > self.max_bytes {
+165:                 return Some("max-bytes");
+166:             }
+167:             #[cfg(not(target_arch = "wasm32"))]
+168:             if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+169:                 return Some("timeout");
+170:             }
+171:             if let Some(cancel) = self.cancel {
+172:                 // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
+173:                 // QueryBudget alive until this scoped snapshot load finishes.
+174:                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
+175:                     return Some("cancelled");
+176:                 }
+177:             }
+178:             None
+179:         }
+180: 
+181:         /// Pure (no thread-local) exhaustion test for rayon closures, where the
+182:         /// installing thread's sticky flag is out of reach: a worker that sees
+183:         /// `hit` stops producing, and the caller's next on-thread check fires
+184:         /// (the deadline is global time; a hit row/byte cap leaves the snapshot's
+185:         /// estimate over the limit). Only the rayon-parallel branches call this
+186:         /// (and `snapshot`); the non-parallel (wasm) build compiles them out.
+187:         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+188:         #[inline]
+189:         pub(in crate::exec) fn hit(&self, rows: usize) -> bool {
+190:             self.why(rows).is_some()
+191:         }
+192:     }
+193: 
+194:     thread_local! {
+195:         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
+196:         static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+197:     }
+198: 
+199:     // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
+200:     struct Guard<'a> {
+201:         previous: Limits,
+202:         exceeded: Option<&'static str>,
+203:         _budget: std::marker::PhantomData<&'a QueryBudget>,
+204:         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
+205:     }
+206:     impl Drop for Guard<'_> {
+207:         fn drop(&mut self) {
+208:             ACTIVE.with(|a| a.set(self.previous));
+209:             EXCEEDED.with(|e| e.set(self.exceeded));
+210:         }
+211:     }
+212: 
+213:     fn install(b: &QueryBudget) -> Guard<'_> {
+214:         let cancel = b
+215:             .cancel
+216:             .as_ref()
+217:             .map(|flag| CancelPtr(NonNull::from(flag.as_ref())));
+218:         #[cfg(not(target_arch = "wasm32"))]
+219:         let on = b.deadline.is_some()
+220:             || b.max_rows.is_some()
+221:             || b.max_bytes.is_some()
+222:             || cancel.is_some();
+223:         #[cfg(target_arch = "wasm32")]
+224:         let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
+225:         let previous = ACTIVE.with(|a| {
+226:             a.replace(Limits {
+227:                 on,
+228:                 #[cfg(not(target_arch = "wasm32"))]
+229:                 deadline: b.deadline,
+230:                 max_rows: b.max_rows.unwrap_or(usize::MAX),
+231:                 max_bytes: b.max_bytes.unwrap_or(usize::MAX),
+232:                 byte_width: BYTES_PER_ID,
+233:                 extra_bytes: 0,
+234:                 cancel,
+235:             })
+236:         });
+237:         let exceeded = EXCEEDED.with(|e| e.replace(None));
+238:         Guard {
+239:             previous,
+240:             exceeded,
+241:             _budget: std::marker::PhantomData,
+242:             _not_send: std::marker::PhantomData,
+243:         }
+244:     }
+245: 
+246:     /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
+247:     ///
+248:     /// Guard never escapes this frame. This enforces LIFO even for reentrant
+249:     /// callbacks, keeps each borrowed cancellation owner alive, and restores idle
+250:     /// OFF/None after a top-level call. Aborting panics have no continuation.
+251:     pub(crate) fn with_budget<T>(b: &QueryBudget, f: impl FnOnce() -> T) -> T {
+252:         let _guard = install(b);
+253:         f()
+254:     }
+lines313-327
+313:     /// [GPT-6 Astra] This lifetime-free Copy is trusted only inside exec. It must
+314:     /// not escape its owning with_budget frame or enter detached work. The four
+315:     /// consumers are scan SELECT-JSON, bindings SELECT-JSON, parallel hash join,
+316:     /// and the parallel residual anti-join; all join before returning. A new
+317:     /// consumer must establish the same owner lifetime and scoped-join invariant.
+318:     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+319:     #[inline]
+320:     pub(in crate::exec) fn snapshot() -> Limits {
+321:         ACTIVE.with(|a| a.get())
+322:     }
+323: 
+324:     /// Decides whether the multi-core SELECT-JSON serializer may fan out under the
+325:     /// CURRENTLY installed budget, returning the limit snapshot its workers re-check at
+326:     /// each par-chunk boundary. [OPUS-4.8] (sq-7d3dj.10, roborev 1538, audit item 6)
+327:     ///
+lines428-508
+428:     /// `true` once the budget is exhausted (sticky) — row-producing loops break
+429:     /// on it; `rows` is the loop's current output size.
+430:     #[inline]
+431:     pub(crate) fn exhausted(rows: usize) -> bool {
+432:         let a = ACTIVE.with(|c| c.get());
+433:         if !a.on {
+434:             return false;
+435:         }
+436:         if EXCEEDED.with(|e| e.get()).is_some() {
+437:             return true;
+438:         }
+439:         if rows > a.max_rows {
+440:             EXCEEDED.with(|e| e.set(Some("max-rows")));
+441:             return true;
+442:         }
+443:         if a.bytes(rows) > a.max_bytes {
+444:             EXCEEDED.with(|e| e.set(Some("max-bytes")));
+445:             return true;
+446:         }
+447:         #[cfg(not(target_arch = "wasm32"))]
+448:         if a.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+449:             EXCEEDED.with(|e| e.set(Some("timeout")));
+450:             return true;
+451:         }
+452:         if let Some(cancel) = a.cancel {
+453:             // SAFETY: `CancelPtr`'s nested-frame invariant keeps this pointer
+454:             // owned by a live QueryBudget, also when restoring a parent frame.
+455:             // Relaxed is sufficient because cancellation gates control flow only;
+456:             // it never publishes or guards a shared query buffer. If that changes,
+457:             // the load/store pair must become Acquire/Release.
+458:             if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
+459:                 EXCEEDED.with(|e| e.set(Some("cancelled")));
+460:                 return true;
+461:             }
+462:         }
+463:         false
+464:     }
+465: 
+466:     /// Propagates an exhausted budget as the query error.
+467:     #[inline]
+468:     pub(crate) fn check(rows: usize) -> Result<(), String> {
+469:         if exhausted(rows) {
+470:             let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
+471:             return Err(format!("query budget exceeded ({why})"));
+472:         }
+473:         Ok(())
+474:     }
+475: 
+476:     /// Returns `true` when a budget is currently installed (even if not yet exhausted).
+477:     /// The columnar path uses this for the I3 fallback rule: when a budget is armed the
+478:     /// seam declines to the scalar path (the scalar debit schedule is not uniform-per-row
+479:     /// inside `apply_filter`, so the `k = min(batch_len, budget_remaining)` prefix rule
+480:     /// cannot be applied; the fallback is budget-armed ⇒ decline per the design record
+481:     /// `research/vector-at-a-time-m4-completion-design.md` §1 I3). [SONNET-4.6] (sq-pntvh.5)
+482:     #[cfg_attr(not(feature = "vectorized"), allow(dead_code))]
+483:     #[inline]
+484:     pub(crate) fn active() -> bool {
+485:         ACTIVE.with(|c| c.get().on)
+486:     }
+487: 
+488:     /// Caps a speculative `Vec` pre-allocation while a budget is active, so a
+489:     /// budgeted cross-product cannot allocate its full (possibly astronomical)
+490:     /// output up front before the first cooperative check fires. Honours BOTH the
+491:     /// row cap and (via `byte_width`) the byte cap — whichever admits fewer rows.
+492:     #[inline]
+493:     pub(crate) fn cap_alloc(cap: usize) -> usize {
+494:         let a = ACTIVE.with(|c| c.get());
+495:         if !a.on {
+496:             return cap;
+497:         }
+498:         // Rows the byte cap still admits, given the current width and accrued extra.
+499:         let by_bytes = a
+500:             .max_bytes
+501:             .saturating_sub(a.extra_bytes)
+502:             .checked_div(a.byte_width.max(1))
+503:             .unwrap_or(usize::MAX)
+504:             .saturating_add(1);
+505:         cap.min(a.max_rows.saturating_add(1)).min(by_bytes).min(1 << 20)
+506:     }
+507: 
+508:     // [GPT-6 Astra] Reentrant scopes must restore the complete owning frame.

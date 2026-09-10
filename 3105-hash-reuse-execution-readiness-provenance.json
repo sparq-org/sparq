@@ -1,0 +1,38 @@
+{
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "source_clean": true,
+  "historical_default_cfgtest_exec_source_equals_current": true,
+  "exec_sha256": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+  "core_substrate_introspect_root_manifests_changes_d41_to_main": [],
+  "historical_command_source_sha256": "6aa189ab4327fb839d176333e3e1c3dec4913d0c7c7d6c2cc25a210abf7a271c",
+  "historical_result_source_sha256": "6f9dd2a476775a21c43754394ae74735513bbecec0d0e9a4bc87336236b3fc8b",
+  "current_rustc": {
+    "path": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+    "bytes": 412504,
+    "sha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+    "version_saved": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+    "version_observation": "Saved version receipt; compiler not executed in this phase. Binary hashed now."
+  },
+  "cached_default_cfgtest_binary": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/sparq_engine-9defe72fdef0ac5a",
+    "bytes": 7995584,
+    "sha256": "255b242546fad2fce6f95c6076424f94ea804dcbeac61a5c29b754291f4227e7",
+    "has_new_hash_witness": false
+  },
+  "edition": "2021 (actual recorded --test invocation, workspace Cargo.toml inherits2021)",
+  "profile": "O3,panic unwind,no LTO,codegen16,release debugfalse,strip debuginfo; jobs1,incremental0/offline recorded",
+  "engine_features": [
+    "default",
+    "digest",
+    "parallel",
+    "regex"
+  ],
+  "core_dev_feature_unification": [
+    "default",
+    "parallel",
+    "mmap",
+    "dict-spill"
+  ],
+  "feature_limit": "No compact-index/algebra-rewrite/zk in recorded default cfgtest; extra core dev mmap/dict-spill explicitly qualified, not pure core-default-only."
+}

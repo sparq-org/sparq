@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-10T15:50:12.935787+00:00",
+  "pr": 6482,
+  "merged_at": "2026-09-10T15:45:55Z",
+  "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "reviewed_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "reviewed_tree_identical": true,
+  "all8merge_group_workflows_success": true,
+  "gate_check": 102931321262,
+  "gate_app": 15368,
+  "gate_completed_at": "2026-09-10T15:45:22Z",
+  "changed_paths": [
+    "crates/sparq-bench/src/update_fuzz.rs"
+  ],
+  "engine_source_unchanged_from459": true,
+  "postmerge_proof_pending": true,
+  "issue5183_kept_open": true
+}

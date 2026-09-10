@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T15:52:24.719587+00:00",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 33087,
+  "session_state": "completed_collected",
+  "input_sha256": "e31f775ee3a322f3a91d9720dd94adead0f20632234bf8cb52c35038357a72af",
+  "output_sha256": "a86d35bc873377261cda0db924aea35d8d5d751ed07ddea44ec89f165f20364a",
+  "verdict": "CONDITIONAL",
+  "implementation_admitted": false,
+  "runtime_witness_admitted": false,
+  "disposition": "Source-onlyfollowup onF1/F2 cappedroutingandbudget, F3cfg/BUILT, F4preregisteredfiller/seedassertions; F5-F7 benefitbound/crowdout/deferredcharge beforeimplementation. F8-F10retainimmutabletable/orderedkeyidentity/commonadapter obligations. No query/build/controlrun yet.",
+  "corrections": "Reviewresource-stop usedprior2.016GB observation; later4.15GB observations improve capacity but do notclearpath/designblockers. Negativecacheinvalidationcontrol belongsfuturecandidatephase; baselinecurrentmain witness cannotdropnonexistenthashcache. F5universalboundmustbequalifiedperstep/twopatternvsfanout, notassumed.",
+  "next_agent": "ExistingAstra postmerge_ci boundedsourcefollowup inprogress; no newOpuscall orbuildauthorized."
+}

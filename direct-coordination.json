@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T15:43:18.143012+00:00",
+  "updated_at": "2026-09-10T15:55:37.157413+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -50,9 +50,9 @@
     "latest_cleanup": "Only two cleancompletedmergedworktrees4246/6468 removed afterfreshGitHubstate/head/status verification;branchesretained;source-admission/completed-worktrees-removed.json. Recovered~6.55GBfree;no sharedcheckout/production/cacheprune."
   },
   "live_main": {
-    "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-    "observed_at": "2026-09-10T13:32:02.593829+00:00",
-    "evidence": "direct-6480/admission/main459-ref-1329.json"
+    "oid": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "observed_at": "2026-09-10T15:52:24.719587+00:00",
+    "evidence": "direct-5183/admission/queue6482-watch1547.json"
   },
   "rules": {
     "required_check": "gate",
@@ -66,7 +66,7 @@
   "active_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "pr6482_protected_merge_group_awaiting_checks",
+    "state": "pr6482_merged_postmerge_validation_pending",
     "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -91,8 +91,8 @@
       "body_sha256": "f9ace93afb7a9a5502a5778a27ea083704938260900644d1a6363fa209adf527",
       "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
-    "next_scope": "Watch existing merge group f50b5049; all20 actualLinuxmodule tests andMSRV/Clippy/privacy passed onfe328, realOpusreview complete, Copilotaddressed/resolved, normalqueueposition1. No furtherenqueue/review mutation. Aftermerge verifyrelevantmainCI thenclose5183 withqualifieddiagnosis.",
-    "agent_current_task": "ExistingAstra metadata-only warm-profile readiness for3105 fixedwitness (~3min), no builds/network/sourceedits. ActualOpus5xhigh designreview running execsession33087.",
+    "next_scope": "Merged6482at15:45:55 mainf50b5049; all8MGworkflows success, exactgate15368 verified, reviewedtreeidentical. Watch relevantnewmainCI/matrix/gate/fuzz beforeclosing5183; no current6482queueentry or mutationrequired.",
+    "agent_current_task": "One actualengine diagnosticbuild+onefixedbaselinequery; bounds480s256MiB/jobs1/offline/continuous2GiB, no retry. Collectfrozenreportbeforeanynewwork.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -333,8 +333,8 @@
     },
     "merge_queue": {
       "at": "2026-09-10T15:23:30.137890+00:00",
-      "position": 1,
-      "state": "AWAITING_CHECKS",
+      "position": null,
+      "state": "MERGED",
       "head": "fe3284199db0831f353d2ae401b8c69472764904",
       "merge_group": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
       "reviewed_tree_identical": true,
@@ -393,6 +393,13 @@
       ],
       "policy": "Normalprotectedenqueue exacthead jumpfalse completed;do notreplay/cancelMG. ALLGREENandgate15368 unchanged.",
       "observed_at": "2026-09-10T15:43:18.143012+00:00"
+    },
+    "merge_result": {
+      "merged_at": "2026-09-10T15:45:55Z",
+      "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+      "root_verification": "direct-5183/admission/merge6482-root-verification.json",
+      "gate_check": 102931321262,
+      "all8mg_success": true
     }
   },
   "prs": {
@@ -919,10 +926,10 @@
     }
   },
   "next_actions": [
-    "Watch existing6482 MG f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464 andqueue state; no duplicateenqueue/reruns. CoreCI34495072210, matrix34495072368, aggregate34495071975.",
-    "Collect existingOpus33087 withoutrelaunch, andexistingAstra metadata-onlyexecution-readiness. Resolve designfindings beforefixedwitness; preserve480s256MiBofflinejobs1 andstablecontinuous2GiBfloor. No implementation admitted.",
-    "After6482 protectedmerge, verifyactualrelevantpostmergeCI thenlink resolvingPRandclose5183; keep separate6483 coveragefollowup open pendingruntimewitness/decision.",
-    "RegistryActionsOFF,10minute heartbeat ACTIVE, releasesheld. Preserve6049/6055/registry2305/canon/EC2holds, ALLGREENandratefailclosed."
+    "Watchactualmainf50 CI34497774423/matrix34497774420/gate34497774057/fuzz34497774415;6482alreadymergedall8MGgreen. Preserveevidence; no unnecessaryrerun.",
+    "CollectexistingAstra onebaselinewitness in direct-3105/hash-reuse-fixed-witness, verifyprovenance/counters/bag/limits; no duplicatebuild. ActualOpus33087completedCONDITIONAL; F1-F4sourcecleared, F5-F7remainimplementationhold. Decidecostpolicyorstop beforefeatureimplementation.",
+    "Afterrelevantpostmergeproof, link6482andclose5183 withqualified8caseclassification; separate6483runtimecoveragegap remainsopen.",
+    "RegistryActionsOFF/heartbeatACTIVE/releasesheld. Preserve6049/6055/registry2305/canon/EC2holds,ALLGREENandratefailclosed."
   ],
   "followup_lane": {
     "issue": 6480,
@@ -1366,16 +1373,12 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-10T15:23:30.137890+00:00",
-    "main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-    "queue_pr": 6482,
-    "queue_position": 1,
-    "mergegroup": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
-    "reviewed_tree_identical": true,
+    "at": "2026-09-10T15:52:24.719587+00:00",
+    "main": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "pr": 6482,
+    "state": "MERGED15:45:55; all8MGworkflows passed; newmainCIpending",
     "registry_actions_enabled": false,
-    "release_authorized": false,
-    "current_work": "Protected6482MG existingchecks; boundedAstra3105 source-readiness",
-    "evidence": "direct-5183/admission/mg6482-first-runs.json"
+    "release_authorized": false
   },
   "registry_pause": {
     "enabled": false,
@@ -3692,58 +3695,17 @@
     }
   },
   "postmerge_watch": {
-    "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
-    "pr": 6481,
-    "observed_at": "2026-09-10T14:03:10.310009+00:00",
-    "evidence": "direct-6480/admission/main459-runs-1344.json",
-    "state": "Main459CI,matrixandaggregateallSUCCESS;singlepoll-caprecoverycompleted. Changed6480surfacesverifiedearlier; registryOFF/releasesheld.",
-    "changed_surface_checks": "js/docs/supply verifiedsuccess;6480closed",
-    "release_authorized": false,
-    "unresolved_noncore_failures": [
-      "batchmergeintentionalOFFguard",
-      "releaseplzknown6474",
-      "scheduledreviewalarm34476250771failed: causeuntriaged"
-    ],
-    "job_observation": {
-      "ci": {
-        "success": 33,
-        "skipped": 6
-      },
-      "matrix": {
-        "success": 56,
-        "skipped": 1
-      }
+    "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+    "pr": 6482,
+    "state": "pending",
+    "runs": {
+      "CI": 34497774423,
+      "feature_matrix": 34497774420,
+      "ci_summary": 34497774057,
+      "fuzz": 34497774415
     },
-    "aggregate": "completed_success_attempt2",
-    "fuzz": {
-      "run": 34475427065,
-      "event": "push",
-      "status": "completed",
-      "conclusion": "success",
-      "scope": "Workflowresultverified, notrawfuzztargetlogre-audit"
-    },
-    "CI": {
-      "run": 34475427098,
-      "status": "completed",
-      "conclusion": "success"
-    },
-    "feature_matrix": {
-      "run": 34475427058,
-      "status": "completed",
-      "conclusion": "success"
-    },
-    "triage_directory": "direct-6480/main459-gate-failure",
-    "recovery": {
-      "run": 34475426945,
-      "prior_attempt": 1,
-      "session": 99564,
-      "session_state": "completed_collected",
-      "receipt": "direct-6480/admission/gate-recovery-receipt.json",
-      "root_verification": "direct-6480/admission/main459-gate-failure-root-verification.json",
-      "policy": "Attempt2SUCCESS already verified. No additional recovery or rerun warranted without a new incident.",
-      "result": "attempt2SUCCESS2026-09-10T13:59:30Z"
-    },
-    "aggregate_evidence": "direct-6480/admission/gate-recovery-attempt2-first.json"
+    "first_snapshot": "direct-5183/admission/mg6482-runs1547.json",
+    "known_advisory_observation": "batch34497773949 failureobserved; priorregistryOFF guard causeknown but thisrunnotyetfreshlogverified. No retries. Release6474held."
   },
   "classifier_watch": {
     "issue": 6468,
@@ -4093,25 +4055,88 @@
   },
   "performance_readiness": {
     "issue": 3105,
-    "state": "source_plan_verified_actual_opus_design_review_pending",
+    "state": "bounded_baseline_witness_authorized_agent_running",
     "source_plan": "direct-3105/hash-reuse-source-plan",
     "manifest_sha256": "dbe10cdac941dc52ceb1db2f611d9b672752ec1402037f249aa7f508855c9c49",
     "root_verification": "direct-3105/hash-reuse-source-plan-root-verification.json",
     "design_review": {
       "session_id": 33087,
       "kind": "exec_command",
-      "state": "running_do_not_restart",
+      "state": "completed_collected_do_not_poll_or_restart",
       "model": "claude-opus-5",
       "effort": "xhigh",
       "input": "direct-3105/admission/opus-hashreuse-design-input.md",
       "input_sha256": "e31f775ee3a322f3a91d9720dd94adead0f20632234bf8cb52c35038357a72af",
       "input_bytes": 91813,
       "output": "direct-3105/admission/opus-hashreuse-design-review.json",
-      "completion": "direct-3105/admission/opus-hashreuse-design-completion.json"
+      "completion": "direct-3105/admission/opus-hashreuse-design-completion.json",
+      "result": "direct-3105/admission/opus-hashreuse-design-result.json",
+      "root_disposition": "direct-3105/admission/opus-hashreuse-design-root-disposition.json",
+      "output_sha256": "a86d35bc873377261cda0db924aea35d8d5d751ed07ddea44ec89f165f20364a",
+      "verdict": "CONDITIONAL"
     },
     "decision": "No implementation/build admission. Fixed2048seed/64RHS/limit65query path+memoryaccountingstatic only. Actualqueryandcountsnotrun.",
     "agent": "/root/postmerge_ci",
-    "agent_task": "metadata-only compatiblewarmprofile readiness; no build/harnessconstruction"
+    "agent_task": "One actualengine diagnosticbuild+onefixedbaselinequery; bounds480s256MiB/jobs1/offline/continuous2GiB, no retry. Collectfrozenreportbeforeanynewwork.",
+    "prior_scan_and_hash_readiness": {
+      "issue": 3105,
+      "at": "2026-09-10T00:28:18.762567+00:00",
+      "source": "Boundedread-onlyAstra xhigh report; no execution/measurementclaim",
+      "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "current_seam": "crates/sparq-engine/src/exec.rs4156-4297; RHSscan4239inside1024/65536/restblocks. hash_join8628maybuildsmallerside.",
+      "finding": "RepeatedRHSscansstillpresent. Perblockactualrows canchangebindadmission/sort/buildside, so preserveplanner/admission andstartwithlazyunchangedscanreuseonly.",
+      "proposed_witness": "Actualmodule >65536seedrows,two sharedvars topreventbind,residual arithmeticFILTER toavoidtry_count; ASKfalse/LIMITmiss; proposed3baseline vs1reusescan count NOTYETMEASURED. Perblockcacheinvalidatingcontrolmustkillassertion.",
+      "semantic_obligations": [
+        "bags/repeatedvariableconsistency",
+        "truthfulsortmetadata",
+        "block-specificbinddecisions",
+        "residualfilters",
+        "row/budget/cancellation",
+        "no eagerunusedRHS or deepclonecachedrows"
+      ],
+      "history_limit": "Localrefs/history only; issuecrossreferencesempty. NeedliveopenPRcensusbeforemutating.",
+      "no_ec2_required": true,
+      "no_files_or_build_by_agent": true,
+      "state": "completed; implementationlane3105started",
+      "artifact": "direct-6475/source-admission/perf3105-readiness.json",
+      "hash_reuse_followup": {
+        "state": "paused_readonly_partial",
+        "directory": "direct-3105/hash-reuse-readiness",
+        "manifest_sha256": "ee41ea30e7a967dbb44e3ad39e37edba39a1690a0234fe19841a14a08fa69fe5",
+        "finding": "OnlyalreadychosenRHS-build/hashkeyidentity seamplausible; preserveperblockplanning/ownership/order and4MiBhonestaccounting. No nonvacuouswitnessyet; existing70000scancaseinsufficient.",
+        "no_implementation_go": true
+      }
+    },
+    "execution_readiness": {
+      "directory": "direct-3105/hash-reuse-execution-readiness",
+      "manifest_sha256": "6afc37d11b98e74ea105cb6ac2b6146f8e12029eeda25de3206db056315bad01",
+      "root_verification": "direct-3105/hash-reuse-execution-readiness-root-verification.json",
+      "implementation_or_build_admitted": false
+    },
+    "design_followup": {
+      "directory": "direct-3105/hash-reuse-design-followup",
+      "manifest_sha256": "e4a0fc6b3749065e18dd636451ad8ae39be943e03897aa803dd962073b3b5483",
+      "files": 8,
+      "decision": "F1-F4 cleared/preregistered beforefirstexecution; F5-F7remainimplementationhold"
+    },
+    "runtime_witness": {
+      "directory": "direct-3105/hash-reuse-fixed-witness",
+      "agent": "/root/postmerge_ci",
+      "state": "authorized_running_do_not_duplicate",
+      "admission": "direct-3105/admission/hash-reuse-baseline-admission.json",
+      "limits": {
+        "seconds": 480,
+        "new_allocated_bytes": 268435456,
+        "start_free_bytes": 2214592512,
+        "continuous_free_bytes": 2147483648,
+        "builds": 1,
+        "filtered_test_runs": 1,
+        "jobs": 1,
+        "offline": true
+      },
+      "source": "Currentmainf50 engine identicalto459/cleanfe328; diagnosticcopy only",
+      "implementation_admitted": false
+    }
   },
   "monitoring_followups": {
     "generator_labels": {

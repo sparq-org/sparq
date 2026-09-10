@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-10T15:55:37.157413+00:00",
+  "manifest_sha256": "e4a0fc6b3749065e18dd636451ad8ae39be943e03897aa803dd962073b3b5483",
+  "files_verified": 8,
+  "source_findings": "Binarycappedgate rejects only>=3cyclicpatterns; exactly2enter. Unlimitedbudget installsactivefalse. Actualcfg/BUILT andobservedpathassertions preregistered. Q3136/P2048widerestimate margin registered beforeanyruntime.",
+  "runtime_admission": "One diagnosticbaselinework-countwitness authorized; no hashreuseimplementation.",
+  "limits": {
+    "seconds": 480,
+    "new_allocated_bytes": 268435456,
+    "start_free_bytes": 2214592512,
+    "continuous_free_bytes": 2147483648,
+    "builds": 1,
+    "filtered_test_runs": 1,
+    "jobs": 1,
+    "offline": true
+  },
+  "profile": "Directrustc--test actualengine sourcecopy, recordedRust1.97.1edition2021O3unwindnoLTOcodegen16defaultprofile/17externlibs. Verifyhashes/sourcefeaturesbeforecompile; no Cargo colddeps orreimplementation.",
+  "resource_basis": "15:44:51 ~4.145GB,15:45:44 ~4.153GB,15:53:06 7465234432B; newstartmustfreshlyverifyandmonitorfloor.",
+  "unresolved_implementation_findings": [
+    "F5actualbenefit/time share unknown",
+    "F6scanpriority/crowdout",
+    "F7deferredcharge/lifetime"
+  ],
+  "stop_policy": "Profile/dependency/build/path/resource mismatchstops; no correction/retry/tuning underthisgrant. No baselinecachemutantfeatureexists. Preserveoriginalsource/branch, rawprovenance/results; no performanceclaim."
+}

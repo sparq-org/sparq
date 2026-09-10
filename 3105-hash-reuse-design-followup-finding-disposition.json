@@ -1,0 +1,45 @@
+{
+  "F1": {
+    "status": "CLEARED_IN_SOURCE",
+    "evidence": "exec.rs7715-7717: !(patterns.len()>=3 && bgp_is_cyclic(patterns)). Exactlytwo patterns short-circuit the RHS of&&, so cyclicity is not called and binary=true. Full GYO helper8778-8841 supplied: duplicate equal edges are also removable; no rejection is established by two shared variables."
+  },
+  "F2": {
+    "status": "CLEARED_IN_SOURCE",
+    "evidence": "QueryBudget derivesDefault(allOptionfieldsNone),unlimited=default(lib275,312). install sets on as OR of optionaldeadline/row/byte/cancel(213-240),so allNone->false. active reads on(484). with_budget installs evenunlimited thenrestorespreviousscope. exhausted returnsfalse andcap_alloc returnsrequestedcap when!on. Thus current ordinaryquery cancacheRHS. Sourceproofdoesnotreplaceobservedscan/activeassertion."
+  },
+  "F3": {
+    "status": "PREREGISTERED",
+    "evidence": "cfg notwasm/algebra-rewrite/zk; actual six-permutation BUILT assertion covers corecompact-index without an unrecognized engine feature. Wrongconfiguration must not become a vacuouspassingtest. rootcanselectvalidprofile; no gateweakening."
+  },
+  "F4": {
+    "status": "PREREGISTERED",
+    "evidence": "Q filler3072 instead1985; P2048,Q3136,margin1088. Exact expected observedestimates+seedassertion. All64passingrows/query/bag/buildcountunchanged. No runtimeexecuted."
+  },
+  "F5": {
+    "status": "QUALIFIED_SOURCE_CEILING",
+    "per_step": "At most3seedblocks, so atmost2skippedtableconstructions perpatternstep withunchangedidentity; notatmost2perquery for multipleRHS. Acrossm patterns loose invocationbound2*(m-1)beforeidentity/capacity/buildsideconstraints.",
+    "two_pattern": "Running left is seedslice: sizes1024,64512(N>65536),remainderN-65536. FirstblockRHSbuild needsR<1024; reuseacrossall3canavoid atmost2R<=2046insertvisits. If onlyblock2/3chooseRHS, R<min(64512,remainder), so atmost64511insertvisits skipped. Thesearetable-rowvisits, notkeyhashcost/partitiontagscancost/time.",
+    "fanout": "For3+patterns earlierjoinfanout canmake runningresultmuch largerthan seedblock; RHSbuildsize isboundedby actualrunningrows andchargedretentionstorage, notuniversally1024/65536. Multiplepatterns mayeachsavebuilds;4MiBsharedstoragefurtherconstrains them.",
+    "fixed_witness": "Proposed2blocks/64RHS hasonepotential64-rowbuildsaving, while2048probe rowsandscansstillrun. It proves repeatedworkonly; no runtime-share orlatencybenefit canbecomputedfromsource."
+  },
+  "F6": {
+    "status": "REAL_TRADEOFF_IMPLEMENTATION_HOLD",
+    "policy_feasibility": "Scan-first priority is feasible by evicting/refunding allretainedhash state before a requiredRHSscan, and immediately dropping a cache entry on currentbuildside/key/kind mismatch or non-hashstrategy. No hash may change GOO/bind/merge/buildside choice. This is deliberatelyconservative andmaydestroyreuse acrossmultiplepatterns.",
+    "remaining": "A largerindexedslottype itselfreducesexistingrow allowance even aftertable refunds. Strictscan-admission parity isnotproved. A singlefixed stackrecord or narrower two-patternscope couldavoid newper-patternheapmetadata, but neither isselected/implemented here. A separatehardhashsubcapalone doesnoteliminate4MiBrowcrowdout.",
+    "control": "Latercandidate must keep existing changing-sort and 5/8RHS bounded-retention scan counts whilehashcacheenabled; also spare-capacity boundary fixturewhereoldrowchargefitsbutextra retainedhashwoulddeny it. Omit requiredrefund => actualrescan/countorallowancefailure. Noneexecutednow."
+  },
+  "F7": {
+    "status": "REAL_TRADEOFF_IMPLEMENTATION_HOLD",
+    "reason": "The originaltable drops when hash_join_ref returns. Deferringcharge/publicationuntil satisfied isknown requires keepingtable(s) alive acrosslaterjoins/residualfilters/accumulation, beforethechargehasprovedfit. Naivelycollectingpendingtables createsnew unaccounted coexistence; discardingand rebuildinglater addswork. Thereforedonotblindlyapplyend-of-blocksuggestion.",
+    "bounded_option": "Neverpromoteafirstblocktable. Onlyconsiderpromotionon a laterblock with anotherblockknown toremain; preserveper-step transientlifetime andaccountbeforekeeping. This avoidsfirstblockaccounting/pendingretention, butcannotbenefit currenttwo-blockwitness and permitsatmostblock2->3reuseperstep. Notadoptedwithoutengineeringassessment.",
+    "other_narrow_lead": "A separatelyproved full-two-column unique scan key could make Key/Posting spillinspection unnecessary, butthatwouldbeanew narrowereligibilitycontract, notcurrentlyprovedgeneralcachepolicy. No implementation authorized."
+  },
+  "F8_F9_F10": {
+    "status": "RETAIN_DESIGN_REQUIREMENTS",
+    "rules": [
+      "Cachedmaps immutableaftercharge; neverinsertafterpublication.",
+      "Identityusesexactorderedbuild-columnprojectionrecomputedfromcurrentprobevariables; currentprobeindices/outputlayoutremainfresh.",
+      "Useoneexistinghash_join_refbodywithoptionalprivatecachecontext/preparation seam; no copiedparallelstrategybody. Preserveoriginaladapterforordinaryuncachedcallers."
+    ]
+  }
+}

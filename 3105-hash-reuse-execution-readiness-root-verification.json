@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T15:52:24.719587+00:00",
+  "manifest_sha256": "6afc37d11b98e74ea105cb6ac2b6146f8e12029eeda25de3206db056315bad01",
+  "files_verified": 7,
+  "result": "Frozen metadata evidenceverified. CompatibleRust1.97.1edition2021O3/unwind/noLTO/codegen16 enginecfgtestprofile and17presentdirectlibs reported; fullCargo/transitiveclosureunverified.",
+  "resources": "Agentfinal15:44:51 4145250304B/root15:45:44 4153217024B. No buildadmitted; pathreviewpending."
+}

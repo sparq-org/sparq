@@ -1,0 +1,38 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "decision": "COMPATIBLE_WARM_PROFILE_FOUND; EXECUTION_NOT_READY",
+  "initial_disk_free_bytes": 1905049600,
+  "initial_observed_utc": "2026-09-10T15:42:48.365918+00:00",
+  "final_disk_free_bytes": 4145250304,
+  "final_observed_utc": "2026-09-10T15:44:51.617373+00:00",
+  "limits": "This phase is metadata/source-only; no build, run, benchmark, cleanup or network. Disk observed initial/final only. New report does not authorize execution.",
+  "warm_evidence": {
+    "default_engine_cfgtest_binary_bytes": 7995584,
+    "all_recorded_direct_extern_libraries_present": 17,
+    "compatible_test_profile_id": 11390895246410217957,
+    "historical_default_filtered_build_seconds": 41.096949100494385,
+    "historical_growth_above_start_bytes": 6643712,
+    "historical_label": "Old6476 nested-budget suite at source byte-equal for current exec; not a new witness or new performance promise."
+  },
+  "prospective_paths": [
+    {
+      "route": "Existing in-tree Cargo --release --locked --offline -p sparq-engine --lib with exact overrides and one new filtered cfg(test) witness",
+      "assessment": "Plausible within480s/256MiB from compatible binaries and17directlibs, but Cargo freshness/fulltransitive closure is NOT established by metadata. New worktree source paths and current feature unification can invalidate local-crate artifacts. Do not claim cold-dependency-free cargo build yet."
+    },
+    {
+      "route": "One direct rustc --test build of current engine module tree using recorded compatible dependency refs",
+      "assessment": "Could avoid dependency builds and exercise actual cfg(test) module, but requires explicitly authorized driver/path adaptation and exact dependency/source verification; not ordinary cargo CI. No command or harness constructed this phase."
+    }
+  ],
+  "blockers": [
+    "Initial free space was below2GiB; final observation recovered to4145250304bytes. The two-point observation does not establish stable reserve or authorize execution; root must freshly decide admission. Compatible artifacts alone do not authorize a build.",
+    "Recorded engine executable lacks proposed new witness/instrumentation; running it cannot prove new RHS hash build counts.",
+    "Full transitive dependency/fingerprint closure and compiler output growth for the new source location remain unverified. No cargo invocation or shared registry scan was used."
+  ],
+  "bounds_for_later": "Retain proposed480s total,256MiB additional outputs/target growth,one process/jobs1,incremental0/offline; confirm stable>=2GiB+64MiB at admission and>=2GiB continuously. Stop on dependency/profile miss rather than expanding. Root decides after actualOpus and stable reserve.",
+  "production_changes": false,
+  "builds_or_test_runs": 0,
+  "github_reads": 0,
+  "pending_commands": false,
+  "disk_correction": "The initial draft text incorrectly described both observations as belowfloor. Numeric observations were accurate. Corrected before final handoff; draft retained."
+}

@@ -1,0 +1,30 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "time": "2026-09-10T15:52:07.093049+00:00",
+  "decision": "PATH_CLEAR_FOR_FUTURE_BASELINE_WITNESS; IMPLEMENTATION_HOLD_ON_F6_F7",
+  "source_main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "new_main_reported_by_root": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "source_scope": "Root reports newmainwhole-treeequalsreviewedfe328; localfe328 runtimefiles equal459, onlybenchsource differs. No freshnetworkreadneeded.",
+  "F1_F2": "Bothclearedsource; binarygateexplicitlyrequires>=3patterns andunlimitedbudgetinstalls on=false.",
+  "witness_revision": "PredeclaredQest3136,P2048 with3072fillers; query and64-rowbag/two-buildoracleunchanged.",
+  "material_unresolved": "No universalhashreusebenefit/timingshareproved. Scan-firstpriorityanddeferredaccounting needa consciouslynarrowpolicybeforeproductioncacheimplementation; naiveend-of-blockpendingtablesconflictwithmemoryintent. Initialbaselinecountwitnessdoesnotrequirechoosingthatpolicy.",
+  "supplied_missing_context": [
+    "completebgp_uses_binary+GYOcyclicity",
+    "QueryBudgetDefault/unlimited,privateinstaller/with_budget,active/exhausted/check/cap_alloc,Limitswhy/snapshot",
+    "viewdefaultstate/default_is_empty",
+    "dictinlineconstants/internselection/is_inline;inline_pass_values",
+    "probe_key_eq",
+    "existingcappedstep/workobserverandbaghelper",
+    "project_bindings+slice_bindings"
+  ],
+  "remaining_evidence": [
+    "Actualcfg/BUILT,parser/filter/estimates/seed/kernel/buildside/tablelen/count/bag observations: NOT EXECUTED.",
+    "Any spill/64partition/probevar-change/crowdout control iscandidate-stageonly.",
+    "Exactlatency/heapbenefit andsourcecachefullclosure remainunverified."
+  ],
+  "prior_review_sha256": "439ef176d480cb0ee2554d6b742cc33df04b076a9a935cf02b92f76c943d0db7",
+  "production_changes": false,
+  "network_calls": 0,
+  "builds_tests_models": 0,
+  "commands_pending": false
+}

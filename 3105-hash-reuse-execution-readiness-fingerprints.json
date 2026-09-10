@@ -1,0 +1,633 @@
+[
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-9defe72fdef0ac5a/test-lib-sparq_engine.json",
+    "sha256": "b8afe1eba50992bb42da98e1de28094fd2e44cad5553455d97acf95d1847aeec",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\"]",
+      "declared_features": "[\"algebra-rewrite\", \"antijoin-static-decline\", \"cluster-materialize\", \"cs-anchor-incidence\", \"cs-planner\", \"default\", \"digest\", \"dp-planner\", \"explain-json\", \"id-filter-fastpath\", \"parallel\", \"params\", \"paths\", \"persistent-stats\", \"query-solution\", \"regex\", \"result-cache\", \"semijoin-bitmap\", \"serialize-rdf\", \"service\", \"service-local\", \"spatial-exact-pushdown\", \"spqcprm2\", \"streaming-serialization\", \"templates\", \"topk-lazy-strkey\", \"txn\", \"value-join\", \"vectorized\", \"window-functions\", \"yannakakis\", \"zk\"]",
+      "target": 14850241637420059780,
+      "profile": 11390895246410217957,
+      "path": 17281109676983326509,
+      "deps": [
+        [
+          466357198569416633,
+          "uuid",
+          false,
+          15664809791377427057
+        ],
+        [
+          613246011889145985,
+          "regex",
+          false,
+          16665736862714572405
+        ],
+        [
+          896379737312318455,
+          "md5",
+          false,
+          5813389962692752192
+        ],
+        [
+          2295442787663447226,
+          "smallvec",
+          false,
+          11708948945115789777
+        ],
+        [
+          4091053499939819895,
+          "sha2",
+          false,
+          14667902832278528226
+        ],
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          6400797066282925533,
+          "ryu",
+          false,
+          195855427173251183
+        ],
+        [
+          7565171189602444183,
+          "sparq_core",
+          false,
+          10474248473541300947
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ],
+        [
+          8066638135757694999,
+          "proptest",
+          false,
+          4597622386733134256
+        ],
+        [
+          8267409410152229463,
+          "sparq_substrate",
+          false,
+          10547461308426491096
+        ],
+        [
+          8578586876803397814,
+          "serde_json",
+          false,
+          13905562870348672800
+        ],
+        [
+          10375932462678898870,
+          "spargebra",
+          false,
+          7510925248783219273
+        ],
+        [
+          11910974697091955563,
+          "rayon",
+          false,
+          9318714795024320300
+        ],
+        [
+          12412381058628540656,
+          "sparq_introspect",
+          false,
+          11361110325957617975
+        ],
+        [
+          13058639913598723517,
+          "sha1",
+          false,
+          6821323692014376005
+        ],
+        [
+          16204031616616193915,
+          "oxiri",
+          false,
+          18057972692383878043
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-engine-9defe72fdef0ac5a/dep-test-lib-sparq_engine",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-51f4619e8a6814bd/test-lib-sparq_engine.json",
+    "sha256": "48650c8838114b59f493a013348b674ce431bd3fb0e674d62016cfa0a43d351e",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[]",
+      "declared_features": "[\"algebra-rewrite\", \"antijoin-static-decline\", \"cluster-materialize\", \"cs-anchor-incidence\", \"cs-planner\", \"default\", \"digest\", \"dp-planner\", \"explain-json\", \"id-filter-fastpath\", \"parallel\", \"params\", \"paths\", \"persistent-stats\", \"query-solution\", \"regex\", \"result-cache\", \"semijoin-bitmap\", \"serialize-rdf\", \"service\", \"service-local\", \"spatial-exact-pushdown\", \"spqcprm2\", \"streaming-serialization\", \"templates\", \"topk-lazy-strkey\", \"txn\", \"value-join\", \"vectorized\", \"window-functions\", \"yannakakis\", \"zk\"]",
+      "target": 14850241637420059780,
+      "profile": 11390895246410217957,
+      "path": 17281109676983326509,
+      "deps": [
+        [
+          466357198569416633,
+          "uuid",
+          false,
+          15664809791377427057
+        ],
+        [
+          2295442787663447226,
+          "smallvec",
+          false,
+          11708948945115789777
+        ],
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          6400797066282925533,
+          "ryu",
+          false,
+          195855427173251183
+        ],
+        [
+          7565171189602444183,
+          "sparq_core",
+          false,
+          10474248473541300947
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ],
+        [
+          8066638135757694999,
+          "proptest",
+          false,
+          4597622386733134256
+        ],
+        [
+          8267409410152229463,
+          "sparq_substrate",
+          false,
+          10547461308426491096
+        ],
+        [
+          8578586876803397814,
+          "serde_json",
+          false,
+          13905562870348672800
+        ],
+        [
+          10375932462678898870,
+          "spargebra",
+          false,
+          7510925248783219273
+        ],
+        [
+          11910974697091955563,
+          "rayon",
+          false,
+          9318714795024320300
+        ],
+        [
+          12412381058628540656,
+          "sparq_introspect",
+          false,
+          11361110325957617975
+        ],
+        [
+          16204031616616193915,
+          "oxiri",
+          false,
+          18057972692383878043
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-engine-51f4619e8a6814bd/dep-test-lib-sparq_engine",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-46d925d7c181d085/test-lib-sparq_engine.json",
+    "sha256": "2ad7500761e6cce30a8e3bedf93d36b7f44a29fd4ed2b7912594b0d18005ceb4",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"default\", \"digest\", \"parallel\", \"regex\", \"service-local\"]",
+      "declared_features": "[\"algebra-rewrite\", \"antijoin-static-decline\", \"cluster-materialize\", \"cs-anchor-incidence\", \"cs-planner\", \"default\", \"digest\", \"dp-planner\", \"explain-json\", \"id-filter-fastpath\", \"parallel\", \"params\", \"paths\", \"persistent-stats\", \"query-solution\", \"regex\", \"result-cache\", \"semijoin-bitmap\", \"serialize-rdf\", \"service\", \"service-local\", \"spatial-exact-pushdown\", \"spqcprm2\", \"streaming-serialization\", \"templates\", \"topk-lazy-strkey\", \"txn\", \"value-join\", \"vectorized\", \"window-functions\", \"yannakakis\", \"zk\"]",
+      "target": 14850241637420059780,
+      "profile": 11390895246410217957,
+      "path": 17281109676983326509,
+      "deps": [
+        [
+          466357198569416633,
+          "uuid",
+          false,
+          15664809791377427057
+        ],
+        [
+          613246011889145985,
+          "regex",
+          false,
+          16665736862714572405
+        ],
+        [
+          896379737312318455,
+          "md5",
+          false,
+          5813389962692752192
+        ],
+        [
+          2295442787663447226,
+          "smallvec",
+          false,
+          11708948945115789777
+        ],
+        [
+          4091053499939819895,
+          "sha2",
+          false,
+          14667902832278528226
+        ],
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          6400797066282925533,
+          "ryu",
+          false,
+          195855427173251183
+        ],
+        [
+          7565171189602444183,
+          "sparq_core",
+          false,
+          10474248473541300947
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ],
+        [
+          8066638135757694999,
+          "proptest",
+          false,
+          4597622386733134256
+        ],
+        [
+          8267409410152229463,
+          "sparq_substrate",
+          false,
+          10547461308426491096
+        ],
+        [
+          8578586876803397814,
+          "serde_json",
+          false,
+          13905562870348672800
+        ],
+        [
+          10375932462678898870,
+          "spargebra",
+          false,
+          7510925248783219273
+        ],
+        [
+          11910974697091955563,
+          "rayon",
+          false,
+          9318714795024320300
+        ],
+        [
+          12412381058628540656,
+          "sparq_introspect",
+          false,
+          11361110325957617975
+        ],
+        [
+          13058639913598723517,
+          "sha1",
+          false,
+          6821323692014376005
+        ],
+        [
+          16204031616616193915,
+          "oxiri",
+          false,
+          18057972692383878043
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-engine-46d925d7c181d085/dep-test-lib-sparq_engine",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-core-e0ac301aa343ee6c/lib-sparq_core.json",
+    "sha256": "d88655f297c40cfc199a7235037fd5ec95e1d0ec9eee389d9901353f2470504b",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"default\", \"dict-spill\", \"mmap\", \"parallel\"]",
+      "declared_features": "[\"block-bloom\", \"compact-index\", \"default\", \"dict-spill\", \"elias-fano\", \"iri-fast\", \"jsonld\", \"mmap\", \"native-ttl\", \"overlay-deleted-projections\", \"parallel\", \"rdfxml\", \"shared\", \"spqcprm2\"]",
+      "target": 1234445006234167779,
+      "profile": 18412561994239103911,
+      "path": 8965937921966613515,
+      "deps": [
+        [
+          3067591776805002636,
+          "hashbrown",
+          false,
+          9550266586828779013
+        ],
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          7098700569944897890,
+          "libc",
+          false,
+          12359317340858094889
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ],
+        [
+          10255809443331586089,
+          "oxttl",
+          false,
+          6727856287723815005
+        ],
+        [
+          10968047079748790161,
+          "memmap2",
+          false,
+          9840562534755442455
+        ],
+        [
+          11910974697091955563,
+          "rayon",
+          false,
+          9318714795024320300
+        ],
+        [
+          16786944793543832643,
+          "memchr",
+          false,
+          11979336616392858102
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-core-e0ac301aa343ee6c/dep-lib-sparq_core",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-substrate-41ef2d192a9dee1f/lib-sparq_substrate.json",
+    "sha256": "f2a408788ee8039681b38d11087e5eab839787d86c2fa0e40ee74e1f2a82411d",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"compare\", \"join\", \"numeric\", \"rows\"]",
+      "declared_features": "[\"compare\", \"default\", \"join\", \"numeric\", \"overhead\", \"rows\"]",
+      "target": 9506538614174156931,
+      "profile": 18412561994239103911,
+      "path": 1647072598151499636,
+      "deps": [
+        [
+          2295442787663447226,
+          "smallvec",
+          false,
+          11708948945115789777
+        ],
+        [
+          3067591776805002636,
+          "hashbrown",
+          false,
+          9550266586828779013
+        ],
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          7565171189602444183,
+          "sparq_core",
+          false,
+          10474248473541300947
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-substrate-41ef2d192a9dee1f/dep-lib-sparq_substrate",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-introspect-db40efe0fe90a3d8/lib-sparq_introspect.json",
+    "sha256": "a7aedc79d15655dc62675728b29cfcedb9a96f4219f51e2a8ca8d45048e90c86",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"default\"]",
+      "declared_features": "[\"default\", \"numeric-facets\", \"schema-diff\"]",
+      "target": 10792352334060782108,
+      "profile": 12929427910671357780,
+      "path": 7998314304839505771,
+      "deps": [
+        [
+          5793233592449580592,
+          "rustc_hash",
+          false,
+          350509441653713199
+        ],
+        [
+          7565171189602444183,
+          "sparq_core",
+          false,
+          10474248473541300947
+        ],
+        [
+          7766414679125189356,
+          "oxrdf",
+          false,
+          14192324074119854652
+        ],
+        [
+          8578586876803397814,
+          "serde_json",
+          false,
+          13905562870348672800
+        ],
+        [
+          13548984313718623784,
+          "serde",
+          false,
+          6399820476751198630
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/sparq-introspect-db40efe0fe90a3d8/dep-lib-sparq_introspect",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  },
+  {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/proptest-fe58022d97b60f4d/lib-proptest.json",
+    "sha256": "9c05e38a514742119e7e589bad29808c8fa47ba895c95d2882f822eda44d3e9f",
+    "contents": {
+      "rustc": 11722972603611519644,
+      "features": "[\"bit-set\", \"default\", \"fork\", \"regex-syntax\", \"rusty-fork\", \"std\", \"tempfile\", \"timeout\"]",
+      "declared_features": "[\"alloc\", \"atomic64bit\", \"attr-macro\", \"bit-set\", \"default\", \"default-code-coverage\", \"f16\", \"fork\", \"handle-panics\", \"hardware-rng\", \"no_std\", \"proptest-macro\", \"regex-syntax\", \"rusty-fork\", \"std\", \"tempfile\", \"timeout\", \"unstable\", \"x86\"]",
+      "target": 8368435328612947345,
+      "profile": 12929427910671357780,
+      "path": 7195185080339929230,
+      "deps": [
+        [
+          1853952367769002784,
+          "regex_syntax",
+          false,
+          105477814709913683
+        ],
+        [
+          5011653409600970931,
+          "rand",
+          false,
+          14853662169945143928
+        ],
+        [
+          5157631553186200874,
+          "num_traits",
+          false,
+          15312324029906727808
+        ],
+        [
+          5652558058897858086,
+          "rand_chacha",
+          false,
+          1927496517824779250
+        ],
+        [
+          5692597712387868707,
+          "bit_vec",
+          false,
+          10141541129163474224
+        ],
+        [
+          7267120687557614496,
+          "rusty_fork",
+          false,
+          4765373402566687896
+        ],
+        [
+          9519969280819313548,
+          "bit_set",
+          false,
+          6516398636030653967
+        ],
+        [
+          9723370144619655183,
+          "tempfile",
+          false,
+          6862229607397131022
+        ],
+        [
+          10902372339037899502,
+          "bitflags",
+          false,
+          10395202118145159061
+        ],
+        [
+          14014736296291115408,
+          "unarray",
+          false,
+          14743930982273173449
+        ],
+        [
+          15141648066790386875,
+          "rand_xorshift",
+          false,
+          8624786080542563863
+        ]
+      ],
+      "local": [
+        {
+          "CheckDepInfo": {
+            "dep_info": "release/.fingerprint/proptest-fe58022d97b60f4d/dep-lib-proptest",
+            "checksum": false
+          }
+        }
+      ],
+      "rustflags": [],
+      "config": 9396254390672932401,
+      "compile_kind": 0
+    }
+  }
+]

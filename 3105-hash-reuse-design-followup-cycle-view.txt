@@ -1,0 +1,142 @@
+crates/sparq-engine/src/exec.rs full-source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+lines2332-2377
+2332: pub(crate) mod view {
+2333:     use crate::{DatasetView, DefaultGraphMode};
+2334:     use oxrdf::Term;
+2335:     use rustc_hash::FxHashSet;
+2336:     use std::cell::RefCell;
+2337:     use std::sync::Arc;
+2338: 
+2339:     /// The installed view, plus the "inside GRAPH" suspend flag:
+2340:     /// `eval_graph_named` swaps evaluation to the named sub-`Graph`, whose inner
+2341:     /// patterns must NOT be empty-defaulted (only the TOP-LEVEL graph scope is).
+2342:     #[derive(Clone, Default)]
+2343:     pub(crate) struct State {
+2344:         named: Option<Arc<FxHashSet<Term>>>,
+2345:         default_empty: bool,
+2346:         suspended: bool,
+2347:     }
+2348: 
+2349:     thread_local! {
+2350:         static ACTIVE: RefCell<State> = RefCell::new(State::default());
+2351:     }
+2352: 
+2353:     /// Restores the pre-install state when the installing entry point returns
+2354:     /// (also on error/unwind, so a poisoned thread never leaks a stale view).
+2355:     pub(crate) struct Guard(State);
+2356:     impl Drop for Guard {
+2357:         fn drop(&mut self) {
+2358:             ACTIVE.with(|a| *a.borrow_mut() = std::mem::take(&mut self.0));
+2359:         }
+2360:     }
+2361: 
+2362:     pub(crate) fn install(v: &DatasetView) -> Guard {
+2363:         let new = State {
+2364:             named: Some(Arc::clone(&v.named)),
+2365:             default_empty: matches!(v.default, DefaultGraphMode::Empty),
+2366:             suspended: false,
+2367:         };
+2368:         Guard(ACTIVE.with(|a| std::mem::replace(&mut *a.borrow_mut(), new)))
+2369:     }
+2370: 
+2371:     /// Fully suspends the view (named filter AND empty default) for a scope —
+2372:     /// used by the entry points once `dataset::build_active` has folded the view
+2373:     /// into a dataset-clause ACTIVE graph: the restriction is already applied,
+2374:     /// and re-filtering would make a non-visible FROM NAMED graph behave
+2375:     /// differently from an absent one (both must be the EMPTY active graph).
+2376:     pub(crate) fn suspend_all() -> Guard {
+2377:         Guard(ACTIVE.with(|a| std::mem::take(&mut *a.borrow_mut())))
+lines2399-2411
+2399:     }
+2400: 
+2401:     /// `true` when the view's default graph is EMPTY at the current scope —
+2402:     /// false with no view, under `StoreDefault`, or inside a GRAPH pattern.
+2403:     #[inline]
+2404:     pub(crate) fn default_is_empty() -> bool {
+2405:         ACTIVE.with(|a| {
+2406:             let s = a.borrow();
+2407:             s.default_empty && !s.suspended
+2408:         })
+2409:     }
+2410: 
+2411:     /// Snapshot of the installed view for the rayon-parallel expression branches
+lines7711-7721
+7711: 
+7712: /// Whether this conjunctive BGP would be routed to the worst-case-optimal plan
+7713: /// (so the caller knows whether sargable-filter pushdown into the binary scan
+7714: /// applies).
+7715: pub(crate) fn bgp_uses_binary(patterns: &[TriplePattern]) -> bool {
+7716:     !(patterns.len() >= 3 && bgp_is_cyclic(patterns))
+7717: }
+7718: 
+7719: /// Binary-join BGP plan: greedy cardinality ordering with sort-merge joins on the
+7720: /// current sort variable (falling back to hash, then cross product). `pat_filters`
+7721: /// holds an optional pushed-down numeric FILTER per pattern (by original index).
+lines8775-8841
+8775: /// α-acyclicity test via GYO reduction: repeatedly drop variables that occur in
+8776: /// only one pattern and patterns whose variable set is contained in another.
+8777: /// A BGP is cyclic iff anything remains. Cyclic BGPs benefit from WCOJ.
+8778: fn bgp_is_cyclic(patterns: &[TriplePattern]) -> bool {
+8779:     let mut next_id = 0u32;
+8780:     let mut ids: FxHashMap<Variable, u32> = FxHashMap::default();
+8781:     let mut edges: Vec<std::collections::HashSet<u32>> = Vec::new();
+8782:     for tp in patterns {
+8783:         let mut e = std::collections::HashSet::new();
+8784:         for v in [tp_var(&tp.subject), nnp_var(&tp.predicate), tp_var(&tp.object)].into_iter().flatten() {
+8785:             let id = *ids.entry(v).or_insert_with(|| {
+8786:                 let id = next_id;
+8787:                 next_id += 1;
+8788:                 id
+8789:             });
+8790:             e.insert(id);
+8791:         }
+8792:         if !e.is_empty() {
+8793:             edges.push(e);
+8794:         }
+8795:     }
+8796: 
+8797:     loop {
+8798:         let mut changed = false;
+8799: 
+8800:         // Drop variables occurring in exactly one edge.
+8801:         let mut count: FxHashMap<u32, usize> = FxHashMap::default();
+8802:         for e in &edges {
+8803:             for &v in e {
+8804:                 *count.entry(v).or_default() += 1;
+8805:             }
+8806:         }
+8807:         for e in edges.iter_mut() {
+8808:             let before = e.len();
+8809:             e.retain(|v| count[v] > 1);
+8810:             if e.len() != before {
+8811:                 changed = true;
+8812:             }
+8813:         }
+8814:         let before = edges.len();
+8815:         edges.retain(|e| !e.is_empty());
+8816:         if edges.len() != before {
+8817:             changed = true;
+8818:         }
+8819: 
+8820:         // Drop an edge contained in a distinct edge (also removes duplicates).
+8821:         let mut removed = None;
+8822:         'outer: for i in 0..edges.len() {
+8823:             for j in 0..edges.len() {
+8824:                 if i != j && edges[i].is_subset(&edges[j]) {
+8825:                     removed = Some(i);
+8826:                     break 'outer;
+8827:                 }
+8828:             }
+8829:         }
+8830:         if let Some(i) = removed {
+8831:             edges.remove(i);
+8832:             changed = true;
+8833:         }
+8834: 
+8835:         if !changed {
+8836:             break;
+8837:         }
+8838:     }
+8839: 
+8840:     !edges.is_empty()
+8841: }

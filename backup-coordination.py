@@ -703,6 +703,17 @@ for evidence_name in ['opus-hashreuse-design-input.md', 'opus-hashreuse-design-i
 for evidence_name in ['queue6482-watch1539.json', 'queue6482-watch1539.stderr', 'mg6482-runs1539.json', 'mg6482-runs1539.stderr']:
     FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
 
+# Completed3105 Opus design review and source/readiness followups;6482 protected merge.
+for evidence_name in ['direct-externs.json', 'fingerprints.json', 'historical-compiler-command.txt', 'historical-result.json', 'provenance.json', 'report-draft.json', 'report.json', 'manifest.json']:
+    FILES['3105-hash-reuse-execution-readiness-' + evidence_name.replace("/", "--")] = ROOT / 'direct-3105/hash-reuse-execution-readiness' / evidence_name
+for evidence_name in ['budget-path.txt', 'cycle-view.txt', 'finding-disposition.json', 'inline-projection.txt', 'preregistered-witness.json', 'report.json', 'review-supplement.md', 'test-observer-context.txt', 'manifest.json']:
+    FILES['3105-hash-reuse-design-followup-' + evidence_name.replace("/", "--")] = ROOT / 'direct-3105/hash-reuse-design-followup' / evidence_name
+FILES["3105-hash-reuse-execution-readiness-root-verification.json"] = ROOT / "direct-3105/hash-reuse-execution-readiness-root-verification.json"
+for evidence_name in ['opus-hashreuse-design-review.json', 'opus-hashreuse-design-stderr.log', 'opus-hashreuse-design-completion.json', 'opus-hashreuse-design-result.json', 'opus-hashreuse-design-root-disposition.json', 'hash-reuse-baseline-admission.json']:
+    FILES['3105-admission-' + evidence_name] = ROOT / 'direct-3105/admission' / evidence_name
+for evidence_name in ['queue6482-watch1547.json', 'queue6482-watch1547.stderr', 'mg6482-runs1547.json', 'mg6482-runs1547.stderr', 'pr6482-merged.json', 'pr6482-merged.stderr', 'mg6482-gate-jobs.json', 'mg6482-gate-jobs.stderr', 'mg6482-gate-check.json', 'mg6482-gate-check.stderr', 'merge6482-root-verification.json']:
+    FILES['5183-admission-' + evidence_name] = ROOT / 'direct-5183/admission' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

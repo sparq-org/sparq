@@ -1,0 +1,46 @@
+{
+  "files": [
+    {
+      "path": "budget-path.txt",
+      "bytes": 18454,
+      "sha256": "2fa60bf1ab31984d5a993f20c670cb07b96099b3ccf87df7da2c037deac0325e"
+    },
+    {
+      "path": "cycle-view.txt",
+      "bytes": 5915,
+      "sha256": "4ceca4530a9ed537f6da509fbbf722e6dd3cf13264818e89494c52ac90aab63a"
+    },
+    {
+      "path": "finding-disposition.json",
+      "bytes": 5051,
+      "sha256": "69060f602543fcd1194e6e7f90a1ff4a3fa963c0dbaf5fdc40ec8c09a6efbd35"
+    },
+    {
+      "path": "inline-projection.txt",
+      "bytes": 7871,
+      "sha256": "a4319ac5e00aa85456b51dcf7a8a1e6de26f0378482e00913dc1dc9067a9b1c2"
+    },
+    {
+      "path": "preregistered-witness.json",
+      "bytes": 3121,
+      "sha256": "47336e90c872e36d3379709aa183c42668bac183fdf624e8a54414516c3f8165"
+    },
+    {
+      "path": "report.json",
+      "bytes": 1914,
+      "sha256": "6621cf30c655dff0cf65dd0a5d8ff2a4042b786f07aa87b16c8c4ae9fd1638c4"
+    },
+    {
+      "path": "review-supplement.md",
+      "bytes": 1841,
+      "sha256": "fb8483c36e6579853f443f6dea6f14ffef5651305f430a087e57621ce3044927"
+    },
+    {
+      "path": "test-observer-context.txt",
+      "bytes": 5118,
+      "sha256": "db7ad93e0448316a104f1086a2c7aae8361927c1f5082c8ae7161d1ea2dd8441"
+    }
+  ],
+  "count": 8,
+  "bytes": 49285
+}

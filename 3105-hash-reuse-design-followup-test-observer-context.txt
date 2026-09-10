@@ -1,0 +1,137 @@
+crates/sparq-engine/src/exec.rs full-source SHA256 10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af
+lines21636-21702
+21636: 
+21637: // [GPT-6 Astra] Actual public-query path and physical RHS-work witness for #3105.
+21638: #[cfg(test)]
+21639: mod capped_rhs_tests {
+21640:     use super::*;
+21641:     use std::cell::{Cell, RefCell};
+21642: 
+21643:     thread_local! {
+21644:         static WORK: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+21645:         static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
+21646:     }
+21647: 
+21648:     // [GPT-6 Astra] Observe the actual branch, scan closure and returned metadata.
+21649:     #[derive(Debug, PartialEq, Eq)]
+21650:     struct Step {
+21651:         start: usize,
+21652:         pattern: usize,
+21653:         kernel: &'static str,
+21654:         requested: Option<usize>,
+21655:         scanned: bool,
+21656:         actual: Option<String>,
+21657:     }
+21658: 
+21659:     pub(super) fn step(
+21660:         start: usize,
+21661:         pattern: usize,
+21662:         kernel: &'static str,
+21663:         requested: Option<usize>,
+21664:         scanned: bool,
+21665:         actual: Option<&Variable>,
+21666:     ) {
+21667:         STEPS.with_borrow_mut(|steps| {
+21668:             if let Some(steps) = steps {
+21669:                 steps.push(Step {
+21670:                     start,
+21671:                     pattern,
+21672:                     kernel,
+21673:                     requested,
+21674:                     scanned,
+21675:                     actual: actual.map(|v| v.as_str().to_owned()),
+21676:                 });
+21677:             }
+21678:         });
+21679:     }
+21680: 
+21681:     fn trace<T>(f: impl FnOnce() -> T) -> (T, Vec<Step>) {
+21682:         STEPS.with_borrow_mut(|steps| *steps = Some(Vec::new()));
+21683:         let result = f();
+21684:         let steps = STEPS.with_borrow_mut(|steps| steps.take().unwrap());
+21685:         (result, steps)
+21686:     }
+21687: 
+21688:     fn bag(result: &crate::QueryResult) -> std::collections::BTreeMap<Vec<String>, usize> {
+21689:         let mut bag = std::collections::BTreeMap::new();
+21690:         for row in &result.rows {
+21691:             *bag.entry(
+21692:                 row.iter()
+21693:                     .map(|v| v.as_ref().unwrap().to_string())
+21694:                     .collect(),
+21695:             )
+21696:             .or_default() += 1;
+21697:         }
+21698:         bag
+21699:     }
+21700: 
+21701:     #[test]
+21702:     fn capped_rhs_changing_sort_mixed_kernels_preserves_full_bag() {
+lines21729-21780
+21729:                     s.scanned,
+21730:                     s.actual.as_deref(),
+21731:                 )
+21732:             })
+21733:             .collect();
+21734:         let r: Vec<_> = steps
+21735:             .iter()
+21736:             .filter(|s| s.pattern == 2)
+21737:             .map(|s| (s.start, s.requested, s.scanned, s.actual.as_deref()))
+21738:             .collect();
+21739:         if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) {
+21740:             assert_eq!(
+21741:                 q,
+21742:                 [
+21743:                     (0, "bind", None, false, None),
+21744:                     (1024, "merge", Some(0), true, Some("s")),
+21745:                     (65536, "bind", None, false, None)
+21746:                 ]
+21747:             );
+21748:             assert_eq!(
+21749:                 r,
+21750:                 [
+21751:                     (0, None, true, Some("s")),
+21752:                     (1024, Some(0), true, Some("s")),
+21753:                     (65536, None, true, Some("s"))
+21754:                 ]
+21755:             );
+21756:         } else {
+21757:             // Three permutations return object order: no false subject-order claim,
+21758:             // and the unchanged None request must reuse the actually unsorted-for-s RHS.
+21759:             assert_eq!(
+21760:                 q,
+21761:                 [
+21762:                     (0, "bind", None, false, None),
+21763:                     (1024, "hash", None, true, Some("x")),
+21764:                     (65536, "bind", None, false, None)
+21765:                 ]
+21766:             );
+21767:             assert_eq!(
+21768:                 r,
+21769:                 [
+21770:                     (0, None, true, Some("x")),
+21771:                     (1024, None, false, Some("x")),
+21772:                     (65536, None, false, Some("x"))
+21773:                 ]
+21774:             );
+21775:         }
+21776:     }
+21777: 
+21778:     #[test]
+21779:     fn capped_rhs_replacement_releases_old_slot_before_scan() {
+21780:         let mut initial = Bindings::unsorted(
+lines22033-22046
+22033: 
+22034:     pub(super) fn observe(index: usize) {
+22035:         WORK.with(|cell| {
+22036:             let mut counts = cell.get();
+22037:             counts[index] += 1;
+22038:             cell.set(counts);
+22039:         });
+22040:     }
+22041: 
+22042:     fn take_work() -> [usize; 4] {
+22043:         WORK.with(|cell| cell.replace([0; 4]))
+22044:     }
+22045: 
+22046:     #[test]

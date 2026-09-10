@@ -1,0 +1,41 @@
+{
+  "files": [
+    {
+      "path": "direct-externs.json",
+      "bytes": 5049,
+      "sha256": "cedb13771e607d3d71076946ea392a4aaa89e74a8ea6ab87b2aa4b67418627e6"
+    },
+    {
+      "path": "fingerprints.json",
+      "bytes": 17594,
+      "sha256": "7b26275af72f53c2ab6283006b32dfe20481a5cd9928f80f3084a92454d3d4cc"
+    },
+    {
+      "path": "historical-compiler-command.txt",
+      "bytes": 4844,
+      "sha256": "da367ff5c13f2743e355e3310fd984e616e4c36548589a666b9cd9d246c7d7a9"
+    },
+    {
+      "path": "historical-result.json",
+      "bytes": 1123,
+      "sha256": "6f9dd2a476775a21c43754394ae74735513bbecec0d0e9a4bc87336236b3fc8b"
+    },
+    {
+      "path": "provenance.json",
+      "bytes": 1998,
+      "sha256": "582ee97607fb0a15c3fe7e94842347f02c700899bd5e5ba5bad657309dcb819d"
+    },
+    {
+      "path": "report-draft.json",
+      "bytes": 2713,
+      "sha256": "f55ec9a66b84f4917d3c33a0442c8d58c570dde405041ad59712e61978bfdac3"
+    },
+    {
+      "path": "report.json",
+      "bytes": 3015,
+      "sha256": "100ec3f7649973fe379a64b149569bbeb0d500714e996819dfcb4672dcdfdecb"
+    }
+  ],
+  "file_count": 7,
+  "total_bytes": 36336
+}
