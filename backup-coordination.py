@@ -405,6 +405,10 @@ for evidence_name in ['assessment.md', 'head-scopes.txt', 'main-scopes.txt', 're
 for evidence_name in ['uncached-lifetime-root-verification.json', 'pr-source-cleared-body.md', 'source-cleared-thread-reply.json', 'source-clear-precheck.json', 'source-cleared-reply-receipt.json', 'source-hold-cleared-receipt.json', 'current-ci-after-hold.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+# PR6477 protected queue admission after full current-head CI.
+for evidence_name in ['heartbeat-0328.json', 'pr-ci-green-body.md', 'queue-admission-root-verification.json', 'enqueue-6477.py', 'queue-rules-0329.json', 'queue-precheck-0329.json', 'enqueue-6477-input.json', 'enqueue-6477-result.json', 'queue-after-admission.json', 'merge-group-first-runs.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

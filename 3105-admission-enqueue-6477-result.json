@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-10T03:31:04.447455+00:00",
+  "expected_head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "result": {
+    "data": {
+      "enqueuePullRequest": {
+        "mergeQueueEntry": {
+          "id": "MQE_lQDOSz3qKM8AAAABC7LrtM4AA2w6zgLKi_g",
+          "position": 1,
+          "state": "QUEUED",
+          "headCommit": null
+        }
+      }
+    }
+  }
+}

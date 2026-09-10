@@ -1,0 +1,28 @@
+{
+  "at": "2026-09-10T03:30:45.821347+00:00",
+  "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+  "source_worktree_clean": true,
+  "all_current_head_checks_terminal_acceptable": true,
+  "counts": {
+    "success": 313,
+    "skipped": 97
+  },
+  "required_gate": {
+    "app": 15368,
+    "run": 34431706773,
+    "job": 102728401318,
+    "conclusion": "success"
+  },
+  "independent_review": "opus-bounded-completion.json",
+  "performance_assessment": [
+    "bounded-timing-root-verification.json",
+    "bounded-many-timing-root-verification.json"
+  ],
+  "finding_disposition": [
+    "bounded-review-reconciliation.json",
+    "uncached-lifetime-root-verification.json",
+    "source-cleared-reply-receipt.json"
+  ],
+  "source_review_admission": "Actual independent Opus approval for CI plus completed root-assessed validation and resolved findings; informational review:unreviewed is not fabricated into review:pass.",
+  "remaining": "Fresh exact-head protected queue admission and merge-group/full postmerge CI."
+}

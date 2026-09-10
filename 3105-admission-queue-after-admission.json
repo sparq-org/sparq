@@ -1,0 +1,44 @@
+{
+  "at": "2026-09-10T03:31:51.821071+00:00",
+  "github": {
+    "data": {
+      "rateLimit": {
+        "remaining": 4957,
+        "resetAt": "2026-09-10T03:47:19Z"
+      },
+      "repository": {
+        "defaultBranchRef": {
+          "target": {
+            "oid": "e53464c73f31f7aca800f3867ac054c36408e346"
+          }
+        },
+        "pullRequest": {
+          "state": "OPEN",
+          "headRefOid": "ed66ef0931fa19dd521fac433870c86a78687a30",
+          "mergedAt": null,
+          "mergeCommit": null,
+          "mergeQueueEntry": {
+            "position": 1,
+            "state": "AWAITING_CHECKS",
+            "headCommit": {
+              "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+            }
+          },
+          "labels": {
+            "nodes": [
+              {
+                "name": "area:bench"
+              },
+              {
+                "name": "area:sparq-engine"
+              },
+              {
+                "name": "review:unreviewed"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

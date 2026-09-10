@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T03:17:37.029619+00:00",
+  "updated_at": "2026-09-10T03:32:35.575406+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,14 +67,14 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Source review findings resolved; current-head protected CI running",
+    "phase": "Protected merge queue admitted at position1; merge-group validation pending",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
     "worktree_state": "Clean ed66; author idle, no commands running.",
     "directory": "direct-3105",
-    "state": "PR6477 ed66 open and source-cleared; own review:changes removed after fresh exact-head revalidation. All existing threads resolved; no fabricated review:pass/VERDICT and no queue mutation. Waiting full CI.",
+    "state": "PR6477 exact ed66 admitted through enqueuePullRequest expectedHeadOid, jump=false. No bypass or review:pass fabrication. Current-head313success97skip; gate15368SUCCESS.",
     "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
     "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
     "readiness": "direct-6475/source-admission/perf3105-readiness.json",
@@ -143,11 +143,10 @@
       "decision": "Positiveadvisoryscreen supportscoveragephase; notcanonicalperfproof. No materiallyrejectingheapgrowth in2RHSfixture; more/largerRHSsumretentionunboundedbyfixture. RSSseparatelimit."
     },
     "next_actions": [
-      "At next scheduled observation read current exact-head required CI/gate and all reviews/threads; do not poll repeatedly while jobs are in progress.",
-      "If actual full CI green and no new blocker, revalidate main/head/labels/threads and admit through normal protected merge queue with expectedHeadOid ed66ef0931fa19dd521fac433870c86a78687a30, jump=false. No force/admin/review:pass fabrication.",
-      "If CI fails, diagnose named failure with same Astra lane; preserve evidence and live merge-group runs. No blind reruns or retry after budget exhaustion.",
-      "After protected merge verify reviewed code on main and postmerge CI; issue3105 remains open for planner/hash reuse. Choose next ready bounded SPARQL lane afterwards.",
-      "Keep registry Actions OFF, all unrelated approval/operator holds, ALLGREEN and no releases; no EC2."
+      "Verify queue entry/merge-group head after admission, then observe actual protected merge-group gate on the scheduled cadence. No cancel/requeue/lucky retry.",
+      "If merged, byte-verify reviewed source/declaration on main and watch postmerge CI. Issue3105 stays OPEN for planner/hash-build reuse.",
+      "If queue ejected or CI fails, diagnose named failure using same Astra lane; preserve current evidence.",
+      "Keep registryOFF,ALLGREEN,all unrelated holds,no releases/EC2; choose next bounded ready SPARQL lane after current landing."
     ],
     "coverage": {
       "agent": "/root/postmerge_ci",
@@ -282,21 +281,29 @@
       "root_verification": "direct-3105/admission/uncached-lifetime-root-verification.json"
     },
     "current_ci": {
-      "at": "2026-09-10T03:16:39.494511+00:00",
+      "at": "2026-09-10T03:28:47.427171+00:00",
       "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
       "gate_run": 34431706773,
       "gate_job": 102728401318,
-      "state": "in_progress",
-      "checks": "direct-3105/admission/current-ci-after-hold.json",
+      "state": "success",
+      "checks": "direct-3105/admission/heartbeat-0328.json",
       "counts": {
-        "success": 97,
-        "skipped": 21,
-        "in_progress": 19,
-        "queued": 3
+        "success": 313,
+        "skipped": 97
       },
       "notes": "No failures. Actual current-head wasm build and initial feature-off exact-equality completed SUCCESS. Normal label-triggered duplicate feature-off run in progress; do not cancel."
     },
-    "publication_assessment": "direct-3105/admission/source-hold-cleared-receipt.json"
+    "publication_assessment": "direct-3105/admission/source-hold-cleared-receipt.json",
+    "queue_admission": {
+      "state": "AWAITING_CHECKS",
+      "position": 1,
+      "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
+      "evidence": "direct-3105/admission/enqueue-6477-result.json",
+      "root_verification": "direct-3105/admission/queue-admission-root-verification.json",
+      "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "verified_at": "2026-09-10T03:31:51.821071+00:00",
+      "verification": "direct-3105/admission/queue-after-admission.json"
+    }
   },
   "prs": {
     "4300": {
@@ -686,7 +693,7 @@
       }
     },
     "6477": {
-      "state": "OPEN_AWAITING_CURRENT_HEAD_CI",
+      "state": "IN_MERGE_QUEUE",
       "issue": 3105,
       "head": "ed66ef0931fa19dd521fac433870c86a78687a30",
       "branch": "codex/capped-rhs-reuse",
@@ -695,10 +702,14 @@
       "reply": "https://github.com/sparq-org/sparq/pull/6477#discussion_r3975074265",
       "threads": "All resolved on fresh preclear observation",
       "gate_run": 34431706773,
-      "gate_state": "in_progress",
-      "latest_evidence": "direct-3105/admission/current-ci-after-hold.json",
+      "gate_state": "success",
+      "latest_evidence": "direct-3105/admission/queue-after-admission.json",
       "scope": "Partial #3105 scanreuse only; Refs, not Closes.",
-      "performance": "Local advisory fullmiss-14.48%,firsthit+2.06%,5/8patterns-7.37%/-5.04%. Bounded4MiB perinvocation; manycaseextra~2.24million requestedpeakbytes. No universal or canonical claim."
+      "performance": "Local advisory fullmiss-14.48%,firsthit+2.06%,5/8patterns-7.37%/-5.04%. Bounded4MiB perinvocation; manycaseextra~2.24million requestedpeakbytes. No universal or canonical claim.",
+      "queue_position": 1,
+      "queue_state": "AWAITING_CHECKS",
+      "admission": "direct-3105/admission/enqueue-6477-result.json",
+      "merge_group_head": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
     }
   },
   "registry": {
