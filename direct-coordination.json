@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T12:05:24.762528+00:00",
+  "updated_at": "2026-09-10T12:21:53.621323+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -50,9 +50,9 @@
     "latest_cleanup": "Only two cleancompletedmergedworktrees4246/6468 removed afterfreshGitHubstate/head/status verification;branchesretained;source-admission/completed-worktrees-removed.json. Recovered~6.55GBfree;no sharedcheckout/production/cacheprune."
   },
   "live_main": {
-    "oid": "781f667c19a8ebb779cfccb24b05ea432360b025",
-    "observed_at": "2026-09-10T08:50:49.132995+00:00",
-    "evidence": "direct-6476/admission/postmerge-root-verification-0850.json"
+    "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+    "observed_at": "2026-09-10T12:21:53.621323+00:00",
+    "evidence": "direct-6480/admission/main459-merge-root-verification.json"
   },
   "rules": {
     "required_check": "gate",
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Protected merge queue position1; await merge-group andmainvalidation",
-    "state": "Exact17594 independentOpusreviews+actualCIverified. CopilotfalseAPIclaimrepliedwithpublishedsource/runtimeproof; threadresolved. Protectedqueueadmission succeeded withALLGREEN, gateapp15368 unchanged. Not merged yet.",
+    "phase": "6481 merged; postmerge validation and6480 closure watch",
+    "state": "Exact reviewed tree merged via protectedALLGREEN queue. All3targetedalerts automatically fixed; mainpush checks pending.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -83,11 +83,10 @@
     },
     "readiness": "direct-6480/admission/readiness-root-verification.json",
     "next_actions": [
-      "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
-      "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-      "Collect existing Astra bounded original seed4141222487 execution onparent/main; preserve failures/caps and exact parser/allowlist/strict guards. Root verify evidence; actual Opus soundness review before any comparator/engine policy change.",
-      "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
-      "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
+      "Watch actual main459 push checks;8MG workflows/gatealreadyverified. Verifycurrentjs/runtime andremainingrequiredmainchecks beforeclosing6480; alerts32/106/107fixedautomatically, no dismissals.",
+      "Collect existing worker frozen original-seed5183 evidence and process completion; verify source/feature/guard equivalence andsame8of10failurebothrevisions; no rerun.",
+      "Obtain actual Opus5xhigh diagnosis/soundness review of original-seed finding and bounded repair options before comparator/generator/engine changes.",
+      "Use existing worker for bounded postmerge main459 failures if any; release-plzknown6474 likely, no retry/releaseauthorization. Preserve6049/6055/registry2305/canon/EC2holds andALLGREEN."
     ],
     "head": "17594d4a6534c142cae764772fc42049e898eca3",
     "implementation": {
@@ -590,7 +589,8 @@
       },
       "gate": "in_progress",
       "source_prefix": "direct-6480/admission/heartbeat1203"
-    }
+    },
+    "merge_root_verification": "direct-6480/admission/main459-merge-root-verification.json"
   },
   "prs": {
     "4300": {
@@ -1005,21 +1005,17 @@
     },
     "6481": {
       "head": "17594d4a6534c142cae764772fc42049e898eca3",
-      "state": "OPEN",
+      "state": "MERGED",
       "draft": false,
       "url": "https://github.com/sparq-org/sparq/pull/6481",
       "title": "chore(deps): patch Next.js and sharp across site and GUI",
-      "queue": {
-        "position": 1,
-        "state": "AWAITING_CHECKS",
-        "headCommit": {
-          "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9"
-        }
-      },
-      "gate": "PRpassed; MG main CI passed; feature matrix pending; aggregate in_progress",
+      "queue": null,
+      "gate": "All8MG workflows and gate app15368 success; postmerge watch active",
       "actual_independent_reviews": "Opus5xhigh0c+17594approvedforCI",
       "copilot_run": 34467011356,
-      "last_observed_at": "2026-09-10T12:05:24.762528+00:00"
+      "last_observed_at": "2026-09-10T12:21:53.621323+00:00",
+      "merged_at": "2026-09-10T12:12:31Z",
+      "merge_commit": "4595388de9e389f5369d63828fbf90cfc16b62d9"
     }
   },
   "registry": {
@@ -1070,16 +1066,15 @@
     }
   },
   "next_actions": [
-    "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
-    "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-    "Collect existing Astra bounded original seed4141222487 execution onparent/main; preserve failures/caps and exact parser/allowlist/strict guards. Root verify evidence; actual Opus soundness review before any comparator/engine policy change.",
-    "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
-    "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
+    "Watch actual main459 push checks;8MG workflows/gatealreadyverified. Verifycurrentjs/runtime andremainingrequiredmainchecks beforeclosing6480; alerts32/106/107fixedautomatically, no dismissals.",
+    "Collect existing worker frozen original-seed5183 evidence and process completion; verify source/feature/guard equivalence andsame8of10failurebothrevisions; no rerun.",
+    "Obtain actual Opus5xhigh diagnosis/soundness review of original-seed finding and bounded repair options before comparator/generator/engine changes.",
+    "Use existing worker for bounded postmerge main459 failures if any; release-plzknown6474 likely, no retry/releaseauthorization. Preserve6049/6055/registry2305/canon/EC2holds andALLGREEN."
   ],
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "bounded_original_seed_execution_in_progress",
+    "state": "original_seed_phase_completed_evidence_freeze_in_progress",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -1103,7 +1098,7 @@
       "receipt": "direct-5183/admission/issue5183-reference-comment-receipt.json"
     },
     "next_scope": "Need bounded originalseed4141222487 unchangedupdate_fuzz onbase/parent withCI-relevantfeatures, exactparser/allowlist/LOADsandbox/comparator; firstreturnclosure/resourceplan. No fullbenchbuild/canonweakening orsourceimplementationyet.",
-    "agent_current_task": "One exact seed4141222487/count1 per qualified source revision;1200s/512MiB/2GiBfree, offline jobs1; no comparator/source edits",
+    "agent_current_task": "Existing Astra agent collecting completed local outputs only after service interruption. Bothcapturedruns exit1 atstep8; no rerun ornewbuild. Root waits frozenproof.",
     "constraints": "No comparator/generator/engine edit before exactseeddiagnosis andactualindependentreview. No extraEC2/registryenable/releases.",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -1120,7 +1115,16 @@
       "seed": 4141222487,
       "count": 1,
       "one_build_run_per_revision": true
-    }
+    },
+    "execution_result_preliminary": {
+      "status": "complete",
+      "seconds": 361.825017125,
+      "new_allocated_bytes": 300384256,
+      "parent_exit": 1,
+      "main_exit": 1,
+      "operation": "8 of 10"
+    },
+    "worker_interruption": "Service flagged turn after phase finished; followup restricted to read-only results/freeze. Root session53547 lookup Unknown process id; no process restart."
   },
   "budget": {
     "observed_at": "2026-09-10T10:36:57.270637+00:00",

@@ -1,0 +1,76 @@
+{
+  "at": "2026-09-10T12:21:53.621323+00:00",
+  "PR": 6481,
+  "merged_at": "2026-09-10T12:12:31Z",
+  "reviewed_head": "17594d4a6534c142cae764772fc42049e898eca3",
+  "main_commit": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "whole_tree": "3ccc4164afe1d61e7e79f65f7870b9805c5ed499",
+  "whole_tree_equals_reviewed": true,
+  "protected_gate": {
+    "id": 102846986203,
+    "app": 15368,
+    "conclusion": "success",
+    "completed_at": "2026-09-10T12:12:09Z"
+  },
+  "merge_group_workflows": [
+    {
+      "id": 34469862419,
+      "name": "CI",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862602,
+      "name": "feature-matrix",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862201,
+      "name": "routing-self-tests",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862126,
+      "name": "pr-area-label",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862167,
+      "name": "flow-on-gates",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862219,
+      "name": "vectorized-feature-off",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862220,
+      "name": "docs-quality",
+      "conclusion": "success"
+    },
+    {
+      "id": 34469862189,
+      "name": "ci-summary",
+      "conclusion": "success"
+    }
+  ],
+  "alerts": {
+    "32": {
+      "state": "fixed",
+      "fixed_at": "2026-09-10T12:12:40Z",
+      "dismissed_at": null
+    },
+    "106": {
+      "state": "fixed",
+      "fixed_at": "2026-09-10T12:12:40Z",
+      "dismissed_at": null
+    },
+    "107": {
+      "state": "fixed",
+      "fixed_at": "2026-09-10T12:12:40Z",
+      "dismissed_at": null
+    }
+  },
+  "postmerge": "Push runs still active; supply-chain and site-visual success; release-plz failure requires bounded known-cause confirmation; no release authorized",
+  "source_snapshot": "main459-runs.json"
+}

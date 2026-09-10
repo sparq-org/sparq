@@ -604,6 +604,10 @@ FILES["5183-admission-original-seed-readiness-root-verification.json"] = ROOT / 
 for evidence_name in ['budget-1202.json', 'heartbeat1203-queue.json', 'heartbeat1203-ci-jobs.json', 'heartbeat1203-matrix-jobs.json', 'heartbeat1203-gate.json']:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+# Protected6481 merge and1218 heartbeat evidence.
+for evidence_name in ['budget-1216.json', 'heartbeat1218-queue.json', 'heartbeat1218-gate.json', 'heartbeat1218-matrix-jobs.json', 'pr6481-merged.json', 'main459-commit.json', 'main459-runs.json', 'mg459-gate-check.json', 'issue6480-after-merge.json', 'alert32-postmerge.json', 'alert106-postmerge.json', 'alert107-postmerge.json', 'main459-merge-root-verification.json', 'issue6480-comment-premerge-update.json']:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
