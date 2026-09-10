@@ -1,0 +1,1 @@
+These manifests name the unmodified module as a binary target solely to permit cargo metadata. The module intentionally has no main. Do not build these manifests; future executable entrypoint and crate layout must follow report.json.

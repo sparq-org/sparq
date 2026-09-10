@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T11:46:57.800440+00:00",
+  "updated_at": "2026-09-10T12:05:24.762528+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -10,8 +10,8 @@
     "quiet_when_unchanged": true,
     "verified_at": "2026-09-09T12:15:56.335100+00:00",
     "schedule_reconciliation": "Saved schedule was6hours despite prompt/checkpoint10minutes. Updated existing automation through app tool to original user-requested10minutes; readback verified. No duplicate automation.",
-    "last_app_view_at": "2026-09-10T08:29:37.116172+00:00",
-    "last_file_verify_at": "2026-09-10T08:29:37.116172+00:00"
+    "last_file_verify_at": "2026-09-10T12:05:45.117882+00:00",
+    "last_app_view_note": "View succeeded during previous heartbeat; precise time not recorded."
   },
   "constraints": [
     "Implementation: actual GPT-6 Astra xhigh, never Sol; independent review/security/soundness: actual Claude Opus 5 xhigh.",
@@ -85,7 +85,7 @@
     "next_actions": [
       "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
       "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-      "Collect existing Astra worker original-seed5183 readiness, independently verify resources/features/allowlist/guards; choose bounded build/run plan. No comparator/engine edits before exact diagnosis and Opus soundness review.",
+      "Collect existing Astra bounded original seed4141222487 execution onparent/main; preserve failures/caps and exact parser/allowlist/strict guards. Root verify evidence; actual Opus soundness review before any comparator/engine policy change.",
       "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
       "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
     ],
@@ -142,7 +142,7 @@
     },
     "pr": 6481,
     "url": "https://github.com/sparq-org/sparq/pull/6481",
-    "agent_state": "Existing Astra worker preparing bounded original-seed5183 closure; no build/model/network authorized in readiness phase",
+    "agent_state": "Existing Astra worker executing bounded original fixed-seed5183 replay; no additional workers",
     "publication": {
       "at": "2026-09-10T09:27:19.769985+00:00",
       "receipt": "direct-6480/admission/publication-receipt.json",
@@ -574,24 +574,22 @@
       "result": "Progressing GitHub-hosted jobs; probable shared capacity contention, no demonstrated concurrency collision; preserve runs"
     },
     "latest_merge_group_jobs": {
-      "at": "2026-09-10T11:46:57.800440+00:00",
+      "at": "2026-09-10T12:05:24.762528+00:00",
       "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
       "counts": {
         "ci": {
-          "success": 22,
-          "skipped": 7,
-          "in_progress": 3,
-          "queued": 1
+          "success": 26,
+          "skipped": 9
         },
         "matrix": {
-          "success": 28,
+          "success": 49,
           "skipped": 1,
-          "queued": 26,
-          "in_progress": 2
+          "in_progress": 6,
+          "queued": 1
         }
       },
       "gate": "in_progress",
-      "source_prefix": "direct-6480/admission/heartbeat1148"
+      "source_prefix": "direct-6480/admission/heartbeat1203"
     }
   },
   "prs": {
@@ -1018,10 +1016,10 @@
           "oid": "4595388de9e389f5369d63828fbf90cfc16b62d9"
         }
       },
-      "gate": "PR17594 passed verified; current MG459 in_progress",
+      "gate": "PRpassed; MG main CI passed; feature matrix pending; aggregate in_progress",
       "actual_independent_reviews": "Opus5xhigh0c+17594approvedforCI",
       "copilot_run": 34467011356,
-      "last_observed_at": "2026-09-10T11:46:57.800440+00:00"
+      "last_observed_at": "2026-09-10T12:05:24.762528+00:00"
     }
   },
   "registry": {
@@ -1074,14 +1072,14 @@
   "next_actions": [
     "Watch progressing6481MG459 exact job/gate results; position1 AWAITING_CHECKS. No queue retry, no protected evidence cancellation.",
     "Aftermergeverifyactualmaincommit/treeandrequiredpostmergechecks, thencheckautomaticDependabotalerts32/106/107; keep6480openuntilproven, no dismissals/releases.",
-    "Collect existing Astra worker original-seed5183 readiness, independently verify resources/features/allowlist/guards; choose bounded build/run plan. No comparator/engine edits before exact diagnosis and Opus soundness review.",
+    "Collect existing Astra bounded original seed4141222487 execution onparent/main; preserve failures/caps and exact parser/allowlist/strict guards. Root verify evidence; actual Opus soundness review before any comparator/engine policy change.",
     "Strict5183defaultenginewitnesspassed12casesbothsource-qualifiedrevisions; no6478regressionobservedthere. Needpinnedreferenceandlaterexactseedbeforeanycomparator/generatorpolicychange; preservecanonNO_GO.",
     "Postmerge6478scheduledfuzz34458064851cancelledwithnonewerreplacementobserved; causaltriagestillpending. UPDATE5183causedmaingatefailure. Preserve6049/6055/registry2305/canon/release/EC2holds andALLGREEN."
   ],
   "followup_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "original_seed_readiness_in_progress",
+    "state": "bounded_original_seed_execution_in_progress",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -1105,9 +1103,24 @@
       "receipt": "direct-5183/admission/issue5183-reference-comment-receipt.json"
     },
     "next_scope": "Need bounded originalseed4141222487 unchangedupdate_fuzz onbase/parent withCI-relevantfeatures, exactparser/allowlist/LOADsandbox/comparator; firstreturnclosure/resourceplan. No fullbenchbuild/canonweakening orsourceimplementationyet.",
-    "agent_current_task": "Offline minimal unchanged update_fuzz.rs closure/resource readiness for original seed4141222487 on source-qualified parent/main; no build/test/run/network yet",
+    "agent_current_task": "One exact seed4141222487/count1 per qualified source revision;1200s/512MiB/2GiBfree, offline jobs1; no comparator/source edits",
     "constraints": "No comparator/generator/engine edit before exactseeddiagnosis andactualindependentreview. No extraEC2/registryenable/releases.",
-    "readiness_directory": "direct-5183/original-seed-readiness"
+    "readiness_directory": "direct-5183/original-seed-readiness",
+    "execution_directory": "direct-5183/original-seed-execution",
+    "readiness_manifest_sha256": "16cffa14191b0ac15e09a0e3577653cd4f95eca8e153ca16e6c18d174a83d3e0",
+    "readiness_root_verification": "direct-5183/admission/original-seed-readiness-root-verification.json",
+    "execution_limits": {
+      "total_seconds": 1200,
+      "per_build_seconds": 600,
+      "per_seed_seconds": 60,
+      "jobs": 1,
+      "offline": true,
+      "max_new_allocated_bytes": 536870912,
+      "min_free_bytes": 2147483648,
+      "seed": 4141222487,
+      "count": 1,
+      "one_build_run_per_revision": true
+    }
   },
   "budget": {
     "observed_at": "2026-09-10T10:36:57.270637+00:00",

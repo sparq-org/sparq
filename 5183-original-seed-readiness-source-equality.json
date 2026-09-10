@@ -1,0 +1,146 @@
+[
+  {
+    "path": "Cargo.toml",
+    "parent": {
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "bytes": 9813
+    },
+    "main": {
+      "sha256": "9f820551d15c1430a25172c831f491fb7fd92231c15f124b2a048b1137d8ce73",
+      "bytes": 9813
+    },
+    "identical": true
+  },
+  {
+    "path": "Cargo.lock",
+    "parent": {
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+      "bytes": 176396
+    },
+    "main": {
+      "sha256": "6d7b6095f5fec01e4ace906d6001687c67d83fedc1e50180891a419c22026152",
+      "bytes": 176396
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-bench/Cargo.toml",
+    "parent": {
+      "sha256": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a",
+      "bytes": 3636
+    },
+    "main": {
+      "sha256": "3d96dbb5d237511d78906f521a6dc859e3dafe2b4c067d17842da525eab0c42a",
+      "bytes": 3636
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-bench/src/update_fuzz.rs",
+    "parent": {
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+      "bytes": 78994
+    },
+    "main": {
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+      "bytes": 78994
+    },
+    "identical": true
+  },
+  {
+    "path": "bench/differential-divergences.json",
+    "parent": {
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+      "bytes": 5722
+    },
+    "main": {
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+      "bytes": 5722
+    },
+    "identical": true
+  },
+  {
+    "path": ".github/workflows/differential.yml",
+    "parent": {
+      "sha256": "77870841a1bd6d542813332095407b198d7a972a3dc583204c0b387d82532c11",
+      "bytes": 15318
+    },
+    "main": {
+      "sha256": "77870841a1bd6d542813332095407b198d7a972a3dc583204c0b387d82532c11",
+      "bytes": 15318
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-core/Cargo.toml",
+    "parent": {
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "bytes": 11422
+    },
+    "main": {
+      "sha256": "bacc2b9877e8d12703578b5c28bba1211514b973bb0edd07ad822bf8b125d362",
+      "bytes": 11422
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-engine/Cargo.toml",
+    "parent": {
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+      "bytes": 39603
+    },
+    "main": {
+      "sha256": "ab9734674fb46fcf5ad91415cff14f2552d4bc9e6a5f2994ca2e0905e2b99bc2",
+      "bytes": 39603
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-canon/Cargo.toml",
+    "parent": {
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7",
+      "bytes": 5684
+    },
+    "main": {
+      "sha256": "a09872ba8df6363b5260d2c02ccf2ec5c54350144c9592d6ad3ea0ddd65927d7",
+      "bytes": 5684
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-substrate/Cargo.toml",
+    "parent": {
+      "sha256": "91346bb3ebc69e9850308c951a0ca8e21fc4f39b79ec58fd67d7b329c41c3774",
+      "bytes": 8397
+    },
+    "main": {
+      "sha256": "91346bb3ebc69e9850308c951a0ca8e21fc4f39b79ec58fd67d7b329c41c3774",
+      "bytes": 8397
+    },
+    "identical": true
+  },
+  {
+    "path": "crates/sparq-difftest/Cargo.toml",
+    "parent": {
+      "sha256": "6e5f689ddc08befb0f36add5467fad787b15c8c8fe37aca81e135767e44120df",
+      "bytes": 2939
+    },
+    "main": {
+      "sha256": "6e5f689ddc08befb0f36add5467fad787b15c8c8fe37aca81e135767e44120df",
+      "bytes": 2939
+    },
+    "identical": true
+  },
+  {
+    "path": "vendor/spargebra/Cargo.toml",
+    "parent": {
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71",
+      "bytes": 9022
+    },
+    "main": {
+      "sha256": "57b7559aef48ba9034998dd66ba282f5299acc4c500dbed80e9c0c52bc114e71",
+      "bytes": 9022
+    },
+    "identical": true
+  }
+]

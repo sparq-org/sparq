@@ -1,0 +1,28 @@
+{
+  "free_bytes": 6479761408,
+  "target": {
+    "allocated_bytes": 596918272,
+    "files": 1706
+  },
+  "evidence": {
+    "allocated_bytes": 1859584,
+    "files": 38
+  },
+  "source_export_cost": {
+    "parent": {
+      "tracked_blob_count": 6443,
+      "content_bytes": 79102861,
+      "estimated_4KiB_file_allocation": 97091584,
+      "symlinks": [],
+      "compiled_internal_source_content_bytes": 5623162
+    },
+    "main": {
+      "tracked_blob_count": 6444,
+      "content_bytes": 79118618,
+      "estimated_4KiB_file_allocation": 97107968,
+      "symlinks": [],
+      "compiled_internal_source_content_bytes": 5637988
+    }
+  },
+  "warning": "Full tracked export is one possible parent-source provision, not performed here. Actual allocated growth and compiler peak temporary files must be monitored; estimate includes file rounding but not directory metadata."
+}

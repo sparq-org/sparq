@@ -1,0 +1,1299 @@
+[
+  {
+    "fingerprint": "oxigraph-21a6d799cb006847",
+    "features": [
+      "rdf-12"
+    ],
+    "profile": 17679675566102314548,
+    "lib_bytes": 4079840,
+    "lib_sha256": "7c99b8a25298952e9ac47f8170c399ac8322e0b7ceaf942cdb99e1d77244c507",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/oxigraph-21a6d799cb006847/lib-oxigraph.json",
+    "deps": [
+      [
+        1116177518248132942,
+        "oxsdatatypes",
+        false,
+        5898721400623311956
+      ],
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        3506500122678159021,
+        "dashmap",
+        false,
+        9507211352369017008
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        6931906511645626171,
+        "sparesults",
+        false,
+        2472034968157538250
+      ],
+      [
+        7098700569944897890,
+        "libc",
+        false,
+        12359317340858094889
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        16921852909739204078
+      ],
+      [
+        8728768191456210883,
+        "siphasher",
+        false,
+        6814550273872325816
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        17495768260813297375
+      ],
+      [
+        10752321154392410571,
+        "spareval",
+        false,
+        12999929607399326635
+      ],
+      [
+        15635169000856453466,
+        "oxrdfio",
+        false,
+        1311110627569082457
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "spargebra-070dccb8a8b877d8",
+    "features": [
+      "default",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "profile": 15504100930133761901,
+    "lib_bytes": 2450312,
+    "lib_sha256": "43f76832cf73debebd45b4749a48feefb69fe54a6105c8a36095d24dcf4fba31",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/spargebra-070dccb8a8b877d8/lib-spargebra.json",
+    "deps": [
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        6845306448585065183,
+        "oxilangtag",
+        false,
+        5548051649206918600
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ],
+      [
+        17328774133535660015,
+        "peg",
+        false,
+        6630895085451978781
+      ]
+    ]
+  },
+  {
+    "fingerprint": "spargebra-0c1567f781528c59",
+    "features": [
+      "default",
+      "sep-0002",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "profile": 15504100930133761901,
+    "lib_bytes": 2452808,
+    "lib_sha256": "c2388cf35522cd19d6a89cd4a1184c27097ef8a18b64609801f2374728a3166f",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/spargebra-0c1567f781528c59/lib-spargebra.json",
+    "deps": [
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        6845306448585065183,
+        "oxilangtag",
+        false,
+        5548051649206918600
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        16921852909739204078
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ],
+      [
+        17328774133535660015,
+        "peg",
+        false,
+        6630895085451978781
+      ]
+    ]
+  },
+  {
+    "fingerprint": "spargebra-46d0e54aec8e29fe",
+    "features": [
+      "default",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "profile": 15504100930133761901,
+    "lib_bytes": 2451144,
+    "lib_sha256": "46a1eaf4335e9b867dd3ba2c9c74265194d07d43f7a823e95ad7bdf26e4ef21f",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/spargebra-46d0e54aec8e29fe/lib-spargebra.json",
+    "deps": [
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        6845306448585065183,
+        "oxilangtag",
+        false,
+        5548051649206918600
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ],
+      [
+        17328774133535660015,
+        "peg",
+        false,
+        6630895085451978781
+      ]
+    ]
+  },
+  {
+    "fingerprint": "spargebra-c7342e1390d1d163",
+    "features": [
+      "default",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "profile": 15504100930133761901,
+    "lib_bytes": 2451288,
+    "lib_sha256": "9e5f8a8350cf14aaf45f5fa1961ae67a2745f2aed0dc3b1bb6590d71eac53ba6",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/spargebra-c7342e1390d1d163/lib-spargebra.json",
+    "deps": [
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        6845306448585065183,
+        "oxilangtag",
+        false,
+        5548051649206918600
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ],
+      [
+        17328774133535660015,
+        "peg",
+        false,
+        6630895085451978781
+      ]
+    ]
+  },
+  {
+    "fingerprint": "spargebra-fe0d7ab6b1770251",
+    "features": [
+      "default",
+      "sep-0006",
+      "sparql-12"
+    ],
+    "profile": 15504100930133761901,
+    "lib_bytes": 2451200,
+    "lib_sha256": "632a0018dda92bed37a3d9684082994cb7429b33481356172f998619325c83bf",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/spargebra-fe0d7ab6b1770251/lib-spargebra.json",
+    "deps": [
+      [
+        2448563160050429386,
+        "thiserror",
+        false,
+        7738616427282374512
+      ],
+      [
+        5011653409600970931,
+        "rand",
+        false,
+        14853662169945143928
+      ],
+      [
+        6845306448585065183,
+        "oxilangtag",
+        false,
+        5548051649206918600
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ],
+      [
+        17328774133535660015,
+        "peg",
+        false,
+        6630895085451978781
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-core-127354fe878a2f23",
+    "features": [
+      "default",
+      "parallel"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 2820408,
+    "lib_sha256": "37e9d27afb0f2c35c565ce403d6f7c238e5ac40595b49cc2949fa50dc27e98be",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-core-127354fe878a2f23/lib-sparq_core.json",
+    "deps": [
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        10255809443331586089,
+        "oxttl",
+        false,
+        6727856287723815005
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        16786944793543832643,
+        "memchr",
+        false,
+        11979336616392858102
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-core-d7334b5f41a84d59",
+    "features": [
+      "default",
+      "parallel"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 2820424,
+    "lib_sha256": "98564604907d907a72fa2a50a91d294f26cfeb78982f4f87eb382f3f3d00e3df",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-core-d7334b5f41a84d59/lib-sparq_core.json",
+    "deps": [
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        10255809443331586089,
+        "oxttl",
+        false,
+        6727856287723815005
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        16786944793543832643,
+        "memchr",
+        false,
+        11979336616392858102
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-core-e0ac301aa343ee6c",
+    "features": [
+      "default",
+      "dict-spill",
+      "mmap",
+      "parallel"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 4395240,
+    "lib_sha256": "b2af007d7241a23c9a06476631c48b5c3f459d28ed3fc6114af5c14d1162874d",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-core-e0ac301aa343ee6c/lib-sparq_core.json",
+    "deps": [
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7098700569944897890,
+        "libc",
+        false,
+        12359317340858094889
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        10255809443331586089,
+        "oxttl",
+        false,
+        6727856287723815005
+      ],
+      [
+        10968047079748790161,
+        "memmap2",
+        false,
+        9840562534755442455
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        16786944793543832643,
+        "memchr",
+        false,
+        11979336616392858102
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-core-e9ed6f0c10ca33fd",
+    "features": [
+      "default",
+      "parallel"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 2820984,
+    "lib_sha256": "9c6042a15b38ebfddaaef9b24e53df598201b72ec631310f201378c0b06ff7c2",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-core-e9ed6f0c10ca33fd/lib-sparq_core.json",
+    "deps": [
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        10255809443331586089,
+        "oxttl",
+        false,
+        6727856287723815005
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        16786944793543832643,
+        "memchr",
+        false,
+        11979336616392858102
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-17d69fdf30aada97",
+    "features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 5276032,
+    "lib_sha256": "2135748c75d5afd1ca3731e6d350c5a06b99caf9376b1388fbd472b08febed9d",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-17d69fdf30aada97/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10936419137437573329
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        6066747434109562044
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        3335382867102284250
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-58f06b544fabdd91",
+    "features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex",
+      "zk"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 5523608,
+    "lib_sha256": "572dc7eab05864fc4f00e6a870f780ea0b52ce992b2e9b0241bb06ca5cd10b4e",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-58f06b544fabdd91/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10936419137437573329
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        6066747434109562044
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        3335382867102284250
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-9e1f57eeb14441e5",
+    "features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex",
+      "zk"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 5517728,
+    "lib_sha256": "15be5b91b66bcd35ab381bf7100a5d3b6a2b3d87e3f57192091ef6205805b6bb",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-9e1f57eeb14441e5/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10938579003949444277
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        11503140517365244728
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        15551357438805011330
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-bafeb69d8fbb93da",
+    "features": [
+      "cs-planner",
+      "default",
+      "digest",
+      "explain-json",
+      "parallel",
+      "params",
+      "regex",
+      "result-cache",
+      "service-local",
+      "vectorized"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 6054696,
+    "lib_sha256": "4ec0cb85422071f0bf7d437ffa539dbbf76f4b5301601fa073f2cdf745cfa849",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-bafeb69d8fbb93da/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        9827627637812297270
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        6367094336072748345
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        4175474718161584753
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-d082493c198a3f5b",
+    "features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 5285512,
+    "lib_sha256": "2f17e066de1c77dd975ec2367c6e140175a31710685b05d8aadccd04f3b7b395",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-d082493c198a3f5b/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        9827627637812297270
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        6367094336072748345
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        4175474718161584753
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-engine-df68943e9feef6e1",
+    "features": [
+      "default",
+      "digest",
+      "parallel",
+      "regex"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 5254472,
+    "lib_sha256": "14646062fcc30dea9aa7d2f69e67ae1c2eea9a19cafd686c9d044d5b8f824c03",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-engine-df68943e9feef6e1/lib-sparq_engine.json",
+    "deps": [
+      [
+        466357198569416633,
+        "uuid",
+        false,
+        15664809791377427057
+      ],
+      [
+        613246011889145985,
+        "regex",
+        false,
+        16665736862714572405
+      ],
+      [
+        896379737312318455,
+        "md5",
+        false,
+        5813389962692752192
+      ],
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        4091053499939819895,
+        "sha2",
+        false,
+        14667902832278528226
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10938579003949444277
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ],
+      [
+        8267409410152229463,
+        "sparq_substrate",
+        false,
+        11503140517365244728
+      ],
+      [
+        10375932462678898870,
+        "spargebra",
+        false,
+        15551357438805011330
+      ],
+      [
+        11910974697091955563,
+        "rayon",
+        false,
+        9318714795024320300
+      ],
+      [
+        13058639913598723517,
+        "sha1",
+        false,
+        6821323692014376005
+      ],
+      [
+        16204031616616193915,
+        "oxiri",
+        false,
+        18057972692383878043
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-substrate-41ef2d192a9dee1f",
+    "features": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 473608,
+    "lib_sha256": "a4c4d9ef99ec4fc6c77c5d82b6b8bce32e4ee4f1893e6343e1d069cf758ca930",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-substrate-41ef2d192a9dee1f/lib-sparq_substrate.json",
+    "deps": [
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10474248473541300947
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-substrate-63e040508c2ddd1a",
+    "features": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 474544,
+    "lib_sha256": "5fbbf87cbfb3ab67b1c3071cb431def12509f1de418802074675621f9273a018",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-substrate-63e040508c2ddd1a/lib-sparq_substrate.json",
+    "deps": [
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        9827627637812297270
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-substrate-b5e326569ac965c1",
+    "features": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 474544,
+    "lib_sha256": "7a64fcd5d888ea631c7739ee4a94a215c253957a8a53c50a5e586b32b6ff2685",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-substrate-b5e326569ac965c1/lib-sparq_substrate.json",
+    "deps": [
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10936419137437573329
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ]
+    ]
+  },
+  {
+    "fingerprint": "sparq-substrate-c22502ef9ed0d727",
+    "features": [
+      "compare",
+      "join",
+      "numeric",
+      "rows"
+    ],
+    "profile": 18412561994239103911,
+    "lib_bytes": 474544,
+    "lib_sha256": "7bf1c5b0d440263cb5a509d058632177db5cef9f810dc1c76cf2844a2b77be8d",
+    "manifest": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/.fingerprint/sparq-substrate-c22502ef9ed0d727/lib-sparq_substrate.json",
+    "deps": [
+      [
+        2295442787663447226,
+        "smallvec",
+        false,
+        11708948945115789777
+      ],
+      [
+        3067591776805002636,
+        "hashbrown",
+        false,
+        9550266586828779013
+      ],
+      [
+        5793233592449580592,
+        "rustc_hash",
+        false,
+        350509441653713199
+      ],
+      [
+        7565171189602444183,
+        "sparq_core",
+        false,
+        10938579003949444277
+      ],
+      [
+        7766414679125189356,
+        "oxrdf",
+        false,
+        14192324074119854652
+      ]
+    ]
+  }
+]

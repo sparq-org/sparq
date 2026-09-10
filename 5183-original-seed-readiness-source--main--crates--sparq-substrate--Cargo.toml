@@ -1,0 +1,132 @@
+[package]
+name = "sparq-substrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared evaluation substrate for sparq: ID-tuple types, XSD numerics, join kernels, and SPARQL term ordering"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+# [SONNET-4.6] sq-qonbz.4: The Phase-3 join kernels (sq-hknqs) have landed — all four
+# join kernels + the numeric value tower + the compare module are now in place. The
+# stub-escape trigger noted above is satisfied. Flipping to publishable, adding the
+# criterion micro-bench and the SKILL.md surface (G1 new-crate-completeness gate).
+publish = true
+
+# [OPUS-4.8] Render README.md as the docs.rs front page (lib.rs uses include_str!).
+[package.metadata.docs.rs]
+all-features = true
+
+# [OPUS-4.8] sq-fmprw (epic sq-qonbz, umbrella sq-6tykl): the KEYSTONE leaf crate that
+# unblocks the substrate move-chain (research/shared-eval-substrate.md, Option C). It
+# depends ONLY on sparq-core (NOT sparq-engine) so BOTH the engine AND the reasoners
+# (sparq-reason / sparq-reason-el, which depend only on sparq-core) can later consume it
+# with NO dependency cycle. This crate is a SCAFFOLD: it defines / re-exports the shared
+# id-tuple vocabulary and the numeric value tower, behind DEFAULT-OFF features, with NO
+# evaluation logic moved yet (the join kernels + the engine `compare_values`/`Num`
+# arithmetic land in later beads of the epic). Nothing in the workspace depends on it, so
+# the lean default / wasm build does not compile any of it and the wasm_bundle_bytes floor
+# stays byte-identical (Phase-1 acceptance, research record §7.1).
+
+[features]
+# DEFAULT-OFF by construction: the lean core/engine/wasm build must compile NONE of this
+# crate's surface. A consumer opts into exactly the slice it needs.
+default = []
+# The shared id-tuple vocabulary: the SmallVec-based Row/Key/Posting aliases over the
+# sparq-core `Id`, plus the inline-integer id helpers. This is the representation BOTH the
+# engine joins and the reasoner rule-firing agree on (research record §2.1).
+rows = []
+# The XSD numeric value tower (`Num` + `as_numeric`): the value-space machinery a
+# D-entailment / RIF-builtin reasoner needs and that the engine uses for FILTER/BIND
+# arithmetic (research record §2.1). SCAFFOLD: the type shape + total-order/promotion-rank
+# accessors only; the full `compare_values` / arithmetic move lands in epic Phase 2.
+# Pulls `oxrdf` (the literal type `as_numeric` classifies) ONLY when enabled — the lean
+# default build links nothing.
+numeric = ["dep:oxrdf"]
+# [OPUS-4.8] sq-hknqs (epic sq-qonbz, Phase 3): the FOUR id-tuple join kernels —
+# merge / hash / bind / leapfrog-trie (WCOJ) — moved here from `sparq-engine::exec` behind a
+# generic `JoinKeys` descriptor + a generic `Budget` cooperative-cancel hook (research record
+# §2.1, §2.3). Monomorphic over `Id=u32` + the SmallVec Row/Key aliases with NO `Box<dyn>` /
+# `&dyn` on the probe loop, so the engine AND a future reasoner drive the same join body each
+# supplying their own key projection MONOMORPHICALLY. Requires `rows` (the Row/Key/Posting
+# aliases) and pulls `rustc-hash` (the FxHashMap the hash join builds) ONLY when enabled — the
+# lean default build links neither.
+# [SONNET-4.6] sq-7d3dj.19: also pulls dep:hashbrown so probe_emit and probe_gather_indices
+# can call raw_entry().from_hash() — a single precomputed FxHash selects the radix partition
+# AND performs the table lookup without a second internal re-hash.
+join = ["rows", "dep:rustc-hash", "dep:hashbrown"]
+# [OPUS-4.8] sq-vezew (epic sq-qonbz, Phase 4): the SPARQL term TOTAL ORDER —
+# `compare::compare_terms` (the engine's `compare_values`: error < blank < IRI < literal <
+# triple, numeric-aware + strict typed/temporal + string fallback + recursive triple-term
+# order) — moved here from `sparq-engine::exec`, generalised over a tiny `CompareTerm` trait the
+# engine implements for its `Value` (research record §2.1, §2.3). The ALGORITHM is generic (no
+# `Box<dyn>` / `&dyn` on the compare path); the engine's `Value` / `LitKind` /
+# `value_compare_strict` stay engine-private (they also drive the relational operators) and are
+# surfaced through the trait. Pure-`std` (it touches NO `oxrdf`/temporal type directly — those
+# stay behind the trait the consumer implements), so this feature links NOTHING new; the lean
+# default build compiles none of it.
+compare = []
+# [FABLE-5] sq-atjue: the zero-overhead DELTA harness (the substrate half of the
+# sparq-engine-systems paper §8, `site/papers/sparq-engine-systems.typ`). Measures each shared
+# kernel against a hand-rolled pre-extraction equivalent and emits the
+# `substrate.overhead_<kernel>` house JSON envelope. Implies `join` + `numeric` + `compare` (it
+# exercises all three kernel families). DEFAULT-OFF: the lean core/engine/wasm build compiles
+# none of it, and it links NO new dependency (the timing loop is `std::time::Instant` + a
+# hand-rolled JSON serialiser), so enabling it never bloats a consumer.
+overhead = ["join", "numeric", "compare"]
+
+[dependencies]
+# `version` alongside `path`: cargo uses the path locally and the version on crates.io
+# (required to publish — crates.io strips `path`). sparq-core is the ONLY dependency: this
+# crate sits at the leaf, below the engine, so the reasoners can reach it without a cycle.
+sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+# Inline small rows (avoid a heap allocation per solution row / join key). Same crate the
+# engine already uses for its `Row`/`Key` aliases, so the representation is byte-identical.
+smallvec.workspace = true
+# The hash join builds a `JoinTable = hashbrown::HashMap<Key, Posting, FxBuildHasher>`.
+# OPTIONAL: linked ONLY by the `join` feature. Same FxBuildHasher the engine uses, so the
+# build/probe key hash is byte-identical. rustc-hash provides the FxBuildHasher; hashbrown
+# provides the HashMap with raw_entry() for single-hash probe lookup. [SONNET-4.6] sq-7d3dj.19
+rustc-hash = { workspace = true, optional = true }
+# hashbrown::HashMap exposes raw_entry().from_hash() — the probe uses a precomputed FxHash
+# for BOTH partition selection and table lookup (no second internal re-hash). OPTIONAL: linked
+# ONLY by the `join` feature (`dep:hashbrown`). [SONNET-4.6] sq-7d3dj.19
+hashbrown = { workspace = true, optional = true }
+# The numeric scaffold's `as_numeric` classifies an `oxrdf::Literal`. OPTIONAL: linked ONLY
+# by the `numeric` feature (`dep:oxrdf`), so the default / `rows`-only build never pulls it.
+# `oxrdf` is already in the workspace dep tree (via sparq-core), so this adds no new crate.
+oxrdf = { workspace = true, optional = true }
+
+# [SONNET-4.6] sq-qonbz.4: criterion for the join/numeric micro-bench (dev-only, never
+# reaches the lean default or wasm build). Pinned at "0.5" to match the bench/zk pattern.
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+oxrdf = { workspace = true }
+# [SONNET-4.6] sq-3dyje.1: property-based tests for the term total-order and numeric tower.
+# Dev-dep ONLY — never reaches the shipped crate or any feature-OFF build.
+proptest = "1"
+
+# [SONNET-4.6] sq-qonbz.4: The micro-bench exercises merge_join + hash build/probe + Num
+# arithmetic. Feature-gated at bench time on `join` + `numeric` (which imply `rows`).
+[[bench]]
+name = "substrate"
+harness = false
+required-features = ["join", "numeric"]
+
+# [FABLE-5] sq-atjue: the zero-overhead DELTA runner — drives `overhead::OverheadReport::run`
+# and prints the human table + the `substrate.overhead_<kernel>` house JSON envelope. Pass
+# `--json` for the envelope only, `--canonical` on a dedicated quiet host (headline-eligible),
+# `--reps N` to set the min-of-N rep count. Gated on the `overhead` feature.
+[[example]]
+name = "substrate_overhead"
+required-features = ["overhead"]
+
+# [FABLE-5] sq-sqtk2.4: `compare.rs` hosts `#[cfg(kani)]` bounded-proof harnesses for the
+# term-total-order laws (run: `cargo kani -p sparq-substrate --features compare`). The Kani
+# model checker injects the `kani` cfg; register it so the normal `-D warnings` build does
+# not trip `unexpected_cfgs` (same pattern as sparq-vectors / sparq-core).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }

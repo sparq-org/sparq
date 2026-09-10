@@ -1,0 +1,22 @@
+{
+  "at": "2026-09-10T12:05:24.762528+00:00",
+  "manifest_sha256": "16cffa14191b0ac15e09a0e3577653cd4f95eca8e153ca16e6c18d174a83d3e0",
+  "verified_files": 47,
+  "raw_metadata_shared_features_equal": true,
+  "minimal_packages": 103,
+  "reference_packages": 111,
+  "source_files_each_revision_git_object_verified": 12,
+  "authorized_execution": {
+    "total_seconds": 1200,
+    "per_build_seconds": 600,
+    "per_seed_seconds": 60,
+    "jobs": 1,
+    "offline": true,
+    "max_new_allocated_bytes": 536870912,
+    "min_free_bytes": 2147483648,
+    "seed": 4141222487,
+    "count": 1,
+    "one_build_run_per_revision": true
+  },
+  "limits": "Unchanged original module/allowlist/parser/guards; profile macOS O3/unwind/noLTO is not exact LinuxCI release-fast; no comparator/source edits or outcome retries"
+}

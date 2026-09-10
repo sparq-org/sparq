@@ -1,0 +1,4 @@
+// [GPT-6 ASTRA] Future harness only; not compiled or executed in this phase.
+#[path = "QUALIFIED_REVISION/crates/sparq-bench/src/update_fuzz.rs"]
+mod update_fuzz;
+fn main() { update_fuzz::run(4141222487, 1); }

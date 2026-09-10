@@ -1,0 +1,12 @@
+{
+  "minimal": {
+    "packages_in_lock": 145,
+    "drift": [],
+    "sha256": "77cd7a32762cab2253920dbb44b0d5b8f30977859c2bd43c13c226dc8fcbecf4"
+  },
+  "bench-reference": {
+    "packages_in_lock": 153,
+    "drift": [],
+    "sha256": "40a8955155029c91e46248b602b758a1cce79ed90f3323e16cdebc42b5a5a0c8"
+  }
+}

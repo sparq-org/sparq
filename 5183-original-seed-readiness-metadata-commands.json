@@ -1,0 +1,42 @@
+[
+  {
+    "mode": "minimal",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1",
+      "--filter-platform",
+      "aarch64-apple-darwin"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-readiness/metadata-minimal",
+    "exit": 0,
+    "seconds": 2.392583833,
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+    },
+    "build_run_or_test": false
+  },
+  {
+    "mode": "bench-reference",
+    "argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/cargo",
+      "metadata",
+      "--offline",
+      "--format-version",
+      "1",
+      "--filter-platform",
+      "aarch64-apple-darwin"
+    ],
+    "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-readiness/metadata-bench-reference",
+    "exit": 0,
+    "seconds": 0.9968953329999999,
+    "env": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTC": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc"
+    },
+    "build_run_or_test": false
+  }
+]

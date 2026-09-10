@@ -1,0 +1,278 @@
+# [FABLE-5] Standing nightly differential fuzzing vs Oxigraph (bead sq-0iqzw).
+#
+# WHAT: runs the sparq-bench differential fuzzer (crates/sparq-bench/src/fuzz.rs —
+# the in-process Oxigraph 0.5 oracle that caught sq-eibog + sq-lr2ii) as a standing
+# nightly lane, sharded PER CATEGORY. Running only the 'all' category hides
+# category-dense bugs — the sq-lr2ii sargable-decimal bug reproduces at seeds
+# 4695+ in 'equality'/'filter' but is invisible in 'all' 0..20000 (density) — so
+# each of the generator's 21 query categories gets its own shard, plus three shards
+# that re-run a prefix of the same day window through the STORE-MODE read paths
+# (mmap / block-compressed / dict-spill rebuilds), which otherwise get zero
+# standing correctness differential.
+#
+# ADVANCING SEED WINDOW: every shard starts at days-since-epoch × WINDOW_STRIDE, so
+# each night explores a FRESH, never-replayed seed range (the fuzzer is a
+# deterministic SplitMix64 — the seed IS the corpus). The fixed REGRESSION windows
+# (seeds 0..2000 'all' + the sq-lr2ii known-catch windows) are covered per-PR by the
+# BLOCKING `differential smoke` job in fuzz.yml, not here.
+#
+# BUDGET: per-shard counts are sized so the aggregate fuzz compute lands around
+# 25–30 minutes at typical runner throughput (store modes are 1–2 orders of
+# magnitude slower per seed than the in-memory baseline, hence their smaller
+# counts). Counts are tunable; WINDOW_STRIDE must stay >= the largest per-shard
+# count so consecutive nights can never replay a seed.
+#
+# ON FAILURE, each shard: (1) uploads the fuzzer log — which contains the full
+# deterministic repro (seed + query + graph) — as an artifact, and (2) auto-files
+# the finding via scripts/ci-file-differential-failure.py: a GitHub issue with the
+# repro inline (deduped per shard against open issues) + a P1 bug bead appended to
+# .beads/issues.jsonl with a BEST-EFFORT push (the same fail-soft pattern as
+# bead-autoclose.yml, in reverse — create instead of close; a GH013 ruleset
+# rejection of the direct push is warned, not fatal, and the GitHub issue is the
+# reliable channel the orchestrator's issue-sweep beads from).
+#
+# ADJUDICATED DIVERGENCES: the comparator consumes bench/differential-divergences.json
+# — the machine-readable registry of the two adjudicated cross-engine semantic
+# divergence classes (sq-eibog cross-family =/!= type error; sq-ai2wa bnode-vs-IRI
+# inequality). A known-class mismatch is skipped WITH COUNT; anything else fails.
+#
+# TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
+# shacl-diff-fuzz.yml: this workflow never produces a check-run on a PR head
+# commit, so the `ci-summary / gate` aggregator never sees it and the per-PR gate
+# is unaffected. The per-PR BLOCKING differential lane is fuzz.yml's
+# `differential smoke` job (which IS aggregated by the gate).
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the
+# trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. Pins
+# match those already used by fuzz.yml / shacl-diff-fuzz.yml / ci.yml.
+name: differential
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_start:
+        description: "seed window start (default: days-since-epoch × stride — the advancing nightly window)"
+        required: false
+        default: ""
+      count:
+        description: "seeds per category shard (store-mode shards keep their own smaller caps)"
+        required: false
+        default: ""
+  # Daily heavy tier. 03:53 UTC — offset from ci.yml's coverage cron (03:17) and
+  # fuzz.yml (04:23) per the existing nightly stagger convention, so the heavy
+  # lanes do not contend for the same runner window.
+  schedule:
+    - cron: "53 3 * * *"
+
+permissions:
+  contents: read
+
+# One nightly sweep at a time; never cancel a shard mid bug-filing.
+concurrency:
+  group: differential-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # The advancing-window stride (seeds/night for a category shard). MUST stay >=
+  # every per-shard `count` below, or consecutive nights would replay seeds
+  # instead of exploring fresh ones.
+  WINDOW_STRIDE: "120000"
+
+jobs:
+  differential:
+    name: nightly differential (sparq vs Oxigraph, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # best-effort .beads bug-bead commit-back (fail-soft on GH013)
+      issues: write # auto-file the finding as a GitHub issue with the repro inline
+    strategy:
+      # Run every shard even if one finds a bug — one night then surfaces EVERY
+      # affected category/mode, not just the first.
+      fail-fast: false
+      matrix:
+        include:
+          # The 21 generator categories (crates/sparq-bench/src/fuzz.rs `CATEGORIES`).
+          # ONE SHARD PER CATEGORY is an invariant the fuzz.rs unit test
+          # `every_category_has_a_nightly_shard` pins against this file, and an
+          # unknown category name here exits non-zero rather than quietly fuzzing the
+          # fallback shape.
+          - { name: bgp, category: bgp, count: 120000, mode: "" }
+          - { name: filter, category: filter, count: 120000, mode: "" }
+          - { name: equality, category: equality, count: 120000, mode: "" }
+          - { name: optional, category: optional, count: 120000, mode: "" }
+          - { name: union, category: union, count: 120000, mode: "" }
+          - { name: minus, category: minus, count: 120000, mode: "" }
+          - { name: limit, category: limit, count: 120000, mode: "" }
+          - { name: distinct, category: distinct, count: 120000, mode: "" }
+          - { name: order, category: order, count: 120000, mode: "" }
+          # sq-j80vk: the SPARQL 1.1 surfaces added to the generator — property
+          # paths, aggregates/GROUP BY/HAVING, sub-selects, EXISTS/NOT EXISTS,
+          # VALUES, BIND and GRAPH — which had no standing differential before.
+          - { name: path, category: path, count: 120000, mode: "" }
+          - { name: aggregate, category: aggregate, count: 120000, mode: "" }
+          - { name: subquery, category: subquery, count: 120000, mode: "" }
+          - { name: exists, category: exists, count: 120000, mode: "" }
+          - { name: values, category: values, count: 120000, mode: "" }
+          - { name: bind, category: bind, count: 120000, mode: "" }
+          - { name: graph, category: graph, count: 120000, mode: "" }
+          # sq-avd75: the `OPTIONAL … FILTER(!bound(?v))` negation idiom — the
+          # trigger shape of rewrite (b) of the `algebra-rewrite` pass (#1735),
+          # which sparq-bench builds ON. Before this shard the pass's anti-join
+          # half was pinned only by fixed fixtures (sparq-engine's
+          # tests/rewrite_pass.rs, on the feature-matrix leg) and never by the
+          # random-data oracle.
+          - { name: antijoin, category: antijoin, count: 120000, mode: "" }
+          # sq-qcnn.6: the generator's typed-literal columns (dateTime/date with and
+          # without a timezone, the three duration datatypes incl. the incomparable
+          # yearMonth/dayTime pair, booleans in both lexical forms, integers beyond
+          # i128, doubles incl. INF/-INF/NaN), the SPARQL 1.1 string functions, and
+          # the two non-SELECT RESULT FORMS — `compare_ask` compares the boolean and
+          # `compare_graph` the canonical triple set, neither of which any shard
+          # reached while the generator emitted only SELECT.
+          - { name: typed, category: typed, count: 120000, mode: "" }
+          - { name: strfn, category: strfn, count: 120000, mode: "" }
+          - { name: ask, category: ask, count: 120000, mode: "" }
+          - { name: construct, category: construct, count: 120000, mode: "" }
+          # Store-mode differentials: re-run a PREFIX of the same day window with
+          # the store rebuilt through each out-of-core/compressed read path (env-
+          # selected in fuzz.rs). Much slower per seed (mmap save/reopen; dict-spill
+          # external build per case), hence the smaller counts.
+          - { name: mode-mmap, category: all, count: 20000, mode: SPARQ_FUZZ_MMAP }
+          - { name: mode-compress, category: all, count: 120000, mode: SPARQ_FUZZ_COMPRESS }
+          - { name: mode-dictspill, category: all, count: 8000, mode: SPARQ_FUZZ_DICTSPILL }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Rust (preinstalled stable)
+        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # ships a rustup stable toolchain; the SHA-pinned action's `rustup
+        # toolchain install stable` re-downloads the whole toolchain whenever
+        # the image lags the newest release. Use the preinstalled one —
+        # `rustup default`/`component add` never trigger a toolchain download.
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          # EVERY shard builds the identical sparq-bench release-fast binary — share
+          # ONE cache key across the matrix instead of a near-duplicate cache per shard.
+          # (Stated without a count: the matrix grows whenever the generator gains a
+          # category, and the previous "All 12" had already gone stale.)
+          shared-key: differential-nightly
+      # Build once, distinctly, so a compile error is reported separately from a
+      # differential mismatch.
+      - name: Build the differential fuzzer
+        run: cargo build -p sparq-bench --profile release-fast
+      - name: Compute the advancing seed window
+        id: window
+        env:
+          INPUT_SEED_START: ${{ github.event.inputs.seed_start }}
+          INPUT_COUNT: ${{ github.event.inputs.count }}
+          MATRIX_COUNT: ${{ matrix.count }}
+          MATRIX_MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          # Advancing window: start = days-since-epoch × stride, so exploration
+          # NEVER replays a previous night's range. A workflow_dispatch may pin an
+          # explicit start (e.g. to re-run a failing night's window).
+          if [ -n "$INPUT_SEED_START" ]; then
+            start="$INPUT_SEED_START"
+          else
+            days=$(( $(date -u +%s) / 86400 ))
+            start=$(( days * WINDOW_STRIDE ))
+          fi
+          # A dispatch count override applies to category shards only; store-mode
+          # shards keep their own caps (they are far slower per seed).
+          count="$MATRIX_COUNT"
+          if [ -n "$INPUT_COUNT" ] && [ -z "$MATRIX_MODE" ]; then
+            count="$INPUT_COUNT"
+          fi
+          if [ "$count" -gt "$WINDOW_STRIDE" ]; then
+            echo "::error::shard count $count exceeds WINDOW_STRIDE $WINDOW_STRIDE — nights would replay seeds"
+            exit 1
+          fi
+          echo "start=$start" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Window for this shard: seeds $start..$(( start + count ))"
+      - name: Run the differential fuzzer (fails on any non-adjudicated mismatch)
+        env:
+          START: ${{ steps.window.outputs.start }}
+          COUNT: ${{ steps.window.outputs.count }}
+          CATEGORY: ${{ matrix.category }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          # Store-mode shards select their read path via the env var fuzz.rs reads.
+          if [ -n "$MODE" ]; then export "$MODE=1"; fi
+          # Tee the log: on a mismatch it contains the full deterministic repro
+          # (MISMATCH seed=N lines + the first failing query + graph), which the
+          # failure steps below upload and file. pipefail keeps the exit code.
+          ./target/release-fast/sparq-bench fuzz "$START" "$COUNT" "$CATEGORY" 2>&1 \
+            | tee "$RUNNER_TEMP/fuzz-log.txt"
+      # ── failure path: preserve the repro + auto-file the finding ────────────────
+      - name: Auto-file the finding (GitHub issue + P1 bug bead, deduped)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Explicit repo for `gh issue …` (independent of the checkout's remote).
+          GH_REPO: ${{ github.repository }}
+          SHARD: ${{ matrix.name }}
+          CATEGORY: ${{ matrix.category }}
+          MODE: ${{ matrix.mode }}
+          START: ${{ steps.window.outputs.start }}
+          COUNT: ${{ steps.window.outputs.count }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-file-differential-failure.py --self-test
+          python3 scripts/ci-file-differential-failure.py \
+            --log "$RUNNER_TEMP/fuzz-log.txt" \
+            --shard "$SHARD" \
+            --category "$CATEGORY" \
+            --mode "${MODE:-baseline}" \
+            --seed-start "${START:-unknown}" \
+            --count "${COUNT:-unknown}" \
+            --out-dir "$RUNNER_TEMP/differential-repro" \
+            --jsonl .beads/issues.jsonl \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Commit the new bug bead back to main (best-effort; fail-soft on ruleset-blocked push)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHARD: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .beads/issues.jsonl; then
+            echo "no bead appended (deduped or filing skipped) — nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .beads/issues.jsonl
+          git commit -m "chore(beads): auto-file differential-fuzz P1 bug bead (${SHARD}) [skip ci]" \
+                     -m "Nightly differential lane finding (sq-0iqzw). [FABLE-5]"
+          # Best-effort push, exactly the bead-autoclose.yml fail-soft pattern: the
+          # protected-main ruleset (GH013) rejects direct pushes until a bypass
+          # exists (sq-roe3); the GitHub issue filed above is the reliable channel.
+          set +e
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          push_rc=$?
+          set -e
+          if [ "$push_rc" -ne 0 ]; then
+            echo "::warning title=differential bead push declined::Could not push the auto-filed bug bead to protected main (git push exit ${push_rc}; likely GH013 ruleset rejection). The GitHub issue filed in the previous step is the durable record; the orchestrator beads it on the next issue sweep."
+            exit 0
+          fi
+          echo "pushed the auto-filed bug bead to main."
+      - name: Upload the repro artifact (log + parsed seed/query/graph)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: differential-repro-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/fuzz-log.txt
+            ${{ runner.temp }}/differential-repro/
+          if-no-files-found: warn
