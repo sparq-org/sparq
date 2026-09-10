@@ -765,6 +765,12 @@ for evidence_name in ['artifacts/candidate/binary.json', 'artifacts/candidate/sp
 for evidence_name in ['implementation-root-verification.json', 'opus-memo-final-input.md', 'run-opus-memo-final.py']:
     FILES["6485-admission-" + evidence_name] = ROOT / "direct-6485/admission" / evidence_name
 
+# Completed6485 source review, draft publication and declaration admission.
+for evidence_name in ['declaration-template.json', 'precedent-6477.json', 'process-source.txt', 'report.json', 'source-hashes.json', 'manifest.json']:
+    FILES["6485-publication-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-6485/publication-readiness" / evidence_name
+for evidence_name in ['opus-memo-final-review.json', 'opus-memo-final-stderr.log', 'opus-memo-final-completion.json', 'opus-memo-final-result.json', 'opus-memo-final-root-disposition.json', 'pr-draft-body.md', 'pr-create-input.json', 'publish-draft.py', 'publication-receipt.json', 'declaration-admission.json']:
+    FILES["6485-admission-" + evidence_name] = ROOT / "direct-6485/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

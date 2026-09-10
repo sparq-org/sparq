@@ -1,0 +1,18 @@
+[
+  {
+    "path": "bench/feature-off-declarations/README.md",
+    "sha256": "e0a46190cd508bbe8d5821cdaec9da2a1d2bd07f8718f00b2a7ad8552cde7d2e"
+  },
+  {
+    "path": "bench/feature-off-declarations/6477.json",
+    "sha256": "89cd0e9e30c946a28a529b11868ab100afdbd2bb85df51514da2bec9b0799061"
+  },
+  {
+    "path": "scripts/check-vectorized-feature-off.py",
+    "sha256": "6d5139e305a1b9fe27c095043849febc5ae9ee9e362b8b55990e47da7408a892"
+  },
+  {
+    "path": ".github/workflows/vectorized-feature-off.yml",
+    "sha256": "6084ce926c8376413df379d70fda9948534a2a87edeb355c61094e61979dcd15"
+  }
+]

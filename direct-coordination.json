@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T17:41:00.779365+00:00",
+  "updated_at": "2026-09-10T17:47:37.188586+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,7 +72,7 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Committed candidate73769114: default4/4, mapped5/5, four behavioral controls killed; final review pending.",
+    "phase": "Source approved by actual Opus; draft6486 published; numbered declaration being added locally.",
     "execution_limits": {
       "max_total_seconds": 600,
       "max_new_allocated_bytes": 268435456,
@@ -85,15 +85,15 @@
       "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
       "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "final_actual_opus_review_running",
+    "state": "draft6486_metadata_implementation_running",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
     "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect final actual Opus review58553 and source-only publication readiness. Resolve material findings before publication.",
-      "Freshly validate target/head/ownership/rate budget; publish through ordinary PR process once approved. Normal CI gate15368 and current reviews required for queue.",
-      "Keep parent3113 and separate6483 open; no unsupported latency claims."
+      "Collect Astra metadata-only declaration child; obtain actual Opus review including caller precision correction.",
+      "Fresh current target validation; publish metadata and mark ready through normal process after review; request Copilot and inspect CI execution evidence.",
+      "No source-only draft merge. Keep6485 open until landed/postmergeproof; parent3113 stays open."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -125,7 +125,7 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "Source-only per-PR optimizer declaration publication readiness; no builds/source edits/writes.",
+    "agent_current_task": "Add/validate/commit only6486 declaration; source bytes preserved; final small independent review before push/ready.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
@@ -147,7 +147,7 @@
       "pending_commands": false
     },
     "final_review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 58553,
       "requested_model": "claude-opus-5",
@@ -156,8 +156,26 @@
       "input_sha256": "8000bf18e96774799a08e9212f94d6029d3e05f65893e1dd90f1e6eff9703a35",
       "output": "direct-6485/admission/opus-memo-final-review.json",
       "completion": "direct-6485/admission/opus-memo-final-completion.json",
-      "policy": "Collect58553; no duplicate launch; no publication until result/current head reconciled."
-    }
+      "policy": "58553 completed/collected; do not poll/relaunch. Metadata/currenthead followup required.",
+      "actual_primary_model": "claude-opus-5",
+      "verdict": "APPROVE_FOR_CI",
+      "result": "direct-6485/admission/opus-memo-final-result.json",
+      "root_disposition": "direct-6485/admission/opus-memo-final-root-disposition.json",
+      "output_sha256": "1d1197a16beb05d66e9edd4e8ab0f85fadd1a7e4d15ed5cd4583575ec102c192"
+    },
+    "pr": 6486,
+    "url": "https://github.com/sparq-org/sparq/pull/6486",
+    "publication": {
+      "receipt": "direct-6485/admission/publication-receipt.json",
+      "draft": true,
+      "head": "73769114f081c8455aa21a393d0b992bd1283b67"
+    },
+    "publication_readiness": {
+      "directory": "direct-6485/publication-readiness",
+      "manifest_sha256": "d597ef6f3d863ae0ed8f29e02f3d86ae57b56146ef3643a8832e95c83dd033dc",
+      "files": 5
+    },
+    "declaration_admission": "direct-6485/admission/declaration-admission.json"
   },
   "prs": {
     "4300": {
@@ -629,6 +647,17 @@
       "merged_at": "2026-09-10T15:45:55Z",
       "merge_commit": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
       "issue5183_closed": true
+    },
+    "6486": {
+      "state": "DRAFT_SOURCE_REVIEWED_DECLARATION_PENDING",
+      "url": "https://github.com/sparq-org/sparq/pull/6486",
+      "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+      "branch": "codex/preserve-numeric-memo",
+      "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+      "issue": 6485,
+      "review": "Actual Opus5xhigh source APPROVE_FOR_CI; metadata-only followup pending",
+      "publication": "direct-6485/admission/publication-receipt.json",
+      "merge_admitted": false
     }
   },
   "registry": {
@@ -679,7 +708,7 @@
     }
   },
   "next_actions": [
-    "Collect final actual Opus review58553 and source-only publication readiness. Resolve material findings before publication.",
+    "Collect Astra metadata-only declaration child; obtain actual Opus review including caller precision correction.",
     "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
     "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
   ],
@@ -949,7 +978,8 @@
       "url": "https://github.com/sparq-org/sparq/issues/6485",
       "parent": 3113,
       "implementation": "active_lane",
-      "creation_receipt": "direct-3113/admission/memo-followup-issue-receipt.json"
+      "creation_receipt": "direct-3113/admission/memo-followup-issue-receipt.json",
+      "pr": 6486
     }
   },
   "usage_observation": {

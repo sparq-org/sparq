@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T17:47:37.188586+00:00",
+  "issue": 6485,
+  "pr": 6486,
+  "base_source_head": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "agent": "/root/postmerge_ci",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "scope": "Only numbered V2 JSON intent declaration bench/feature-off-declarations/6486.json; preserve Rust source bytes; actual assigned PR/date/truthful reason.",
+  "validation": "JSON filename/shape/intent, existing checker self-test, git diff --check; no source rebuilds needed.",
+  "independent_review_required": true,
+  "publication_authorized": false,
+  "correction": "Current memo reads numerics.lookup as well as dict term predicate; retain accurate existing comment, qualify prior Opus dict-only claim in followup."
+}

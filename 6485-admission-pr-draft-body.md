@@ -1,0 +1,9 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+Updates that leave the dictionary unchanged currently discard the cached numeric-precision verdict. The next numeric-filter safety check then scans the dictionary again. This preserves the memo after deletions, known-term reinsertion and inline-integer insertion, while retaining invalidation when stored terms grow and the existing conservative high-precision verdict.
+
+The change documents the dictionary/cache coherence requirement and covers dense, sparse, forked and mapped graphs, including compaction, snapshot isolation and WAL replay. It addresses #6485. The separate first cold scan in #3113 remains unchanged and that parent issue stays open.
+
+Validation at `73769114f081c8455aa21a393d0b992bd1283b67`: four focused default tests and five mmap/dict-spill tests passed; four deliberate invalidation defects compiled and failed the expected behavioral assertions. Scoped Clippy with warnings denied and touched formatting passed. These are actual native Rust 2021 module builds using the recorded dependencies, not a full workspace/wasm gate. Local preflight stopped at the established Bash 3 `mapfile` limitation; normal Linux CI remains required. No latency, throughput, heap or wasm byte-neutrality claim is made.
+
+Implementation: GPT-6 Astra with extra-high reasoning. Actual independent Claude Opus 5 with extra-high reasoning approved the source for normal CI with no blocking findings. This draft first assigns the PR number required by the repository's per-PR declaration process. The numbered declaration will document the intentional always-compiled optimization; normal feature-off comparison and the independent wasm size gate remain required before protected merge.

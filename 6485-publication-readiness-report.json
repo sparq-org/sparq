@@ -1,0 +1,46 @@
+{
+  "at": "2026-09-10T17:41:26.907706+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "reviewed_candidate": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "required_when": "The gate requires intent declaration only if actual feature-off base/head wasm bytes differ. No wasm build/comparison has been run for this candidate, so byte inequality is not established here. This intentionally always-compiled guard is the documented class for a manual V2 intent declaration, appropriate to include when root assigns the PR number.",
+  "schema": {
+    "path": "bench/feature-off-declarations/<numeric-PR>.json",
+    "documented_fields": {
+      "pr": "actual integer PR number",
+      "date": "YYYY-MM-DD",
+      "reason": "one-line truthful intent explanation"
+    },
+    "implementation": "The V2 acceptance helper checks only a new filename matching ^\\d+\\.(?:json|md)$ in head minus base directory. It does not parse/validate these JSON fields; use the documented shape and matching actual number anyway.",
+    "template_status": "Evidence-only template uses a placeholder string and is not a ready-to-commit declaration. Replace with the assigned integer and name the new file accordingly; never put a placeholder in the repo declaration directory."
+  },
+  "proposed_reason": "[GPT-6 Astra] Intentional always-compiled core change: preserve the numeric precision memo when an update adds no stored dictionary terms. This is not a byte-neutrality assertion; the separate wasm size ratchet remains unchanged.",
+  "process": [
+    "After actual source approval, root opens a normal draft PR for number assignment.",
+    "On the same branch add only the numbered JSON file, with actual PR integer/date/reason; preserve reviewed source and prior head ancestry.",
+    "Validate JSON shape/filename/intent and run existing mechanism self-test; freeze small delta for actual independent review before root pushes.",
+    "Normal vectorized-feature-off CI builds/comparisons and the independent wasm-size/perf ratchet remain required; declaration does not assert neutrality or waive size validation."
+  ],
+  "validation_commands_not_executed": [
+    "python3 -m json.tool bench/feature-off-declarations/<PR>.json",
+    "python3 scripts/check-vectorized-feature-off.py --self-test",
+    "git diff --check",
+    "python3 scripts/check-vectorized-feature-off.py --leg2-dynamic base-wasm/base.wasm head.wasm base-wasm/base-decl.json bench/feature-off-declaration.json --declarations-dirs base-wasm/base-declarations bench/feature-off-declarations"
+  ],
+  "last_command_qualification": "Exact existing CI comparison invocation; its files are produced by the normal compiler-backed workflow. It is not a local build authorization or a substitute with fabricated bytes.",
+  "precedent": "6477.json records an intentional always-compiled optimization with the same no-byte-neutrality wording. No derived:true or compiler-derived evidence fields apply.",
+  "do_not_use": [
+    "Retired scalar change_token mutation",
+    "feature_off_autodeclare as a supposed neutrality proof for this intentional code change",
+    "A fabricated PR number or byte-size claim",
+    "Changing floor, workflow, feature gates or acceptance rules"
+  ],
+  "approval": "Ordinary reviewed declaration is already within authorized optimization process. No additional user policy approval is inferred; root owns draft creation/publication after actual Opus source review.",
+  "operations": {
+    "builds": 0,
+    "tests": 0,
+    "source_edits": 0,
+    "commits": 0,
+    "network": 0,
+    "pending_commands": 0
+  }
+}

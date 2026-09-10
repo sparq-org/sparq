@@ -1,0 +1,30 @@
+{
+  "files": [
+    {
+      "path": "declaration-template.json",
+      "bytes": 312,
+      "sha256": "7d5e33cb2bcf7796297e72c90bc16c0dd1a960ace8bbbf029bad8f95d05d10bf"
+    },
+    {
+      "path": "precedent-6477.json",
+      "bytes": 273,
+      "sha256": "89cd0e9e30c946a28a529b11868ab100afdbd2bb85df51514da2bec9b0799061"
+    },
+    {
+      "path": "process-source.txt",
+      "bytes": 13840,
+      "sha256": "17abe0b2fd39df3759afb81bbac18f445e9cf8fbb82d6b1cb45a14ebc4766e2b"
+    },
+    {
+      "path": "report.json",
+      "bytes": 3564,
+      "sha256": "58d639d2abd887c7ed0167a5967bbc43163958f8ec2b59234783900fde11feca"
+    },
+    {
+      "path": "source-hashes.json",
+      "bytes": 590,
+      "sha256": "35ace9df8c4cd5ae42a56ea84097fe07112bef97b4df7a4a218e8fda93de086c"
+    }
+  ],
+  "file_count": 5
+}
