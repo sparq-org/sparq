@@ -1,0 +1,65 @@
+{
+  "declared_utc": "2026-09-10T00:51:27.182048+00:00",
+  "phase_minutes": 20,
+  "source": {
+    "baseline": "e53464c73f31f7aca800f3867ac054c36408e346",
+    "candidate": "6e86f1d0ba447aa78a50800337a7a379702fa999"
+  },
+  "profiles": {
+    "release": "existing bench/overlay-count convention: opt-level3, debugfalse,ltofalse,codegen-units16",
+    "timing": "System allocator, no counting module",
+    "allocations": "byte-identical fixture/workload with existing owner-guard counting.rs, calibration before measurement"
+  },
+  "matrix": {
+    "subjects": 70000,
+    "query_predicates": 3,
+    "auxiliary_triples": 8192,
+    "views": [
+      "base",
+      "fork with4096unrelated tombstones"
+    ],
+    "cases": [
+      "ASK first seed row hit",
+      "ASK seed position2048hit",
+      "ASK all residual-filter miss",
+      "SELECT LIMIT65537 with residual true filter",
+      "ASK three-pattern/two-RHS residual-filter miss"
+    ]
+  },
+  "protocol": {
+    "rayon_threads": 1,
+    "warmups": 2,
+    "timing_repetitions": 5,
+    "queries_per_timing_sample": 3,
+    "allocation_repetitions": 3,
+    "queries_per_allocation_sample": 1,
+    "order": "Five paired samples per case: AB,BA,AB,BA,AB (A=baseline B=candidate). Each sample process runs its own setup/oracle/two warmups before one recorded sample. No concurrent builds or measurement.",
+    "correctness": "exact ASK boolean; LIMIT row count and each returned binding checked against generated subject/object identity; full-result oracle outside timed windows",
+    "path_evidence": "derive seed subject-order from actual scan; preserve arithmetic residual filter/two shared vars. Prior actual-query phase1 witness establishes this capped shape. Additional per-case physical instrumentation only if affordable; absence must remain explicit.",
+    "rss": "cumulative process high-water only, report separately at setup/before/after; never equate to query heap"
+  },
+  "admission": {
+    "correctness": "all paired answers must satisfy generated oracle; otherwise NO-GO",
+    "benefit": "at least full-miss or two-RHS miss median improves10percent with disjoint min/max ranges",
+    "regression": "any favorable/second-hit/late-LIMIT median regression>10percent with disjoint ranges is NO-GO",
+    "memory": "Conservative experiment screen: >25percent and >8MiB additional peak query live heap is NO-GO for this candidate pending root engineering evaluation; not repository policy or owner-approval requirement.",
+    "uncertainty": "Five-sample min/max and medians are advisory screening, not statistical proof or canonical admission; missing exact path/resource evidence is inconclusive.",
+    "no_tuning": true
+  },
+  "resource": {
+    "initial_free_bytes": 6779858944,
+    "minimum_free_bytes": 6509559808,
+    "build_jobs": 2,
+    "incremental": false,
+    "offline_locked": true,
+    "build_cap_seconds": 600,
+    "no_installs": true,
+    "no_cache_cleanup": true
+  },
+  "restricted_order": "affordable correctness-only assessment; no new feature build if reserve insufficient",
+  "amendment_before_any_measured_samples": {
+    "utc": "2026-09-10T00:53:43.039716+00:00",
+    "reason": "Root requested balanced paired order and clarified screening thresholds before measurements",
+    "samples_recorded": 0
+  }
+}

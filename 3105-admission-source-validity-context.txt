@@ -1,0 +1,312 @@
+FILE crates/sparq-core/src/store.rs:345-357, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+345: pub struct TripleStore {
+346:     // Each permutation in its column order, sorted (so binary search on a bound prefix
+347:     // is a plain lexicographic comparison of the leading columns) — owned or mmap'd.
+348:     //
+349:     // Behind an `Arc` so [`fork`](Self::fork) can SHARE the immutable base indexes
+350:     // across snapshot generations (the structural fork): every store is born
+351:     // shareable, a fork is an Arc bump. The only post-build mutation,
+352:     // [`decompress_to_ram`](Self::decompress_to_ram), goes through `Arc::get_mut`
+353:     // (it runs on freshly opened, never-yet-shared stores). Cost when unused: one
+354:     // extra pointer indirection per scan/estimate CALL (not per row) — measured in
+355:     // the flat-read benchmark as within noise.
+356:     perms: std::sync::Arc<[PermData; 6]>,
+357:     // Per-predicate stats keyed by predicate id (for the cost-based planner).
+
+FILE crates/sparq-core/src/store.rs:947-957, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+947:     /// O(n) rebuild. Set semantics: re-inserting a present triple and deleting an absent
+948:     /// one are no-ops; a delete of a pending insertion simply retracts it. When the
+949:     /// overlay nets out to nothing it is dropped entirely, so an untouched (or fully
+950:     /// reverted) store scans with zero overhead.
+951:     pub fn apply_delta(&mut self, inserts: &[[Id; 3]], deletes: &[[Id; 3]]) {
+952:         if inserts.is_empty() && deletes.is_empty() {
+953:             return;
+954:         }
+955:         let mut ov = self.overlay.take().unwrap_or_default();
+956:         // [GPT-6 Astra] Added projections retain the existing conservative reset.
+957:         // Preserve deletion projections across inserts/no-ops: only actual tombstone
+
+FILE crates/sparq-core/src/store.rs:1010-1023, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+1010: 
+1011:     /// A structural FORK of this store: the immutable base permutation indexes and
+1012:     /// planner stats are SHARED (Arc bumps, O(1)); the pending delta-overlay is
+1013:     /// carried by value (O(overlay), bounded by the compaction policy). The fork and
+1014:     /// the original then evolve independently through [`apply_delta`](Self::apply_delta)
+1015:     /// — neither ever mutates the shared base, so existing readers are unaffected.
+1016:     pub fn fork(&self) -> TripleStore {
+1017:         TripleStore {
+1018:             perms: std::sync::Arc::clone(&self.perms),
+1019:             pred_stats: std::sync::Arc::clone(&self.pred_stats),
+1020:             overlay: self.overlay.clone(),
+1021:         }
+1022:     }
+1023: 
+
+FILE crates/sparq-core/src/store.rs:1080-1094, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+1080: 
+1081:     /// Returns the contiguous slice of rows (in `perm` order) matching the bound
+1082:     /// prefix of the pattern, together with the chosen permutation.
+1083:     pub fn scan(&self, pattern: &Pattern) -> Scan<'_> {
+1084:         let (perm, lead) = Self::choose(pattern);
+1085:         self.scan_with(pattern, perm, lead)
+1086:     }
+1087: 
+1088:     /// Scans choosing a permutation whose output is sorted by canonical column
+1089:     /// `sort_col` (when possible), for merge joins.
+1090:     pub fn scan_sorted(&self, pattern: &Pattern, sort_col: usize) -> Scan<'_> {
+1091:         let (perm, lead) = Self::choose_sorted(pattern, sort_col);
+1092:         self.scan_with(pattern, perm, lead)
+1093:     }
+1094: 
+
+FILE crates/sparq-core/src/store.rs:1136-1168, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c
+1136:         let (lo, hi) = Self::bounds(pattern, perm, lead);
+1137:         let base = self.perms[perm as usize].rows_in(lo, hi);
+1138:         // The single overlay branch on the scan hot path: with no pending updates the
+1139:         // base range is returned untouched (borrowed, zero copies); with an overlay the
+1140:         // deleted triples are filtered out and the inserted ones merge-interleaved, so
+1141:         // the rows keep the permutation's sort order (merge joins stay valid).
+1142:         //
+1143:         // ZERO-COPY FAST PATH (sq-7d3dj.3) [OPUS-4.8]: even WITH an overlay, most ranges a small
+1144:         // overlay does not touch. `count_correction` tells us exactly how many
+1145:         // `added`/`deleted` triples fall in this range; when it is `(0, 0)` the
+1146:         // overlay contributes nothing here — no `added` row projects into `[lo, hi]` (so
+1147:         // nothing is interleaved) and no in-range base row is deleted (so nothing is
+1148:         // dropped) — hence `merge` would reproduce `base` verbatim, rows AND sort order.
+1149:         // We therefore return the BORROWED base slice directly, restoring allocation-free
+1150:         // scans for every untouched range (the read-mostly mutated-server common case)
+1151:         // instead of paying the owned merge path — which copies the whole base range into a
+1152:         // fresh `Vec` and merge-interleaves the (separately, already perm-sorted) in-range
+1153:         // `added` rows. It never re-sorts the range; the cost is the copy plus the interleave.
+1154:         let rows = match &self.overlay {
+1155:             None => base,
+1156:             Some(ov) if ov.count_correction(perm, lo, hi) == (0, 0) => base,
+1157:             Some(ov) => std::borrow::Cow::Owned(ov.merge(&base, perm, lo, hi)),
+1158:         };
+1159:         Scan { rows, perm }
+1160:     }
+1161: 
+1162:     /// Estimated number of matches for a pattern (the range length) — the cardinality
+1163:     /// estimate used by the greedy planner. Cheap for every storage mode: raw modes
+1164:     /// subtract binary-search bounds; the compressed mode counts via the block directory
+1165:     /// decoding at most two boundary blocks (never the whole range).
+1166:     pub fn estimate(&self, pattern: &Pattern) -> usize {
+1167:         let (perm, lead) = Self::choose(pattern);
+1168:         let (lo, hi) = Self::bounds(pattern, perm, lead);
+
+FILE crates/sparq-engine/src/exec.rs:192-238, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd
+192:     /// Clears the budget when the `*_with_budget` entry point returns (also on
+193:     /// error/unwind, so a poisoned thread never leaks a stale budget).
+194:     pub(crate) struct Guard<'a> {
+195:         _budget: std::marker::PhantomData<&'a QueryBudget>,
+196:         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
+197:     }
+198:     impl Drop for Guard<'_> {
+199:         fn drop(&mut self) {
+200:             ACTIVE.with(|a| a.set(OFF));
+201:             EXCEEDED.with(|e| e.set(None));
+202:         }
+203:     }
+204: 
+205:     pub(crate) fn install(b: &QueryBudget) -> Guard<'_> {
+206:         let cancel = b
+207:             .cancel
+208:             .as_ref()
+209:             .map(|flag| CancelPtr(NonNull::from(flag.as_ref())));
+210:         #[cfg(not(target_arch = "wasm32"))]
+211:         let on = b.deadline.is_some()
+212:             || b.max_rows.is_some()
+213:             || b.max_bytes.is_some()
+214:             || cancel.is_some();
+215:         #[cfg(target_arch = "wasm32")]
+216:         let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
+217:         ACTIVE.with(|a| {
+218:             a.set(Limits {
+219:                 on,
+220:                 #[cfg(not(target_arch = "wasm32"))]
+221:                 deadline: b.deadline,
+222:                 max_rows: b.max_rows.unwrap_or(usize::MAX),
+223:                 max_bytes: b.max_bytes.unwrap_or(usize::MAX),
+224:                 byte_width: BYTES_PER_ID,
+225:                 extra_bytes: 0,
+226:                 cancel,
+227:             })
+228:         });
+229:         EXCEEDED.with(|e| e.set(None));
+230:         Guard {
+231:             _budget: std::marker::PhantomData,
+232:             _not_send: std::marker::PhantomData,
+233:         }
+234:     }
+235: 
+236:     /// [OPUS-4.8] (sq-s5is) Sets the per-row byte width (= `width_in_ids ×
+237:     /// BYTES_PER_ID`) of the working set the next row-count checks price. Called once
+238:     /// per operator with that operator's output arity, so a check on `rows` correctly
+
+FILE crates/sparq-engine/src/exec.rs:2021-2106, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd
+2021: pub(crate) mod view {
+2022:     use crate::{DatasetView, DefaultGraphMode};
+2023:     use oxrdf::Term;
+2024:     use rustc_hash::FxHashSet;
+2025:     use std::cell::RefCell;
+2026:     use std::sync::Arc;
+2027: 
+2028:     /// The installed view, plus the "inside GRAPH" suspend flag:
+2029:     /// `eval_graph_named` swaps evaluation to the named sub-`Graph`, whose inner
+2030:     /// patterns must NOT be empty-defaulted (only the TOP-LEVEL graph scope is).
+2031:     #[derive(Clone, Default)]
+2032:     pub(crate) struct State {
+2033:         named: Option<Arc<FxHashSet<Term>>>,
+2034:         default_empty: bool,
+2035:         suspended: bool,
+2036:     }
+2037: 
+2038:     thread_local! {
+2039:         static ACTIVE: RefCell<State> = RefCell::new(State::default());
+2040:     }
+2041: 
+2042:     /// Restores the pre-install state when the installing entry point returns
+2043:     /// (also on error/unwind, so a poisoned thread never leaks a stale view).
+2044:     pub(crate) struct Guard(State);
+2045:     impl Drop for Guard {
+2046:         fn drop(&mut self) {
+2047:             ACTIVE.with(|a| *a.borrow_mut() = std::mem::take(&mut self.0));
+2048:         }
+2049:     }
+2050: 
+2051:     pub(crate) fn install(v: &DatasetView) -> Guard {
+2052:         let new = State {
+2053:             named: Some(Arc::clone(&v.named)),
+2054:             default_empty: matches!(v.default, DefaultGraphMode::Empty),
+2055:             suspended: false,
+2056:         };
+2057:         Guard(ACTIVE.with(|a| std::mem::replace(&mut *a.borrow_mut(), new)))
+2058:     }
+2059: 
+2060:     /// Fully suspends the view (named filter AND empty default) for a scope —
+2061:     /// used by the entry points once `dataset::build_active` has folded the view
+2062:     /// into a dataset-clause ACTIVE graph: the restriction is already applied,
+2063:     /// and re-filtering would make a non-visible FROM NAMED graph behave
+2064:     /// differently from an absent one (both must be the EMPTY active graph).
+2065:     pub(crate) fn suspend_all() -> Guard {
+2066:         Guard(ACTIVE.with(|a| std::mem::take(&mut *a.borrow_mut())))
+2067:     }
+2068: 
+2069:     /// RAII suspension of the empty-default short-circuit only, for GRAPH scope
+2070:     /// (the named-graph visibility filter stays active). Restores the previous
+2071:     /// flag on drop, so nested scopes compose.
+2072:     pub(crate) struct GraphScope(bool);
+2073:     impl Drop for GraphScope {
+2074:         fn drop(&mut self) {
+2075:             ACTIVE.with(|a| a.borrow_mut().suspended = self.0);
+2076:         }
+2077:     }
+2078: 
+2079:     pub(crate) fn enter_graph() -> GraphScope {
+2080:         GraphScope(ACTIVE.with(|a| std::mem::replace(&mut a.borrow_mut().suspended, true)))
+2081:     }
+2082: 
+2083:     /// `true` when `name` is a visible named graph under the installed view
+2084:     /// (always true with no view installed).
+2085:     #[inline]
+2086:     pub(crate) fn allows(name: &Term) -> bool {
+2087:         ACTIVE.with(|a| a.borrow().named.as_ref().is_none_or(|s| s.contains(name)))
+2088:     }
+2089: 
+2090:     /// `true` when the view's default graph is EMPTY at the current scope —
+2091:     /// false with no view, under `StoreDefault`, or inside a GRAPH pattern.
+2092:     #[inline]
+2093:     pub(crate) fn default_is_empty() -> bool {
+2094:         ACTIVE.with(|a| {
+2095:             let s = a.borrow();
+2096:             s.default_empty && !s.suspended
+2097:         })
+2098:     }
+2099: 
+2100:     /// Snapshot of the installed view for the rayon-parallel expression branches
+2101:     /// (`None` — no view, the common case — makes [`worker_install`] free).
+2102:     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+2103:     pub(crate) fn snapshot() -> Option<State> {
+2104:         ACTIVE.with(|a| {
+2105:             let s = a.borrow();
+2106:             (s.named.is_some() || s.default_empty).then(|| s.clone())
+
+FILE crates/sparq-engine/src/exec.rs:4650-4690, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 71f7279359bf982dad1f751fcbc6b42cd68200daebf0de2f417bca1a20d867fd
+4650:                     .collect()
+4651:             })
+4652:             .collect();
+4653:         Ok(Bindings::unsorted(b.vars, rows))
+4654:     }
+4655:     match name {
+4656:         NamedNodePattern::NamedNode(n) => {
+4657:             let target = Term::NamedNode(n.clone());
+4658:             // A graph outside an installed dataset view takes the absent-graph
+4659:             // branch below: non-visible must be INDISTINGUISHABLE from absent
+4660:             // (the L1 view's security property).
+4661:             let sub = if view::allows(&target) {
+4662:                 graph.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
+4663:             } else {
+4664:                 None
+4665:             };
+4666:             match sub {
+4667:                 Some(sub) => eval_translated(
+4668:                     graph,
+4669:                     local,
+4670:                     sub,
+4671:                     #[cfg(feature = "zk")]
+4672:                     &target,
+4673:                     inner,
+4674:                 ),
+4675:                 // The named graph is absent → ZERO solutions (even for `GRAPH <g> {}`,
+4676:                 // which must NOT yield the unit row), but with `inner`'s variable
+4677:                 // schema — evaluate against an empty graph for the columns, then drop
+4678:                 // any rows (an empty group pattern would otherwise produce one).
+4679:                 None => {
+4680:                     let _scope = view::enter_graph(); // schema eval matches the present-graph path
+4681:                     // zk-trace: an absent graph still records the operator
+4682:                     // boundary + (empty) pattern input sets under its name.
+4683:                     #[cfg(feature = "zk")]
+4684:                     let _zk = crate::zk::graph_scope(&target);
+4685:                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
+4686:                     let mut el = LocalVocab::default();
+4687:                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
+4688:                     b.rows.clear();
+4689:                     Ok(b)
+4690:                 }
+
+FILE crates/sparq-engine/src/lib.rs:331-365, git e53464c73f31f7aca800f3867ac054c36408e346, full-file SHA256 2efd087a5bb3ba10461ceedcf67172bc34287ce15b26eac95b13b555a14736fb
+331: /// debugging the extension.
+332: pub type ExtFn = std::sync::Arc<dyn Fn(&[Term]) -> Result<Term, String> + Send + Sync>;
+333: 
+334: /// A map from function IRIs to [`ExtFn`]s, consulted by the evaluator for
+335: /// `Function::Custom` IRIs that are not XSD constructor casts (SPARQL 17.6,
+336: /// extensible value testing). Installed per query by [`query_with_functions`] /
+337: /// [`with_functions`]; the registry-free entry points never consult it, so they
+338: /// keep their exact pre-registry behaviour (an unknown custom IRI is a hard
+339: /// "unsupported SPARQL function" error) and hot-path cost.
+340: ///
+341: /// Cloning is cheap (the functions are `Arc`-shared), so a long-lived registry can
+342: /// be built once and reused across queries and threads.
+343: #[derive(Clone, Default)]
+344: pub struct FunctionRegistry {
+345:     map: std::collections::HashMap<String, ExtFn>,
+346: }
+347: 
+348: impl FunctionRegistry {
+349:     pub fn new() -> Self {
+350:         Self::default()
+351:     }
+352: 
+353:     /// Registers `f` under the function IRI (replacing any previous registration).
+354:     pub fn register(
+355:         &mut self,
+356:         iri: impl Into<String>,
+357:         f: impl Fn(&[Term]) -> Result<Term, String> + Send + Sync + 'static,
+358:     ) {
+359:         self.map.insert(iri.into(), std::sync::Arc::new(f));
+360:     }
+361: 
+362:     /// The function registered under `iri`, if any.
+363:     pub fn get(&self, iri: &str) -> Option<&ExtFn> {
+364:         self.map.get(iri)
+365:     }

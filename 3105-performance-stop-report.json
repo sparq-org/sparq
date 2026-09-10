@@ -1,0 +1,21 @@
+{
+  "status": "INCOMPLETE_RESOURCE_LIMIT",
+  "candidate_head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "baseline_head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "measurements": 0,
+  "baseline_build": "completed optimized O3,LTOoff,16codegen units; final binary preserved",
+  "candidate_build": "SIGTERM after25.44seconds: disk reserve sampled6482006016bytes below6509559808threshold",
+  "allocation_builds": "not attempted",
+  "harness_validation": "Compiled baseline harness only. No runtime correctness/oracle/sample executed; per-case physical path remains unverified beyond source reasoning and prior phase1 witness.",
+  "balanced_protocol": "AB/BA amendment recorded before any samples; one-sample CLI implemented, measurement orchestration not executed",
+  "source_state": "Frozen candidate and all59phase1files unchanged; no production changes",
+  "next_step": "Root may recover disk reserve without touching frozen evidence; reassess build feasibility before separately authorizing completion of this same fixed paired protocol. No performance-admission or speedup conclusion is supported.",
+  "risks": [
+    "Repeated RHS retention peak heap remains unmeasured.",
+    "Five-repetition ranges would be advisory screening, not statistical proof.",
+    "Restricted-order/overlay correctness and actual per-case physical-path instrumentation remain incomplete.",
+    "Counter allocator is copied byte-identically from merged owner-guard version, but its calibration was not executed in this phase.",
+    "Process listing was sandbox-denied; no retry. Build runner completed process-group SIGTERM; no command is pending from this lane."
+  ],
+  "utc": "2026-09-10T00:58:33.357579+00:00"
+}

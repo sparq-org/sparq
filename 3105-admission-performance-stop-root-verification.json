@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-10T01:10:57.490641+00:00",
+  "files": 21,
+  "manifest_sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+  "verified": true,
+  "result": "INCOMPLETE_RESOURCE_LIMIT; zero samples",
+  "resume_basis": "Freshly observed14,537,830,400bytes free; same fixed protocol, no policy threshold changes"
+}

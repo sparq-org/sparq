@@ -1,0 +1,48 @@
+[
+  {
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance/baseline/Cargo.toml"
+    ],
+    "exit": 0,
+    "seconds": 3.5680585,
+    "minimum_free_bytes": 6532620288,
+    "stopped": null,
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    },
+    "binary_sha256": "ccab79f940c63edf7c364579cc0cf18cc38d24dc5f7d4870c3234465459f5688",
+    "binary_bytes": 5333312
+  },
+  {
+    "argv": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--offline",
+      "--manifest-path",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-3105/performance/candidate/Cargo.toml"
+    ],
+    "exit": -15,
+    "seconds": 25.440260041,
+    "minimum_free_bytes": 6482006016,
+    "stopped": "disk reserve",
+    "env": {
+      "CARGO_BUILD_JOBS": "2",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_NET_OFFLINE": "true",
+      "CARGO_TARGET_DIR": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target",
+      "RAYON_NUM_THREADS": "1"
+    }
+  }
+]

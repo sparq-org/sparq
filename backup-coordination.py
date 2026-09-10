@@ -355,6 +355,12 @@ for evidence_name in ['ask-early-exit.json', 'ask-early-exit.log', 'author-prefl
 for evidence_name in ['root-phase1-verification.json', 'opus-input.md', 'opus-input-audit.json', 'actions-0050.json', 'health-summary.json']:
     FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
 
+# Issue3105 completed Opus and stopped benchmark evidence; exclude active completion files.
+for evidence_name in ['baseline/Cargo.lock', 'baseline/Cargo.toml', 'baseline/src/counting.rs', 'baseline/src/main.rs', 'binary/baseline-timing', 'build-all.py', 'build-baseline-timing.json', 'build-baseline-timing.log', 'builds.json', 'candidate/Cargo.lock', 'candidate/Cargo.toml', 'candidate/src/counting.rs', 'candidate/src/main.rs', 'final-build-baseline-timing.json', 'final-build-baseline-timing.log', 'final-build-candidate-timing.json', 'final-build-candidate-timing.log', 'initial-unmeasured-main.rs', 'protocol.json', 'report.json', 'run-command.py', 'manifest.json']:
+    FILES["3105-performance-stop-" + evidence_name.replace("/", "--")] = ROOT / "direct-3105/performance" / evidence_name
+for evidence_name in ['opus-review.json', 'opus-review.stderr.log', 'opus-result.json', 'opus-completion.json', 'performance-stop-root-verification.json', 'source-validity-context.txt', 'source-validity-assessment.json', 'nested-budget-issue.md', 'nested-budget-precreate.json', 'nested-budget-issue-url.txt', 'nested-budget-issue-verified.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

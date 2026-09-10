@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T01:14:18.033449+00:00",
+  "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "exact_dedupe": [],
+  "earlier_searches": [
+    "budget nested",
+    "budget reentrant",
+    "budget restore",
+    "QueryBudget"
+  ],
+  "result": "No matching outer-budget restoration issue found; unrelated results not adopted"
+}

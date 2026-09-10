@@ -1,0 +1,64 @@
+{
+  "verdict": "approve_for_validation",
+  "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "findings": [
+    {
+      "severity": "important",
+      "location": "crates/sparq-engine/src/exec.rs:4198-4204 (rhs_cache construction) and 4265-4278 (slot use), lifetime = whole eval_bgp_binary_capped frame",
+      "finding": "In the unbudgeted path the cache retains every reached non-bind RHS relation until the capped call returns, so peak retained rows become \u03a3|rhs_i| instead of the base's one-at-a-time |rhs_i|. Exactly this path has no row/byte ceiling, so a previously-completing query can regress to OOM.",
+      "evidence": "Base moved each `rhs` into `merge_join`/`hash_join`/`cross_product`, which dropped it at return, so at most one RHS relation plus `seed_all` plus `result` was live. The candidate holds `Vec<Option<(Option<usize>, Bindings)>>` for the frame. Executed-path counterexample: unbudgeted `ASK { ?s :p ?o . ?s :q ?o . ?s :r ?o . ?s :t ?o }` over the 70k fixture shape \u2014 no pattern admits bind join (`connecting.len() == 1` fails at exec.rs:4237), the first block misses, so blocks 2 and 3 run with three full relations simultaneously live. Because reuse requires `!budget::active()`, `Limits.on` is false, hence `budget::exhausted` and `budget::cap_alloc` are no-ops (exec.rs:~400, ~470) and nothing caps this growth. The non-capped `eval_bgp_binary` still frees per step, so the capped path can now retain more than the full path it is supposed to be cheaper than.",
+      "required_action": "In the declared bounded phase, measure peak live heap/RSS for a \u22653-pattern non-bind capped miss, base vs candidate. If the regression is material, bound retention explicitly and document it (e.g. do not retain relations above a stated size, or retain only while \u22652 blocks remain) rather than leaving it unbounded."
+    },
+    {
+      "severity": "important",
+      "location": "crates/sparq-engine/src/exec.rs:4317-4331 (capped_rhs sort keying); guard coverage in exec.rs:21340-21385",
+      "finding": "The changed-requested-sort path is guarded only by a synthetic helper unit test; no executed query covers it, yet it is reachable end to end.",
+      "evidence": "The `ignore-requested-sort` control is killed solely by `capped_rhs_keeps_rows_and_actual_order_until_request_changes`, which calls `capped_rhs` directly with hand-built `Bindings`. Reachability of a real key change: bind-join admission at exec.rs:4237-4241 tests `result.rows.len().saturating_mul(8) < prepared[i].est`, which differs between the 1024-row block and the remainder block; the branch taken then sets `result.sorted_by` differently (merge_join_ref \u2192 `Some(jv)` at exec.rs:8630, hash/cross \u2192 unsorted), so for \u22653 patterns `merge_var` and therefore `scan_sort` for a later pattern can differ between block 1 and block 3, forcing the replacement branch. That branch's correctness (rows and truthful `sorted_by` swap, transient double retention) is therefore unexercised by any compiled query.",
+      "required_action": "Add one executed \u22653-pattern capped case in which `scan_sort` for some pattern changes across blocks; assert capped result equals the full-path result as a multiset and assert the observed scan counts (expect >1 scan for that slot). Also cover a disconnected step so `cross_product_ref` is executed at least once in the capped path."
+    },
+    {
+      "severity": "important",
+      "location": "crates/sparq-engine/src/exec.rs:8497-8500 (graph.store.scan / scan_sorted) versus residual-FILTER application at exec.rs:4290-4305 and view gating in try_capped exec.rs:3985-3992",
+      "finding": "Cache validity assumes the scan result depends only on (&Graph, id_pat, pos_vars, filt, sort). All *direct* inputs are immutable in the frame, but view/overlay coupling inside the store scan is not in this packet, and residual FILTERs (possibly containing EXISTS/subqueries) do execute between blocks. Missing evidence, not an established bug.",
+      "evidence": "`try_capped` consults global view state (`view::default_is_empty()`), proving view state influences this path; `scan_to_bindings` obtains rows via `graph.store.scan(id_pat)` / `scan_sorted(id_pat, c)` whose view/overlay/snapshot interaction is not included. Between block N and block N+1 the only code that runs is per-block residual `apply_filter` (exec.rs:4297-4304), which for EXISTS/subquery filters can install and restore evaluation-scope state. Under base a stale view would be corrected by the next re-scan; under the candidate the block-1 rows are reused.",
+      "required_action": "Either cite the store/view code establishing that a capped-call scan is invariant to any state mutable during the call, or add an executed test with an overlay/named-graph view plus an EXISTS residual FILTER across a multi-block capped miss, comparing against the full path."
+    },
+    {
+      "severity": "suggestion",
+      "location": "crates/sparq-engine/src/exec.rs:4324-4328 (`*slot = Some((sort, scan()))`)",
+      "finding": "On a key change the replacement relation is materialized before the stale one is dropped, doubling transient peak for that relation.",
+      "evidence": "Evaluation order of `Some((sort, scan()))` builds the new `Bindings` while the old tuple is still owned by `*slot`; the drop happens at assignment. This is the same path flagged in scope_remaining (\"temporarily needs the replacement scan before dropping the old slot\").",
+      "required_action": "Set `*slot = None;` immediately before invoking `scan()` (one line, no behavior change on unwind since the frame aborts anyway)."
+    },
+    {
+      "severity": "suggestion",
+      "location": "crates/sparq-engine/src/exec.rs:21268 and 21296, 21419, 21429 (exact `[1,3,1,0]` / `[1,1,1,0]` work assertions)",
+      "finding": "Exact work-count assertions are plan-sensitive and may go red under untested feature matrices rather than indicating a defect.",
+      "evidence": "The counts depend on GOO ordering, bind admission and block count. For this fixture bind is structurally impossible (two connecting variables, exec.rs:4237) and the block count is data-determined, so the fixture is fairly robust; but cs-planner / semijoin-bitmap / vectorized / columnar / zk builds were not executed, and `#[cfg(test)] capped_rhs_tests::observe` is now referenced from production control flow (exec.rs:4192, 4207, 4244, 4251), so the test module must compile in every test-configured feature combination.",
+      "required_action": "Run the relevant feature matrices (and an all-features lib test) before merge; if a combo legitimately changes the plan, relax the assertion to a documented inequality for that combo rather than deleting the guard."
+    }
+  ],
+  "validated_reasoning": [
+    "Scan purity holds for the reviewed frame: `prepared[i].id_pat`/`pos_vars` come from `prepare_bgp` before the loop, `filt = pfilter(i)` is a copy out of `pat_filters` computed once by `split_sargable`, `limit` is `None`, the `semijoin-bitmap` prefilter is `None`, and `graph` is a shared borrow. The only varying argument, `scan_sort`, is part of the cache key, so a hit returns rows and `sorted_by` byte-identical to what a fresh scan would produce \u2014 result identity, not merely multiset equality, in this path.",
+    "No mutation or aliasing of cached rows is possible: `capped_rhs` returns `&Bindings`, and all three kernels read `&left.rows`/`&right.rows` and clone/emit into a fresh output vector (`sjoin::merge_join`, `build_table`/`probe_emit`, `cross_product_ref`'s `l.clone(); row.extend_from_slice(r)`). Bag multiplicity of the reused RHS is therefore preserved across blocks; the helper test additionally asserts pointer identity and duplicate-row survival.",
+    "Sort metadata stays truthful: the requested key is stored separately from the returned `sorted_by`, and merge eligibility still tests the actual value (`rhs.sorted_by.as_ref() == Some(jv)`, exec.rs:4272), so restricted-permutation fallback to hash join and range-pruning suppression behave as in base.",
+    "Per-block planner/bind/build-side decisions are unchanged: `goo_seed`, `goo_pick`, `record_pattern_ndv` and `CsCtx` are still recomputed per block from the same `prepared`; the bind branch never consults the cache; `hash_join_ref` selects the build side by `rows.len()` exactly as the owned version and the cached RHS content is identical, so build side, `out_vars` order and posting-list order match base.",
+    "The borrowed refactor is behavior-preserving at the owned call sites: the pre-patch bodies of `merge_join`/`hash_join`/`cross_product` already touched inputs only through references (`&left.rows`, `left.vars.clone()`, `&build.rows`) and never moved data out of them, so delegating to `*_ref` changes neither output nor input drop timing for callers that kept owned signatures. In the budgeted capped branch the per-iteration `uncached` local extends the RHS lifetime only to the end of that loop iteration.",
+    "Budget/cancellation lifetimes: reuse is gated on `!budget::active()`, which is false exactly when `Limits.on` was set by `install` (deadline/max_rows/max_bytes/cancel, wasm excluding deadline). Consequently a cached relation can never be a budget-truncated partial scan (`scan_to_bindings`'s `budget::exhausted` break and `cap_alloc` are no-ops when `on == false`), and with any armed budget the cache vector has length 0, restoring the former per-step lifetime and polling cadence. The `ignore-budget` control (armed budget must show 3 scans) is the executed guard for this.",
+    "Feature/MSRV compatibility: no production signature or cfg was changed; `budget::active()` is compiled in all configs (only its dead_code allow is cfg'd, and an allow on a now-used item is harmless); `Option::is_none_or` is already used in base (`goo_pick`); the only new `std::time::Instant` use is behind `cfg(not(target_arch = \"wasm32\"))` in the test; under `zk` the capped path is declined in `try_capped`, so no zk trace can lose scans.",
+    "Controls are non-vacuous: all three compile and die from runtime assertions, and two of the three kills are on the actual public `ask`/`ask_with_budget` path with counters placed after the early returns (entry/block/scan/bind), so count pushdown or another fast path cannot make the scan-count result vacuous.",
+    "The retained test correction is coherent: `?s :p ?o . ?s :q ?other` produces a nonempty intermediate and `max_rows: Some(10)` yields `query budget exceeded (max-rows)`, so `.contains(\"max-rows\")` is a real assertion. Note it is an armed-budget query and takes the bind-join branch on block 1, so it validates unchanged budget behavior, not reuse."
+  ],
+  "missing_validation": [
+    "Full required CI: workspace clippy across all targets and feature sets with -D warnings, full test suite, conformance, wasm build, and the repo ratchets. Only `-p sparq-engine --lib` default-feature clippy was executed.",
+    "Feature matrices unexecuted: cs-planner, persistent-stats, semijoin-bitmap, id-filter-fastpath, vectorized/columnar, zk, parallel-off, all-features. The reported \"no default engine features\" run still enables sparq-core parallel/mmap/dict-spill via dev-dependencies, so it is not a clean minimal-feature or wasm check.",
+    "Executed multi-pattern capped coverage: changed `scan_sort` across blocks, a disconnected (cross_product_ref) step, and a mixed bind + non-bind chain, each compared against the full-path result as a multiset.",
+    "Overlay/named-graph views, snapshot and concurrent readers with a capped query in flight, plus a residual EXISTS/subquery FILTER interleaved between blocks (the only code that runs between a cached scan and its reuse).",
+    "Deterministic mid-query cancellation injection; only pre-cancelled and pre-expired budgets were executed. Reuse is disabled in that mode, but the polling cadence should be shown unregressed.",
+    "The declared measurement phase: release latency, allocation counts and peak live heap/RSS for first-block hit, second-block hit, complete miss, late-LIMIT completion, plus multi-pattern RHS retention and the changed-scan-order replacement path. No speed or memory claim is currently supported by anything in this packet.",
+    "Privacy preflight `scripts/check-privacy-claims.sh` never ran (Bash 3 lacks `mapfile`); run under bash >= 4 or replace the `mapfile` call so the gate is actually evaluated rather than skipped.",
+    "Confirmation that no nested evaluation reachable before this frame can leave `budget::active()` reading false inside a budgeted outer query (the `service`/`service-local` `ByteSavepoint`/`restore_bytes` machinery and any nested `install` guard drop), which is the only way an armed-budget query could silently take the retaining path."
+  ],
+  "performance_admission_approved": false,
+  "merge_approved": false
+}

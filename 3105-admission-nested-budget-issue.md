@@ -1,0 +1,9 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+A nested public query on the same thread discards the outer query's installed budget. At main `e53464c73f31f7aca800f3867ac054c36408e346`, [`budget::install` and `Guard::drop`](https://github.com/sparq-org/sparq/blob/e53464c73f31f7aca800f3867ac054c36408e346/crates/sparq-engine/src/exec.rs#L192) overwrite `ACTIVE`/`EXCEEDED` on entry and reset them to `OFF`/`None` on exit, without saving the previous values.
+
+The public API permits reentry through an extension function: [`FunctionRegistry::register`](https://github.com/sparq-org/sparq/blob/e53464c73f31f7aca800f3867ac054c36408e346/crates/sparq-engine/src/lib.rs#L347) accepts a normal Rust callback, and public query/ASK entry points install a fresh budget. If a callback invokes an inner query, the inner guard's return clears the outer limits; subsequent outer polls see the budget as inactive. Clearing `EXCEEDED` also discards an existing sticky error. Ordinary internal EXISTS recursion is different: it calls the internal evaluator and does not itself install a fresh public-entry budget.
+
+This is confirmed from the state transitions and reachable public callback API; an end-to-end runtime reproduction has **not** yet been executed. Found while checking the armed-budget condition for #3105, but present on main independently of that patch.
+
+The fix should preserve and restore the previous limits and sticky state with sound lifetimes, while retaining top-level cleanup on success, error and unwind. Add executed reentrant public-callback tests for outer cancellation/limits, inner success and failure, plus a negative control that clears the saved state. Check other public query surfaces that share this guard. Keep this separate from the RHS scan-reuse change.

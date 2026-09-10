@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T00:51:28.433721+00:00",
+  "updated_at": "2026-09-10T01:19:02.905546+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -66,14 +66,14 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Frozen scan-reuse source under independent Opus review; bounded release measurements in progress",
+    "phase": "Independent source review collected; fixed performance matrix measured with one calibration failure; harness correction underway",
     "started_at": "2026-09-10T00:31:07.235396+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/capped-rhs-reuse",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105",
     "worktree_state": "Root verified committed source/base exact; clean at handoff. Agent reuses isolated worktree for benchmark harness only.",
     "directory": "direct-3105",
-    "state": "Actual public ASK/LIMIT miss queries retain three blocks but reduce RHS scans3to1. Any armed budget preserves three scans. Source not yet performance admitted or published.",
+    "state": "Clean committed6e86 locally; no PRpublished or closure/admission. RealOpusapproveforvalidation only. OneAstra lane finishingperformance/coverage; fullremoteCI/ratchets pending.",
     "constraints": "Ownisolatedworktreeonly; no sharedbranchswitch. >=6GiBfree throughout, max2buildjobs, CARGO_INCREMENTAL0preferred,20minfirstphase, no fullworkspace/globalinstall/EC2/release/registryenable/remotePRmutation/modelcall. Preserveplanner/blockbind/buildside/bags/budgets/sortmetadata; no eagerunusedRHS/deepclone/newpublicAPI. No timingspeedclaimfromworkcounts.",
     "cache": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target mayreuseasregenerablecacheonly;619frozenevidencefilesoutsideverifiedunchanged,oldincrementalremoved. TopkexperimentremainsSTOPPED.",
     "readiness": "direct-6475/source-admission/perf3105-readiness.json",
@@ -95,7 +95,7 @@
       "scope": "Scanrows reuse only. Per-block GOO/bind/hashbuildside choices unchanged; hash builds unhoisted. Memory/latency/wasm/fullCI remain pending."
     },
     "review": {
-      "state": "running",
+      "state": "completed_collected",
       "kind": "exec_command",
       "session_id": 90599,
       "actual_model_required": "claude-opus-5",
@@ -105,16 +105,34 @@
       "input_bytes": 83887,
       "input_sha256": "aec96ab6c445162cda2ac78c1afc315f4327f171b9d38ea3258512d77dac313f",
       "output": "direct-3105/admission/opus-review.json",
-      "collect_policy": "Collect existing90599 once complete; verifyouterJSONsuccess/modelUsageactualOpus andparse result. Never launchduplicate/exhaustion retry orreadtranscripts. Liveoutput excludedbackup."
+      "collect_policy": "90599completed/collected. Do not poll or relaunch. ActualOpusreviewonlyagain afternewmeaningfulsource/evidence; no merge/perfadmission yet.",
+      "exit_code": 0,
+      "actual_model": "claude-opus-5",
+      "verdict": "approve_for_validation",
+      "result": "direct-3105/admission/opus-result.json",
+      "receipt": "direct-3105/admission/opus-completion.json",
+      "output_sha256": "9dfaed519e80d678574e49e6a2044281f4856a56aae3040b5f207bbfba93408e"
     },
     "performance": {
       "agent": "/root/postmerge_ci",
-      "state": "boundedphase2 dispatched",
-      "directory": "direct-3105/performance",
+      "state": "completionphase active after externally recovered free space",
+      "directory": "direct-3105/performance-completion",
       "max_minutes": 20,
       "scope": "Predeclared exactbaseline/candidaterelease pairedwholequery costs: earlyhit/secondhit/miss/lateLIMIT/multipleRHS retention;allocations/peakheap ifsafe existingharness;overlay/restrictedsortcorrectness ifaffordable",
       "constraints": "No prodsourcechange/hashhoist/tuning/newdeps/network/EC2;2jobs;incrementalOFF;>=6GiB+64MiBfree;preserve59frozenfiles andsharedcheckout;rootOpusreviewindependent",
-      "admission": "No latency claim beforemeasurements; full CI/ratchets authoritative remote gate beforemerge"
+      "admission": "No latency claim beforemeasurements; full CI/ratchets authoritative remote gate beforemerge",
+      "stopped_phase": {
+        "directory": "direct-3105/performance",
+        "manifest_files": 21,
+        "manifest_sha256": "9cd9164058fa95e142633787c30cd9d00a65463e975de28f3b46166503f87bed",
+        "proof": "direct-3105/admission/performance-stop-root-verification.json",
+        "result": "INCOMPLETE_RESOURCE_LIMIT; zero samples; finalbaselinebinarypreserved. Candidatebuildterminatedon6GiB+64MiBfloor; allfrozenfilesunchanged."
+      },
+      "resume_basis": "Diskfree14,537,830,400bytesat01:09 vsprior6.27GB; no rootcachecleanup. Samefixedprotocolauthorizedcompletion, not requestbudgetretry.",
+      "preliminary": "100/100 timingsamples,59/60 allocation samples. Lastcandidate multi-overlay failedSTARTUPcalibration beforequery. No discard/retry ofoldsample. RootreadsampleJSON; fullmiss candidate/base~0.84-0.85,multi~0.77-0.79;earlyhit rangesoverlap. Localadvisoryonly; heapcompletedmulti+143160bytes~1.3%.",
+      "calibration_followup": "Sameagentmay move calibration after fixture/oracle/querywarmups plus explicit poolbroadcast; unchangedcounting.rs andmeasuredbody. Before-samplesprotocolamendment,newbothcountbinaries thenFULL60allocationmatrix once; preserveoldfailure; anysecondfailureSTOP. Timingbinaryunchanged,no timingrerun. Stillwithin20minphase orfreezeforrootdecision.",
+      "coverage": "Actualchanging scan_sort/mixedbind/nonbind anddisconnectedcrossnotyetshown. Rootprovidedconcrete3patternfixture candidate; namedoverlayEXISTS coveragepending.",
+      "source_validity": "direct-3105/admission/source-validity-assessment.json supportsstore/viewscanpurity bysourceinspection; not broadruntimeproof."
     }
   },
   "prs": {
@@ -2218,6 +2236,15 @@
         "completion": "direct-6475/source-admission/opus-candidate-completion.json",
         "production_change_approved": false
       }
+    },
+    "6476": {
+      "issue": 6476,
+      "url": "https://github.com/sparq-org/sparq/issues/6476",
+      "state": "OPEN out-of-scope baselinebudgetrestorationfinding; runtime repro pending",
+      "source_main": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "summary": "Nested publicquery throughExtFn overwrites ACTIVE/EXCEEDED; innerGuardDropclearsOFF/None instead ofrestoringouter. OrdinaryEXISTSinternalrecursion notsame path. Sourceconfirmed,no runtimeclaim.",
+      "proof": "direct-3105/admission/nested-budget-issue-verified.json",
+      "implementation": "Not mixedinto3105; one substantive lane preserved."
     }
   },
   "performance_readiness": {

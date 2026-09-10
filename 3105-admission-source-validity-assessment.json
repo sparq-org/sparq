@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T01:13:43.181511+00:00",
+  "source_base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "scan_validity": [
+    "TripleStore.scan/scan_sorted choose a permutation and call scan_with on &self; scan_with reads immutable permutation rows and the owned overlay to produce the same row/order result. It does not consult engine view TLS.",
+    "Store.apply_delta needs &mut self; fork shares immutable Arc base and clones overlay, so updates to a distinct fork cannot change the borrowed store in the capped frame.",
+    "Named-graph evaluation passes the named sub-Graph by shared reference and scopes view::enter_graph; GraphScope restores previous suspended flag on drop. View install/suspend_all guards restore the full previous State.",
+    "The cached scan uses immutable prepared pattern/filter slots; residual EXISTS invokes inner evaluator with fresh LocalVocab and scoped view controls. This source argument supports scan purity; it is not a concurrency or feature-matrix test."
+  ],
+  "budget_finding": "Existing budget::install overwrites ACTIVE and clears EXCEEDED; Guard::drop unconditionally sets OFF and None rather than restoring previous state. Public custom ExtFn can invoke another public query, creating a source-confirmed restoration defect outside the candidate delta. Ordinary eval_exists recursion does not call public install; SERVICE byte_savepoint/restore_bytes changes counters, not on.",
+  "scope": "Source inspection only; no new runtime case executed by root. No assertion of a remotely exploitable path or changed new-patch behavior."
+}
