@@ -4128,8 +4128,8 @@ fn in_scope_vars(p: &GraphPattern) -> Vec<Variable> {
 const CAPPED_SEED_BLOCK: usize = 1024;
 /// Second-tier block: one escalation before the remainder is processed whole, so a
 /// first-block miss still avoids the full chain when a solution lives within the
-/// first ~64k seed rows. Exactly two escalations bound the per-step rhs re-scan
-/// overhead of a NO-solution (ASK false) query at 3x the single-pass scans.
+/// first ~64k seed rows. Exactly two escalations bound a NO-solution query to
+/// three blocks; identical non-bind RHS scans are reused when no budget is armed.
 const CAPPED_SEED_BLOCK_2: usize = 65_536;
 
 /// Capped conjunctive (BGP + FILTER) evaluation — the ASK / LIMIT-k first-solutions
@@ -4191,9 +4191,20 @@ fn eval_bgp_binary_capped(
         None,
     );
 
+    #[cfg(test)]
+    capped_rhs_tests::observe(0);
+    // [GPT-6 Astra] Query-local and lazy: never scan an unreached step. Pattern
+    // filters are immutable here; each slot also keys the requested scan order.
+    // Armed budgets retain the old per-step lifetime and polling: their working-set
+    // estimate does not account for multiple retained RHS relations.
+    let reuse_rhs = !budget::active();
+    let mut rhs_cache: Vec<Option<(Option<usize>, Bindings)>> =
+        std::iter::repeat_with(|| None).take(if reuse_rhs { prepared.len() } else { 0 }).collect();
     let mut acc: Option<Bindings> = None;
     let mut start = 0usize;
     while start < seed_all.rows.len() {
+        #[cfg(test)]
+        capped_rhs_tests::observe(1);
         let end = if start == 0 {
             CAPPED_SEED_BLOCK.min(seed_all.rows.len())
         } else if start == CAPPED_SEED_BLOCK {
@@ -4231,28 +4242,36 @@ fn eval_bgp_binary_capped(
                 let jv = &connecting[0];
                 let rk = result.col(jv).unwrap();
                 let pp = prepared[i].var_pos(jv).unwrap();
+                #[cfg(test)]
+                capped_rhs_tests::observe(3);
                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
             } else {
                 let filt = pfilter(i);
                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
-                let rhs = scan_to_bindings(
-                    graph,
-                    &prepared[i].id_pat,
-                    &prepared[i].pos_vars,
-                    scan_sort,
-                    filt,
-                    None,
-                    #[cfg(feature = "semijoin-bitmap")]
-                    None,
-                );
+                let mut uncached = None;
+                let slot = if reuse_rhs { &mut rhs_cache[i] } else { &mut uncached };
+                let rhs = capped_rhs(slot, scan_sort, || {
+                    #[cfg(test)]
+                    capped_rhs_tests::observe(2);
+                    scan_to_bindings(
+                        graph,
+                        &prepared[i].id_pat,
+                        &prepared[i].pos_vars,
+                        scan_sort,
+                        filt,
+                        None,
+                        #[cfg(feature = "semijoin-bitmap")]
+                        None,
+                    )
+                });
                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
-                    result = merge_join(result, rhs, &jv);
+                    result = merge_join_ref(&result, rhs, &jv);
                 } else if connected {
-                    result = hash_join(result, rhs);
+                    result = hash_join_ref(&result, rhs);
                 } else {
-                    result = cross_product(result, rhs);
+                    result = cross_product_ref(&result, rhs);
                 }
             }
             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
@@ -4293,6 +4312,22 @@ fn eval_bgp_binary_capped(
         start = end;
     }
     Ok(Some(acc.unwrap_or_else(|| Bindings::unsorted(collect_vars(patterns), vec![]))))
+}
+
+// [GPT-6 Astra] Reuse only the same requested order of one immutable prepared pattern.
+// Retain the actual sorted_by metadata returned by the scan, including fallback orders.
+fn capped_rhs(
+    slot: &mut Option<(Option<usize>, Bindings)>,
+    sort: Option<usize>,
+    scan: impl FnOnce() -> Bindings,
+) -> &Bindings {
+    if slot
+        .as_ref()
+        .is_none_or(|(cached_sort, _)| *cached_sort != sort)
+    {
+        *slot = Some((sort, scan()));
+    }
+    &slot.as_ref().unwrap().1
 }
 
 /// Distinct (non-repeated) variable positions of a prepared pattern, or `None` if
@@ -8574,6 +8609,11 @@ fn scan_to_bindings(
 }
 
 fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+    merge_join_ref(&left, &right, jv)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn merge_join_ref(left: &Bindings, right: &Bindings, jv: &Variable) -> Bindings {
     let lk = left.col(jv).unwrap();
     let rk = right.col(jv).unwrap();
     let mut out_vars = left.vars.clone();
@@ -8626,6 +8666,11 @@ use sjoin::{any_unbound, compatible, merge_rows};
 use sjoin::{key_hash, JOIN_PARTS};
 
 fn hash_join(left: Bindings, right: Bindings) -> Bindings {
+    hash_join_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // Build the hash table on the smaller side.
     let (build, probe) = if left.rows.len() <= right.rows.len() {
         (left, right)
@@ -9163,6 +9208,11 @@ mod bind_join_run_grouping {
 }
 
 fn cross_product(left: Bindings, right: Bindings) -> Bindings {
+    cross_product_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn cross_product_ref(left: &Bindings, right: &Bindings) -> Bindings {
     let mut out_vars = left.vars.clone();
     out_vars.extend(right.vars.iter().cloned());
     let mut rows = Vec::with_capacity(budget::cap_alloc(left.rows.len().saturating_mul(right.rows.len())));
@@ -21175,6 +21225,196 @@ mod order_bindings_worker_reinstall {
             result.len(),
             n,
             "all {n} rows must survive ORDER BY with custom function on parallel dataset"
+        );
+    }
+}
+
+// [GPT-6 Astra] Actual public-query path and physical RHS-work witness for #3105.
+#[cfg(test)]
+mod capped_rhs_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        static WORK: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+    }
+
+    pub(super) fn observe(index: usize) {
+        WORK.with(|cell| {
+            let mut counts = cell.get();
+            counts[index] += 1;
+            cell.set(counts);
+        });
+    }
+
+    fn take_work() -> [usize; 4] {
+        WORK.with(|cell| cell.replace([0; 4]))
+    }
+
+    #[test]
+    fn capped_rhs_three_block_miss() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        // More than the second block boundary; two shared variables prohibit bind join.
+        for i in 0..70_000 {
+            ttl.push_str(&format!(":s{i} :p {i} ; :q {} .\n", i + 1));
+        }
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        // Arithmetic keeps this filter residual and defeats the count shortcut.
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        take_work();
+        assert!(!crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        let ask_work = take_work();
+        assert_eq!(ask_work, [1, 3, 1, 0]);
+        assert!(
+            crate::query(
+                &graph,
+                &format!("PREFIX : <http://ex/> SELECT * WHERE {{ {body} }} LIMIT 1")
+            )
+            .unwrap()
+            .rows
+            .is_empty()
+        );
+        let limit_work = take_work();
+        assert_eq!(limit_work, [1, 3, 1, 0]);
+        println!(
+            "ASK and LIMIT miss: entries/blocks/RHS scans/bind calls = {ask_work:?}, {limit_work:?}"
+        );
+        // The budget permits the old scan. Its presence must disable retention,
+        // independently of whether it actually trips on this query.
+        let generous = crate::QueryBudget {
+            max_rows: Some(100_000),
+            ..Default::default()
+        };
+        assert!(
+            !crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &generous
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            take_work(),
+            [1, 3, 3, 0],
+            "armed budget must retain original scan behavior"
+        );
+        let row_limited = crate::QueryBudget {
+            max_rows: Some(10),
+            ..Default::default()
+        };
+        // A nonempty intermediate, unlike the all-miss witness, exercises the row ceiling.
+        let expansion =
+            "PREFIX : <http://ex/> ASK { ?s :p ?o . ?s :q ?other . FILTER(?o + 0 >= 0) }";
+        assert!(
+            crate::ask_with_budget(&graph, expansion, &row_limited)
+                .unwrap_err()
+                .contains("max-rows")
+        );
+        take_work();
+        let cancelled = crate::QueryBudget {
+            cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+            ..Default::default()
+        };
+        assert!(
+            crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &cancelled
+            )
+            .unwrap_err()
+            .contains("cancelled")
+        );
+        take_work();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let expired = crate::QueryBudget {
+                deadline: Some(std::time::Instant::now()),
+                ..Default::default()
+            };
+            assert!(
+                crate::ask_with_budget(
+                    &graph,
+                    &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                    &expired
+                )
+                .is_err()
+            );
+            take_work();
+        }
+    }
+    #[test]
+    fn capped_rhs_keeps_rows_and_actual_order_until_request_changes() {
+        let mut slot = None;
+        let variable = Variable::new("x").unwrap();
+        let first = capped_rhs(&mut slot, Some(0), || Bindings {
+            vars: vec![variable.clone()],
+            rows: vec![Row::from_slice(&[1]), Row::from_slice(&[1])],
+            // Requested and actual order need not agree on restricted permutations.
+            sorted_by: None,
+        });
+        let pointer = first.rows.as_ptr();
+        assert_eq!(first.rows.len(), 2);
+        assert_eq!(first.sorted_by, None);
+        let reused = capped_rhs(&mut slot, Some(0), || panic!("identical scan was repeated"));
+        assert_eq!(
+            reused.rows.as_ptr(),
+            pointer,
+            "reuse must not deep-clone rows"
+        );
+        assert_eq!(
+            reused.rows[0], reused.rows[1],
+            "bag multiplicity is retained"
+        );
+        let changed = capped_rhs(&mut slot, Some(2), || Bindings {
+            vars: vec![variable.clone()],
+            rows: vec![Row::from_slice(&[2])],
+            sorted_by: Some(variable.clone()),
+        });
+        assert_eq!(changed.rows, vec![Row::from_slice(&[2])]);
+        assert_eq!(changed.sorted_by, Some(variable));
+    }
+
+    #[test]
+    fn capped_rhs_public_bags_repeated_variables_and_first_block_hit() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1, 2 ; :q 1, 2 . :b :p :b ; :q :b . :c :p :b .",
+            "turtle",
+        )
+        .unwrap();
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        let full = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }}"),
+        )
+        .unwrap();
+        take_work();
+        let limited = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        assert_eq!(limited.rows, full.rows);
+        assert_eq!(limited.rows.len(), 2);
+        assert_eq!(
+            limited.rows[0], limited.rows[1],
+            "projection preserves multiplicity"
+        );
+        take_work();
+        assert!(crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        let repeated = "?s :p ?s . ?s :q ?o . FILTER(?s != <http://ex/missing>)";
+        let result = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {repeated} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.rows.len(),
+            1,
+            "off-diagonal repeated-variable rows must not survive"
         );
     }
 }
