@@ -1,0 +1,31 @@
+{
+  "task": "Seven remaining original #5183 failures: read-only readiness",
+  "author": "GPT-6 Astra xhigh",
+  "candidate_preserved": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "candidate_clean": true,
+  "fixed_seeds": [
+    4141222535,
+    4141222571,
+    4141222576,
+    4141222599,
+    4141222612,
+    4141222617,
+    4141222622
+  ],
+  "finding": "Only seven MISMATCH markers can be extracted. Failing indices, request sequences, operation counts and LOAD mirrors for these seven are not in the frozen CI output. They remain unknown.",
+  "reason": "Original run() stores detail only while first_repro is None; only seed4141222487 gets FIRST FAILING CASE/full sequence. Later Err(detail) values emit a seed marker and discard detail.",
+  "frozen_binary_capability": "Both binaries hash-match their frozen records but hard-code run(4141222487,1); neither can replay these seven without a new driver build.",
+  "recommended_next_step": "If authorized, compile two minimal fixed-list drivers against the exact frozen original module and verified old direct dependencies, then run each seven-seed list once per revision. No dependency/engine build, candidate generator, or broad seed window.",
+  "new_execution_performed": false,
+  "new_source_or_builds": false,
+  "seven_cases_resolved": false,
+  "cache_direct_inputs_match": true,
+  "evidence_limits": [
+    "The CI log proves failure occurrence only for the seven; no index or semantic diagnosis inferred from the first seed.",
+    "All first-case original-seed-execution outputs concern only4141222487 and add no details for these seven.",
+    "Direct link input checks are read-only readiness, not proof a new driver will compile or reproduce under macOS.",
+    "No full original CI binary was found in these named frozen bundles; no broad filesystem/tool inventory performed."
+  ],
+  "plan": "next-execution-plan.json",
+  "no_commands_pending": true
+}

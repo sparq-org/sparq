@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-10T14:03:10.310009+00:00",
+  "manifest_sha256": "a2a2bea574ee24a4ba7db7a85a419be4295fb36190f40bdbbdcf92b5b3b50227",
+  "files_verified": 12,
+  "finding": "Seven CI markers alone do not establish sequence/index/LOAD; original hardcoded drivers require narrow new driver builds; no replay performed",
+  "followup": "Deferred until current patch-followup validated. Use original sources, not modified generator."
+}

@@ -1,0 +1,65 @@
+{
+  "files": [
+    {
+      "path": "ci-markers.txt",
+      "bytes": 467,
+      "sha256": "1af03bf256d8e7e9c8d98f38e32cfe4dba8aabd6be4c66d9c7a9982e5fb1678e"
+    },
+    {
+      "path": "identities-and-cache.json",
+      "bytes": 8737,
+      "sha256": "481eab48f63ceb594648e2623cc94da1b154e2ae34e7dd13083d9301c2ffffd6"
+    },
+    {
+      "path": "input-references.json",
+      "bytes": 2928,
+      "sha256": "9fcc1fa75f8a6030bf1489792c67a3fc9da32421e5d6a83d2dbb3ddd81a852e7"
+    },
+    {
+      "path": "main-original-driver-compiler-argv.json",
+      "bytes": 2206,
+      "sha256": "39e2f2a6a0485a0444d71a043e12294c13a8ce177090d4307d0b842fb56cfb11"
+    },
+    {
+      "path": "main-original-driver.txt",
+      "bytes": 264,
+      "sha256": "5ef9a6373edd4354da75ca209b46d0d8ee658742e5eba1cd4ff20220456ab227"
+    },
+    {
+      "path": "next-execution-plan.json",
+      "bytes": 6135,
+      "sha256": "ec6e35e06a647c18e24302342a9dd0c5596e0b09382110c4f0a346278c87db9a"
+    },
+    {
+      "path": "original-cases.json",
+      "bytes": 3326,
+      "sha256": "fbfd3e27006482e015c5c27c787952dce756408099c477a9e2befa9bb399d7ba"
+    },
+    {
+      "path": "original-check-seed.txt",
+      "bytes": 785,
+      "sha256": "6314a3e14c3d9cd96b84791299a1b7e8be2c67c97af4dfbd84a053bbc4bd9a92"
+    },
+    {
+      "path": "original-run-entrypoint.txt",
+      "bytes": 2052,
+      "sha256": "3632d38118cc217c3dd6f5d5fa16f711ed9ec483dfe46789269d742b0db7e017"
+    },
+    {
+      "path": "parent-original-driver-compiler-argv.json",
+      "bytes": 2208,
+      "sha256": "2ba324728ab612ff8821754e02b63eec193af049db2fc784efc18635c27ca28e"
+    },
+    {
+      "path": "parent-original-driver.txt",
+      "bytes": 294,
+      "sha256": "fd066b5ee302a143631812907761baa201b9f263fa1c28eb22608a8943873d5e"
+    },
+    {
+      "path": "report.json",
+      "bytes": 1909,
+      "sha256": "20c7e452afceac74dc8b0dde193359498d8c9831ad1e22e4f130970b5ac67590"
+    }
+  ],
+  "readiness_only": true
+}

@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-10T14:03:10.310009+00:00",
+  "reviewed_head": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 14761,
+  "session_state": "completed_collected",
+  "output_sha256": "0dc5bc09a9e2da3cac36e16b8f1d9901f8bdcd43e4698a6f7f0e8f231fd016ac",
+  "verdict": "APPROVE_SCOPED for ordinary CI publication; production_change_approved false explicitly because scope is harness-only",
+  "root_disposition": "Hold publication for edition2021 compatibility correction and three focused review followups; fresh actual delta review required on new commit.",
+  "findings": {
+    "diagnostic_details": "Accept: accurate blank-node mismatch and comparable error should retain original one_sided context.",
+    "pool_test": "Accept: explicit canonical/noncanonical boundaries across all recursive integer leaves; expected values independently pinned.",
+    "ambient_allowlist": "Accept: explicit allowlist in test.",
+    "let_chains": "CONFIRMED MATERIAL COMPATIBILITY GAP: workspace edition2021, sparq-bench inherits; local harness incorrectly edition2024. Fix syntax and rerun harness with edition2021. No productionCargo edition change.",
+    "raw_count": "Informational; preserve explicit guard rather than infer dead code from an omitted prologue."
+  },
+  "corrections_to_earlier_root_claims": [
+    "Original packet retained selected function excerpts and diff, not full candidate source. Full source was frozen separately. Opus omitted-context limitation valid.",
+    "Workspace is edition2021, not2024. Earlier20/20 tests used wrong edition and cannot establish crate compilation compatibility.",
+    "Generator RNG draws preserved, but pool literal contents change; do not repeat review claim of byte-identical pool contents."
+  ],
+  "validation_policy": "Use ordinary authoritative CI after scoped local verification; no new run-level nonvacuity policy or broad redundant local workspace gate. Preserve fixed historical regression and keep5183 open for other7 original inputs.",
+  "current_followup": "ExistingAstra /root/postmerge_ci implementing small correction,300s/128MiB budget,offlinejobs1,min2GiBfree. No GitHub/modelcalls by worker."
+}

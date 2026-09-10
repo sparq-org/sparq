@@ -1,0 +1,154 @@
+{
+  "frozen_binaries": {
+    "parent": {
+      "binary": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-parent-binary",
+      "sha256": "f9dd4dd424db95a59bcb8c4ae8ccc8fdf9b1e48bedf81b3d53188b48f311f823",
+      "bytes": 9765696,
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "source_module": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/source/parent/crates/sparq-bench/src/update_fuzz.rs",
+      "module_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+      "driver_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench/src/main.rs",
+      "driver_sha256": "fd066b5ee302a143631812907761baa201b9f263fa1c28eb22608a8943873d5e",
+      "fixed_call": "update_fuzz::run(4141222487, 1)",
+      "accepts_other_seed": false,
+      "passes_extra_arguments": "Ignored by this main body; must not be represented as a replay of another seed.",
+      "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+      "manifest_relative_allowlist_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/bench/differential-divergences.json",
+      "lock_sha256": "e40502f13b47ee5b6de0e9decf672b2959bb2e80a0833bd465bb475dc47ace7f"
+    },
+    "main": {
+      "binary": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-main-binary",
+      "sha256": "2ced202953d94a96152ead54326260b4b1dc5e84d4fb5f1336c2739efedb6e9f",
+      "bytes": 9763792,
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "source_module": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/source/main/crates/sparq-bench/src/update_fuzz.rs",
+      "module_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+      "driver_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench/src/main.rs",
+      "driver_sha256": "5ef9a6373edd4354da75ca209b46d0d8ee658742e5eba1cd4ff20220456ab227",
+      "fixed_call": "update_fuzz::run(4141222487, 1)",
+      "accepts_other_seed": false,
+      "passes_extra_arguments": "Ignored by this main body; must not be represented as a replay of another seed.",
+      "allowlist_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+      "manifest_relative_allowlist_path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/bench/differential-divergences.json",
+      "lock_sha256": "ba8b45735595547f625163710a426cfb6f9daefdfe12693663ab62b6d365eb40"
+    }
+  },
+  "direct_link_dependencies": {
+    "parent": [
+      {
+        "crate": "oxigraph",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-f198a9448745ccd7.rlib",
+        "expected_sha256": "886e561bdc8bb2532920d611167ef657a50e1ff29c3f55f37280026d30eee0b1",
+        "actual_sha256": "886e561bdc8bb2532920d611167ef657a50e1ff29c3f55f37280026d30eee0b1",
+        "exists": true,
+        "matches": true,
+        "bytes": 4079960
+      },
+      {
+        "crate": "oxrdf",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+        "expected_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+        "actual_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+        "exists": true,
+        "matches": true,
+        "bytes": 1921384
+      },
+      {
+        "crate": "serde_json",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+        "expected_sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+        "actual_sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+        "exists": true,
+        "matches": true,
+        "bytes": 1952816
+      },
+      {
+        "crate": "sparq_canon",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-0b5ba485bc988ee9.rlib",
+        "expected_sha256": "40c7dbbfa675206aae049882a875ba28ddad65e4a5b89c207ab4adccddca2032",
+        "actual_sha256": "40c7dbbfa675206aae049882a875ba28ddad65e4a5b89c207ab4adccddca2032",
+        "exists": true,
+        "matches": true,
+        "bytes": 674248
+      },
+      {
+        "crate": "sparq_core",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-10f4959e8a6c9c7e.rlib",
+        "expected_sha256": "1ffe7e608bd8a976cb4520949530aeedbc06bcacb625f816467d05e3bc721d76",
+        "actual_sha256": "1ffe7e608bd8a976cb4520949530aeedbc06bcacb625f816467d05e3bc721d76",
+        "exists": true,
+        "matches": true,
+        "bytes": 4399272
+      },
+      {
+        "crate": "sparq_engine",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-8856bccde738726e.rlib",
+        "expected_sha256": "8c95a6c76f9a240fcb2bde55d1e499e8073a91648eddf6ed885a9aa2fe2f8525",
+        "actual_sha256": "8c95a6c76f9a240fcb2bde55d1e499e8073a91648eddf6ed885a9aa2fe2f8525",
+        "exists": true,
+        "matches": true,
+        "bytes": 5412664
+      }
+    ],
+    "main": [
+      {
+        "crate": "oxigraph",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib",
+        "expected_sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+        "actual_sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+        "exists": true,
+        "matches": true,
+        "bytes": 4080216
+      },
+      {
+        "crate": "oxrdf",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+        "expected_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+        "actual_sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+        "exists": true,
+        "matches": true,
+        "bytes": 1921384
+      },
+      {
+        "crate": "serde_json",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+        "expected_sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+        "actual_sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+        "exists": true,
+        "matches": true,
+        "bytes": 1952816
+      },
+      {
+        "crate": "sparq_canon",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib",
+        "expected_sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+        "actual_sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+        "exists": true,
+        "matches": true,
+        "bytes": 674744
+      },
+      {
+        "crate": "sparq_core",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+        "expected_sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+        "actual_sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+        "exists": true,
+        "matches": true,
+        "bytes": 4397856
+      },
+      {
+        "crate": "sparq_engine",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+        "expected_sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+        "actual_sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+        "exists": true,
+        "matches": true,
+        "bytes": 5404992
+      }
+    ]
+  },
+  "all_direct_artifacts_present_and_hash_equal": true,
+  "source_module_equal_between_revisions": true,
+  "free_bytes": 2795298816,
+  "qualification": "Only named direct link inputs from the frozen actual compiler invocations inspected. Transitive link resolution not re-executed; any missing transitive input must stop a future compile without dependency-build expansion."
+}

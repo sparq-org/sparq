@@ -646,6 +646,15 @@ for evidence_name in ['budget.json', 'checks-page1.json', 'checks-page2.json', '
 for evidence_name in ['gate-recovery-budget.json', 'gate-recovery-immediate-run.json', 'gate-recovery-main.json', 'gate-recovery-receipt.json', 'gate-recovery-registry.json', 'gate-recovery-runs.json', 'gate-recovery-single-rerun.json', 'gate-recovery1357-budget.json', 'gate-recovery1357-budget.stderr', 'gate-recovery1357-main.json', 'gate-recovery1357-main.stderr', 'gate-recovery1357-runs.json', 'gate-recovery1357-runs.stderr', 'gate-recovery1400-checks-page1.json', 'gate-recovery1400-checks-page1.stderr', 'gate-recovery1400-checks-page2.json', 'gate-recovery1400-checks-page2.stderr', 'gate-recovery1400-checks-page3.json', 'gate-recovery1400-checks-page3.stderr', 'gate-recovery1400-checks-page4.json', 'gate-recovery1400-checks-page4.stderr', 'gate-recovery1400-checks-page5.json', 'gate-recovery1400-checks-page5.stderr', 'gate-recovery1400-checks-summary.json', 'main459-gate-failure-root-verification.json', 'recover-main459-gate.py']:
     FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
 
+
+# Actual5183 patch review, edition qualification and remaining-original readiness.
+for evidence_name in ['ci-markers.txt', 'identities-and-cache.json', 'input-references.json', 'main-original-driver-compiler-argv.json', 'main-original-driver.txt', 'next-execution-plan.json', 'original-cases.json', 'original-check-seed.txt', 'original-run-entrypoint.txt', 'parent-original-driver-compiler-argv.json', 'parent-original-driver.txt', 'report.json', 'manifest.json']:
+    FILES["5183-remaining-original-readiness-" + evidence_name.replace("/", "--")] = ROOT / "direct-5183/remaining-original-readiness" / evidence_name
+for evidence_name in ['opus-injective-patch-review.json', 'opus-injective-patch-stderr.log', 'opus-injective-patch-completion.json', 'opus-injective-patch-result.json', 'opus-injective-patch-root-disposition.json', 'remaining-original-readiness-root-verification.json']:
+    FILES["5183-admission-" + evidence_name] = ROOT / "direct-5183/admission" / evidence_name
+for evidence_name in ["gate-recovery-attempt2-first.json", "gate-recovery-attempt2-first.stderr"]:
+    FILES["6480-admission-" + evidence_name] = ROOT / "direct-6480/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

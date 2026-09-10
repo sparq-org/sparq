@@ -1,0 +1,55 @@
+pub fn run(seed_start: u64, count: u64) {
+    let allow = UpdateDivergenceAllowlist::load();
+    println!("update-fuzz divergence allowlist {}", allow.state);
+    let mut checked = 0u64;
+    let mut ops_applied = 0u64;
+    let mut adjudicated_integer_lexical = 0u64;
+    let mut isomorphism_compares = 0u64;
+    let mut mismatch = 0u64;
+    let mut first_repro: Option<String> = None;
+
+    for seed in seed_start..seed_start + count {
+        match check_seed(seed, None, &allow) {
+            Ok(outcome) => {
+                checked += 1;
+                ops_applied += outcome.ops;
+                adjudicated_integer_lexical += outcome.adjudicated_integer_lexical;
+                isomorphism_compares += outcome.isomorphism_compares;
+            }
+            Err(detail) => {
+                mismatch += 1;
+                // One machine-greppable line per failing seed (the contract
+                // scripts/ci-file-differential-failure.py parses).
+                eprintln!("MISMATCH seed={}", seed);
+                if first_repro.is_none() {
+                    first_repro = Some(format!("seed={}\n{}", seed, detail));
+                }
+            }
+        }
+    }
+
+    println!(
+        "update-fuzz seeds {}..{} : checked={} update_requests={} \
+         isomorphism_compares={} adjudicated(integer-lexical)={} mismatch={}",
+        seed_start,
+        seed_start + count,
+        checked,
+        ops_applied,
+        isomorphism_compares,
+        adjudicated_integer_lexical,
+        mismatch
+    );
+    // NON-VACUITY GUARD: a window that never exercised the v2 isomorphism path has
+    // lost blank-node coverage without failing anything — say so loudly.
+    if mismatch == 0 && checked > 0 && isomorphism_compares == 0 {
+        eprintln!(
+            "warning: no step in this window needed RDFC-1.0 relabelling — the \
+             blank-node isomorphism path was never exercised"
+        );
+    }
+    if let Some(r) = first_repro {
+        println!("\nFIRST FAILING CASE:\n{}", r);
+        std::process::exit(1);
+    }
+}
+

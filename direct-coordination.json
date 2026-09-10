@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T13:59:11.819114+00:00",
+  "updated_at": "2026-09-10T14:03:10.310009+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -66,7 +66,7 @@
   "active_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "committed_independent_patch_review_in_progress",
+    "state": "review_followup_in_progress_edition2021_gap_correcting",
     "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -91,7 +91,7 @@
       "receipt": "direct-5183/admission/original-seed-comment-receipt.json"
     },
     "next_scope": "Collect actual Opus patch review, resolve any material findings, publish scoped5183 PR for ordinary CI. Keep issue open for seven original unresolved inputs.",
-    "agent_current_task": "ExistingAstra read-only readiness for seven original5183 failures; patch review14761 still running",
+    "agent_current_task": "ExistingAstra fixes3lowfindings and confirmed edition2024-harness/edition2021-crate mismatch; boundedscoped validation",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -172,13 +172,14 @@
       "at": "2026-09-10T13:53:12.221217+00:00",
       "source": "frozen208-filebundle_root_verified",
       "final_validation": "20/20 full scoped tests; scoped Clippy --tests -Dwarnings pass; seven compiled controls all killed; original survivors retained",
-      "limits": "Exact-module minimal harness; LinuxCI remains. HostpreflightonlyknownBash3mapfilefailure."
+      "limits": "Exact-module minimal harness; LinuxCI remains. HostpreflightonlyknownBash3mapfilefailure.",
+      "edition_qualification": "Earlier20/20compilededition2024minimalharness; actualcrateedition2021. Incompatible new letchains caught beforepush; correctedfollowupnotyetvalidated."
     },
     "head": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
     "implementation_manifest_sha256": "76c1012bf2fa7d784006dd70fe075559aebc59ff06addca6550b783d68600421",
     "implementation_root_verification": "direct-5183/admission/implementation-root-verification.json",
     "patch_review": {
-      "state": "running",
+      "state": "completed_collected",
       "session_id": 14761,
       "expected_model": "claude-opus-5",
       "effort": "xhigh",
@@ -186,7 +187,25 @@
       "input_sha256": "fc0cfecc7db6307058ac294e7527787bad2b0e736d454067d476c46635ea4485",
       "output": "direct-5183/admission/opus-injective-patch-review.json",
       "completion": "direct-5183/admission/opus-injective-patch-completion.json",
-      "policy": "Collect14761 completion before parsing; validate actualOpus modelUsage/success; no retry on quota/auth failure; no duplicate review."
+      "policy": "Session14761 completed/collected. Do not repoll/relaunch. Hold publication for material edition gap and3smallfollowups; actual delta review on next commit.",
+      "actual_model": "claude-opus-5",
+      "verdict": "APPROVE_SCOPED",
+      "root_disposition": "direct-5183/admission/opus-injective-patch-root-disposition.json",
+      "result": "direct-5183/admission/opus-injective-patch-result.json"
+    },
+    "review_followup": {
+      "state": "in_progress",
+      "directory": "direct-5183/review-followup",
+      "base": "787aab5c9e7fb114cbe8f390f6fc572eb2a3cfd1",
+      "agent": "/root/postmerge_ci",
+      "required": "Edition2021 syntax/harness; retained diagnostics; independently bounded integer pooltests; hermetic testallowlist; full helper excerpts in packet",
+      "budget": "300scompile/test,128MiBgrowth,min2GiBfree,offlinejobs1"
+    },
+    "remaining_original_readiness": {
+      "directory": "direct-5183/remaining-original-readiness",
+      "manifest_sha256": "a2a2bea574ee24a4ba7db7a85a419be4295fb36190f40bdbbdcf92b5b3b50227",
+      "state": "read_only_complete_root_verified_no_replay",
+      "finding": "Sevenmarkersonly,nooriginaldetail; fixedbinarieshardcodedfirstseed; newdriveronlybuildneeded withunchangedoriginalsources."
     }
   },
   "prs": {
@@ -678,7 +697,7 @@
     "agent": "root observing; existingAstra on5183 remainingoriginal readiness",
     "CI": "completed_success",
     "feature_matrix": "completed_success",
-    "aggregate": "single_recovery_rerun_requested",
+    "aggregate": "completed_success_attempt2",
     "known_advisory_failures": {
       "batch_merge": "intentionalemptyREGISTRY_RING_TOKENguard; nodispatch",
       "release_plz": "sameOPEN6474packaging;noauthorizationorremediation"
@@ -3437,9 +3456,9 @@
   "postmerge_watch": {
     "head": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "pr": 6481,
-    "observed_at": "2026-09-10T13:53:12.221217+00:00",
+    "observed_at": "2026-09-10T14:03:10.310009+00:00",
     "evidence": "direct-6480/admission/main459-runs-1344.json",
-    "state": "MainCI/matrixsuccess; failed poll-cap aggregate rerun once after complete fresh451checks/45runs andtarget/budget validation",
+    "state": "Main459CI,matrixandaggregateallSUCCESS;singlepoll-caprecoverycompleted. Changed6480surfacesverifiedearlier; registryOFF/releasesheld.",
     "changed_surface_checks": "js/docs/supply verifiedsuccess;6480closed",
     "release_authorized": false,
     "unresolved_noncore_failures": [
@@ -3457,7 +3476,7 @@
         "skipped": 1
       }
     },
-    "aggregate": "single_recovery_rerun_requested",
+    "aggregate": "completed_success_attempt2",
     "fuzz": {
       "run": 34475427065,
       "event": "push",
@@ -3483,8 +3502,10 @@
       "session_state": "completed_collected",
       "receipt": "direct-6480/admission/gate-recovery-receipt.json",
       "root_verification": "direct-6480/admission/main459-gate-failure-root-verification.json",
-      "policy": "No second rerun without new diagnosis; verify actual attempt2 result on next bounded observation"
-    }
+      "policy": "No second rerun without new diagnosis; verify actual attempt2 result on next bounded observation",
+      "result": "attempt2SUCCESS2026-09-10T13:59:30Z"
+    },
+    "aggregate_evidence": "direct-6480/admission/gate-recovery-attempt2-first.json"
   },
   "classifier_watch": {
     "issue": 6468,

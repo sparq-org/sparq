@@ -1,0 +1,60 @@
+{
+  "files": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/source/parent/crates/sparq-bench/src/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench/src/main.rs",
+      "bytes": 294,
+      "sha256": "fd066b5ee302a143631812907761baa201b9f263fa1c28eb22608a8943873d5e"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-parent-binary",
+      "bytes": 9765696,
+      "sha256": "f9dd4dd424db95a59bcb8c4ae8ccc8fdf9b1e48bedf81b3d53188b48f311f823"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent-setup-proof.json",
+      "bytes": 7689,
+      "sha256": "6dbbf1cdb26bcd1509d7915400a740bd25f88addee674c587289f048d64fe5b6"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/parent/harness/crates/sparq-bench/Cargo.lock",
+      "bytes": 34268,
+      "sha256": "e40502f13b47ee5b6de0e9decf672b2959bb2e80a0833bd465bb475dc47ace7f"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/source/main/crates/sparq-bench/src/update_fuzz.rs",
+      "bytes": 78994,
+      "sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench/src/main.rs",
+      "bytes": 264,
+      "sha256": "5ef9a6373edd4354da75ca209b46d0d8ee658742e5eba1cd4ff20220456ab227"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/issue5183-original-main-binary",
+      "bytes": 9763792,
+      "sha256": "2ced202953d94a96152ead54326260b4b1dc5e84d4fb5f1336c2739efedb6e9f"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main-setup-proof.json",
+      "bytes": 7687,
+      "sha256": "99605949350e99aba86075ef2dd01fbb3628bccc34677164ba8ec111e5f07f89"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/original-seed-execution/main/harness/crates/sparq-bench/Cargo.lock",
+      "bytes": 34266,
+      "sha256": "ba8b45735595547f625163710a426cfb6f9daefdfe12693663ab62b6d365eb40"
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6480/ci-first-failures/job-102811674711.log",
+      "bytes": 59905,
+      "sha256": "648510046732f8c41893f56fefe4e776f39a0632181fa25349243b91aad29392"
+    }
+  ],
+  "large_inputs": "Referenced immutable binaries/source/CI log are not copied; existing frozen bundles retain them."
+}

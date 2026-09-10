@@ -1,0 +1,22 @@
+fn check_seed(
+    seed: u64,
+    inject_divergence_at: Option<usize>,
+    allow: &UpdateDivergenceAllowlist,
+) -> Result<SeedOutcome, String> {
+    let mut rng = Rng::new(seed);
+    let ops = gen_sequence(&mut rng);
+    let sandbox = if ops.iter().any(|o| o.sparq.starts_with("LOAD")) {
+        Some(LoadSandbox::new()?)
+    } else {
+        None
+    };
+    match sandbox.as_ref() {
+        // The allowlisted base is installed for the whole seed: `with_load_base` is a
+        // thread-local guard, and a seed's steps all run on this thread.
+        Some(s) => sparq_engine::with_load_base(s.path(), || {
+            apply_sequence(seed, &ops, Some(s), inject_divergence_at, allow)
+        }),
+        None => apply_sequence(seed, &ops, None, inject_divergence_at, allow),
+    }
+}
+

@@ -1,0 +1,67 @@
+{
+  "verdict": "APPROVE_SCOPED",
+  "production_change_approved": false,
+  "scope_note": "Only crates/sparq-bench/src/update_fuzz.rs (differential harness generator + adjudicator). No engine, parser, canonicalizer, allowlist registry or workflow change. Approval covers publishing this test-corpus/oracle repair for ordinary protected CI; it does not waive CI and does not authorize closing #5183.",
+  "independent_soundness_check": {
+    "generator_injectivity": "Confirmed by construction, not just sampling. v = 20 + 3*offset + style with offset in 0..19, style in 0..2 gives exactly 20..79, and v mod 3 = (2+style) mod 3, so value determines style, hence exactly one spelling per value. Canonical pool is 0..19 in gen_simple_object arm 4 and gen_ntriples_object arm 4 (LOAD), disjoint from 20..79 and from the canonical images of the noncanonical pool. I enumerated every integer-literal source in the shown generator (gen_simple_object, gen_object/gen_triple_term, gen_ntriples_object, gen_insert_quad arms 1 and 2|3, gen_where_op arm 0, gen_delete_block pool, gen_load); all route through gen_canonical_integer or gen_noncanonical_integer. Strings/@en/IRIs carry no integer datatype. Variable copies propagate terms unchanged, so per-side injectivity is preserved across templates.",
+    "rng_stream": "gen_noncanonical_integer still draws below(20) then below(3) in the same order, and gen_canonical_integer is exactly the replaced rng.below(20). The stream is byte-identical, so every seed's op shape, pool contents and family probabilities are unchanged; only noncanonical literal values are remapped. This is the minimal possible corpus perturbation.",
+    "term_coverage": "q.subject and q.graph_name are NamedOrBlankNode/GraphName in this oxrdf version (the existing code pattern-matches them), and triple-term subjects/predicates cannot be literals, so all integer leaves are reachable from objects. record_lexical_terms recurses through Term::Triple objects, matching oxigraph_normalized_term's recursion. No missed leaf found.",
+    "no_counter_only_acceptance": "AdjudicatedIntegerLexical is returned only from the arm (Ok(na), Ok(nb)) if na == nb after comparable(), i.e. byte equality when relabel is false and RDFC-1.0 canonical equality otherwise. Counters (raw len, blank-node count, duplicate-row guard, injectivity) are strictly additional refusals; the non-matching case falls through `_ => {}` to the final Differs. Confirmed the blind-adjudication mutant (early return) is killed.",
+    "strictness_direction": "All new checks are fail-closed: unequal raw counts, non-injective integer map, parse row-count change, post-normalization duplicates, blank-node count mismatch, canonicalization error all yield Differs. The previously permissive out.dedup() is removed, so the 8/008 collapse class is now rejected rather than absorbed. I found no path where the patch accepts something the pre-patch comparator rejected.",
+    "row_guard_reachability": "Verified the guard is load-bearing exactly for blank-node snapshots: comparable() with relabel=true routes through canon's set conversion, which would silently dedup [p,p,q] vs [p,q,q]; the IRI-only fixture is rejected by plain vector inequality. The retained two-subject loop is the correct fix for the v2 survivor.",
+    "unchanged_paths": "sparq-vs-sparq compare is still called with allow_integer_lexical=false, the strict Same branch and error handling in apply_sequence are untouched, and oxigraph_normalized has no other caller."
+  },
+  "findings": [
+    {
+      "severity": "low",
+      "location": "compare(), new blank-node branch: `return Verdict::Differs(\"integer normalization changed blank-node counts\".into())` and the `(Err(e), _) | (_, Err(e)) => return Verdict::Differs(e)` arm on comparable()",
+      "failing_shape": "A real nightly divergence that trips either path now reports a bare one-line message with no dataset dump. Pre-patch, both fell through to the final Differs which carries one_sided(label_a,&ca,label_b,&cb). Concretely: sparq emits an extra fresh template blank node while lexicals differ -> operator sees only 'integer normalization changed blank-node counts' plus step/op/repro, with no per-side lines, materially slowing triage of a genuine engine bug. The wording is also inaccurate (normalization does not change blank nodes; the two sides disagree).",
+      "minimal_fix": "Wrap both with the same detail used by the other refusals: format!(\"integer-lexical adjudication refused: blank-node counts differ ({} vs {})\\n{}\", na.blank_nodes, nb.blank_nodes, one_sided(label_a,&ca,label_b,&cb)) and likewise prefix the comparable() error."
+    },
+    {
+      "severity": "low",
+      "location": "tests::generated_integer_domain_is_injective_including_load (generated-state loop, after `for q in parse_lines(&sparq_nquads(&graph), ...)`)",
+      "failing_shape": "The LOAD path has an explicit pool assertion (`value < CANONICAL_INTEGER_VALUES`) but ordinary ground terms are only checked indirectly via cross-step injectivity. Mutate gen_simple_object arm 4 to rng.below(40): a canonical \"25\" only collides if the noncanonical value 25 also appears in the same seed's accumulated map. The run reports noncanonical=22 distinct spellings over 400 seeds, so this partial-overlap mutant would very plausibly survive the guard that exists to catch exactly it.",
+      "minimal_fix": "In the same loop, for every Term::Literal with xsd:integer, assert either (value < CANONICAL_INTEGER_VALUES && lexical == value.to_string()) or (CANONICAL_INTEGER_VALUES..4*CANONICAL_INTEGER_VALUES).contains(&value) && lexical != value.to_string(). Cheap, deterministic, and closes the sampling gap for both pools."
+    },
+    {
+      "severity": "low",
+      "location": "tests::injected_marker_fails_during_actual_lexical_adjudication, `let positive = apply_sequence(0, &ops, None, None, &allowlist()).unwrap();`",
+      "failing_shape": "This is the first test whose positive branch requires allow.integer_lexical == true. If any CI job exports SPARQ_FUZZ_DIVERGENCES to a strict/empty registry (the loader documents it as a CI/agent override), step 0 refuses, unwrap() panics with an opaque adjudication dump, and the failure looks like an engine regression rather than a config choice.",
+      "minimal_fix": "Build the allowlist literally in this test (UpdateDivergenceAllowlist { integer_lexical: true, state: \"test\".into() }) instead of allowlist(), or assert allow.integer_lexical up front with an explanatory message."
+    },
+    {
+      "severity": "low",
+      "location": "record_lexical_terms integer arm and the new let-chain in the injectivity test",
+      "failing_shape": "`if let Ok(v) = ... && let Some(prev) = ... && prev != ...` is let-chain syntax requiring edition 2024 / Rust >= 1.88. It compiled and cleared clippy on the author's toolchain, but if the repo runs an MSRV or pinned-older-toolchain job that includes sparq-bench, the build fails there rather than in the module suite.",
+      "minimal_fix": "None if the crate is already edition 2024 (clippy's collapsible_if let-chain suggestion implies it). Otherwise revert these three sites to nested ifs. Confirm in CI, not by inspection."
+    },
+    {
+      "severity": "informational",
+      "location": "compare(), new `if a.len() != b.len()` inside the allow_integer_lexical block",
+      "failing_shape": "sparq_nquads' doc comment says duplicates are not collapsed 'see the raw-count check in compare', implying an equivalent check already runs before this block; if so the new one is dead. Harmless and fail-closed either way, but it should not be read as the only raw-count defence.",
+      "minimal_fix": "Leave as-is, or drop it and cite the existing check in a comment once the pre-block code is re-read."
+    }
+  ],
+  "required_validation": [
+    "Full protected CI on head 787aab5c: whole-workspace cargo test (not the single module), fmt, full clippy/lint/doc, wasm, and any MSRV/pinned-toolchain job covering sparq-bench (let-chain edition risk).",
+    "Run the production driver at CI/nightly seed ranges (at minimum `sparq-bench update-fuzz --seed-start 0 --seed-count 1000`, plus whatever the soak uses) on the new generator. Require zero 'integer-lexical adjudication refused' / 'merges or duplicates rows' / 'not term-injective' failures, and require the summary's adjudicated_integer_lexical > 0 and isomorphism_compares > 0 so the narrowed corpus has not become vacuous for those paths.",
+    "Confirm bench/differential-divergences.json is unchanged and that no CI job overrides SPARQ_FUZZ_DIVERGENCES for this module.",
+    "Re-run scripts/check-privacy-claims.sh on normal Linux bash4+; the mapfile failure is a host artifact and must not be waived.",
+    "Explicitly re-triage the seven other historical failing inputs on this head and record, per input, whether it is still failing under its literal original text; passing their seed numbers under the changed generator is not resolution. Keep #5183 open."
+  ],
+  "coverage_tradeoffs": [
+    "Lost, permanently and by design: cross-engine differential coverage of coexisting canonical + noncanonical aliases of the same integer value, and of two distinct noncanonical spellings of one value, including the downstream solution-multiplicity/fresh-blank-node cascade that #5183 exposed. That coverage is unobtainable against a lossy reference, but the fuzzer will no longer discover new bugs in that region.",
+    "Retained: noncanonical terms still reach storage, WHERE evaluation, templates, nested triple terms, probes and the reference comparison (one spelling per value); Sparq-only pins (non_canonical_integer_lexicals_are_distinct_terms, nested_noncanonical_terms_remain_exact_in_sparq, historical_4141222487) hold the language semantics.",
+    "The adjudicator is now strictly narrower than before, so an otherwise-legitimate lossy collapse would fail CI rather than be absorbed. That is the correct direction, but it makes any future generator edit that reintroduces value aliasing an immediate red build; the finding-2 assertion is the cheap tripwire.",
+    "historical_4141222487_preserves_lexicals_and_fresh_nodes hardcodes 9 solutions / 9 fresh nodes / 4 for s2 and an exact final g2. It is a deliberate regression pin and will need conscious re-derivation if update semantics legitimately change; it should not be edited to make CI green without re-adjudicating #5183.",
+    "This correspondence is valid only for the generated BGP/GRAPH/isBlank grammar and whole-quad probes. It is not a licence for STR/sameTerm/arithmetic/ORDER BY/aggregate/DISTINCT-projecting queries, and the module doc now says so."
+  ],
+  "limits": [
+    "No execution, build, or repository access; all pass/fail, hash, mutant and timing claims are taken as reported and are not independently reproduced.",
+    "The packet omits compare()'s prologue (roughly lines 940-975: derivation of ca/cb, relabel, the pre-existing raw-count check and the trailing Differs), the allowlist() test helper, the Verdict enum, and sparq_canon::parse_nquads' duplicate handling. My soundness argument for the fall-through, the strict path and the row-count interaction depends on the diff showing those regions unchanged and on the existing duplicate_quad_is_caught_despite_canonicalization test.",
+    "I cannot verify that oxigraph_normalized_term still matches Oxigraph 0.5's real storage normalization for every datatype; only xsd:integer is adjudicated and decimal/lang are shown fail-closed.",
+    "I cannot verify the CI workflow's actual update-fuzz seed range, nightly soak size, or whether sparq-bench is in the MSRV matrix; those drive required_validation items 1 and 2.",
+    "No assertion is made that Oxigraph is lossless, that Sparq semantics changed, or that #5183 is resolved."
+  ]
+}
