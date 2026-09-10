@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-10T17:12:01.215151+00:00",
+  "controls_manifest_sha256": "c2ce45e38b13296594d8fbea1e7aa1216af68219817b754a89ea3729319b9d6e",
+  "controls_verified_files": 50,
+  "review_context_manifest_sha256": "d5862c951bf2092d458aec3b4615965d413347f369fa2d7cc79c14876e2637fb",
+  "review_context_verified_files": 2,
+  "tests_passed": 2,
+  "observation_count": 11,
+  "production_edits": 0,
+  "input_bytes": 55277,
+  "input_sha256": "e8348fa975cf6bcbe05f3e8bed09aed21c205ec460d0ef82a32e79ac0a797f49"
+}

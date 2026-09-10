@@ -743,6 +743,16 @@ for evidence_name in ['close5183-body.md', 'close5183-budget.json', 'close5183-b
 for evidence_name in ['corrected-controls-admission.json', 'issue6485-current.json', 'issue6485-current.stderr', 'pr4097-current.json', 'pr4097-current.stderr', 'pr4247-current.json', 'pr4247-current.stderr', 'pr4354-current.json', 'pr4354-current.stderr']:
     FILES['6485-admission-' + evidence_name] = ROOT / 'direct-6485/admission' / evidence_name
 
+# Frozen6485 corrected controls and independent design-review input (live outputs excluded).
+for evidence_name in ['artifacts/sparq_core-memo_controls_f50', 'artifacts/sparq_core-memo_controls_f50.d', 'binary.json', 'compile-argv.json', 'compile-command.json', 'compile-receipt.json', 'compile.stderr', 'compile.stdout', 'compiler-proof.json', 'core/README.md', 'core/src/compress.rs', 'core/src/dict.rs', 'core/src/dictspill.rs', 'core/src/eliasfano.rs', 'core/src/extsort.rs', 'core/src/iri.rs', 'core/src/lib.rs', 'core/src/nt.rs', 'core/src/shared.rs', 'core/src/store/overlay_deleted_tests.rs', 'core/src/store.rs', 'core/src/strdist.rs', 'core/src/temporal.rs', 'core/src/ttl/tests.rs', 'core/src/ttl.rs', 'core-Cargo.toml', 'diagnostic.diff', 'final-source-proof.json', 'invariant-assessment.json', 'observations.json', 'old-diagnostic-to-corrected.diff', 'phase-result.json', 'preexecution-proof.json', 'preregistered-witness.json', 'recorded-core-invocation.txt', 'recorded-engine-test-invocation.txt', 'recorded-environment.json', 'report.json', 'resources.json', 'reused-artifacts.json', 'review-packet.md', 'run.py', 'source-context.txt', 'source-proof.json', 'test-command.json', 'test-receipt.json', 'test.stderr', 'test.stdout', 'tmp/xcrun_db', 'workspace-edition.txt', 'manifest.json']:
+    FILES['6485-memo-controls-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6485/memo-controls' / evidence_name
+for evidence_name in ['context-assessment.json', 'review-context.md', 'manifest.json']:
+    FILES['6485-memo-controls-review-context-' + evidence_name.replace("/", "--")] = ROOT / 'direct-6485/memo-controls-review-context' / evidence_name
+for evidence_name in ['memo-controls-root-verification.json', 'opus-memo-design-input.md', 'run-opus-memo-design.py']:
+    FILES['6485-admission-' + evidence_name] = ROOT / 'direct-6485/admission' / evidence_name
+for evidence_name in ['budget.json', 'budget.json.stderr', 'in-progress.json', 'in-progress.json.stderr', 'queued.json', 'queued.json.stderr', 'registry-actions.json', 'registry-actions.json.stderr']:
+    FILES['monitor-20260910-1712-' + evidence_name] = ROOT / 'monitor-20260910-1712' / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,61 @@
+--- frozen-delete-memo-baseline/core/src/lib.rs
++++ memo-controls/core/src/lib.rs
+@@ -2749,7 +2749,7 @@
+                 let found = (1..=self.dict.len() as Id)
+                     .any(|id| {
+                         #[cfg(test)]
+-                        delete_memo_baseline::visit();
++                        memo_controls::visit();
+                         self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id)
+                     });
+                 self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
+@@ -11262,7 +11262,7 @@
+ 
+ // [GPT-6 Astra] Diagnostic-only cold-branch work observer; no memo policy change.
+ #[cfg(test)]
+-mod delete_memo_baseline {
++mod memo_controls {
+     use super::*;
+     use std::cell::Cell;
+     use std::sync::atomic::Ordering::Relaxed;
+@@ -11293,7 +11293,7 @@
+     }
+ 
+     #[test]
+-    fn fixed_delete_only_rescans() {
++    fn has_high_precision_decimal_memo_corrected_controls() {
+         assert!(cfg!(feature = "parallel"));
+         assert!(!cfg!(feature = "mmap"));
+         assert!(!cfg!(feature = "dict-spill"));
+@@ -11331,16 +11331,27 @@
+         check(&graph, "empty-delta", false, 0);
+ 
+         let integer = triple("urn:keep", "urn:query", Literal::from(999999));
+-        graph.apply_delta(&[integer], &[]).unwrap();
++        graph.apply_delta(std::slice::from_ref(&integer), &[]).unwrap();
++        assert_eq!(graph.dict.len(), d, "canonical integer stays inline");
++        assert_eq!(graph.id_of(&integer[2]), Some(dict::INLINE_BASE + 999999));
++        check(&graph, "inline-integer", false, d);
++        let exact = triple("urn:keep", "urn:query", Literal::new_typed_literal("1.5", xsd::DECIMAL));
++        assert_eq!(decimal_significant_digits("1.5"), 2);
++        graph.apply_delta(std::slice::from_ref(&exact), &[]).unwrap();
+         assert!(graph.dict.len() > d);
+-        check(&graph, "new-integer", false, graph.dict.len());
+-        let exact = triple("urn:keep", "urn:query", Literal::new_typed_literal("1.5", xsd::DECIMAL));
+-        graph.apply_delta(&[exact], &[]).unwrap();
++        let exact_id = graph.id_of(&exact[2]).unwrap();
++        assert!(!is_high_precision_decimal(&graph.dict, exact_id));
++        assert_eq!(graph.numeric_value(exact_id), Some(1.5));
+         check(&graph, "new-exact-decimal", false, graph.dict.len());
+ 
+         let inexact = triple("urn:keep", "urn:query", Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
++        let before_inexact = graph.dict.len();
++        assert_eq!(decimal_significant_digits("2.000000000000000003"), 19);
+         graph.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
++        assert!(graph.dict.len() > before_inexact);
+         let offender_id = graph.id_of(&inexact[2]).unwrap() as usize;
++        assert!(is_high_precision_decimal(&graph.dict, offender_id as Id));
++        assert!(graph.numeric_value(offender_id as Id).is_some());
+         check(&graph, "new-inexact-decimal", true, offender_id);
+         graph.apply_delta(&[], &[inexact]).unwrap();
+         check(&graph, "state2-after-delete", true, 0);

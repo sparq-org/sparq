@@ -1,0 +1,193 @@
+{
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T17:09:13.594097+00:00",
+  "issue": 6485,
+  "parent_issue_stays_open": 3113,
+  "status": "CORRECTED_BASELINE_CONTROLS_PASS; NO_PRODUCTION_CHANGE",
+  "source_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "production_clean": true,
+  "execution": {
+    "builds": 1,
+    "filtered_runs": 1,
+    "passed": 2,
+    "failed": 0,
+    "filtered_out": 149,
+    "selected_names": [
+      "memo_controls::has_high_precision_decimal_memo_corrected_controls",
+      "tests::has_high_precision_decimal_memo_survives_delta_insert"
+    ],
+    "compiler_exit": 0,
+    "test_exit": 0,
+    "compiler_seconds": 11.779763459000002,
+    "test_seconds": 1.0218791659999997,
+    "phase_seconds": 13.054174291999999,
+    "retries": 0,
+    "dependency_builds": 0,
+    "pending_commands": false
+  },
+  "correction": "Old diagnostic incorrectly assumed canonical integer999999 grows Dict. New preregistration pins its inline ID and unchanged D. The entire old48-file failure bundle was rehashed and left immutable.",
+  "observations": [
+    {
+      "case": "initial",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "immediate-warm",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    },
+    {
+      "case": "existing-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "known-terms-reinsert",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "empty-delta",
+      "dict_len": 4100,
+      "before": 1,
+      "state": 1,
+      "result": false,
+      "visits": 0
+    },
+    {
+      "case": "inline-integer",
+      "dict_len": 4100,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4100
+    },
+    {
+      "case": "new-exact-decimal",
+      "dict_len": 4101,
+      "before": 0,
+      "state": 1,
+      "result": false,
+      "visits": 4101
+    },
+    {
+      "case": "new-inexact-decimal",
+      "dict_len": 4102,
+      "before": 0,
+      "state": 2,
+      "result": true,
+      "visits": 4102
+    },
+    {
+      "case": "state2-after-delete",
+      "dict_len": 4102,
+      "before": 2,
+      "state": 2,
+      "result": true,
+      "visits": 0
+    },
+    {
+      "case": "state2-after-insert",
+      "dict_len": 4102,
+      "before": 2,
+      "state": 2,
+      "result": true,
+      "visits": 0
+    }
+  ],
+  "work_count_qualification": "Actual increments inside each cold-branch ID predicate; visits include nonnumeric dictionary entries/cache misses and are not decimal parse counts. No query bag, latency, throughput or heap benefit measured.",
+  "profile": "Actual core module tree, Rust1.97.1 nativeaarch64/edition2021/O3/unwind/LTOoff/codegen16, default+parallel; seven rehashed direct rlibs. Direct rustc adaptation, not full Cargo/workspace/wasm or mmap/dict-spill/compact-index gate.",
+  "binary": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/memo-controls/artifacts/sparq_core-memo_controls_f50",
+    "bytes": 3774480,
+    "sha256": "2c9234ae3f4a5468fd4335aa8f6991a4ee7b54308cfeaeef38cae845b6524182"
+  },
+  "resource": {
+    "start_free_bytes": 10742272000,
+    "min_sampled_free_bytes": 10731491328,
+    "max_sampled_task_allocated_bytes": 9920512,
+    "final_task_allocated_bytes": 5459968,
+    "limits": {
+      "seconds": 480,
+      "new_allocated_bytes": 268435456,
+      "start_floor": 2214592512,
+      "continuous_floor": 2147483648
+    },
+    "sampling_seconds": 0.5,
+    "qualification": "Resource sampling is not continuous RSS or peak heap measurement."
+  },
+  "source_findings": {
+    "claim": "Within apply_delta_mem on a coherent Graph, equal old/current dictionary length means this call introduced no stored term or changed existing numeric meaning. This is scoped to the inspected mutation path, not arbitrary public-field mutation.",
+    "steps": [
+      {
+        "source": "crates/sparq-core/src/lib.rs:3372-3398",
+        "evidence": "Takes &mut self; deletes resolve existing IDs only; every insert synchronously interns complete Term components; old_len is captured before insertion; caches extend only after all interning. No deferred ID or numeric-cache completion runs in this method."
+      },
+      {
+        "source": "crates/sparq-core/src/dict.rs:1247-1259,1466-1553,2363-2366",
+        "evidence": "Existing terms return old IDs. A novel stored term goes through push and increments terms.len; base+terms.len is dictionary length. Prefix/datatype additions append; no existing record is rewritten by these interners. Triple terms recursively intern children first."
+      },
+      {
+        "source": "crates/sparq-core/src/dict.rs:62-72; crates/sparq-core/src/lib.rs:796-824",
+        "evidence": "Only canonical in-range xsd:integer can return a new inline ID without stored growth. It cannot introduce xsd:decimal; the high-precision predicate inspects stored numeric IDs."
+      },
+      {
+        "source": "crates/sparq-core/src/lib.rs:240-266,300-325",
+        "evidence": "Owned/Sparse/Mapped/Forked numeric caches extend exactly old_len..dict.len; equal lengths execute zero iterations and cannot mutate cached values. Fork-cache fold preserves each existing ID/value."
+      },
+      {
+        "source": "crates/sparq-core/src/lib.rs:1666-1699,2100-2235,2600-2645,4799-4811",
+        "evidence": "Sharded/spilled deferred temporary IDs belong to builders, which finish consolidation/remapping before constructing/opening the Graph and numeric caches. They are not pending work inside apply_delta_mem."
+      },
+      {
+        "source": "crates/sparq-core/src/lib.rs:2885-2895,3410-3445,3462-3471,3538-3595; crates/sparq-core/src/dict.rs:2315-2360",
+        "evidence": "Fork starts its own memo at0. In-memory compact preserves dictionary IDs/terms and folds numeric cache; sticky2 remains conservative even after triples are deleted. Durable compact reopens a fresh Graph with0. Vacuum reinterns live terms into a fresh Graph and replaces whole state. Same size across arbitrary replacement is not used as an invariant."
+      },
+      {
+        "source": "crates/sparq-core/src/lib.rs:1910-1962",
+        "evidence": "Open constructs memo0, with numeric cache loaded/recomputed, before WAL replay into apply_delta_mem. This source-only qualification does not establish runtime mmap/dict-spill coverage."
+      }
+    ],
+    "public_field_caveat": {
+      "source": "crates/sparq-core/src/lib.rs:67-76",
+      "fact": "Graph.dict and Graph.store are public. A safe external caller can replace/intern the dictionary outside the coordinated mutation methods; numeric caches are private and are not automatically synchronized by those field writes. Thus a universal guarantee for every safely constructible Graph is not proven.",
+      "scope": "Focused search of core and engine production source found dict assignment only in compact and direct self.dict.intern only in apply_delta_mem; this is not a whole-workspace/external-client census.",
+      "decision_needed": "Independent review should assess the established coordinated Graph invariant versus the exposed fields. Do not present length as a global dictionary-generation identity or expand this diagnostic into a public API redesign."
+    },
+    "smallest_candidate": "Condition only the existing state1\u21920 compare_exchange on self.dict.len()!=old_len after interning/cache extension; keep state2, state0, ordering, store mutation, fork/build/reopen policies unchanged. This is supported for the coherent apply_delta path; not yet implemented/approved.",
+    "future_meaningful_tests": [
+      "Keep existing false\u2192true insertion test unchanged. Promote focused cold/warm/unchanged-dictionary cases into scoped tests and require zero cold predicate visits after the proposed guard.",
+      "Reverting the new length condition must execute and fail the saved no-rescan assertions; suppressing all invalidation must fail new stored inexact decimal false\u2192true.",
+      "Include fork/compact and relevant mmap/dict-spill source/runtime coverage before broad admission; do not assume current default-only run executes these configurations.",
+      "Do not close parent3113: first cold dictionary scan is unchanged and no whole public SPARQL query or latency benefit has been measured."
+    ]
+  },
+  "limits": [
+    "Only two selected tests executed; unchanged other tests compiled but filtered.",
+    "No production candidate/mutant, full suite, concurrent reader witness or engine query executed.",
+    "Public mutable dict/store prevents an unconditional all-caller state-invariant claim; see explicit caveat.",
+    "Original first-cold-scan issue3113 stays open."
+  ],
+  "warning": "Linker diagnostic stderr retained; compilation and selected test run both exited0."
+}

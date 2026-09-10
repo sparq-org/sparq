@@ -1,0 +1,121 @@
+--- a/crates/sparq-core/src/lib.rs
++++ diagnostic/core/src/lib.rs
+@@ -2747,7 +2747,11 @@
+             1 => false,
+             _ => {
+                 let found = (1..=self.dict.len() as Id)
+-                    .any(|id| self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id));
++                    .any(|id| {
++                        #[cfg(test)]
++                        memo_controls::visit();
++                        self.numerics.lookup(id).is_some() && is_high_precision_decimal(&self.dict, id)
++                    });
+                 self.high_precision_decimal.store(if found { 2 } else { 1 }, Relaxed);
+                 found
+             }
+@@ -11255,3 +11259,105 @@
+         assert_eq!(f2.numeric_value(id), Some(4.5));
+     }
+ }
++
++// [GPT-6 Astra] Diagnostic-only cold-branch work observer; no memo policy change.
++#[cfg(test)]
++mod memo_controls {
++    use super::*;
++    use std::cell::Cell;
++    use std::sync::atomic::Ordering::Relaxed;
++
++    thread_local! {
++        static VISITS: Cell<usize> = const { Cell::new(0) };
++    }
++
++    pub(super) fn visit() {
++        VISITS.with(|visits| visits.set(visits.get() + 1));
++    }
++
++    fn triple(subject: &str, predicate: &str, object: Literal) -> [Term; 3] {
++        [NamedNode::new(subject).unwrap().into(), NamedNode::new(predicate).unwrap().into(), object.into()]
++    }
++
++    fn check(graph: &Graph, name: &str, expected: bool, expected_visits: usize) {
++        let before = graph.high_precision_decimal.load(Relaxed);
++        VISITS.with(|visits| visits.set(0));
++        let result = graph.has_high_precision_decimal();
++        let visits = VISITS.with(Cell::get);
++        let state = graph.high_precision_decimal.load(Relaxed);
++        let d = graph.dict.len();
++        println!(r#"MEMO_WITNESS {{"case":"{name}","dict_len":{d},"before":{before},"state":{state},"result":{result},"visits":{visits}}}"#);
++        assert_eq!(result, expected, "{name}");
++        assert_eq!(visits, expected_visits, "{name}");
++        assert_eq!(state, if expected { 2 } else { 1 }, "{name}");
++    }
++
++    #[test]
++    fn has_high_precision_decimal_memo_corrected_controls() {
++        assert!(cfg!(feature = "parallel"));
++        assert!(!cfg!(feature = "mmap"));
++        assert!(!cfg!(feature = "dict-spill"));
++        assert_eq!(store::BUILT.len(), 6);
++        let mut ttl = String::from("@prefix : <urn:> .\n");
++        for i in 0..4096 {
++            ttl.push_str(&format!(":s{i} :p {i} .\n"));
++        }
++        ttl.push_str(":keep :query 1 .\n:remove :p 2 .\n");
++        let mut graph = Graph::load_str(&ttl, "turtle").unwrap();
++        let d = graph.dict.len();
++        assert!(d >= 4096);
++        assert_eq!(graph.len(), 4098);
++        check(&graph, "initial", false, d);
++        check(&graph, "immediate-warm", false, 0);
++
++        let removed = triple("urn:remove", "urn:p", Literal::from(2));
++        graph.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
++        assert_eq!(graph.len(), 4097);
++        assert_eq!(graph.dict.len(), d);
++        check(&graph, "existing-delete", false, d);
++
++        let absent = triple("urn:keep", "urn:p", Literal::from(2));
++        assert!(absent.iter().all(|term| graph.id_of(term).is_some()));
++        graph.apply_delta(&[], &[absent]).unwrap();
++        assert_eq!(graph.len(), 4097);
++        assert_eq!(graph.dict.len(), d);
++        check(&graph, "known-terms-absent-delete", false, d);
++
++        graph.apply_delta(&[removed], &[]).unwrap();
++        assert_eq!(graph.len(), 4098);
++        assert_eq!(graph.dict.len(), d);
++        check(&graph, "known-terms-reinsert", false, d);
++        graph.apply_delta(&[], &[]).unwrap();
++        check(&graph, "empty-delta", false, 0);
++
++        let integer = triple("urn:keep", "urn:query", Literal::from(999999));
++        graph.apply_delta(std::slice::from_ref(&integer), &[]).unwrap();
++        assert_eq!(graph.dict.len(), d, "canonical integer stays inline");
++        assert_eq!(graph.id_of(&integer[2]), Some(dict::INLINE_BASE + 999999));
++        check(&graph, "inline-integer", false, d);
++        let exact = triple("urn:keep", "urn:query", Literal::new_typed_literal("1.5", xsd::DECIMAL));
++        assert_eq!(decimal_significant_digits("1.5"), 2);
++        graph.apply_delta(std::slice::from_ref(&exact), &[]).unwrap();
++        assert!(graph.dict.len() > d);
++        let exact_id = graph.id_of(&exact[2]).unwrap();
++        assert!(!is_high_precision_decimal(&graph.dict, exact_id));
++        assert_eq!(graph.numeric_value(exact_id), Some(1.5));
++        check(&graph, "new-exact-decimal", false, graph.dict.len());
++
++        let inexact = triple("urn:keep", "urn:query", Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
++        let before_inexact = graph.dict.len();
++        assert_eq!(decimal_significant_digits("2.000000000000000003"), 19);
++        graph.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
++        assert!(graph.dict.len() > before_inexact);
++        let offender_id = graph.id_of(&inexact[2]).unwrap() as usize;
++        assert!(is_high_precision_decimal(&graph.dict, offender_id as Id));
++        assert!(graph.numeric_value(offender_id as Id).is_some());
++        check(&graph, "new-inexact-decimal", true, offender_id);
++        graph.apply_delta(&[], &[inexact]).unwrap();
++        check(&graph, "state2-after-delete", true, 0);
++        let more = triple("urn:keep", "urn:query", Literal::from(999998));
++        graph.apply_delta(&[more], &[]).unwrap();
++        check(&graph, "state2-after-insert", true, 0);
++        println!("MEMO_WITNESS_COMPLETE cases=11 public_query_executed=false");
++    }
++}

@@ -1,0 +1,9 @@
+{
+  "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "status_porcelain": "",
+  "production_files_unchanged": true,
+  "diagnostic_files_match_compile_input": true,
+  "old_manifest_sha256": "5fbf100f532772b3cef94c13d2ce70b08c80c9af7c4371ff21c01b219c117f42",
+  "old_frozen_files_rehashed": 48,
+  "final_free_bytes": 10735026176
+}

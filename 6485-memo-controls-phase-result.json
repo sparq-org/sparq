@@ -1,0 +1,114 @@
+{
+  "outcome": "passed-two-tests",
+  "ended": "2026-09-10T17:06:31.975699+00:00",
+  "elapsed_seconds": 13.054174291999999,
+  "receipts": [
+    {
+      "name": "compile",
+      "argv": [
+        "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+        "--crate-name",
+        "sparq_core",
+        "--edition=2021",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/memo-controls/core/src/lib.rs",
+        "--error-format=json",
+        "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+        "--emit=dep-info,link",
+        "-C",
+        "opt-level=3",
+        "-C",
+        "embed-bitcode=no",
+        "-C",
+        "codegen-units=16",
+        "--warn=unexpected_cfgs",
+        "--check-cfg",
+        "cfg(kani)",
+        "--cfg",
+        "feature=\"default\"",
+        "--cfg",
+        "feature=\"parallel\"",
+        "--check-cfg",
+        "cfg(docsrs,test)",
+        "--check-cfg",
+        "cfg(feature, values(\"block-bloom\", \"compact-index\", \"default\", \"dict-spill\", \"elias-fano\", \"iri-fast\", \"jsonld\", \"mmap\", \"native-ttl\", \"overlay-deleted-projections\", \"parallel\", \"rdfxml\", \"shared\", \"spqcprm2\"))",
+        "-C",
+        "metadata=memo_controls_f50",
+        "-C",
+        "extra-filename=-memo_controls_f50",
+        "--out-dir",
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/memo-controls/artifacts",
+        "-C",
+        "strip=debuginfo",
+        "-L",
+        "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+        "--extern",
+        "hashbrown=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rlib",
+        "--extern",
+        "memchr=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rlib",
+        "--extern",
+        "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib",
+        "--extern",
+        "oxttl=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-9b48f76b6508b35d.rlib",
+        "--extern",
+        "rayon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-fb353b242d14de3d.rlib",
+        "--extern",
+        "rustc_hash=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rlib",
+        "--test",
+        "--extern",
+        "proptest=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libproptest-fe58022d97b60f4d.rlib",
+        "-C",
+        "panic=unwind",
+        "-C",
+        "lto=off"
+      ],
+      "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+      "started": "2026-09-10T17:06:18.927301+00:00",
+      "before": {
+        "free_bytes": 10742263808,
+        "allocated_bytes": 1552384
+      },
+      "pid": 28257,
+      "exit_code": 0,
+      "stop_reason": null,
+      "ended": "2026-09-10T17:06:30.706972+00:00",
+      "duration_seconds": 11.779763459000002,
+      "after": {
+        "free_bytes": 10735792128,
+        "allocated_bytes": 5345280
+      },
+      "terminal": true
+    },
+    {
+      "name": "test",
+      "argv": [
+        "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/memo-controls/artifacts/sparq_core-memo_controls_f50",
+        "has_high_precision_decimal_memo",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+      "started": "2026-09-10T17:06:30.921230+00:00",
+      "before": {
+        "free_bytes": 10735693824,
+        "allocated_bytes": 5357568
+      },
+      "pid": 28290,
+      "exit_code": 0,
+      "stop_reason": null,
+      "ended": "2026-09-10T17:06:31.943057+00:00",
+      "duration_seconds": 1.0218791659999997,
+      "after": {
+        "free_bytes": 10735489024,
+        "allocated_bytes": 5365760
+      },
+      "terminal": true
+    }
+  ],
+  "final_resources": {
+    "free_bytes": 10735484928,
+    "allocated_bytes": 5369856
+  },
+  "commands_pending": false,
+  "retries": 0,
+  "source_modified_after_preregistration": false
+}

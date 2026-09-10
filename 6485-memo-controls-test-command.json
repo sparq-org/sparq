@@ -1,0 +1,15 @@
+{
+  "name": "test",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/memo-controls/artifacts/sparq_core-memo_controls_f50",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:06:30.921230+00:00",
+  "before": {
+    "free_bytes": 10735693824,
+    "allocated_bytes": 5357568
+  }
+}

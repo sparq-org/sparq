@@ -1,0 +1,46 @@
+{
+  "claim": "Within apply_delta_mem on a coherent Graph, equal old/current dictionary length means this call introduced no stored term or changed existing numeric meaning. This is scoped to the inspected mutation path, not arbitrary public-field mutation.",
+  "steps": [
+    {
+      "source": "crates/sparq-core/src/lib.rs:3372-3398",
+      "evidence": "Takes &mut self; deletes resolve existing IDs only; every insert synchronously interns complete Term components; old_len is captured before insertion; caches extend only after all interning. No deferred ID or numeric-cache completion runs in this method."
+    },
+    {
+      "source": "crates/sparq-core/src/dict.rs:1247-1259,1466-1553,2363-2366",
+      "evidence": "Existing terms return old IDs. A novel stored term goes through push and increments terms.len; base+terms.len is dictionary length. Prefix/datatype additions append; no existing record is rewritten by these interners. Triple terms recursively intern children first."
+    },
+    {
+      "source": "crates/sparq-core/src/dict.rs:62-72; crates/sparq-core/src/lib.rs:796-824",
+      "evidence": "Only canonical in-range xsd:integer can return a new inline ID without stored growth. It cannot introduce xsd:decimal; the high-precision predicate inspects stored numeric IDs."
+    },
+    {
+      "source": "crates/sparq-core/src/lib.rs:240-266,300-325",
+      "evidence": "Owned/Sparse/Mapped/Forked numeric caches extend exactly old_len..dict.len; equal lengths execute zero iterations and cannot mutate cached values. Fork-cache fold preserves each existing ID/value."
+    },
+    {
+      "source": "crates/sparq-core/src/lib.rs:1666-1699,2100-2235,2600-2645,4799-4811",
+      "evidence": "Sharded/spilled deferred temporary IDs belong to builders, which finish consolidation/remapping before constructing/opening the Graph and numeric caches. They are not pending work inside apply_delta_mem."
+    },
+    {
+      "source": "crates/sparq-core/src/lib.rs:2885-2895,3410-3445,3462-3471,3538-3595; crates/sparq-core/src/dict.rs:2315-2360",
+      "evidence": "Fork starts its own memo at0. In-memory compact preserves dictionary IDs/terms and folds numeric cache; sticky2 remains conservative even after triples are deleted. Durable compact reopens a fresh Graph with0. Vacuum reinterns live terms into a fresh Graph and replaces whole state. Same size across arbitrary replacement is not used as an invariant."
+    },
+    {
+      "source": "crates/sparq-core/src/lib.rs:1910-1962",
+      "evidence": "Open constructs memo0, with numeric cache loaded/recomputed, before WAL replay into apply_delta_mem. This source-only qualification does not establish runtime mmap/dict-spill coverage."
+    }
+  ],
+  "public_field_caveat": {
+    "source": "crates/sparq-core/src/lib.rs:67-76",
+    "fact": "Graph.dict and Graph.store are public. A safe external caller can replace/intern the dictionary outside the coordinated mutation methods; numeric caches are private and are not automatically synchronized by those field writes. Thus a universal guarantee for every safely constructible Graph is not proven.",
+    "scope": "Focused search of core and engine production source found dict assignment only in compact and direct self.dict.intern only in apply_delta_mem; this is not a whole-workspace/external-client census.",
+    "decision_needed": "Independent review should assess the established coordinated Graph invariant versus the exposed fields. Do not present length as a global dictionary-generation identity or expand this diagnostic into a public API redesign."
+  },
+  "smallest_candidate": "Condition only the existing state1\u21920 compare_exchange on self.dict.len()!=old_len after interning/cache extension; keep state2, state0, ordering, store mutation, fork/build/reopen policies unchanged. This is supported for the coherent apply_delta path; not yet implemented/approved.",
+  "future_meaningful_tests": [
+    "Keep existing false\u2192true insertion test unchanged. Promote focused cold/warm/unchanged-dictionary cases into scoped tests and require zero cold predicate visits after the proposed guard.",
+    "Reverting the new length condition must execute and fail the saved no-rescan assertions; suppressing all invalidation must fail new stored inexact decimal false\u2192true.",
+    "Include fork/compact and relevant mmap/dict-spill source/runtime coverage before broad admission; do not assume current default-only run executes these configurations.",
+    "Do not close parent3113: first cold dictionary scan is unchanged and no whole public SPARQL query or latency benefit has been measured."
+  ]
+}

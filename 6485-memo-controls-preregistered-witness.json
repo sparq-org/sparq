@@ -1,0 +1,83 @@
+{
+  "at": "2026-09-10T17:06:09.624327+00:00",
+  "fixture": "4096 :sN :p N integer triples plus :keep :query1 and :remove :p2; prefixurn:. D is measured actual dictionary length. All initial numeric values exact.",
+  "sequence": [
+    {
+      "case": "initial",
+      "expected_visits": "D",
+      "result": false
+    },
+    {
+      "case": "immediate-warm",
+      "expected_visits": 0,
+      "result": false
+    },
+    {
+      "case": "existing-delete",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "known-terms-absent-delete",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "known-terms-reinsert",
+      "expected_visits": "D unchanged",
+      "result": false
+    },
+    {
+      "case": "empty-delta",
+      "expected_visits": 0,
+      "result": false
+    },
+    {
+      "case": "inline-integer",
+      "expected_visits": "D unchanged",
+      "result": false,
+      "dictionary": "999999 is canonical integer, ID=INLINE_BASE+999999; no growth"
+    },
+    {
+      "case": "new-exact-decimal",
+      "expected_visits": "newD",
+      "result": false,
+      "dictionary": "1.5 decimal is stored, has two significant digits, numeric cache Some(1.5), no high precision"
+    },
+    {
+      "case": "new-inexact-decimal",
+      "expected_visits": "numeric offender dictionaryID",
+      "result": true,
+      "dictionary": "2.000000000000000003 decimal is stored, 19 significant digits, numeric cache present; first offender ID bounds short circuit"
+    },
+    {
+      "case": "state2-after-delete",
+      "expected_visits": 0,
+      "result": true
+    },
+    {
+      "case": "state2-after-insert",
+      "expected_visits": 0,
+      "result": true
+    }
+  ],
+  "execution": "One actual-core direct rustc --test build; one substring-filtered run has_high_precision_decimal_memo --nocapture --test-threads=1. Exactly two tests statically selected. Stop on first unexpected result; no correction/retry after compiler launch.",
+  "profile": "Rust1.97.1,edition2021,O3,unwind,LTOoff,codegen16,coredefault+parallel only. Adapt recorded actualcore lib invocation; add sole proptest devdependency from executed engine cfgtest invocation.",
+  "limits": {
+    "seconds": 480,
+    "new_allocated_bytes": 268435456,
+    "start_free": 2214592512,
+    "continuous_free": 2147483648
+  },
+  "existing_test": "tests::has_high_precision_decimal_memo_survives_delta_insert remains unchanged and is selected alongside memo_controls::has_high_precision_decimal_memo_corrected_controls.",
+  "source_basis": [
+    "dict.rs:62-72 and1491-1501 canonical integer inline; decimal stored",
+    "lib.rs:796-824 decimal precision classifier significant digits >15",
+    "lib.rs:240-266 numeric cache extends only new IDs",
+    "lib.rs:3372-3398 baseline memo resets state1 after every nonempty apply_delta_mem"
+  ],
+  "selected_test_names": [
+    "has_high_precision_decimal_memo_survives_delta_insert",
+    "has_high_precision_decimal_memo_corrected_controls"
+  ]
+}

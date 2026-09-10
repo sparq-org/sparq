@@ -1,0 +1,15 @@
+{
+  "files": [
+    {
+      "path": "context-assessment.json",
+      "bytes": 6473,
+      "sha256": "1df4d6fc11d42d4620a1f73303dcb076cd8575f4b2a5cb228abc9a4fb2ad64a3"
+    },
+    {
+      "path": "review-context.md",
+      "bytes": 43602,
+      "sha256": "4a87b5b7f5e9cdc2e4f09bac058a50b7329002b86de71ff67e96fb37a7215c1c"
+    }
+  ],
+  "file_count": 2
+}

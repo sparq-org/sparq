@@ -1,0 +1,95 @@
+{
+  "head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "files": [
+    {
+      "path": "src/compress.rs",
+      "sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc",
+      "base_sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc"
+    },
+    {
+      "path": "src/dict.rs",
+      "sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3",
+      "base_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    },
+    {
+      "path": "src/dictspill.rs",
+      "sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513",
+      "base_sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513"
+    },
+    {
+      "path": "src/eliasfano.rs",
+      "sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb",
+      "base_sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb"
+    },
+    {
+      "path": "src/extsort.rs",
+      "sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f",
+      "base_sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f"
+    },
+    {
+      "path": "src/iri.rs",
+      "sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d",
+      "base_sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d"
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "72915907da8afee997b612b5a2d5f13c8ab1931a4eabdf005f4c93c155cf2788",
+      "base_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "src/nt.rs",
+      "sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10",
+      "base_sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10"
+    },
+    {
+      "path": "src/shared.rs",
+      "sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9",
+      "base_sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9"
+    },
+    {
+      "path": "src/store/overlay_deleted_tests.rs",
+      "sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688",
+      "base_sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688"
+    },
+    {
+      "path": "src/store.rs",
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c",
+      "base_sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c"
+    },
+    {
+      "path": "src/strdist.rs",
+      "sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761",
+      "base_sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761"
+    },
+    {
+      "path": "src/temporal.rs",
+      "sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047",
+      "base_sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047"
+    },
+    {
+      "path": "src/ttl/tests.rs",
+      "sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33",
+      "base_sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33"
+    },
+    {
+      "path": "src/ttl.rs",
+      "sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a",
+      "base_sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a"
+    }
+  ],
+  "readme_sha256": "e58635a8842b94ad2474015e3396225b5fb55fd35a420ec6bc10dc8f4ed71d4b",
+  "base_lib_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+  "diagnostic_lib_sha256": "72915907da8afee997b612b5a2d5f13c8ab1931a4eabdf005f4c93c155cf2788",
+  "prior_frozen_manifest_sha256": "5fbf100f532772b3cef94c13d2ce70b08c80c9af7c4371ff21c01b219c117f42",
+  "selected_tests": [
+    {
+      "file": "core/src/lib.rs",
+      "name": "has_high_precision_decimal_memo_survives_delta_insert"
+    },
+    {
+      "file": "core/src/lib.rs",
+      "name": "has_high_precision_decimal_memo_corrected_controls"
+    }
+  ],
+  "unchanged_existing_test": true
+}

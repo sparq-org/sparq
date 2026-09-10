@@ -1,0 +1,19 @@
+
+running 2 tests
+test memo_controls::has_high_precision_decimal_memo_corrected_controls ... MEMO_WITNESS {"case":"initial","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"immediate-warm","dict_len":4100,"before":1,"state":1,"result":false,"visits":0}
+MEMO_WITNESS {"case":"existing-delete","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"known-terms-absent-delete","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"known-terms-reinsert","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"empty-delta","dict_len":4100,"before":1,"state":1,"result":false,"visits":0}
+MEMO_WITNESS {"case":"inline-integer","dict_len":4100,"before":0,"state":1,"result":false,"visits":4100}
+MEMO_WITNESS {"case":"new-exact-decimal","dict_len":4101,"before":0,"state":1,"result":false,"visits":4101}
+MEMO_WITNESS {"case":"new-inexact-decimal","dict_len":4102,"before":0,"state":2,"result":true,"visits":4102}
+MEMO_WITNESS {"case":"state2-after-delete","dict_len":4102,"before":2,"state":2,"result":true,"visits":0}
+MEMO_WITNESS {"case":"state2-after-insert","dict_len":4102,"before":2,"state":2,"result":true,"visits":0}
+MEMO_WITNESS_COMPLETE cases=11 public_query_executed=false
+ok
+test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.01s
+

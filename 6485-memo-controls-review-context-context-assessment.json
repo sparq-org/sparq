@@ -1,0 +1,128 @@
+{
+  "created_at": "2026-09-10T17:10:31.950965+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "source_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "prior_bundle_manifest_sha256": "c2ce45e38b13296594d8fbea1e7aa1216af68219817b754a89ea3729319b9d6e",
+  "prior_packet_sha256": "74b62d939c6ab3ae945cdd609b68fdfd3a1f24872cf74a059534477dff9b21be",
+  "purpose": "Supplement only; frozen controls source/results/packet are unchanged. No extra build, test or production mutation.",
+  "scope_proof": "Coordinated public Graph methods load/from_parts/apply_delta/insert/remove/fork/compact/vacuum maintain or reconstruct numeric caches. apply_delta_mem accepts complete oxrdf Terms and synchronously interns every component; it has no pending/deferred-ID finalization. Builder-only sharded/spill paths finish their IDs before Graph construction/open and memo0.",
+  "public_contract_precision": [
+    "Graph.dict and Graph.store are public mutable fields. The viewed public docs do not prohibit arbitrary replacement or promise automatic cache resynchronization after it. Do not label all direct edits invalid by fiat.",
+    "Direct dictionary replacement/interning can make existing private numeric caches and a computed memo stale even before this proposal. Graph::from_parts is the inspected public path for constructing a fresh coherent Graph from an edited dictionary/triple set.",
+    "No newly introduced regression through the inspected coordinated public mutation operations was found. This is source reasoning plus the executed baseline controls; the production length condition is not yet implemented.",
+    "A potential observable distinction exists after direct replacement: old exact decimal and new high-precision decimal can share an f64 cache value and dictionary cardinality; stale memo1 currently gets reset incidentally by a later nonempty apply_delta, whereas the proposed length condition would retain it. This is an unexecuted source-derived scenario, not a demonstrated runtime regression; current API docs do not by themselves resolve its support status.",
+    "Independent review should decide whether the established coherent-Graph invariant suffices for this narrow change or requires a separate public-field consistency remedy. No automatic API redesign or production edit is authorized here."
+  ],
+  "smallest_proposal": "Within the coordinated apply_delta_mem path, wrap only the existing state1\u21920 compare_exchange with self.dict.len()!=old_len, leaving all interning/cache extension/store application/state2 logic unchanged. Held for review of the public-field qualification.",
+  "included_context": "Public fields/docs, numeric lookup and extension, precision predicate, graph build/open/WAL, apply_delta/apply_delta_mem, compaction/rebuild/fork, complete interning dispatch and push/len, deferred-builder boundary excerpts. Full unchanged core sources remain in the 50-file controls bundle. Builder excerpt prologues/epilogues can be partial; apply_delta_mem, cache extension, memo and synchronous intern dispatch are complete.",
+  "sections": [
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 65,
+      "end": 87,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 185,
+      "end": 267,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 790,
+      "end": 824,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 1380,
+      "end": 1387,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 1666,
+      "end": 1703,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 1910,
+      "end": 1963,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 2600,
+      "end": 2645,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 2730,
+      "end": 2757,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 2883,
+      "end": 2902,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 2936,
+      "end": 2959,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 3369,
+      "end": 3445,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 3460,
+      "end": 3473,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 3538,
+      "end": 3595,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/lib.rs",
+      "start": 4794,
+      "end": 4811,
+      "source_sha256": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45"
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "start": 27,
+      "end": 87,
+      "source_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "start": 1218,
+      "end": 1265,
+      "source_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "start": 1460,
+      "end": 1555,
+      "source_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "start": 2307,
+      "end": 2370,
+      "source_sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    }
+  ]
+}
