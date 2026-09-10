@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T04:02:49.426363+00:00",
+  "updated_at": "2026-09-10T04:06:30.917974+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Bounded public-callback runtime reproduction and sound restoration design",
-    "state": "Assigned read/test-only first phase, production correction not yet authorized; no fix claimed.",
+    "phase": "Runtime reproduction resumed after disk reserve recovered",
+    "state": "Same Astra lane running bounded public extension-callback harness and no-nesting cancellation control; no production fix, publication or runtime finding claimed yet.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -76,7 +76,7 @@
     "directory": "direct-6476",
     "max_minutes": 15,
     "scope": "Execute real nested public extension-callback reproduction; inspect affected entry points and previous limits/sticky-error/cancel pointer restoration lifetimes; exact source and test/control plan.",
-    "constraints": "Own newworktree; no production fix/push/remote mutation/modelcall/release/EC2 yet. max2jobs incrementalOFF offline;stopfree<6509559808B. Cache5983 mayreuse asregenerableonly. Preservecompletedworktrees and frozen evidence. No bd commands after readonly bootstrap defect.",
+    "constraints": "Own newworktree; no production fix/push/remote mutation/modelcall/release/EC2 yet. max2jobs incrementalOFF offline;stopfree<6509559808B. Cache5983 mayreuse asregenerableonly. Preservecompletedworktrees and frozen evidence. No bd commands after readonly bootstrap defect. Disk floor remains live; stop again if reserve crossed. No evidence was deleted.",
     "fresh_admission": [
       "direct-3105/admission/next6476-admission.json",
       "direct-3105/admission/next6476-admission-page2.json",
@@ -88,7 +88,16 @@
       "Collect existing Astra reproduction/design phase; do not launchduplicate.",
       "If runtime findingconfirmed, authorize minimal restoration fix with meaningful public-callback success/error/unwind/cancellation/sticky-state controls and actual Opus5 xhigh soundness review.",
       "Keep postmerge6477watch active; no mixedpush/merge-group verdict counts or releaseauthorization."
-    ]
+    ],
+    "resource_event": {
+      "at": "2026-09-10T04:06:30.916128+00:00",
+      "initial_stop": "Before any worktree/build, free fell6939156480\u21925884108800B below6509559808B floor. No code/build ran belowfloor.",
+      "root_inspection": "Only known task-owned direct5983target (~2.1GB) and issue3105worktree (~97MB) measured. Cache is regenerable; all result artifacts frozenoutside and backed. No cleanup performed.",
+      "reserve_recovered": "Root then measured6971408384B; child7002030080B. Runtime phase explicitly reauthorized from~04:05 with same strict floor and15min bound.",
+      "system_process_check": "Sandbox ps read was unavailable; no cleanup or escalation attempted on that evidence.",
+      "no_cache_cleanup": true
+    },
+    "runtime_scope": "Outer query_with_functions_and_budget extension callback optionally invokes public inner ASK, then sets outer cancel flag. Must calibrate no-nesting control to actual cancelled outcome; no inference if no subsequent budget polling. Expand entry-point inventory/design without patching."
   },
   "prs": {
     "4300": {
