@@ -1,0 +1,49 @@
+{
+  "files": [
+    {
+      "path": "Verdict.rs.txt",
+      "bytes": 419,
+      "sha256": "c6ed6dca8072f1ed9b902affd80a3f372cc0f98b51f9333990c4bc90a186fc5a"
+    },
+    {
+      "path": "comparable.rs.txt",
+      "bytes": 456,
+      "sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786"
+    },
+    {
+      "path": "current-test-context.rs.txt",
+      "bytes": 4120,
+      "sha256": "3aed2a6f103c5bf671146d1a87adfeee95b09bbe09f3e73b7176d01e93227a5e"
+    },
+    {
+      "path": "prior-executed-test-excerpt.txt",
+      "bytes": 188,
+      "sha256": "92340c1d31cad671fb4fc76d2f7701e761f7f809c8e94e7e9a2ce4b05bf8a744"
+    },
+    {
+      "path": "report.json",
+      "bytes": 3455,
+      "sha256": "5d9702a685aa47bed398d1528f70b6d267f5192b73303e5f2b05bf233fe2d66f"
+    },
+    {
+      "path": "review-packet.md",
+      "bytes": 9753,
+      "sha256": "93184f44cce9d0d0d0e9b0bd48165db6fba79310666661af5ab7376e7abe6f57"
+    },
+    {
+      "path": "review-thread.json",
+      "bytes": 1004,
+      "sha256": "d72041438d5996add7a345d834a272327c94265239cbb4874c1aaa9654def14c"
+    },
+    {
+      "path": "source-provenance.json",
+      "bytes": 403,
+      "sha256": "29b05b39473c7d79a816a89635b6987ea5a4d1e44741be2f04664b0c5a1f18de"
+    },
+    {
+      "path": "strict-Same-prologue.rs.txt",
+      "bytes": 1009,
+      "sha256": "73d7078360d7275f11179441e711fbe6b78b3b7c879b3380ba5d615a37036fee"
+    }
+  ]
+}

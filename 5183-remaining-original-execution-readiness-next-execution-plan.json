@@ -1,0 +1,171 @@
+{
+  "status": "plan only; no new driver source written or compiled",
+  "build_boundary": "Two driver-only direct rustc invocations, one per recorded revision. Import the FROZEN original update_fuzz.rs (0807388f...), never the current worktree file (787aab5c changed its generator). Driver accepts only this fixed seven-seed list, invokes original public run(seed,1), and rejects missing/other arguments. Preserve original module byte-for-byte.",
+  "possible_without_any_build": false,
+  "source_or_dependency_build_required": "The original module is compiled into each new driver, but no engine/dependency/whole-bench compilation is planned. All twelve recorded direct extern references are checked for existence/hash in identities-and-cache.json.",
+  "commands": [
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222535"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222571"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222576"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222599"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222612"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222617"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "parent",
+      "argv": [
+        "<new-parent-original-driver>",
+        "4141222622"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222535"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222571"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222576"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222599"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222612"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222617"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    },
+    {
+      "revision": "main",
+      "argv": [
+        "<new-main-original-driver>",
+        "4141222622"
+      ],
+      "seed_count": 1,
+      "max_seconds": 30,
+      "retry": false
+    }
+  ],
+  "proposed_hard_limits": {
+    "aggregate_seconds": 600,
+    "driver_build_seconds_each": 120,
+    "seed_seconds_each": 30,
+    "new_allocated_bytes": 134217728,
+    "minimum_free_bytes": 2147483648,
+    "jobs": 1,
+    "offline": true,
+    "incremental": false,
+    "dependency_compilation": false
+  },
+  "footprint_basis": "Frozen binaries total19,529,488 bytes; two similar new driver outputs plus temporary object/link output and14 small reports should fit128MiB, but this is a bounded estimate, not measured new-build proof. Check/stop on aggregate disk/time limits.",
+  "capture": "One independent process per listed seed, so every observed mismatch is that process first failure and original run() emits its localized detail/full request sequence/LOAD reference mirrors. Preserve exit1 and contrary successes unchanged. No seed search or outcome retries.",
+  "input_qualification": "The original seven sequence texts cannot be extracted from this CI log. They must be deterministically regenerated from the exact unchanged SplitMix64/generator source and saved seeds. That is old-generator reconstruction, not the candidate generator and not a preexisting raw CI sequence capture.",
+  "success_gap": "If a listed seed unexpectedly passes under the qualified local environment, original run() prints no full sequence. Preserve the success and absence of sequence; do not silently add tracing or rerun until a separately scoped choice is made.",
+  "controls_preserved": "CARGO_MANIFEST_DIR default committed allowlist (SPARQ_FUZZ_DIVERGENCES absent); exact generator, LOAD sandbox and equivalent reference INSERT, parser/canonicalizer, both Sparq update paths, per-step dataset/probes, lexical allowlist and strict unknown-divergence behavior.",
+  "environment": "Recorded Rust1.97.1 aarch64 macOS O3/unwind/noLTO/codegen16, Rayon1. Not Linux CI release-fast thinLTO/abort/runner thread parity. Clear inherited SPARQ_*/RUSTFLAGS/profile overrides; reapply recorded explicit environment.",
+  "identity_obligations": [
+    "Rehash original module, old driver inputs, lock/allowlist, current rustc and all link dependencies immediately before build/run.",
+    "Use unique per-revision new driver/source/output names, real compiler invocations and binary hashes, avoiding reused package freshness or existing frozen files.",
+    "Never use implementation787aab5 generator for an ORIGINAL failure; never run the two old hard-coded binaries with new arguments and claim parameterization.",
+    "Stop if missing dependencies, a hash differs, a resource cap is met or required provenance cannot be established; no broad rebuild/install/cleanup."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "core": {
+    "remaining": 4857,
+    "limit": 5000,
+    "reset": 1789052125
+  },
+  "search": {
+    "remaining": 30,
+    "limit": 30,
+    "reset": 1789050764
+  },
+  "observed_before_additional_reads": true
+}

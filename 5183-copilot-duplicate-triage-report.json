@@ -1,0 +1,53 @@
+{
+  "task": "PR6482 Copilot duplicate redistribution concern; source assessment, runtime blocked",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "author": "GPT-6 Astra xhigh",
+  "runtime_status": "NOT EXECUTED: observed free space1,483,120,640B is below required2,147,483,648B; no scratchRust file, build or test process started. No retry/cleanup/alternate route.",
+  "final_observed_free_bytes": 1822334976,
+  "review_claim_about_current_test": "Contradicted by exact source and already-frozen20/20 Rust2021 execution: current bnode fixture left020/021 differs lexically from right20/21, so their initial canonical datasets are unequal and the lexical adjudication branch is reached; normalization refuses duplicate redistribution.",
+  "distinct_lexical_prior_runtime": [
+    "test update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure ... ok",
+    "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.18s"
+  ],
+  "identical_lexical_lead": "With literally identical p/q spellings on both sides, source indicates comparable canonicalizes to sets; equal total raw counts then returnSame. This is a plausible PRE-EXISTING strictSame blindspot, not a demonstrated new runtime result in this phase.",
+  "base_equivalence": {
+    "comparable": {
+      "base_sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786",
+      "final_sha256": "51f9b695022433220769ae3d5b88d233034a304a3ca01ccac18f29630848b786",
+      "byte_identical": true
+    },
+    "strict-Same-prologue": {
+      "base_sha256": "73d7078360d7275f11179441e711fbe6b78b3b7c879b3380ba5d615a37036fee",
+      "final_sha256": "73d7078360d7275f11179441e711fbe6b78b3b7c879b3380ba5d615a37036fee",
+      "byte_identical": true
+    },
+    "Verdict": {
+      "base_sha256": "c6ed6dca8072f1ed9b902affd80a3f372cc0f98b51f9333990c4bc90a186fc5a",
+      "final_sha256": "c6ed6dca8072f1ed9b902affd80a3f372cc0f98b51f9333990c4bc90a186fc5a",
+      "byte_identical": true
+    }
+  },
+  "scope": "No production fix, comparator weakening, source commit, GitHub action, model call or runtime replay.",
+  "next_exact_witness": {
+    "source": "New unique task-private copy of exactfe328 module, same edition2021 feature-pinned direct externs. Append one isolated test only; production source remains unchanged.",
+    "cases": [
+      "Control: current _:x left[p020,p020,q021], right[p20,q21,q21]; requireDiffers, preserving known fullsuite behavior.",
+      "Observation: same left, right[p020,q021,q021]; print actual Verdict and complete detail, without assertingSame a priori."
+    ],
+    "qualification": "One driver/module compile and one filtered test; no dependency build. No main build needed because comparable/Verdict/strictSame prologue are byte-identical to459.",
+    "limits": {
+      "aggregate_seconds": 90,
+      "new_allocated_bytes": 67108864,
+      "min_free_bytes": 2147483648,
+      "jobs": 1,
+      "offline": true
+    }
+  },
+  "evidence_limits": [
+    "The new identical-lexical case remains unexecuted. Do not label it a confirmed runtime defect solely from this report.",
+    "RDF graph set semantics and query-result multiset semantics must remain distinguished when scoping a later repair; current strictSame branch predates thecandidate.",
+    "Prior test excerpt is reused frozen evidence, not a new test run."
+  ],
+  "commands_pending": false
+}

@@ -1,0 +1,6 @@
+{
+  "status": "resource_stop_before_compile",
+  "controller_exit": 1,
+  "compiler_test_commands": 0,
+  "terminal": true
+}

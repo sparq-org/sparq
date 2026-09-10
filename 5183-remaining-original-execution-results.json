@@ -1,0 +1,508 @@
+[
+  {
+    "seed": 4141222535,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222535,
+      "exit": 1,
+      "stdout_sha256": "d59b8c35e539df669791f85b8be2846e7210407cd8caadddda0b7618348fae0e",
+      "stderr_sha256": "eeebf1ba6146d0f93e454ede4150a06a70463d4307741ef72a53bc7a63028ec5",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 7,
+      "request_count": 8,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "dacb7fc27771375a656ce3521f9b5892968f321fefc3ddaff2227b12320130fb",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "08974ad3006e27ef48ded068730e1a99344b9555b16839258c24df25194e1860",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        3
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222535,
+      "exit": 1,
+      "stdout_sha256": "42afe94b356615c66dc6ed7386b9741dee3d4c5331c645ebce032a1c46fceaf9",
+      "stderr_sha256": "eeebf1ba6146d0f93e454ede4150a06a70463d4307741ef72a53bc7a63028ec5",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 7,
+      "request_count": 8,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "dacb7fc27771375a656ce3521f9b5892968f321fefc3ddaff2227b12320130fb",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "08974ad3006e27ef48ded068730e1a99344b9555b16839258c24df25194e1860",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        3
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222571,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222571,
+      "exit": 1,
+      "stdout_sha256": "62dc3f3e773c42dd2e92c9a287d0f6619e78fa88a53ce46781dd8a02c15acb58",
+      "stderr_sha256": "17a0e2dbc9e202a948106cbf93de902ba8b4b11dca05fb76932d0e18fe78c84e",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 9,
+      "request_count": 10,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "4a4d019d1f83333ffd92d88798941b3ddf9931636ebffd472bbf0047d6a4c519",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "1a7fbbfbeddb03cd347c81578928d6a196355d4f5cbaca99a973e7f23b624298",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        5
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222571,
+      "exit": 1,
+      "stdout_sha256": "cd2de503d807351fc91896f682ee0b113bf782eeac34edbfa94106187a5643d0",
+      "stderr_sha256": "17a0e2dbc9e202a948106cbf93de902ba8b4b11dca05fb76932d0e18fe78c84e",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 9,
+      "request_count": 10,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "4a4d019d1f83333ffd92d88798941b3ddf9931636ebffd472bbf0047d6a4c519",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "1a7fbbfbeddb03cd347c81578928d6a196355d4f5cbaca99a973e7f23b624298",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        5
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222576,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222576,
+      "exit": 1,
+      "stdout_sha256": "a8f7bc4239dd9f2b5cfca24d90bfcb4cb0bcb4869ac6a84ddb816beeb24ecd2e",
+      "stderr_sha256": "754e01b7bc80e0e79b1365187a996056de2d4f1d7d7700e2da4ab315ae290e10",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 8,
+      "request_count": 9,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "89937fd6739fc0534e820c7b34a497d53c04d95c0da9648581a943734dd901f1",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "8458ff1f7ac29f3308e08d4f7eb7c8b360c31c830dc46c69f033400f4d17f0ca",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        4
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222576,
+      "exit": 1,
+      "stdout_sha256": "d0e23c7949780faf843de7410f15002972bfcf1c0f0f6f39a4b21e04ace26445",
+      "stderr_sha256": "754e01b7bc80e0e79b1365187a996056de2d4f1d7d7700e2da4ab315ae290e10",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 8,
+      "request_count": 9,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "8481610761605d6a31d5d7df89bd85830fcbb198877602b0792bb003b8c0c18a",
+      "first_failure_body_sha256": "89937fd6739fc0534e820c7b34a497d53c04d95c0da9648581a943734dd901f1",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p0> _:c14n4 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> .",
+        "<http://ex/s4> <http://ex/p0> _:c14n2 ."
+      ],
+      "only_in_oxigraph": [
+        "<http://ex/s2> <http://ex/p0> _:c14n2 .",
+        "<http://ex/s4> <http://ex/p0> _:c14n3 ."
+      ],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "8458ff1f7ac29f3308e08d4f7eb7c8b360c31c830dc46c69f033400f4d17f0ca",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        4
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222599,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222599,
+      "exit": 1,
+      "stdout_sha256": "5a7943569303322157104c85eaac5b1758a9fffe0fdd225d911803bfd18020e6",
+      "stderr_sha256": "eab0b4d0d40fe546d5d6262bd40bfd544be884f8c7772b1a7a1dcf8bf979103e",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 5,
+      "request_count": 6,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "9b5e264bc3fa92791bc45fe6d87eca143afabf3dbd7cf09e7bd19188a1935d6e",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "2db068e2087df1b60c887da420eee438b3c7c6d644e094ae80f27cb11e133186",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        1
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222599,
+      "exit": 1,
+      "stdout_sha256": "9276dc2c53e31dc6c70088f2434858c4125a8acf0f49fb8115fe3ed17169fabf",
+      "stderr_sha256": "eab0b4d0d40fe546d5d6262bd40bfd544be884f8c7772b1a7a1dcf8bf979103e",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 5,
+      "request_count": 6,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "9b5e264bc3fa92791bc45fe6d87eca143afabf3dbd7cf09e7bd19188a1935d6e",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "2db068e2087df1b60c887da420eee438b3c7c6d644e094ae80f27cb11e133186",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        1
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222612,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222612,
+      "exit": 1,
+      "stdout_sha256": "0c2faf3976decc71bfac4d377a06fb635fee839871f1b6a04548ca5c48bc2314",
+      "stderr_sha256": "12471359556fe9f3416a74d90c482f30896f55baf27586e04692a816f8b73d06",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 6,
+      "request_count": 8,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "41097c8f81c5fec18ab9683efffdc52a7938cd89c6a3b82e65c31e9734396b66",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "bc1f01746af39e035b1edc96392e9224f93f4cf4e1f6eb0e48b1fdafb5d579b2",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        2
+      ],
+      "requests_after_failure_not_executed": 1
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222612,
+      "exit": 1,
+      "stdout_sha256": "d2f16eed6d4d626746913180c7331fa3fa4874e4d3c58c055586f1212b5100dc",
+      "stderr_sha256": "12471359556fe9f3416a74d90c482f30896f55baf27586e04692a816f8b73d06",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 6,
+      "request_count": 8,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "41097c8f81c5fec18ab9683efffdc52a7938cd89c6a3b82e65c31e9734396b66",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "bc1f01746af39e035b1edc96392e9224f93f4cf4e1f6eb0e48b1fdafb5d579b2",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        2
+      ],
+      "requests_after_failure_not_executed": 1
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222617,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222617,
+      "exit": 1,
+      "stdout_sha256": "754ba0825ce66bfbad4092fadac584607ebd452220c9a10faa342d278aad2f98",
+      "stderr_sha256": "b66088ce18c0464cae6f3c8dcc3c59747c8a31af4a15f7bfe77f3a5ebdefe765",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 5,
+      "request_count": 7,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "707466e405e7188a4dc2ddc1233aa828cf765c35d44b20f3cb2b469e08c74941",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "367128fa1d44a38a5a1916ca03e7cd37b9f98ce274d1162a8d5fbbc678477eb4",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        1
+      ],
+      "requests_after_failure_not_executed": 1
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222617,
+      "exit": 1,
+      "stdout_sha256": "b5c6b4dc138158676a46c17bd10bf0cde0e8b9709d9828f1896e7dc06ff721c6",
+      "stderr_sha256": "b66088ce18c0464cae6f3c8dcc3c59747c8a31af4a15f7bfe77f3a5ebdefe765",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 5,
+      "request_count": 7,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "707466e405e7188a4dc2ddc1233aa828cf765c35d44b20f3cb2b469e08c74941",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "367128fa1d44a38a5a1916ca03e7cd37b9f98ce274d1162a8d5fbbc678477eb4",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        1
+      ],
+      "requests_after_failure_not_executed": 1
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  },
+  {
+    "seed": 4141222622,
+    "parent": {
+      "revision": "parent",
+      "source_revision": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+      "seed": 4141222622,
+      "exit": 1,
+      "stdout_sha256": "171e8d68f5481cc2b9c4e753c92cadb8f4e145cf8331d133b7aa410a31695078",
+      "stderr_sha256": "7db6b900ad435f7fec4ecc54b5316fa5ac8aa0e289cef5ef9025698c79a3f644",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 4,
+      "request_count": 5,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "7be7baa92ccd899121230850be83dbc7b0d685ab5bf8d817c199ffb9b34e8094",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "4cd602a44149c850f83bdc8c354cb97d4b4ad5d4deaf88d19a931c84af955630",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        0
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "main": {
+      "revision": "main",
+      "source_revision": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "seed": 4141222622,
+      "exit": 1,
+      "stdout_sha256": "4730d6b40fc7f18f38def7a07a2c5e89e4408297eaffc3f3bdd9c2ef4591467d",
+      "stderr_sha256": "7db6b900ad435f7fec4ecc54b5316fa5ac8aa0e289cef5ef9025698c79a3f644",
+      "sequence_origin": "Deterministically reconstructed by unchanged original generator, not captured raw CI sequence.",
+      "startup_allowlist_enabled": true,
+      "failing_index_zero_based": 4,
+      "request_count": 5,
+      "failing_operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+      "reason": "canonical dataset differs (sparq(rebuild) vs oxigraph)",
+      "failure_detail_sha256": "ad9b1f2293c33f1250ce0fd562d5f850356136cb0fe6ccaa1bb9ac0da0fca7d4",
+      "first_failure_body_sha256": "7be7baa92ccd899121230850be83dbc7b0d685ab5bf8d817c199ffb9b34e8094",
+      "only_in_sparq": [
+        "<http://ex/s2> <http://ex/p0> _:c14n3 .",
+        "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+      ],
+      "only_in_oxigraph": [],
+      "net_extra_reported_quads": 2,
+      "net_extra_bnode_bearing_quads": 1,
+      "sequence_sha256": "4cd602a44149c850f83bdc8c354cb97d4b4ad5d4deaf88d19a931c84af955630",
+      "load_reference_mirrors": [
+        "LOAD SILENT <file://doc1.nt>\n     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })"
+      ],
+      "request_indices_with_both8_and008": [
+        0
+      ],
+      "requests_after_failure_not_executed": 0
+    },
+    "same_exit": true,
+    "same_failure_body": true,
+    "same_sequence": true
+  }
+]

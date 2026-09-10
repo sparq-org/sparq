@@ -1,0 +1,5 @@
+canonical dataset differs (sparq(rebuild) vs oxigraph)
+only in sparq(rebuild):
+  <http://ex/s2> <http://ex/p0> _:c14n3 .
+  <http://ex/s2> <http://ex/p1> "008"^^<http://www.w3.org/2001/XMLSchema#integer> .
+only in oxigraph:

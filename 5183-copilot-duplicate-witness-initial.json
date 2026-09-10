@@ -1,0 +1,50 @@
+{
+  "free_bytes": 2279686144,
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "source_sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa",
+  "externs": [
+    {
+      "name": "oxigraph",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxigraph-93faeb99561d9c18.rlib",
+      "sha256": "061387827fb57834ef2159ba30869c762136532e7d89c1fedc24225922f8ef78",
+      "bytes": 4080216,
+      "still_matches_prior": true
+    },
+    {
+      "name": "oxrdf",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+      "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+      "bytes": 1921384,
+      "still_matches_prior": true
+    },
+    {
+      "name": "serde_json",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libserde_json-dfbc1c86400a124e.rlib",
+      "sha256": "82e04818b4316e664e56972def65b77f697798d13a0746f07fff488acadd9be0",
+      "bytes": 1952816,
+      "still_matches_prior": true
+    },
+    {
+      "name": "sparq_canon",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_canon-38f96fcabe5b0906.rlib",
+      "sha256": "9c8027ebf3e494cecde1a7755289737ef36a407bd9f065f5abe489e973dc7018",
+      "bytes": 674744,
+      "still_matches_prior": true
+    },
+    {
+      "name": "sparq_core",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_core-ecad7fe38b152a30.rlib",
+      "sha256": "a00b383a2789eff25fe29b9d3e7bf9ac905d7b54e7c57ba3e383f1f824fc5581",
+      "bytes": 4397856,
+      "still_matches_prior": true
+    },
+    {
+      "name": "sparq_engine",
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libsparq_engine-1603d23b1ddfa53f.rlib",
+      "sha256": "562fe4d414372d44511ddcc6b073d8145c8c3c7a738c7e796abaaa2908c8fa7b",
+      "bytes": 5404992,
+      "still_matches_prior": true
+    }
+  ],
+  "compiler_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+}

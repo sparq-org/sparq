@@ -1,0 +1,8 @@
+{
+  "commands": 16,
+  "builds": 2,
+  "seed_runs": 14,
+  "controller_exit": 0,
+  "all_command_receipts_terminal": true,
+  "no_retry": true
+}

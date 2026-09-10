@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T14:42:28.069200+00:00",
+  "head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "source_bundle_verified": true,
+  "current_test_claim": "Refuted by exactdistinctlexicalfixture andfrozenRust2021pass/control evidence",
+  "identical_lexical_gap": "Sourceindicatedpre-existingmissingcoverage; witnessunexecutedbelow2GiBfloor. Issue6483capturesqualification andrequirednextwitness; no observedenginebugclaim.",
+  "policy": "Replywithproofandfollowup; leaveunresolveduntilnormalCIevidence, thenresolveifhead/findingsunchanged. No extraCopilotretryneededforunchangedcode.",
+  "resource": "No localbuildbelowexisting2GiBfloor; no globalcacheorworktreecleanup."
+}

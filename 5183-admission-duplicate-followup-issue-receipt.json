@@ -1,0 +1,20 @@
+{
+  "started_at": "2026-09-10T14:39:50.473354+00:00",
+  "fresh-budget": {
+    "exit": 0,
+    "stderr": ""
+  },
+  "fresh-dedupe": {
+    "exit": 0,
+    "stderr": ""
+  },
+  "fresh-pr": {
+    "exit": 0,
+    "stderr": ""
+  },
+  "created": {
+    "number": 6483,
+    "url": "https://github.com/sparq-org/sparq/issues/6483"
+  },
+  "completed_at": "2026-09-10T14:39:53.275710+00:00"
+}

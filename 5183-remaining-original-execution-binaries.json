@@ -1,0 +1,12 @@
+{
+  "parent": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/remaining-original-execution/parent/harness/crates/sparq-bench/out/issue5183_remaining_original_parent-parent",
+    "sha256": "84d41434d71dfe29158b82aa8dc5b321a1249206cc15dd02c46a09115a6d5a23",
+    "bytes": 9781824
+  },
+  "main": {
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/remaining-original-execution/main/harness/crates/sparq-bench/out/issue5183_remaining_original_main-main",
+    "sha256": "9413a7e702710574442f53deba0c3f44a8570af5df4373f82ad9cc780f0b189a",
+    "bytes": 9796416
+  }
+}

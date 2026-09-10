@@ -1,0 +1,30 @@
+fn compare(
+    label_a: &str,
+    a: &[String],
+    label_b: &str,
+    b: &[String],
+    allow_integer_lexical: bool,
+) -> Verdict {
+    let relabel = mentions_blank_node(a) || mentions_blank_node(b);
+    let (ca, cb) = match (
+        comparable(a, relabel, label_a),
+        comparable(b, relabel, label_b),
+    ) {
+        (Ok(ca), Ok(cb)) => (ca, cb),
+        (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+    };
+    if ca == cb {
+        // Canonicalization deduplicates, so a duplicate quad on one side alone would
+        // survive the compare — check the raw counts to keep that failure visible.
+        if a.len() != b.len() {
+            return Verdict::Differs(format!(
+                "datasets are isomorphic but the raw quad COUNTS differ \
+                 ({} {} vs {} {}) — one side is yielding a duplicate quad",
+                label_a,
+                a.len(),
+                label_b,
+                b.len()
+            ));
+        }
+        return Verdict::Same;
+    }

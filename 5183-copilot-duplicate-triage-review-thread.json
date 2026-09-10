@@ -1,0 +1,21 @@
+{
+  "id": "PRRT_kwDOSz3qKM6hHXbJ",
+  "isResolved": false,
+  "isOutdated": false,
+  "comments": {
+    "nodes": [
+      {
+        "databaseId": 3980166727,
+        "body": "The new row-preservation checks are bypassed when blank-node canonicalization makes `ca == cb`: `comparable` deduplicates canonical lines, and this branch only compares total raw lengths. Thus a dataset with `[p, p, q]` versus `[p, q, q]` has equal canonical sets and equal raw counts and returns `Same`; the `subject == \"_:x\"` case in `lexical_adjudication_preserves_rows_and_blank_node_structure` exercises exactly this path and will not return `Differs`. Compare multiplicities (or run the normalized snapshot checks) before the early `ca == cb` return, rather than relying on total row counts.",
+        "author": {
+          "login": "copilot-pull-request-reviewer"
+        },
+        "path": "crates/sparq-bench/src/update_fuzz.rs",
+        "line": 982
+      }
+    ],
+    "pageInfo": {
+      "hasNextPage": false
+    }
+  }
+}

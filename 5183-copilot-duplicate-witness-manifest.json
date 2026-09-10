@@ -1,0 +1,44 @@
+{
+  "files": [
+    {
+      "path": "execute.py",
+      "bytes": 6180,
+      "sha256": "55057aaed2a0d3881e1af0e9944b1d07cd8827e671671ccaf1313eacbb976b02"
+    },
+    {
+      "path": "harness/bench/differential-divergences.json",
+      "bytes": 5722,
+      "sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2"
+    },
+    {
+      "path": "initial.json",
+      "bytes": 2381,
+      "sha256": "7e2e07569ac702288e5c1a6da7f4e86345e14ce689c20a1eaac5065f66ac31b9"
+    },
+    {
+      "path": "old-compiler-argv.json",
+      "bytes": 1753,
+      "sha256": "2dad221759db466f66562c1c81ad546217314a45aa66507b66e9631b358fc925"
+    },
+    {
+      "path": "phase-result.json",
+      "bytes": 122,
+      "sha256": "a63bc756a25597a7dd6ea2ca2fa3909a84eb6be61f6bdaced33c0d50e56359e6"
+    },
+    {
+      "path": "production-source.rs.txt",
+      "bytes": 102385,
+      "sha256": "41d8a1e664a3620dc23ec530af9c1908123c43f98131a61f1c9ca2b555d33eaa"
+    },
+    {
+      "path": "report.json",
+      "bytes": 1222,
+      "sha256": "841ad44bb30220a1bb759486023c6abedaeac5d5409c6e1cafc32c410d4459e0"
+    },
+    {
+      "path": "resources.json",
+      "bytes": 120,
+      "sha256": "7f6498a9720284a2a8ba4be74f60ebe8bfc5d910245aa46aa8e36f2e8307c109"
+    }
+  ]
+}

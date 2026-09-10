@@ -1,0 +1,35 @@
+{
+  "author": "GPT-6 Astra xhigh",
+  "task": "Original seven recorded UPDATE differential seeds; one process per seed per revision",
+  "seeds": [
+    4141222535,
+    4141222571,
+    4141222576,
+    4141222599,
+    4141222612,
+    4141222617,
+    4141222622
+  ],
+  "revisions": {
+    "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+    "main": "781f667c19a8ebb779cfccb24b05ea432360b025"
+  },
+  "candidate_untouched": "fe3284199db0831f353d2ae401b8c69472764904",
+  "source_module_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+  "limits": {
+    "aggregate_seconds": 600,
+    "build_seconds": 120,
+    "seed_seconds": 30,
+    "new_allocated": 134217728,
+    "min_free": 2147483648,
+    "jobs": 1
+  },
+  "method": "Two direct rustc driver-only builds, identical recorded externs; edition2021 corrected to actual workspace. Original generator/LOAD/strict comparisons untouched. No dependency compilation or Cargo.",
+  "differences_from_old_driver": [
+    "Fixed-list seed argument replaces one hard-coded first seed.",
+    "Edition2021 replaces prior diagnostic driver2024; old module is unchanged.",
+    "Unique crate/metadata/output identity, task-owned source export and new manifest-relative default allowlist path."
+  ],
+  "environment": "Same recorded O3/unwind/noLTO/codegen16, Rayon1; inherited SPARQ_/profile/RUSTFLAGS cleared. Not LinuxCI release-fast/thread parity.",
+  "outcome_policy": "Observe exits0 or1 once. Unexpected success retains no-sequence gap. Other exit/time/provenance/resource failure stops remaining execution; no retry."
+}

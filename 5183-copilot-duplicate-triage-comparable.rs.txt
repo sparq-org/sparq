@@ -1,0 +1,12 @@
+fn comparable(lines: &[String], relabel: bool, what: &str) -> Result<Vec<String>, String> {
+    if !relabel {
+        return Ok(lines.to_vec());
+    }
+    let quads = parse_lines(lines, what)?;
+    let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+        .map_err(|e| format!("{}: RDFC-1.0 canonicalization failed ({})", what, e))?;
+    let mut out: Vec<String> = canon.lines().map(str::to_string).collect();
+    out.sort();
+    Ok(out)
+}
+

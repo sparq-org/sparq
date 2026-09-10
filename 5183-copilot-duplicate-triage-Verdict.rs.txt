@@ -1,0 +1,11 @@
+enum Verdict {
+    /// Byte-identical, or RDF-isomorphic when blank nodes are in play.
+    Same,
+    /// Absorbed by the adjudicated `update-oxigraph-integer-lexical-canonicalization`
+    /// class: the two datasets agree exactly once Oxigraph's numeric normalization is
+    /// re-derived on both sides.
+    AdjudicatedIntegerLexical,
+    /// A real divergence (the string is the report body).
+    Differs(String),
+}
+

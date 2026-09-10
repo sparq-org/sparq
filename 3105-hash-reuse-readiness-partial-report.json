@@ -1,0 +1,42 @@
+{
+  "status": "Paused at safe read boundary for higher-priority6482 review; no implementation/measurement authorized or performed.",
+  "current_main": "4595388de9e389f5369d63828fbf90cfc16b62d9",
+  "candidate_worktree_unchanged": "fe3284199db0831f353d2ae401b8c69472764904",
+  "issue3105": "OPEN; merged6477 explicitly leaves planner/hash build work open.",
+  "observed_seams": {
+    "capped_caller": "crates/sparq-engine/src/exec.rs:4468,4512,4595",
+    "scan_cache": "exec.rs:4645-4732;4MiB capacities-based shared per-invocation storage allowance; disabled for armed budget",
+    "hash_adapter": "exec.rs:9071-9151; recomputes smaller-side selection, shared columns, out_vars and probe_only every call; builds tables every hash call",
+    "substrate": "crates/sparq-substrate/src/join.rs:293,309,336,397; table entries retain ordered build-row indices, probe receives immutable build rows",
+    "types": "crates/sparq-substrate/src/rows.rs:59,66; keys inline2, postings inline2 then heap spill"
+  },
+  "source_findings": [
+    "Scan reuse does not imply reusable hash build: hash_join_ref picks left on ties and smaller side per block. The existing70000-row two-pattern fixture need not ever build RHS; it cannot by itself prove a hash-hoist benefit.",
+    "Only an already-chosen RHS-build hash branch over the same retained immutable RHS and same ordered key projection is a plausible narrow reuse boundary. Do not pin RHS as build side or hoist planner/bind decisions.",
+    "Probe columns/out_vars may change with per-block earlier joins even if build key unchanged. Recompute these; preserve posting index order, original parallel partition representation, sortedness and budget polling.",
+    "Existing4MiB scan accounting excludes JoinTable buckets/control bytes and spilled Key/Posting vectors. Adding tables without honest charged capacity would reopen resolved retention issue. No safe accounting implementation investigated in this paused read-only phase."
+  ],
+  "witness_direction": "Need public capped query proving at least two RHS-build calls on the same relation/layout, independently of scan reuse, plus exact bag and physical build count. Existing scan-only counter and symmetric70k fixtures are insufficient. A filtered RHS with high prepared estimate but smaller actual scan, or preceding fanout, is a candidate shape; actual planner/path and reasonable resource cost remain unverified. No discriminator has yet been executed.",
+  "proposed_control": "If a witness is established later, discard cached hash preparation per block: assert repeated RHS table constructions return while full result bag remains identical. No wall-clock unit assertion.",
+  "semantic_traps": [
+    "RHS ownership/generation changes on sort replacement; table row indices cannot outlive/refer to the old rows.",
+    "Shared key order/column identity differs from probe layout; changing build side changes output layout and enumeration.",
+    "Unbound/duplicate rows and posting multiplicity must retain current semantics; no global unordered output assumption.",
+    "Parallel threshold selects one table versus64 partitions; probe partition hash must match.",
+    "Cache disabled under armed budgets; preserve all old cancellation checks and existing ZK caller guard."
+  ],
+  "dedupe": {
+    "logical_GH_reads_after_budget": 6,
+    "open3105": 0,
+    "openRHS": 0,
+    "open_hash_join": 1,
+    "hash_join_match": "6064 release umbrella only; source/path overlap not fully enumerated. No direct matching active fix found in these bounded queries.",
+    "no_further_reads": true
+  },
+  "resources": {
+    "warm_private_release_allocated": 856776704,
+    "last_free_bytes": 1483120640,
+    "future_execution_not_authorized": "A new engine/module build footprint has not been validated. With free space currently below2GiB, do not start a witness build. Reuse of existing rlibs cannot by itself add physical build instrumentation inside engine."
+  },
+  "decision": "Readiness incomplete; no implementation GO. Narrow RHS-only build reuse is plausible, but first needs a nonvacuous path/work witness and bounded table-storage accounting."
+}

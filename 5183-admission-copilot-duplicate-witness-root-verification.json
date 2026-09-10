@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-10T14:50:14.301947+00:00",
+  "manifest_files": 8,
+  "manifest_sha256": "7c254c05982afad3a236a14c45c460c0003fded91e8e0b2b49d80fe6d8dce572",
+  "outcome": "Resource floor failed before compilation/control export; zero compiler/test processes, no runtime verdict; no retry or production change",
+  "resource": "Start2279686144free then1178558464 beforebuild; below2147483648floor",
+  "scope": "Source-onlycoverageissue6483andCopilotreplyremainqualified; existing20/20testevidencestillvalid; no newnegative/positive runtimeclaim."
+}

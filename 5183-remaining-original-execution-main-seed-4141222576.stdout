@@ -1,0 +1,29 @@
+update-fuzz divergence allowlist (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5183/remaining-original-execution/main/harness/crates/sparq-bench/../../bench/differential-divergences.json): adjudicated classes enabled ["update-oxigraph-integer-lexical-canonicalization"]; every other divergence fails
+update-fuzz seeds 4141222576..4141222577 : checked=0 update_requests=0 isomorphism_compares=0 adjudicated(integer-lexical)=0 mismatch=1
+
+FIRST FAILING CASE:
+seed=4141222576
+step=8 of 9
+op: INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }
+canonical dataset differs (sparq(rebuild) vs oxigraph)
+only in sparq(rebuild):
+  <http://ex/s2> <http://ex/p0> _:c14n3 .
+  <http://ex/s2> <http://ex/p0> _:c14n4 .
+  <http://ex/s2> <http://ex/p1> "008"^^<http://www.w3.org/2001/XMLSchema#integer> .
+  <http://ex/s4> <http://ex/p0> _:c14n2 .
+only in oxigraph:
+  <http://ex/s2> <http://ex/p0> _:c14n2 .
+  <http://ex/s4> <http://ex/p0> _:c14n3 .
+
+repro: cargo run -p sparq-bench --release -- update-fuzz --seed-start 4141222576 --seed-count 1
+--- full sequence ---
+[0] INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o1> . <http://ex/s4> <http://ex/p0> "lit2" . }
+[1] INSERT { ?s <http://ex/p1> _:bt } WHERE { ?s <http://ex/p3> ?o }
+[2] DELETE DATA { <http://ex/s0> <http://ex/p1> "lit2" . <http://ex/s5> <http://ex/p1> <http://ex/o1> . <http://ex/s4> <http://ex/p0> "lit2" . }
+[3] INSERT { ?s <http://ex/p1> <<( ?s ?p ?o )>> } WHERE { ?s ?p ?o FILTER(!isBlank(?s) && !isBlank(?o)) }
+[4] INSERT DATA { <http://ex/s3> <http://ex/p1> "lit1" . <http://ex/s5> <http://ex/p2> <http://ex/o4> . <http://ex/s2> <http://ex/p1> 8 . <http://ex/s2> <http://ex/p1> "008"^^<http://www.w3.org/2001/XMLSchema#integer> . }
+[5] LOAD SILENT <file://doc1.nt>
+     (reference engine ran: INSERT DATA { <http://ex/s5> <http://ex/p1> <http://ex/o3> . <http://ex/s0> <http://ex/p0> <http://ex/o2> . <http://ex/s4> <http://ex/p1> <http://ex/o5> . })
+[6] DELETE DATA { <http://ex/s5> <http://ex/p2> <http://ex/o4> . }
+[7] CREATE SILENT GRAPH <http://ex/g0>
+[8] INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }

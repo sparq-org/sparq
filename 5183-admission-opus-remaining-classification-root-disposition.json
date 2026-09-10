@@ -1,0 +1,21 @@
+{
+  "at": "2026-09-10T14:42:28.069200+00:00",
+  "actual_primary_model": "claude-opus-5",
+  "effort": "xhigh",
+  "session": 58533,
+  "session_state": "completed_collected",
+  "verdict": "SUPPORTED_WITH_QUALIFICATIONS",
+  "output_sha256": "8446dd1a6d094a2686e563a3a1544af3ece4f9a9e646fbdfba0d161b0aaac104",
+  "root_disposition": "Accept provisional grouping all7 with original reference lexical-collapse/cardinality cause. No new engine defect or original-input pass claimed.",
+  "timing_ambiguity_resolved": {
+    "source": "Original immutable0807388f module at781f; compare865-906, apply_sequence1133-1178",
+    "explanation": "After each update strictrebuild/inplace comparison runs first withallow=false. Oxi comparisons use committedallow.integer_lexical=true (startupverified all14runs). Originalcompare893-902 independently normalizes integerlexicals/deduplicates, returningAdjudicated when normalizeddatasets agree; apply_sequence increments counter/continues. Thus the earlier8/008 difference is adjudicated, while laterextra freshnode is residual andfails. Earlierreferenceagreement means agreement underthis explicitpredicate, not rawterm equality. No additionalrunneeded toresolveindexquestion."
+  },
+  "review_claim_corrections": [
+    "Do not infer general per-solution reference behavior solely from canonical labels; inherited actual reducedpublicAPI controls provide it. Shared-cause classification remainsqualifiedwithout perstep counts for7cases.",
+    "Do not use absence of same numericseedmarkers underchangedgenerator as original-input closingproof. Originalaliasinputs remain outside losslessreference domain andmaystillfail; fullselectedCI plusdomaininvariants/historicalSparqregression/qualifiedcausereview aredistinctevidence.",
+    "Use RDF1.2 tripleterm terminology inpublictext; reviewlegacywording notcopied."
+  ],
+  "remaining": "NormalPR6482CI/merge andmaintain explicit unexecutedsuffix limits2612/2617; existingissue5183 staysopen pendinglandedrepair.",
+  "no_further_replay": "No concrete timingambiguityremainsafterreadingsource; no repeatcontrols/buildrequested."
+}

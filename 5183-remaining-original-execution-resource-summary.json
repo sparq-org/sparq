@@ -1,0 +1,19 @@
+{
+  "phase_seconds": 39.381189959000004,
+  "sum_command_seconds": 34.23177266599998,
+  "driver_build_seconds": {
+    "parent-build": 17.56406175,
+    "main-build": 9.503190499999999
+  },
+  "max_monitored_new_allocated_bytes": 22622208,
+  "min_monitored_free_bytes": 2584088576,
+  "final_free_bytes": 2584195072,
+  "bounds": {
+    "aggregate_seconds": 600,
+    "build_seconds": 120,
+    "seed_seconds": 30,
+    "new_allocated": 134217728,
+    "min_free": 2147483648,
+    "jobs": 1
+  }
+}

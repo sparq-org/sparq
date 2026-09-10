@@ -1,0 +1,5 @@
+{
+  "crates/sparq-engine/src/exec.rs": "10090299f707dbf4adb4cae6349bd390a06ed2a50645e8c3417bcc3b90fb20af",
+  "crates/sparq-substrate/src/join.rs": "cd708a74d9f77a9c4ab2e519a1d6475c4863fb68f909889d2d62d8e1b9cefae5",
+  "crates/sparq-substrate/src/rows.rs": "490d760db1825e85a08b7434725ffa0ba5d9c62adaaaa8f537442d7d48f42de0"
+}

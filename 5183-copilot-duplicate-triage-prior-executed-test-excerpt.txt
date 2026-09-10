@@ -1,0 +1,2 @@
+test update_fuzz::tests::lexical_adjudication_preserves_rows_and_blank_node_structure ... ok
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.18s

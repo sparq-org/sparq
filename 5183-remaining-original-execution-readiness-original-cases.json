@@ -1,0 +1,96 @@
+{
+  "ci_run": 34458877088,
+  "ci_job": 102811674711,
+  "ci_head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+  "fixed_seeds": [
+    4141222535,
+    4141222571,
+    4141222576,
+    4141222599,
+    4141222612,
+    4141222617,
+    4141222622
+  ],
+  "cases": [
+    {
+      "seed": 4141222535,
+      "ci_log_line": 588,
+      "raw_line": "2026-09-10T09:14:07.1488247Z MISMATCH seed=4141222535",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222571,
+      "ci_log_line": 589,
+      "raw_line": "2026-09-10T09:14:07.2400651Z MISMATCH seed=4141222571",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222576,
+      "ci_log_line": 590,
+      "raw_line": "2026-09-10T09:14:07.2584296Z MISMATCH seed=4141222576",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222599,
+      "ci_log_line": 591,
+      "raw_line": "2026-09-10T09:14:07.3153360Z MISMATCH seed=4141222599",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222612,
+      "ci_log_line": 592,
+      "raw_line": "2026-09-10T09:14:07.3504353Z MISMATCH seed=4141222612",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222617,
+      "ci_log_line": 593,
+      "raw_line": "2026-09-10T09:14:07.3650805Z MISMATCH seed=4141222617",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    },
+    {
+      "seed": 4141222622,
+      "ci_log_line": 594,
+      "raw_line": "2026-09-10T09:14:07.3832530Z MISMATCH seed=4141222622",
+      "failure_confirmed": true,
+      "failing_step": null,
+      "operation_count": null,
+      "original_requests": null,
+      "LOAD_documents_or_mirrors": null,
+      "reason": "The frozen run prints only the first failure detail; this seed has only a MISMATCH marker."
+    }
+  ],
+  "only_detailed_case_seed": 4141222487,
+  "first_case_log_line": 597,
+  "ci_log_sha256": "648510046732f8c41893f56fefe4e776f39a0632181fa25349243b91aad29392"
+}

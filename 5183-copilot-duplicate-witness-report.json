@@ -1,0 +1,20 @@
+{
+  "task": "Single Copilot duplicate witness",
+  "status": "STOPPED before build due resource floor; no retry",
+  "source_head": "fe3284199db0831f353d2ae401b8c69472764904",
+  "initial_free_bytes": 2279686144,
+  "initial_required_bytes": 2214592512,
+  "prebuild_free_bytes": 1178558464,
+  "continuous_minimum_bytes": 2147483648,
+  "new_allocated_bytes_at_stop": 126976,
+  "compiler_commands_started": 0,
+  "test_commands_started": 0,
+  "scratch_rust_source_exported": false,
+  "observed_error": "execute.py first check() raised AssertionError: free floor before test-suffix/update_fuzz/driver writes or subprocess.Popen. Controller exit1.",
+  "cause_of_free_space_drop": "Unverified; no cleanup or broader inspection performed.",
+  "candidate_clean": true,
+  "prior_source_only_bundle_unchanged": true,
+  "interpretation": "No new runtime verdict. Prior source and20/20 evidence still refute the assertion that the existing distinct-lexical test fails; identical-lexical redistribution remains a source-inferred pre-existing lead pending actual runtime.",
+  "commands_pending": false,
+  "next_step": "Root decides whether a materially changed resource state permits a separately authorized attempt. No automatic retry."
+}

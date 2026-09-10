@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T14:28:07.242996+00:00",
+  "updated_at": "2026-09-10T14:50:14.301947+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -66,7 +66,7 @@
   "active_lane": {
     "issue": 5183,
     "agent": "/root/postmerge_ci",
-    "state": "published_pr6482_ci_in_progress",
+    "state": "pr6482_ci_and_copilot_followup",
     "base": "4595388de9e389f5369d63828fbf90cfc16b62d9",
     "parent": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183",
@@ -87,11 +87,12 @@
     },
     "public_update": {
       "url": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5618039976",
-      "updated_at": "2026-09-10T12:56:13.006388+00:00",
-      "receipt": "direct-5183/admission/original-seed-comment-receipt.json"
+      "receipt": "direct-5183/admission/remaining-original-comment-receipt.json",
+      "body_sha256": "f9ace93afb7a9a5502a5778a27ea083704938260900644d1a6363fa209adf527",
+      "state": "Updatedexistingowncommentwithqualified7caseclassification andPR6482;issuekeptopen"
     },
     "next_scope": "Collect actual Opus patch review, resolve any material findings, publish scoped5183 PR for ordinary CI. Keep issue open for seven original unresolved inputs.",
-    "agent_current_task": "ExistingAstra fixed-list7originalseedreplay onparent/main using frozenoriginalmodule+driver-onlybuild; independent fromcandidate. No candidate edits.",
+    "agent_current_task": "ExistingAstra idle; no commands/modelcalls running. Localnewwitnessstoppedbeforerun bydiskfloor; watchremoteCI.",
     "constraints": "Preserve strict comparison and full normalized structural equality; no reference-input normalization, canon/engine/workflow edits or broad semantic claims; registryOFF/releasesheld",
     "readiness_directory": "direct-5183/original-seed-readiness",
     "execution_directory": "direct-5183/original-seed-execution",
@@ -148,10 +149,11 @@
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
     "next_actions": [
-      "Watch PR6482 normalCI/Copilot; verify requiredgate exacthead/app15368, resolve every substantive finding, then normalprotectedqueue with exactexpectedhead. No force/admin/reviewlabel fabrication.",
-      "Collect and verify existingAstra remaining-original-execution frozenbundle; classify7perseed failures usingoriginalsource reconstruction and compareparent/main. Keep5183open untilclassification+landedrepair proven.",
-      "No new modelreview or build onfe328 unless findings/changejustify it. Main459alreadygreen; do notrerun.",
-      "Preserve registryOFF,ALLGREEN,6049/6055/canon/EC2/release holds; bounded10minheartbeat andoneimplementationworker."
+      "Watch6482coreCI34488984319/gate34488983731; matrix/docs/supplypassed. Verifyactualselectedtest/gateproofandcurrenthead/reviews. Address/resolveCopilotwithrecordedreason+6483followup ifevidenceremainsvalid, thennormalprotectedqueueexacthead.",
+      "No newlocalbuildwhile2GiBreserveunavailable. Copilotwitnessnotexecutedafterresourcecollapse; donotretryona fleetingreservegain. Localstorageassessmentonlytask-ownedcompletedartifactswithpreservationproof; no globalcleanup/production/EC2workaround.",
+      "Issue5183all8nowqualifiedsharedreferencecause, keepopenpendinglandedrepair/postmergeproof; donotclaimoriginalinputsnowpassundernewgenerator.",
+      "Hashreuse3105readinesspartial/paused,noimplementationGO. Localenginebuildsrequirefreshresourcefloor; no globalcachedeletes orunreviewedcleanup.",
+      "RetainregistryOFF/ALLGREEN/6049/6055/canon/EC2/releasesholds; quietbounded10minheartbeatwhenCIpending."
     ],
     "design_manifest_sha256": "2c25700e565a5d475d31392b23f9a921b2861a119e6d6a54a9b56a045f7fc574",
     "design_root_verification": "direct-5183/admission/comparator-design-root-verification.json",
@@ -231,13 +233,17 @@
       "output_sha256": "0c093d3d42af2abc2834c2e4ccca221ddee802896f1b378e8d536bc50190580a"
     },
     "remaining_original_execution": {
-      "state": "in_progress",
+      "state": "completed_frozen_root_verified",
       "directory": "direct-5183/remaining-original-execution",
       "agent": "/root/postmerge_ci",
       "scope": "Two driver-onlybuilds withfrozenoriginal0807388module, parentd41/main781f qualifieddependencies; sevenlistedseeds onceperrevision,14runsmax; edition2021 matchingrealcrate. No generator/source changes.",
       "limits": "600saggregate,120seachbuild,30seachseed,128MiBnew,min2GiBfree,offlinejobs1,no retries",
       "qualification": "Reconstructdeterministicallyfromoriginalsource; originalCIcapturedonlymarkersforthese7. Preserveunexpectedsuccesswithoutsecondrun.",
-      "progress": "Agent reports2driverbuilds+14runs terminal in~39.4s/~20.1MB,7failuresmatchparent/main; freeze/perseedproofnotyetrootverified. No extraexecution."
+      "progress": "Twooriginaldriverbuilds+14fixedruns terminal; all7samefailure/sequenceonparent/main; no retries/candidateexecution.14exit1. Two trailingADDrequests unexecuted.",
+      "manifest_files": 114,
+      "manifest_sha256": "1160710b3c56a734f94b1ba72ad21ad4fe25dd6332b5aed39c23e9c7867a5d0d",
+      "packet_sha256": "3653729c481bf70a733e4f88040332c7b26fa67e305cf2e9b775d8fc26787f8e",
+      "root_verification": "direct-5183/admission/remaining-original-execution-root-verification.json"
     },
     "pr": 6482,
     "url": "https://github.com/sparq-org/sparq/pull/6482",
@@ -253,13 +259,58 @@
       "copilot_receipt": "direct-5183/admission/copilot-request-receipt.json"
     },
     "ci": {
-      "state": "initial_runs_pending",
-      "evidence": "direct-5183/admission/pr6482-first-runs.json",
+      "state": "matrix_docs_supply_success_core_and_gate_running",
+      "evidence": "direct-5183/admission/pr6482-runs1442.json",
       "CI": 34488984319,
       "feature_matrix": 34488984325,
       "aggregate": 34488983731,
       "docs_quality": 34488983828,
-      "supply_chain": 34488983646
+      "supply_chain": 34488983646,
+      "feature_matrix_conclusion": "success",
+      "docs_quality_conclusion": "success",
+      "supply_chain_conclusion": "success",
+      "CI_status": "in_progress",
+      "aggregate_status": "in_progress"
+    },
+    "remaining_classification_review": {
+      "state": "completed_collected",
+      "session": 58533,
+      "actual_model": "claude-opus-5",
+      "effort": "xhigh",
+      "verdict": "SUPPORTED_WITH_QUALIFICATIONS",
+      "input": "direct-5183/admission/opus-remaining-classification-input.md",
+      "input_sha256": "f1cda72482b4642c0fe364f13ac3379cd8258a7fa48251d7823dd10de5cf0e10",
+      "output": "direct-5183/admission/opus-remaining-classification-review.json",
+      "result": "direct-5183/admission/opus-remaining-classification-result.json",
+      "root_disposition": "direct-5183/admission/opus-remaining-classification-root-disposition.json",
+      "policy": "58533completed/collected; no poll/relaunch. Requestedtimingambiguityresolvedbysourceoriginalcompare893-902/apply1133-1178; noextraexecutionneeded. Newseedabsence notoriginalclosingproof."
+    },
+    "copilot": {
+      "state": "COMMENTED_one_thread_replied_unresolved_pendingCI",
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "thread": "PRRT_kwDOSz3qKM6hHXbJ",
+      "comment": 3980166727,
+      "reply_url": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
+      "reply_receipt": "direct-5183/admission/copilot-duplicate-reply-receipt.json",
+      "source_triage": "direct-5183/copilot-duplicate-triage",
+      "root_disposition": "direct-5183/admission/copilot-duplicate-root-disposition.json",
+      "finding": "Currentdistinctlexicaltestfailureclaim refutedbyfrozen20/20andmutantproof. IdenticallexicalSamepath predatespatch; coverageissue6483. Newruntimewitnessstillunexecuted: reservecollapsedbeforebuild; no confirmedruntimeSameclaim."
+    },
+    "copilot_duplicate_witness": {
+      "state": "resource_stopped_not_executed_frozen_root_verified",
+      "directory": "direct-5183/copilot-duplicate-witness",
+      "agent": "/root/postmerge_ci",
+      "head": "fe3284199db0831f353d2ae401b8c69472764904",
+      "bounds": "Startonly>=2GiB+64MiBfree,continuous2GiBfloor,90s/64MiBmax,1modulecompile+1filteredrun,offlinejobs1; stopnoretryifresourcefail",
+      "source_only_bundle_immutable": true,
+      "reason": "Freshdisk14:44:44=2285400064, changedfromunderfloor. No assumptionstillfree; workerrevalidates.",
+      "manifest_files": 8,
+      "manifest_sha256": "7c254c05982afad3a236a14c45c460c0003fded91e8e0b2b49d80fe6d8dce572",
+      "root_verification": "direct-5183/admission/copilot-duplicate-witness-root-verification.json",
+      "compiler_or_test_started": false,
+      "commands_pending": false,
+      "last_free_bytes": 1178558464,
+      "policy": "Do not retry this witness repeatedly on single fleeting reserve recovery. Reassess sustained free space/task-owned completed storage safely; no broadcleanup/processinspectionfallback. Existinglocalcompilerfloor2GiB preserved."
     }
   },
   "prs": {
@@ -705,13 +756,37 @@
         "docs_quality": 34488983828,
         "supply_chain": 34488983646
       },
-      "copilot": "requested",
+      "copilot": {
+        "state": "COMMENTED_one_thread_replied_unresolved_pendingCI",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "thread": "PRRT_kwDOSz3qKM6hHXbJ",
+        "comment": 3980166727,
+        "reply_url": "https://github.com/sparq-org/sparq/pull/6482#discussion_r3980261208",
+        "reply_receipt": "direct-5183/admission/copilot-duplicate-reply-receipt.json",
+        "source_triage": "direct-5183/copilot-duplicate-triage",
+        "root_disposition": "direct-5183/admission/copilot-duplicate-root-disposition.json",
+        "finding": "Currentdistinctlexicaltestfailureclaim refutedbyfrozen20/20andmutantproof. IdenticallexicalSamepath predatespatch; coverageissue6483. Newruntimewitnessstillunexecuted: reservecollapsedbeforebuild; no confirmedruntimeSameclaim."
+      },
       "merge_admitted": false,
       "issue_autoclose": false,
       "observed_labels": [
         "area:sparq-bench"
       ],
-      "observed_at": "2026-09-10T14:28:07.242996+00:00"
+      "observed_at": "2026-09-10T14:28:07.242996+00:00",
+      "latest_ci": {
+        "state": "matrix_docs_supply_success_core_and_gate_running",
+        "evidence": "direct-5183/admission/pr6482-runs1442.json",
+        "CI": 34488984319,
+        "feature_matrix": 34488984325,
+        "aggregate": 34488983731,
+        "docs_quality": 34488983828,
+        "supply_chain": 34488983646,
+        "feature_matrix_conclusion": "success",
+        "docs_quality_conclusion": "success",
+        "supply_chain_conclusion": "success",
+        "CI_status": "in_progress",
+        "aggregate_status": "in_progress"
+      }
     }
   },
   "registry": {
@@ -3953,7 +4028,14 @@
     "no_ec2_required": true,
     "no_files_or_build_by_agent": true,
     "state": "completed; implementationlane3105started",
-    "artifact": "direct-6475/source-admission/perf3105-readiness.json"
+    "artifact": "direct-6475/source-admission/perf3105-readiness.json",
+    "hash_reuse_followup": {
+      "state": "paused_readonly_partial",
+      "directory": "direct-3105/hash-reuse-readiness",
+      "manifest_sha256": "ee41ea30e7a967dbb44e3ad39e37edba39a1690a0234fe19841a14a08fa69fe5",
+      "finding": "OnlyalreadychosenRHS-build/hashkeyidentity seamplausible; preserveperblockplanning/ownership/order and4MiBhonestaccounting. No nonvacuouswitnessyet; existing70000scancaseinsufficient.",
+      "no_implementation_go": true
+    }
   },
   "monitoring_followups": {
     "generator_labels": {
@@ -4003,6 +4085,28 @@
       "priority": "Promptmaintenanceafter6478,independentreviewmedium",
       "constraints": "No manualdismissal,deploymentorbroadaudit; exactpatchstatus/npmversion/lockintegrity/relevantCIbeforemerge.",
       "closure_evidence": "direct-6480/admission/close6480-receipt.json"
+    },
+    "6483": {
+      "state": "OPEN",
+      "url": "https://github.com/sparq-org/sparq/issues/6483",
+      "scope": "Missingidenticallexicalduplicate-redistributioncaseinpreexistingstrictSameoracle; sourcelead, notobservedenginebug",
+      "receipt": "direct-5183/admission/duplicate-followup-issue-receipt.json",
+      "next_witness": {
+        "state": "resource_stopped_not_executed_frozen_root_verified",
+        "directory": "direct-5183/copilot-duplicate-witness",
+        "agent": "/root/postmerge_ci",
+        "head": "fe3284199db0831f353d2ae401b8c69472764904",
+        "bounds": "Startonly>=2GiB+64MiBfree,continuous2GiBfloor,90s/64MiBmax,1modulecompile+1filteredrun,offlinejobs1; stopnoretryifresourcefail",
+        "source_only_bundle_immutable": true,
+        "reason": "Freshdisk14:44:44=2285400064, changedfromunderfloor. No assumptionstillfree; workerrevalidates.",
+        "manifest_files": 8,
+        "manifest_sha256": "7c254c05982afad3a236a14c45c460c0003fded91e8e0b2b49d80fe6d8dce572",
+        "root_verification": "direct-5183/admission/copilot-duplicate-witness-root-verification.json",
+        "compiler_or_test_started": false,
+        "commands_pending": false,
+        "last_free_bytes": 1178558464,
+        "policy": "Do not retry this witness repeatedly on single fleeting reserve recovery. Reassess sustained free space/task-owned completed storage safely; no broadcleanup/processinspectionfallback. Existinglocalcompilerfloor2GiB preserved."
+      }
     }
   },
   "pending_operational_notes": {
@@ -4044,5 +4148,11 @@
       },
       "issue": 6480
     }
+  },
+  "local_resource_state": {
+    "at": "2026-09-10T14:50:14.301947+00:00",
+    "free_bytes": 1178558464,
+    "evidence": "direct-5183/copilot-duplicate-witness/report.json",
+    "policy": "Continuous2GiBfloor blockednewwitnessbeforecompile. No compiler/teststarted, no retries/cleanup. RemoteCIcontinues; noagent/modelprocessrunning."
   }
 }

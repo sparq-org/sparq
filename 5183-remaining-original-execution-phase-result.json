@@ -1,0 +1,13 @@
+{
+  "status": "complete",
+  "commands": 16,
+  "seed_runs": 14,
+  "all_returned": true,
+  "seconds": 39.381189959000004,
+  "last_resource": {
+    "elapsed_seconds": 39.381206792,
+    "free_bytes": 2595483648,
+    "output_allocated": 20074496,
+    "new_allocated": 20074496
+  }
+}
