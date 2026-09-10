@@ -1,0 +1,209 @@
+﻿2026-09-10T07:18:46.0045004Z Current runner version: '2.337.0'
+2026-09-10T07:18:46.0073100Z ##[group]Runner Image Provisioner
+2026-09-10T07:18:46.0073968Z Hosted Compute Agent
+2026-09-10T07:18:46.0074557Z Version: 20260828.587
+2026-09-10T07:18:46.0075292Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T07:18:46.0076068Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T07:18:46.0077181Z Worker ID: {f21579f6-5018-4159-9c2b-3c4f16a6be5a}
+2026-09-10T07:18:46.0077973Z Azure Region: eastus
+2026-09-10T07:18:46.0078657Z ##[endgroup]
+2026-09-10T07:18:46.0080301Z ##[group]Operating System
+2026-09-10T07:18:46.0080990Z Ubuntu
+2026-09-10T07:18:46.0081639Z 24.04.4
+2026-09-10T07:18:46.0082159Z LTS
+2026-09-10T07:18:46.0082646Z ##[endgroup]
+2026-09-10T07:18:46.0083269Z ##[group]Runner Image
+2026-09-10T07:18:46.0083926Z Image: ubuntu-24.04
+2026-09-10T07:18:46.0084547Z Version: 20260831.293.1
+2026-09-10T07:18:46.0085858Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T07:18:46.0087754Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-10T07:18:46.0088838Z ##[endgroup]
+2026-09-10T07:18:46.0090442Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T07:18:46.0092658Z Actions: write
+2026-09-10T07:18:46.0093430Z Checks: read
+2026-09-10T07:18:46.0094043Z Contents: read
+2026-09-10T07:18:46.0094632Z Metadata: read
+2026-09-10T07:18:46.0095228Z PullRequests: read
+2026-09-10T07:18:46.0095813Z Statuses: read
+2026-09-10T07:18:46.0096625Z ##[endgroup]
+2026-09-10T07:18:46.0098805Z Secret source: Actions
+2026-09-10T07:18:46.0099930Z Cache mode: write
+2026-09-10T07:18:46.0100979Z Prepare workflow directory
+2026-09-10T07:18:46.0437984Z Prepare all required actions
+2026-09-10T07:18:46.0488145Z Getting action download info
+2026-09-10T07:18:46.3204856Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T07:18:46.5714371Z Complete job name: gate
+2026-09-10T07:18:46.6501056Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T07:18:46.6502162Z with:
+2026-09-10T07:18:46.6502636Z   persist-credentials: false
+2026-09-10T07:18:46.6503424Z   sparse-checkout: scripts/ci_summary_gate.py
+.github/advisory-registry.json
+
+2026-09-10T07:18:46.6504255Z   sparse-checkout-cone-mode: false
+2026-09-10T07:18:46.6504823Z   repository: sparq-org/sparq
+2026-09-10T07:18:46.6508952Z   token: ***
+2026-09-10T07:18:46.6509401Z   ssh-strict: true
+2026-09-10T07:18:46.6509861Z   ssh-user: git
+2026-09-10T07:18:46.6510295Z   clean: true
+2026-09-10T07:18:46.6510726Z   fetch-depth: 1
+2026-09-10T07:18:46.6511166Z   fetch-tags: false
+2026-09-10T07:18:46.6511622Z   show-progress: true
+2026-09-10T07:18:46.6512087Z   lfs: false
+2026-09-10T07:18:46.6512516Z   submodules: false
+2026-09-10T07:18:46.6512978Z   set-safe-directory: true
+2026-09-10T07:18:46.6513635Z   allow-unsafe-pr-checkout: false
+2026-09-10T07:18:46.6514488Z ##[endgroup]
+2026-09-10T07:18:46.7533652Z Syncing repository: sparq-org/sparq
+2026-09-10T07:18:46.7536929Z ##[group]Getting Git version info
+2026-09-10T07:18:46.7538115Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T07:18:46.7539166Z [command]/usr/bin/git version
+2026-09-10T07:18:46.7601138Z git version 2.55.0
+2026-09-10T07:18:46.7636112Z ##[endgroup]
+2026-09-10T07:18:46.7645683Z Temporarily overriding HOME='/home/runner/work/_temp/d5c05577-55a0-4f74-a081-24176d321e2d' before making global git config changes
+2026-09-10T07:18:46.7648459Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T07:18:46.7650373Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T07:18:46.7698868Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T07:18:46.7702363Z ##[group]Determining repository object format
+2026-09-10T07:18:46.7703912Z ##[endgroup]
+2026-09-10T07:18:46.7705181Z ##[group]Initializing the repository
+2026-09-10T07:18:46.7708327Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T07:18:46.7829947Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T07:18:46.7831900Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T07:18:46.7833739Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T07:18:46.7835209Z hint: call:
+2026-09-10T07:18:46.7836241Z hint:
+2026-09-10T07:18:46.7837814Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T07:18:46.7839179Z hint:
+2026-09-10T07:18:46.7840217Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T07:18:46.7841795Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T07:18:46.7843111Z hint:
+2026-09-10T07:18:46.7843898Z hint: 	git branch -m <name>
+2026-09-10T07:18:46.7844802Z hint:
+2026-09-10T07:18:46.7845993Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T07:18:46.7847687Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T07:18:46.7849417Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T07:18:46.7897075Z ##[endgroup]
+2026-09-10T07:18:46.7898617Z ##[group]Disabling automatic garbage collection
+2026-09-10T07:18:46.7900257Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T07:18:46.7937219Z ##[endgroup]
+2026-09-10T07:18:46.7939220Z ##[group]Setting up auth
+2026-09-10T07:18:46.7940523Z Removing SSH command configuration
+2026-09-10T07:18:46.7945485Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T07:18:46.7983964Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T07:18:46.8348272Z Removing HTTP extra header
+2026-09-10T07:18:46.8350580Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T07:18:46.8390906Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T07:18:46.8618990Z Removing includeIf entries pointing to credentials config files
+2026-09-10T07:18:46.8623996Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T07:18:46.8659931Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T07:18:46.8884530Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T07:18:46.8924965Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:46.8960385Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:46.8999103Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:46.9036039Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:46.9070756Z ##[endgroup]
+2026-09-10T07:18:46.9072588Z ##[group]Fetching the repository
+2026-09-10T07:18:46.9078312Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +ac96a6d71f5b6e1dff34f1f6ae51144785f27327:refs/remotes/pull/6478/merge
+2026-09-10T07:18:47.1987105Z From https://github.com/sparq-org/sparq
+2026-09-10T07:18:47.1988754Z  * [new ref]         ac96a6d71f5b6e1dff34f1f6ae51144785f27327 -> pull/6478/merge
+2026-09-10T07:18:47.1992914Z ##[endgroup]
+2026-09-10T07:18:47.1994288Z ##[group]Determining the checkout info
+2026-09-10T07:18:47.1996008Z ##[endgroup]
+2026-09-10T07:18:47.1997676Z ##[group]Setting up sparse checkout
+2026-09-10T07:18:47.2000467Z [command]/usr/bin/git config core.sparseCheckout true
+2026-09-10T07:18:47.2042629Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+2026-09-10T07:18:47.2071150Z .git/info/sparse-checkout
+2026-09-10T07:18:47.2080306Z ##[endgroup]
+2026-09-10T07:18:47.2081672Z ##[group]Checking out the ref
+2026-09-10T07:18:47.2086994Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6478/merge
+2026-09-10T07:18:47.7029757Z Note: switching to 'refs/remotes/pull/6478/merge'.
+2026-09-10T07:18:47.7030721Z 
+2026-09-10T07:18:47.7031398Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T07:18:47.7032975Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T07:18:47.7034464Z state without impacting any branches by switching back to a branch.
+2026-09-10T07:18:47.7035313Z 
+2026-09-10T07:18:47.7035918Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T07:18:47.7037674Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T07:18:47.7038627Z 
+2026-09-10T07:18:47.7039269Z   git switch -c <new-branch-name>
+2026-09-10T07:18:47.7040359Z 
+2026-09-10T07:18:47.7041077Z Or undo this operation with:
+2026-09-10T07:18:47.7042121Z 
+2026-09-10T07:18:47.7042710Z   git switch -
+2026-09-10T07:18:47.7043530Z 
+2026-09-10T07:18:47.7044708Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T07:18:47.7047060Z 
+2026-09-10T07:18:47.7049172Z HEAD is now at ac96a6d Merge 3c637b228449e9345d8bba31ea2d7d449f8a2b8f into d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5
+2026-09-10T07:18:47.7055725Z ##[endgroup]
+2026-09-10T07:18:47.7100195Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T07:18:47.7131549Z ac96a6d71f5b6e1dff34f1f6ae51144785f27327
+2026-09-10T07:18:47.7142325Z ##[group]Removing auth
+2026-09-10T07:18:47.7143841Z Removing SSH command configuration
+2026-09-10T07:18:47.7146277Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T07:18:47.7188748Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T07:18:47.7433284Z Removing HTTP extra header
+2026-09-10T07:18:47.7438254Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T07:18:47.7482294Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T07:18:47.7719898Z Removing includeIf entries pointing to credentials config files
+2026-09-10T07:18:47.7723163Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T07:18:47.7757310Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T07:18:47.7759944Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T07:18:47.7762088Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T07:18:47.7764113Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T07:18:47.7770054Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T07:18:47.7796662Z /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.7810395Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.7852039Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T07:18:47.7879787Z /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.7889406Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.7924561Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T07:18:47.7953529Z /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.7962955Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.8003119Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T07:18:47.8030798Z /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.8048885Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config
+2026-09-10T07:18:47.8129841Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T07:18:47.8365077Z Removing credentials config '/home/runner/work/_temp/git-credentials-d012eb12-0805-4a42-8d80-03c128766a55.config'
+2026-09-10T07:18:47.8372578Z ##[endgroup]
+2026-09-10T07:18:47.8649862Z ##[group]Run python3 scripts/ci_summary_gate.py
+2026-09-10T07:18:47.8651549Z [36;1mpython3 scripts/ci_summary_gate.py[0m
+2026-09-10T07:18:47.8693848Z shell: /usr/bin/bash -e {0}
+2026-09-10T07:18:47.8694974Z env:
+2026-09-10T07:18:47.8705832Z   GH_TOKEN: ***
+2026-09-10T07:18:47.8707046Z   REPO: sparq-org/sparq
+2026-09-10T07:18:47.8708223Z   SHA: 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+2026-09-10T07:18:47.8709560Z   SELF_RUN_ID: 34449322223
+2026-09-10T07:18:47.8710632Z   EVENT_NAME: pull_request
+2026-09-10T07:18:47.8711682Z   PR_DRAFT: false
+2026-09-10T07:18:47.8712624Z   PR_NUMBER: 6478
+2026-09-10T07:18:47.8713543Z ##[endgroup]
+2026-09-10T07:18:49.6068803Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+2026-09-10T07:18:49.6069596Z ci-summary: evaluating tier=full (event=pull_request).
+2026-09-10T07:18:49.6070104Z attempt 1: 37 check-run(s), 34 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T07:19:12.7579522Z   workflow-run resolver: ignored 7 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T07:19:12.7580917Z attempt 2: 41 check-run(s), 20 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T07:19:14.0389984Z   fail-fast: 3 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+2026-09-10T07:19:14.0391375Z   workflow-run resolver: ignored 7 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T07:19:14.0392640Z attempt 3: 41 check-run(s), 19 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T07:19:14.0395003Z ### ci-summary: FAILED (fail-fast) — 3 gating check(s) concluded failure while 19 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+2026-09-10T07:19:14.0408053Z - ✗ detect rust changes: failure
+2026-09-10T07:19:14.0408907Z - ✗ detect rust changes (feature-matrix): failure
+2026-09-10T07:19:14.0409890Z - ✗ supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom): failure
+2026-09-10T07:19:14.0441074Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+2026-09-10T07:19:14.0552135Z ##[error]Process completed with exit code 1.
+2026-09-10T07:19:14.0710202Z Post job cleanup.
+2026-09-10T07:19:14.1592341Z [command]/usr/bin/git version
+2026-09-10T07:19:14.1641840Z git version 2.55.0
+2026-09-10T07:19:14.1686379Z Temporarily overriding HOME='/home/runner/work/_temp/d4a31156-6c6a-4146-ba2d-8b28105f987b' before making global git config changes
+2026-09-10T07:19:14.1687956Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T07:19:14.1693067Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T07:19:14.1732808Z Removing SSH command configuration
+2026-09-10T07:19:14.1740349Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T07:19:14.1778949Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T07:19:14.2042643Z Removing HTTP extra header
+2026-09-10T07:19:14.2049153Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T07:19:14.2088947Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T07:19:14.2354297Z Removing includeIf entries pointing to credentials config files
+2026-09-10T07:19:14.2354919Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T07:19:14.2395352Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T07:19:14.2808144Z Cleaning up orphan processes

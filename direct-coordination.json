@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T07:17:10.187978+00:00",
+  "updated_at": "2026-09-10T07:32:44.143660+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -67,8 +67,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "Completed Copilot delta; actual Opus supplement running",
-    "state": "d07 full CI jobs verified successful; two Copilot threads plus suppressed README nit being addressed before final review/publication",
+    "phase": "PR6478 recovered upstream GitHub diff-service incident; exact3c637b attempt2 full CI running",
+    "state": "Exact3c637b independentlyapproved,published,priorreviewthreadsresolved. Copilotnewcap-combination request publiclydispositioned; normalfailedjobrerunonceafterdiffendpointrecovered, noqueue.",
     "started_at": "2026-09-10T04:00:00Z",
     "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
     "local_branch": "codex/nested-query-budget",
@@ -85,10 +85,10 @@
     "dedupe": "165openPRtitles/branches+issuecrossrefs checked; no matching budget-restoration fix. Not exhaustiveallPRdiff audit.",
     "issue_comment": "https://github.com/sparq-org/sparq/issues/6476#issuecomment-5612755312",
     "next_actions": [
-      "Collect frozen Copilot delta,rootverify,oneconciseactualOpus review.",
-      "Normalfastforwardpush,replyandresolveallfindingsafterverifiedfix,requestfreshCopilot and inspectnewheadCI.",
-      "Freshprotectedqueueadmissiononlyafterallrequirements; postmergewatchandissue6476link/close.",
-      "6479runtimereproductionremainsseparate; nosecondengineimplementationlane."
+      "Inspect attempt2exact3c637bfullCI/matrix/supplychaingate; verifyfailedpathsfilterrecovered and actualheavygatesrun, no skip-onlysuccess.",
+      "Ifgreenandallreviewconditionsmet,freshprotectedqueueadmission expectedHeadOid3c637b,jumpfalse,gate15368ALLGREENunchanged; postmergewatchandlink/close6476.",
+      "Issue6480Nextpatchrecommendedafterthislane; sameAstra xhigh implementation,independentOpusandtargetedwebCI. No broaddependencyupgrade or alertdismissal.",
+      "Issue6479nestedBASEruntimewitnessstillseparate; nosecondengineimplementationlanewhile6478active."
     ],
     "resource_event": {
       "at": "2026-09-10T04:06:30.916128+00:00",
@@ -314,7 +314,7 @@
       "result": "direct-6476/admission/opus-final-result.json",
       "receipt": "direct-6476/admission/opus-final-completion.json"
     },
-    "agent_state": "Astra idle, exact3c637b committed clean; actual Opus session97463 running",
+    "agent_state": "Astra idle; allOpusreviews and diagnosticscompleted/collected; no localprocess or sourceworkpending.",
     "publication_readiness": {
       "state": "completed_root_hash_verified",
       "directory": "direct-6476/publication-readiness",
@@ -335,11 +335,11 @@
       "url": "https://github.com/sparq-org/sparq/pull/6478",
       "state": "OPEN",
       "draft": false,
-      "head": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+      "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
       "branch": "codex/nested-query-budget",
-      "verified": "direct-6476/admission/pr-ready-verified.json",
-      "receipt": "direct-6476/admission/ready-followup-receipt.json",
-      "push_receipt": "direct-6476/admission/followup-publication-receipt.json",
+      "verified": "direct-6476/admission/copilot-followup-reconcile-receipt.json",
+      "receipt": "direct-6476/admission/copilot-followup-rereview-corrected-receipt.json",
+      "push_receipt": "direct-6476/admission/copilot-followup-push-receipt.json",
       "push_state_note": "Push succeeded; immediate PR head read lagged at bcba, so continuation stopped before later mutations. Subsequent fresh read showed d07; dedicated continuation did not repeat push."
     },
     "followup": {
@@ -558,7 +558,7 @@
       "result": "DistinctpostinstallErrfifthcallbackcase;queryskill+READMEcorrected;default6/6andnodefault6/6;prod/declarationunchanged"
     },
     "copilot_opus_review": {
-      "state": "running",
+      "state": "completed_collected",
       "session_id": 97463,
       "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
       "model": "claude-opus-5",
@@ -567,7 +567,37 @@
       "input_bytes": 20734,
       "input_sha256": "b704cff02087b1a04b13cf631c891d41d4e3437a6bffd5f31ab20d152bdded06",
       "output": "direct-6476/admission/opus-copilot-review.json",
-      "collect_policy": "Collect97463before readingoutput;verifyactualmodelUsage/successandverdict. No duplicatecallorquotaexhaustionretry."
+      "collect_policy": "Collect97463before readingoutput;verifyactualmodelUsage/successandverdict. No duplicatecallorquotaexhaustionretry.",
+      "actual_model": "claude-opus-5",
+      "exit_code": 0,
+      "verdict": "approve_delta_for_ci",
+      "result": "direct-6476/admission/opus-copilot-result.json",
+      "receipt": "direct-6476/admission/opus-copilot-completion.json",
+      "root_disposition": "direct-6476/admission/opus-copilot-root-disposition.json"
+    },
+    "copilot_latest": {
+      "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "review_at": "2026-09-10T07:25:43Z",
+      "new_threads": 0,
+      "unresolved_threads": 0,
+      "suppressed_finding": "Addpublicnestedcallback+row/bytecap-errorcombination",
+      "disposition": "Retaincurrentcomposedcoverage: wrapperforwardsoriginalbudgetdirectlytosamepubliccaptestedentry; nestedprivatefullLimits+mutants and publiccallbackreentry coverthechange. No claimthatpublicnestedcapcrossproductexecuted. Optionalcombinationdeclinedwithsource-backedcomment.",
+      "comment": "https://github.com/sparq-org/sparq/pull/6478#issuecomment-5614807591",
+      "evidence": "direct-6476/admission/copilot-cap-disposition-receipt.json"
+    },
+    "ci_incident": {
+      "state": "diagnosed_frozen_root_verified_recovery_accepted",
+      "directory": "direct-6476/head3c-ci-incident",
+      "manifest_files": 18,
+      "manifest_sha256": "bc626ad44d71dd001b683c9e41f0099e4cc37d7bd99762f02bb31ab34ac332a7",
+      "proof": "direct-6476/admission/head3c-ci-incident-root-verification.json",
+      "cause": "GitHubPRdiffheavyserverload/not_available in3pinneddornypathsfiltersteps; requiredaggregatefailedcorrectly. No sourcefailure demonstrated,noHTTPstatusinvented.",
+      "recovered_endpoint": "direct-6476/admission/diff-service-health-precheck.json",
+      "recovery_receipt": "direct-6476/admission/diff-service-recovery-receipt.json",
+      "recovery": "OnePOSTrerun-failed-jobseach34449322494CI,34449322415matrix,34449322222supplychain,34449322223gate; freshhead/runattempt1/completedfailureeach,targetfiles10healthy,budgetavailable. Livefuzz/mutationuntouched.",
+      "attempt": 2,
+      "first_snapshot": "direct-6476/admission/recovery-attempt2-first-runs.json",
+      "no_repeat": "Do not rerun blindly. Inspect currentattempt2results, everyrequiredjobexecution and review state beforeprotectedqueue."
     }
   },
   "prs": {
@@ -1030,9 +1060,11 @@
     }
   },
   "next_actions": [
-    "Collect active6476 implementation then realindependentfinalreview andprotectedCI/merge.",
-    "No duplicate6477work: merged, byteverified, allpostmergecoregatespassed.",
-    "Preserve6049approvalblock,6055ownerhold,6475canonicalizationNO_GO,6095hold,registry2305ActionsOFF; no releases/EC2/groupingchange."
+    "Inspect attempt2exact3c637bfullCI/matrix/supplychaingate; verifyfailedpathsfilterrecovered and actualheavygatesrun, no skip-onlysuccess.",
+    "Ifgreenandallreviewconditionsmet,freshprotectedqueueadmission expectedHeadOid3c637b,jumpfalse,gate15368ALLGREENunchanged; postmergewatchandlink/close6476.",
+    "Issue6480Nextpatchrecommendedafterthislane; sameAstra xhigh implementation,independentOpusandtargetedwebCI. No broaddependencyupgrade or alertdismissal.",
+    "Issue6479nestedBASEruntimewitnessstillseparate; nosecondengineimplementationlanewhile6478active.",
+    "Preserve6049approvalblock,6055ownerhold,6475NO_GOand6095hold;registryActionsOFF,noreleases,noEC2orALLGREENchange."
   ],
   "followup_lane": {
     "issue": 6462,
@@ -3021,9 +3053,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T07:11:18.528290+00:00",
+    "at": "2026-09-10T07:32:44.143660+00:00",
     "actions_enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0703.json"
+    "evidence": "direct-6476/admission/diff-service-health-precheck.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",
@@ -3040,6 +3072,14 @@
       "evidence": "direct-6476/admission/query-base-issue-created.json",
       "dedupe": "direct-6476/admission/query-base-followup-dedupe.json",
       "constraint": "Separate from6478, view_scope already restores state; no broad TLS redesign claim"
+    },
+    "6480": {
+      "url": "https://github.com/sparq-org/sparq/issues/6480",
+      "state": "OPEN",
+      "scope": "NarrowsharedNext15.5.21\u2192patched15.5line,site/gui; runtimeexposureunproven; statics/imagesconfig preserved",
+      "evidence": "direct-6476/admission/critical-next-issue-created.json",
+      "priority": "Promptmaintenanceafter6478,independentreviewmedium",
+      "constraints": "No manualdismissal,deploymentorbroadaudit; exactpatchstatus/npmversion/lockintegrity/relevantCIbeforemerge."
     }
   },
   "pending_operational_notes": {
@@ -3050,7 +3090,7 @@
         "high": 41,
         "moderate": 20
       },
-      "state": "Boundedcriticalintakecomplete;actualOpussecurityassessmentanddeduplicatedfollowupissue/patchpending. Noexposureorfalsepositiveclaim;noalertdismissal.",
+      "state": "Two criticalalerts triagedbyactualOpus; deduplicatedissue6480created,implementationqueuedafter6478. Remainingoriginal61alertsnottriaged.",
       "intake": "direct-6476/admission/critical-alert-intake-summary.json",
       "critical_alerts": [
         106,
@@ -3063,7 +3103,23 @@
       ],
       "published_patch": "15.5.24",
       "source_observation": "Bothconfigsexportstaticandimagesunoptimized;notproofallruntimepaths/deployments",
-      "dedupe": "No15.5.24/GHSAissueorPR;8Next.jsmatchesunrelated. Onlycriticalalertsread,remaining61nottriaged."
+      "dedupe": "No15.5.24/GHSAissueorPR;8Next.jsmatchesunrelated. Onlycriticalalertsread,remaining61nottriaged.",
+      "independent_review": {
+        "state": "completed_collected",
+        "session_id": 70798,
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "input": "direct-6476/admission/opus-critical-intake-input.md",
+        "input_sha256": "76729e48182fc8fb848fa58215f4ec379bd4d0d77f9e7d438ee552a49efcb4b0",
+        "output": "direct-6476/admission/opus-critical-intake-review.json",
+        "scope": "Two publiccriticalalerts,lockeddependencyandstaticconfigs;noimplementation/noexposureconclusionyet",
+        "collect_policy": "Collect70798oncebeforeoutputread;actualmodel/successcheck;noquotaretry.",
+        "verdict": "file_narrow_patch_followup",
+        "result": "direct-6476/admission/opus-critical-intake-result.json",
+        "receipt": "direct-6476/admission/opus-critical-intake-completion.json",
+        "correction": "Opus swappedalertIDs;primaryAPI107=AVIF/106=Windows,correctedpublicissueandrootdisposition."
+      },
+      "issue": 6480
     }
   }
 }

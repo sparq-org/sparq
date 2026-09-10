@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-10T07:30:47.071975+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "manifest_files": 18,
+  "manifest_sha256": "bc626ad44d71dd001b683c9e41f0099e4cc37d7bd99762f02bb31ab34ac332a7",
+  "classification": "SHARED_UPSTREAM_GITHUB_DIFF_SERVICE_FAILURE",
+  "raw_failed_steps_and_logs_verified": true,
+  "run_ids": [
+    34449322222,
+    34449322223,
+    34449322415,
+    34449322494
+  ],
+  "subsequent_changed_files_endpoint_success": true,
+  "healthy_files": 10,
+  "decision": "One normal failed-job rerun each for three source workflows and aggregate; no source/gate/cancellation changes; freshbudget/head/runstateeachmutation."
+}

@@ -1,0 +1,26 @@
+{
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "files": {
+    ".github/workflows/ci.yml": {
+      "sha256": "8c2dd15936888aab25dd70c36d457811ac7ae453758643b9833ee1d2bf10985c",
+      "unchanged_vs_main_base": true
+    },
+    ".github/workflows/feature-matrix.yml": {
+      "sha256": "a4685a6f4b0b4655879176cb7bace120105feeebc533152a7a9fd5e38821dc2d",
+      "unchanged_vs_main_base": true
+    },
+    ".github/workflows/supply-chain.yml": {
+      "sha256": "19aff7e9956715261b789e3ad3b19e21d7bb2f14496e32ff4cd546e5f671273d",
+      "unchanged_vs_main_base": true
+    },
+    ".github/workflows/ci-summary.yml": {
+      "sha256": "be42f933e62ef681e9f45fc515afee8398bcf9d809d589d8b3c2bb9f9fa79884",
+      "unchanged_vs_main_base": true
+    },
+    "scripts/ci_summary_gate.py": {
+      "sha256": "7c6682c108301844ed06feb63f2249af7aca9f54004cbe1e955dd7b4fd0282ef",
+      "unchanged_vs_main_base": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-10T07:18:36.687660+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "parent": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+  "exit_code": 0,
+  "stdout": "To https://github.com/sparq-org/sparq.git\n \t3c637b228449e9345d8bba31ea2d7d449f8a2b8f:refs/heads/codex/nested-query-budget\td07ca79f8..3c637b228\nDone\n",
+  "stderr": "remote: \nremote: GitHub found 63 vulnerabilities on sparq-org/sparq's default branch (2 critical, 41 high, 20 moderate). To find out more, visit:        \nremote:      https://github.com/sparq-org/sparq/security/dependabot        \nremote: \n"
+}

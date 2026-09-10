@@ -1,0 +1,52 @@
+{
+  "at": "2026-09-10T07:28:25.660121+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "review_id": 5163973901,
+  "response": {
+    "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5614807591",
+    "html_url": "https://github.com/sparq-org/sparq/pull/6478#issuecomment-5614807591",
+    "issue_url": "https://api.github.com/repos/sparq-org/sparq/issues/6478",
+    "id": 5614807591,
+    "node_id": "IC_kwDOSz3qKM8AAAABTqsqJw",
+    "user": {
+      "login": "jeswr",
+      "id": 63333554,
+      "node_id": "MDQ6VXNlcjYzMzMzNTU0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63333554?u=1896ad2facb314da6926dd2b6755ad956c61af0e&v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/jeswr",
+      "html_url": "https://github.com/jeswr",
+      "followers_url": "https://api.github.com/users/jeswr/followers",
+      "following_url": "https://api.github.com/users/jeswr/following{/other_user}",
+      "gists_url": "https://api.github.com/users/jeswr/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/jeswr/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/jeswr/subscriptions",
+      "organizations_url": "https://api.github.com/users/jeswr/orgs",
+      "repos_url": "https://api.github.com/users/jeswr/repos",
+      "events_url": "https://api.github.com/users/jeswr/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/jeswr/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "created_at": "2026-09-10T07:28:25Z",
+    "updated_at": "2026-09-10T07:28:25Z",
+    "author_association": "MEMBER",
+    "body": "> \ud83e\udd16 **SPARQ agent** \u2014 I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).\n\nDisposition of the suppressed cap-coverage suggestion on 3c637b228449e9345d8bba31ea2d7d449f8a2b8f: I am retaining the current test scope. `query_with_functions_and_budget` forwards the original `&QueryBudget` directly to `query_with_budget`, so it shares the public entry path exercised by `budget_max_rows_refuses_not_truncates`, `budget_max_bytes_prices_row_width` and `budget_max_bytes_prices_computed_literals`. There is no field-by-field budget reconstruction in that wrapper or its migration.\n\nThe new nested-state tests separately assert non-default row and byte caps, byte width/accounting, cancellation and sticky state across multiple levels, errors and unwind; compiled restoration mutants fail those assertions. The public callback regression establishes re-entry through that same scope and later cancellation/error behavior. This is composed coverage, not a claim that a public nested callback followed by a row/byte-cap error was executed. That additional combination is useful optional coverage, but I do not see a defect in this change that requires it before merge.\n\nThe exact-head CI failures are being diagnosed independently. All required gates remain mandatory, and the PR is not in the merge queue.\n",
+    "reactions": {
+      "url": "https://api.github.com/repos/sparq-org/sparq/issues/comments/5614807591/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "performed_via_github_app": null,
+    "minimized": null,
+    "pin": null
+  }
+}

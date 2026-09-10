@@ -1,0 +1,75 @@
+{
+  "at": "2026-09-10T07:21:28.516597+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "precheck": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "state": "OPEN",
+          "isDraft": false,
+          "headRefOid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+          "mergeQueueEntry": null,
+          "reviewThreads": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOSz3qKM6g9YwV",
+                "isResolved": true
+              },
+              {
+                "id": "PRRT_kwDOSz3qKM6g9Ywu",
+                "isResolved": true
+              }
+            ]
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "github-actions"
+                },
+                "commit": {
+                  "oid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "commit": {
+                  "oid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "jeswr"
+                },
+                "commit": {
+                  "oid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "jeswr"
+                },
+                "commit": {
+                  "oid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f"
+                },
+                "state": "COMMENTED"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "has_review": false,
+  "has_run": true,
+  "pending": false,
+  "requested": false
+}

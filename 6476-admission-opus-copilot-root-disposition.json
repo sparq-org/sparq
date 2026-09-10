@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-10T07:21:54.985317+00:00",
+  "reviewed_head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "blocking_findings": [],
+  "decision": "Publish exact reviewed delta and require normal exact-head repositoryCI, allthreadresolution, protectedqueue; no newcustomgate or repeatedoptionaltests.",
+  "limitations_disposition": {
+    "unwind": "No new unwind test in thisdelta; prior15testmodule and in-tree suites include explicitunwindrestoration already reviewed. Do not claim wholechange untested.",
+    "wasm": "Existing productionwasmbuild/sizechecks mandatory. No newenginewasm testexecution job was introduced or source-audited as available; preexisting test function remainsnativein-tree.",
+    "visibility": "Actualdefault/no-defaultin-treecompilation verifiedsymbols; supportedCIfeaturecombinations remainmandatory.",
+    "child_install": "Exactsourcecallpathestablishesinstallation; newcaseassertsparentrestoration, notnewruntimecounter; earlierscopedstatetestscoverindependentchildlimits.",
+    "optional_doc_nits": "Current wording correct and approved; noextrachurn for optionalphrasing.",
+    "roborev": "Executable notpresentonhost; actual independentOpus review requiredbyuser and Copilot maintained; no fabricatedroborevPASS."
+  }
+}

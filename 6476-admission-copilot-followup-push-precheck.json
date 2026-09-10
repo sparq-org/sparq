@@ -1,0 +1,59 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": {
+        "target": {
+          "oid": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5"
+        }
+      },
+      "pullRequest": {
+        "id": "PR_kwDOSz3qKM8AAAABC8cW7A",
+        "state": "OPEN",
+        "isDraft": false,
+        "baseRefName": "main",
+        "headRefOid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618",
+        "mergeQueueEntry": null,
+        "labels": {
+          "nodes": [
+            {
+              "name": "area:bench"
+            },
+            {
+              "name": "area:sparq-engine"
+            },
+            {
+              "name": "review:unreviewed"
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOSz3qKM6g9YwV",
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 3976252036
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOSz3qKM6g9Ywu",
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 3976252068
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

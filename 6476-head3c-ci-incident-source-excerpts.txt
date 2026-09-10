@@ -1,0 +1,169 @@
+SOURCE .github/workflows/ci.yml @ 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+216:     runs-on: ubuntu-latest
+217:     permissions:
+218:       contents: read
+219:       pull-requests: read
+220:     outputs:
+226:       docker_changed: ${{ steps.decide.outputs.docker_changed }}
+227:     steps:
+228:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+229:       # Only run the path filter on pull_request: merge_group gets the batch-diff
+230:       # change-class gate in the decide step below (dorny's push/merge_group base-diff is
+231:       # unreliable; the merge_group event payload's base_sha/head_sha pair is not), and
+232:       # every other event force-runs the full matrix, so the filter is irrelevant there.
+233:       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+234:         id: filter
+235:         if: github.event_name == 'pull_request'
+236:         with:
+237:           filters: |
+238:             rust:
+239:               - '**/*.rs'
+240:               - '**/Cargo.toml'
+241:               - 'Cargo.lock'
+242:               - 'rust-toolchain*'
+243:               - '.github/workflows/ci.yml'
+244:               # [OPUS-4.8] sq-spfg: the checked-in coverage/mutation FLOOR files are ratchet
+245:               # inputs the `coverage` job's --check-monotonic gate validates. Without these,
+246:               # a PR that lowers ONLY a floor (no .rs/Cargo/ci.yml change) sets
+247:               # rust_changed=false, SKIPS the coverage job, and bypasses the monotonicity
+248:               # gate at the PR level (merge_group force-true still catches it in the queue,
+249:               # but the PR-level gate should fire too). List them so a floor-only PR runs the
+250:               # gate that guards exactly those files. mutants-baseline.json is included
+251:               # defensively for when the advisory mutation ratchet is promoted to gating.
+
+SOURCE .github/workflows/feature-matrix.yml @ 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+234:     runs-on: ubuntu-latest
+235:     permissions:
+236:       contents: read
+237:       pull-requests: read
+238:     outputs:
+239:       rust_changed: ${{ steps.decide.outputs.rust_changed }}
+240:     steps:
+241:       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+242:       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+243:         id: filter
+244:         if: github.event_name == 'pull_request'
+245:         with:
+246:           filters: |
+247:             rust:
+248:               - '**/*.rs'
+249:               - '**/Cargo.toml'
+250:               - 'Cargo.lock'
+251:               - 'rust-toolchain*'
+252:               - '.github/workflows/feature-matrix.yml'
+253:               # [OPUS-4.8] sq-ibrze: editing a per-crate fragment (adding/changing an
+254:               # opt-in leg) or the assembler MUST re-run the full matrix so the new/edited
+255:               # leg actually builds+tests — even on an otherwise non-Rust PR.
+256:               - '.github/feature-matrix.d/**'
+257:               - 'scripts/assemble-feature-matrix.py'
+258:               # [FABLE-5] PR #3511 review finding 2: the grouped-runner engine is as
+259:               # load-bearing as the assembler — a PR changing ONLY this script must
+260:               # still run setup (its self-test gates there) + the grouped execution
+
+SOURCE .github/workflows/supply-chain.yml @ 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+56:     permissions:
+57:       contents: read
+58:       # dorny/paths-filter lists the PR's changed files via the API.
+59:       pull-requests: read
+60:     steps:
+79:       # rust_changed=true on EVERY enqueue — installing cargo-deny/vet/cyclonedx + running
+80:       # the full workspace deny/vet/SBOM on every merge, even for an orchestration/docs-only
+81:       # batch (the maintainer's merge-queue-heaviness complaint). The deny/vet/SBOM output is
+82:       # a pure function of the resolved dependency graph + the Rust source tree; a batch that
+83:       # touches none of the `rust` path set below cannot change it — so we now diff the queued
+84:       # batch's base_sha..head_sha against the SAME `rust` path set the PR filter uses and skip
+85:       # the heavy rust step-groups when nothing matched (fail-safe: any diff error → full run).
+86:       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+87:         id: filter
+88:         if: github.event_name == 'pull_request'
+89:         with:
+90:           filters: |
+91:             rust:
+92:               - '**/*.rs'
+93:               - '**/Cargo.toml'
+94:               - 'Cargo.lock'
+95:               - 'rust-toolchain*'
+96:               - 'deny.toml'
+97:               - 'supply-chain/**'
+98:               - '.github/workflows/supply-chain.yml'
+99:       - name: Decide rust_changed (safe-by-default off the PR path)
+100:         id: changes
+101:         env:
+102:           EVENT_NAME: ${{ github.event_name }}
+103:           MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+104:           MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+
+SOURCE .github/workflows/ci-summary.yml @ 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+239: # never to a pass). `actions: write` is narrowly required by #3505 for the bounded
+240: # once-only POST that re-runs a newest cancelled workflow; it grants no source write
+241: # and the gate remains test-execution-free.
+242: permissions:
+243:   checks: read
+244:   statuses: read
+245:   contents: read
+246:   actions: write
+247:   pull-requests: read
+248: 
+249: # One in-flight gate per PR (or per branch on push). Cancel a superseded run so a
+250: # new push doesn't leave a stale, slowly-timing-out gate behind.
+251: concurrency:
+252:   group: ci-summary-${{ github.event.pull_request.number || github.ref }}
+253:   cancel-in-progress: true
+254: 
+255: jobs:
+287:             scripts/ci_summary_gate.py
+288:             .github/advisory-registry.json
+289:           sparse-checkout-cone-mode: false
+290:       - name: Wait for all other checks, then aggregate
+291:         env:
+292:           GH_TOKEN: ${{ github.token }}
+293:           REPO: ${{ github.repository }}
+294:           # On pull_request the head commit is the PR head; on push AND on merge_group
+295:           # it's github.sha (the merge_group ref's commit) — github.event.pull_request
+296:           # is undefined there, so the fallback selects the right SHA automatically and
+297:           # the check-run discovery reads the merge_group commit's siblings. [OPUS-4.8]
+298:           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+299:           # This workflow RUN's id — unique to THIS gate run. Every check-run's
+300:           # details_url embeds the run id of the workflow run that produced it
+301:           # (…/actions/runs/<RUN_ID>/job/<JOB_ID>), so we self-exclude by exact
+302:           # run id rather than by the job NAME. A name match ("gate") is fragile:
+303:           # it would also drop any FUTURE sibling job literally named `gate` in any
+314:           EVENT_NAME: ${{ github.event_name }}
+315:           PR_DRAFT: ${{ github.event.pull_request.draft }}
+316:           PR_NUMBER: ${{ github.event.pull_request.number }}
+317:         run: python3 scripts/ci_summary_gate.py
+
+SOURCE scripts/ci_summary_gate.py @ 3c637b228449e9345d8bba31ea2d7d449f8a2b8f
+1984:         # observation arms a grace re-poll (immediate, no sleep — dodges an API
+1985:         # read race); the red fires when a fresh fetch re-observes the same set.
+1986:         # awaiting_report is included so a real failing leg still fails FAST while
+1987:         # the gate is (correctly) holding for the reporter verdict.
+1988:         if pending or awaiting_full or awaiting_report:
+1989:             ff = failfast_failures(runs)
+1990:             if ff:
+1991:                 key = tuple(sorted((r.get("name", ""), r.get("id") or 0) for r in ff))
+1992:                 if key == ff_suspect:
+1993:                     _emit(
+1994:                         f"### ci-summary: FAILED (fail-fast) — {len(ff)} gating "
+1995:                         f"check(s) concluded failure while {pending} sibling(s) "
+1996:                         f"were still running; no later state can turn this verdict "
+1997:                         f"green (a newest-run failure is never forgiven), so the gate "
+1998:                         f"REDs now instead of waiting out the remaining legs.",
+1999:                         cfg.summary_path,
+2000:                     )
+2001:                     for r in ff:
+2002:                         _emit(f"- ✗ {r.get('name')}: failure", cfg.summary_path)
+2003:                     print(
+2004:                         "::error::ci-summary failed fast — a gating check concluded "
+2005:                         "failure; the remaining siblings were not waited on."
+2006:                     )
+2007:                     return 1
+2008:                 ff_suspect = key
+2009:                 print(
+2010:                     f"  fail-fast: {len(ff)} concluded gating failure(s) observed — "
+2011:                     f"immediate grace re-poll to confirm before concluding."
+2012:                 )
+2013:                 continue  # no sleep: the grace re-poll is deliberately immediate
+2014:             ff_suspect = None
+2015: 
+2016:         # [OPUS-5] #3781 — UNSATISFIABLE HOLD: detect it, do not wait it out.

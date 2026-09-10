@@ -1,0 +1,200 @@
+{
+  "started_at": "2026-09-10T07:19:43.845672+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "steps": [
+    {
+      "body_edited": true
+    },
+    {
+      "thread": "PRRT_kwDOSz3qKM6g9YwV",
+      "reply": {
+        "data": {
+          "addPullRequestReviewThreadReply": {
+            "comment": {
+              "id": "PRRC_kwDOSz3qKM7tBQrb",
+              "url": "https://github.com/sparq-org/sparq/pull/6478#discussion_r3976530651"
+            }
+          }
+        }
+      }
+    },
+    {
+      "thread": "PRRT_kwDOSz3qKM6g9YwV",
+      "resolve": {
+        "data": {
+          "resolveReviewThread": {
+            "thread": {
+              "id": "PRRT_kwDOSz3qKM6g9YwV",
+              "isResolved": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "thread": "PRRT_kwDOSz3qKM6g9Ywu",
+      "reply": {
+        "data": {
+          "addPullRequestReviewThreadReply": {
+            "comment": {
+              "id": "PRRC_kwDOSz3qKM7tBQzr",
+              "url": "https://github.com/sparq-org/sparq/pull/6478#discussion_r3976531179"
+            }
+          }
+        }
+      }
+    },
+    {
+      "thread": "PRRT_kwDOSz3qKM6g9Ywu",
+      "resolve": {
+        "data": {
+          "resolveReviewThread": {
+            "thread": {
+              "id": "PRRT_kwDOSz3qKM6g9Ywu",
+              "isResolved": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "initial": {
+    "id": "PR_kwDOSz3qKM8AAAABC8cW7A",
+    "state": "OPEN",
+    "isDraft": false,
+    "baseRefName": "main",
+    "headRefOid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+    "mergeQueueEntry": null,
+    "labels": {
+      "nodes": [
+        {
+          "name": "area:bench"
+        },
+        {
+          "name": "area:sparq-engine"
+        },
+        {
+          "name": "review:unreviewed"
+        }
+      ]
+    },
+    "reviewThreads": {
+      "pageInfo": {
+        "hasNextPage": false
+      },
+      "nodes": [
+        {
+          "id": "PRRT_kwDOSz3qKM6g9YwV",
+          "isResolved": false,
+          "comments": {
+            "pageInfo": {
+              "hasPreviousPage": false
+            },
+            "nodes": [
+              {
+                "databaseId": 3976252036,
+                "body": "This case does not enter the child budget scope: `query` parses before calling `query_prepared_with_budget` (`lib.rs:1022-1023`), so `\"not SPARQL\"` returns before `with_budget` is installed. Use a syntactically valid but unsupported query such as `CONSTRUCT { ?s ?p ?o } WHERE {}` so the callback exercises restoration after an inner execution error.",
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "commit": {
+                  "oid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "PRRT_kwDOSz3qKM6g9Ywu",
+          "isResolved": false,
+          "comments": {
+            "pageInfo": {
+              "hasPreviousPage": false
+            },
+            "nodes": [
+              {
+                "databaseId": 3976252068,
+                "body": "The public `QueryBudget` contract now includes nested-call behavior, but `skills/sparql-query/SKILL.md` still documents only the limits and error strings, not that callbacks get an independent budget and the outer limits/sticky error resume after child errors or unwind. The repository maintenance rule in `AGENTS.md:90` requires updating the matching skill when a public surface changes; add this behavior there.",
+                "author": {
+                  "login": "copilot-pull-request-reviewer"
+                },
+                "commit": {
+                  "oid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "failed_step": {
+    "action": "Copilot re-review request",
+    "status": 422,
+    "reason": "Used GraphQL author login without REST bot suffix; not collaborator. Prior successful request payload uses copilot-pull-request-reviewer[bot].",
+    "no_mutation_at_failed_step": true
+  },
+  "completed_at": "2026-09-10T07:21:28.524158+00:00",
+  "final": {
+    "state": "OPEN",
+    "isDraft": false,
+    "headRefOid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+    "mergeQueueEntry": null,
+    "reviewThreads": {
+      "pageInfo": {
+        "hasNextPage": false
+      },
+      "nodes": [
+        {
+          "id": "PRRT_kwDOSz3qKM6g9YwV",
+          "isResolved": true
+        },
+        {
+          "id": "PRRT_kwDOSz3qKM6g9Ywu",
+          "isResolved": true
+        }
+      ]
+    },
+    "reviews": {
+      "nodes": [
+        {
+          "author": {
+            "login": "github-actions"
+          },
+          "commit": {
+            "oid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+          },
+          "state": "COMMENTED"
+        },
+        {
+          "author": {
+            "login": "copilot-pull-request-reviewer"
+          },
+          "commit": {
+            "oid": "d07ca79f89e3a8945be46b516c3cd2f770ccd618"
+          },
+          "state": "COMMENTED"
+        },
+        {
+          "author": {
+            "login": "jeswr"
+          },
+          "commit": {
+            "oid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f"
+          },
+          "state": "COMMENTED"
+        },
+        {
+          "author": {
+            "login": "jeswr"
+          },
+          "commit": {
+            "oid": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f"
+          },
+          "state": "COMMENTED"
+        }
+      ]
+    }
+  },
+  "rereview_receipt": "copilot-followup-rereview-corrected-receipt.json"
+}

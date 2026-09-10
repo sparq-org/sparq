@@ -1,0 +1,148 @@
+{
+  "at": "2026-09-10T07:30:52.749526+00:00",
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "reason": "Confirmed changed-file service failure; endpoint now healthy, rerun only completed failed jobs once.",
+  "steps": [
+    {
+      "run": 34449322494,
+      "previous_attempt": 1,
+      "name": "CI",
+      "request_started_at": "2026-09-10T07:30:56.432335+00:00",
+      "exit_code": 0,
+      "stdout": "{}",
+      "stderr": ""
+    },
+    {
+      "run": 34449322415,
+      "previous_attempt": 1,
+      "name": "feature-matrix",
+      "request_started_at": "2026-09-10T07:30:58.498177+00:00",
+      "exit_code": 0,
+      "stdout": "{}",
+      "stderr": ""
+    },
+    {
+      "run": 34449322222,
+      "previous_attempt": 1,
+      "name": "supply-chain",
+      "request_started_at": "2026-09-10T07:31:00.431311+00:00",
+      "exit_code": 0,
+      "stdout": "{}",
+      "stderr": ""
+    },
+    {
+      "run": 34449322223,
+      "previous_attempt": 1,
+      "name": "ci-summary",
+      "request_started_at": "2026-09-10T07:31:02.522692+00:00",
+      "exit_code": 0,
+      "stdout": "{}",
+      "stderr": ""
+    }
+  ],
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 71,
+      "remaining": 4929,
+      "reset": 1789025624
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789025513
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789029053
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789029053
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025513
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789025513
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789029053
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789029053
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025513
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025513
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789029053
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789029053
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789025513
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789029053
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789029053
+    }
+  },
+  "healthy_file_names": [
+    "bench/feature-off-declarations/6478.json",
+    "crates/sparq-engine/README.md",
+    "crates/sparq-engine/src/cache.rs",
+    "crates/sparq-engine/src/construct.rs",
+    "crates/sparq-engine/src/exec.rs",
+    "crates/sparq-engine/src/explain.rs",
+    "crates/sparq-engine/src/explain_json.rs",
+    "crates/sparq-engine/src/lib.rs",
+    "crates/sparq-engine/src/update.rs",
+    "skills/sparql-query/SKILL.md"
+  ],
+  "completed_at": "2026-09-10T07:31:03.112093+00:00"
+}

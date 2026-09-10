@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T07:20:22.881131+00:00",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "model": "claude-opus-5",
+  "effort": "xhigh",
+  "input_bytes": 16734,
+  "input_sha256": "76729e48182fc8fb848fa58215f4ec379bd4d0d77f9e7d438ee552a49efcb4b0",
+  "scope": "Two publicdependencyalerts and exactworkspaceconfig; no private data, no implementation"
+}

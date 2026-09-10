@@ -1,0 +1,375 @@
+{
+  "at": "2026-09-10T07:24:08.513060+00:00",
+  "base": "d41ec9fcb796504d85f5a5247a5fdc9eb3e65de5",
+  "budget": {
+    "core": {
+      "limit": 5000,
+      "used": 58,
+      "remaining": 4942,
+      "reset": 1789025624
+    },
+    "search": {
+      "limit": 30,
+      "used": 0,
+      "remaining": 30,
+      "reset": 1789025104
+    },
+    "graphql": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789028644
+    },
+    "integration_manifest": {
+      "limit": 5000,
+      "used": 0,
+      "remaining": 5000,
+      "reset": 1789028644
+    },
+    "source_import": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025104
+    },
+    "code_scanning_autofix": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789025104
+    },
+    "actions_runner_registration": {
+      "limit": 10000,
+      "used": 0,
+      "remaining": 10000,
+      "reset": 1789028644
+    },
+    "scim": {
+      "limit": 15000,
+      "used": 0,
+      "remaining": 15000,
+      "reset": 1789028644
+    },
+    "dependency_snapshots": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025104
+    },
+    "dependency_sbom": {
+      "limit": 100,
+      "used": 0,
+      "remaining": 100,
+      "reset": 1789025104
+    },
+    "audit_log": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789028644
+    },
+    "audit_log_streaming": {
+      "limit": 15,
+      "used": 0,
+      "remaining": 15,
+      "reset": 1789028644
+    },
+    "code_search": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset": 1789025104
+    },
+    "copilot_usage_records": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789028644
+    },
+    "enterprise_token_inventory": {
+      "limit": 1750,
+      "used": 0,
+      "remaining": 1750,
+      "reset": 1789028644
+    }
+  },
+  "searches": {
+    "repo:sparq-org/sparq is:open is:pr next in:title": {
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": [],
+      "search_type": "lexical"
+    },
+    "repo:sparq-org/sparq is:open \"GHSA-p293-qw3h-jr36\"": {
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": [],
+      "search_type": "lexical"
+    },
+    "repo:sparq-org/sparq is:open \"15.5.24\"": {
+      "total_count": 0,
+      "incomplete_results": false,
+      "items": [],
+      "search_type": "lexical"
+    }
+  },
+  "alerts": [
+    {
+      "number": 106,
+      "state": "open",
+      "dependency": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "manifest_path": "package-lock.json",
+        "scope": "runtime",
+        "relationship": "transitive"
+      },
+      "security_advisory": {
+        "ghsa_id": "GHSA-p293-qw3h-jr36",
+        "cve_id": "CVE-2026-75604",
+        "summary": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+        "description": "## Impact\n\nA vulnerability in applications using Pages and App router without Cache Component can lead to remote code execution when the server is hosted on machines using a Windows filesystem.\n\n## Workaround\n\nThere is no known workaround for affected windows-hosted applications. You should upgrade immediately if your server is hosted on Windows.",
+        "severity": "critical",
+        "identifiers": [
+          {
+            "value": "GHSA-p293-qw3h-jr36",
+            "type": "GHSA"
+          },
+          {
+            "value": "CVE-2026-75604",
+            "type": "CVE"
+          }
+        ],
+        "references": [
+          {
+            "url": "https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36"
+          },
+          {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-75604"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/968b9fcb26bdeb8e0a861a9df05361474666d51b"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/b0f3460a92b955d3ca41fccff9a525a2b910fbf3"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v15.5.24"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v16.3.3"
+          },
+          {
+            "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36"
+          }
+        ],
+        "published_at": "2026-09-08T20:51:40Z",
+        "updated_at": "2026-09-08T20:51:43Z",
+        "withdrawn_at": null,
+        "vulnerabilities": [
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 13.4.0, < 15.5.24",
+            "first_patched_version": {
+              "identifier": "15.5.24"
+            }
+          },
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 16.0.0, < 16.3.3",
+            "first_patched_version": {
+              "identifier": "16.3.3"
+            }
+          }
+        ],
+        "cvss_severities": {
+          "cvss_v3": {
+            "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            "score": 9.0
+          },
+          "cvss_v4": {
+            "vector_string": null,
+            "score": 0.0
+          }
+        },
+        "epss": {
+          "percentage": 0.01057,
+          "percentile": 0.62236
+        },
+        "cvss": {
+          "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+          "score": 9.0
+        },
+        "cwes": [
+          {
+            "cwe_id": "CWE-22",
+            "name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+          }
+        ],
+        "classification": "general"
+      },
+      "security_vulnerability": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "severity": "critical",
+        "vulnerable_version_range": ">= 13.4.0, < 15.5.24",
+        "first_patched_version": {
+          "identifier": "15.5.24"
+        }
+      },
+      "url": "https://api.github.com/repos/sparq-org/sparq/dependabot/alerts/106",
+      "html_url": "https://github.com/sparq-org/sparq/security/dependabot/106",
+      "created_at": "2026-09-09T18:36:32Z",
+      "updated_at": "2026-09-09T18:36:32Z",
+      "dismissal_request": null,
+      "assignees": [],
+      "dismissed_at": null,
+      "dismissed_by": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "fixed_at": null,
+      "auto_dismissed_at": null
+    },
+    {
+      "number": 107,
+      "state": "open",
+      "dependency": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "manifest_path": "package-lock.json",
+        "scope": "runtime",
+        "relationship": "transitive"
+      },
+      "security_advisory": {
+        "ghsa_id": "GHSA-2xp9-vwfh-vxw4",
+        "cve_id": null,
+        "summary": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+        "description": "A vulnerability in the underlying `libheif` library used by `sharp` which Next.js uses for image optimization can lead to remote code execution when AVIF files are optimized.\n\nUntil a fix has propagated, optimization of AVIF files is disabled.",
+        "severity": "critical",
+        "identifiers": [
+          {
+            "value": "GHSA-2xp9-vwfh-vxw4",
+            "type": "GHSA"
+          }
+        ],
+        "references": [
+          {
+            "url": "https://github.com/strukturag/libheif/security/advisories/GHSA-g89c-p67h-r497"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/pull/97875"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/pull/97931"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/3a15b4ac6ac8e70b1a9b18ecc18e8434462899b3"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/409772ec807def20132d251ad48fd8d8ad4c73c2"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/commit/7a5937a8ab20b89d0a961f75eabb11577f5d5998"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v15.5.24"
+          },
+          {
+            "url": "https://github.com/vercel/next.js/releases/tag/v16.3.3"
+          },
+          {
+            "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4"
+          }
+        ],
+        "published_at": "2026-09-08T21:21:12Z",
+        "updated_at": "2026-09-08T21:21:13Z",
+        "withdrawn_at": null,
+        "vulnerabilities": [
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 10.0.0, < 15.5.24",
+            "first_patched_version": {
+              "identifier": "15.5.24"
+            }
+          },
+          {
+            "package": {
+              "ecosystem": "npm",
+              "name": "next"
+            },
+            "severity": "critical",
+            "vulnerable_version_range": ">= 16.0.0, < 16.3.3",
+            "first_patched_version": {
+              "identifier": "16.3.3"
+            }
+          }
+        ],
+        "cvss_severities": {
+          "cvss_v3": {
+            "vector_string": null,
+            "score": 0.0
+          },
+          "cvss_v4": {
+            "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+            "score": 9.5
+          }
+        },
+        "cvss": {
+          "vector_string": null,
+          "score": 0.0
+        },
+        "cwes": [
+          {
+            "cwe_id": "CWE-1395",
+            "name": "Dependency on Vulnerable Third-Party Component"
+          }
+        ],
+        "classification": "general"
+      },
+      "security_vulnerability": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "next"
+        },
+        "severity": "critical",
+        "vulnerable_version_range": ">= 10.0.0, < 15.5.24",
+        "first_patched_version": {
+          "identifier": "15.5.24"
+        }
+      },
+      "url": "https://api.github.com/repos/sparq-org/sparq/dependabot/alerts/107",
+      "html_url": "https://github.com/sparq-org/sparq/security/dependabot/107",
+      "created_at": "2026-09-09T18:36:33Z",
+      "updated_at": "2026-09-09T18:36:33Z",
+      "dismissal_request": null,
+      "assignees": [],
+      "dismissed_at": null,
+      "dismissed_by": null,
+      "dismissed_reason": null,
+      "dismissed_comment": null,
+      "fixed_at": null,
+      "auto_dismissed_at": null
+    }
+  ]
+}

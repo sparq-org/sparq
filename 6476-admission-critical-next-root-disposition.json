@@ -1,0 +1,6 @@
+{
+  "review": "opus-critical-intake-result.json",
+  "correction": "Reviewer swapped alertnumber associations. PrimaryAPI verifies107=AVIF/GHSA-2xp9-vwfh-vxw4;106=Windows/GHSA-p293-qw3h-jr36. Publicissueusescorrectmapping.",
+  "decision": "File boundedpatchfollowup; useralready authorizes issueimplementation aftercurrentlane. Reviewer noimplementationauthorization sentence reflects triage-onlyscope, not a newuserapprovalrequirement.",
+  "priority": "Promptmaintenanceafter6478; noexposureclaim,noalertdismissal."
+}

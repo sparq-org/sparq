@@ -1,0 +1,111 @@
+{
+  "head": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+  "classification": "SHARED_UPSTREAM_GITHUB_DIFF_SERVICE_FAILURE",
+  "runs": [
+    {
+      "run_id": 34449322222,
+      "name": "supply-chain",
+      "event": "pull_request",
+      "attempt": 1,
+      "head_sha": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "head_branch": "codex/nested-query-budget",
+      "status": "completed",
+      "conclusion": "failure",
+      "path": ".github/workflows/supply-chain.yml",
+      "job_counts": {
+        "failure": 1
+      },
+      "failed_job_id": 102781168632,
+      "failed_job_name": "supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)",
+      "failed_step": "Run dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
+    },
+    {
+      "run_id": 34449322223,
+      "name": "ci-summary",
+      "event": "pull_request",
+      "attempt": 1,
+      "head_sha": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "head_branch": "codex/nested-query-budget",
+      "status": "completed",
+      "conclusion": "failure",
+      "path": ".github/workflows/ci-summary.yml",
+      "job_counts": {
+        "failure": 1
+      },
+      "failed_job_id": 102781168179,
+      "failed_job_name": "gate",
+      "failed_step": "Wait for all other checks, then aggregate"
+    },
+    {
+      "run_id": 34449322415,
+      "name": "feature-matrix",
+      "event": "pull_request",
+      "attempt": 1,
+      "head_sha": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "head_branch": "codex/nested-query-budget",
+      "status": "completed",
+      "conclusion": "failure",
+      "path": ".github/workflows/feature-matrix.yml",
+      "job_counts": {
+        "failure": 1,
+        "success": 1,
+        "skipped": 8
+      },
+      "failed_job_id": 102781169261,
+      "failed_job_name": "detect rust changes (feature-matrix)",
+      "failed_step": "Run dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
+    },
+    {
+      "run_id": 34449322494,
+      "name": "CI",
+      "event": "pull_request",
+      "attempt": 1,
+      "head_sha": "3c637b228449e9345d8bba31ea2d7d449f8a2b8f",
+      "head_branch": "codex/nested-query-budget",
+      "status": "completed",
+      "conclusion": "failure",
+      "path": ".github/workflows/ci.yml",
+      "job_counts": {
+        "failure": 1,
+        "success": 3,
+        "skipped": 27
+      },
+      "failed_job_id": 102781170528,
+      "failed_job_name": "detect rust changes",
+      "failed_step": "Run dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
+    }
+  ],
+  "exact_trigger": {
+    "operation": "dorny/paths-filter pinned7b450fff21473bca461d4b92ce414b9d0420d706 invokes listFiles(pull_number6478,per_page100)",
+    "error": "Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {\"resource\":\"PullRequest\",\"field\":\"diff\",\"code\":\"not_available\"}",
+    "error_times_utc": {
+      "supply_chain": "2026-09-10T07:18:52.4987787Z",
+      "matrix": "2026-09-10T07:18:52.2575688Z",
+      "ci": "2026-09-10T07:18:52.7322726Z"
+    },
+    "checkout_merge_sha": "ac96a6d71f5b6e1dff34f1f6ae51144785f27327",
+    "checkout_identity_note": "Each run API binds head3c637b; pull_request checkout logs name generated refs/pull/6478/merge at ac96, distinct from PRhead as expected."
+  },
+  "source_regression": "No source regression demonstrated by these failures. All three stop in PR changed-file detection before their build/test/security/matrix validation. Relevant workflow and aggregate source byte-identical to base d41. This does not prove unexecuted validation passes.",
+  "advisory": "None of the three source failures is advisory. Aggregate log explicitly classifies all three as gating; registry/release pause unrelated.",
+  "aggregate": "Required gate34449322223 confirms identical three failing checks on immediate grace re-poll, then fails at07:19:14 with19siblings stillrunning. Gate error is derivative, not a separate aggregate defect.",
+  "smallest_next_action": "Keep source and live evidence unchanged. Root may use normal bounded recovery of the three failed source workflows plus required aggregate after GitHub diff availability is confirmed; obtain real successful exact-head validation before admission. No gate/permission/filter relaxation or code change is supported by this evidence.",
+  "limits": [
+    "No HTTP status number or request ID is emitted in the failing action log; do not assert502/503/403.",
+    "GitHub describes transient heavy server load; root service recovery and recurrence remain unverified.",
+    "No new pull-files probe, retry, rerun, dispatch, cancellation, model call, source edit or remote mutation performed.",
+    "Fuzz34449322450 and mutation34449322147 were still running in the supplied snapshot; not reread or cancelled.",
+    "Only the four named terminal run identities, complete bounded job listings and four failing job logs were fetched once. No issue search, unrelated logs or transcripts inspected."
+  ],
+  "requests": {
+    "fresh_budget_reads": 1,
+    "run_metadata_reads": 4,
+    "job_list_reads": 4,
+    "terminal_job_log_reads": 4,
+    "pagination_needed": false,
+    "retries": 0,
+    "core_remaining_before_incident_reads": 4937
+  },
+  "source_worktree_clean": true,
+  "saved_epoch": 1789025382.453639
+}

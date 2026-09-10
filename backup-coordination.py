@@ -485,6 +485,16 @@ for evidence_name in ['after/crates/sparq-engine/README.md', 'after/crates/sparq
 for evidence_name in ['copilot-followup-root-verification.json', 'opus-copilot-input.md', 'opus-copilot-input-receipt.json', 'critical-alert-readiness.json', 'critical-alert-dedupe-source.json', 'critical-alert-intake-summary.json', 'pr-copilot-followup-body.md', 'copilot-followup-replies.json']:
     FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
 
+# PR6478 completed final review and publication, pending security-review input.
+for evidence_name in ['opus-copilot-review.json', 'opus-copilot-stderr.log', 'opus-copilot-result.json', 'opus-copilot-completion.json', 'opus-copilot-root-disposition.json', 'push-copilot-followup.py', 'copilot-followup-push-precheck.json', 'copilot-followup-push-receipt.json', 'reconcile-copilot-followup.py', 'copilot-followup-reconcile-receipt.json', 'copilot-followup-reply-PRRT_kwDOSz3qKM6g9YwV.json', 'copilot-followup-reply-PRRT_kwDOSz3qKM6g9Ywu.json', 'copilot-followup-rereview-input.json', 'copilot-followup-rereview-corrected-receipt.json', 'opus-critical-intake-input.md', 'opus-critical-intake-input-receipt.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
+# PR6478 verified GitHub diff incident and bounded recovery; Next issue6480.
+for evidence_name in ['budget.json', 'diagnostic-excerpts.txt', 'job-102781168179.log', 'job-102781168632.log', 'job-102781169261.log', 'job-102781170528.log', 'jobs-34449322222.json', 'jobs-34449322223.json', 'jobs-34449322415.json', 'jobs-34449322494.json', 'reads.json', 'report.json', 'run-34449322222.json', 'run-34449322223.json', 'run-34449322415.json', 'run-34449322494.json', 'source-excerpts.txt', 'source-provenance.json', 'manifest.json']:
+    FILES["6476-head3c-ci-incident-" + evidence_name.replace("/", "--")] = ROOT / "direct-6476/head3c-ci-incident" / evidence_name
+for evidence_name in ['opus-critical-intake-review.json', 'opus-critical-intake-stderr.log', 'opus-critical-intake-result.json', 'opus-critical-intake-completion.json', 'critical-next-issue-input.json', 'critical-next-root-disposition.json', 'critical-next-issue-precreate.json', 'critical-next-issue-created.json', 'head3c-first-ci.json', 'copilot-cap-disposition-input.json', 'copilot-cap-disposition-source.json', 'copilot-cap-disposition-receipt.json', 'diff-service-health-precheck.json', 'head3c-ci-incident-root-verification.json', 'recover-diff-service.py', 'diff-service-recovery-receipt.json', 'recovery-attempt2-first-runs.json']:
+    FILES["6476-admission-" + evidence_name] = ROOT / "direct-6476/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

@@ -1,0 +1,33 @@
+JOB 102781168632
+151: 2026-09-10T07:18:52.0685382Z ##[group]Fetching list of changed files for PR#6478 from GitHub API
+152: 2026-09-10T07:18:52.0694362Z Invoking listFiles(pull_number: 6478, per_page: 100)
+153: 2026-09-10T07:18:52.4963286Z ##[endgroup]
+154: 2026-09-10T07:18:52.4987787Z ##[error]Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {"resource":"PullRequest","field":"diff","code":"not_available"}
+
+JOB 102781169261
+181: 2026-09-10T07:18:51.7986519Z ##[group]Fetching list of changed files for PR#6478 from GitHub API
+182: 2026-09-10T07:18:51.7995170Z Invoking listFiles(pull_number: 6478, per_page: 100)
+183: 2026-09-10T07:18:52.2546345Z ##[endgroup]
+184: 2026-09-10T07:18:52.2575688Z ##[error]Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {"resource":"PullRequest","field":"diff","code":"not_available"}
+
+JOB 102781170528
+182: 2026-09-10T07:18:52.2523094Z ##[group]Fetching list of changed files for PR#6478 from GitHub API
+183: 2026-09-10T07:18:52.2527534Z Invoking listFiles(pull_number: 6478, per_page: 100)
+184: 2026-09-10T07:18:52.7301147Z ##[endgroup]
+185: 2026-09-10T07:18:52.7322726Z ##[error]Server Error: Sorry, this diff is temporarily unavailable due to heavy server load.: {"resource":"PullRequest","field":"diff","code":"not_available"}
+
+JOB 102781168179
+180: 2026-09-10T07:18:49.6068803Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+181: 2026-09-10T07:18:49.6069596Z ci-summary: evaluating tier=full (event=pull_request).
+182: 2026-09-10T07:18:49.6070104Z attempt 1: 37 check-run(s), 34 running, all-terminal stable for 0/2 poll(s)
+183: 2026-09-10T07:19:12.7579522Z   workflow-run resolver: ignored 7 check-run(s) from superseded runs/attempts (#3505).
+184: 2026-09-10T07:19:12.7580917Z attempt 2: 41 check-run(s), 20 running, all-terminal stable for 0/2 poll(s) (name set changed)
+185: 2026-09-10T07:19:14.0389984Z   fail-fast: 3 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+186: 2026-09-10T07:19:14.0391375Z   workflow-run resolver: ignored 7 check-run(s) from superseded runs/attempts (#3505).
+187: 2026-09-10T07:19:14.0392640Z attempt 3: 41 check-run(s), 19 running, all-terminal stable for 0/2 poll(s)
+188: 2026-09-10T07:19:14.0395003Z ### ci-summary: FAILED (fail-fast) — 3 gating check(s) concluded failure while 19 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+189: 2026-09-10T07:19:14.0408053Z - ✗ detect rust changes: failure
+190: 2026-09-10T07:19:14.0408907Z - ✗ detect rust changes (feature-matrix): failure
+191: 2026-09-10T07:19:14.0409890Z - ✗ supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom): failure
+192: 2026-09-10T07:19:14.0441074Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+193: 2026-09-10T07:19:14.0552135Z ##[error]Process completed with exit code 1.
