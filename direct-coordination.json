@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T09:27:19.769985+00:00",
+  "updated_at": "2026-09-10T09:52:26.406334+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -68,8 +68,8 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "PR6481 published; required Linux CI and Copilot review queued",
-    "state": "Final26d source reviewed by actual Opus5 through two completed reviews. Normal non-draft PR6481 opened, no auto-merge/queue admission. Actual installs/builds and check outcomes await CI.",
+    "phase": "PR6481 review/CI follow-up implementation: test parser, triggers, sharp remediation",
+    "state": "Published26d has realinstall/buildsuccess but docs/supplychaingatesfailedonstalechecker/data. Titlefixed. Astra agent authorizedtargetedpatchedsharpupgrade plus coherenttest/trigger/accuraterecord changes; no followupsourcepushed, newOpusreviewrequired.",
     "started_at": "2026-09-10T08:47:00Z",
     "base": "781f667c19a8ebb779cfccb24b05ea432360b025",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6480",
@@ -83,11 +83,12 @@
     },
     "readiness": "direct-6480/admission/readiness-root-verification.json",
     "next_actions": [
-      "Inspect PR6481 exacthead26d CI/Copilot results; diagnose genuine failures with existing Astra agent and actual Opus review for source deltas. No rerunstorms or duplicatedreview requests.",
-      "Verify root js run34460513430 actuallynpmci/installedNext forbothworkspaces/no lockdrift, plus all requiredsite/GUI gates and advisoryoutcomes. Do notclaim metadata-only checks as runtimeproof.",
-      "OnceallrequiredCIpasses/reviewfindingsresolved, revalidateexacthead/main/rules/queue; normalprotectedqueue admission expectedHeadOid26d,jumpfalse. Then verify mergedsource/mainCI and alerts107AVIF/106Windows automaticclosure beforeclosing6480.",
-      "Continue observing PR6478 main781f CI34456809712,matrix34456809643,gate34456809361; fuzzpush34456809602 supersededbylive scheduled34458064851 (no retry).",
-      "After current lane completes, separate6479 nestedBASE runtimewitness/performancefrontier. Preserve allstanding6049/6055/canon/release/registry/EC2holds; ALLGREENunchanged."
+      "Collect existing Astra review-followup packet oncefinished; verify scopedlock/securityrecord/test/triggerchanges and alltests; obtain actual Opus5 xhigh security/finalreview beforeonefollowuppush toPR6481.",
+      "Preserve oldhead26d actualNode22.23.2/npm10.9.8 npmci, Next15.5.24bothworkspaces, no lock/minimachurn andGUIbuildproof; require freshvalidationforfollowuphead.",
+      "Update current6480/6481 trackingwith sharp32expandedremediation aftercandidateproven; #3767 is CLOSED historicalumbrella, notactivecurrenttracking. Recheckalerts32/106/107automaticallyaftermerge, no dismissals.",
+      "HandleCopilotbodyfindingswithsource/testproof; do notre-requestrevieworforgeverdictbeforefollowupsource. RevalidateexactPR/head/main/budget/rules beforemutation; normalprotectedqueue onlyafterreview+requiredCI.",
+      "Aftercurrent6481lane, prioritize deterministic UPDATE5183 firstseed4141222487 replay/localization against mainandparent; existingissuecomment alreadyrecordsnewwindow, no duplicateissue or luckyrerun. Keep6479separatequeued.",
+      "Watch remaininglive sameheadscheduledfuzz34458064851; mainaggregatefailureisUPDATE, not fuzz. Preserveall6049/6055/canon/registry/release/EC2holds andALLGREEN."
     ],
     "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
     "implementation": {
@@ -259,6 +260,43 @@
         "ReviewCopilot findings and resolve withsource/testproof; do notfabricatereviewpass.",
         "AllrequiredCIgate andnormalprotectedqueueonexactreviewedhead; checkmainandbudgetfreshbeforemutation."
       ]
+    },
+    "review_followup": {
+      "state": "running",
+      "agent": "/root/postmerge_ci",
+      "model": "GPT-6 Astra",
+      "effort": "xhigh",
+      "directory": "direct-6480/review-followup",
+      "base_head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "scope": "Targeted sharp0.35.x>=0.35.3 admittedbyNext, mechanicallyrequiredtransitives only; docstest actualinline/blockrootnpmci order; bothconsumerPRtriggerpaths; truthfuladvisoryrecord. No newdirectdeps/overrides/globaltools/lifecycle/fullappbuild/push.",
+      "resource_bounds": {
+        "min_free_bytes": 2147483648,
+        "max_new_followup_allocated_bytes": 268435456
+      },
+      "security_boundary": "Sharpalert32OPEN/high, affected<0.35.0, currentlock0.34.5; Nextnewrange permitsfix but no candidateupgrade/automaticclosure yet. ActualOpusfinalsecurityreviewrequired."
+    },
+    "ci_first_failures": {
+      "directory": "direct-6480/ci-first-failures",
+      "manifest_sha256": "31dcfe2332e51b9f5db2b41d6eca74542e2b893bc0ebc28835526a5493a84fd5",
+      "all38_hashes_root_verified": true,
+      "docs": "JsLaneWasmPackInstall.test_install_precedes_npm_ci assumes inline scalar; preservesemanticorder guard.",
+      "supply_chain": "25tests2failures: Nextparent/range stale; strictlive-data guardcorrect. Sharpunderlyingalert remainsopen.",
+      "aggregate": "fail-fast on docs, notsourcebuildevidence",
+      "copilot": "Noinline threads; bodyflags sharpmetadata and missingconsumerpaths, both addressedinplannedfollowup"
+    },
+    "current_head_runtime": {
+      "at": "2026-09-10T09:52:26.406334+00:00",
+      "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "js_job": 102816976635,
+      "node": "22.23.2",
+      "npm": "10.9.8",
+      "actual_root_npmci_and_installed_resolution": "success; log reports Next15.5.24 in bothworkspaces",
+      "lock_and_minima_cleanliness": "git diff --exit-code ran in same root bash-e step; step completed success and advanced to build",
+      "downstream_js_build_and_node_tests": "success",
+      "gui": "11success,1expectedmanualflakeprobe skip; bothfrontendtargetbuilds andsitebuild/typecheck passed",
+      "title": "correctedto chore(deps); normaledited-event run34461973903success",
+      "qualification": "This proves current26d only; planned followupdependency/securityrecord/test/trigger changes must get fresh review+CI.",
+      "log_sha256": "2d04c5bc42095d8a7dc9eb2bb8d421db1f67d9238c3bac7d62c4ebd24a59b76b"
     }
   },
   "prs": {
@@ -680,8 +718,9 @@
       "issue": 6480,
       "url": "https://github.com/sparq-org/sparq/pull/6481",
       "review": "actualOpusfull50c+delta26dapprovedforCI; Copilotpending",
-      "ci": "queued09:25",
-      "main_base": "781f667c19a8ebb779cfccb24b05ea432360b025"
+      "ci": "docs/supplychain/aggregatefailed; runtimeJS+GUI pass; titlecorrectionpass",
+      "main_base": "781f667c19a8ebb779cfccb24b05ea432360b025",
+      "title": "chore(deps): patch Next.js across site and GUI"
     }
   },
   "registry": {
@@ -732,11 +771,12 @@
     }
   },
   "next_actions": [
-    "Inspect PR6481 exacthead26d CI/Copilot results; diagnose genuine failures with existing Astra agent and actual Opus review for source deltas. No rerunstorms or duplicatedreview requests.",
-    "Verify root js run34460513430 actuallynpmci/installedNext forbothworkspaces/no lockdrift, plus all requiredsite/GUI gates and advisoryoutcomes. Do notclaim metadata-only checks as runtimeproof.",
-    "OnceallrequiredCIpasses/reviewfindingsresolved, revalidateexacthead/main/rules/queue; normalprotectedqueue admission expectedHeadOid26d,jumpfalse. Then verify mergedsource/mainCI and alerts107AVIF/106Windows automaticclosure beforeclosing6480.",
-    "Continue observing PR6478 main781f CI34456809712,matrix34456809643,gate34456809361; fuzzpush34456809602 supersededbylive scheduled34458064851 (no retry).",
-    "After current lane completes, separate6479 nestedBASE runtimewitness/performancefrontier. Preserve allstanding6049/6055/canon/release/registry/EC2holds; ALLGREENunchanged."
+    "Collect existing Astra review-followup packet oncefinished; verify scopedlock/securityrecord/test/triggerchanges and alltests; obtain actual Opus5 xhigh security/finalreview beforeonefollowuppush toPR6481.",
+    "Preserve oldhead26d actualNode22.23.2/npm10.9.8 npmci, Next15.5.24bothworkspaces, no lock/minimachurn andGUIbuildproof; require freshvalidationforfollowuphead.",
+    "Update current6480/6481 trackingwith sharp32expandedremediation aftercandidateproven; #3767 is CLOSED historicalumbrella, notactivecurrenttracking. Recheckalerts32/106/107automaticallyaftermerge, no dismissals.",
+    "HandleCopilotbodyfindingswithsource/testproof; do notre-requestrevieworforgeverdictbeforefollowupsource. RevalidateexactPR/head/main/budget/rules beforemutation; normalprotectedqueue onlyafterreview+requiredCI.",
+    "Aftercurrent6481lane, prioritize deterministic UPDATE5183 firstseed4141222487 replay/localization against mainandparent; existingissuecomment alreadyrecordsnewwindow, no duplicateissue or luckyrerun. Keep6479separatequeued.",
+    "Watch remaininglive sameheadscheduledfuzz34458064851; mainaggregatefailureisUPDATE, not fuzz. Preserveall6049/6055/canon/registry/release/EC2holds andALLGREEN."
   ],
   "followup_lane": {
     "issue": 6479,
@@ -2926,7 +2966,7 @@
     },
     "6478": {
       "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
-      "state": "main validation running",
+      "state": "mainCIandmatrixsuccess; aggregatefailure on realnightlyUPDATE comparatorfinding",
       "observed_at": "2026-09-10T08:50:49.132995+00:00",
       "ci_run": 34456809712,
       "matrix_run": 34456809643,
@@ -2956,7 +2996,21 @@
         "root_verified": "All13 evidence hashes; GitHub annotation explicitly says shared concurrency supersession; exact newer run ID inference from sole newer same-main run. No source crash/timeout observed; not full randomized completion proof. Corpus save warning means persistence not proven.",
         "action": "Observe replacement, no retry/cancel/concurrency change."
       },
-      "latest_runs": "direct-6480/admission/publication-readiness-0919.json"
+      "latest_runs": "direct-6480/admission/publication-readiness-0919.json",
+      "update_diagnosis": {
+        "run": 34458877088,
+        "job": 102811674711,
+        "failed_gate_job": 102805006574,
+        "mismatches": 8,
+        "first_seed": 4141222487,
+        "step": 8,
+        "issue": 5183,
+        "issue_state": "OPEN since2026-07-30",
+        "current_comment": "https://github.com/sparq-org/sparq/issues/5183#issuecomment-5616227052",
+        "evidence": "direct-6480/ci-first-failures/report.json",
+        "actual_gate_cause": "nightly UPDATE differential (sparq vs Oxigraph, advancing), notfuzzcancellation",
+        "classification": "Actual comparator mismatches; whichengine/comparatoriswrong and whether6478introducedit notestablished. Fixedwindowpassed. No retry/adjudicationwaiver."
+      }
     }
   },
   "classifier_watch": {
@@ -3347,9 +3401,9 @@
     "evidence": "direct-3105/admission/latency-alarm-job.log"
   },
   "registry_pause_latest": {
-    "at": "2026-09-10T09:14:11.264208+00:00",
+    "at": "2026-09-10T09:52:26.406334+00:00",
     "enabled": false,
-    "evidence": "direct-6476/admission/heartbeat-0909.json"
+    "evidence": "direct-6480/admission/heartbeat-0938.json"
   },
   "frontier_fallback": {
     "at": "2026-09-10T03:59:18.624949+00:00",

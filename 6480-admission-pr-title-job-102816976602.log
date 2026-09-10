@@ -1,0 +1,65 @@
+﻿2026-09-10T09:27:27.2389260Z Current runner version: '2.337.0'
+2026-09-10T09:27:27.2415961Z ##[group]Runner Image Provisioner
+2026-09-10T09:27:27.2416932Z Hosted Compute Agent
+2026-09-10T09:27:27.2417612Z Version: 20260828.587
+2026-09-10T09:27:27.2418355Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T09:27:27.2419165Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T09:27:27.2419903Z Worker ID: {9f3737e1-aa6a-47fc-a45f-9c8ceff6da03}
+2026-09-10T09:27:27.2420734Z Azure Region: centralus
+2026-09-10T09:27:27.2421348Z ##[endgroup]
+2026-09-10T09:27:27.2422878Z ##[group]Operating System
+2026-09-10T09:27:27.2423557Z Ubuntu
+2026-09-10T09:27:27.2424150Z 24.04.4
+2026-09-10T09:27:27.2424755Z LTS
+2026-09-10T09:27:27.2425617Z ##[endgroup]
+2026-09-10T09:27:27.2426239Z ##[group]Runner Image
+2026-09-10T09:27:27.2426887Z Image: ubuntu-24.04
+2026-09-10T09:27:27.2427524Z Version: 20260831.293.1
+2026-09-10T09:27:27.2428886Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T09:27:27.2430536Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-10T09:27:27.2431611Z ##[endgroup]
+2026-09-10T09:27:27.2432735Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T09:27:27.2434803Z Metadata: read
+2026-09-10T09:27:27.2435695Z PullRequests: read
+2026-09-10T09:27:27.2436402Z ##[endgroup]
+2026-09-10T09:27:27.2438578Z Secret source: Actions
+2026-09-10T09:27:27.2439662Z Cache mode: write
+2026-09-10T09:27:27.2440400Z Prepare workflow directory
+2026-09-10T09:27:27.2800046Z Prepare all required actions
+2026-09-10T09:27:27.2867972Z Getting action download info
+2026-09-10T09:27:27.5677804Z Download action repository 'amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50' (SHA:48f256284bd46cdaab1048c3721360e808335d50)
+2026-09-10T09:27:28.1272193Z Complete job name: conventional-commits (advisory)
+2026-09-10T09:27:28.1976747Z ##[group]Run amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50
+2026-09-10T09:27:28.1977970Z with:
+2026-09-10T09:27:28.1978572Z   types: feat
+fix
+docs
+chore
+ci
+test
+refactor
+perf
+build
+style
+revert
+
+2026-09-10T09:27:28.1979300Z   requireScope: false
+2026-09-10T09:27:28.1979823Z   githubBaseUrl: https://api.github.com
+2026-09-10T09:27:28.1980516Z env:
+2026-09-10T09:27:28.1984320Z   GITHUB_TOKEN: ***
+2026-09-10T09:27:28.1984783Z ##[endgroup]
+2026-09-10T09:27:29.0782052Z ##[error]Unknown release type "deps" found in pull request title "deps: patch Next.js across site and GUI".
+
+Available types:
+ - feat
+ - fix
+ - docs
+ - chore
+ - ci
+ - test
+ - refactor
+ - perf
+ - build
+ - style
+ - revert
+2026-09-10T09:27:29.1174918Z Cleaning up orphan processes

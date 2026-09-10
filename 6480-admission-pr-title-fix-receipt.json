@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-10T09:40:52.087084+00:00",
+  "previous_title": "deps: patch Next.js across site and GUI",
+  "title": "chore(deps): patch Next.js across site and GUI",
+  "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+  "url": "https://github.com/sparq-org/sparq/pull/6481",
+  "mechanism": "normal PR edited event revalidates title; no explicit rerun"
+}

@@ -1,0 +1,385 @@
+﻿2026-09-10T09:32:33.5726432Z Current runner version: '2.337.0'
+2026-09-10T09:32:33.5752008Z ##[group]Runner Image Provisioner
+2026-09-10T09:32:33.5753386Z Hosted Compute Agent
+2026-09-10T09:32:33.5754096Z Version: 20260828.587
+2026-09-10T09:32:33.5754766Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T09:32:33.5755596Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T09:32:33.5756317Z Worker ID: {cfc54d4b-2c3a-4816-80de-e595658666de}
+2026-09-10T09:32:33.5757054Z Azure Region: centralus
+2026-09-10T09:32:33.5757788Z ##[endgroup]
+2026-09-10T09:32:33.5760061Z ##[group]Operating System
+2026-09-10T09:32:33.5760840Z Ubuntu
+2026-09-10T09:32:33.5761419Z 24.04.4
+2026-09-10T09:32:33.5761982Z LTS
+2026-09-10T09:32:33.5762634Z ##[endgroup]
+2026-09-10T09:32:33.5763224Z ##[group]Runner Image
+2026-09-10T09:32:33.5763884Z Image: ubuntu-24.04
+2026-09-10T09:32:33.5764487Z Version: 20260831.293.1
+2026-09-10T09:32:33.5765884Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T09:32:33.5767468Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-10T09:32:33.5768646Z ##[endgroup]
+2026-09-10T09:32:33.5769943Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T09:32:33.5772357Z Contents: read
+2026-09-10T09:32:33.5773004Z Metadata: read
+2026-09-10T09:32:33.5773596Z PullRequests: read
+2026-09-10T09:32:33.5774273Z ##[endgroup]
+2026-09-10T09:32:33.5776363Z Secret source: Actions
+2026-09-10T09:32:33.5777478Z Cache mode: write
+2026-09-10T09:32:33.5778578Z Prepare workflow directory
+2026-09-10T09:32:33.6116410Z Prepare all required actions
+2026-09-10T09:32:33.6164618Z Getting action download info
+2026-09-10T09:32:33.8989522Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T09:32:34.0366179Z Download action repository 'dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706' (SHA:7b450fff21473bca461d4b92ce414b9d0420d706)
+2026-09-10T09:32:34.3392285Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+2026-09-10T09:32:34.4517291Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+2026-09-10T09:32:34.5650607Z Download action repository 'taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68' (SHA:18b1216eba7f8039b0f8d131d5473787f0edce68)
+2026-09-10T09:32:35.2567493Z Complete job name: supply-chain gates (deny + vet + SBOM + VEX + OpenSSF + js-sbom)
+2026-09-10T09:32:35.3392541Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T09:32:35.3393283Z with:
+2026-09-10T09:32:35.3393565Z   repository: sparq-org/sparq
+2026-09-10T09:32:35.3396165Z   token: ***
+2026-09-10T09:32:35.3396444Z   ssh-strict: true
+2026-09-10T09:32:35.3396715Z   ssh-user: git
+2026-09-10T09:32:35.3396988Z   persist-credentials: true
+2026-09-10T09:32:35.3397295Z   clean: true
+2026-09-10T09:32:35.3397600Z   sparse-checkout-cone-mode: true
+2026-09-10T09:32:35.3397921Z   fetch-depth: 1
+2026-09-10T09:32:35.3398182Z   fetch-tags: false
+2026-09-10T09:32:35.3398851Z   show-progress: true
+2026-09-10T09:32:35.3399147Z   lfs: false
+2026-09-10T09:32:35.3399414Z   submodules: false
+2026-09-10T09:32:35.3399693Z   set-safe-directory: true
+2026-09-10T09:32:35.3400000Z   allow-unsafe-pr-checkout: false
+2026-09-10T09:32:35.3400585Z ##[endgroup]
+2026-09-10T09:32:35.4425553Z Syncing repository: sparq-org/sparq
+2026-09-10T09:32:35.4427468Z ##[group]Getting Git version info
+2026-09-10T09:32:35.4428469Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T09:32:35.4429352Z [command]/usr/bin/git version
+2026-09-10T09:32:35.4464558Z git version 2.55.0
+2026-09-10T09:32:35.4485349Z ##[endgroup]
+2026-09-10T09:32:35.4503690Z Temporarily overriding HOME='/home/runner/work/_temp/4897472e-9f9e-4d71-9c0d-e5b6039ba774' before making global git config changes
+2026-09-10T09:32:35.4511824Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T09:32:35.4513185Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T09:32:35.4569381Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T09:32:35.4571194Z ##[group]Determining repository object format
+2026-09-10T09:32:35.4572356Z ##[endgroup]
+2026-09-10T09:32:35.4573628Z ##[group]Initializing the repository
+2026-09-10T09:32:35.4574327Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T09:32:35.4646268Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T09:32:35.4647147Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T09:32:35.4647732Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T09:32:35.4648188Z hint: call:
+2026-09-10T09:32:35.4648586Z hint:
+2026-09-10T09:32:35.4648925Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T09:32:35.4649320Z hint:
+2026-09-10T09:32:35.4649685Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T09:32:35.4650256Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T09:32:35.4650699Z hint:
+2026-09-10T09:32:35.4650961Z hint: 	git branch -m <name>
+2026-09-10T09:32:35.4651255Z hint:
+2026-09-10T09:32:35.4651636Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T09:32:35.4656515Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T09:32:35.4667987Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T09:32:35.4711995Z ##[endgroup]
+2026-09-10T09:32:35.4712714Z ##[group]Disabling automatic garbage collection
+2026-09-10T09:32:35.4715814Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T09:32:35.4748182Z ##[endgroup]
+2026-09-10T09:32:35.4749450Z ##[group]Setting up auth
+2026-09-10T09:32:35.4749977Z Removing SSH command configuration
+2026-09-10T09:32:35.4754798Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T09:32:35.4790190Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T09:32:35.5125484Z Removing HTTP extra header
+2026-09-10T09:32:35.5132776Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T09:32:35.5187252Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T09:32:35.5441326Z Removing includeIf entries pointing to credentials config files
+2026-09-10T09:32:35.5447876Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T09:32:35.5487704Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T09:32:35.5729797Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T09:32:35.5773162Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:35.5810179Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:35.5847673Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:35.5883833Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:35.5916405Z ##[endgroup]
+2026-09-10T09:32:35.5916966Z ##[group]Fetching the repository
+2026-09-10T09:32:35.5922726Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +823bf151d734c8d45c5c3209cf78f883f57ae9ed:refs/remotes/pull/6481/merge
+2026-09-10T09:32:39.2355041Z From https://github.com/sparq-org/sparq
+2026-09-10T09:32:39.2355953Z  * [new ref]         823bf151d734c8d45c5c3209cf78f883f57ae9ed -> pull/6481/merge
+2026-09-10T09:32:39.2359603Z ##[endgroup]
+2026-09-10T09:32:39.2369925Z ##[group]Determining the checkout info
+2026-09-10T09:32:39.2370865Z ##[endgroup]
+2026-09-10T09:32:39.2371400Z [command]/usr/bin/git sparse-checkout disable
+2026-09-10T09:32:39.2430364Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-10T09:32:39.2479654Z ##[group]Checking out the ref
+2026-09-10T09:32:39.2480497Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/6481/merge
+2026-09-10T09:32:39.8234269Z Note: switching to 'refs/remotes/pull/6481/merge'.
+2026-09-10T09:32:39.8235081Z 
+2026-09-10T09:32:39.8235743Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-10T09:32:39.8237017Z changes and commit them, and you can discard any commits you make in this
+2026-09-10T09:32:39.8237846Z state without impacting any branches by switching back to a branch.
+2026-09-10T09:32:39.8239169Z 
+2026-09-10T09:32:39.8239585Z If you want to create a new branch to retain commits you create, you may
+2026-09-10T09:32:39.8240311Z do so (now or later) by using -c with the switch command. Example:
+2026-09-10T09:32:39.8240726Z 
+2026-09-10T09:32:39.8240889Z   git switch -c <new-branch-name>
+2026-09-10T09:32:39.8241174Z 
+2026-09-10T09:32:39.8241347Z Or undo this operation with:
+2026-09-10T09:32:39.8241710Z 
+2026-09-10T09:32:39.8241866Z   git switch -
+2026-09-10T09:32:39.8242095Z 
+2026-09-10T09:32:39.8242466Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-10T09:32:39.8242960Z 
+2026-09-10T09:32:39.8243521Z HEAD is now at 823bf15 Merge 26d139520f07f1ceacafbacbeb9991de371e2b53 into 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T09:32:39.8254787Z ##[endgroup]
+2026-09-10T09:32:39.8314305Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T09:32:39.8345883Z 823bf151d734c8d45c5c3209cf78f883f57ae9ed
+2026-09-10T09:32:39.8609473Z ##[group]Run dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706
+2026-09-10T09:32:39.8609904Z with:
+2026-09-10T09:32:39.8610502Z   filters: rust:
+  - '**/*.rs'
+  - '**/Cargo.toml'
+  - 'Cargo.lock'
+  - 'rust-toolchain*'
+  - 'deny.toml'
+  - 'supply-chain/**'
+  - '.github/workflows/supply-chain.yml'
+
+2026-09-10T09:32:39.8613372Z   token: ***
+2026-09-10T09:32:39.8613607Z   list-files: none
+2026-09-10T09:32:39.8613852Z   initial-fetch-depth: 100
+2026-09-10T09:32:39.8614122Z   predicate-quantifier: some
+2026-09-10T09:32:39.8614421Z ##[endgroup]
+2026-09-10T09:32:39.9435298Z ##[group]Fetching list of changed files for PR#6481 from GitHub API
+2026-09-10T09:32:39.9443416Z Invoking listFiles(pull_number: 6481, per_page: 100)
+2026-09-10T09:32:40.3573790Z Received 4 items
+2026-09-10T09:32:40.3574571Z [modified] .github/workflows/js.yml
+2026-09-10T09:32:40.3575497Z [modified] gui/app/package.json
+2026-09-10T09:32:40.3576318Z [modified] package-lock.json
+2026-09-10T09:32:40.3577148Z [modified] site/package.json
+2026-09-10T09:32:40.3578507Z ##[endgroup]
+2026-09-10T09:32:40.3579114Z Detected 4 changed files
+2026-09-10T09:32:40.3585048Z Results:
+2026-09-10T09:32:40.3586085Z ##[group]Filter rust = false
+2026-09-10T09:32:40.3586785Z Matching files: none
+2026-09-10T09:32:40.3594981Z ##[endgroup]
+2026-09-10T09:32:40.3595731Z Changes output set to []
+2026-09-10T09:32:40.3920525Z ##[group]Run set -euo pipefail
+2026-09-10T09:32:40.3920963Z [36;1mset -euo pipefail[0m
+2026-09-10T09:32:40.3921291Z [36;1mif [ "${EVENT_NAME}" = "pull_request" ]; then[0m
+2026-09-10T09:32:40.3921874Z [36;1m  echo "rust_changed=false" >> "$GITHUB_OUTPUT"[0m
+2026-09-10T09:32:40.3922257Z [36;1m  echo "pull_request -> paths-filter says rust=false"[0m
+2026-09-10T09:32:40.3922629Z [36;1melif [ "${EVENT_NAME}" = "merge_group" ]; then[0m
+2026-09-10T09:32:40.3923067Z [36;1m  # Diff the queued batch; fail-safe to the full run on any resolution error.[0m
+2026-09-10T09:32:40.3923462Z [36;1m  rust=true[0m
+2026-09-10T09:32:40.3923672Z [36;1m  ok=true[0m
+2026-09-10T09:32:40.3924032Z [36;1m  git fetch --no-tags --quiet origin "${MG_BASE_SHA}" "${MG_HEAD_SHA}" 2>/dev/null \[0m
+2026-09-10T09:32:40.3924545Z [36;1m    || git fetch --no-tags --quiet origin "${MG_BASE_SHA}" 2>/dev/null \[0m
+2026-09-10T09:32:40.3924916Z [36;1m    || ok=false[0m
+2026-09-10T09:32:40.3925273Z [36;1m  git cat-file -e "${MG_BASE_SHA}^{commit}" 2>/dev/null || ok=false[0m
+2026-09-10T09:32:40.3925715Z [36;1m  git cat-file -e "${MG_HEAD_SHA}^{commit}" 2>/dev/null || ok=false[0m
+2026-09-10T09:32:40.3926063Z [36;1m  if [ "${ok}" = "true" ]; then[0m
+2026-09-10T09:32:40.3926441Z [36;1m    changed="$(git diff --name-only "${MG_BASE_SHA}" "${MG_HEAD_SHA}")"[0m
+2026-09-10T09:32:40.3926946Z [36;1m    echo "Changed files in queued batch (${MG_BASE_SHA}..${MG_HEAD_SHA}):"[0m
+2026-09-10T09:32:40.3927337Z [36;1m    printf '%s\n' "${changed}"[0m
+2026-09-10T09:32:40.3927737Z [36;1m    # SAME `rust` path set as the pull_request dorny filter above (kept in sync by[0m
+2026-09-10T09:32:40.3928493Z [36;1m    # scripts/tests/test_ci_select_wiring.py::TestSupplyChainMergeGroupGate).[0m
+2026-09-10T09:32:40.3928961Z [36;1m    if printf '%s\n' "${changed}" | grep -Eq \[0m
+2026-09-10T09:32:40.3929588Z [36;1m      '(\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|(^|/)rust-toolchain([^/]*)$|^deny\.toml$|^supply-chain/|^\.github/workflows/supply-chain\.yml$)'; then[0m
+2026-09-10T09:32:40.3930144Z [36;1m      rust=true[0m
+2026-09-10T09:32:40.3930369Z [36;1m    else[0m
+2026-09-10T09:32:40.3930577Z [36;1m      rust=false[0m
+2026-09-10T09:32:40.3930806Z [36;1m    fi[0m
+2026-09-10T09:32:40.3930999Z [36;1m  else[0m
+2026-09-10T09:32:40.3931563Z [36;1m    echo "::warning::could not resolve merge_group base/head SHAs for the diff — running the full supply-chain gate (fail-safe)."[0m
+2026-09-10T09:32:40.3932144Z [36;1m    rust=true[0m
+2026-09-10T09:32:40.3932361Z [36;1m  fi[0m
+2026-09-10T09:32:40.3932620Z [36;1m  echo "rust_changed=${rust}" >> "$GITHUB_OUTPUT"[0m
+2026-09-10T09:32:40.3932976Z [36;1m  echo "merge_group -> rust_changed=${rust}"[0m
+2026-09-10T09:32:40.3933258Z [36;1melse[0m
+2026-09-10T09:32:40.3933495Z [36;1m  echo "rust_changed=true" >> "$GITHUB_OUTPUT"[0m
+2026-09-10T09:32:40.3933909Z [36;1m  echo "event=${EVENT_NAME} -> forcing rust_changed=true (full supply-chain)"[0m
+2026-09-10T09:32:40.3934296Z [36;1mfi[0m
+2026-09-10T09:32:40.3977054Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.3977323Z env:
+2026-09-10T09:32:40.3977532Z   EVENT_NAME: pull_request
+2026-09-10T09:32:40.3977779Z   MG_BASE_SHA: 
+2026-09-10T09:32:40.3977998Z   MG_HEAD_SHA: 
+2026-09-10T09:32:40.3978192Z ##[endgroup]
+2026-09-10T09:32:40.4058969Z pull_request -> paths-filter says rust=false
+2026-09-10T09:32:40.4091871Z ##[group]Run python3 scripts/tests/test_vex_deny_drift.py
+2026-09-10T09:32:40.4092288Z [36;1mpython3 scripts/tests/test_vex_deny_drift.py[0m
+2026-09-10T09:32:40.4128450Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.4128766Z ##[endgroup]
+2026-09-10T09:32:40.4955636Z test_empty_both_passes (__main__.EvaluatePure.test_empty_both_passes) ... ok
+2026-09-10T09:32:40.4956605Z test_id_in_deny_only_fails (__main__.EvaluatePure.test_id_in_deny_only_fails) ... ok
+2026-09-10T09:32:40.4957442Z test_id_in_vex_only_fails (__main__.EvaluatePure.test_id_in_vex_only_fails) ... ok
+2026-09-10T09:32:40.4958520Z test_in_sync_passes (__main__.EvaluatePure.test_in_sync_passes) ... ok
+2026-09-10T09:32:40.4959122Z test_justified_one_sided_passes (__main__.EvaluatePure.test_justified_one_sided_passes) ... ok
+2026-09-10T09:32:40.4959692Z test_malformed_id_fails (__main__.EvaluatePure.test_malformed_id_fails) ... ok
+2026-09-10T09:32:40.4967804Z test_deny_parses_bare_and_structured (__main__.FileParsers.test_deny_parses_bare_and_structured) ... ok
+2026-09-10T09:32:40.4972131Z test_deny_reason_text_not_mistaken_for_id (__main__.FileParsers.test_deny_reason_text_not_mistaken_for_id) ... ok
+2026-09-10T09:32:40.4973537Z test_missing_deny_raises_drifterror (__main__.FileParsers.test_missing_deny_raises_drifterror) ... ok
+2026-09-10T09:32:40.4976646Z test_vex_parses (__main__.FileParsers.test_vex_parses) ... ok
+2026-09-10T09:32:40.5029788Z test_committed_files_in_sync (__main__.LiveRepoInvariant.test_committed_files_in_sync) ... ok
+2026-09-10T09:32:40.5030457Z 
+2026-09-10T09:32:40.5030697Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.5031216Z Ran 11 tests in 0.004s
+2026-09-10T09:32:40.5031418Z 
+2026-09-10T09:32:40.5031523Z OK
+2026-09-10T09:32:40.5115821Z ##[group]Run python3 scripts/check-vex-deny-drift.py
+2026-09-10T09:32:40.5116259Z [36;1mpython3 scripts/check-vex-deny-drift.py[0m
+2026-09-10T09:32:40.5155845Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.5156132Z ##[endgroup]
+2026-09-10T09:32:40.5596286Z VEX ↔ deny.toml in sync: 4 advisory id(s) match 1:1.
+2026-09-10T09:32:40.5683937Z ##[group]Run python3 scripts/tests/test_bestpractices_evidence.py
+2026-09-10T09:32:40.5684440Z [36;1mpython3 scripts/tests/test_bestpractices_evidence.py[0m
+2026-09-10T09:32:40.5723006Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.5723297Z ##[endgroup]
+2026-09-10T09:32:40.6270580Z test_bad_family_fails (__main__.TestEvaluate.test_bad_family_fails) ... ok
+2026-09-10T09:32:40.6273562Z test_bad_status_fails (__main__.TestEvaluate.test_bad_status_fails) ... ok
+2026-09-10T09:32:40.6276730Z test_blank_justification_fails (__main__.TestEvaluate.test_blank_justification_fails) ... ok
+2026-09-10T09:32:40.6280521Z test_duplicate_id_fails (__main__.TestEvaluate.test_duplicate_id_fails) ... ok
+2026-09-10T09:32:40.6283354Z test_empty_criteria_fails (__main__.TestEvaluate.test_empty_criteria_fails) ... ok
+2026-09-10T09:32:40.6286028Z test_empty_evidence_fails (__main__.TestEvaluate.test_empty_evidence_fails) ... ok
+2026-09-10T09:32:40.6289166Z test_filed_with_badge_url_passes (__main__.TestEvaluate.test_filed_with_badge_url_passes) ... ok
+2026-09-10T09:32:40.6291896Z test_filed_without_badge_url_fails (__main__.TestEvaluate.test_filed_without_badge_url_fails) ... ok
+2026-09-10T09:32:40.6294741Z test_missing_evidence_path_fails (__main__.TestEvaluate.test_missing_evidence_path_fails) ... ok
+2026-09-10T09:32:40.6297386Z test_valid_doc_passes (__main__.TestEvaluate.test_valid_doc_passes) ... ok
+2026-09-10T09:32:40.6300380Z test_wrong_schema_fails (__main__.TestEvaluate.test_wrong_schema_fails) ... ok
+2026-09-10T09:32:40.6312371Z test_real_self_cert_passes (__main__.TestRealSelfCert.test_real_self_cert_passes) ... ok
+2026-09-10T09:32:40.6312876Z 
+2026-09-10T09:32:40.6313040Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.6313390Z Ran 12 tests in 0.005s
+2026-09-10T09:32:40.6313541Z 
+2026-09-10T09:32:40.6313641Z OK
+2026-09-10T09:32:40.6419916Z ##[group]Run python3 scripts/check-bestpractices-evidence.py
+2026-09-10T09:32:40.6420384Z [36;1mpython3 scripts/check-bestpractices-evidence.py[0m
+2026-09-10T09:32:40.6459819Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.6460099Z ##[endgroup]
+2026-09-10T09:32:40.6780203Z OK: 63 criteria, 21 distinct evidence paths, 0 finding(s)
+2026-09-10T09:32:40.6781209Z project.filed is false — GX-4 external filing not yet done (expected; honest)
+2026-09-10T09:32:40.6851395Z ##[group]Run python3 scripts/tests/test_dependabot_coverage.py
+2026-09-10T09:32:40.6851854Z [36;1mpython3 scripts/tests/test_dependabot_coverage.py[0m
+2026-09-10T09:32:40.6889418Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.6889700Z ##[endgroup]
+2026-09-10T09:32:40.7409540Z test_docker_exclusions_still_consume_only_a_first_party_floating_base (__main__.TestDependabotCoverage.test_docker_exclusions_still_consume_only_a_first_party_floating_base)
+2026-09-10T09:32:40.7411457Z The premise, checked against the file — not against the reason string. ... ok
+2026-09-10T09:32:40.7457624Z test_every_tracked_dockerfile_is_covered (__main__.TestDependabotCoverage.test_every_tracked_dockerfile_is_covered) ... ok
+2026-09-10T09:32:40.7494865Z test_every_tracked_npm_lock_is_covered_or_excluded (__main__.TestDependabotCoverage.test_every_tracked_npm_lock_is_covered_or_excluded) ... ok
+2026-09-10T09:32:40.7496306Z test_exclusions_are_not_stale (__main__.TestDependabotCoverage.test_exclusions_are_not_stale) ... ok
+2026-09-10T09:32:40.7497682Z test_guard_rejects_a_third_party_pinned_base_in_the_file (__main__.TestDependabotCoverage.test_guard_rejects_a_third_party_pinned_base_in_the_file) ... ok
+2026-09-10T09:32:40.7499243Z test_guard_rejects_an_extra_stage (__main__.TestDependabotCoverage.test_guard_rejects_an_extra_stage) ... ok
+2026-09-10T09:32:40.7500655Z test_guard_rejects_blessing_a_third_party_base_in_the_table (__main__.TestDependabotCoverage.test_guard_rejects_blessing_a_third_party_base_in_the_table)
+2026-09-10T09:32:40.7501573Z Editing EXCLUDED_DOCKER_DIRS to match a foreign base must not silence it. ... ok
+2026-09-10T09:32:40.7502283Z test_npm_targets_workspaces_root_not_a_member (__main__.TestDependabotCoverage.test_npm_targets_workspaces_root_not_a_member)
+2026-09-10T09:32:40.7534109Z Regression guard for the sq-bqjv defect. ... ok
+2026-09-10T09:32:40.7534858Z test_parser_sees_every_entry (__main__.TestDependabotCoverage.test_parser_sees_every_entry)
+2026-09-10T09:32:40.7535750Z Entry count from the parser must equal the raw key count in the file. ... ok
+2026-09-10T09:32:40.7536244Z 
+2026-09-10T09:32:40.7536474Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.7538673Z Ran 9 tests in 0.013s
+2026-09-10T09:32:40.7538832Z 
+2026-09-10T09:32:40.7538918Z OK
+2026-09-10T09:32:40.7643887Z ##[group]Run python3 scripts/tests/test_check_npm_advisory_record.py
+2026-09-10T09:32:40.7644386Z [36;1mpython3 scripts/tests/test_check_npm_advisory_record.py[0m
+2026-09-10T09:32:40.7683547Z shell: /usr/bin/bash -e {0}
+2026-09-10T09:32:40.7683826Z ##[endgroup]
+2026-09-10T09:32:40.8252495Z test_failure_report_says_do_not_relax (__main__.EvaluatePure.test_failure_report_says_do_not_relax) ... ok
+2026-09-10T09:32:40.8253700Z test_instance_version_drift_fails (__main__.EvaluatePure.test_instance_version_drift_fails) ... ok
+2026-09-10T09:32:40.8259413Z test_matching_record_passes (__main__.EvaluatePure.test_matching_record_passes) ... ok
+2026-09-10T09:32:40.8260999Z test_new_unrecorded_instance_fails (__main__.EvaluatePure.test_new_unrecorded_instance_fails) ... ok
+2026-09-10T09:32:40.8262314Z test_optional_dependency_pin_is_read_from_the_recorded_field (__main__.EvaluatePure.test_optional_dependency_pin_is_read_from_the_recorded_field)
+2026-09-10T09:32:40.8263420Z `sharp` is an OPTIONAL dep of `next` — a dependencies-only lookup would miss it. ... ok
+2026-09-10T09:32:40.8264127Z test_optional_pin_moved_to_another_field_fails (__main__.EvaluatePure.test_optional_pin_moved_to_another_field_fails)
+2026-09-10T09:32:40.8264836Z Same range under `dependencies` must not satisfy an `optionalDependencies` pin. ... ok
+2026-09-10T09:32:40.8265440Z test_pinning_package_gone_fails (__main__.EvaluatePure.test_pinning_package_gone_fails) ... ok
+2026-09-10T09:32:40.8266122Z test_pinning_package_version_drift_fails (__main__.EvaluatePure.test_pinning_package_version_drift_fails) ... ok
+2026-09-10T09:32:40.8266759Z test_pinning_range_drift_fails (__main__.EvaluatePure.test_pinning_range_drift_fails)
+2026-09-10T09:32:40.8267297Z The crux of the disposition: the pin RELAXING is what unblocks the patch. ... ok
+2026-09-10T09:32:40.8267838Z test_root_override_bump_fails (__main__.EvaluatePure.test_root_override_bump_fails) ... ok
+2026-09-10T09:32:40.8268810Z test_root_override_removed_fails (__main__.EvaluatePure.test_root_override_removed_fails) ... ok
+2026-09-10T09:32:40.8269780Z test_vanished_instance_fails (__main__.EvaluatePure.test_vanished_instance_fails) ... ok
+2026-09-10T09:32:40.8305154Z test_committed_record_matches_committed_lock (__main__.LiveRepo.test_committed_record_matches_committed_lock) ... FAIL
+2026-09-10T09:32:40.8354436Z test_main_exits_zero_on_the_live_repo (__main__.LiveRepo.test_main_exits_zero_on_the_live_repo) ... FAIL
+2026-09-10T09:32:40.8356181Z test_record_covers_the_tracked_packages (__main__.LiveRepo.test_record_covers_the_tracked_packages) ... ok
+2026-09-10T09:32:40.8357485Z test_nested_and_workspace_copies_are_instances (__main__.LockInstanceMatching.test_nested_and_workspace_copies_are_instances) ... ok
+2026-09-10T09:32:40.8358738Z test_scoped_package_with_same_suffix_is_not_an_instance (__main__.LockInstanceMatching.test_scoped_package_with_same_suffix_is_not_an_instance)
+2026-09-10T09:32:40.8359453Z `node_modules/@tailwindcss/postcss` is NOT a copy of `postcss`. ... ok
+2026-09-10T09:32:40.8365453Z test_instance_missing_field_is_parse_error (__main__.RecordParsing.test_instance_missing_field_is_parse_error) ... ok
+2026-09-10T09:32:40.8368975Z test_malformed_json_is_parse_error (__main__.RecordParsing.test_malformed_json_is_parse_error) ... ok
+2026-09-10T09:32:40.8372052Z test_missing_fence_is_parse_error (__main__.RecordParsing.test_missing_fence_is_parse_error) ... ok
+2026-09-10T09:32:40.8374238Z test_missing_record_file_is_parse_error (__main__.RecordParsing.test_missing_record_file_is_parse_error) ... ok
+2026-09-10T09:32:40.8377129Z test_missing_sentinels_is_parse_error (__main__.RecordParsing.test_missing_sentinels_is_parse_error) ... ok
+2026-09-10T09:32:40.8381289Z test_roundtrip (__main__.RecordParsing.test_roundtrip) ... ok
+2026-09-10T09:32:40.8382139Z test_unknown_pin_field_is_parse_error (__main__.RecordParsing.test_unknown_pin_field_is_parse_error)
+2026-09-10T09:32:40.8385901Z A typo'd field would otherwise compare None to None and pass vacuously. ... ok
+2026-09-10T09:32:40.8390925Z test_unknown_pin_kind_is_parse_error (__main__.RecordParsing.test_unknown_pin_kind_is_parse_error) ... ok
+2026-09-10T09:32:40.8391604Z 
+2026-09-10T09:32:40.8391791Z ======================================================================
+2026-09-10T09:32:40.8392665Z FAIL: test_committed_record_matches_committed_lock (__main__.LiveRepo.test_committed_record_matches_committed_lock)
+2026-09-10T09:32:40.8393588Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.8394125Z Traceback (most recent call last):
+2026-09-10T09:32:40.8395109Z   File "/home/runner/work/sparq/sparq/scripts/tests/test_check_npm_advisory_record.py", line 291, in test_committed_record_matches_committed_lock
+2026-09-10T09:32:40.8396131Z     self.assertTrue(ok, "\n".join(lines))
+2026-09-10T09:32:40.8396947Z AssertionError: False is not true : npm advisory record is STALE — the lock no longer matches supply-chain/npm-advisories.md:
+2026-09-10T09:32:40.8397744Z   ✗ sharp: pinning package `node_modules/next` is version '15.5.24', record says '15.5.21'
+2026-09-10T09:32:40.8398726Z   ✗ sharp: pinning package `node_modules/next` declares optionalDependencies.sharp = '^0.34.3 || ^0.35.3', record says '^0.34.3'
+2026-09-10T09:32:40.8399200Z 
+2026-09-10T09:32:40.8399408Z This is usually the GOOD signal: the npm graph moved, most likely because a
+2026-09-10T09:32:40.8399923Z patched version became reachable. Re-check the open Dependabot alerts, update
+2026-09-10T09:32:40.8400449Z or delete the affected entry in the record (and close its tracking issue).
+2026-09-10T09:32:40.8400856Z Do NOT relax this check to make it pass.
+2026-09-10T09:32:40.8401049Z 
+2026-09-10T09:32:40.8401175Z ======================================================================
+2026-09-10T09:32:40.8401666Z FAIL: test_main_exits_zero_on_the_live_repo (__main__.LiveRepo.test_main_exits_zero_on_the_live_repo)
+2026-09-10T09:32:40.8402180Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.8402525Z Traceback (most recent call last):
+2026-09-10T09:32:40.8403104Z   File "/home/runner/work/sparq/sparq/scripts/tests/test_check_npm_advisory_record.py", line 301, in test_main_exits_zero_on_the_live_repo
+2026-09-10T09:32:40.8403869Z     self.assertEqual(chk.main([]), 0)
+2026-09-10T09:32:40.8404141Z AssertionError: 1 != 0
+2026-09-10T09:32:40.8404289Z 
+2026-09-10T09:32:40.8404437Z ----------------------------------------------------------------------
+2026-09-10T09:32:40.8404755Z Ran 25 tests in 0.014s
+2026-09-10T09:32:40.8404889Z 
+2026-09-10T09:32:40.8404982Z FAILED (failures=2)
+2026-09-10T09:32:40.8405468Z npm advisory record is STALE — the lock no longer matches supply-chain/npm-advisories.md:
+2026-09-10T09:32:40.8406118Z   ✗ sharp: pinning package `node_modules/next` is version '15.5.24', record says '15.5.21'
+2026-09-10T09:32:40.8406901Z   ✗ sharp: pinning package `node_modules/next` declares optionalDependencies.sharp = '^0.34.3 || ^0.35.3', record says '^0.34.3'
+2026-09-10T09:32:40.8407364Z 
+2026-09-10T09:32:40.8407578Z This is usually the GOOD signal: the npm graph moved, most likely because a
+2026-09-10T09:32:40.8408094Z patched version became reachable. Re-check the open Dependabot alerts, update
+2026-09-10T09:32:40.8408824Z or delete the affected entry in the record (and close its tracking issue).
+2026-09-10T09:32:40.8409218Z Do NOT relax this check to make it pass.
+2026-09-10T09:32:40.8485246Z ##[error]Process completed with exit code 1.
+2026-09-10T09:32:40.8694889Z Post job cleanup.
+2026-09-10T09:32:40.9551432Z [command]/usr/bin/git version
+2026-09-10T09:32:40.9593989Z git version 2.55.0
+2026-09-10T09:32:40.9659908Z Temporarily overriding HOME='/home/runner/work/_temp/e3560c95-ac28-4238-b7a8-ed1a125ce957' before making global git config changes
+2026-09-10T09:32:40.9661395Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T09:32:40.9689176Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T09:32:40.9700076Z Removing SSH command configuration
+2026-09-10T09:32:40.9705954Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T09:32:40.9746040Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T09:32:41.0010710Z Removing HTTP extra header
+2026-09-10T09:32:41.0017303Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T09:32:41.0064288Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T09:32:41.0362390Z Removing includeIf entries pointing to credentials config files
+2026-09-10T09:32:41.0370240Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T09:32:41.0410876Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T09:32:41.0413555Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T09:32:41.0414609Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T09:32:41.0415377Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T09:32:41.0430946Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T09:32:41.0475291Z /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0485896Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0541230Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T09:32:41.0596047Z /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0607449Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0648845Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T09:32:41.0677708Z /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0686069Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0725146Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T09:32:41.0754918Z /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0762521Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config
+2026-09-10T09:32:41.0804215Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T09:32:41.1069876Z Removing credentials config '/home/runner/work/_temp/git-credentials-5d502c52-3486-4216-9601-f22319d8a09c.config'
+2026-09-10T09:32:41.1215059Z Cleaning up orphan processes

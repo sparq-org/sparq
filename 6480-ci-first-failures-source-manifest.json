@@ -1,0 +1,58 @@
+[
+  {
+    "path": ".github/workflows/js.yml",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "958b871972bcd02072acd85695d0c6ed7d4ccc99e25d9305bc9d1d27ea4be18f"
+  },
+  {
+    "path": ".github/workflows/docs-quality.yml",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "8540fb4b537761d09f3816259e5029d81d50cc214b2147c62bebdfe211f2a594"
+  },
+  {
+    "path": ".github/workflows/supply-chain.yml",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "19aff7e9956715261b789e3ad3b19e21d7bb2f14496e32ff4cd546e5f671273d"
+  },
+  {
+    "path": "scripts/tests/test_js_wasm_pack_install.py",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "d7eb549536b8ea2bd96b17b7684ba10cff04d558c16b8a99cac0c51bbc71de08"
+  },
+  {
+    "path": "scripts/check-install-action-tool.py",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "d650691e589dedf694c018e342cdcb7864633d7ec3344460ec3c6ce7c2eb1fcf"
+  },
+  {
+    "path": "scripts/check-advisory-registry.py",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "c480ee0181f0c7efedf2c9642842ec92a40b4807c60a233e57adc0ab5ee34e14"
+  },
+  {
+    "path": "scripts/check-npm-advisory-record.py",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "2ccef22357d13124c3cd6e512c2bb96bb1e305956d1111cbf12c3578ef8c6490"
+  },
+  {
+    "path": "scripts/tests/test_check_npm_advisory_record.py",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "b157b6d2de909c08fc927c21776ea3f064ef648410e3a18077d280f21f8cd4a6"
+  },
+  {
+    "path": "supply-chain/npm-advisories.md",
+    "commit": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+    "sha256": "259510c93de807f92b3e10997ef116655943b540a270543ad7f06d5a7f8fa52c"
+  },
+  {
+    "path": ".github/workflows/differential-update.yml",
+    "commit": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "sha256": "6e3e49ecbd494b77f9d8585faf3f39b1f2ab166ac8df0b598ed5f32a01dccbeb"
+  },
+  {
+    "path": "crates/sparq-bench/src/update_fuzz.rs",
+    "commit": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "full_source_sha256": "0807388f84792f011b868456269a36bf74e5e463c67dfb71d1be3ad9d35aecf7",
+    "excerpt_only": true
+  }
+]

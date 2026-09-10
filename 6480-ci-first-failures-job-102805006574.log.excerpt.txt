@@ -1,0 +1,9 @@
+job-102805006574.log:352: 2026-09-10T09:21:22.6824544Z   workflow-run resolver: ignored 180 check-run(s) from superseded runs/attempts (#3505).
+job-102805006574.log:353: 2026-09-10T09:21:22.6825431Z attempt 92: 520 check-run(s), 26 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+job-102805006574.log:354: 2026-09-10T09:21:26.5912717Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+job-102805006574.log:355: 2026-09-10T09:21:26.5913872Z   workflow-run resolver: ignored 180 check-run(s) from superseded runs/attempts (#3505).
+job-102805006574.log:356: 2026-09-10T09:21:26.5914837Z attempt 93: 520 check-run(s), 26 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+job-102805006574.log:357: 2026-09-10T09:21:26.5917491Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 26 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+job-102805006574.log:358: 2026-09-10T09:21:26.5920447Z - ✗ nightly UPDATE differential (sparq vs Oxigraph, advancing): failure
+job-102805006574.log:359: 2026-09-10T09:21:26.5948004Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+job-102805006574.log:360: 2026-09-10T09:21:26.6000295Z ##[error]Process completed with exit code 1.

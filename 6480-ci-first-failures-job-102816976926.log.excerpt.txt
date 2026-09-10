@@ -1,0 +1,35 @@
+job-102816976926.log:318: 2026-09-10T09:32:40.8392665Z FAIL: test_committed_record_matches_committed_lock (__main__.LiveRepo.test_committed_record_matches_committed_lock)
+job-102816976926.log:319: 2026-09-10T09:32:40.8393588Z ----------------------------------------------------------------------
+job-102816976926.log:320: 2026-09-10T09:32:40.8394125Z Traceback (most recent call last):
+job-102816976926.log:321: 2026-09-10T09:32:40.8395109Z   File "/home/runner/work/sparq/sparq/scripts/tests/test_check_npm_advisory_record.py", line 291, in test_committed_record_matches_committed_lock
+job-102816976926.log:322: 2026-09-10T09:32:40.8396131Z     self.assertTrue(ok, "\n".join(lines))
+job-102816976926.log:323: 2026-09-10T09:32:40.8396947Z AssertionError: False is not true : npm advisory record is STALE — the lock no longer matches supply-chain/npm-advisories.md:
+job-102816976926.log:324: 2026-09-10T09:32:40.8397744Z   ✗ sharp: pinning package `node_modules/next` is version '15.5.24', record says '15.5.21'
+job-102816976926.log:325: 2026-09-10T09:32:40.8398726Z   ✗ sharp: pinning package `node_modules/next` declares optionalDependencies.sharp = '^0.34.3 || ^0.35.3', record says '^0.34.3'
+job-102816976926.log:326: 2026-09-10T09:32:40.8399200Z 
+job-102816976926.log:327: 2026-09-10T09:32:40.8399408Z This is usually the GOOD signal: the npm graph moved, most likely because a
+job-102816976926.log:328: 2026-09-10T09:32:40.8399923Z patched version became reachable. Re-check the open Dependabot alerts, update
+job-102816976926.log:329: 2026-09-10T09:32:40.8400449Z or delete the affected entry in the record (and close its tracking issue).
+job-102816976926.log:330: 2026-09-10T09:32:40.8400856Z Do NOT relax this check to make it pass.
+job-102816976926.log:331: 2026-09-10T09:32:40.8401049Z 
+job-102816976926.log:332: 2026-09-10T09:32:40.8401175Z ======================================================================
+job-102816976926.log:333: 2026-09-10T09:32:40.8401666Z FAIL: test_main_exits_zero_on_the_live_repo (__main__.LiveRepo.test_main_exits_zero_on_the_live_repo)
+job-102816976926.log:334: 2026-09-10T09:32:40.8402180Z ----------------------------------------------------------------------
+job-102816976926.log:335: 2026-09-10T09:32:40.8402525Z Traceback (most recent call last):
+job-102816976926.log:336: 2026-09-10T09:32:40.8403104Z   File "/home/runner/work/sparq/sparq/scripts/tests/test_check_npm_advisory_record.py", line 301, in test_main_exits_zero_on_the_live_repo
+job-102816976926.log:337: 2026-09-10T09:32:40.8403869Z     self.assertEqual(chk.main([]), 0)
+job-102816976926.log:338: 2026-09-10T09:32:40.8404141Z AssertionError: 1 != 0
+job-102816976926.log:339: 2026-09-10T09:32:40.8404289Z 
+job-102816976926.log:340: 2026-09-10T09:32:40.8404437Z ----------------------------------------------------------------------
+job-102816976926.log:341: 2026-09-10T09:32:40.8404755Z Ran 25 tests in 0.014s
+job-102816976926.log:342: 2026-09-10T09:32:40.8404889Z 
+job-102816976926.log:343: 2026-09-10T09:32:40.8404982Z FAILED (failures=2)
+job-102816976926.log:344: 2026-09-10T09:32:40.8405468Z npm advisory record is STALE — the lock no longer matches supply-chain/npm-advisories.md:
+job-102816976926.log:345: 2026-09-10T09:32:40.8406118Z   ✗ sharp: pinning package `node_modules/next` is version '15.5.24', record says '15.5.21'
+job-102816976926.log:346: 2026-09-10T09:32:40.8406901Z   ✗ sharp: pinning package `node_modules/next` declares optionalDependencies.sharp = '^0.34.3 || ^0.35.3', record says '^0.34.3'
+job-102816976926.log:347: 2026-09-10T09:32:40.8407364Z 
+job-102816976926.log:348: 2026-09-10T09:32:40.8407578Z This is usually the GOOD signal: the npm graph moved, most likely because a
+job-102816976926.log:349: 2026-09-10T09:32:40.8408094Z patched version became reachable. Re-check the open Dependabot alerts, update
+job-102816976926.log:350: 2026-09-10T09:32:40.8408824Z or delete the affected entry in the record (and close its tracking issue).
+job-102816976926.log:351: 2026-09-10T09:32:40.8409218Z Do NOT relax this check to make it pass.
+job-102816976926.log:352: 2026-09-10T09:32:40.8485246Z ##[error]Process completed with exit code 1.

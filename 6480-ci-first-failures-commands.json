@@ -1,0 +1,72 @@
+{
+  "tool": "/opt/homebrew/bin/gh api",
+  "each_attempts": 1,
+  "each_exit": 0,
+  "initial_core_budget": 4940,
+  "reads": [
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513000",
+      "evidence": "34460513000-run.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513000/jobs?per_page=100",
+      "evidence": "34460513000-jobs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513478",
+      "evidence": "34460513478-run.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513478/jobs?per_page=100",
+      "evidence": "34460513478-jobs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513189",
+      "evidence": "34460513189-run.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34460513189/jobs?per_page=100",
+      "evidence": "34460513189-jobs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34456809361",
+      "evidence": "34456809361-run.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34456809361/jobs?per_page=100",
+      "evidence": "34456809361-jobs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102816976194/logs",
+      "evidence": "job-102816976194.log"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102816976926/logs",
+      "evidence": "job-102816976926.log"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102816976230/logs",
+      "evidence": "job-102816976230.log"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102805006574/logs",
+      "evidence": "job-102805006574.log"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/jobs/102811674711/logs",
+      "evidence": "job-102811674711.log"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/workflows/differential-update.yml/runs?head_sha=781f667c19a8ebb779cfccb24b05ea432360b025&per_page=10",
+      "evidence": "main-update-runs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/actions/runs/34458877088/jobs?per_page=100",
+      "evidence": "main-update-jobs.json"
+    },
+    {
+      "endpoint": "repos/sparq-org/sparq/dependabot/alerts/32",
+      "evidence": "sharp-alert32.json"
+    }
+  ]
+}

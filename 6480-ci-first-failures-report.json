@@ -1,0 +1,139 @@
+{
+  "model": "GPT-6 Astra xhigh",
+  "pr": 6481,
+  "head": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+  "source_clean": true,
+  "read_only": true,
+  "completed_at": "2026-09-10T09:44:45.619216+00:00",
+  "pr_failures": [
+    {
+      "run": 34460513000,
+      "job": 102816976194,
+      "name": "docs-quality quick-gates",
+      "failed_step": "wasm-pack install posture",
+      "exact_test": "JsLaneWasmPackInstall.test_install_precedes_npm_ci",
+      "observed_result": "9 tests, 1 failure; npm_ci_at is empty",
+      "source_cause": "scripts/tests/test_js_wasm_pack_install.py:205-223 accepts only inline run: npm ci, not the semantically equivalent block scalar introduced in26d. Actual wasm-pack installation remains before root npm ci at workflow lines120-138.",
+      "classification": "Stale inspection-test syntax assumption exposed by workflow supplement; no demonstrated installation-order regression."
+    },
+    {
+      "run": 34460513478,
+      "job": 102816976926,
+      "name": "supply-chain gates",
+      "failed_step": "npm advisory-record self-test",
+      "observed_result": "25 tests, 2 live-repository invariant failures",
+      "exact_drift": [
+        "node_modules/next version15.5.24 vs recorded15.5.21",
+        "optionalDependencies.sharp ^0.34.3 || ^0.35.3 vs recorded^0.34.3"
+      ],
+      "source_cause": "supply-chain/npm-advisories.md:82,205-208 stale; LiveRepo tests at test_check_npm_advisory_record.py:285-301 correctly reject drift. Standalone drift step is skipped after failing self-test.",
+      "classification": "Genuine stale disposition data; deterministic drift gate has no advisory feed, so failure itself is not a new vulnerability detection."
+    },
+    {
+      "run": 34460513189,
+      "job": 102816976230,
+      "name": "gate",
+      "observed_result": "Fail-fast09:29:31 on docs-quality quick-gates while46siblings running. Supply-chain failure happened later09:32:40 and was not this aggregate verdict trigger."
+    }
+  ],
+  "sharp_evidence": {
+    "alert": 32,
+    "read": "one fresh exact GitHub alert read",
+    "state": "open",
+    "severity": "high",
+    "affected_range": "<0.35.0",
+    "first_patched": "0.35.0",
+    "locked_version": "0.34.5, unchanged by PR",
+    "new_next_allowed_range": "^0.34.3 || ^0.35.3",
+    "interpretation": "Current locked version falls inside the reported affected range; this is a pre-existing unresolved alert, not fixed by merely changing Next. New range permits versions above the reported fix, but feasibility/integrity/platform/build validation of a sharp bump has not been executed.",
+    "required_record_accuracy": "Preserve open status and actual locked0.34.5; update parent version/range and dated alert observation. Do not call sharp fixed, dismiss alert, or claim upgrade remains impossible. Do not silently expand dependency scope before root/Opus assessment.",
+    "existing_tracking": {
+      "issue": 3767,
+      "basis": "supply-chain/npm-advisories.md and checker header explicitly identify #3767 as originating security_update_not_possible/disposition work; no separate sharp-only issue lookup performed in this bounded diagnosis.",
+      "exact_record_fields": {
+        "packages[name=sharp].instances[0].path": "node_modules/sharp",
+        "version": "0.34.5",
+        "pinned_by.path": "node_modules/next",
+        "pinned_by.version": "15.5.21",
+        "pinned_by.field": "optionalDependencies",
+        "pinned_by.range": "^0.34.3"
+      }
+    },
+    "targeted_upgrade_proposal": {
+      "target": "sharp0.35.3, admitted by Next15.5.24 optional range; proposed only, package publication/engines/SRI not yet fetched or independently reviewed.",
+      "first": "Read official exact sharp0.35.3 metadata, engines, native optional dependency matrix and published integrity; inspect current sharp/libvips consumer constraints.",
+      "generation": "Using same verified task-local npm11.17.0 and compatible bundled Node, evaluate a package-lock-only targeted sharp resolution update with --ignore-scripts --no-audit --no-fund and no new direct dependency/minimum/override. A targeted npm update sharp --package-lock-only is a candidate command, not assumed to pin0.35.3; inspect resolved version and scope before acceptance. Do not hand-edit resolved/integrity or assume broad npm update remains narrow.",
+      "scope": "Permit only sharp and required @img/sharp/native-libvips transitive entries after exact diff review; preserve Next15.5.24, all8SWCplatforms/4libc selectors, root overrides, unrelated dependency floors and unrelated lock entries.",
+      "record": "Only after inspected lock generation update actual sharp instance/parent range fields and dated advisory observation; keep alert state open until GitHub reevaluates. No dismissal or exploit/non-exposure assertion.",
+      "validation": "Metadata+SRI/scope/idempotence locally within separately authorized limits; real npm ci/install-tree and site/gui image/export/tests on supported CI; actual Opus review before publication.",
+      "fallback": "If exact0.35.3 cannot be generated without unrelated changes or incompatible engines, report concrete conflict for root rather than weakening overrides/gates."
+    }
+  },
+  "manifest_trigger_finding": {
+    "valid": true,
+    "missing_paths": [
+      "site/package.json",
+      "gui/app/package.json"
+    ],
+    "source": ".github/workflows/js.yml:28-44",
+    "current_PR_coverage": "Already triggered by changed root package-lock.json and workflow path.",
+    "future_gap": "A PR changing only one consumer manifest does not trigger this new installed-tree/lock-cleanliness check.",
+    "copilot_qualification": "Its statement that site/GUI jobs use npm install is overbroad: site-e2e.yml:98 uses npm ci. This does not supply the exact two-consumer installed-tree plus post-install tracked-cleanliness check."
+  },
+  "smallest_coherent_proposal": [
+    {
+      "file": "scripts/tests/test_js_wasm_pack_install.py",
+      "change": "Recognize actual run commands inside parsed/split steps for inline and block forms (reuse existing extractor where appropriate), preserve exact wasm-install-before-root-npm-ci requirement; do not merely weaken to substring mention.",
+      "validation": "Positive current block and legacy inline; reject absent/comment-only npm ci, npm install substitute, wrong working-directory and moved-before-wasm install. Keep SHA/version/unification tests unchanged."
+    },
+    {
+      "file": "supply-chain/npm-advisories.md",
+      "change": "Update live Next parent15.5.24 and actual sharp range in prose/table/machine record, keep sharp0.34.5 unresolved and add accurate dated current alert32 range/status. Correct nearby live Next/PostCSS reference only; retain historical claims explicitly historical.",
+      "validation": "Existing25tests and standalone drift checker, plus verify lock/overrides/platform selectors unchanged. No checker waiver or tolerance change."
+    },
+    {
+      "file": ".github/workflows/js.yml",
+      "change": "Add exactly site/package.json and gui/app/package.json PR paths, preserving all other triggers/permissions/commands.",
+      "validation": "Focused trigger coverage assertions and positive/negative path cases, parsed workflow comparison."
+    }
+  ],
+  "main_aggregate": {
+    "run": 34456809361,
+    "job": 102805006574,
+    "head": "781f667c19a8ebb779cfccb24b05ea432360b025",
+    "event": "push",
+    "failed_at": "2026-09-10T09:21:26Z",
+    "actual_gate_failure": "nightly UPDATE differential (sparq vs Oxigraph, advancing)",
+    "fuzz_cancellation_was_verdict_cause": false,
+    "required_source_run": 34458877088,
+    "source_event": "schedule",
+    "source_attempt": 1,
+    "source_job": 102811674711,
+    "fixed_window_job": 102811675018,
+    "fixed_window_result": "success",
+    "build_result": "success",
+    "source_failure": "Eight actual comparator mismatches in advancing window4141200000..4141350000; execution exit1.",
+    "summary": "checked149992 update_requests1049062 isomorphism_compares412714 adjudicated(integer-lexical)243186 mismatch8",
+    "first_seed": 4141222487,
+    "step": "8 of10",
+    "operation": "INSERT { ?s <http://ex/p0> _:bt } WHERE { ?s <http://ex/p1> ?o }",
+    "comparison": "canonical dataset differs (sparq rebuild vs Oxigraph)",
+    "only_in_sparq": [
+      "<http://ex/s2> <http://ex/p0> _:c14n8 .",
+      "<http://ex/s2> <http://ex/p1> \"008\"^^<http://www.w3.org/2001/XMLSchema#integer> ."
+    ],
+    "replay_from_log": "cargo run -p sparq-bench --release -- update-fuzz --seed-start 4141222487 --seed-count 1 (not executed)",
+    "existing_tracking": "Filer reports fresh window commented on existing open issue5183, bead sq-dfamfmg. Issue/comment not independently fetched.",
+    "secondary": "Best-effort direct bead push rejected GH013 after mismatch; warning not source failure.",
+    "interpretation": "Genuine differential-test finding, not infrastructure/cancellation. Does not by itself prove which engine/comparator is wrong or that6478 introduced it. UPDATE workflow and comparator source unchanged across6478 merge.",
+    "next_action": "Use existing5183 for exact deterministic replay/localization against main and parent in a separately authorized phase; preserve strict comparator and live scheduled runs."
+  },
+  "limits": [
+    "No source edits, test/build execution, reruns, cancellations, dispatches, policy/gate changes, remote mutations or independent model calls.",
+    "No vulnerability remediation/exposure claim beyond direct current alert metadata; actual Opus security review remains required.",
+    "The exact restored CI install/GUI/visual evidence remains live and was not rerun or interrupted.",
+    "Root separately owns PR title correction.",
+    "No request errors/exhaustion encountered; each named request executed once.",
+    "Miri/triage error-looking text earlier in docs log belongs to passing self-test fixtures; failed-step metadata and terminal assertion isolate actual cause."
+  ]
+}

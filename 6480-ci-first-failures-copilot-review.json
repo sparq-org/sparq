@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {
+      "author": {
+        "login": "copilot-pull-request-reviewer"
+      },
+      "state": "COMMENTED",
+      "commit": {
+        "oid": "26d139520f07f1ceacafbacbeb9991de371e2b53"
+      },
+      "body": "### \ud83d\udd35 Needs a closer look\n\nResolve the stale advisory record and ensure manifest-only changes trigger the verification workflow.\n\n<details>\n<summary>Pull request overview</summary>\n\nPatches Next.js to `15.5.24` across the site and GUI, refreshes lockfile metadata, and adds CI verification.\n\n**Changes:**\n- Raises Next.js minimums in both frontend manifests.\n- Updates Next.js, SWC, and related lockfile entries.\n- Adds resolution and lockfile-cleanliness checks.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `site/package.json` | Updates the site\u2019s Next.js requirement. |\r\n| `package-lock.json` | Resolves patched Next.js packages. **Critical (2 votes):** the stale `sharp` advisory record must be updated or rechecked. |\r\n| `gui/app/package.json` | Updates the GUI\u2019s Next.js requirement. |\r\n| `.github/workflows/js.yml` | Adds dependency verification. **Moderate (1 vote):** include both manifest paths in workflow triggers. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**.github/workflows/js.yml:138**\n* This verification step is only reachable when `js.yml` runs, but its `pull_request.paths` list (lines 38\u201344) does not include `site/package.json` or `gui/app/package.json`. A future manifest-only change can therefore bypass the new two-consumer resolution/lock-cleanliness check (while the site/GUI jobs use `npm install`); add these manifest paths or place the guard in a workflow that already triggers for both consumers.\n```\n          npm ls next --workspace=site --workspace=gui/app\n          git diff --exit-code -- package-lock.json gui/app/package.json site/package.json\n```\n\n- **Files reviewed:** 3/4 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/sparq-org/sparq/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+      "submittedAt": "2026-09-10T09:36:23Z"
+    }
+  ]
+}

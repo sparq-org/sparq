@@ -1,0 +1,376 @@
+﻿2026-09-10T08:44:55.8824891Z Current runner version: '2.337.0'
+2026-09-10T08:44:55.8847169Z ##[group]Runner Image Provisioner
+2026-09-10T08:44:55.8847904Z Hosted Compute Agent
+2026-09-10T08:44:55.8848411Z Version: 20260828.587
+2026-09-10T08:44:55.8848912Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-10T08:44:55.8849514Z Build Date: 2026-08-28T16:44:25Z
+2026-09-10T08:44:55.8850031Z Worker ID: {28516f14-0541-4b81-92bb-8748d095ddac}
+2026-09-10T08:44:55.8850542Z Azure Region: centralus
+2026-09-10T08:44:55.8851019Z ##[endgroup]
+2026-09-10T08:44:55.8852064Z ##[group]Operating System
+2026-09-10T08:44:55.8852522Z Ubuntu
+2026-09-10T08:44:55.8852946Z 24.04.5
+2026-09-10T08:44:55.8853339Z LTS
+2026-09-10T08:44:55.8853766Z ##[endgroup]
+2026-09-10T08:44:55.8854177Z ##[group]Runner Image
+2026-09-10T08:44:55.8855195Z Image: ubuntu-24.04
+2026-09-10T08:44:55.8855714Z Version: 20260907.300.1
+2026-09-10T08:44:55.8856818Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-10T08:44:55.8857986Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-10T08:44:55.8858680Z ##[endgroup]
+2026-09-10T08:44:55.8859777Z ##[group]GITHUB_TOKEN Permissions
+2026-09-10T08:44:55.8861917Z Actions: write
+2026-09-10T08:44:55.8862364Z Checks: read
+2026-09-10T08:44:55.8862779Z Contents: read
+2026-09-10T08:44:55.8863217Z Metadata: read
+2026-09-10T08:44:55.8863629Z PullRequests: read
+2026-09-10T08:44:55.8864043Z Statuses: read
+2026-09-10T08:44:55.8864472Z ##[endgroup]
+2026-09-10T08:44:55.8866270Z Secret source: Actions
+2026-09-10T08:44:55.8867059Z Cache mode: write
+2026-09-10T08:44:55.8867571Z Prepare workflow directory
+2026-09-10T08:44:55.9112764Z Prepare all required actions
+2026-09-10T08:44:55.9149522Z Getting action download info
+2026-09-10T08:44:56.1823130Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-10T08:44:56.4060364Z Complete job name: gate
+2026-09-10T08:44:56.4563576Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-10T08:44:56.4564299Z with:
+2026-09-10T08:44:56.4564689Z   persist-credentials: false
+2026-09-10T08:44:56.4565514Z   sparse-checkout: scripts/ci_summary_gate.py
+.github/advisory-registry.json
+
+2026-09-10T08:44:56.4566140Z   sparse-checkout-cone-mode: false
+2026-09-10T08:44:56.4566586Z   repository: sparq-org/sparq
+2026-09-10T08:44:56.4569428Z   token: ***
+2026-09-10T08:44:56.4569785Z   ssh-strict: true
+2026-09-10T08:44:56.4570176Z   ssh-user: git
+2026-09-10T08:44:56.4570530Z   clean: true
+2026-09-10T08:44:56.4570881Z   fetch-depth: 1
+2026-09-10T08:44:56.4571247Z   fetch-tags: false
+2026-09-10T08:44:56.4571813Z   show-progress: true
+2026-09-10T08:44:56.4572194Z   lfs: false
+2026-09-10T08:44:56.4572544Z   submodules: false
+2026-09-10T08:44:56.4572944Z   set-safe-directory: true
+2026-09-10T08:44:56.4573376Z   allow-unsafe-pr-checkout: false
+2026-09-10T08:44:56.4574022Z ##[endgroup]
+2026-09-10T08:44:56.5326062Z Syncing repository: sparq-org/sparq
+2026-09-10T08:44:56.5328036Z ##[group]Getting Git version info
+2026-09-10T08:44:56.5328687Z Working directory is '/home/runner/work/sparq/sparq'
+2026-09-10T08:44:56.5329550Z [command]/usr/bin/git version
+2026-09-10T08:44:56.6752379Z git version 2.55.0
+2026-09-10T08:44:56.6771603Z ##[endgroup]
+2026-09-10T08:44:56.6779987Z Temporarily overriding HOME='/home/runner/work/_temp/1b0e8beb-346f-424b-8ed6-4d0778cd83cd' before making global git config changes
+2026-09-10T08:44:56.6782000Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T08:44:56.6794092Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T08:44:56.6832073Z Deleting the contents of '/home/runner/work/sparq/sparq'
+2026-09-10T08:44:56.6833842Z ##[group]Determining repository object format
+2026-09-10T08:44:56.6835318Z ##[endgroup]
+2026-09-10T08:44:56.6836286Z ##[group]Initializing the repository
+2026-09-10T08:44:56.6839110Z [command]/usr/bin/git init /home/runner/work/sparq/sparq
+2026-09-10T08:44:56.6937352Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-10T08:44:56.6938985Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-10T08:44:56.6940308Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-10T08:44:56.6941283Z hint: call:
+2026-09-10T08:44:56.6942007Z hint:
+2026-09-10T08:44:56.6942877Z hint: 	git config --global init.defaultBranch <name>
+2026-09-10T08:44:56.6943811Z hint:
+2026-09-10T08:44:56.6944778Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-10T08:44:56.6946111Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-10T08:44:56.6947192Z hint:
+2026-09-10T08:44:56.6947980Z hint: 	git branch -m <name>
+2026-09-10T08:44:56.6948695Z hint:
+2026-09-10T08:44:56.6949597Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-10T08:44:56.6951553Z Initialized empty Git repository in /home/runner/work/sparq/sparq/.git/
+2026-09-10T08:44:56.6954339Z [command]/usr/bin/git remote add origin https://github.com/sparq-org/sparq
+2026-09-10T08:44:56.6983616Z ##[endgroup]
+2026-09-10T08:44:56.6984269Z ##[group]Disabling automatic garbage collection
+2026-09-10T08:44:56.6987099Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-10T08:44:56.7009853Z ##[endgroup]
+2026-09-10T08:44:56.7010751Z ##[group]Setting up auth
+2026-09-10T08:44:56.7011541Z Removing SSH command configuration
+2026-09-10T08:44:56.7014674Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T08:44:56.7038925Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T08:44:56.9631476Z Removing HTTP extra header
+2026-09-10T08:44:56.9639257Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T08:44:56.9663461Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T08:44:56.9812434Z Removing includeIf entries pointing to credentials config files
+2026-09-10T08:44:56.9817296Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T08:44:56.9843312Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T08:44:56.9994573Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-10T08:44:57.0022213Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:57.0043587Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:57.0069598Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:57.0092055Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:57.0110758Z ##[endgroup]
+2026-09-10T08:44:57.0111554Z ##[group]Fetching the repository
+2026-09-10T08:44:57.0117207Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin +781f667c19a8ebb779cfccb24b05ea432360b025:refs/remotes/origin/main
+2026-09-10T08:44:57.7675134Z From https://github.com/sparq-org/sparq
+2026-09-10T08:44:57.7677035Z  * [new ref]         781f667c19a8ebb779cfccb24b05ea432360b025 -> origin/main
+2026-09-10T08:44:57.7682865Z [command]/usr/bin/git branch --list --remote origin/main
+2026-09-10T08:44:57.7706673Z   origin/main
+2026-09-10T08:44:57.7711974Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+2026-09-10T08:44:57.7731743Z 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T08:44:57.7735344Z ##[endgroup]
+2026-09-10T08:44:57.7736901Z ##[group]Determining the checkout info
+2026-09-10T08:44:57.7739006Z ##[endgroup]
+2026-09-10T08:44:57.7740472Z ##[group]Setting up sparse checkout
+2026-09-10T08:44:57.7741715Z [command]/usr/bin/git config core.sparseCheckout true
+2026-09-10T08:44:57.7766776Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+2026-09-10T08:44:57.7785284Z .git/info/sparse-checkout
+2026-09-10T08:44:57.7791319Z ##[endgroup]
+2026-09-10T08:44:57.7793520Z ##[group]Checking out the ref
+2026-09-10T08:44:57.7796211Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-10T08:44:58.3393087Z Switched to a new branch 'main'
+2026-09-10T08:44:58.3395347Z branch 'main' set up to track 'origin/main'.
+2026-09-10T08:44:58.3402109Z ##[endgroup]
+2026-09-10T08:44:58.3440852Z [command]/usr/bin/git log -1 --format=%H
+2026-09-10T08:44:58.3466059Z 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T08:44:58.3467367Z ##[group]Removing auth
+2026-09-10T08:44:58.3467736Z Removing SSH command configuration
+2026-09-10T08:44:58.3470110Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T08:44:58.3502183Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T08:44:58.3663982Z Removing HTTP extra header
+2026-09-10T08:44:58.3667790Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T08:44:58.3690081Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T08:44:58.3846834Z Removing includeIf entries pointing to credentials config files
+2026-09-10T08:44:58.3849420Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T08:44:58.3878283Z includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T08:44:58.3878727Z includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T08:44:58.3879185Z includeif.gitdir:/github/workspace/.git.path
+2026-09-10T08:44:58.3879611Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T08:44:58.3884053Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git.path
+2026-09-10T08:44:58.3901142Z /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.3907210Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git.path /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.3965623Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path
+2026-09-10T08:44:58.3983050Z /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.3989469Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/sparq/sparq/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.4015159Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-10T08:44:58.4059448Z /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.4084129Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.4102627Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-10T08:44:58.4119250Z /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.4123672Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config
+2026-09-10T08:44:58.4145763Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T08:44:58.4302070Z Removing credentials config '/home/runner/work/_temp/git-credentials-c32c618d-5f23-4eea-9945-1ed4382f4e88.config'
+2026-09-10T08:44:58.4308781Z ##[endgroup]
+2026-09-10T08:44:58.4470552Z ##[group]Run python3 scripts/ci_summary_gate.py
+2026-09-10T08:44:58.4470957Z [36;1mpython3 scripts/ci_summary_gate.py[0m
+2026-09-10T08:44:58.4495780Z shell: /usr/bin/bash -e {0}
+2026-09-10T08:44:58.4496128Z env:
+2026-09-10T08:44:58.4498178Z   GH_TOKEN: ***
+2026-09-10T08:44:58.4498383Z   REPO: sparq-org/sparq
+2026-09-10T08:44:58.4498697Z   SHA: 781f667c19a8ebb779cfccb24b05ea432360b025
+2026-09-10T08:44:58.4499016Z   SELF_RUN_ID: 34456809361
+2026-09-10T08:44:58.4499582Z   EVENT_NAME: push
+2026-09-10T08:44:58.4499812Z   PR_DRAFT: 
+2026-09-10T08:44:58.4500008Z   PR_NUMBER: 
+2026-09-10T08:44:58.4500261Z ##[endgroup]
+2026-09-10T08:45:05.1574334Z ci-summary: 36 declared-advisory job name(s) loaded from .github/advisory-registry.json; every other check GATES (#3773).
+2026-09-10T08:45:05.1575391Z ci-summary: evaluating tier=full (event=push).
+2026-09-10T08:45:05.1575824Z   workflow-run resolver: ignored 102 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:45:05.1576426Z attempt 1: 430 check-run(s), 43 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T08:45:29.6240532Z   workflow-run resolver: ignored 105 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:45:29.6241469Z attempt 2: 428 check-run(s), 38 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:45:53.4108132Z   workflow-run resolver: ignored 106 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:45:53.4108667Z attempt 3: 429 check-run(s), 36 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:46:17.0318646Z   workflow-run resolver: ignored 107 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:46:17.0319448Z attempt 4: 433 check-run(s), 35 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:46:40.3575871Z   workflow-run resolver: ignored 107 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:46:40.3576668Z attempt 5: 435 check-run(s), 36 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:47:03.9291072Z   workflow-run resolver: ignored 109 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:47:03.9291719Z attempt 6: 442 check-run(s), 40 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:47:27.9367736Z   workflow-run resolver: ignored 111 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:47:27.9368267Z attempt 7: 454 check-run(s), 48 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:47:51.5729342Z   workflow-run resolver: ignored 112 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:47:51.5730172Z attempt 8: 453 check-run(s), 46 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:48:15.3469351Z   workflow-run resolver: ignored 114 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:48:15.3470213Z attempt 9: 453 check-run(s), 43 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:48:38.5681784Z   workflow-run resolver: ignored 114 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:48:38.5683003Z attempt 10: 453 check-run(s), 42 running, all-terminal stable for 0/2 poll(s)
+2026-09-10T08:49:02.2025614Z   workflow-run resolver: ignored 115 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:49:02.2026329Z attempt 11: 462 check-run(s), 48 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:49:25.9367045Z   workflow-run resolver: ignored 117 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:49:25.9369262Z attempt 12: 461 check-run(s), 45 running, all-terminal stable for 0/2 poll(s) (name set changed)
+2026-09-10T08:49:49.7487475Z   workflow-run resolver: ignored 117 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:49:49.7489681Z attempt 13: 508 check-run(s), 90 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:50:14.0985629Z   workflow-run resolver: ignored 118 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:50:14.0988058Z attempt 14: 507 check-run(s), 87 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:50:37.6183081Z   workflow-run resolver: ignored 118 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:50:37.6185843Z attempt 15: 507 check-run(s), 86 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:51:01.3784178Z   workflow-run resolver: ignored 118 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:51:01.3785453Z attempt 16: 510 check-run(s), 86 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:51:25.4983371Z   workflow-run resolver: ignored 118 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:51:25.4984024Z attempt 17: 510 check-run(s), 85 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:51:49.3901964Z   workflow-run resolver: ignored 118 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:51:49.3902761Z attempt 18: 510 check-run(s), 83 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:52:13.4512204Z   workflow-run resolver: ignored 119 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:52:13.4513721Z attempt 19: 509 check-run(s), 80 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:52:37.0246759Z   workflow-run resolver: ignored 119 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:52:37.0247590Z attempt 20: 509 check-run(s), 80 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:53:00.8462586Z   workflow-run resolver: ignored 119 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:53:00.8463516Z attempt 21: 509 check-run(s), 79 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:53:25.0556340Z   workflow-run resolver: ignored 121 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:53:25.0556981Z attempt 22: 508 check-run(s), 76 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:53:48.9356498Z   workflow-run resolver: ignored 120 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:53:48.9358682Z attempt 23: 509 check-run(s), 76 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:54:12.6453971Z   workflow-run resolver: ignored 120 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:54:12.6455822Z attempt 24: 509 check-run(s), 75 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:54:37.0714869Z   workflow-run resolver: ignored 122 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:54:37.0715908Z attempt 25: 508 check-run(s), 73 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:55:00.9836686Z   workflow-run resolver: ignored 122 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:55:00.9837521Z attempt 26: 508 check-run(s), 72 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:55:24.7598485Z   workflow-run resolver: ignored 122 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:55:24.7599151Z attempt 27: 508 check-run(s), 70 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:55:48.6301907Z   workflow-run resolver: ignored 122 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:55:48.6306230Z attempt 28: 508 check-run(s), 69 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:56:13.0596277Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:56:36.7408161Z attempt 29: 507 check-run(s), 66 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:56:36.7408759Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:56:36.7409263Z attempt 30: 507 check-run(s), 66 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:57:00.3964825Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:57:00.3965924Z attempt 31: 507 check-run(s), 65 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:57:24.6376346Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:57:24.6377227Z attempt 32: 507 check-run(s), 64 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:57:48.4591317Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:57:48.4592440Z attempt 33: 507 check-run(s), 64 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:58:12.1223443Z   workflow-run resolver: ignored 124 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:58:12.1226825Z attempt 34: 507 check-run(s), 63 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:58:35.7935927Z   workflow-run resolver: ignored 127 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:58:35.7936620Z attempt 35: 506 check-run(s), 62 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T08:58:59.3509555Z   workflow-run resolver: ignored 127 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:58:59.3510505Z attempt 36: 506 check-run(s), 61 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:59:23.2902276Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:59:23.2903520Z attempt 37: 507 check-run(s), 60 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T08:59:47.3360379Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T08:59:47.3361180Z attempt 38: 507 check-run(s), 59 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:00:11.3519533Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:00:11.3520696Z attempt 39: 507 check-run(s), 59 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:00:35.8097416Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:00:35.8098645Z attempt 40: 507 check-run(s), 58 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:00:59.4365999Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:00:59.4366704Z attempt 41: 509 check-run(s), 57 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:01:23.2346280Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:01:23.2347499Z attempt 42: 509 check-run(s), 56 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:01:46.8579764Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:01:46.8580841Z attempt 43: 509 check-run(s), 55 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:02:10.9856226Z   workflow-run resolver: ignored 128 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:02:10.9856918Z attempt 44: 509 check-run(s), 55 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:02:35.3963063Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:02:35.3964750Z attempt 45: 508 check-run(s), 53 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:02:59.0600244Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:02:59.0604344Z attempt 46: 508 check-run(s), 52 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:03:22.9719624Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:03:22.9721916Z attempt 47: 508 check-run(s), 51 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:03:46.7334677Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:03:46.7336139Z attempt 48: 508 check-run(s), 51 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:04:10.5447144Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:04:10.5447794Z attempt 49: 508 check-run(s), 51 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:04:34.7750756Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:04:34.7753057Z attempt 50: 509 check-run(s), 51 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:04:58.7965519Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:04:58.7966613Z attempt 51: 509 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:05:22.3643859Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:05:22.3646226Z attempt 52: 509 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:05:46.3008507Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:05:46.3010740Z attempt 53: 509 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:06:10.3287596Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:06:10.3288274Z attempt 54: 509 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:06:33.8521911Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:06:33.8524444Z attempt 55: 514 check-run(s), 54 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:06:58.0987304Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:06:58.0987935Z attempt 56: 514 check-run(s), 53 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:07:22.4550062Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:07:22.4551498Z attempt 57: 517 check-run(s), 56 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:07:46.3895368Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:07:46.3896463Z attempt 58: 517 check-run(s), 54 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:08:10.3440276Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:08:10.3440905Z attempt 59: 517 check-run(s), 53 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:08:34.1342130Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:08:34.1342818Z attempt 60: 517 check-run(s), 52 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:08:58.4063763Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:08:58.4064473Z attempt 61: 517 check-run(s), 51 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:09:22.2385604Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:09:22.2386274Z attempt 62: 517 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:09:45.9357567Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:09:45.9358409Z attempt 63: 517 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:10:10.2704254Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:10:10.2705055Z attempt 64: 517 check-run(s), 50 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:10:34.3952745Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:10:34.3953707Z attempt 65: 518 check-run(s), 49 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:10:58.1785590Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:10:58.1786506Z attempt 66: 518 check-run(s), 49 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:11:22.1771541Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:11:22.1772610Z attempt 67: 518 check-run(s), 49 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:11:45.9582214Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:11:45.9584224Z attempt 68: 518 check-run(s), 48 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:12:09.6608666Z   workflow-run resolver: ignored 129 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:12:09.6609718Z attempt 69: 518 check-run(s), 47 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:12:33.9486717Z   workflow-run resolver: ignored 134 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:12:33.9488176Z attempt 70: 517 check-run(s), 45 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:12:57.6110123Z   workflow-run resolver: ignored 134 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:12:57.6111560Z attempt 71: 517 check-run(s), 45 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:13:21.8910981Z   workflow-run resolver: ignored 134 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:13:21.8911666Z attempt 72: 519 check-run(s), 47 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:13:45.7055932Z   workflow-run resolver: ignored 134 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:13:45.7057151Z attempt 73: 520 check-run(s), 45 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:14:09.6914681Z   workflow-run resolver: ignored 134 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:14:09.6915868Z attempt 74: 520 check-run(s), 45 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:14:34.2831168Z   workflow-run resolver: ignored 137 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:14:34.2832654Z attempt 75: 519 check-run(s), 43 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:14:58.7159748Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:14:58.7160387Z attempt 76: 518 check-run(s), 41 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:15:22.6413921Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:15:22.6416021Z attempt 77: 518 check-run(s), 39 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:15:46.5614014Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:15:46.5615110Z attempt 78: 518 check-run(s), 39 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:16:10.3616101Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:16:10.3616741Z attempt 79: 518 check-run(s), 38 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:16:34.1495340Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:16:34.1496094Z attempt 80: 518 check-run(s), 38 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:16:57.9715670Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:16:57.9716369Z attempt 81: 518 check-run(s), 37 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:17:21.6536467Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:17:21.6537250Z attempt 82: 518 check-run(s), 36 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:17:45.5341255Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:17:45.5343115Z attempt 83: 518 check-run(s), 35 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:18:09.4736058Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:18:09.4736851Z attempt 84: 520 check-run(s), 35 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:18:33.5677140Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:18:33.5677948Z attempt 85: 520 check-run(s), 35 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:18:57.4843213Z   workflow-run resolver: ignored 138 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:18:57.4843888Z attempt 86: 520 check-run(s), 35 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:19:22.9490679Z   workflow-run resolver: ignored 178 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:19:22.9491315Z attempt 87: 521 check-run(s), 31 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:19:46.6864869Z   workflow-run resolver: ignored 178 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:19:46.6865633Z attempt 88: 521 check-run(s), 30 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:20:10.5846452Z   workflow-run resolver: ignored 178 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:20:10.5847040Z attempt 89: 521 check-run(s), 30 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:20:34.4421040Z   workflow-run resolver: ignored 178 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:20:34.4421834Z attempt 90: 521 check-run(s), 29 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:20:58.2635693Z   workflow-run resolver: ignored 178 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:20:58.2643627Z attempt 91: 521 check-run(s), 29 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:21:22.6824544Z   workflow-run resolver: ignored 180 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:21:22.6825431Z attempt 92: 520 check-run(s), 26 running, all-terminal stable for 0/2 poll(s) (name set changed), awaiting the feature-matrix reporter verdict
+2026-09-10T09:21:26.5912717Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+2026-09-10T09:21:26.5913872Z   workflow-run resolver: ignored 180 check-run(s) from superseded runs/attempts (#3505).
+2026-09-10T09:21:26.5914837Z attempt 93: 520 check-run(s), 26 running, all-terminal stable for 0/2 poll(s), awaiting the feature-matrix reporter verdict
+2026-09-10T09:21:26.5917491Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 26 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+2026-09-10T09:21:26.5920447Z - ✗ nightly UPDATE differential (sparq vs Oxigraph, advancing): failure
+2026-09-10T09:21:26.5948004Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+2026-09-10T09:21:26.6000295Z ##[error]Process completed with exit code 1.
+2026-09-10T09:21:26.6125288Z Post job cleanup.
+2026-09-10T09:21:26.6835464Z [command]/usr/bin/git version
+2026-09-10T09:21:26.6873281Z git version 2.55.0
+2026-09-10T09:21:26.6915915Z Temporarily overriding HOME='/home/runner/work/_temp/f469f54c-2833-45a9-9664-2b4aa086c57b' before making global git config changes
+2026-09-10T09:21:26.6916673Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-10T09:21:26.6921301Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/sparq/sparq
+2026-09-10T09:21:26.6948305Z Removing SSH command configuration
+2026-09-10T09:21:26.6954289Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-10T09:21:26.6983631Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-10T09:21:26.7161042Z Removing HTTP extra header
+2026-09-10T09:21:26.7166230Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-10T09:21:26.7191899Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-10T09:21:26.7364706Z Removing includeIf entries pointing to credentials config files
+2026-09-10T09:21:26.7369025Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-10T09:21:26.7393433Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-10T09:21:26.7684174Z Cleaning up orphan processes

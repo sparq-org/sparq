@@ -1,0 +1,9 @@
+job-102816976230.log:190: 2026-09-10T09:29:28.9891861Z   workflow-run resolver: ignored 3 check-run(s) from superseded runs/attempts (#3505).
+job-102816976230.log:191: 2026-09-10T09:29:28.9892620Z attempt 5: 59 check-run(s), 46 running, all-terminal stable for 0/2 poll(s) (name set changed)
+job-102816976230.log:192: 2026-09-10T09:29:31.3183770Z   fail-fast: 1 concluded gating failure(s) observed — immediate grace re-poll to confirm before concluding.
+job-102816976230.log:193: 2026-09-10T09:29:31.3185145Z   workflow-run resolver: ignored 3 check-run(s) from superseded runs/attempts (#3505).
+job-102816976230.log:194: 2026-09-10T09:29:31.3185749Z attempt 6: 59 check-run(s), 46 running, all-terminal stable for 0/2 poll(s)
+job-102816976230.log:195: 2026-09-10T09:29:31.3188054Z ### ci-summary: FAILED (fail-fast) — 1 gating check(s) concluded failure while 46 sibling(s) were still running; no later state can turn this verdict green (a newest-run failure is never forgiven), so the gate REDs now instead of waiting out the remaining legs.
+job-102816976230.log:196: 2026-09-10T09:29:31.3189148Z - ✗ docs-quality quick-gates: failure
+job-102816976230.log:197: 2026-09-10T09:29:31.3208390Z ##[error]ci-summary failed fast — a gating check concluded failure; the remaining siblings were not waited on.
+job-102816976230.log:198: 2026-09-10T09:29:31.3258709Z ##[error]Process completed with exit code 1.

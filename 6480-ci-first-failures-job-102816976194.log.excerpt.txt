@@ -1,0 +1,45 @@
+job-102816976194.log:3396: 2026-09-10T09:29:04.1513519Z ##[group]Run python3 scripts/tests/test_js_wasm_pack_install.py
+job-102816976194.log:3397: 2026-09-10T09:29:04.1513980Z [36;1mpython3 scripts/tests/test_js_wasm_pack_install.py[0m
+job-102816976194.log:3398: 2026-09-10T09:29:04.1549862Z shell: /usr/bin/bash -e {0}
+job-102816976194.log:3399: 2026-09-10T09:29:04.1550111Z env:
+job-102816976194.log:3400: 2026-09-10T09:29:04.1550613Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+job-102816976194.log:3401: 2026-09-10T09:29:04.1551252Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+job-102816976194.log:3402: 2026-09-10T09:29:04.1551693Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+job-102816976194.log:3403: 2026-09-10T09:29:04.1552075Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+job-102816976194.log:3404: 2026-09-10T09:29:04.1552476Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+job-102816976194.log:3405: 2026-09-10T09:29:04.1552866Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+job-102816976194.log:3406: 2026-09-10T09:29:04.1553198Z ##[endgroup]
+job-102816976194.log:3407: 2026-09-10T09:29:04.2095186Z test_install_precedes_npm_ci (__main__.JsLaneWasmPackInstall.test_install_precedes_npm_ci)
+job-102816976194.log:3408: 2026-09-10T09:29:04.2100381Z (4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH. ... FAIL
+job-102816976194.log:3409: 2026-09-10T09:29:04.2102207Z test_installs_prebuilt_binary_sha_pinned (__main__.JsLaneWasmPackInstall.test_installs_prebuilt_binary_sha_pinned)
+job-102816976194.log:3410: 2026-09-10T09:29:04.2104084Z (2) The replacement is the SHA-pinned prebuilt-download action. ... ok
+job-102816976194.log:3411: 2026-09-10T09:29:04.2105436Z test_no_cargo_install_wasm_pack (__main__.JsLaneWasmPackInstall.test_no_cargo_install_wasm_pack)
+job-102816976194.log:3412: 2026-09-10T09:29:04.2107035Z (1) The source compile — the actual flake surface — must be gone. ... ok
+job-102816976194.log:3413: 2026-09-10T09:29:04.2112278Z test_version_is_pinned_exactly_not_latest (__main__.JsLaneWasmPackInstall.test_version_is_pinned_exactly_not_latest)
+job-102816976194.log:3414: 2026-09-10T09:29:04.2122120Z (3) An exact vX.Y.Z — `latest` re-adds a network lookup to resolve it. ... ok
+job-102816976194.log:3415: 2026-09-10T09:29:04.2123559Z test_both_wasm_lanes_use_the_action (__main__.WasmPackVersionUnified.test_both_wasm_lanes_use_the_action)
+job-102816976194.log:3416: 2026-09-10T09:29:04.2214858Z Anti-vacuity: the two lanes #5771 unified must still be in the sample. ... ok
+job-102816976194.log:3417: 2026-09-10T09:29:04.2216407Z test_every_step_pins_an_exact_version (__main__.WasmPackVersionUnified.test_every_step_pins_an_exact_version)
+job-102816976194.log:3418: 2026-09-10T09:29:04.2294157Z Every wasm-pack step names an exact release — an omitted `version:` takes ... ok
+job-102816976194.log:3419: 2026-09-10T09:29:04.2295947Z test_mutation_dropping_a_lanes_version_is_caught (__main__.WasmPackVersionUnified.test_mutation_dropping_a_lanes_version_is_caught)
+job-102816976194.log:3420: 2026-09-10T09:29:04.2297582Z Deleting one lane's `version:` must NOT leave both assertions green. ... ok
+job-102816976194.log:3421: 2026-09-10T09:29:04.2299263Z test_mutation_version_outside_with_is_not_a_pin (__main__.WasmPackVersionUnified.test_mutation_version_outside_with_is_not_a_pin)
+job-102816976194.log:3422: 2026-09-10T09:29:04.2301063Z A `version:` that the action never receives must not read as a pin. ... ok
+job-102816976194.log:3423: 2026-09-10T09:29:04.2377722Z test_single_version_across_workflows (__main__.WasmPackVersionUnified.test_single_version_across_workflows) ... ok
+job-102816976194.log:3424: 2026-09-10T09:29:04.2378610Z 
+job-102816976194.log:3425: 2026-09-10T09:29:04.2378958Z ======================================================================
+job-102816976194.log:3426: 2026-09-10T09:29:04.2379979Z FAIL: test_install_precedes_npm_ci (__main__.JsLaneWasmPackInstall.test_install_precedes_npm_ci)
+job-102816976194.log:3427: 2026-09-10T09:29:04.2381290Z (4) `prepare` runs on `npm ci` and needs wasm-pack already on PATH.
+job-102816976194.log:3428: 2026-09-10T09:29:04.2382113Z ----------------------------------------------------------------------
+job-102816976194.log:3429: 2026-09-10T09:29:04.2382824Z Traceback (most recent call last):
+job-102816976194.log:3430: 2026-09-10T09:29:04.2383901Z   File "/home/runner/work/sparq/sparq/scripts/tests/test_js_wasm_pack_install.py", line 216, in test_install_precedes_npm_ci
+job-102816976194.log:3431: 2026-09-10T09:29:04.2385117Z     self.assertTrue(npm_ci_at, "js.yml must still run the root `npm ci`")
+job-102816976194.log:3432: 2026-09-10T09:29:04.2386057Z AssertionError: [] is not true : js.yml must still run the root `npm ci`
+job-102816976194.log:3433: 2026-09-10T09:29:04.2386568Z 
+job-102816976194.log:3434: 2026-09-10T09:29:04.2387292Z ----------------------------------------------------------------------
+job-102816976194.log:3435: 2026-09-10T09:29:04.2387892Z Ran 9 tests in 0.029s
+job-102816976194.log:3436: 2026-09-10T09:29:04.2388127Z 
+job-102816976194.log:3437: 2026-09-10T09:29:04.2388533Z FAILED (failures=1)
+job-102816976194.log:3438: 2026-09-10T09:29:04.2462387Z ##[error]Process completed with exit code 1.
+job-102816976194.log:3439: 2026-09-10T09:29:04.2641087Z Post job cleanup.
+job-102816976194.log:3440: 2026-09-10T09:29:04.3476416Z [command]/usr/bin/git version

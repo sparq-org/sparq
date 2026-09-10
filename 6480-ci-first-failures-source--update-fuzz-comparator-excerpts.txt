@@ -1,0 +1,164 @@
+crates/sparq-bench/src/update_fuzz.rs:733:     }
+crates/sparq-bench/src/update_fuzz.rs:734:     out.sort();
+crates/sparq-bench/src/update_fuzz.rs:735:     Ok(out)
+crates/sparq-bench/src/update_fuzz.rs:736: }
+crates/sparq-bench/src/update_fuzz.rs:737: 
+crates/sparq-bench/src/update_fuzz.rs:738: // ── canonical comparison ─────────────────────────────────────────────────────────
+crates/sparq-bench/src/update_fuzz.rs:739: 
+crates/sparq-bench/src/update_fuzz.rs:740: /// Whether a snapshot mentions a blank node, i.e. whether sorted N-Quads has stopped
+crates/sparq-bench/src/update_fuzz.rs:741: /// being a canonical form and RDFC-1.0 relabelling is required.
+crates/sparq-bench/src/update_fuzz.rs:742: ///
+crates/sparq-bench/src/update_fuzz.rs:743: /// Deliberately a substring test. It cannot produce a FALSE NEGATIVE — every blank
+crates/sparq-bench/src/update_fuzz.rs:744: /// node renders as `_:label` — and a false positive (a literal containing the text
+crates/sparq-bench/src/update_fuzz.rs:745: /// `_:`) would only route a blank-node-free snapshot through the canonicalizer, which
+crates/sparq-bench/src/update_fuzz.rs:746: /// on such input is just a sort-and-deduplicate. The generator emits no such literal
+crates/sparq-bench/src/update_fuzz.rs:747: /// today; the check stays conservative so that if one is ever added, the comparator
+crates/sparq-bench/src/update_fuzz.rs:748: /// degrades in the safe direction.
+crates/sparq-bench/src/update_fuzz.rs:749: fn mentions_blank_node(lines: &[String]) -> bool {
+crates/sparq-bench/src/update_fuzz.rs:750:     lines.iter().any(|l| l.contains("_:"))
+crates/sparq-bench/src/update_fuzz.rs:751: }
+crates/sparq-bench/src/update_fuzz.rs:752: 
+crates/sparq-bench/src/update_fuzz.rs:753: /// Re-parses N-Quads lines back into `oxrdf` quads (the input side of every
+crates/sparq-bench/src/update_fuzz.rs:754: /// structural rewrite below).
+crates/sparq-bench/src/update_fuzz.rs:755: fn parse_lines(lines: &[String], what: &str) -> Result<Vec<Quad>, String> {
+crates/sparq-bench/src/update_fuzz.rs:756:     let doc = {
+crates/sparq-bench/src/update_fuzz.rs:757:         let mut s = lines.join("\n");
+crates/sparq-bench/src/update_fuzz.rs:758:         s.push('\n');
+crates/sparq-bench/src/update_fuzz.rs:759:         s
+crates/sparq-bench/src/update_fuzz.rs:760:     };
+crates/sparq-bench/src/update_fuzz.rs:761:     sparq_canon::parse_nquads(&doc)
+crates/sparq-bench/src/update_fuzz.rs:762:         .map_err(|e| format!("{}: N-Quads re-parse failed ({})", what, e))
+crates/sparq-bench/src/update_fuzz.rs:763: }
+crates/sparq-bench/src/update_fuzz.rs:764: 
+crates/sparq-bench/src/update_fuzz.rs:765: /// The comparable form of one snapshot.
+crates/sparq-bench/src/update_fuzz.rs:766: ///
+crates/sparq-bench/src/update_fuzz.rs:767: /// With `relabel` false (neither side mentions a blank node) the sorted lines ARE the
+crates/sparq-bench/src/update_fuzz.rs:768: /// canonical form and are returned untouched — the strongest, byte-level compare.
+crates/sparq-bench/src/update_fuzz.rs:769: /// With it true, both sides are relabelled to their RDFC-1.0 canonical form so the
+crates/sparq-bench/src/update_fuzz.rs:770: /// comparison decides RDF ISOMORPHISM. The constrained `*_ground_terms` profile is
+crates/sparq-bench/src/update_fuzz.rs:771: /// used deliberately: it is exactly RDFC-1.0 with triple terms as opaque constants and
+crates/sparq-bench/src/update_fuzz.rs:772: /// fails closed on a blank node nested inside a triple term, so the non-standard
+crates/sparq-bench/src/update_fuzz.rs:773: /// nested-bnode descent is never reachable from this harness.
+crates/sparq-bench/src/update_fuzz.rs:774: fn comparable(lines: &[String], relabel: bool, what: &str) -> Result<Vec<String>, String> {
+crates/sparq-bench/src/update_fuzz.rs:775:     if !relabel {
+crates/sparq-bench/src/update_fuzz.rs:776:         return Ok(lines.to_vec());
+crates/sparq-bench/src/update_fuzz.rs:777:     }
+crates/sparq-bench/src/update_fuzz.rs:778:     let quads = parse_lines(lines, what)?;
+crates/sparq-bench/src/update_fuzz.rs:779:     let canon = sparq_canon::canonicalize_rdf12_ground_terms(&quads)
+crates/sparq-bench/src/update_fuzz.rs:780:         .map_err(|e| format!("{}: RDFC-1.0 canonicalization failed ({})", what, e))?;
+crates/sparq-bench/src/update_fuzz.rs:781:     let mut out: Vec<String> = canon.lines().map(str::to_string).collect();
+crates/sparq-bench/src/update_fuzz.rs:782:     out.sort();
+crates/sparq-bench/src/update_fuzz.rs:783:     Ok(out)
+crates/sparq-bench/src/update_fuzz.rs:784: }
+crates/sparq-bench/src/update_fuzz.rs:785: 
+crates/sparq-bench/src/update_fuzz.rs:786: /// Rewrites `t` the way Oxigraph's storage layer does: an `xsd:integer` literal whose
+crates/sparq-bench/src/update_fuzz.rs:787: /// value fits the native integer it decodes to is re-rendered in canonical lexical
+crates/sparq-bench/src/update_fuzz.rs:788: /// form. Structural, never string surgery — and it descends into triple terms, which
+crates/sparq-bench/src/update_fuzz.rs:789: /// Oxigraph's recursive term encoder also normalizes.
+crates/sparq-bench/src/update_fuzz.rs:790: fn oxigraph_normalized_term(t: &Term) -> Term {
+crates/sparq-bench/src/update_fuzz.rs:791:     match t {
+crates/sparq-bench/src/update_fuzz.rs:792:         Term::Literal(l) if l.datatype() == xsd::INTEGER => match l.value().parse::<i64>() {
+crates/sparq-bench/src/update_fuzz.rs:793:             Ok(v) if v.to_string() != l.value() => {
+crates/sparq-bench/src/update_fuzz.rs:794:                 Term::Literal(Literal::new_typed_literal(v.to_string(), xsd::INTEGER))
+crates/sparq-bench/src/update_fuzz.rs:795:             }
+crates/sparq-bench/src/update_fuzz.rs:796:             _ => t.clone(),
+crates/sparq-bench/src/update_fuzz.rs:797:         },
+crates/sparq-bench/src/update_fuzz.rs:798:         Term::Triple(inner) => Term::Triple(Box::new(Triple::new(
+crates/sparq-bench/src/update_fuzz.rs:799:             inner.subject.clone(),
+crates/sparq-bench/src/update_fuzz.rs:800:             inner.predicate.clone(),
+crates/sparq-bench/src/update_fuzz.rs:801:             oxigraph_normalized_term(&inner.object),
+crates/sparq-bench/src/update_fuzz.rs:802:         ))),
+crates/sparq-bench/src/update_fuzz.rs:803:         _ => t.clone(),
+crates/sparq-bench/src/update_fuzz.rs:804:     }
+crates/sparq-bench/src/update_fuzz.rs:805: }
+crates/sparq-bench/src/update_fuzz.rs:806: 
+crates/sparq-bench/src/update_fuzz.rs:807: /// A snapshot with every `xsd:integer` lexical canonicalized and duplicates merged —
+crates/sparq-bench/src/update_fuzz.rs:808: /// the state Oxigraph's lossy numeric encoding collapses a dataset to. Re-derived
+crates/sparq-bench/src/update_fuzz.rs:809: /// here independently of BOTH engines; see the adjudicated class in the module docs.
+crates/sparq-bench/src/update_fuzz.rs:810: fn oxigraph_normalized(lines: &[String], what: &str) -> Result<Vec<String>, String> {
+crates/sparq-bench/src/update_fuzz.rs:811:     let quads = parse_lines(lines, what)?;
+crates/sparq-bench/src/update_fuzz.rs:812:     let mut out: Vec<String> = quads
+crates/sparq-bench/src/update_fuzz.rs:813:         .iter()
+crates/sparq-bench/src/update_fuzz.rs:814:         .map(|q| {
+crates/sparq-bench/src/update_fuzz.rs:815:             let graph = match &q.graph_name {
+crates/sparq-bench/src/update_fuzz.rs:816:                 oxrdf::GraphName::DefaultGraph => None,
+crates/sparq-bench/src/update_fuzz.rs:817:                 g => Some(g.to_string()),
+crates/sparq-bench/src/update_fuzz.rs:818:             };
+crates/sparq-bench/src/update_fuzz.rs:819:             nquads_line(
+crates/sparq-bench/src/update_fuzz.rs:820:                 &q.subject.to_string(),
+crates/sparq-bench/src/update_fuzz.rs:821:                 &q.predicate.to_string(),
+crates/sparq-bench/src/update_fuzz.rs:822:                 &oxigraph_normalized_term(&q.object).to_string(),
+crates/sparq-bench/src/update_fuzz.rs:823:                 graph.as_deref(),
+crates/sparq-bench/src/update_fuzz.rs:824:             )
+crates/sparq-bench/src/update_fuzz.rs:825:         })
+crates/sparq-bench/src/update_fuzz.rs:826:         .collect();
+crates/sparq-bench/src/update_fuzz.rs:827:     out.sort();
+crates/sparq-bench/src/update_fuzz.rs:828:     out.dedup();
+crates/sparq-bench/src/update_fuzz.rs:829:     Ok(out)
+crates/sparq-bench/src/update_fuzz.rs:830: }
+crates/sparq-bench/src/update_fuzz.rs:831: 
+crates/sparq-bench/src/update_fuzz.rs:832: /// The lines on exactly one side — the human-readable core of a divergence report.
+crates/sparq-bench/src/update_fuzz.rs:833: fn one_sided(label_a: &str, a: &[String], label_b: &str, b: &[String]) -> String {
+crates/sparq-bench/src/update_fuzz.rs:834:     let bset: std::collections::BTreeSet<&String> = b.iter().collect();
+crates/sparq-bench/src/update_fuzz.rs:835:     let aset: std::collections::BTreeSet<&String> = a.iter().collect();
+crates/sparq-bench/src/update_fuzz.rs:836:     let mut s = String::new();
+crates/sparq-bench/src/update_fuzz.rs:1108:         // divergence (strict — there is no unsupported-skip in this harness).
+crates/sparq-bench/src/update_fuzz.rs:1109:         g_rebuild = sparq_engine::update(&g_rebuild, &op.sparq)
+crates/sparq-bench/src/update_fuzz.rs:1110:             .map_err(|e| fail(i, op, format!("sparq update (rebuild path) error: {}", e)))?;
+crates/sparq-bench/src/update_fuzz.rs:1111:         sparq_engine::update_in_place(&mut g_inplace, &op.sparq)
+crates/sparq-bench/src/update_fuzz.rs:1112:             .map_err(|e| fail(i, op, format!("sparq update_in_place error: {}", e)))?;
+crates/sparq-bench/src/update_fuzz.rs:1113:         if let Some(oxi) = &op.oxi {
+crates/sparq-bench/src/update_fuzz.rs:1114:             store
+crates/sparq-bench/src/update_fuzz.rs:1115:                 .update(oxi.as_str())
+crates/sparq-bench/src/update_fuzz.rs:1116:                 .map_err(|e| fail(i, op, format!("oxigraph update error: {}", e)))?;
+crates/sparq-bench/src/update_fuzz.rs:1117:         }
+crates/sparq-bench/src/update_fuzz.rs:1118: 
+crates/sparq-bench/src/update_fuzz.rs:1119:         if inject_divergence_at == Some(i) {
+crates/sparq-bench/src/update_fuzz.rs:1120:             use oxigraph::model::{GraphName, NamedNode, Quad};
+crates/sparq-bench/src/update_fuzz.rs:1121:             let n = |s: &str| NamedNode::new(s).expect("valid IRI");
+crates/sparq-bench/src/update_fuzz.rs:1122:             let marker = Quad::new(
+crates/sparq-bench/src/update_fuzz.rs:1123:                 n("http://ex/injected"),
+crates/sparq-bench/src/update_fuzz.rs:1124:                 n("http://ex/injected"),
+crates/sparq-bench/src/update_fuzz.rs:1125:                 n("http://ex/injected"),
+crates/sparq-bench/src/update_fuzz.rs:1126:                 GraphName::DefaultGraph,
+crates/sparq-bench/src/update_fuzz.rs:1127:             );
+crates/sparq-bench/src/update_fuzz.rs:1128:             store
+crates/sparq-bench/src/update_fuzz.rs:1129:                 .insert(&marker)
+crates/sparq-bench/src/update_fuzz.rs:1130:                 .map_err(|e| format!("marker insert failed: {}", e))?;
+crates/sparq-bench/src/update_fuzz.rs:1131:         }
+crates/sparq-bench/src/update_fuzz.rs:1132: 
+crates/sparq-bench/src/update_fuzz.rs:1133:         // (a) Canonical dataset equality. Localizes a divergence to this exact step.
+crates/sparq-bench/src/update_fuzz.rs:1134:         // sparq-vs-sparq FIRST and STRICT (no adjudication): the two sparq paths must
+crates/sparq-bench/src/update_fuzz.rs:1135:         // agree with each other whatever the reference engine does.
+crates/sparq-bench/src/update_fuzz.rs:1136:         let nq_rebuild = sparq_nquads(&g_rebuild);
+crates/sparq-bench/src/update_fuzz.rs:1137:         let nq_inplace = sparq_nquads(&g_inplace);
+crates/sparq-bench/src/update_fuzz.rs:1138:         let nq_oxi = oxi_nquads(&store).map_err(|e| fail(i, op, e))?;
+crates/sparq-bench/src/update_fuzz.rs:1139:         if mentions_blank_node(&nq_rebuild) || mentions_blank_node(&nq_oxi) {
+crates/sparq-bench/src/update_fuzz.rs:1140:             isomorphism_compares += 1;
+crates/sparq-bench/src/update_fuzz.rs:1141:         }
+crates/sparq-bench/src/update_fuzz.rs:1142:         if let Verdict::Differs(detail) = compare(
+crates/sparq-bench/src/update_fuzz.rs:1143:             "sparq(rebuild)",
+crates/sparq-bench/src/update_fuzz.rs:1144:             &nq_rebuild,
+crates/sparq-bench/src/update_fuzz.rs:1145:             "sparq(in-place)",
+crates/sparq-bench/src/update_fuzz.rs:1146:             &nq_inplace,
+crates/sparq-bench/src/update_fuzz.rs:1147:             false,
+crates/sparq-bench/src/update_fuzz.rs:1148:         ) {
+crates/sparq-bench/src/update_fuzz.rs:1149:             return Err(fail(
+crates/sparq-bench/src/update_fuzz.rs:1150:                 i,
+crates/sparq-bench/src/update_fuzz.rs:1151:                 op,
+crates/sparq-bench/src/update_fuzz.rs:1152:                 format!(
+crates/sparq-bench/src/update_fuzz.rs:1153:                     "canonical dataset differs BETWEEN SPARQ'S OWN UPDATE PATHS\n{}",
+crates/sparq-bench/src/update_fuzz.rs:1154:                     detail
+crates/sparq-bench/src/update_fuzz.rs:1155:                 ),
+crates/sparq-bench/src/update_fuzz.rs:1156:             ));
+crates/sparq-bench/src/update_fuzz.rs:1157:         }
+crates/sparq-bench/src/update_fuzz.rs:1158:         for (label, nq) in [
+crates/sparq-bench/src/update_fuzz.rs:1159:             ("sparq(rebuild)", &nq_rebuild),
+crates/sparq-bench/src/update_fuzz.rs:1160:             ("sparq(in-place)", &nq_inplace),
+crates/sparq-bench/src/update_fuzz.rs:1161:         ] {
+crates/sparq-bench/src/update_fuzz.rs:1162:             match compare(label, nq, "oxigraph", &nq_oxi, allow.integer_lexical) {
+crates/sparq-bench/src/update_fuzz.rs:1163:                 Verdict::Same => {}
+crates/sparq-bench/src/update_fuzz.rs:1164:                 Verdict::AdjudicatedIntegerLexical => adjudicated_integer_lexical += 1,
+crates/sparq-bench/src/update_fuzz.rs:1165:                 Verdict::Differs(detail) => {
+crates/sparq-bench/src/update_fuzz.rs:1166:                     return Err(fail(
+crates/sparq-bench/src/update_fuzz.rs:1167:                         i,

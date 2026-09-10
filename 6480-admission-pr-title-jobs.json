@@ -1,0 +1,57 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 102816976602,
+      "run_id": 34460513204,
+      "workflow_name": "pr-title",
+      "head_branch": "codex/next-security-patch",
+      "run_url": "https://api.github.com/repos/sparq-org/sparq/actions/runs/34460513204",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSz3qKM8AAAAX8F6O2g",
+      "head_sha": "26d139520f07f1ceacafbacbeb9991de371e2b53",
+      "url": "https://api.github.com/repos/sparq-org/sparq/actions/jobs/102816976602",
+      "html_url": "https://github.com/sparq-org/sparq/actions/runs/34460513204/job/102816976602",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-09-10T09:25:02Z",
+      "started_at": "2026-09-10T09:27:26Z",
+      "completed_at": "2026-09-10T09:27:30Z",
+      "name": "conventional-commits (advisory)",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-10T09:27:27Z",
+          "completed_at": "2026-09-10T09:27:28Z"
+        },
+        {
+          "name": "Validate PR title is a Conventional Commit",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 2,
+          "started_at": "2026-09-10T09:27:28Z",
+          "completed_at": "2026-09-10T09:27:29Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-10T09:27:29Z",
+          "completed_at": "2026-09-10T09:27:29Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/sparq-org/sparq/check-runs/102816976602",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000077439,
+      "runner_name": "GitHub Actions 1000077439",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}
