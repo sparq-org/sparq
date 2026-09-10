@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-10T17:39:55.139419+00:00",
+  "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "manifest_sha256": "2679e940e1f2106778d6ee569f90aeb6896ed4d468b5f6b3aa01e7e3a55e5df3",
+  "verified_files": 221,
+  "source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "diff_sha256": "7aaff25ee7dd6b817313cd1d33b19026a8741ad9a3771c35d03c1489867960ca",
+  "actual_git_bytes_match": true,
+  "input_bytes": 100410,
+  "input_sha256": "8000bf18e96774799a08e9212f94d6029d3e05f65893e1dd90f1e6eff9703a35",
+  "default_tests": 4,
+  "mmap_tests": 5,
+  "behavioral_controls_killed": 4,
+  "full_CI_pending": true
+}

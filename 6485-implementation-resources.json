@@ -1,0 +1,554 @@
+[
+  {
+    "phase": "preflight",
+    "elapsed": 0.01789179199999999,
+    "free": 10712563712,
+    "allocated": 10276864
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 0.540693334,
+    "free": 10713378816,
+    "allocated": 10280960
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 1.062723959,
+    "free": 10713374720,
+    "allocated": 10280960
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 1.5787512499999998,
+    "free": 10713001984,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 2.0992520420000003,
+    "free": 10713001984,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 2.616408584,
+    "free": 10713001984,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 3.1380649170000003,
+    "free": 10712973312,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 3.650747334,
+    "free": 10712748032,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 4.172237917,
+    "free": 10713542656,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 4.694026334,
+    "free": 10713292800,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 5.210952,
+    "free": 10713268224,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 5.72652025,
+    "free": 10713239552,
+    "allocated": 10285056
+  },
+  {
+    "phase": "preflight",
+    "elapsed": 6.250492875,
+    "free": 10712936448,
+    "allocated": 10285056
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 6.859398125,
+    "free": 10712678400,
+    "allocated": 10305536
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 7.3810526670000005,
+    "free": 10712670208,
+    "allocated": 10305536
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 7.905129209000001,
+    "free": 10712662016,
+    "allocated": 10305536
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 8.434076958999999,
+    "free": 10712629248,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 8.952325458999999,
+    "free": 10712625152,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 9.471940959,
+    "free": 10712616960,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 9.992266958999998,
+    "free": 10712616960,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 10.521298792,
+    "free": 10712616960,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 11.048620958999999,
+    "free": 10712616960,
+    "allocated": 10313728
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 11.575293583999999,
+    "free": 10712367104,
+    "allocated": 10559488
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 12.101252375,
+    "free": 10712109056,
+    "allocated": 10813440
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 12.630980791999999,
+    "free": 10708258816,
+    "allocated": 14647296
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 13.150344292,
+    "free": 10708152320,
+    "allocated": 14647296
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 13.65866775,
+    "free": 10708152320,
+    "allocated": 14647296
+  },
+  {
+    "phase": "compile-candidate",
+    "elapsed": 14.177797624999998,
+    "free": 10708148224,
+    "allocated": 14647296
+  },
+  {
+    "phase": "test-candidate",
+    "elapsed": 14.789296666999999,
+    "free": 10708430848,
+    "allocated": 14143488
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 15.368613834,
+    "free": 10708258816,
+    "allocated": 14159872
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 15.892506416999998,
+    "free": 10708246528,
+    "allocated": 14159872
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 16.423503542000002,
+    "free": 10708226048,
+    "allocated": 14168064
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 16.937607917,
+    "free": 10708221952,
+    "allocated": 14168064
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 17.45025675,
+    "free": 10708209664,
+    "allocated": 14168064
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 17.971098667,
+    "free": 10708209664,
+    "allocated": 14168064
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 18.496186917,
+    "free": 10708205568,
+    "allocated": 14168064
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 19.023635084000002,
+    "free": 10707955712,
+    "allocated": 14413824
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 19.554536375,
+    "free": 10707664896,
+    "allocated": 14667776
+  },
+  {
+    "phase": "compile-unconditional-cas",
+    "elapsed": 20.079698209,
+    "free": 10703814656,
+    "allocated": 18501632
+  },
+  {
+    "phase": "test-unconditional-cas",
+    "elapsed": 20.67742575,
+    "free": 10704285696,
+    "allocated": 18001920
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 21.258057209,
+    "free": 10704109568,
+    "allocated": 18018304
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 21.782250959000002,
+    "free": 10704101376,
+    "allocated": 18018304
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 22.308102875,
+    "free": 10704076800,
+    "allocated": 18026496
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 22.828284834,
+    "free": 10704031744,
+    "allocated": 18026496
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 23.339973209,
+    "free": 10704019456,
+    "allocated": 18026496
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 23.867562209000003,
+    "free": 10704019456,
+    "allocated": 18026496
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 24.396348167,
+    "free": 10704019456,
+    "allocated": 18026496
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 24.923809625,
+    "free": 10703773696,
+    "allocated": 18272256
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 25.450775042,
+    "free": 10703769600,
+    "allocated": 18272256
+  },
+  {
+    "phase": "compile-no-cas",
+    "elapsed": 25.981649667000003,
+    "free": 10699669504,
+    "allocated": 22360064
+  },
+  {
+    "phase": "test-no-cas",
+    "elapsed": 26.6011445,
+    "free": 10700148736,
+    "allocated": 21856256
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 27.181698125,
+    "free": 10699980800,
+    "allocated": 21872640
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 27.705716167000002,
+    "free": 10699972608,
+    "allocated": 21872640
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 28.230215334,
+    "free": 10699960320,
+    "allocated": 21880832
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 28.75060025,
+    "free": 10699956224,
+    "allocated": 21880832
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 29.26261325,
+    "free": 10699948032,
+    "allocated": 21880832
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 29.783599167000002,
+    "free": 10699948032,
+    "allocated": 21880832
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 30.313852917000002,
+    "free": 10699943936,
+    "allocated": 21880832
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 30.843322750000002,
+    "free": 10699796480,
+    "allocated": 22126592
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 31.369187834,
+    "free": 10699247616,
+    "allocated": 22659072
+  },
+  {
+    "phase": "compile-inverted-guard",
+    "elapsed": 31.890543709000003,
+    "free": 10696069120,
+    "allocated": 26214400
+  },
+  {
+    "phase": "test-inverted-guard",
+    "elapsed": 32.476183541999994,
+    "free": 10696421376,
+    "allocated": 25710592
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 33.042618792,
+    "free": 10696228864,
+    "allocated": 25726976
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 33.561993541999996,
+    "free": 10696167424,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 34.076169541999995,
+    "free": 10696269824,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 34.599548709,
+    "free": 10696249344,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 35.118330541999995,
+    "free": 10696245248,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 35.7118405,
+    "free": 10696241152,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 36.241305624999995,
+    "free": 10696220672,
+    "allocated": 25735168
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 36.76433925,
+    "free": 10695954432,
+    "allocated": 25980928
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 37.295390667,
+    "free": 10694012928,
+    "allocated": 27922432
+  },
+  {
+    "phase": "compile-self-length",
+    "elapsed": 37.823146959,
+    "free": 10687840256,
+    "allocated": 34095104
+  },
+  {
+    "phase": "test-self-length",
+    "elapsed": 38.440349958999995,
+    "free": 10692263936,
+    "allocated": 29569024
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 39.042755917,
+    "free": 10692145152,
+    "allocated": 29585408
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 39.567637,
+    "free": 10692124672,
+    "allocated": 29585408
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 40.1010965,
+    "free": 10692124672,
+    "allocated": 29585408
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 40.624226875,
+    "free": 10692108288,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 41.147478917,
+    "free": 10692108288,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 41.670870791999995,
+    "free": 10692108288,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 42.185780042,
+    "free": 10692108288,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 42.709326458999996,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 43.229790042,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 43.756722958999994,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 44.283814334,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 44.815982542,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 45.34886375,
+    "free": 10692100096,
+    "allocated": 29597696
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 45.877139541999995,
+    "free": 10690191360,
+    "allocated": 31502336
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 46.41045475,
+    "free": 10687819776,
+    "allocated": 33865728
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 46.932154292,
+    "free": 10685788160,
+    "allocated": 35880960
+  },
+  {
+    "phase": "compile-mmap-candidate",
+    "elapsed": 47.459349959,
+    "free": 10675556352,
+    "allocated": 40873984
+  },
+  {
+    "phase": "test-mmap-candidate",
+    "elapsed": 48.073859291999995,
+    "free": 10687066112,
+    "allocated": 34603008
+  },
+  {
+    "phase": "test-mmap-candidate",
+    "elapsed": 48.593451959,
+    "free": 10686984192,
+    "allocated": 34689024
+  }
+]

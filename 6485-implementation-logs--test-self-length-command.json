@@ -1,0 +1,15 @@
+{
+  "name": "test-self-length",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/self-length/sparq_core-memo_self_length",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:24:05.095367+00:00",
+  "before": {
+    "free": 10692337664,
+    "allocated": 29564928
+  }
+}

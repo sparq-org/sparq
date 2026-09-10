@@ -1,0 +1,648 @@
+
+--- Base unchanged crates/sparq-core/src/lib.rs:185-325 ---
+/// `id`, NaN for non-numeric): owned dense in RAM, mmap'd from disk (out-of-core), or
+/// SPARSE — only the numeric terms in a hash map. Most RDF terms are IRIs/strings (NaN),
+/// and small integers inline (carrying their own value, never cached), so the dense
+/// cache is mostly — often entirely — NaN; the sparse form stores only the few real
+/// numeric literals, the right shape for the memory-bound browser store.
+enum NumData {
+    Owned(Vec<f64>),
+    /// The mmap'd dense cache, plus a small side map for terms APPENDED after open
+    /// (delta-overlay updates) — the mmap'd file cannot grow, the dictionary can.
+    #[cfg(feature = "mmap")]
+    Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, f64>),
+    Sparse(rustc_hash::FxHashMap<Id, f64>),
+    /// A FORKED graph's cache: the base graph's cache SHARED immutably (Arc) plus a
+    /// small side map for terms interned after the fork — the in-RAM twin of
+    /// `Mapped`'s grow-over-immutable-base shape. Lookup: base first, side map as the
+    /// fallback (the side map only ever holds ids the base does not cover).
+    /// INVARIANT: the inner cache is never itself `Forked` (fork flattens one level).
+    Forked { base: std::sync::Arc<NumData>, extra: rustc_hash::FxHashMap<Id, f64> },
+}
+
+impl NumData {
+    /// The cached numeric value of a 1-based dictionary id, or `None` if it is not a
+    /// (cached) numeric literal. The engine's O(1) numeric fast path.
+    // [FABLE-5] Keep the dominant dense-cache probe small enough that LTO reliably places it
+    // inside numeric gather loops; the larger storage-variant dispatch stays outlined.
+    #[inline(always)]
+    fn lookup(&self, id: Id) -> Option<f64> {
+        if let NumData::Owned(values) = self {
+            let value = *values.get((id - 1) as usize)?;
+            return (!value.is_nan()).then_some(value);
+        }
+        self.lookup_non_owned(id)
+    }
+
+    #[inline(never)]
+    fn lookup_non_owned(&self, id: Id) -> Option<f64> {
+        match self {
+            NumData::Sparse(m) => m.get(&id).copied(),
+            #[cfg(feature = "mmap")]
+            NumData::Mapped(_, extra) => match self.as_slice().get((id - 1) as usize) {
+                Some(v) if !v.is_nan() => Some(*v),
+                Some(_) => None,
+                // Beyond the mmap'd dense cache: a term appended after open.
+                None => extra.get(&id).copied(),
+            },
+            NumData::Owned(_) => unreachable!("Owned handled by lookup"),
+            NumData::Forked { base, extra } => {
+                base.lookup(id).or_else(|| extra.get(&id).copied())
+            }
+        }
+    }
+
+    /// Appends cache entries for freshly interned dictionary ids `old_len+1 ..= dict.len()`
+    /// (delta-overlay growth): the dense backing extends in place; the sparse / mmap'd
+    /// backings record only the real numeric values in their side map.
+    fn extend_for(&mut self, dict: &Dict, old_len: usize) {
+        for i in old_len..dict.len() {
+            let id = i as Id + 1;
+            let v = numeric_of(&dict.term(id));
+            match self {
+                NumData::Owned(vec) => vec.push(v),
+                NumData::Sparse(m) => {
+                    if !v.is_nan() {
+                        m.insert(id, v);
+                    }
+                }
+                #[cfg(feature = "mmap")]
+                NumData::Mapped(_, extra) => {
+                    if !v.is_nan() {
+                        extra.insert(id, v);
+                    }
+                }
+                NumData::Forked { extra, .. } => {
+                    if !v.is_nan() {
+                        extra.insert(id, v);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The cache for a structurally FORKED graph: the base cache shared immutably,
+    /// new terms recorded in a per-fork side map. Forking a fork shares the same
+    /// base Arc and copies the (small) side map; the FIRST fork of a flat cache
+    /// pays a one-time O(n) copy to freeze the shareable base (the mmap'd backing
+    /// is materialised — an `Mmap` cannot be cloned; forked graphs are in-memory).
+    fn fork(&self) -> NumData {
+        match self {
+            NumData::Forked { base, extra } => NumData::Forked {
+                base: std::sync::Arc::clone(base),
+                extra: extra.clone(),
+            },
+            NumData::Owned(v) => NumData::Forked {
+                base: std::sync::Arc::new(NumData::Owned(v.clone())),
+                extra: rustc_hash::FxHashMap::default(),
+            },
+            NumData::Sparse(m) => NumData::Forked {
+                base: std::sync::Arc::new(NumData::Sparse(m.clone())),
+                extra: rustc_hash::FxHashMap::default(),
+            },
+            #[cfg(feature = "mmap")]
+            NumData::Mapped(_, extra) => NumData::Forked {
+                // Materialise the mmap'd dense part (an `Mmap` cannot be cloned);
+                // ids the file does not cover stay in the carried side map.
+                base: std::sync::Arc::new(NumData::Owned(self.as_slice().to_vec())),
+                extra: extra.clone(),
+            },
+        }
+    }
+
+    /// Folds a forked cache's side map into a FRESH shared base (compaction): one
+    /// dense/sparse backing covering the whole dictionary, kept in the SHAREABLE
+    /// `Forked` shape (Arc base + empty side map) — so the side map stops growing
+    /// AND the next fork is still an Arc bump, never an O(dict) re-freeze.
+    /// Non-forked backings are returned as-is.
+    fn fold(self, dict_len: usize) -> NumData {
+        match self {
+            NumData::Forked { base, extra } => {
+                let folded = match &*base {
+                    NumData::Owned(v) => {
+                        let mut dense = v.clone();
+                        dense.resize(dict_len, f64::NAN);
+                        for (&id, &val) in &extra {
+                            dense[(id - 1) as usize] = val;
+                        }
+                        NumData::Owned(dense)
+                    }
+                    NumData::Sparse(m) => {
+                        let mut m = m.clone();
+                        m.extend(extra);
+                        NumData::Sparse(m)
+                    }
+                    // `fork` never freezes a Forked or Mapped base (invariant above).
+                    _ => unreachable!("a forked numeric cache's base is Owned or Sparse"),
+                };
+                NumData::Forked { base: std::sync::Arc::new(folded), extra: rustc_hash::FxHashMap::default() }
+            }
+            other => other,
+        }
+    }
+
+
+--- Base unchanged crates/sparq-core/src/lib.rs:790-825 ---
+
+/// [OPUS-4.8] (sq-lr2ii) `true` iff dict id `id` is an `xsd:decimal` literal whose lexical
+/// form carries MORE than 15 significant digits — i.e. its f64 image may be inexact, so the
+/// engine's f64 sargable FILTER fast path is unsafe for it. Only `xsd:decimal` is checked:
+/// integer exactness is handled by the engine's constant-side guard and float/double values
+/// are their own f64. See [`Graph::has_high_precision_decimal`].
+fn is_high_precision_decimal(dict: &Dict, id: Id) -> bool {
+    matches!(dict.term_parts(id),
+        dict::TermParts::Lit { value, datatype, lang: None }
+            if datatype == xsd::DECIMAL.as_str() && decimal_significant_digits(value) > 15)
+}
+
+/// Significant decimal digits of a plain decimal lexical `[+-]?digits(.digits)?`: leading
+/// integer zeros and leading fractional zeros (for a value `< 1`) are not significant, e.g.
+/// `007.50` -> 3, `0.00123` -> 3, `1.000000000000000001` -> 19. `usize::MAX` for a lexical that
+/// is not a plain decimal (treated as unsafe by the `> 15` guard). Kept LOCAL to sparq-core:
+/// this crate is the leanest tier and cannot depend on `sparq-substrate`; the count mirrors the
+/// engine's `sig_digits` (constant-side guard) so the two round-trip decisions stay consistent.
+fn decimal_significant_digits(s: &str) -> usize {
+    let s = s.trim();
+    let s = s.strip_prefix(['+', '-']).unwrap_or(s);
+    let (int, frac) = s.split_once('.').unwrap_or((s, ""));
+    if (int.is_empty() && frac.is_empty()) || !int.bytes().chain(frac.bytes()).all(|c| c.is_ascii_digit()) {
+        return usize::MAX;
+    }
+    let int = int.trim_start_matches('0');
+    let frac = frac.trim_end_matches('0');
+    if int.is_empty() {
+        frac.trim_start_matches('0').len()
+    } else {
+        int.len() + frac.len()
+    }
+}
+
+/// True for `xsd:integer` and its derived integer subtypes (NOT decimal/double/float) —
+/// the datatypes whose values are exact integers (parseable as `i128`).
+
+--- Base unchanged crates/sparq-core/src/lib.rs:1380-1387 ---
+
+    /// Builds a graph from an already-interned dictionary + triple set (e.g. after opt-in
+    /// reasoning materialized additional triples). Public counterpart of the internal
+    /// `build`.
+    pub fn from_parts(dict: Dict, triples: Vec<[Id; 3]>) -> Graph {
+        Self::build(dict, triples)
+    }
+
+
+--- Base unchanged crates/sparq-core/src/lib.rs:1680-1703 ---
+        let store = TripleStore::from_triples(triples);
+        let numerics = NumData::Owned(numerics_of(&dict));
+        // Unlike the numerics cache (dense f64 = 8 B/term), the dense temporal cells
+        // are 16 B/term — go sparse straight away when temporals are rare (usually:
+        // none at all -> an empty map, zero memory), keeping the load-time memory
+        // metric flat for non-temporal datasets. Temporal-heavy data stays dense.
+        let temporals = TempData::Owned(temporals_of(&dict)).into_sparse_if_worthwhile();
+        Graph {
+            dict,
+            store,
+            numerics,
+            temporals,
+            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            named: Vec::new(),
+            graph_prefix_index: std::sync::Mutex::new(None),
+            #[cfg(feature = "mmap")]
+            wal: None,
+            // [OPUS-4.8] (sq-ycle) In-memory graph: no parent-level redo journal.
+            #[cfg(feature = "mmap")]
+            txn: None,
+        }
+    }
+
+    /// Like [`load_str`](Self::load_str) but stores the permutation indexes
+
+--- Base unchanged crates/sparq-core/src/lib.rs:1910-1962 ---
+            } else {
+                // Neither format present — surface the original mmap error (NotFound on
+                // dict-meta.bin), matching the previous behaviour for a corrupt directory.
+                Dict::open_mmap(dir)?
+            }
+        };
+        let np = dir.join("numerics.bin");
+        let numerics = match std::fs::File::open(&np) {
+            Ok(f) if f.metadata()?.len() as usize == dict.len() * std::mem::size_of::<f64>() => {
+                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
+                NumData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+            }
+            _ => NumData::Owned(numerics_of(&dict)),
+        };
+        let tp = dir.join("temporals.bin");
+        let temporals = match std::fs::File::open(&tp) {
+            Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
+                // SAFETY: the file is owned by this graph for its lifetime and not mutated.
+                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+            }
+            // Absent or stale (a graph saved before this cache existed): recompute —
+            // backward compatible, like the numerics cache.
+            _ => TempData::Owned(temporals_of(&dict)),
+        };
+        // [OPUS-4.8] (sq-3ui0, gh-45) Restore the named graphs (each opened memory-mapped
+        // with its own per-graph WAL) so a save→open round-trip is lossless for the whole
+        // dataset. Empty for a default-graph-only / pre-named-graph directory.
+        let named = Self::open_named(dir)?;
+        let mut g = Graph {
+            dict,
+            store,
+            numerics,
+            temporals,
+            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            named,
+            graph_prefix_index: std::sync::Mutex::new(None),
+            wal: None,
+            txn: None,
+        };
+        // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
+        // plain not-yet-compacted close), stopping cleanly at the first torn record and
+        // truncating the log there — then keep the log open for further appends.
+        for (insert, t) in Wal::replay(dir)? {
+            if insert {
+                g.apply_delta_mem(&[t], &[]);
+            } else {
+                g.apply_delta_mem(&[], &[t]);
+            }
+        }
+        g.wal = Some(Wal::open(dir)?);
+        // [OPUS-4.8] (sq-ycle) AFTER the per-graph WALs are replayed (above + per named graph in
+        // `open_named`), redo any committed parent-level transaction frame, idempotently. A
+        // multi-op UPDATE body's resolved per-slot quad-delta is one atomic `txn.log` frame; if a
+
+--- Base unchanged crates/sparq-core/src/lib.rs:2883-2902 ---
+    /// generation pattern is an in-memory serving construct — durability stays with
+    /// whatever owns the base.
+    pub fn fork(&self) -> Graph {
+        Graph {
+            dict: self.dict.fork(),
+            store: self.store.fork(),
+            numerics: self.numerics.fork(),
+            temporals: self.temporals.fork(),
+            // sq-lr2ii: the fork shares the same values; recompute the guard lazily.
+            high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            named: self.named.iter().map(|(name, g)| (name.clone(), g.fork())).collect(),
+            // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
+            graph_prefix_index: std::sync::Mutex::new(None),
+            #[cfg(feature = "mmap")]
+            wal: None,
+            // [OPUS-4.8] (sq-ycle) A fork/snapshot is a logically-independent in-memory copy with
+            // NO directory association — no WAL and no redo journal (like `wal: None`).
+            #[cfg(feature = "mmap")]
+            txn: None,
+        }
+
+--- Base unchanged crates/sparq-core/src/lib.rs:2936-2959 ---
+
+    // ---- Incremental updates (T17): delta-overlay + WAL durability ------------------
+
+    /// Applies an incremental update batch — `deletes` first, then `inserts` (SPARQL's
+    /// DELETE/INSERT application order) — through the store's DELTA-OVERLAY: O(batch)
+    /// work instead of the O(n) full rebuild. New terms are interned APPEND-ONLY (the
+    /// dictionary grows; existing ids never change), so readers of existing ids are
+    /// unaffected. For a directory-backed graph (opened via [`open`](Self::open)) the
+    /// batch is appended to the write-ahead log and fsync'd BEFORE it is applied, so a
+    /// crash replays it on the next open. Fold the overlay back into the immutable base
+    /// periodically with [`compact`](Self::compact).
+    pub fn apply_delta(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) -> Result<(), String> {
+        if inserts.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+        #[cfg(feature = "mmap")]
+        if let Some(w) = &mut self.wal {
+            w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
+        }
+        self.apply_delta_mem(inserts, deletes);
+        Ok(())
+    }
+
+    /// [OPUS-4.8] (gh-1122) Insert a SINGLE triple from `oxrdf` terms — the ergonomic
+
+--- Base unchanged crates/sparq-core/src/lib.rs:3400-3445 ---
+    /// that keeps scans overlay-free). The dictionary is kept as-is — ids are stable;
+    /// terms only referenced by deleted triples linger until a full reload (cheap, and
+    /// it keeps compaction O(triples) with no re-interning). For a directory-backed
+    /// graph the new base is persisted ATOMICALLY (written to a fresh sibling directory,
+    /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
+    /// memory-mapped from the new base.
+    pub fn compact(&mut self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        let dir = self.wal.as_ref().map(|w| w.dir.clone());
+        // Fold the structural-fork layers first (ids unchanged throughout): named
+        // graphs recursively, then this graph's dictionary extension into a fresh
+        // frozen base (so the NEXT fork is O(1) again) and the forked caches flat.
+        // No-ops on a never-forked graph.
+        for (_, g) in &mut self.named {
+            g.compact()?;
+        }
+        if self.dict.is_forked() {
+            self.dict = self.dict.compacted();
+            let n = self.dict.len();
+            let numerics = std::mem::replace(&mut self.numerics, NumData::Sparse(rustc_hash::FxHashMap::default()));
+            self.numerics = numerics.fold(n);
+            let temporals = std::mem::replace(&mut self.temporals, TempData::Sparse(rustc_hash::FxHashMap::default()));
+            self.temporals = temporals.fold(n);
+        }
+        if self.store.has_overlay() {
+            let triples: Vec<[Id; 3]> = {
+                let scan = self.store.scan(&[None, None, None]);
+                scan.rows.iter().map(|r| scan.to_spo(r)).collect()
+            };
+            self.store = TripleStore::from_triples(triples);
+        } else {
+            // Nothing pending: for a directory-backed graph just discard the (no-op) log.
+            #[cfg(feature = "mmap")]
+            if let Some(w) = &mut self.wal {
+                w.truncate().map_err(|e| e.to_string())?;
+            }
+            return Ok(());
+        }
+        #[cfg(feature = "mmap")]
+        if let Some(dir) = dir {
+            self.persist_swap(&dir)?;
+        }
+        Ok(())
+    }
+
+    /// [OPUS-4.8] (sq-x32t) ROLLBACK-SAFE on-disk swap shared by [`compact`](Self::compact) and
+
+--- Base unchanged crates/sparq-core/src/lib.rs:3460-3473 ---
+    /// re-opened memory-mapped from the new base with a fresh, empty WAL.
+    #[cfg(feature = "mmap")]
+    fn persist_swap(&mut self, dir: &std::path::Path) -> Result<(), String> {
+        // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be renamed
+        // away with `dir`), then run the shared crash-safe swap, writing `self`'s CURRENT image as
+        // the new base. Adopt the re-opened directory-backed graph in place. [OPUS-4.8] (sq-ft7u)
+        self.wal = None;
+        let reopened = swap_dir_to_new_base(dir, |new_dir| self.save(new_dir))
+            .map_err(|e| e.to_string())?;
+        *self = reopened;
+        Ok(())
+    }
+
+    /// [OPUS-4.8] (sq-ft7u) PUBLIC crash-safe RESTORE-INTO-DURABLE seam. Atomically REPLACE the
+
+--- Base unchanged crates/sparq-core/src/lib.rs:3538-3595 ---
+    /// The live dataset (default graph + every named graph, recursively) is dumped to `[Term; 3]`
+    /// and re-interned into a brand-new [`Graph`] with an empty [`Dict`]; that fresh image is then
+    /// swapped in via the SAME rollback-safe `persist_swap` the compaction
+    /// uses (atomic, crash-safe, WAL-truncated). The live triple set is preserved EXACTLY
+    /// (round-trip). For an in-memory graph it just replaces the dictionary/store in place.
+    ///
+    /// PHYSICAL-ERASURE SCOPE (honest): this scrubs the engine's own on-disk segments + dictionary;
+    /// it cannot reach bytes already copied off-box (filesystem snapshots, block-level COW history,
+    /// external backups), which the storage/backup tier must handle per the retention-erasure
+    /// runbook.
+    pub fn vacuum(&mut self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        let dir = self.wal.as_ref().map(|w| w.dir.clone());
+        // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
+        // term orphaned by a prior delete/drop is dropped (it is never re-interned).
+        let mut fresh = self.reintern_live()?;
+        #[cfg(feature = "mmap")]
+        if let Some(dir) = dir {
+            // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be
+            // renamed away). `persist_swap` writes `fresh`'s image to `dir` and re-opens
+            // `fresh` memory-mapped from the new base with a fresh WAL; adopt that re-opened,
+            // directory-backed graph back into `self` so subsequent updates WAL-append to it.
+            self.wal = None;
+            fresh.persist_swap(&dir)?;
+        }
+        // Adopt the freshly re-interned (and, when persisted, re-opened) image in place.
+        std::mem::swap(self, &mut fresh);
+        Ok(())
+    }
+
+    /// [OPUS-4.8] (sq-x32t) Builds a fresh in-memory [`Graph`] holding exactly this graph's LIVE
+    /// triples (default + named, recursively), re-interned into a brand-new [`Dict`] — so terms
+    /// orphaned by a delete/drop are absent from the result. Carries NO directory/WAL association
+    /// (the caller's [`persist_swap`](Self::persist_swap) gives the swapped-in graph its own).
+    fn reintern_live(&self) -> Result<Graph, String> {
+        // Dump the live default-graph triples as Terms (overlay already merged by `scan`).
+        let live: Vec<[Term; 3]> = {
+            let scan = self.store.scan(&[None, None, None]);
+            scan.rows
+                .iter()
+                .map(|r| {
+                    let spo = scan.to_spo(r);
+                    [self.dict.term(spo[0]), self.dict.term(spo[1]), self.dict.term(spo[2])]
+                })
+                .collect()
+        };
+        let mut fresh = Graph::from_parts(Dict::new(), Vec::new());
+        if !live.is_empty() {
+            fresh.apply_delta(&live, &[])?;
+        }
+        // Named graphs: re-intern each recursively and attach it as an IN-MEMORY sub-graph (no
+        // directory/WAL — the parent's `save` writes the whole `named/` sub-tree afresh).
+        for (name, sub) in &self.named {
+            let sub_fresh = sub.reintern_live()?;
+            fresh.named.push((name.clone(), sub_fresh));
+        }
+        Ok(fresh)
+    }
+
+--- Base unchanged crates/sparq-core/src/dict.rs:1218-1260 ---
+    }
+
+    #[inline]
+    fn intern_prefix(&mut self, prefix: &str) -> u32 {
+        if let Some(&id) = self.prefix_ids.get(prefix) {
+            return id;
+        }
+        let id = self.prefixes.len() as u32;
+        let boxed: Box<str> = prefix.into();
+        self.prefixes.push(boxed.clone());
+        self.prefix_ids.insert(boxed, id);
+        id
+    }
+
+    #[inline]
+    fn intern_datatype(&mut self, dt: &str) -> u32 {
+        if let Some(&id) = self.datatype_ids.get(dt) {
+            return id;
+        }
+        let id = self.datatypes.len() as u32;
+        self.datatypes.push(NamedNode::new_unchecked(dt));
+        self.datatype_ids.insert(dt.into(), id);
+        id
+    }
+
+    /// Assigns the next id to a freshly built `Stored` and indexes it. With a compacted
+    /// base (blob/mmap), the new term is APPENDED to the arena above `base` — the dict's
+    /// append-only growth path for delta-overlay updates.
+    #[inline]
+    fn push(&mut self, hash: u64, stored: Stored) -> Id {
+        let id = (self.base + self.terms.len()) as Id + 1; // 1-based
+        // Enforced in release too: once the (non-inline) dictionary reaches INLINE_BASE
+        // distinct terms, new ids would collide with the inline-integer range and decode
+        // as integers — silent corruption. 2^31 ≈ 2.1B distinct non-integer terms is the
+        // hard capacity limit of the u32 scheme; fail loudly (widen Id to u64).
+        assert!(id < INLINE_BASE, "dictionary exceeded the id capacity (2^31 distinct non-integer terms); widen Id to u64");
+        self.terms.push(stored);
+        let (base, terms, blob, prefixes, datatypes) =
+            (self.base, &self.terms, &self.blob, &self.prefixes, &self.datatypes);
+        self.table.insert_unique(hash, id, |&i| hash_tabled(i, base, terms, blob, prefixes, datatypes));
+        id
+    }
+
+
+--- Base unchanged crates/sparq-core/src/dict.rs:1463-1553 ---
+
+    /// Interns an IRI term from its string, returning its id.
+    #[inline]
+    pub fn intern_iri(&mut self, iri: &str) -> Id {
+        let hash = hash_iri(iri);
+        if let Some(id) = self.find_iri(hash, iri) {
+            return id;
+        }
+        let (p, suffix) = split_iri(iri);
+        let prefix = self.intern_prefix(p);
+        self.push(hash, Stored::Iri { prefix, suffix: suffix.into() })
+    }
+
+    /// Interns an IRI already split into (prefix, suffix) — used by the parallel-load
+    /// merge, where the canonical split is already known (no re-split, no concat).
+    #[inline]
+    fn intern_iri_parts(&mut self, prefix: &str, suffix: &str) -> Id {
+        let hash = hash_iri_parts(prefix, suffix);
+        if let Some(id) = self.find_iri_parts(hash, prefix, suffix) {
+            return id;
+        }
+        let prefix = self.intern_prefix(prefix);
+        self.push(hash, Stored::Iri { prefix, suffix: suffix.into() })
+    }
+
+    /// Interns a literal from its components, returning its id. Canonical small
+    /// `xsd:integer`s are encoded inline and never stored.
+    #[inline]
+    pub fn intern_lit(&mut self, value: &str, datatype: &str, lang: Option<&str>) -> Id {
+        if let Some(id) = try_inline_lit(value, datatype) {
+            return id;
+        }
+        let hash = hash_lit(value, datatype, lang);
+        if let Some(id) = self.find_lit(hash, value, datatype, lang) {
+            return id;
+        }
+        let datatype = self.intern_datatype(datatype);
+        self.push(hash, Stored::Lit { value: value.into(), datatype, lang: lang.map(Into::into) })
+    }
+
+    /// Interns a blank node from its label, returning its id.
+    #[inline]
+    pub fn intern_blank(&mut self, label: &str) -> Id {
+        let hash = hash_blank(label);
+        if let Some(id) = self.find_blank(hash, label) {
+            return id;
+        }
+        self.push(hash, Stored::Blank(label.into()))
+    }
+
+    /// Interns an RDF 1.2 triple term whose components are ALREADY interned in this dict
+    /// (ids may include inline-integer ids). Content-addressed by the component ids, so
+    /// separately-interned identical triples share one id.
+    ///
+    /// [OPUS-4.8] `pub(crate)` so the byte-level N-Triples parser (`nt`) can intern a
+    /// `<<( s p o )>>` triple-term object STRUCTURALLY (interning s/p/o first, then the
+    /// triple by their ids) — the identical path `intern(&Term::Triple(_))` takes — so the
+    /// N-Triples and Turtle loaders agree on triple-term content-addressing.
+    pub(crate) fn intern_triple_ids(&mut self, ids: [Id; 3]) -> Id {
+        let hash = hash_triple_ids(ids);
+        if let Some(id) = self.find_triple_ids(hash, ids) {
+            return id;
+        }
+        self.push(hash, Stored::Triple(ids))
+    }
+
+    /// Interns a term, returning its id (creating it if new). Dispatches to the
+    /// component interners so the `Term` and byte-slice paths share one code path.
+    /// An RDF 1.2 triple term is stored STRUCTURALLY: its s/p/o are interned first
+    /// (recursing through a nested triple-term object) and the triple holds their ids.
+    #[inline]
+    pub fn intern(&mut self, term: &Term) -> Id {
+        match term {
+            Term::NamedNode(n) => self.intern_iri(n.as_str()),
+            Term::Literal(l) => self.intern_lit(l.value(), l.datatype().as_str(), lang_with_dir(l).as_deref()),
+            Term::BlankNode(b) => self.intern_blank(b.as_str()),
+            Term::Triple(t) => {
+                let s = match t.subject {
+                    oxrdf::NamedOrBlankNode::NamedNode(ref n) => self.intern_iri(n.as_str()),
+                    oxrdf::NamedOrBlankNode::BlankNode(ref b) => self.intern_blank(b.as_str()),
+                };
+                let p = self.intern_iri(t.predicate.as_str());
+                let o = self.intern(&t.object);
+                self.intern_triple_ids([s, p, o])
+            }
+        }
+    }
+
+    /// Interns a borrowed term (already-split components) without building a `Term` or
+    /// concatenating the IRI — the fast path used by the sharded parallel merge for LEAF
+    /// terms.
+
+--- Base unchanged crates/sparq-core/src/dict.rs:2307-2370 ---
+            0
+        }
+    }
+
+    /// Folds a forked dictionary's extension into a FRESH frozen base (ids
+    /// unchanged), so subsequent [`fork`](Self::fork)s are O(1) again — the dict
+    /// half of `Graph::compact`. Non-forked dicts are returned unchanged (well,
+    /// cloned); O(n) — call it from a compaction path only.
+    pub fn compacted(&self) -> Dict {
+        if self.frozen.is_none() {
+            return self.clone();
+        }
+        let n = self.len();
+        let mut terms: Vec<Stored> = Vec::with_capacity(n);
+        for id in 1..=n as Id {
+            terms.push(match self.record(id) {
+                StoredRef::Iri { prefix, suffix } => Stored::Iri { prefix, suffix: suffix.into() },
+                StoredRef::Lit { value, datatype, lang } => {
+                    Stored::Lit { value: value.into(), datatype, lang: lang.map(Into::into) }
+                }
+                StoredRef::Blank(b) => Stored::Blank(b.into()),
+                StoredRef::Triple(ids) => Stored::Triple(ids),
+            });
+        }
+        // The fork's prefix/datatype tables are supersets of the frozen base's with
+        // identical indices (fork-time clone + append-only growth), so every record
+        // copied above stays valid against them.
+        let mut flat = Dict {
+            prefixes: self.prefixes.clone(),
+            prefix_ids: self.prefix_ids.clone(),
+            datatypes: self.datatypes.clone(),
+            datatype_ids: self.datatype_ids.clone(),
+            terms,
+            table: HashTable::new(),
+            blob: None,
+            #[cfg(feature = "mmap")]
+            mapped: None,
+            base: 0,
+            frozen: None,
+        };
+        flat.build_table();
+        Dict {
+            prefixes: flat.prefixes.clone(),
+            prefix_ids: flat.prefix_ids.clone(),
+            datatypes: flat.datatypes.clone(),
+            datatype_ids: flat.datatype_ids.clone(),
+            terms: Vec::new(),
+            table: HashTable::new(),
+            blob: None,
+            #[cfg(feature = "mmap")]
+            mapped: None,
+            base: n,
+            frozen: Some(std::sync::Arc::new(flat)),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        // `base` is the blob/mmap'd record count (0 for a plain arena dict); appended
+        // (delta-overlay) terms live in the arena above it.
+        self.base + self.terms.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0

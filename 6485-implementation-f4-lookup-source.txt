@@ -1,0 +1,496 @@
+
+--- crates/sparq-core/src/lib.rs:2771-2782 ---
+2771:     /// Resolves a term to its id, or `None` if the term is absent (so a pattern
+2772:     /// bound to it cannot match).
+2773:     pub fn id_of(&self, term: &Term) -> Option<Id> {
+2774:         let id = self.dict.lookup(term);
+2775:         if id == dict::NO_ID {
+2776:             None
+2777:         } else {
+2778:             Some(id)
+2779:         }
+2780:     }
+2781: 
+2782:     /// [FABLE-5] (sq-1ivw7) Whether ANY triple with predicate `predicate` in the CURRENT store
+
+--- crates/sparq-core/src/dict.rs:27-87 ---
+27: /// from the id (QLever's value-id idea, kept in `u32` so the index stays compact).
+28: /// Inline integers also sort by value in the permutations (enabling range pruning).
+29: ///
+30: /// The `u32` id space is partitioned: dictionary ids `[1, INLINE_BASE)` (≈2.1 billion
+31: /// distinct terms — enough for e.g. full-Wikidata's term count without widening to `u64`,
+32: /// which would double the index), inline integers `[INLINE_BASE, INLINE_BASE + 2^30)`, and
+33: /// the engine's local-vocab ids `[INLINE_BASE + 2^30, 2^32)`. `0` is `NO_ID`.
+34: pub const INLINE_BASE: Id = 1 << 31;
+35: /// The largest value encodable inline (the inline range stays 2^30 wide; bigger integers
+36: /// fall back to the dictionary).
+37: const INLINE_MAX: u32 = (1 << 30) - 1;
+38: 
+39: /// [OPUS-4.8] (review 1409) On-disk format marker for the mmap dictionary (`dict-meta.bin`).
+40: /// `INLINE_BASE` partitions the `u32` id space, so persisted RAW ids only mean what they say
+41: /// under the SAME partition the file was written with. A file written before `INLINE_BASE`
+42: /// moved (from `1 << 30` to `1 << 31`) encodes inline integers in `[1<<30, 1<<31)`, which the
+43: /// current code would misread as dictionary ids — silent numeric corruption / panics. The
+44: /// header records the partition so `open_mmap` can REJECT a mismatched/legacy store with a
+45: /// clear rebuild-required error instead of silently misinterpreting its ids.
+46: ///
+47: /// `dict-meta.bin` previously began with `prefixes.len() as u32` (a small count). This magic
+48: /// is chosen to be distinguishable from any plausible legacy prefix count, so the reader can
+49: /// detect header-less legacy files. ("DMV1" — Dict Meta, V1; little-endian.)
+50: // clippy/dead_code: the on-disk meta header is read/written only by the `mmap`/`dict-spill`
+51: // persistence paths, which are cfg'd out of the default feature set.
+52: #[allow(dead_code)]
+53: pub(crate) const DICT_META_MAGIC: u32 = 0x31_56_4D_44; // b"DMV1" little-endian
+54: /// Bump when the on-disk meta layout changes incompatibly.
+55: #[allow(dead_code)]
+56: pub(crate) const DICT_META_VERSION: u32 = 1;
+57: 
+58: /// If a literal `value`/`datatype` is a canonical non-negative `xsd:integer` in
+59: /// range, its inline id. Only the canonical lexical form (no leading zeros / sign)
+60: /// inlines, so `"030"^^integer` stays a distinct dictionary term.
+61: #[inline]
+62: fn try_inline_lit(value: &str, datatype: &str) -> Option<Id> {
+63:     if datatype == xsd::INTEGER.as_str() {
+64:         if let Ok(v) = value.parse::<u32>() {
+65:             if v <= INLINE_MAX && v.to_string() == value {
+66:                 return Some(INLINE_BASE + v);
+67:             }
+68:         }
+69:     }
+70:     None
+71: }
+72: 
+73: /// If `term` is a canonical non-negative `xsd:integer` in range, its inline id.
+74: fn try_inline(term: &Term) -> Option<Id> {
+75:     match term {
+76:         Term::Literal(l) => try_inline_lit(l.value(), l.datatype().as_str()),
+77:         _ => None,
+78:     }
+79: }
+80: 
+81: /// Whether an id encodes an inline integer value. (`INLINE_BASE << 1` would overflow `u32`,
+82: /// so the upper bound is expressed via the inline width.)
+83: #[inline]
+84: pub fn is_inline(id: Id) -> bool {
+85:     id >= INLINE_BASE && id - INLINE_BASE <= INLINE_MAX
+86: }
+87: 
+
+--- crates/sparq-core/src/dict.rs:185-248 ---
+185:     Triple([Id; 3]),
+186: }
+187: 
+188: // ---- Content hashing ---------------------------------------------------------
+189: // A term's hash must be identical whether computed from an `oxrdf::Term`, from parsed
+190: // byte slices, or from the compact `Stored` arena form — so interning and rehashing
+191: // never build a `Term` or concatenate an IRI. FxHasher is deterministic (no seed).
+192: 
+193: #[inline]
+194: fn hash_iri_parts(prefix: &str, suffix: &str) -> u64 {
+195:     // Length-prefix the prefix and make hash_iri route through here on the SAME split,
+196:     // so the two paths issue an identical sequence of writes — FxHasher is word-chunked,
+197:     // so `write(a); write(b)` does NOT equal `write(a++b)`; identical call sequences do.
+198:     let mut h = rustc_hash::FxHasher::default();
+199:     h.write_u8(0);
+200:     h.write_usize(prefix.len());
+201:     h.write(prefix.as_bytes());
+202:     h.write(suffix.as_bytes());
+203:     h.finish()
+204: }
+205: 
+206: #[inline]
+207: fn hash_iri(iri: &str) -> u64 {
+208:     let (prefix, suffix) = split_iri(iri);
+209:     hash_iri_parts(prefix, suffix)
+210: }
+211: 
+212: #[inline]
+213: fn hash_lit(value: &str, datatype: &str, lang: Option<&str>) -> u64 {
+214:     let mut h = rustc_hash::FxHasher::default();
+215:     h.write_u8(1);
+216:     h.write_usize(value.len());
+217:     h.write(value.as_bytes());
+218:     h.write_usize(datatype.len());
+219:     h.write(datatype.as_bytes());
+220:     match lang {
+221:         Some(l) => {
+222:             h.write_u8(1);
+223:             h.write(l.as_bytes());
+224:         }
+225:         None => h.write_u8(0),
+226:     }
+227:     h.finish()
+228: }
+229: 
+230: #[inline]
+231: fn hash_blank(label: &str) -> u64 {
+232:     let mut h = rustc_hash::FxHasher::default();
+233:     h.write_u8(2);
+234:     h.write(label.as_bytes());
+235:     h.finish()
+236: }
+237: 
+238: /// Content hash of a structurally stored triple term — over the (already-interned) ids of
+239: /// its components, NOT strings. Unlike the other term kinds this hash is dict-relative
+240: /// (the ids are), so a `Term::Triple` is hashed only AFTER its children are resolved in
+241: /// the target dict (`intern`/`lookup` handle this; `hash_term` cannot).
+242: /// [OPUS-4.8] (sq-jvbr) `pub(crate)` so the dict-spill external builder can content-address
+243: /// an RDF 1.2 triple term by its components' FINAL dense ids when it assembles the
+244: /// triple-term dictionary records (the same `(hash, id)` pair `save_mmap`/`into_merged`
+245: /// produce), keeping `dict-hash.bin`/`dict-hid.bin` consistent for triple terms too.
+246: #[inline]
+247: pub(crate) fn hash_triple_ids(ids: [Id; 3]) -> u64 {
+248:     let mut h = rustc_hash::FxHasher::default();
+
+--- crates/sparq-core/src/dict.rs:333-341 ---
+333: fn hash_term(t: &Term) -> u64 {
+334:     match t {
+335:         Term::NamedNode(n) => hash_iri(n.as_str()),
+336:         Term::Literal(l) => hash_lit(l.value(), l.datatype().as_str(), lang_with_dir(l).as_deref()),
+337:         Term::BlankNode(b) => hash_blank(b.as_str()),
+338:         _ => 0,
+339:     }
+340: }
+341: 
+
+--- crates/sparq-core/src/dict.rs:377-417 ---
+377: fn stored_is_iri(s: &Stored, iri: &str, prefixes: &[Box<str>]) -> bool {
+378:     match s {
+379:         Stored::Iri { prefix, suffix } => {
+380:             let p = &prefixes[*prefix as usize];
+381:             iri.len() == p.len() + suffix.len() && iri.as_bytes().starts_with(p.as_bytes()) && iri[p.len()..] == **suffix
+382:         }
+383:         _ => false,
+384:     }
+385: }
+386: 
+387: #[inline]
+388: fn stored_is_iri_parts(s: &Stored, prefix: &str, suffix: &str, prefixes: &[Box<str>]) -> bool {
+389:     match s {
+390:         Stored::Iri { prefix: pid, suffix: suf } => prefixes[*pid as usize].as_ref() == prefix && **suf == *suffix,
+391:         _ => false,
+392:     }
+393: }
+394: 
+395: #[inline]
+396: fn stored_is_lit(s: &Stored, value: &str, datatype: &str, lang: Option<&str>, datatypes: &[NamedNode]) -> bool {
+397:     match s {
+398:         Stored::Lit { value: v, datatype: dt, lang: lg } => {
+399:             **v == *value && lg.as_deref() == lang && datatypes[*dt as usize].as_str() == datatype
+400:         }
+401:         _ => false,
+402:     }
+403: }
+404: 
+405: /// NOTE: `Term::Triple` always misses here — triple terms are matched by their component
+406: /// IDS (see `Dict::lookup`, which resolves the children and intercepts before this path).
+407: #[inline]
+408: fn stored_eq_term(s: &Stored, q: &Term, prefixes: &[Box<str>], datatypes: &[NamedNode]) -> bool {
+409:     match q {
+410:         Term::NamedNode(n) => stored_is_iri(s, n.as_str(), prefixes),
+411:         Term::Literal(l) => stored_is_lit(s, l.value(), l.datatype().as_str(), lang_with_dir(l).as_deref(), datatypes),
+412:         Term::BlankNode(b) => matches!(s, Stored::Blank(x) if **x == *b.as_str()),
+413:         _ => false,
+414:     }
+415: }
+416: 
+417: /// [OPUS-4.8] sq-cvug — the safe placeholders `reconstruct_triple` substitutes when a
+
+--- crates/sparq-core/src/dict.rs:644-664 ---
+644: 
+645: /// NOTE: like `stored_eq_term`, `Term::Triple` always misses here — `Dict::lookup`
+646: /// resolves a triple term's component ids first and matches `StoredRef::Triple` by id.
+647: fn stored_ref_eq_term(s: &StoredRef, q: &Term, prefixes: &[Box<str>], datatypes: &[NamedNode]) -> bool {
+648:     match (s, q) {
+649:         (StoredRef::Iri { prefix, suffix }, Term::NamedNode(n)) => {
+650:             let p = &prefixes[*prefix as usize];
+651:             let iri = n.as_str();
+652:             iri.len() == p.len() + suffix.len() && iri.starts_with(p.as_ref()) && iri[p.len()..] == **suffix
+653:         }
+654:         (StoredRef::Lit { value, datatype, lang }, Term::Literal(l)) => {
+655:             *value == l.value()
+656:                 && lang.as_deref() == lang_with_dir(l).as_deref()
+657:                 && datatypes[*datatype as usize].as_str() == l.datatype().as_str()
+658:         }
+659:         (StoredRef::Blank(x), Term::BlankNode(b)) => *x == b.as_str(),
+660:         _ => false,
+661:     }
+662: }
+663: 
+664: /// A zero-copy `StoredRef` view of an arena `Stored` — so the appended-term (arena-over-
+
+--- crates/sparq-core/src/dict.rs:744-788 ---
+744:     blob: memmap2::Mmap,    // concatenated term records (the format `save_mmap` writes)
+745:     offsets: memmap2::Mmap, // [u64; n] byte offset of each term record in `blob`
+746:     hashes: memmap2::Mmap,  // [u64; n] content hashes, SORTED (for lookup)
+747:     hashids: memmap2::Mmap, // [u32; n] term ids parallel to `hashes`
+748: }
+749: 
+750: #[cfg(feature = "mmap")]
+751: impl MappedDict {
+752:     #[inline]
+753:     fn slice_u64(m: &memmap2::Mmap) -> &[u64] {
+754:         // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u64 (little-endian on
+755:         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
+756:         // page-aligned (>= 8). This pointer cast reads them back in the same native order.
+757:         unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u64>(), m.len() / 8) }
+758:     }
+759:     #[inline]
+760:     fn offsets(&self) -> &[u64] {
+761:         Self::slice_u64(&self.offsets)
+762:     }
+763:     #[inline]
+764:     fn hashes(&self) -> &[u64] {
+765:         Self::slice_u64(&self.hashes)
+766:     }
+767:     #[inline]
+768:     fn hashids(&self) -> &[u32] {
+769:         // SAFETY: `write_pod_slice` wrote these as raw NATIVE-endian u32 (little-endian on
+770:         // every supported target — pinned by `DICT_ON_DISK_LE_GUARD`, sq-lvw8); mmap base is
+771:         // page-aligned (>= 4). This pointer cast reads them back in the same native order.
+772:         unsafe { std::slice::from_raw_parts(self.hashids.as_ptr().cast::<u32>(), self.hashids.len() / 4) }
+773:     }
+774:     /// The parsed term record for a 1-based id.
+775:     ///
+776:     /// [OPUS-4.8] sq-znld: this reads from an UNTRUSTED memory-mapped blob, so it uses the
+777:     /// bounds-/UTF-8-CHECKED parser. `Dict::open_mmap` runs [`validate`](Self::validate)
+778:     /// up front, which proves every offset is in range and every record parses, so by the
+779:     /// time `stored` is reached the `expect` is structurally impossible — but the checked
+780:     /// parse remains as a sound floor (no `from_utf8_unchecked` over attacker bytes, ever),
+781:     /// and the cost is negligible against the mmap page-fault that produced the bytes.
+782:     #[inline]
+783:     fn stored(&self, id: Id) -> StoredRef<'_> {
+784:         let off = self.offsets()[(id - 1) as usize] as usize;
+785:         parse_stored_ref_checked(self.blob.get(off..).unwrap_or_default())
+786:             .expect("mmap dict record validated at open (sq-znld); a failure here means the mapped file changed under us")
+787:     }
+788: 
+
+--- crates/sparq-core/src/dict.rs:1260-1349 ---
+1260: 
+1261:     /// Finds a term in the MAPPED base by content hash (binary search of the mmap'd
+1262:     /// sorted-hash index, verifying candidates with `eq`). `None` when not mapped or
+1263:     /// absent — the caller then consults the table (blob base + appended arena terms).
+1264:     #[cfg(feature = "mmap")]
+1265:     #[inline]
+1266:     fn mapped_find(&self, hash: u64, eq: impl Fn(&StoredRef) -> bool) -> Option<Id> {
+1267:         let m = self.mapped.as_ref()?;
+1268:         let hashes = m.hashes();
+1269:         let mut i = hashes.partition_point(|&h| h < hash);
+1270:         let ids = m.hashids();
+1271:         while i < hashes.len() && hashes[i] == hash {
+1272:             let id = ids[i];
+1273:             if eq(&m.stored(id)) {
+1274:                 return Some(id);
+1275:             }
+1276:             i += 1;
+1277:         }
+1278:         None
+1279:     }
+1280: 
+1281:     /// The record of a TABLED id (blob base, or appended arena) as needed by the intern
+1282:     /// comparison closures. Pure-arena dicts (`base == 0`) always take the arena branch,
+1283:     /// so the bulk-load hot path is unchanged beyond one predictable comparison.
+1284:     #[inline]
+1285:     fn tabled_base_ref(&self, id: Id) -> StoredRef<'_> {
+1286:         let (blob, offs) = self.blob.as_ref().expect("a tabled id below `base` requires the blob");
+1287:         parse_stored_ref(&blob[offs[(id - 1) as usize] as usize..])
+1288:     }
+1289: 
+1290:     #[inline]
+1291:     fn tabled_is_iri(&self, id: Id, iri: &str) -> bool {
+1292:         let i = (id - 1) as usize;
+1293:         if i >= self.base {
+1294:             stored_is_iri(&self.terms[i - self.base], iri, &self.prefixes)
+1295:         } else {
+1296:             stored_ref_is_iri(&self.tabled_base_ref(id), iri, &self.prefixes)
+1297:         }
+1298:     }
+1299: 
+1300:     #[inline]
+1301:     fn tabled_is_iri_parts(&self, id: Id, prefix: &str, suffix: &str) -> bool {
+1302:         let i = (id - 1) as usize;
+1303:         if i >= self.base {
+1304:             stored_is_iri_parts(&self.terms[i - self.base], prefix, suffix, &self.prefixes)
+1305:         } else {
+1306:             stored_ref_is_iri_parts(&self.tabled_base_ref(id), prefix, suffix, &self.prefixes)
+1307:         }
+1308:     }
+1309: 
+1310:     #[inline]
+1311:     fn tabled_is_lit(&self, id: Id, value: &str, datatype: &str, lang: Option<&str>) -> bool {
+1312:         let i = (id - 1) as usize;
+1313:         if i >= self.base {
+1314:             stored_is_lit(&self.terms[i - self.base], value, datatype, lang, &self.datatypes)
+1315:         } else {
+1316:             stored_ref_is_lit(&self.tabled_base_ref(id), value, datatype, lang, &self.datatypes)
+1317:         }
+1318:     }
+1319: 
+1320:     #[inline]
+1321:     fn tabled_is_blank(&self, id: Id, label: &str) -> bool {
+1322:         let i = (id - 1) as usize;
+1323:         if i >= self.base {
+1324:             matches!(&self.terms[i - self.base], Stored::Blank(b) if **b == *label)
+1325:         } else {
+1326:             matches!(self.tabled_base_ref(id), StoredRef::Blank(b) if b == label)
+1327:         }
+1328:     }
+1329: 
+1330:     #[inline]
+1331:     fn tabled_is_triple(&self, id: Id, ids: [Id; 3]) -> bool {
+1332:         let i = (id - 1) as usize;
+1333:         if i >= self.base {
+1334:             matches!(&self.terms[i - self.base], Stored::Triple(x) if *x == ids)
+1335:         } else {
+1336:             matches!(self.tabled_base_ref(id), StoredRef::Triple(x) if x == ids)
+1337:         }
+1338:     }
+1339: 
+1340:     #[inline]
+1341:     fn tabled_eq_term(&self, id: Id, term: &Term) -> bool {
+1342:         let i = (id - 1) as usize;
+1343:         if i >= self.base {
+1344:             stored_eq_term(&self.terms[i - self.base], term, &self.prefixes, &self.datatypes)
+1345:         } else {
+1346:             stored_ref_eq_term(&self.tabled_base_ref(id), term, &self.prefixes, &self.datatypes)
+1347:         }
+1348:     }
+1349: 
+
+--- crates/sparq-core/src/dict.rs:1380-1462 ---
+1380:     #[inline]
+1381:     fn find_iri(&self, hash: u64, iri: &str) -> Option<Id> {
+1382:         #[cfg(feature = "mmap")]
+1383:         if let Some(id) = self.mapped_find(hash, |s| stored_ref_is_iri(s, iri, &self.prefixes)) {
+1384:             return Some(id);
+1385:         }
+1386:         if let Some(f) = &self.frozen {
+1387:             if let Some(id) = f.find_iri(hash, iri) {
+1388:                 return Some(id);
+1389:             }
+1390:         }
+1391:         self.table.find(hash, |&id| self.tabled_is_iri(id, iri)).copied()
+1392:     }
+1393: 
+1394:     #[inline]
+1395:     fn find_iri_parts(&self, hash: u64, prefix: &str, suffix: &str) -> Option<Id> {
+1396:         #[cfg(feature = "mmap")]
+1397:         if let Some(id) = self.mapped_find(hash, |s| stored_ref_is_iri_parts(s, prefix, suffix, &self.prefixes)) {
+1398:             return Some(id);
+1399:         }
+1400:         if let Some(f) = &self.frozen {
+1401:             if let Some(id) = f.find_iri_parts(hash, prefix, suffix) {
+1402:                 return Some(id);
+1403:             }
+1404:         }
+1405:         self.table.find(hash, |&id| self.tabled_is_iri_parts(id, prefix, suffix)).copied()
+1406:     }
+1407: 
+1408:     #[inline]
+1409:     fn find_lit(&self, hash: u64, value: &str, datatype: &str, lang: Option<&str>) -> Option<Id> {
+1410:         #[cfg(feature = "mmap")]
+1411:         if let Some(id) = self.mapped_find(hash, |s| stored_ref_is_lit(s, value, datatype, lang, &self.datatypes)) {
+1412:             return Some(id);
+1413:         }
+1414:         if let Some(f) = &self.frozen {
+1415:             if let Some(id) = f.find_lit(hash, value, datatype, lang) {
+1416:                 return Some(id);
+1417:             }
+1418:         }
+1419:         self.table.find(hash, |&id| self.tabled_is_lit(id, value, datatype, lang)).copied()
+1420:     }
+1421: 
+1422:     #[inline]
+1423:     fn find_blank(&self, hash: u64, label: &str) -> Option<Id> {
+1424:         #[cfg(feature = "mmap")]
+1425:         if let Some(id) = self.mapped_find(hash, |s| matches!(s, StoredRef::Blank(b) if *b == label)) {
+1426:             return Some(id);
+1427:         }
+1428:         if let Some(f) = &self.frozen {
+1429:             if let Some(id) = f.find_blank(hash, label) {
+1430:                 return Some(id);
+1431:             }
+1432:         }
+1433:         self.table.find(hash, |&id| self.tabled_is_blank(id, label)).copied()
+1434:     }
+1435: 
+1436:     #[inline]
+1437:     fn find_triple_ids(&self, hash: u64, ids: [Id; 3]) -> Option<Id> {
+1438:         #[cfg(feature = "mmap")]
+1439:         if let Some(id) = self.mapped_find(hash, |s| matches!(s, StoredRef::Triple(x) if *x == ids)) {
+1440:             return Some(id);
+1441:         }
+1442:         if let Some(f) = &self.frozen {
+1443:             if let Some(id) = f.find_triple_ids(hash, ids) {
+1444:                 return Some(id);
+1445:             }
+1446:         }
+1447:         self.table.find(hash, |&id| self.tabled_is_triple(id, ids)).copied()
+1448:     }
+1449: 
+1450:     #[inline]
+1451:     fn find_term(&self, hash: u64, term: &Term) -> Option<Id> {
+1452:         #[cfg(feature = "mmap")]
+1453:         if let Some(id) = self.mapped_find(hash, |s| stored_ref_eq_term(s, term, &self.prefixes, &self.datatypes)) {
+1454:             return Some(id);
+1455:         }
+1456:         if let Some(f) = &self.frozen {
+1457:             if let Some(id) = f.find_term(hash, term) {
+1458:                 return Some(id);
+1459:             }
+1460:         }
+1461:         self.table.find(hash, |&id| self.tabled_eq_term(id, term)).copied()
+1462:     }
+
+--- crates/sparq-core/src/dict.rs:1571-1620 ---
+1571: 
+1572:     /// Returns the id for a term if present, else `NO_ID`.
+1573:     #[inline]
+1574:     pub fn lookup(&self, term: &Term) -> Id {
+1575:         // An RDF 1.2 triple term is matched STRUCTURALLY: resolve its components first
+1576:         // (a missing component means the triple term cannot be present either), then
+1577:         // find the triple by its component ids.
+1578:         if let Term::Triple(t) = term {
+1579:             let s = match t.subject {
+1580:                 oxrdf::NamedOrBlankNode::NamedNode(ref n) => self.lookup(&Term::NamedNode(n.clone())),
+1581:                 oxrdf::NamedOrBlankNode::BlankNode(ref b) => self.lookup(&Term::BlankNode(b.clone())),
+1582:             };
+1583:             let p = self.lookup(&Term::NamedNode(t.predicate.clone()));
+1584:             let o = self.lookup(&t.object);
+1585:             if s == NO_ID || p == NO_ID || o == NO_ID {
+1586:                 return NO_ID;
+1587:             }
+1588:             return self.lookup_triple_ids([s, p, o]);
+1589:         }
+1590:         if let Some(id) = try_inline(term) {
+1591:             return id;
+1592:         }
+1593:         let hash = hash_term(term);
+1594:         // Mapped base first (binary search of the sorted hash index, verifying each
+1595:         // equal-hash candidate — content hashes can collide), then the frozen shared
+1596:         // base of a forked dict, then the table, which covers the blob base and any
+1597:         // APPENDED terms (delta-overlay growth).
+1598:         self.find_term(hash, term).unwrap_or(NO_ID)
+1599:     }
+1600: 
+1601:     /// Returns the id for a literal given its components, else `NO_ID` — `lookup`
+1602:     /// without constructing an `oxrdf::Term` (the fast path for resolving computed
+1603:     /// BIND/aggregate values against the dictionary). Canonical small `xsd:integer`s
+1604:     /// resolve to their inline id, exactly like `lookup`/`intern_lit`.
+1605:     #[inline]
+1606:     pub fn lookup_lit(&self, value: &str, datatype: &str, lang: Option<&str>) -> Id {
+1607:         if let Some(id) = try_inline_lit(value, datatype) {
+1608:             return id;
+1609:         }
+1610:         let hash = hash_lit(value, datatype, lang);
+1611:         self.find_lit(hash, value, datatype, lang).unwrap_or(NO_ID)
+1612:     }
+1613: 
+1614:     /// Returns the id of a triple term whose components resolved to `ids`, else `NO_ID`.
+1615:     /// Serves all three storage modes (arena, blob, mmap).
+1616:     fn lookup_triple_ids(&self, ids: [Id; 3]) -> Id {
+1617:         let hash = hash_triple_ids(ids);
+1618:         self.find_triple_ids(hash, ids).unwrap_or(NO_ID)
+1619:     }
+1620: 

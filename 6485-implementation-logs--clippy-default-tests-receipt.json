@@ -1,0 +1,11 @@
+{
+  "name": "clippy-default-tests",
+  "exit": 0,
+  "stop": null,
+  "seconds": 1.5667059170000002,
+  "after": {
+    "free": 10686234624,
+    "allocated": 35086336
+  },
+  "terminal": true
+}

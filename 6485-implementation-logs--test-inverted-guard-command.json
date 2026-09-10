@@ -1,0 +1,15 @@
+{
+  "name": "test-inverted-guard",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/inverted-guard/sparq_core-memo_inverted_guard",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:23:59.127324+00:00",
+  "before": {
+    "free": 10696445952,
+    "allocated": 25706496
+  }
+}

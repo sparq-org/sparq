@@ -1,0 +1,15 @@
+{
+  "name": "test-candidate",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/candidate/sparq_core-memo_candidate",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:23:41.442807+00:00",
+  "before": {
+    "free": 10708434944,
+    "allocated": 14139392
+  }
+}

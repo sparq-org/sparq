@@ -1,0 +1,92 @@
+[
+  {
+    "crate": "hashbrown",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rlib",
+    "bytes": 1636144,
+    "sha256": "6aac5ddc22ccd9b73685dc899cdc951130e5fb3094bed9a9ebda1807d56d1f4a"
+  },
+  {
+    "crate": "memchr",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rlib",
+    "bytes": 1225144,
+    "sha256": "31ffdbd9407dde07285a57dbce8d9ecbcfb575db7f9beba2fafbb70624ac6046"
+  },
+  {
+    "crate": "oxrdf",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-4ecd756ddd7ab1ec.rlib",
+    "bytes": 1889456,
+    "sha256": "39c12e127a3f154f092a9bdb0301dc4eef27456adb5a7576fca063a52acf3abd"
+  },
+  {
+    "crate": "oxttl",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-9b48f76b6508b35d.rlib",
+    "bytes": 1258472,
+    "sha256": "dfde85660515bc5048a46bf8cc7233e8e9117566697ca3ab65c2cfde67e8b697"
+  },
+  {
+    "crate": "rayon",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-fb353b242d14de3d.rlib",
+    "bytes": 4519144,
+    "sha256": "ee009cb5d311d96b6b5e3d8088a22c7317cae93104dd6fbd55e91fd98796556f"
+  },
+  {
+    "crate": "rustc_hash",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rlib",
+    "bytes": 40672,
+    "sha256": "b62e578ef93ab86ace4d00bb0b3c90e02e00fabc1a1fad4bf28e676a4b25e894"
+  },
+  {
+    "crate": "proptest",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libproptest-fe58022d97b60f4d.rlib",
+    "bytes": 6714896,
+    "sha256": "4d9fdfe72692de8b2580f8d3826dcb80532f0c7d9688174188d28dc4635a6e47"
+  },
+  {
+    "crate": "hashbrown",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rlib",
+    "sha256": "6aac5ddc22ccd9b73685dc899cdc951130e5fb3094bed9a9ebda1807d56d1f4a",
+    "bytes": 1636144
+  },
+  {
+    "crate": "libc",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liblibc-d3a9ab32a070ca78.rlib",
+    "sha256": "9ead2b96ea04a72d78681b24d0275b3f257b1802df53e04c3b52017a0706ba00",
+    "bytes": 2214928
+  },
+  {
+    "crate": "memchr",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rlib",
+    "sha256": "31ffdbd9407dde07285a57dbce8d9ecbcfb575db7f9beba2fafbb70624ac6046",
+    "bytes": 1225144
+  },
+  {
+    "crate": "memmap2",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemmap2-1da36dfefebe3146.rlib",
+    "sha256": "2e86757102b42a04914c7f2fcac70dbb84c69b3f00155d82fe6458458db3752e",
+    "bytes": 165304
+  },
+  {
+    "crate": "oxrdf",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rlib",
+    "sha256": "491471fab5133fe72a254ceba0e57440914aedf52ba79e1898df16442b65e82a",
+    "bytes": 1921384
+  },
+  {
+    "crate": "oxttl",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-bf587d09880a3c80.rlib",
+    "sha256": "c610322ca491aed26d2162080126ed33a8c97245436aa0da8542e0cbe07dd8a7",
+    "bytes": 1260416
+  },
+  {
+    "crate": "rayon",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rlib",
+    "sha256": "481f142ba17b4bc134155982e55c4104c362c8ee0b9062e80a4248d407870ea6",
+    "bytes": 4519136
+  },
+  {
+    "crate": "rustc_hash",
+    "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rlib",
+    "sha256": "b62e578ef93ab86ace4d00bb0b3c90e02e00fabc1a1fad4bf28e676a4b25e894",
+    "bytes": 40672
+  }
+]

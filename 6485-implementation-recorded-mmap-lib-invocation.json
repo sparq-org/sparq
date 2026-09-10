@@ -1,0 +1,116 @@
+{
+  "from": "direct-5183/original-seed-execution/compiler-linked-provenance.json",
+  "source_file_sha256": "426b6fc0ceacb2328fc1451f2600fc58aa69b849669ca75b6d23ccd4e882c6f6",
+  "record": {
+    "crate": "sparq_core",
+    "actual_rustc_argv": [
+      "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustc",
+      "--crate-name",
+      "sparq_core",
+      "--edition=2021",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue5183/crates/sparq-core/src/lib.rs",
+      "--error-format=json",
+      "--json=diagnostic-rendered-ansi,artifacts,future-incompat",
+      "--crate-type",
+      "lib",
+      "--emit=dep-info,metadata,link",
+      "-C",
+      "opt-level=3",
+      "-C",
+      "embed-bitcode=no",
+      "-C",
+      "codegen-units=16",
+      "--warn=unexpected_cfgs",
+      "--check-cfg",
+      "cfg(kani)",
+      "--cfg",
+      "feature=\"default\"",
+      "--cfg",
+      "feature=\"dict-spill\"",
+      "--cfg",
+      "feature=\"mmap\"",
+      "--cfg",
+      "feature=\"parallel\"",
+      "--check-cfg",
+      "cfg(docsrs,test)",
+      "--check-cfg",
+      "cfg(feature, values(\"block-bloom\", \"compact-index\", \"default\", \"dict-spill\", \"elias-fano\", \"iri-fast\", \"jsonld\", \"mmap\", \"native-ttl\", \"overlay-deleted-projections\", \"parallel\", \"rdfxml\", \"shared\", \"spqcprm2\"))",
+      "-C",
+      "metadata=d1d9bdd2a8f8bc7d",
+      "-C",
+      "extra-filename=-ecad7fe38b152a30",
+      "--out-dir",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "-C",
+      "strip=debuginfo",
+      "-L",
+      "dependency=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps",
+      "--extern",
+      "hashbrown=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rmeta",
+      "--extern",
+      "libc=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liblibc-d3a9ab32a070ca78.rmeta",
+      "--extern",
+      "memchr=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rmeta",
+      "--extern",
+      "memmap2=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemmap2-1da36dfefebe3146.rmeta",
+      "--extern",
+      "oxrdf=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rmeta",
+      "--extern",
+      "oxttl=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-bf587d09880a3c80.rmeta",
+      "--extern",
+      "rayon=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rmeta",
+      "--extern",
+      "rustc_hash=/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rmeta"
+    ],
+    "extern_artifacts_now_hashed": [
+      {
+        "crate": "hashbrown",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libhashbrown-6eaca190343f9157.rmeta",
+        "bytes": 1629641,
+        "sha256": "f70ef3873baef998c352e0470000c0983c3c7b8ed8f031bca7003c3850f666df"
+      },
+      {
+        "crate": "libc",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liblibc-d3a9ab32a070ca78.rmeta",
+        "bytes": 2210357,
+        "sha256": "c19072db322653af0eaa1438613809a61c4bad83fb91641d13a2b2e0890fad79"
+      },
+      {
+        "crate": "memchr",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemchr-f73f6714e13773b7.rmeta",
+        "bytes": 1196459,
+        "sha256": "be353fd777a2570abc0be1f83d20ad9ca5e1a799a477106b388f42d75a6e337e"
+      },
+      {
+        "crate": "memmap2",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/libmemmap2-1da36dfefebe3146.rmeta",
+        "bytes": 134713,
+        "sha256": "8ae3caf9d749d0b0bc24f8cca2b9b26cd63f86603f0d728acfd3c64804ce431d"
+      },
+      {
+        "crate": "oxrdf",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxrdf-a953fc3282e3d853.rmeta",
+        "bytes": 1115222,
+        "sha256": "82eb36cbafc283e14529c491a15d20bf14deeb6c234590b191213eae5462004d"
+      },
+      {
+        "crate": "oxttl",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/liboxttl-bf587d09880a3c80.rmeta",
+        "bytes": 744747,
+        "sha256": "2ad2388fe2aaca5d8b123ce63e99755b5c4698c48fd2881b268a3b06365d72a7"
+      },
+      {
+        "crate": "rayon",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librayon-b0b3a31e71d15f32.rmeta",
+        "bytes": 4468288,
+        "sha256": "26f44f8eca6e8b3240a1d3d85b78dd87f60d3e193195bb65fbc105df19c376b6"
+      },
+      {
+        "crate": "rustc_hash",
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/release/deps/librustc_hash-a257f2d86c4c9dc8.rmeta",
+        "bytes": 39228,
+        "sha256": "c2d3331b60b8edcc0eb669f977552882fc408a1b11c2cf1db06d85ea70cf3625"
+      }
+    ]
+  }
+}

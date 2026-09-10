@@ -1,0 +1,19 @@
+
+thread 'tests::has_high_precision_decimal_memo_fork_compact_isolation' (5018953) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/inverted-guard/core/src/lib.rs:9763:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tests::has_high_precision_decimal_memo_invalidates_stored_growth' (5018956) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/inverted-guard/core/src/lib.rs:9729:17:
+assertion `left == right` failed: growth: 1.5
+  left: 1
+ right: 0
+
+thread 'tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary' (5018957) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/inverted-guard/core/src/lib.rs:9676:13:
+assertion `left == right` failed: delete, sparse=false
+  left: 0
+ right: 1
+
+thread 'tests::has_high_precision_decimal_memo_survives_delta_insert' (5018958) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/inverted-guard/core/src/lib.rs:9644:9:
+delta-inserted inexact decimal must flip the memo

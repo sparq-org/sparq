@@ -1,0 +1,15 @@
+{
+  "name": "preflight",
+  "argv": [
+    "python3",
+    "scripts/preflight.py",
+    "--base",
+    "HEAD"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:23:26.673368+00:00",
+  "before": {
+    "free": 10712576000,
+    "allocated": 10272768
+  }
+}

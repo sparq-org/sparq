@@ -1,0 +1,15 @@
+{
+  "name": "test-unconditional-cas",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/unconditional-cas/sparq_core-memo_unconditional_cas",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:23:47.331396+00:00",
+  "before": {
+    "free": 10704297984,
+    "allocated": 17997824
+  }
+}

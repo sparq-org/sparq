@@ -1,0 +1,11 @@
+{
+  "name": "clippy-mmap-tests",
+  "exit": 0,
+  "stop": null,
+  "seconds": 2.631937125,
+  "after": {
+    "free": 10686033920,
+    "allocated": 35098624
+  },
+  "terminal": true
+}

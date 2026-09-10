@@ -1,0 +1,11 @@
+{
+  "source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "matches_compiled_candidate": true,
+  "touched_tests_rustfmt_exit": 0,
+  "touched_test_bytes_formatted": true,
+  "git_diff_check_exit": 0,
+  "git_status": " M crates/sparq-core/src/lib.rs\n",
+  "branch": "codex/preserve-numeric-memo",
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "production_accessor_counter_added": false
+}

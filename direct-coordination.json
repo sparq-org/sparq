@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-10T17:17:44.343772+00:00",
+  "updated_at": "2026-09-10T17:41:00.779365+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -72,29 +72,28 @@
     "agent": "/root/postmerge_ci",
     "model": "gpt-6-astra",
     "effort": "xhigh",
-    "phase": "Narrow memo optimization and focused regressions after actual Opus conditional design review.",
+    "phase": "Committed candidate73769114: default4/4, mapped5/5, four behavioral controls killed; final review pending.",
     "execution_limits": {
-      "builds": 1,
-      "filtered_runs": 1,
-      "filter": "has_high_precision_decimal_memo",
-      "seconds": 480,
-      "new_allocated_bytes": 268435456,
-      "start_free_floor": 2214592512,
-      "continuous_free_floor": 2147483648,
+      "max_total_seconds": 600,
+      "max_new_allocated_bytes": 268435456,
+      "start_floor": 2214592512,
+      "continuous_floor": 2147483648,
       "offline": true,
       "jobs": 1,
       "incremental": false,
-      "no_retry": true
+      "default": "One candidate and four named behavioral controls",
+      "extra": "At most one matching recorded mmap/dict-spill candidate adaptation; no dependency rebuild.",
+      "checks": "Scoped Clippy/touched formatting/diff if warm; CI authority for broad matrix."
     },
-    "state": "astra_implementation_running",
+    "state": "final_actual_opus_review_running",
     "directory": "direct-6485/implementation",
     "admission": "direct-6485/admission/corrected-controls-admission.json",
-    "production_edit_authorized": true,
+    "production_edit_authorized": false,
     "prior_baseline": "direct-3113/delete-memo-baseline",
     "next_actions": [
-      "Collect Astra implementation and complete source proof for id_of F4. Verify bounded tests and behavioral controls.",
-      "Obtain actual Opus5 xhigh review of final patch/evidence before publication.",
-      "Keep parent3113 and separate6483 open; preserve all holds."
+      "Collect final actual Opus review58553 and source-only publication readiness. Resolve material findings before publication.",
+      "Freshly validate target/head/ownership/rate budget; publish through ordinary PR process once approved. Normal CI gate15368 and current reviews required for queue.",
+      "Keep parent3113 and separate6483 open; no unsupported latency claims."
     ],
     "controls": {
       "directory": "direct-6485/memo-controls",
@@ -126,12 +125,38 @@
       "root_disposition": "direct-6485/admission/opus-memo-design-root-disposition.json",
       "output_sha256": "c619dd1d92a198c46a7e2b26ca8ab34e08de5612bd6db3920b451263d5891886"
     },
-    "agent_current_task": "Implement/validate/commit locally within grant; root handles final actual Opus review and publication. No commands from former phases remain.",
+    "agent_current_task": "Source-only per-PR optimizer declaration publication readiness; no builds/source edits/writes.",
     "implementation_admission": "direct-6485/admission/implementation-admission.json",
     "implementation_readiness": {
       "directory": "direct-6485/implementation-readiness",
       "manifest_sha256": "a86fc5c86b63c33a91f43a3d5cffff710a08e0da3a45c14cd1c362a2b76066f4",
       "verified_files": 6
+    },
+    "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+    "implementation": {
+      "directory": "direct-6485/implementation",
+      "manifest_sha256": "2679e940e1f2106778d6ee569f90aeb6896ed4d468b5f6b3aa01e7e3a55e5df3",
+      "files": 221,
+      "root_verification": "direct-6485/admission/implementation-root-verification.json",
+      "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+      "tests_default": 4,
+      "tests_mmap": 5,
+      "controls_killed": 4,
+      "clippy": "default lib/test + mapped test passed",
+      "preflight": "Known Bash3 mapfile only; Linux CI remains required",
+      "pending_commands": false
+    },
+    "final_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 58553,
+      "requested_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6485/admission/opus-memo-final-input.md",
+      "input_sha256": "8000bf18e96774799a08e9212f94d6029d3e05f65893e1dd90f1e6eff9703a35",
+      "output": "direct-6485/admission/opus-memo-final-review.json",
+      "completion": "direct-6485/admission/opus-memo-final-completion.json",
+      "policy": "Collect58553; no duplicate launch; no publication until result/current head reconciled."
     }
   },
   "prs": {
@@ -654,7 +679,7 @@
     }
   },
   "next_actions": [
-    "Collect existing Astra6485 bounded implementation; verify id_of source, focused controls and current head. Actual Opus final patch review before publication. Keep3113 open.",
+    "Collect final actual Opus review58553 and source-only publication readiness. Resolve material findings before publication.",
     "6482/5183 complete; no repeated CI/log reads or reruns. Separate6483 witness remains unexecuted/open. Hashreuse3105 parked with evidence.",
     "Registry Actions OFF, heartbeat ACTIVE; preserve ALLGREEN, gate15368, rate fail-closed and all prior approval/canon/EC2/release holds."
   ],

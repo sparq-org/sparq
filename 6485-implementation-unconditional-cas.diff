@@ -1,0 +1,17 @@
+--- candidate/crates/sparq-core/src/lib.rs
++++ unconditional-cas/crates/sparq-core/src/lib.rs
+@@ -3395,14 +3395,12 @@
+         // [GPT-6 Astra] Interning is append-only and extend_for touches only new IDs.
+         // Equal lengths therefore preserve every term/numeric value read by the memo.
+         // Any future path changing existing terms or cached values must invalidate it.
+-        if self.dict.len() != old_len {
+             let _ = self.high_precision_decimal.compare_exchange(
+                 1,
+                 0,
+                 std::sync::atomic::Ordering::Relaxed,
+                 std::sync::atomic::Ordering::Relaxed,
+             );
+-        }
+         self.store.apply_delta(&ins_ids, &del_ids);
+     }
+ 

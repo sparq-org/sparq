@@ -1,0 +1,11 @@
+{
+  "name": "clippy-default-lib",
+  "exit": 0,
+  "stop": null,
+  "seconds": 1.5705595419999998,
+  "after": {
+    "free": 10686169088,
+    "allocated": 35074048
+  },
+  "terminal": true
+}

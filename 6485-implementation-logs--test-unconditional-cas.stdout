@@ -1,0 +1,15 @@
+
+running 4 tests
+test tests::has_high_precision_decimal_memo_fork_compact_isolation ... FAILED
+test tests::has_high_precision_decimal_memo_invalidates_stored_growth ... ok
+test tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary ... FAILED
+test tests::has_high_precision_decimal_memo_survives_delta_insert ... ok
+
+failures:
+
+failures:
+    tests::has_high_precision_decimal_memo_fork_compact_isolation
+    tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.00s
+

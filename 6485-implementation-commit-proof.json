@@ -1,0 +1,17 @@
+{
+  "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "parent": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "branch": "codex/preserve-numeric-memo",
+  "status": "",
+  "changed_files": [
+    "crates/sparq-core/src/lib.rs"
+  ],
+  "numstat": {
+    "added": 214,
+    "deleted": 7
+  },
+  "committed_diff_sha256": "7aaff25ee7dd6b817313cd1d33b19026a8741ad9a3771c35d03c1489867960ca",
+  "committed_source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "coauthor": "GPT-6 Astra <noreply@openai.com>",
+  "commit_signing": "Per-command commit.gpgsign=false; no persistent configuration change; ordinary hooks retained."
+}

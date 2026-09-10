@@ -1,0 +1,108 @@
+[
+  {
+    "variant": "candidate",
+    "exit": 0,
+    "summary": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out",
+    "passed": 4,
+    "failed": 0,
+    "filtered": 149,
+    "failed_tests": [],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/candidate/sparq_core-memo_candidate",
+      "sha256": "a9cf407d004ebfaa2da3f3619cde149ccba5c672bce0816a0faf447391feb5cd",
+      "bytes": 3817168
+    }
+  },
+  {
+    "variant": "unconditional-cas",
+    "exit": 101,
+    "summary": "test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 149 filtered out",
+    "passed": 2,
+    "failed": 2,
+    "filtered": 149,
+    "failed_tests": [
+      "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+      "tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary"
+    ],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/unconditional-cas/sparq_core-memo_unconditional_cas",
+      "sha256": "f2e538069b12f34f8dcdf9cee97e2396555de4aa015146d70e4b8b5626973b50",
+      "bytes": 3816432
+    }
+  },
+  {
+    "variant": "no-cas",
+    "exit": 101,
+    "summary": "test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 149 filtered out",
+    "passed": 1,
+    "failed": 3,
+    "filtered": 149,
+    "failed_tests": [
+      "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+      "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+      "tests::has_high_precision_decimal_memo_survives_delta_insert"
+    ],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/no-cas/sparq_core-memo_no_cas",
+      "sha256": "d98bfa8bcde6bdc0502e53eeb0bdb6a71b24fb09ad773c24cb1891f6d7f00973",
+      "bytes": 3817168
+    }
+  },
+  {
+    "variant": "inverted-guard",
+    "exit": 101,
+    "summary": "test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 149 filtered out",
+    "passed": 0,
+    "failed": 4,
+    "filtered": 149,
+    "failed_tests": [
+      "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+      "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+      "tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary",
+      "tests::has_high_precision_decimal_memo_survives_delta_insert"
+    ],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/inverted-guard/sparq_core-memo_inverted_guard",
+      "sha256": "19bfe4fc56883993a1b8a1cc261647ec00d8e2ac145158b93e10ae7aad344844",
+      "bytes": 3816416
+    }
+  },
+  {
+    "variant": "self-length",
+    "exit": 101,
+    "summary": "test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 149 filtered out",
+    "passed": 1,
+    "failed": 3,
+    "filtered": 149,
+    "failed_tests": [
+      "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+      "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+      "tests::has_high_precision_decimal_memo_survives_delta_insert"
+    ],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/self-length/sparq_core-memo_self_length",
+      "sha256": "79c656a599892d5648f3f268702bf284934e1ce23618aecbb75bb11d841b6eeb",
+      "bytes": 3817168
+    }
+  },
+  {
+    "variant": "mmap-candidate",
+    "exit": 0,
+    "summary": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out",
+    "passed": 5,
+    "failed": 0,
+    "filtered": 225,
+    "failed_tests": [],
+    "expected_behavior_observed": true,
+    "binary": {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/mmap-candidate/sparq_core-memo_mmap_candidate",
+      "sha256": "8ce47c4cc1fb4091d4cd16dfda3ab1b77a0b6c779113b6bc31fdd2c507f930bb",
+      "bytes": 4992544
+    }
+  }
+]

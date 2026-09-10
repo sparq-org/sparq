@@ -1,0 +1,5 @@
+{
+  "exit": 1,
+  "stop": null,
+  "note": "Inspect raw output; known local Bash3/mapfile limitation must remain explicit."
+}

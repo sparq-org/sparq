@@ -1,0 +1,226 @@
+{
+  "author_runtime": "GPT-6 Astra xhigh",
+  "frozen_at": "2026-09-10T17:28:01.987325+00:00",
+  "status": "LOCAL_CANDIDATE_READY_FOR_ACTUAL_OPUS_REVIEW; NOT_PUBLICATION_OR_MERGE_APPROVAL",
+  "issue": 6485,
+  "parent_issue": 3113,
+  "head": "73769114f081c8455aa21a393d0b992bd1283b67",
+  "parent": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "source_clean": true,
+  "scope": "One file,214 added/7 removed lines. Runtime delta is entry capture and a condition around existing CAS; most additions are four focused tests and small public-field docs. No API signature, cache representation, dependency, workflow or policy change.",
+  "reason": "Nonempty deltas that introduce no stored dictionary terms need not discard the memoized absence of high-precision decimals. Existing state2 remains sticky and first cold dictionary scan is unchanged.",
+  "f4": "Full Graph::id_of/Dict::lookup recursion plus mapped/frozen/table finder and equality source is supplied. Deletes are lookup-only; entry capture is neutral.",
+  "invariant": "Coordinated Graph mutation interns append-only terms, extends numeric cache only for new IDs, and does not change old ID/value pairs without growth. New guard comment requires future old-entry updates to invalidate. Public fields are documented as bypassing caches; from_parts builds a replacement using coherent matching ID triples. No global guarantee for arbitrary field replacements.",
+  "tests": [
+    {
+      "variant": "candidate",
+      "exit": 0,
+      "summary": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out",
+      "passed": 4,
+      "failed": 0,
+      "filtered": 149,
+      "failed_tests": [],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/candidate/sparq_core-memo_candidate",
+        "sha256": "a9cf407d004ebfaa2da3f3619cde149ccba5c672bce0816a0faf447391feb5cd",
+        "bytes": 3817168
+      }
+    },
+    {
+      "variant": "unconditional-cas",
+      "exit": 101,
+      "summary": "test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 149 filtered out",
+      "passed": 2,
+      "failed": 2,
+      "filtered": 149,
+      "failed_tests": [
+        "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+        "tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary"
+      ],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/unconditional-cas/sparq_core-memo_unconditional_cas",
+        "sha256": "f2e538069b12f34f8dcdf9cee97e2396555de4aa015146d70e4b8b5626973b50",
+        "bytes": 3816432
+      }
+    },
+    {
+      "variant": "no-cas",
+      "exit": 101,
+      "summary": "test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 149 filtered out",
+      "passed": 1,
+      "failed": 3,
+      "filtered": 149,
+      "failed_tests": [
+        "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+        "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+        "tests::has_high_precision_decimal_memo_survives_delta_insert"
+      ],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/no-cas/sparq_core-memo_no_cas",
+        "sha256": "d98bfa8bcde6bdc0502e53eeb0bdb6a71b24fb09ad773c24cb1891f6d7f00973",
+        "bytes": 3817168
+      }
+    },
+    {
+      "variant": "inverted-guard",
+      "exit": 101,
+      "summary": "test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 149 filtered out",
+      "passed": 0,
+      "failed": 4,
+      "filtered": 149,
+      "failed_tests": [
+        "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+        "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+        "tests::has_high_precision_decimal_memo_preserves_unchanged_dictionary",
+        "tests::has_high_precision_decimal_memo_survives_delta_insert"
+      ],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/inverted-guard/sparq_core-memo_inverted_guard",
+        "sha256": "19bfe4fc56883993a1b8a1cc261647ec00d8e2ac145158b93e10ae7aad344844",
+        "bytes": 3816416
+      }
+    },
+    {
+      "variant": "self-length",
+      "exit": 101,
+      "summary": "test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 149 filtered out",
+      "passed": 1,
+      "failed": 3,
+      "filtered": 149,
+      "failed_tests": [
+        "tests::has_high_precision_decimal_memo_fork_compact_isolation",
+        "tests::has_high_precision_decimal_memo_invalidates_stored_growth",
+        "tests::has_high_precision_decimal_memo_survives_delta_insert"
+      ],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/self-length/sparq_core-memo_self_length",
+        "sha256": "79c656a599892d5648f3f268702bf284934e1ce23618aecbb75bb11d841b6eeb",
+        "bytes": 3817168
+      }
+    },
+    {
+      "variant": "mmap-candidate",
+      "exit": 0,
+      "summary": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out",
+      "passed": 5,
+      "failed": 0,
+      "filtered": 225,
+      "failed_tests": [],
+      "expected_behavior_observed": true,
+      "binary": {
+        "path": "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/mmap-candidate/sparq_core-memo_mmap_candidate",
+        "sha256": "8ce47c4cc1fb4091d4cd16dfda3ab1b77a0b6c779113b6bc31fdd2c507f930bb",
+        "bytes": 4992544
+      }
+    }
+  ],
+  "clippy": {
+    "receipts": [
+      {
+        "name": "clippy-default-lib",
+        "exit": 0,
+        "stop": null,
+        "seconds": 1.5705595419999998,
+        "after": {
+          "free": 10686169088,
+          "allocated": 35074048
+        },
+        "terminal": true
+      },
+      {
+        "name": "clippy-default-tests",
+        "exit": 0,
+        "stop": null,
+        "seconds": 1.5667059170000002,
+        "after": {
+          "free": 10686234624,
+          "allocated": 35086336
+        },
+        "terminal": true
+      },
+      {
+        "name": "clippy-mmap-tests",
+        "exit": 0,
+        "stop": null,
+        "seconds": 2.631937125,
+        "after": {
+          "free": 10686033920,
+          "allocated": 35098624
+        },
+        "terminal": true
+      }
+    ],
+    "elapsed": 5.950292625,
+    "aggregate_with_build_tests": 55.13545191699999,
+    "pending": false
+  },
+  "preflight": {
+    "exit": 1,
+    "passing_checks": [
+      "G1 new-crate-completeness",
+      "G2 public-api-to-skill",
+      "G6 new-config-to-docs",
+      "guard-untested"
+    ],
+    "sole_finding": "privacy-claims shell line92 uses mapfile unavailable in local Bash3; BrokenPipeError follows. Gate unchanged; actual Linux preflight/privacy remains required.",
+    "skips": [
+      "no-perf-numbers: no matching diff path",
+      "readme-template: no matching diff path"
+    ]
+  },
+  "format_diff": "Only the new test block was formatted with pinned rustfmt; final block check and git diff --check passed. Compiled candidate bytes equal committed file.",
+  "profile": {
+    "compiler": "Rust1.97.1 (8bab26f4f), aarch64-apple-darwin",
+    "edition": 2021,
+    "optimization": "O3/unwind/LTOoff/codegen16",
+    "default": [
+      "default",
+      "parallel"
+    ],
+    "mapped": [
+      "default",
+      "parallel",
+      "mmap",
+      "dict-spill"
+    ],
+    "routes": "Direct rustc --test adaptation of actual recorded lib invocations; no Cargo/dependency compilation. Candidate and four mutants used7 rehashed direct rlibs; mapped used8 recorded-feature rlibs plus same proptest dev dependency.",
+    "clippy": "Pinned clippy-driver, same source/extern cfgs, -D warnings, metadata-only; default lib/default cfgtest/mapped cfgtest all exit0.",
+    "scope_limits": "Not full Cargo/workspace CI. Mapped WAL test actually ran; cfg dict-spill code compiled, but no new dict-spill ingest runtime test was selected. compact-index/wasm and broad gates remain CI obligations."
+  },
+  "resources": {
+    "execution_seconds_build_test_preflight": 49.185157333999996,
+    "execution_seconds_with_clippy": 55.13545191699999,
+    "initial_free": 10712580096,
+    "min_sampled_free": 10675556352,
+    "max_sampled_allocated": 40873984,
+    "current_allocated": 35430400,
+    "current_free": 10683953152,
+    "limits": {
+      "seconds": 600,
+      "new_allocated": 268435456,
+      "start_free": 2214592512,
+      "continuous_free": 2147483648
+    },
+    "sampling_interval_seconds": 0.5,
+    "qualification": "Polling is not a peak-RSS measurement; compile/test durations are resource receipts, not performance evidence."
+  },
+  "no_latency_claim": "Predicate-visit baseline is preserved in separate bundles; this candidate uses memo-state assertions. No measured latency, throughput, heap or public SPARQL query benefit claimed.",
+  "remaining": [
+    "Actual Opus final patch review before publication.",
+    "Authoritative full-workspace Clippy/tests, feature matrix including compact-index/dict-spill, wasm and applicable ratchets; Linux privacy check.",
+    "Parent3113 first cold scan remains open; held PR4097/4354/4247 untouched.",
+    "An intentional always-compiled optimizer declaration may be required under the normal per-PR feature-off process once root assigns a PR number; no byte-neutrality claim or wasm-floor change."
+  ],
+  "commands_pending": false,
+  "source_edits_after_validation": false,
+  "network_calls": 0,
+  "remote_mutations": 0,
+  "dependency_builds": 0,
+  "build_retries": 0,
+  "behavior_retries": 0
+}

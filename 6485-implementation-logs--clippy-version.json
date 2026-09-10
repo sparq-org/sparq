@@ -1,0 +1,7 @@
+{
+  "path": "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/clippy-driver",
+  "sha256": "ca34521c9c61e5570ad5f07b303b00fbb60756fedcb62b9f1529f85971256ecf",
+  "exit": 0,
+  "stdout": "clippy 0.1.97 (8bab26f4f6 2026-07-14)\n",
+  "stderr": ""
+}

@@ -1,0 +1,7 @@
+perf(core): preserve numeric memo across unchanged dictionaries
+
+Avoid invalidating the cached high-precision-decimal verdict when a delta
+adds no stored dictionary terms. Document cache coherence and test dense,
+sparse, forked and mapped mutation paths.
+
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>

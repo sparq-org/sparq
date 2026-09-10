@@ -1,0 +1,11 @@
+--- candidate/crates/sparq-core/src/lib.rs
++++ self-length/crates/sparq-core/src/lib.rs
+@@ -3395,7 +3395,7 @@
+         // [GPT-6 Astra] Interning is append-only and extend_for touches only new IDs.
+         // Equal lengths therefore preserve every term/numeric value read by the memo.
+         // Any future path changing existing terms or cached values must invalidate it.
+-        if self.dict.len() != old_len {
++        if self.dict.len() != self.dict.len() {
+             let _ = self.high_precision_decimal.compare_exchange(
+                 1,
+                 0,

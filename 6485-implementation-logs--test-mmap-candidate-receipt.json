@@ -1,0 +1,25 @@
+{
+  "name": "test-mmap-candidate",
+  "argv": [
+    "/private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/artifacts/mmap-candidate/sparq_core-memo_mmap_candidate",
+    "has_high_precision_decimal_memo",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:24:14.728024+00:00",
+  "before": {
+    "free": 10687000576,
+    "allocated": 34598912
+  },
+  "pid": 29309,
+  "exit_code": 0,
+  "stop": null,
+  "seconds": 1.061710167000001,
+  "ended": "2026-09-10T17:24:15.792230+00:00",
+  "after": {
+    "free": 10687029248,
+    "allocated": 34607104
+  },
+  "terminal": true
+}

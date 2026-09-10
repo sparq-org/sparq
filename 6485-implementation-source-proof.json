@@ -1,0 +1,95 @@
+{
+  "base": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "current_lib_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+  "old_existing_test_unchanged": true,
+  "variants": [
+    {
+      "name": "candidate",
+      "source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+      "production_candidate": true
+    },
+    {
+      "name": "unconditional-cas",
+      "source_sha256": "ee8f94e05f1b2081fe41edfeb19ab10fb4d0c95619980a20a65f978f133566c0",
+      "production_candidate": false
+    },
+    {
+      "name": "no-cas",
+      "source_sha256": "44886b51eb03739f229d0b25f5269dac0528980302e7c928af3cb6504d338492",
+      "production_candidate": false
+    },
+    {
+      "name": "inverted-guard",
+      "source_sha256": "0d6217f6239ba1050917d4fd1a8b5b1be74c3d626d2a70a6fc40858d3df91198",
+      "production_candidate": false
+    },
+    {
+      "name": "self-length",
+      "source_sha256": "635caac4f63247ab6c50afce282f8936057f4098fb5f675bd235161d656b154e",
+      "production_candidate": false
+    },
+    {
+      "name": "mmap-candidate",
+      "source_sha256": "e332be510f79a0374e3d930127229deeb77e3fa3523e3b9de9d2f5c4f4dfeade",
+      "production_candidate": true
+    }
+  ],
+  "all_other_core_files": [
+    {
+      "path": "crates/sparq-core/src/compress.rs",
+      "sha256": "71b4b72c7499b3c8e7b81c2dff753e5911b226d2700da4fc9baebb244b9408dc"
+    },
+    {
+      "path": "crates/sparq-core/src/dict.rs",
+      "sha256": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+    },
+    {
+      "path": "crates/sparq-core/src/dictspill.rs",
+      "sha256": "a57c8da2eb093df1876fa255e83c12a4ae6de2b9995e1ba53663f054e28cf513"
+    },
+    {
+      "path": "crates/sparq-core/src/eliasfano.rs",
+      "sha256": "0bf83ea87986b04417e0396fbaba406e5c1112f12caa26d92db0565210e2b3cb"
+    },
+    {
+      "path": "crates/sparq-core/src/extsort.rs",
+      "sha256": "792673d722e1fec68525505782685743f7bc9d1f499fb8b79065fea58aaf333f"
+    },
+    {
+      "path": "crates/sparq-core/src/iri.rs",
+      "sha256": "bf6e36f447ce51f43a7bf84220bdb8ee4a894662971bd3a82013fa7d5ba1414d"
+    },
+    {
+      "path": "crates/sparq-core/src/nt.rs",
+      "sha256": "6e120cf3f7ae015a44e345be0f5146ffd5d809a5e09efa666e83d99c6481ae10"
+    },
+    {
+      "path": "crates/sparq-core/src/shared.rs",
+      "sha256": "0cd9243e254cef67c54fb5ae25ed2eac60cd671997168e55d3d27bd828e98ac9"
+    },
+    {
+      "path": "crates/sparq-core/src/store/overlay_deleted_tests.rs",
+      "sha256": "5eaf0fda2377ec4e7df664d749e5466771aa656659ac5153f746a8ed6ec4a688"
+    },
+    {
+      "path": "crates/sparq-core/src/store.rs",
+      "sha256": "6c70a6d4f13de468143f19b75972c28b312a8a2110bf95deb502d784f9b9284c"
+    },
+    {
+      "path": "crates/sparq-core/src/strdist.rs",
+      "sha256": "5538ea31c303721b57c3677ba8b087c67a6524754d74e1690de123d8845cd761"
+    },
+    {
+      "path": "crates/sparq-core/src/temporal.rs",
+      "sha256": "edd405793ad97bf0a8a300b08828b1d36b6c5ba48467096425512ad98a76b047"
+    },
+    {
+      "path": "crates/sparq-core/src/ttl/tests.rs",
+      "sha256": "231f14796387d1cba773feccbc2518688c8504b28baabb21c28178ddab4a9c33"
+    },
+    {
+      "path": "crates/sparq-core/src/ttl.rs",
+      "sha256": "062892f23e21ef9fe25e8fe3527c134ec0d2b18e89d72789f0cd8b324834f48a"
+    }
+  ]
+}

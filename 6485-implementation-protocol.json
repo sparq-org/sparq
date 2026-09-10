@@ -1,0 +1,42 @@
+{
+  "at": "2026-09-10T17:18:25.405542+00:00",
+  "author": "GPT-6 Astra xhigh",
+  "scope": "One-file production length guard, entry capture, public cache-coherence docs; in-tree focused memo tests; no latency claim.",
+  "default_execution": "Candidate actual core --test, filter has_high_precision_decimal_memo; existing false->true and new preservation/growth/fork tests.",
+  "controls": [
+    {
+      "name": "unconditional-cas",
+      "change": "remove only length condition",
+      "expected": "memo preservation state1 assertion fails"
+    },
+    {
+      "name": "no-cas",
+      "change": "remove CAS block",
+      "expected": "stored growth reset/false->true fails"
+    },
+    {
+      "name": "inverted-guard",
+      "change": "!= becomes ==",
+      "expected": "preservation/reset assertion fails"
+    },
+    {
+      "name": "self-length",
+      "change": "compare length to itself",
+      "expected": "stored growth reset/false->true fails"
+    }
+  ],
+  "extra_profile": "At most one candidate --test adaptation using recorded mmap/dict-spill lib command+known proptest; same memo filter additionally selects mapped WAL test. Stop on compile/profile prerequisite failure.",
+  "bounds": {
+    "seconds": 600,
+    "allocated_bytes": 268435456,
+    "start_free": 2214592512,
+    "continuous_free": 2147483648,
+    "jobs": 1,
+    "incremental": false,
+    "offline": true
+  },
+  "resources_before": {
+    "free": 10717253632
+  },
+  "required_remaining": "Independent actual Opus final review and authoritative full-workspace/feature-matrix/wasm gates. Parent3113 first cold scan remains open."
+}

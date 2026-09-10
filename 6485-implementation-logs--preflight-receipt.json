@@ -1,0 +1,25 @@
+{
+  "name": "preflight",
+  "argv": [
+    "python3",
+    "scripts/preflight.py",
+    "--base",
+    "HEAD"
+  ],
+  "cwd": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6485",
+  "started": "2026-09-10T17:23:26.673368+00:00",
+  "before": {
+    "free": 10712576000,
+    "allocated": 10272768
+  },
+  "pid": 29194,
+  "exit_code": 1,
+  "stop": null,
+  "seconds": 6.76105675,
+  "ended": "2026-09-10T17:23:33.436109+00:00",
+  "after": {
+    "free": 10712748032,
+    "allocated": 10289152
+  },
+  "terminal": true
+}

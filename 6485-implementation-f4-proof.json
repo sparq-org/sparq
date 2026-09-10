@@ -1,0 +1,17 @@
+{
+  "source_head": "f50b5049627415a0f8fd1eca6dd3cb9ac5fcd464",
+  "verified_before_production_edit": true,
+  "chain": [
+    "Graph::id_of(&self) -> Dict::lookup(&self)",
+    "Triple term recursion resolves subject,predicate,object with same lookup, missing components return NO_ID; lookup_triple_ids -> find_triple_ids",
+    "Leaf: try_inline -> value-only calculation; otherwise hash_term -> find_term",
+    "Finders: mapped_find reads sorted hashes/IDs/record; frozen recursively calls same read-only finder; HashTable::find reads table using equality closure",
+    "Equality functions only inspect arena/blob/mapped records and strings; no interning/cache mutation. Dict fields contain owned storage/read-only shared backing, no lazy numeric/memo updates."
+  ],
+  "conclusion": "Delete-resolution loop cannot intern or mutate the dictionary. Moving old_len to entry is semantically neutral for existing implementation. Numeric cache extend and state1 invalidation remain after full interning.",
+  "source_sha256": {
+    "lib.rs": "3679c762c28c956df60ee519682420c2800993a3b3674b77ed335bb9acba6a45",
+    "dict.rs": "abb2f7a0c524583eafc1acb175113ab4fd551a336d772f702a13420ef281aeb3"
+  },
+  "scope": "Not a guarantee across arbitrary replacement of public fields; new docs will explain coherent reconstruction."
+}

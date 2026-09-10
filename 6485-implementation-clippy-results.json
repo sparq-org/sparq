@@ -1,0 +1,40 @@
+{
+  "receipts": [
+    {
+      "name": "clippy-default-lib",
+      "exit": 0,
+      "stop": null,
+      "seconds": 1.5705595419999998,
+      "after": {
+        "free": 10686169088,
+        "allocated": 35074048
+      },
+      "terminal": true
+    },
+    {
+      "name": "clippy-default-tests",
+      "exit": 0,
+      "stop": null,
+      "seconds": 1.5667059170000002,
+      "after": {
+        "free": 10686234624,
+        "allocated": 35086336
+      },
+      "terminal": true
+    },
+    {
+      "name": "clippy-mmap-tests",
+      "exit": 0,
+      "stop": null,
+      "seconds": 2.631937125,
+      "after": {
+        "free": 10686033920,
+        "allocated": 35098624
+      },
+      "terminal": true
+    }
+  ],
+  "elapsed": 5.950292625,
+  "aggregate_with_build_tests": 55.13545191699999,
+  "pending": false
+}

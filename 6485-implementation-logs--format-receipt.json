@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/jesght/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin/rustfmt",
+    "--edition",
+    "2021",
+    "--emit",
+    "stdout"
+  ],
+  "exit_code": 0,
+  "scope": "Only new test block formatted through wrapper; no whole-file reflow",
+  "stderr": ""
+}

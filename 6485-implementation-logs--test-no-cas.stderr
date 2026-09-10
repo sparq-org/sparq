@@ -1,0 +1,12 @@
+
+thread 'tests::has_high_precision_decimal_memo_fork_compact_isolation' (5018809) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/no-cas/core/src/lib.rs:9777:9:
+assertion failed: parent.has_high_precision_decimal()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tests::has_high_precision_decimal_memo_invalidates_stored_growth' (5018811) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/no-cas/core/src/lib.rs:9721:17:
+assertion `left == right` failed: growth: 1.5
+  left: 1
+ right: 0
+
+thread 'tests::has_high_precision_decimal_memo_survives_delta_insert' (5018813) panicked at /private/tmp/sparq-pr6049/.throughput-monitor/direct-6485/implementation/sources/no-cas/core/src/lib.rs:9636:9:
+delta-inserted inexact decimal must flip the memo

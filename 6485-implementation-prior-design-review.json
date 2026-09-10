@@ -1,0 +1,69 @@
+{
+  "verdict": "CONDITIONAL",
+  "summary": "The narrow guard is sound for every in-repo coordinated mutation path and actually aligns the code with its own documented contract. Two cheap preconditions must be met before merge (old_len capture point / id_of non-interning proof, and a public-field doc note), plus the mutation-controlled tests below.",
+  "material_findings": [
+    {
+      "id": "F1-invariant-holds",
+      "severity": "supporting",
+      "detail": "Within apply_delta_mem the guard is exact. Dict::intern dispatches only to intern_iri/intern_lit/intern_blank/intern_triple_ids (dict.rs:1530-1548); each either returns an existing id or calls push (dict.rs:1243-1259), which increments terms.len, and len()=base+terms.len (dict.rs:2363-2366). intern_prefix/intern_datatype append only immediately before a push and never rewrite existing indices (dict.rs:1220-1241). NumData::extend_for iterates old_len..dict.len() (lib.rs:243-266), so an equal length executes zero iterations and cannot alter any cached f64 for id<=len. Therefore len unchanged => the exact input pair (dict terms, numerics values) read by the 1..=dict.len() scan in has_high_precision_decimal (lib.rs:2748-2751) is byte-identical before and after the call, so a pre-existing verdict of 1 remains correct. No global 'length = dictionary generation' claim is needed."
+    },
+    {
+      "id": "F2-inline-integers-safe",
+      "severity": "supporting",
+      "detail": "try_inline_lit only inlines canonical in-range xsd:integer (dict.rs:60-72), which can never be xsd:decimal, and inline ids are >= INLINE_BASE (1<<31) while push asserts id < INLINE_BASE (dict.rs:1250-1253), so inline ids are structurally outside the scan range 1..=dict.len(). The corrected controls' inline-integer case is consistent with source; the old 48-file assumption was indeed wrong."
+    },
+    {
+      "id": "F3-code-already-broader-than-its-doc",
+      "severity": "high (favours change)",
+      "detail": "The field doc states the memo is 'reset to 0 by a delta that APPENDS terms (apply_delta_mem)' (lib.rs:76-84) and has_high_precision_decimal repeats 'A delta that appends terms resets the memo' (lib.rs:2738-2740). The current unconditional compare_exchange(1,0) at lib.rs:3390-3395 is broader than the documented contract. The proposal narrows code to the documented behaviour, which materially weakens any claim that callers may rely on the incidental reset."
+    },
+    {
+      "id": "F4-old_len-capture-point",
+      "severity": "MEDIUM - blocking verification",
+      "detail": "old_len is captured AFTER the delete-resolution loop (lib.rs:3375-3380). The guard's soundness therefore depends on Graph::id_of being lookup-only. id_of's body is NOT in the supplied packet; only a comment asserts it. If id_of ever interned, growth during delete resolution would today be caught by the unconditional reset but silently skipped by the guard (and is already missed by extend_for, a pre-existing desync). This is the one place where the change could introduce a real divergence via a supported path."
+    },
+    {
+      "id": "F5-public-field-divergence-is-contrived-and-already-broken",
+      "severity": "low",
+      "detail": "The only divergent scenario is: caller directly replaces g.dict (lib.rs:65-66) with a SAME-cardinality dict in which an existing id's lexical form changes from an exact decimal to a >15-digit decimal whose f64 image equals the already-cached value, then issues a length-preserving delta. Any such replacement already desynchronises the private numerics/temporals caches, which are documented 'parallel to the dictionary' and drive FILTER/ORDER BY/MIN/MAX results (lib.rs:67-79) - a strictly worse, result-affecting incoherence that no memo reset repairs. The simpler variants of the concern do NOT diverge: an externally interned new term lies beyond every NumData variant's coverage, so lookup returns None and even the recomputed predicate skips it (lib.rs:213-236). Graph::from_parts (lib.rs:1384-1386) is the supported seam for an edited dictionary."
+    },
+    {
+      "id": "F6-pr4354-sparse-coupling",
+      "severity": "MEDIUM - forward hazard",
+      "detail": "Under NumData::Sparse the invariant still holds (empty extend range, untouched map). But the guard converts an incidental per-delta self-heal into a hard dependency on 'no path mutates dict terms or numerics values for ids <= len without growing dict.len()'. A sparse-representation PR that lazily populates or repairs entries for already-existing ids (e.g. filling a previously missed numeric literal) would leave a stale memo 1 permanently instead of for one delta. This must be recorded as an explicit invariant comment at the guard site so PR4354 review can check it; it is not a reason to block."
+    },
+    {
+      "id": "F7-benefit-scope",
+      "severity": "note",
+      "detail": "Reset is only 1->0, so the win is bounded to interleaved query/delta workloads; state 2 is sticky and monotonic, state 0 unaffected. The controls' visit counts (4100 vs 0) are consistent with source but are predicate-internal work, not latency. Issue 3113 (first cold scan) is genuinely untouched."
+    },
+    {
+      "id": "F8-no-concurrency-risk",
+      "severity": "note",
+      "detail": "apply_delta_mem takes &mut self while has_high_precision_decimal takes &self, so borrowck excludes a concurrent reader; Relaxed ordering is unchanged by the proposal and remains adequate."
+    }
+  ],
+  "public_field_assessment": "The coherent-Graph invariant SUFFICES for this narrow optimization. Justification: (a) the divergence requires an unsupported direct write to Graph.dict that already breaks the private numerics/temporals parallel-array invariant with result-visible consequences; (b) the in-repo audit of dict assignment (compact, which preserves ids/terms exactly per dict.rs:2315-2360) and of self.dict.intern (apply_delta_mem only) shows no supported path producing it; (c) fork/vacuum/open all construct memo 0 (lib.rs:1691, 1939, 2891, 3572). No concrete supported regression exists. Minimal remedy required is documentation, NOT API redesign: add one sentence to the pub dict/store field docs stating that direct writes bypass numeric/temporal cache and memo maintenance and that from_parts/vacuum are the supported rebuild seams. Do not gate on making the fields private or on a public-field census.",
+  "proposed_minimal_implementation": [
+    "Hoist old_len capture to the first statement of apply_delta_mem (before del_ids), OR keep it where it is and add debug_assert_eq!(self.dict.len(), <entry len>) after the delete loop, after confirming Graph::id_of performs lookup only. Hoisting is a no-op if id_of is non-interning and strictly safer otherwise.",
+    "Wrap only the existing compare_exchange at lib.rs:3390-3395 in `if self.dict.len() != old_len { ... }`. Use `!=`, not `>`.",
+    "Add an invariant comment at the guard: 'sound only while no path mutates dict terms or numerics values for ids <= old_len without growing dict.len()'.",
+    "One-sentence doc note on pub dict/store (lib.rs:65-66). No change to state 2, state 0, orderings, interning, extend_for, store.apply_delta, fork/compact/vacuum/open."
+  ],
+  "required_tests": [
+    "Unchanged: existing false->true insertion test must still pass.",
+    "Memo-preserved cases (assert the memo byte via a #[cfg(test)] accessor, cheaper and less invasive than a visit counter): warm to 1, then (i) delete-only delta, (ii) delta inserting only already-interned terms, (iii) delta inserting canonical inline integer '42'^^xsd:integer, (iv) empty delta. Each must leave memo==1 and predicate false, and dict.len() unchanged.",
+    "Memo-reset cases: (v) new >15-digit xsd:decimal -> len grows, memo 0, predicate true; (vi) new <=15-digit decimal -> len grows, memo 0, predicate still false (no false positive); (vii) non-canonical '007'^^xsd:integer -> len grows, memo reset (guard not over-broad).",
+    "Mutation controls, each must FAIL a named test: revert to unconditional CAS (breaks ii-iv memo-preserved assertions); delete the CAS entirely (breaks v); invert `!=` to `==` (breaks both ii-iv and v); compare dict.len() to itself post-extend (breaks v).",
+    "Variant coverage: force NumData::Sparse and repeat (ii) and (v); Forked graph (fork memo starts 0, base delta after fork does not corrupt either); compact() on a forked graph preserving len keeps predicate result stable.",
+    "Feature matrix beyond the executed run: mmap WAL replay of a >15-digit decimal on open must return true; dict-spill/compact-index configs must at least compile-and-run the new tests. The corrected controls ran default+parallel only."
+  ],
+  "scope_limitations": [
+    "This is a design admission only; no production patch exists and none is approved here.",
+    "Evidence accepted: 2 tests / 11 observations, 149 filtered out, direct rustc aarch64, not full Cargo workspace, wasm, mmap, dict-spill or compact-index.",
+    "No latency, throughput, heap or engine-query benefit is claimed or established; work counts are predicate-internal only.",
+    "Issue 3113 must stay open: the first cold O(dict.len()) scan is unchanged.",
+    "Graph::id_of body was not supplied - this is the exact missing source piece required to close F4.",
+    "PRs 4097/4354/4247 untouched; F6 is a cross-PR review note, not a change to them."
+  ]
+}

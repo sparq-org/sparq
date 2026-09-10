@@ -1,0 +1,169 @@
+[package]
+name = "sparq-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Dictionary-encoded RDF triplestore core: six sorted permutation indexes, parallel + streaming loaders, and an out-of-core memory-mapped store"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# [OPUS-4.8] crate-local README so crates.io (package.readme) matches the docs.rs front
+# page (lib.rs include_str!("../README.md")) — same content on both registries.
+readme = "README.md"
+
+# [OPUS-4.8] wire docs.rs to build all-features + the `docsrs` cfg so the README
+# front page and every feature-gated item render on docs.rs.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Parallel index construction via rayon. On by default for native builds; turn it
+# off (e.g. for wasm, which has no threads by default) for a smaller, simpler build.
+default = ["parallel"]
+# `memchr` rides `parallel`: it is only used by the parallel Turtle terminator pre-scan
+# (T2), so the wasm build (which disables `parallel`) never links it. [OPUS-4.8]
+parallel = ["dep:rayon", "dep:memchr"]
+# Build only THREE permutation indexes (SPO, POS, OSP) instead of six. Every triple
+# pattern is still answered by one of them, but some merge joins fall back to hashing.
+# ~halves index memory (36 vs 72 B/triple) — for the memory-constrained browser target.
+compact-index = []
+# [GPT-6 Astra] Experimental lazy tombstone projections. OFF by default: cold
+# reads sort and allocate; forks copy retained projections. See the crate README.
+overlay-deleted-projections = []
+# Out-of-core querying: persist the indexes and memory-map them (native only).
+mmap = ["dep:memmap2"]
+# [OPUS-4.8] sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
+# (subject/object) leading column of a BLOCK-COMPRESSED permutation. The directory's
+# first-triple already gives an implicit min/max zone map that prunes RANGE scans, but for
+# an EQUALITY-BOUND leading column the zone map still leaves a candidate block that must be
+# decoded just to find it holds no matching row; the Bloom filter drops that decode when the id
+# is provably absent. ([SONNET-4.6] sq-v8ixk measured the block-SKIP opportunity, on synthetic
+# high-NDV columns, to be on ABSENT-key lookups: a PRESENT id is already zone-map-pruned to ~one
+# block. Skip counts only — no latency result is claimed. See `compress::block_bloom`.)
+# OFF by default so the lean default
+# / wasm build pays no filter bytes; it is a pure-std bitset (NO new dependency). Zero false
+# negatives by construction, so results are identical to the feature-off path — only fewer
+# blocks decoded. The filter is in-RAM only and never serialised, so the on-disk SPQCPRM1
+# format is unchanged. See `compress::block_bloom`.
+block-bloom = []
+# [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): OPT-IN Elias-Fano and
+# Partitioned-Elias-Fano column codecs (`eliasfano` module) supporting **compressed seek** —
+# `next_geq(target)` answered directly on the compressed data, which the incumbent
+# delta+varint block codec cannot do (it must decode a whole block to seek).
+#
+# THIS IS A MEASUREMENT-GATED PROTOTYPE. It is deliberately NOT routed as a `PermData` variant
+# and no join calls it: the survey's own honest risk is that EF's pointer-chasing select/rank
+# LOSES to a linear varint walk on cache-resident streaming scans, so adoption is conditional on
+# the A/B (seek latency, scan throughput, bytes moved, heap) in
+# `eliasfano::tests::measure_ef_vs_block_varint` — which is NATIVE-ONLY (it times with
+# `std::time::Instant`, absent on wasm32), so the wasm32 half of the comparison is UNRESOLVED and
+# must be answered before adoption. OFF by default so the shipped store keeps the
+# incumbent codec bit-exactly and the lean default / wasm bundle links none of it. Pure `std` —
+# NO new dependency.
+elias-fano = []
+# [FABLE-5] sq-7d3dj.32.2.6 / sq-7d3dj.32.2.7: SPQCPRM2 frame-of-reference col2-reset
+# encoding. The SPQCPRM1 block stream writes a col2 that resets after a middle-column
+# change (`reset_d1`) as an ABSOLUTE varint; sq-7d3dj.32.2.4 attribution found that bucket
+# the dominant grower at scale. SPQCPRM2 instead frame-of-reference encodes that col2 as a
+# zigzag delta from the block's FIRST-row col2, which is cheaper when a block's objects
+# cluster.
+#
+# THE V2 *READER* SHIPS UNCONDITIONALLY WITH `mmap` (sq-7d3dj.32.2.7): `open` auto-detects
+# `FILE_MAGIC_V2` and decodes it via `decode_block_v2_at`, so any V2 file ever written
+# always decodes; a `SPQCPRM1` file decodes byte-identically forever (the backward-compat
+# soundness invariant). What `spqcprm2` gates is the *EMITTER*: turning it on lets a build
+# request V2 emission (via `with_emit_format` / `SPARQ_EMIT_FORMAT=v2`) plus the `encode_v2`
+# in-RAM writer and the round-trip/measurement tests. OFF by default so the shipped store
+# keeps *writing* SPQCPRM1 bit-exactly (V2 is NOT defaulted on — a separate decision pending
+# a positive real-data B/triple measurement). Requires `mmap` (the on-disk store is where
+# the versioned format lives). See `compress::CompressedPerm::encode_v2` and `EmitFormat`.
+spqcprm2 = ["mmap"]
+# [OPUS-4.8] sq-dvyi: JSON-LD ingest for the in-memory loaders (`load_str` /
+# `load_dataset` / `load_reader`). OPT-IN and OFF by default so the DEFAULT lean wasm
+# bundle (which the perf-gate tracks via `cargo build -p sparq-wasm`, no features) does
+# NOT link `oxjsonld` and stays under the wasm_bundle_bytes floor. JSON-LD is a
+# whole-document JSON parse (not chunkable), so it has no parallel/streaming variant to
+# gate further. Consumers that want JSON-LD (the site REPL upload/URL path) enable this.
+jsonld = ["dep:oxjsonld"]
+# [OPUS-4.8] sq-f47w1 (survey §B1): RDF/XML ingest for the in-memory loaders
+# (`load_str` / `load_str_with_base` / `parse_to_triples`). OPT-IN and OFF by default,
+# mirroring `jsonld`, so the DEFAULT lean wasm bundle (which the perf-gate tracks via
+# `cargo build -p sparq-wasm`, no features) does NOT link `oxrdfxml` (it pulls `quick-xml`)
+# and stays under the wasm_bundle_bytes floor. RDF/XML is a whole-document XML parse (not
+# line-delimited / chunkable), so it has no parallel/streaming variant to gate further.
+# The dependency is already proven in-tree (sparq-server's GSP + conformance paths use it).
+rdfxml = ["dep:oxrdfxml"]
+# Spillable BUILD-time term dictionary (native only, off by default): bound the peak
+# build RSS by a configurable memory budget — term occurrences spill to disk and are
+# externally sorted/deduplicated into the SAME ids (byte-identical output) as the
+# sharded in-RAM consolidation. See research/external-dictionary.md. Rides the
+# parallel parse pipeline and the mmap on-disk store, hence the feature deps.
+dict-spill = ["mmap", "parallel", "dep:libc"]
+# [OPUS-4.8] sq-yj76l (gh #1121): the ergonomic `shared::SharedGraph` handle — an
+# `Arc<RwLock<Graph>>` packaging the recommended read-heavy serving pattern for sharing one
+# store across the async handlers of an axum/actix/tower server. `Graph` is ALREADY Send+Sync
+# (a compile-time assertion in the crate root guarantees it stays so), so this adds NO new
+# dependency — it is `std::sync` only — and is OFF by default so the lean default / wasm build
+# pays nothing. See the `shared` module docs.
+shared = []
+# [OPUS-4.8] sq-7d3dj.18: prefix-memoized IRI-validation fast path in FRONT of the full
+# `oxiri` RFC-3987 automaton (see the `iri` module). OFF by default so the lean default / wasm
+# build never NAMES `oxiri` as a direct dep (it is already in-tree transitively via oxttl, so
+# enabling this adds ZERO new compilation) and the parser keeps its current unvalidated-fast
+# behaviour. When ON, the byte-level N-Triples / N-Quads loader validates each IRI through the
+# fast path (accepting EXACTLY what `oxiri` accepts — a mandatory differential-fuzz gate), so
+# the parallel loader reaches conformance parity with the serial oxttl path at fast-path cost.
+iri-fast = ["dep:oxiri"]
+# [OPUS-4.8] sq-jocpn: a native, hand-rolled byte-level Turtle tokenizer/parser (`ttl` module)
+# that interns S/P/O directly into the `Dict`, replacing the oxttl per-chunk worker on the
+# serial Turtle path. OFF by default so the incumbent oxttl path stays the shipped behaviour and
+# the native parser can be A/B'd first; it must be a byte-identical drop-in (same triples, same
+# term canonicalisation, same accept/reject on the W3C TurtleTests) before any thought of
+# defaulting it on. Pulls `oxiri` for RFC-3987 base resolution + IRI validation IDENTICAL to
+# oxttl's (oxttl resolves through the same `oxiri` automaton) — so IRI resolution is byte-exact by
+# construction rather than a hand-rolled re-derivation. `oxiri` is already in-tree transitively via
+# oxttl, so naming it here adds no new compiled crate. The default / wasm build never references
+# any of this — sparq-core stays lean. See the `ttl` module.
+native-ttl = ["dep:oxiri"]
+
+[dependencies]
+oxrdf.workspace = true
+oxttl.workspace = true
+# [OPUS-4.8] sq-7d3dj.18: RFC-3987 IRI automaton, OPT-IN behind `iri-fast` (OFF by default).
+# Already present in-tree transitively (oxttl depends on oxiri), so naming it as a direct dep
+# under the feature adds no new compiled crate; the default build never references it.
+oxiri = { version = "0.2", optional = true }
+# [OPUS-4.8] sq-dvyi: JSON-LD ingest for the in-memory loaders (`load_str` /
+# `load_dataset` / `load_reader`). Pure-Rust + wasm-portable, but OPT-IN behind the
+# `jsonld` feature (OFF by default) so the tracked lean wasm bundle never links it and
+# stays under the wasm_bundle_bytes perf floor — the site REPL enables the feature.
+oxjsonld = { workspace = true, optional = true }
+# [OPUS-4.8] sq-f47w1 (survey §B1): RDF/XML ingest for the in-memory loaders. Same
+# oxigraph family as oxrdf/oxttl, OPT-IN behind the `rdfxml` feature (OFF by default) so
+# the tracked lean wasm bundle never links it (it pulls `quick-xml`) and stays under the
+# wasm_bundle_bytes perf floor. Already proven in-tree (sparq-server pins the same version).
+oxrdfxml = { workspace = true, optional = true }
+rustc-hash.workspace = true
+hashbrown.workspace = true
+rayon = { workspace = true, optional = true }
+memchr = { workspace = true, optional = true }
+memmap2 = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+
+# [SONNET-4.6] sq-3dyje.2: property-based testing harness — DEV/TEST ONLY (does NOT appear
+# in [dependencies] or in any feature, so it is never pulled into the shipped crate or wasm
+# bundle). The supply-chain exemptions for proptest 1.11.0 + its rusty-fork 0.3.1 transitive
+# are declared in supply-chain/config.toml (safe-to-run, dev-only scope).
+[dev-dependencies]
+proptest = "1"
+
+# [OPUS-4.8] sq-ueuk (epic sq-toze, gap MS-G4) — register the `kani` cfg so the
+# `#[cfg(kani)]` bounded-proof harness in `dict.rs` (the mmap-free `validate_dict_bytes`
+# seam) does not trip `-D warnings` (unexpected_cfgs) on the NORMAL build. `cargo kani` sets
+# this cfg itself when it model-checks; under a normal build the harness is stripped. Mirrors
+# crates/sparq-vectors/Cargo.toml, which registers the same cfg for its `.spqv` validator proof.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
