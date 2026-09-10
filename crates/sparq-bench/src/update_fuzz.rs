@@ -834,14 +834,16 @@ fn record_lexical_terms(
 ) -> Result<(), String> {
     match term {
         Term::Literal(l) if l.datatype() == xsd::INTEGER => {
-            if let Ok(value) = l.value().parse::<i64>()
-                && let Some(previous) = integers.insert(value, l.value().to_string())
-                && previous != l.value()
-            {
-                return Err(format!(
-                    "integer normalization is not term-injective: {previous:?} and {:?}",
-                    l.value()
-                ));
+            if let Ok(value) = l.value().parse::<i64>() {
+                match integers.insert(value, l.value().to_string()) {
+                    Some(previous) if previous != l.value() => {
+                        return Err(format!(
+                            "integer normalization is not term-injective: {previous:?} and {:?}",
+                            l.value()
+                        ));
+                    }
+                    _ => {}
+                }
             }
         }
         Term::BlankNode(b) => {
@@ -986,16 +988,24 @@ fn compare(
         match normalized {
             (Ok(na), Ok(nb)) => {
                 if na.blank_nodes != nb.blank_nodes {
-                    return Verdict::Differs(
-                        "integer normalization changed blank-node counts".into(),
-                    );
+                    return Verdict::Differs(format!(
+                        "integer-lexical adjudication refused: blank-node counts differ ({} vs {})\n{}",
+                        na.blank_nodes,
+                        nb.blank_nodes,
+                        one_sided(label_a, &ca, label_b, &cb)
+                    ));
                 }
                 match (
                     comparable(&na.lines, relabel, label_a),
                     comparable(&nb.lines, relabel, label_b),
                 ) {
                     (Ok(na), Ok(nb)) if na == nb => return Verdict::AdjudicatedIntegerLexical,
-                    (Err(e), _) | (_, Err(e)) => return Verdict::Differs(e),
+                    (Err(e), _) | (_, Err(e)) => {
+                        return Verdict::Differs(format!(
+                            "integer-lexical adjudication refused: {e}\n{}",
+                            one_sided(label_a, &ca, label_b, &cb)
+                        ));
+                    }
                     _ => {}
                 }
             }
@@ -1575,11 +1585,9 @@ mod tests {
     #[test]
     fn no_nested_blank_nodes_in_triple_terms() {
         // (a) the guard actually fires on the shape it exists to reject.
-        let nested = vec![
-            "<http://ex/s> <http://ex/p> \
+        let nested = vec!["<http://ex/s> <http://ex/p> \
                           <<( <http://ex/a> <http://ex/b> _:x )>> ."
-                .to_string(),
-        ];
+            .to_string()];
         let err = comparable(&nested, true, "nested")
             .expect_err("a blank node inside a triple term must be rejected, not canonicalized");
         assert!(
@@ -1876,11 +1884,9 @@ mod tests {
         assert!(!b.integer_lexical);
         // Malformed / absent registries are strict too.
         assert!(!UpdateDivergenceAllowlist::from_json("{", path).integer_lexical);
-        assert!(
-            UpdateDivergenceAllowlist::from_json("{", path)
-                .state
-                .contains("STRICT")
-        );
+        assert!(UpdateDivergenceAllowlist::from_json("{", path)
+            .state
+            .contains("STRICT"));
     }
 
     /// sq-hodke (3), the premise correction, MACHINE-CHECKED: Oxigraph 0.5 as this
@@ -1967,6 +1973,27 @@ mod tests {
     // a persistent map also catches collisions across different graphs or steps.
     #[test]
     fn generated_integer_domain_is_injective_including_load() {
+        // [GPT-6 ASTRA] Independent test boundaries: do not derive the expected
+        // domain from the production constant or rely on a sampled collision.
+        fn assert_integer_pool(term: &Term) {
+            match term {
+                Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+                    let value = l
+                        .value()
+                        .parse::<u64>()
+                        .expect("nonnegative generated integer");
+                    if value < 20 {
+                        assert_eq!(l.value(), value.to_string(), "canonical pool spelling");
+                    } else {
+                        assert!((20..80).contains(&value), "noncanonical pool: {value}");
+                        assert_ne!(l.value(), value.to_string(), "noncanonical pool spelling");
+                    }
+                }
+                Term::Triple(t) => assert_integer_pool(&t.object),
+                _ => {}
+            }
+        }
+        assert_eq!(CANONICAL_INTEGER_VALUES, 20);
         let mut noncanonical = 0;
         let mut loads = 0;
         let mut load_integers = 0;
@@ -1983,16 +2010,18 @@ mod tests {
                         sandbox.write(doc).expect("LOAD document");
                         let rows: Vec<_> = doc.content.lines().map(str::to_string).collect();
                         for q in parse_lines(&rows, "LOAD document").expect("valid document") {
-                            if let Term::Literal(l) = &q.object
-                                && l.datatype() == xsd::INTEGER
-                            {
-                                let value = l.value().parse::<u64>().unwrap();
-                                assert!(
-                                    value < CANONICAL_INTEGER_VALUES,
-                                    "LOAD integer must stay in the canonical pool: {value}"
-                                );
-                                assert_eq!(value.to_string(), l.value());
-                                load_integers += 1;
+                            assert_integer_pool(&q.object);
+                            match &q.object {
+                                Term::Literal(l) if l.datatype() == xsd::INTEGER => {
+                                    let value = l.value().parse::<u64>().unwrap();
+                                    assert!(
+                                        value < 20,
+                                        "LOAD integer must stay canonical: {value}"
+                                    );
+                                    assert_eq!(value.to_string(), l.value());
+                                    load_integers += 1;
+                                }
+                                _ => {}
                             }
                             record_lexical_terms(&q.object, &mut integers, &mut bnodes)
                                 .expect("LOAD shares the injective integer domain");
@@ -2007,6 +2036,7 @@ mod tests {
                     graph = sparq_engine::update(&graph, &op.sparq)
                         .unwrap_or_else(|e| panic!("seed={seed} update={} failed: {e}", op.sparq));
                     for q in parse_lines(&sparq_nquads(&graph), "generated state").unwrap() {
+                        assert_integer_pool(&q.object);
                         nested += usize::from(matches!(&q.object, Term::Triple(_)));
                         record_lexical_terms(&q.object, &mut integers, &mut bnodes)
                             .unwrap_or_else(|e| panic!("seed={seed}: {e}"));
@@ -2107,10 +2137,25 @@ mod tests {
             Verdict::AdjudicatedIntegerLexical
         ));
         let split = vec![good[0].clone(), "_:y <http://ex/q> <http://ex/o> .".into()];
-        assert!(matches!(
-            compare("a", &a, "b", &split, true),
-            Verdict::Differs(_)
-        ));
+        match compare("a", &a, "b", &split, true) {
+            Verdict::Differs(detail) => {
+                assert!(
+                    detail.contains("blank-node counts differ (1 vs 2)"),
+                    "{detail}"
+                );
+                assert!(detail.contains("only in a:"), "{detail}");
+                assert!(detail.contains("only in b:"), "{detail}");
+                assert!(
+                    detail.contains("\"020\""),
+                    "original lexical missing: {detail}"
+                );
+                assert!(
+                    detail.contains("\"20\""),
+                    "reference lexical missing: {detail}"
+                );
+            }
+            _ => panic!("different blank-node counts must fail with original dataset details"),
+        }
         let extra = vec![good[0].clone(), "_:x <http://ex/r> <http://ex/o> .".into()];
         assert!(
             matches!(compare("a", &a, "b", &extra, true), Verdict::Differs(_)),
@@ -2164,10 +2209,14 @@ mod tests {
             )),
             Op::shared("INSERT { ?s <http://ex/q> _:bt } WHERE { ?s <http://ex/p> ?o }".into()),
         ];
-        let positive = apply_sequence(0, &ops, None, None, &allowlist()).unwrap();
+        let allow = UpdateDivergenceAllowlist {
+            integer_lexical: true,
+            state: "hermetic marker-adjudication test".into(),
+        };
+        let positive = apply_sequence(0, &ops, None, None, &allow).unwrap();
         assert_eq!(positive.ops, 2);
         assert!(positive.adjudicated_integer_lexical > 0);
-        let negative = apply_sequence(0, &ops, None, Some(1), &allowlist()).unwrap_err();
+        let negative = apply_sequence(0, &ops, None, Some(1), &allow).unwrap_err();
         assert!(negative.contains("step=1") && negative.contains("http://ex/injected"));
     }
 
