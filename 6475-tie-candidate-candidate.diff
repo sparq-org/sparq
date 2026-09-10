@@ -1,0 +1,58 @@
+--- rdf-canonize5.0.0/lib/RDFC10Sync.js
++++ scratch/lib/RDFC10Sync.js
+@@ -151,7 +151,16 @@
+       // 6.3) For each result in the hash path list,
+       // lexicographically-sorted by the hash in result:
+       hashPathList.sort(_stringHashCompare);
+-      for(const result of hashPathList) {
++      // [GPT-6 Astra] Scratch candidate: explore only equal-hash order choices.
++      for(let begin = 0; begin < hashPathList.length;) {
++        let end = begin + 1;
++        while(end < hashPathList.length && hashPathList[end].hash === hashPathList[begin].hash) ++end;
++        const remaining = hashPathList.slice(begin, end);
++        while(remaining.length > 0) {
++          const useful = remaining.filter(result => result.issuer.getOldIds().some(id => !this.canonicalIssuer.hasId(id)));
++          if(useful.length === 0) break;
++          const result = this.chooseEqual(useful, {stage:'top', crossGroup:useful.some(r=>r.issuer.getOldIds().some(id=>!idList.includes(id)&&!this.canonicalIssuer.hasId(id))), complete:useful.every(r => [...this.blankNodeInfo.keys()].every(id => this.canonicalIssuer.hasId(id) || r.issuer.hasId(id))), partial:useful.some(r => [...this.blankNodeInfo.keys()].some(id => !this.canonicalIssuer.hasId(id) && !r.issuer.hasId(id))), overlap:useful.some((a,i)=>useful.slice(i+1).some(b=>a.issuer.getOldIds().some(id=>b.issuer.hasId(id))))});
++          remaining.splice(remaining.indexOf(result), 1);
+         // 6.3.1) For each blank node identifier, existing identifier,
+         // that was issued a temporary identifier by identifier issuer
+         // in result, issue a canonical identifier, in the same order,
+@@ -161,6 +170,8 @@
+         for(const id of oldIds) {
+           this.canonicalIssuer.getId(id);
+         }
++        }
++        begin = end;
+       }
+     }
+ 
+@@ -271,6 +282,7 @@
+ 
+   // 4.8) Hash N-Degree Quads
+   hashNDegreeQuads(id, issuer) {
++    this.experimentalTick();
+     if(this.remainingDeepIterations === 0) {
+       throw new Error(
+         `Maximum deep iterations exceeded (${this.maxDeepIterations}).`);
+@@ -298,6 +310,7 @@
+ 
+       // 5.3) Create an unset chosen issuer variable.
+       let chosenIssuer;
++      let chosenIssuers = [];
+ 
+       // 5.4) For each permutation of blank node list:
+       const permuter = new Permuter(hashToRelated.get(hash));
+@@ -396,8 +409,12 @@
+         if(chosenPath.length === 0 || path < chosenPath) {
+           chosenPath = path;
+           chosenIssuer = issuerCopy;
++          chosenIssuers = [issuerCopy];
++        } else if(path === chosenPath && !chosenIssuers.some(x => JSON.stringify([...x._existing]) === JSON.stringify([...issuerCopy._existing]))) {
++          chosenIssuers.push(issuerCopy);
+         }
+       }
++      chosenIssuer = this.chooseEqual(chosenIssuers, {stage:'recursive', partial:true});
+ 
+       // 5.5) Append chosen path to data to hash.
+       md.update(chosenPath);

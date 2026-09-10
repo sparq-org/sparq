@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-09-09T23:47:40.761930+00:00",
+  "updated_at": "2026-09-10T00:22:31.348291+00:00",
   "task_id": "01a06e98-0eb7-70b0-b9d3-a5c35d3c6f73",
   "purpose": "Direct ongoing coordinator replacing paused registry; prioritize SPARQL performance and reviewed PR throughput.",
   "automation": {
@@ -41,13 +41,16 @@
       "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/pr6069",
       "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6437",
       "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6462",
-      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436"
-    ]
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6436",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
+      "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468"
+    ],
+    "latest_cleanup": "Only two cleancompletedmergedworktrees4246/6468 removed afterfreshGitHubstate/head/status verification;branchesretained;source-admission/completed-worktrees-removed.json. Recovered~6.55GBfree;no sharedcheckout/production/cacheprune."
   },
   "live_main": {
     "oid": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "observed_at": "2026-09-09T23:24:58.003787+00:00",
-    "evidence": "direct-6475/source-admission/live-state-2322.json"
+    "observed_at": "2026-09-10T00:22:31.348291+00:00",
+    "evidence": "direct-6475/source-admission/live-state-0018.json"
   },
   "rules": {
     "required_check": "gate",
@@ -63,13 +66,13 @@
     "agent": "/root/postmerge_ci",
     "actual_model": "GPT-6 Astra",
     "effort": "xhigh",
-    "phase": "One bounded JS scratch experiment comparing complete tied outcomes",
+    "phase": "Failed scratch candidate stopped; actual Opus5 xhigh continuation-soundness review running",
     "started_at": "2026-09-09T22:22:32.104545+00:00",
     "base": "e53464c73f31f7aca800f3867ac054c36408e346",
     "local_branch": "codex/canon-relabel-invariance",
     "worktree": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6475",
     "directory": "direct-6475/replay",
-    "state": "Root verified396evidence-completionfiles; Rust86packagedcasesPASS, exactpair12cases2outputs; JS86PASS atfixeddiagnosticbudget. Investigatecompletecandidatechoice including recursive/partialties; no productionpatch.",
+    "state": "Rootverified248candidatefiles/218cases. Twelvevariantsunify,but4W3Cpositivesnewlyexhaustlimits;no completedrecursivetiecase. No productionpatch or budgetchange. ActualOpusreview65227collectonce; agentdoesboundedreadonly3105readiness.",
     "inputs": "direct-6095/queue-incident/manifest.json",
     "constraints": "OneAstra xhigh lane, ownissue6475worktree; >=6GiBfloor, JSprototype<=8MiB,noRust/engine/workspacebuild/globalinstall/cachemutation/productionpatchyet. Preserve6095review:changes/5357review:needs-user, all tests/profiles/limits/holds. No remote rerun/requeue/cancel/release/registryenable.",
     "review_requirement": "Actual independent Opus5 xhigh reviewed evidence only, no production change approved; actual future repair needs independent patch review and protected validation.",
@@ -135,7 +138,7 @@
       "production_change_approved": false,
       "public_progress": "https://github.com/sparq-org/sparq/issues/6475#issuecomment-5610159807"
     },
-    "agent_state": "postmerge_ci running single JS scratch candidate; no Rustbuild/modelcall",
+    "agent_state": "postmerge_ci running5minread-only3105readiness; no productionimplementation; actualClaudeCLI review65227active",
     "evidence_completion": {
       "state": "completed_frozen_root_verified",
       "agent": "/root/postmerge_ci",
@@ -150,13 +153,40 @@
       "result": "Rust86/86packagedcases and12/12counterexampleaccepted,2outputsbylabel. JS86/86at4000diagnosticiterations+1scap;defaultworkfactor+1scap68passes/18worklimiterrors. Rustglobaldefault4000HNDQcalls,pairrequires4. Error-onlyguardcannotrepaircurrentsuccessproperty."
     },
     "tie_candidate": {
-      "state": "running",
+      "state": "stopped_no_go_frozen_root_verified",
       "directory": "direct-6475/tie-candidate",
       "agent": "/root/postmerge_ci",
       "limit_minutes": 20,
       "disk_budget_bytes": 8388608,
       "scope": "One JSscratch prototype for complete equalhashoutcomes; include recursive discardedties,partialissuers/latergroups, preserve outputmapconsistency and symmetric baseline; finitebudget/smallcorpus; no productionedits",
-      "disk_state": "Recovered6556930048bytes bydeletingonlycompletedtaskowned6475targets; no Rustcompile/targetcopy permitted; check>=6GiB beforewrites/runs."
+      "disk_state": "Recovered6556930048bytes bydeletingonlycompletedtaskowned6475targets; no Rustcompile/targetcopy permitted; check>=6GiB beforewrites/runs.",
+      "manifest_files": 248,
+      "manifest_sha256": "ae6606672b852f489d1a9d11688665504a26725d33d781579bb5fca8689b5c55",
+      "packet_sha256": "1cde7764505d8f04d6d541cf1804e57fed77edecb93cfacb75ec37913f205762",
+      "root_verification": "direct-6475/source-admission/tie-candidate-root-verification.json",
+      "new_positive_failures": [
+        "test044c",
+        "test045c",
+        "test046c",
+        "test059c"
+      ],
+      "limitation": "No completedrecursivechoicecase; equalobservedleaves notproofremainingbranches equivalent; no partialoutput/mapreturned; no portapproved",
+      "public_comment": "https://github.com/sparq-org/sparq/issues/6475#issuecomment-5610643055"
+    },
+    "continuation_review": {
+      "state": "running",
+      "kind": "exec_command",
+      "session_id": 65227,
+      "expected_model": "claude-opus-5",
+      "effort": "xhigh",
+      "input": "direct-6475/source-admission/opus-candidate-input.md",
+      "input_bytes": 91690,
+      "input_sha256": "ba723581324b5eecdd0afaf0081607d575b3e4c9d36f7a56a6bba17e9befab93",
+      "audit": "direct-6475/source-admission/opus-candidate-input-audit.json",
+      "output": "direct-6475/source-admission/opus-candidate-review.json",
+      "scope": "Assessfailedcandidateandprecise soundequivalence pruning predicate orSTOP; not productionapproval",
+      "observed_running_at": "2026-09-10T00:22:31.348291+00:00",
+      "collect_policy": "Collect65227once; verify successfulouterJSON/actualOpusmodelUsage beforeusingreview. Do notreadtranscripts,duplicatecall,or retryexhaustion. Outputactivelywritten, notyetbacked."
     }
   },
   "prs": {
@@ -404,7 +434,8 @@
       "issue": 4246,
       "issue_state": "CLOSED",
       "source_verification": "direct-4246/perf-admission/main-source-proof.json",
-      "postmerge": "Main CI, feature-matrix and aggregate verifiedSUCCESS; release-plz/batch-merge failures not re-diagnosed, registry/release holds remain."
+      "postmerge": "Main CI, feature-matrix and aggregate verifiedSUCCESS; release-plz/batch-merge failures not re-diagnosed, registry/release holds remain.",
+      "worktree": "Own completed clean worktree removed; branch/head retained. Verified in direct-6475/source-admission/completed-worktrees-removed.json"
     },
     "6473": {
       "issue": 6468,
@@ -430,7 +461,8 @@
         "event": "merge_group",
         "head": "e53464c73f31f7aca800f3867ac054c36408e346",
         "conclusion": "success"
-      }
+      },
+      "worktree": "Own completed clean worktree removed; branch/head retained. Verified in direct-6475/source-admission/completed-worktrees-removed.json"
     },
     "6095": {
       "state": "OPEN_HELD_CANON6475",
@@ -593,7 +625,7 @@
     }
   },
   "next_actions": [
-    "Collect one bounded JS tie-candidate experiment from sameAstra xhigh agent. Rootverified396baselinefiles; noactualcandidateyet. Use completeoutcome/recursivepartialtie reasoning and unchanged86fixturebytes; avoid treating error-onlyguard as gate repair. Preservefrozenbinaries;6475completedtargetsremovedfor diskreserve. No duplicate Opusreview:21832completed.",
+    "CollectONE actualOpus5xhigh continuationreview65227 on91,690bytepublicpacketba723581. FirstJSprototypeSTOPPEDNO_GO,248filesrootverified. No secondcandidate unless soundconcretepruningexperiment justified; otherwise preserve6475/6095hold and move singlelane to unheldSPARQLperformance (3105readiness pending). No reread/retry completed21832.",
     "PR6095 waits on6475 with review:changes retained. Gate34409423697/job102660112366failed on real canonicalization invariant in matrix34409424033/job102661090898 (g20sparq-vectors groupscanon asleg4). Original reviewedPythonhead86b8unchanged; no lucky requeue or cancellationofremainingliveMG2adb evidence.",
     "Before eventual6095hold reconciliation, freshlyread currentlabeltimeline/humaninterventions, repairmergedmainandnewexactreview/checkevidence. Then normalprotectedqueue only. Afteractual6095merge verifytwofiles/queue47tests/gate, commentbeforeclosing4567 andwatchmain.",
     "First ordinary scheduled classifier containing6473 fix is34409971933(e534,22:00:34Z),SUCCESS; actual45tests and150writes verified. Onlyremainingmaintenancewatch is eventualgenerator-label recipients:5016correctlyplannedDEFERRED,0currentrecipients. No manualreplay/newlabels.",
@@ -948,10 +980,10 @@
     "followup": "Narrowtriage-titleCIrule+offendingrowdiagnostic could improveclassifier, but originalgenpartitionrequires separatelyreviewedpolicy. No6468implementation while4246active."
   },
   "latest_monitor": {
-    "at": "2026-09-09T23:27:46.453047+00:00",
+    "at": "2026-09-10T00:22:31.348291+00:00",
     "main": "e53464c73f31f7aca800f3867ac054c36408e346",
-    "pr6095": "OPEN same86b8 head, review:changes held, no queueentry",
-    "issue6475": "OPEN; bot-added role:impl/status:untriaged observed; public progresscomment exactreadbackverified",
+    "pr6095": "OPEN same86b8, review:changes held, noqueueentry",
+    "issue6475": "OPEN,failedcandidateNO_GOcommentexactreadbackverified. ActualOpusreviewrunning.",
     "registry_actions_enabled": false,
     "queued_runs": 1,
     "in_progress_runs": 3,
@@ -1954,8 +1986,8 @@
   },
   "registry_latest_pause": {
     "enabled": false,
-    "observed_at": "2026-09-09T23:24:58.003787+00:00",
-    "evidence": "direct-6475/source-admission/registry-pause-2322.json"
+    "observed_at": "2026-09-10T00:22:31.348291+00:00",
+    "evidence": "direct-6475/source-admission/registry-pause-0018.json"
   },
   "waiting_lanes": {
     "6095": {
@@ -2124,5 +2156,18 @@
         "hold": "review:changes, provenance must be freshly rechecked before any future reconciliation"
       }
     }
+  },
+  "performance_readiness": {
+    "issue": 3105,
+    "state": "bounded_readonly_in_progress",
+    "agent": "/root/postmerge_ci",
+    "time_bound_minutes": 5,
+    "purpose": "NextunheldSPARQLperformance candidateifcanonicalizerrepairneedslongerresearch; nosecondimpllaneorbuild",
+    "current_evidence": "direct-6475/source-admission/perf-next-shortlist.json",
+    "other_shortlisted": [
+      3363,
+      3113
+    ],
+    "exclusions": "5983/6465STOPPED;4300NO_GO;6435AWSblocked;4247canonicalV2hold. No restart."
   }
 }

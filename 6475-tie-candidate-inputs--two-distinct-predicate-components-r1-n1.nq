@@ -1,0 +1,6 @@
+_:y8 <http://other/q> _:y2 _:y9 .
+_:y0 <http://other/p> _:y8 .
+_:y0 <http://other/q> _:y9 _:y2 .
+_:x8 <http://ex/q> _:x2 _:x9 .
+_:x0 <http://ex/p> _:x8 .
+_:x0 <http://ex/q> _:x9 _:x2 .

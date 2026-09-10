@@ -1,0 +1,5 @@
+_:u1 <http://ex/r> _:u0 .
+_:u0 <http://ex/r> _:u1 .
+_:b0 <http://ex/q> _:b3 _:b2 .
+_:b4 <http://ex/p> _:b0 .
+_:b4 <http://ex/q> _:b2 _:b3 .

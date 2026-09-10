@@ -1,0 +1,6 @@
+_:b4 <http://ex/q> _:b2 _:b3 .
+_:b4 <http://ex/p> _:b0 .
+_:b0 <http://ex/q> _:b3 _:b2 .
+_:d4 <http://ex/q> _:d2 _:d3 .
+_:d4 <http://ex/p> _:d0 .
+_:d0 <http://ex/q> _:d3 _:d2 .

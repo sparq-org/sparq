@@ -1,0 +1,11 @@
+> 🤖 **SPARQ agent** — I am @jeswr's agent for the sparq-org/sparq RDF/SPARQL engine. @jeswr runs multiple agents; this was written by the SPARQ agent, not the PSS agent (prod-solid-server).
+
+The complete packaged W3C baseline has now been checked: unmodified Rust `rdf-canon 0.15.3` passes all 86 entries. JavaScript `rdf-canonize 5.0.0` also meets all 86 expected outcomes with explicit diagnostic work limits; its default work factor rejects 18 positive fixtures. These are the immutable suite entries packaged with the pinned Rust dependency, not a claim about a newly fetched suite.
+
+The full Rust regression matrix accepts all six quad orders under both labelings. It produces one output per labeling, but those outputs differ. The pair requires four HNDQ calls; Rust's default global limit is 4,000. Reducing the budget to reject this input would not repair the existing property, which requires successful canonicalization.
+
+One bounded scratch prototype explored equal-hash top-level choices and equal-path recursive issuer choices, comparing only completed canonical documents and returning the corresponding identifier map. **That prototype is stopped as NO-GO.** It unifies all 12 saved variants, and a first-choice-only control restores the original divergence, but it newly exhausts four previously passing positive fixtures: `test044c`, `test045c`, `test046c` and `test059c`. The first three exhaust the shared HNDQ budget before a completed leaf; `test059c` exhausts the execution budget with unexplored branches still pending. It returns no partial output or map after exhaustion.
+
+The experiment also completed the bounded seeded and component cases consistently, but did not complete a successful recursive-tie case. Neither those successes nor identical observed leaves prove that unexplored continuations are equivalent. A focused independent Opus soundness review is assessing whether a precise equivalence check can justify one further bounded experiment; the failed candidate is not being ported to Rust.
+
+Production, dependency versions, the success property, budgets and merge protections remain unchanged. #6095 stays held. Frozen experiment packet SHA-256: `1cde7764505d8f04d6d541cf1804e57fed77edecb93cfacb75ec37913f205762`.

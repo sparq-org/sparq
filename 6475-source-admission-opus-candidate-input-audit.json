@@ -1,0 +1,7 @@
+{
+  "bytes": 91690,
+  "sha256": "ba723581324b5eecdd0afaf0081607d575b3e4c9d36f7a56a6bba17e9befab93",
+  "host_path_matches": 0,
+  "credential_pattern_matches": 0,
+  "scope": "Public source, fixed test data, explicit structured results and consumer inventory only. No raw host/process/build logs or agent transcript."
+}

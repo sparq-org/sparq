@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-10T00:15:30.478071+00:00",
+  "files_verified": 248,
+  "manifest_sha256": "ae6606672b852f489d1a9d11688665504a26725d33d781579bb5fca8689b5c55",
+  "packet_sha256": "1cde7764505d8f04d6d541cf1804e57fed77edecb93cfacb75ec37913f205762",
+  "decision": "NO_GO",
+  "checks": "All248hash/bytes; candidate diff/exploration driver read;218results and85positive expected values independently tallied;81preserved/fournewbudgeterrors confirmed;no incomplete output/map;firstOnlycontrol restores2outcomes;currentproductionworktreeclean.",
+  "limits": "No new execution or complete recursive correctness proof; no patch admitted."
+}

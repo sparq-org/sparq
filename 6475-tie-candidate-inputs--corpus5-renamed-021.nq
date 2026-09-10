@@ -1,0 +1,3 @@
+_:x3 <http://ex/p0> _:x1 .
+_:x2 <http://ex/p1> _:x2 _:x0 .
+_:x2 <http://ex/p0> _:x2 _:x1 .

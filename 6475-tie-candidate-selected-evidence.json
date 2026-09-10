@@ -1,0 +1,561 @@
+[
+  {
+    "name": "saved-original-012",
+    "group": "saved",
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": null,
+    "expected": null,
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b2": "c14n2",
+        "b3": "c14n3"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b3": "c14n2",
+        "b2": "c14n3"
+      },
+      "distinctOutcomes": 2,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 3,
+        "hndqCalls": 12,
+        "leaves": 2,
+        "choices": 1,
+        "topComplete": 1,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 1,
+        "recursive": 0,
+        "maxPending": 2
+      }
+    }
+  },
+  {
+    "name": "saved-original-012-first-only",
+    "group": "saved-control",
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n",
+    "hash": "SHA256",
+    "control": "first-only",
+    "kind": null,
+    "expected": null,
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b2": "c14n2",
+        "b3": "c14n3"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b2": "c14n2",
+        "b3": "c14n3"
+      },
+      "distinctOutcomes": 1,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 1,
+        "hndqCalls": 4,
+        "leaves": 1,
+        "choices": 0,
+        "topComplete": 0,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 0,
+        "recursive": 0,
+        "maxPending": 1
+      }
+    }
+  },
+  {
+    "name": "test021c",
+    "group": "W3C",
+    "input": "_:e0 <http://example.org/vocab#next> _:e1 .\n_:e1 <http://example.org/vocab#next> _:e0 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "_:c14n0 <http://example.org/vocab#next> _:c14n1 .\n_:c14n1 <http://example.org/vocab#next> _:c14n0 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#next> _:c14n1 .\n_:c14n1 <http://example.org/vocab#next> _:c14n0 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e1": "c14n1"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#next> _:c14n1 .\n_:c14n1 <http://example.org/vocab#next> _:c14n0 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e1": "c14n1"
+      },
+      "distinctOutcomes": 1,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 3,
+        "hndqCalls": 12,
+        "leaves": 2,
+        "choices": 1,
+        "topComplete": 1,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 1,
+        "recursive": 0,
+        "maxPending": 2
+      }
+    }
+  },
+  {
+    "name": "test033c",
+    "group": "W3C",
+    "input": "_:e0 <http://example.org/vocab#prop> _:e1 .\n_:e2 <http://example.org/vocab#prop> _:e3 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "_:c14n0 <http://example.org/vocab#prop> _:c14n1 .\n_:c14n2 <http://example.org/vocab#prop> _:c14n3 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#prop> _:c14n1 .\n_:c14n2 <http://example.org/vocab#prop> _:c14n3 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e1": "c14n1",
+        "e2": "c14n2",
+        "e3": "c14n3"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#prop> _:c14n1 .\n_:c14n2 <http://example.org/vocab#prop> _:c14n3 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e1": "c14n1",
+        "e2": "c14n2",
+        "e3": "c14n3"
+      },
+      "distinctOutcomes": 1,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 3,
+        "hndqCalls": 12,
+        "leaves": 2,
+        "choices": 1,
+        "topComplete": 0,
+        "topPartial": 1,
+        "topCrossGroup": 1,
+        "topOverlapping": 0,
+        "recursive": 0,
+        "maxPending": 2
+      }
+    }
+  },
+  {
+    "name": "test044c",
+    "group": "W3C",
+    "input": "_:e0 <http://example.org/vocab#p> _:e1 .\n_:e0 <http://example.org/vocab#p> _:e2 .\n_:e0 <http://example.org/vocab#p> _:e3 .\n_:e1 <http://example.org/vocab#p> _:e0 .\n_:e1 <http://example.org/vocab#p> _:e3 .\n_:e1 <http://example.org/vocab#p> _:e4 .\n_:e2 <http://example.org/vocab#p> _:e0 .\n_:e2 <http://example.org/vocab#p> _:e4 .\n_:e2 <http://example.org/vocab#p> _:e5 .\n_:e3 <http://example.org/vocab#p> _:e0 .\n_:e3 <http://example.org/vocab#p> _:e1 .\n_:e3 <http://example.org/vocab#p> _:e5 .\n_:e4 <http://example.org/vocab#p> _:e1 .\n_:e4 <http://example.org/vocab#p> _:e2 .\n_:e4 <http://example.org/vocab#p> _:e5 .\n_:e5 <http://example.org/vocab#p> _:e3 .\n_:e5 <http://example.org/vocab#p> _:e2 .\n_:e5 <http://example.org/vocab#p> _:e4 .\n_:e6 <http://example.org/vocab#p> _:e7 .\n_:e6 <http://example.org/vocab#p> _:e8 .\n_:e6 <http://example.org/vocab#p> _:e9 .\n_:e7 <http://example.org/vocab#p> _:e6 .\n_:e7 <http://example.org/vocab#p> _:e10 .\n_:e7 <http://example.org/vocab#p> _:e11 .\n_:e8 <http://example.org/vocab#p> _:e6 .\n_:e8 <http://example.org/vocab#p> _:e10 .\n_:e8 <http://example.org/vocab#p> _:e11 .\n_:e9 <http://example.org/vocab#p> _:e6 .\n_:e9 <http://example.org/vocab#p> _:e10 .\n_:e9 <http://example.org/vocab#p> _:e11 .\n_:e10 <http://example.org/vocab#p> _:e7 .\n_:e10 <http://example.org/vocab#p> _:e8 .\n_:e10 <http://example.org/vocab#p> _:e9 .\n_:e11 <http://example.org/vocab#p> _:e7 .\n_:e11 <http://example.org/vocab#p> _:e8 .\n_:e11 <http://example.org/vocab#p> _:e9 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e2": "c14n1",
+        "e3": "c14n2",
+        "e1": "c14n3",
+        "e4": "c14n4",
+        "e5": "c14n5",
+        "e6": "c14n6",
+        "e7": "c14n7",
+        "e8": "c14n8",
+        "e9": "c14n9",
+        "e10": "c14n10",
+        "e11": "c14n11"
+      }
+    },
+    "result": {
+      "status": "error",
+      "error": "global HNDQ budget",
+      "kind": "experimental_budget",
+      "stats": {
+        "executions": 22,
+        "hndqCalls": 4001,
+        "leaves": 0,
+        "choices": 21,
+        "topComplete": 0,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 0,
+        "recursive": 21,
+        "maxPending": 30
+      },
+      "partialOutcomes": 0
+    }
+  },
+  {
+    "name": "test045c",
+    "group": "W3C",
+    "input": "_:e0 <http://example.org/vocab#p> _:e1 .\n_:e0 <http://example.org/vocab#p> _:e2 .\n_:e0 <http://example.org/vocab#p> _:e3 .\n_:e1 <http://example.org/vocab#p> _:e0 .\n_:e1 <http://example.org/vocab#p> _:e4 .\n_:e1 <http://example.org/vocab#p> _:e5 .\n_:e2 <http://example.org/vocab#p> _:e0 .\n_:e2 <http://example.org/vocab#p> _:e4 .\n_:e2 <http://example.org/vocab#p> _:e5 .\n_:e3 <http://example.org/vocab#p> _:e0 .\n_:e3 <http://example.org/vocab#p> _:e4 .\n_:e3 <http://example.org/vocab#p> _:e5 .\n_:e4 <http://example.org/vocab#p> _:e1 .\n_:e4 <http://example.org/vocab#p> _:e2 .\n_:e4 <http://example.org/vocab#p> _:e3 .\n_:e5 <http://example.org/vocab#p> _:e1 .\n_:e5 <http://example.org/vocab#p> _:e2 .\n_:e5 <http://example.org/vocab#p> _:e3 .\n_:e6 <http://example.org/vocab#p> _:e7 .\n_:e6 <http://example.org/vocab#p> _:e8 .\n_:e6 <http://example.org/vocab#p> _:e9 .\n_:e7 <http://example.org/vocab#p> _:e6 .\n_:e7 <http://example.org/vocab#p> _:e9 .\n_:e7 <http://example.org/vocab#p> _:e10 .\n_:e8 <http://example.org/vocab#p> _:e6 .\n_:e8 <http://example.org/vocab#p> _:e10 .\n_:e8 <http://example.org/vocab#p> _:e11 .\n_:e9 <http://example.org/vocab#p> _:e6 .\n_:e9 <http://example.org/vocab#p> _:e7 .\n_:e9 <http://example.org/vocab#p> _:e11 .\n_:e10 <http://example.org/vocab#p> _:e7 .\n_:e10 <http://example.org/vocab#p> _:e8 .\n_:e10 <http://example.org/vocab#p> _:e11 .\n_:e11 <http://example.org/vocab#p> _:e9 .\n_:e11 <http://example.org/vocab#p> _:e8 .\n_:e11 <http://example.org/vocab#p> _:e10 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+      "map": {
+        "e6": "c14n0",
+        "e8": "c14n1",
+        "e9": "c14n2",
+        "e7": "c14n3",
+        "e10": "c14n4",
+        "e11": "c14n5",
+        "e0": "c14n6",
+        "e1": "c14n7",
+        "e2": "c14n8",
+        "e3": "c14n9",
+        "e4": "c14n10",
+        "e5": "c14n11"
+      }
+    },
+    "result": {
+      "status": "error",
+      "error": "global HNDQ budget",
+      "kind": "experimental_budget",
+      "stats": {
+        "executions": 36,
+        "hndqCalls": 4001,
+        "leaves": 0,
+        "choices": 35,
+        "topComplete": 0,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 0,
+        "recursive": 35,
+        "maxPending": 56
+      },
+      "partialOutcomes": 0
+    }
+  },
+  {
+    "name": "test046c",
+    "group": "W3C",
+    "input": "_:e0 <http://example.org/vocab#p> _:e1 .\n_:e0 <http://example.org/vocab#p> _:e2 .\n_:e0 <http://example.org/vocab#p> _:e3 .\n_:e1 <http://example.org/vocab#p> _:e0 .\n_:e1 <http://example.org/vocab#p> _:e9 .\n_:e1 <http://example.org/vocab#p> _:e8 .\n_:e2 <http://example.org/vocab#p> _:e3 .\n_:e2 <http://example.org/vocab#p> _:e8 .\n_:e2 <http://example.org/vocab#p> _:e0 .\n_:e3 <http://example.org/vocab#p> _:e0 .\n_:e3 <http://example.org/vocab#p> _:e2 .\n_:e3 <http://example.org/vocab#p> _:e9 .\n_:e4 <http://example.org/vocab#p> _:e5 .\n_:e4 <http://example.org/vocab#p> _:e6 .\n_:e4 <http://example.org/vocab#p> _:e7 .\n_:e5 <http://example.org/vocab#p> _:e10 .\n_:e5 <http://example.org/vocab#p> _:e4 .\n_:e5 <http://example.org/vocab#p> _:e11 .\n_:e6 <http://example.org/vocab#p> _:e4 .\n_:e6 <http://example.org/vocab#p> _:e11 .\n_:e6 <http://example.org/vocab#p> _:e10 .\n_:e7 <http://example.org/vocab#p> _:e10 .\n_:e7 <http://example.org/vocab#p> _:e11 .\n_:e7 <http://example.org/vocab#p> _:e4 .\n_:e8 <http://example.org/vocab#p> _:e1 .\n_:e8 <http://example.org/vocab#p> _:e2 .\n_:e8 <http://example.org/vocab#p> _:e9 .\n_:e9 <http://example.org/vocab#p> _:e8 .\n_:e9 <http://example.org/vocab#p> _:e3 .\n_:e9 <http://example.org/vocab#p> _:e1 .\n_:e10 <http://example.org/vocab#p> _:e6 .\n_:e10 <http://example.org/vocab#p> _:e7 .\n_:e10 <http://example.org/vocab#p> _:e5 .\n_:e11 <http://example.org/vocab#p> _:e5 .\n_:e11 <http://example.org/vocab#p> _:e6 .\n_:e11 <http://example.org/vocab#p> _:e7 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://example.org/vocab#p> _:c14n1 .\n_:c14n0 <http://example.org/vocab#p> _:c14n2 .\n_:c14n0 <http://example.org/vocab#p> _:c14n3 .\n_:c14n1 <http://example.org/vocab#p> _:c14n0 .\n_:c14n1 <http://example.org/vocab#p> _:c14n4 .\n_:c14n1 <http://example.org/vocab#p> _:c14n5 .\n_:c14n10 <http://example.org/vocab#p> _:c14n7 .\n_:c14n10 <http://example.org/vocab#p> _:c14n8 .\n_:c14n10 <http://example.org/vocab#p> _:c14n9 .\n_:c14n11 <http://example.org/vocab#p> _:c14n7 .\n_:c14n11 <http://example.org/vocab#p> _:c14n8 .\n_:c14n11 <http://example.org/vocab#p> _:c14n9 .\n_:c14n2 <http://example.org/vocab#p> _:c14n0 .\n_:c14n2 <http://example.org/vocab#p> _:c14n3 .\n_:c14n2 <http://example.org/vocab#p> _:c14n5 .\n_:c14n3 <http://example.org/vocab#p> _:c14n0 .\n_:c14n3 <http://example.org/vocab#p> _:c14n2 .\n_:c14n3 <http://example.org/vocab#p> _:c14n4 .\n_:c14n4 <http://example.org/vocab#p> _:c14n1 .\n_:c14n4 <http://example.org/vocab#p> _:c14n3 .\n_:c14n4 <http://example.org/vocab#p> _:c14n5 .\n_:c14n5 <http://example.org/vocab#p> _:c14n1 .\n_:c14n5 <http://example.org/vocab#p> _:c14n2 .\n_:c14n5 <http://example.org/vocab#p> _:c14n4 .\n_:c14n6 <http://example.org/vocab#p> _:c14n7 .\n_:c14n6 <http://example.org/vocab#p> _:c14n8 .\n_:c14n6 <http://example.org/vocab#p> _:c14n9 .\n_:c14n7 <http://example.org/vocab#p> _:c14n10 .\n_:c14n7 <http://example.org/vocab#p> _:c14n11 .\n_:c14n7 <http://example.org/vocab#p> _:c14n6 .\n_:c14n8 <http://example.org/vocab#p> _:c14n10 .\n_:c14n8 <http://example.org/vocab#p> _:c14n11 .\n_:c14n8 <http://example.org/vocab#p> _:c14n6 .\n_:c14n9 <http://example.org/vocab#p> _:c14n10 .\n_:c14n9 <http://example.org/vocab#p> _:c14n11 .\n_:c14n9 <http://example.org/vocab#p> _:c14n6 .\n",
+      "map": {
+        "e0": "c14n0",
+        "e1": "c14n1",
+        "e2": "c14n2",
+        "e3": "c14n3",
+        "e9": "c14n4",
+        "e8": "c14n5",
+        "e4": "c14n6",
+        "e5": "c14n7",
+        "e6": "c14n8",
+        "e7": "c14n9",
+        "e10": "c14n10",
+        "e11": "c14n11"
+      }
+    },
+    "result": {
+      "status": "error",
+      "error": "global HNDQ budget",
+      "kind": "experimental_budget",
+      "stats": {
+        "executions": 22,
+        "hndqCalls": 4001,
+        "leaves": 0,
+        "choices": 21,
+        "topComplete": 0,
+        "topPartial": 0,
+        "topCrossGroup": 0,
+        "topOverlapping": 0,
+        "recursive": 21,
+        "maxPending": 30
+      },
+      "partialOutcomes": 0
+    }
+  },
+  {
+    "name": "test059c",
+    "group": "W3C",
+    "input": "<urn:ex:s> <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n_:s0 <urn:ex:p> _:o0 _:g0 .\n_:s1 <urn:ex:p> _:o1 _:g1 .\n_:s2 <urn:ex:p> _:o2 _:g2 .\n_:s3 <urn:ex:p> _:o3 _:g3 .\n_:s4 <urn:ex:p> _:o4 _:g4 .\n_:s5 <urn:ex:p> _:o5 _:g5 .\n_:s6 <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": "rdfc:RDFC10EvalTest",
+    "expected": "<urn:ex:s> <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n_:c14n0 <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n_:c14n1 <urn:ex:p> _:c14n3 _:c14n2 .\n_:c14n10 <urn:ex:p> _:c14n12 _:c14n11 .\n_:c14n13 <urn:ex:p> _:c14n15 _:c14n14 .\n_:c14n16 <urn:ex:p> _:c14n18 _:c14n17 .\n_:c14n4 <urn:ex:p> _:c14n6 _:c14n5 .\n_:c14n7 <urn:ex:p> _:c14n9 _:c14n8 .\n",
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "<urn:ex:s> <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n_:c14n0 <urn:ex:p> <urn:ex:o> <urn:ex:g> .\n_:c14n1 <urn:ex:p> _:c14n3 _:c14n2 .\n_:c14n10 <urn:ex:p> _:c14n12 _:c14n11 .\n_:c14n13 <urn:ex:p> _:c14n15 _:c14n14 .\n_:c14n16 <urn:ex:p> _:c14n18 _:c14n17 .\n_:c14n4 <urn:ex:p> _:c14n6 _:c14n5 .\n_:c14n7 <urn:ex:p> _:c14n9 _:c14n8 .\n",
+      "map": {
+        "s6": "c14n0",
+        "s0": "c14n1",
+        "g0": "c14n2",
+        "o0": "c14n3",
+        "s1": "c14n4",
+        "g1": "c14n5",
+        "o1": "c14n6",
+        "s2": "c14n7",
+        "g2": "c14n8",
+        "o2": "c14n9",
+        "s3": "c14n10",
+        "g3": "c14n11",
+        "o3": "c14n12",
+        "s4": "c14n13",
+        "g4": "c14n14",
+        "o4": "c14n15",
+        "s5": "c14n16",
+        "g5": "c14n17",
+        "o5": "c14n18"
+      }
+    },
+    "result": {
+      "status": "error",
+      "error": "execution budget",
+      "kind": "experimental_budget",
+      "stats": {
+        "executions": 64,
+        "hndqCalls": 1152,
+        "leaves": 36,
+        "choices": 28,
+        "topComplete": 0,
+        "topPartial": 28,
+        "topCrossGroup": 28,
+        "topOverlapping": 0,
+        "recursive": 0,
+        "maxPending": 16
+      },
+      "partialOutcomes": 1
+    }
+  },
+  {
+    "name": "two-distinct-predicate-components-r0-n0",
+    "group": "two-distinct-predicate-components",
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n_:d4 <http://other/q> _:d2 _:d3 .\n_:d4 <http://other/p> _:d0 .\n_:d0 <http://other/q> _:d3 _:d2 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": null,
+    "expected": null,
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n5 _:c14n4 .\n_:c14n1 <http://other/p> _:c14n3 .\n_:c14n1 <http://other/q> _:c14n6 _:c14n7 .\n_:c14n2 <http://ex/p> _:c14n0 .\n_:c14n2 <http://ex/q> _:c14n4 _:c14n5 .\n_:c14n3 <http://other/q> _:c14n7 _:c14n6 .\n",
+      "map": {
+        "b0": "c14n0",
+        "d4": "c14n1",
+        "b4": "c14n2",
+        "d0": "c14n3",
+        "b2": "c14n4",
+        "b3": "c14n5",
+        "d2": "c14n6",
+        "d3": "c14n7"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n4 _:c14n5 .\n_:c14n1 <http://other/p> _:c14n3 .\n_:c14n1 <http://other/q> _:c14n6 _:c14n7 .\n_:c14n2 <http://ex/p> _:c14n0 .\n_:c14n2 <http://ex/q> _:c14n5 _:c14n4 .\n_:c14n3 <http://other/q> _:c14n7 _:c14n6 .\n",
+      "map": {
+        "b0": "c14n0",
+        "d4": "c14n1",
+        "b4": "c14n2",
+        "d0": "c14n3",
+        "b3": "c14n4",
+        "b2": "c14n5",
+        "d2": "c14n6",
+        "d3": "c14n7"
+      },
+      "distinctOutcomes": 4,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 7,
+        "hndqCalls": 52,
+        "leaves": 4,
+        "choices": 3,
+        "topComplete": 2,
+        "topPartial": 1,
+        "topCrossGroup": 0,
+        "topOverlapping": 3,
+        "recursive": 0,
+        "maxPending": 3
+      }
+    }
+  },
+  {
+    "name": "two-same-predicate-components-r0-n0",
+    "group": "two-same-predicate-components",
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n_:d4 <http://ex/q> _:d2 _:d3 .\n_:d4 <http://ex/p> _:d0 .\n_:d0 <http://ex/q> _:d3 _:d2 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": null,
+    "expected": null,
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n2 <http://ex/p> _:c14n3 .\n_:c14n2 <http://ex/q> _:c14n1 _:c14n0 .\n_:c14n3 <http://ex/q> _:c14n0 _:c14n1 .\n_:c14n6 <http://ex/p> _:c14n7 .\n_:c14n6 <http://ex/q> _:c14n5 _:c14n4 .\n_:c14n7 <http://ex/q> _:c14n4 _:c14n5 .\n",
+      "map": {
+        "b3": "c14n0",
+        "b2": "c14n1",
+        "b4": "c14n2",
+        "b0": "c14n3",
+        "d3": "c14n4",
+        "d2": "c14n5",
+        "d4": "c14n6",
+        "d0": "c14n7"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n2 <http://ex/p> _:c14n3 .\n_:c14n2 <http://ex/q> _:c14n1 _:c14n0 .\n_:c14n3 <http://ex/q> _:c14n0 _:c14n1 .\n_:c14n6 <http://ex/p> _:c14n7 .\n_:c14n6 <http://ex/q> _:c14n5 _:c14n4 .\n_:c14n7 <http://ex/q> _:c14n4 _:c14n5 .\n",
+      "map": {
+        "b3": "c14n0",
+        "b2": "c14n1",
+        "b4": "c14n2",
+        "b0": "c14n3",
+        "d3": "c14n4",
+        "d2": "c14n5",
+        "d4": "c14n6",
+        "d0": "c14n7"
+      },
+      "distinctOutcomes": 1,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 3,
+        "hndqCalls": 48,
+        "leaves": 2,
+        "choices": 1,
+        "topComplete": 0,
+        "topPartial": 1,
+        "topCrossGroup": 1,
+        "topOverlapping": 0,
+        "recursive": 0,
+        "maxPending": 2
+      }
+    }
+  },
+  {
+    "name": "saved-plus-cycle-r0-n0",
+    "group": "saved-plus-cycle",
+    "input": "_:b4 <http://ex/q> _:b2 _:b3 .\n_:b4 <http://ex/p> _:b0 .\n_:b0 <http://ex/q> _:b3 _:b2 .\n_:u0 <http://ex/r> _:u1 .\n_:u1 <http://ex/r> _:u0 .\n",
+    "hash": "SHA256",
+    "control": "candidate",
+    "kind": null,
+    "expected": null,
+    "limits": {
+      "hndqCalls": 4000,
+      "executions": 64,
+      "milliseconds": 1000
+    },
+    "baseline": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n4 <http://ex/r> _:c14n5 .\n_:c14n5 <http://ex/r> _:c14n4 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b2": "c14n2",
+        "b3": "c14n3",
+        "u0": "c14n4",
+        "u1": "c14n5"
+      }
+    },
+    "result": {
+      "status": "complete",
+      "output": "_:c14n0 <http://ex/q> _:c14n2 _:c14n3 .\n_:c14n1 <http://ex/p> _:c14n0 .\n_:c14n1 <http://ex/q> _:c14n3 _:c14n2 .\n_:c14n4 <http://ex/r> _:c14n5 .\n_:c14n5 <http://ex/r> _:c14n4 .\n",
+      "map": {
+        "b0": "c14n0",
+        "b4": "c14n1",
+        "b3": "c14n2",
+        "b2": "c14n3",
+        "u0": "c14n4",
+        "u1": "c14n5"
+      },
+      "distinctOutcomes": 2,
+      "mapConsistent": true,
+      "stats": {
+        "executions": 7,
+        "hndqCalls": 52,
+        "leaves": 4,
+        "choices": 3,
+        "topComplete": 2,
+        "topPartial": 1,
+        "topCrossGroup": 0,
+        "topOverlapping": 3,
+        "recursive": 0,
+        "maxPending": 3
+      }
+    }
+  }
+]

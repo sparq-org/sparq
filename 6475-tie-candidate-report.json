@@ -1,0 +1,32 @@
+{
+  "decision": "NO-GO: four previously passing positive W3C fixtures exhaust fixed experimental work limits",
+  "scope": "One scratch complete-outcome equal-hash/equal-path candidate; fixed protocol and no second candidate",
+  "results": "Saved 12/12 unify; first-only control restores two outputs. 96 seeded variants and 12 component variants complete consistently. Baseline meets all 86 W3C expected outcomes; candidate preserves 81/85 positives and retains negative failure; four positives newly exhaust.",
+  "completion_argument": [
+    "Top-level equal-hash candidates retain complete ordered temporary issuers. Each selected issuer is applied, then every remaining hash group continues to a full dataset output before comparison. Already fully covered issuers have no canonical-assignment effect and are skipped.",
+    "Recursive equal-minimum-path issuers are retained by exact ordered issuer-state identity. Choice-prefix replay branches at every encountered recursive/top choice; later groups recompute from each selected state. This intends to preserve nested ties rather than merely sort top-level results.",
+    "A minimum is returned only when the pending choice tree is empty. Any error or limit returns no output/map, even when leaves were observed. test059c concretely exercises partial-search rejection after 36 leaves.",
+    "UTF-8 byte comparison chooses among completed documents; the returned map belongs to that same completed document, and reconstruction checks map/output agreement. This is empirical consistency evidence, not a correctness proof for the candidate algorithm."
+  ],
+  "smallest_obstruction": "test059c is a 254-byte positive parsing fixture containing six interchangeable disconnected blank-node components. At 64 executions, 36 completed leaves had one distinct document, but remaining branches could not be assumed equivalent. Original JS5 completes under the same 4000 deep-iteration diagnostic option.",
+  "recommended_next_step": "Stop this candidate. If root authorizes a further design experiment, use test059c to justify a sound structural quotient or memoization of equivalent complete continuation states before further breadth. Prove remaining-state equivalence rather than assuming equal hashes or identical observed leaves; separately address recursive test044c/045c/046c cost. Do not increase budgets, discard recursive alternatives, return a partial minimum, or weaken the success property.",
+  "limits": [
+    "No production patch, dependency change, commit, build, new install, API call or gate/property/hold change. Prototype is not approved or ready for Rust port.",
+    "Complete means all branches exposed by this candidate finished, not a proof that the candidate exposes every semantically relevant RDFC outcome. Equivalence to a complete canonical algorithm is unproved.",
+    "No successful case completed after a recursive multi-issuer equal-path choice; test044c/test045c/test046c reached those hooks but exhausted before any leaf. Recursive alternative correctness remains unvalidated.",
+    "Output/map consistency is verified by reconstructing the entire canonical document from each completed map. Exact map equality across renamings is not required for legitimate automorphisms; tested W3C expected maps remained unchanged.",
+    "Existing lexicographic path pruning is retained. JS uses strict greater-than pruning. Rust comparison details and lexical b10/b2 temporary ordering remain separate future port concerns.",
+    "The 4000 global HNDQ-entry cap counts replay work; it is stricter than granting every replay an independent 4000 budget. 64 executions and 1000 ms are fixed diagnostic caps, not proposed public API defaults. No limits were tuned.",
+    "Negative test074c still errors without output/map, but the experimental error type/text differs from the baseline. This is not error-API compatibility proof.",
+    "The implemented disableRecursive hook was not executed. Only firstOnly was executed as a negative control.",
+    "Seeded corpus is eight 3-quad graphs with 12 variants each, not exhaustive differential testing. Additional component variants are four per shape, not all permutations.",
+    "Protocol timing measures finite diagnostic execution, not performance benchmarking. No throughput/canonical performance claim.",
+    "No accepted W3C erratum or standard-level correction is established by these results."
+  ],
+  "summary": "summary.json",
+  "provenance": "provenance.json",
+  "raw_results": "results.json",
+  "exact_commands": "commands.json",
+  "scratch_only": true,
+  "no_commands_pending": true
+}

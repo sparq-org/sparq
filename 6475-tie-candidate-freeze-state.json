@@ -1,0 +1,13 @@
+{
+  "utc": "2026-09-09T23:59:29.024729+00:00",
+  "free_bytes_before_manifest": 6502072320,
+  "floor_bytes": 6442450944,
+  "maximum_bundle_bytes": 8388608,
+  "actual_bytes_before_manifest": 951816,
+  "production_head": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "production_clean": true,
+  "pending_commands": [],
+  "builds": 0,
+  "remote_calls": 0,
+  "new_installs": 0
+}

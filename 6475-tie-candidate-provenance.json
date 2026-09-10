@@ -1,0 +1,24 @@
+{
+  "author": "GPT-6 Astra, xhigh; scratch experiment only",
+  "baseline_package": "rdf-canonize 5.0.0",
+  "baseline_gitHead": "9502eee92d87e8685d96b9d325477d767c86fb83",
+  "baseline_npm_sha512": "sha512-g8OUrgMXAR9ys/ZuJVfBr05sPPoMA7nHIVs8VEvg9QwM5W4GR2qSFEEHjsyHF1eWlBaf8Ev40WNjQFQ+nJTO3w==",
+  "candidate_changed_package_files": [
+    "lib/RDFC10Sync.js"
+  ],
+  "candidate_package_file_count": 14,
+  "node_binary_sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+  "node_version": "24.19.0 (previous frozen reference-v5 tooling evidence; not rerun in this freeze)",
+  "source_sha256": {
+    "candidate/lib/RDFC10Sync.js": "82711fe47bb6e29c224abec5ca1d0c306261d2b7af02b0e86a92c3a3f02282c6",
+    "explore.cjs": "00c170088de05427d9db092b7a061d107021339f7b865026a59ce8e98194f6bd",
+    "case.cjs": "c9d8b375c6af2b28bb1096fb600385cb6c3f07cdfb39f7fbb6afce018c1b98d1",
+    "run.py": "e82cc40eb4ac4cbb8809f5830450c08c26b8f7355f6c4bded13c7b90c6228892",
+    "candidate.diff": "29a5bfbdb547e7da2a2f627f8e0d1a53730418fb5ea4dd9323496e4d014322c0"
+  },
+  "baseline_RDFC10Sync_sha256": "0f08af51ac41dc730f146cc1eb12b07d913f67ffbf1498d9b124e1cef589a02d",
+  "production_HEAD": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "production_status_porcelain": "",
+  "production_modified": false,
+  "previous_frozen_evidence_packet_sha256": "0f943bfa5b625e878be443586d0f4758da4612fd85737f23d499161f7538cd1f"
+}

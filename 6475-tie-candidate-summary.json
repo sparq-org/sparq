@@ -1,0 +1,194 @@
+{
+  "decision": "NO-GO: four previously passing positive W3C fixtures exhaust fixed experimental work limits",
+  "commands": {
+    "count": 218,
+    "all_process_exit_zero": true,
+    "note": "case.cjs returns JSON for algorithm errors; process exit zero is not a canonicalization success"
+  },
+  "groups": {
+    "saved": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "saved-control": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 2,
+      "all_complete_maps_consistent": true
+    },
+    "W3C": {
+      "cases": 86,
+      "complete": 81,
+      "errors": 5,
+      "distinct_complete_outputs": 43,
+      "all_complete_maps_consistent": true
+    },
+    "two-distinct-predicate-components": {
+      "cases": 4,
+      "complete": 4,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "two-same-predicate-components": {
+      "cases": 4,
+      "complete": 4,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "saved-plus-cycle": {
+      "cases": 4,
+      "complete": 4,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus0": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus1": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus2": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus3": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus4": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus5": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus6": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    },
+    "corpus7": {
+      "cases": 12,
+      "complete": 12,
+      "errors": 0,
+      "distinct_complete_outputs": 1,
+      "all_complete_maps_consistent": true
+    }
+  },
+  "W3C": {
+    "entries": 86,
+    "baseline_expected_outcomes": 86,
+    "positive_unchanged": 81,
+    "positive_total": 85,
+    "negative_still_errors": 1,
+    "new_positive_failures": [
+      {
+        "name": "test044c",
+        "error": "global HNDQ budget",
+        "stats": {
+          "executions": 22,
+          "hndqCalls": 4001,
+          "leaves": 0,
+          "choices": 21,
+          "topComplete": 0,
+          "topPartial": 0,
+          "topCrossGroup": 0,
+          "topOverlapping": 0,
+          "recursive": 21,
+          "maxPending": 30
+        },
+        "partialOutcomes": 0
+      },
+      {
+        "name": "test045c",
+        "error": "global HNDQ budget",
+        "stats": {
+          "executions": 36,
+          "hndqCalls": 4001,
+          "leaves": 0,
+          "choices": 35,
+          "topComplete": 0,
+          "topPartial": 0,
+          "topCrossGroup": 0,
+          "topOverlapping": 0,
+          "recursive": 35,
+          "maxPending": 56
+        },
+        "partialOutcomes": 0
+      },
+      {
+        "name": "test046c",
+        "error": "global HNDQ budget",
+        "stats": {
+          "executions": 22,
+          "hndqCalls": 4001,
+          "leaves": 0,
+          "choices": 21,
+          "topComplete": 0,
+          "topPartial": 0,
+          "topCrossGroup": 0,
+          "topOverlapping": 0,
+          "recursive": 21,
+          "maxPending": 30
+        },
+        "partialOutcomes": 0
+      },
+      {
+        "name": "test059c",
+        "error": "execution budget",
+        "stats": {
+          "executions": 64,
+          "hndqCalls": 1152,
+          "leaves": 36,
+          "choices": 28,
+          "topComplete": 0,
+          "topPartial": 28,
+          "topCrossGroup": 28,
+          "topOverlapping": 0,
+          "recursive": 0,
+          "maxPending": 16
+        },
+        "partialOutcomes": 1
+      }
+    ]
+  },
+  "recursive_coverage": {
+    "completed_cases_with_recursive_choices": 0,
+    "cases_with_recursive_choices": [
+      "test044c",
+      "test045c",
+      "test046c"
+    ]
+  },
+  "execution_seconds": 22.085896084
+}

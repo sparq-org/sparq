@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-10T00:13:18.221137+00:00",
+  "records": [
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue4246",
+      "branch": "refs/heads/codex/overlay-deleted-projections",
+      "head_retained": "ccded1b4898cf5b317a6591f6ff6108ced23123c",
+      "merged_pr": "6469",
+      "merge_commit": "cea4414b39225b1240f36d968ba1549e700cd32f",
+      "free_before": 6349152256,
+      "free_after": 6450343936
+    },
+    {
+      "path": "/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue6468",
+      "branch": "refs/heads/codex/triage-area-unknown-diagnostics",
+      "head_retained": "afa9c6489db0351855acd9297a6aa2c845434106",
+      "merged_pr": "6473",
+      "merge_commit": "e53464c73f31f7aca800f3867ac054c36408e346",
+      "free_before": 6450315264,
+      "free_after": 6551207936
+    }
+  ],
+  "scope": "Two clean completed task-owned worktrees only; no force, prune, branch deletion, shared checkout or production change."
+}

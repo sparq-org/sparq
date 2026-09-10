@@ -1,0 +1,13 @@
+{
+  "candidate": "enumerate equal-hash top choices and equal-path recursive issuers; compare complete outputs only",
+  "max_hndq_calls_across_replays": 4000,
+  "max_executions_per_input": 64,
+  "total_deadline_ms_per_input": 1000,
+  "external_seconds_per_case": 3,
+  "whole_run_seconds": 140,
+  "corpus": "8 seeded3quad datasets over4 bnodes,2predicates,default/bnode graphs; all6ordersx2 bijective labels",
+  "seed": 25717,
+  "controls": "first-only on all12 saved variants",
+  "suite": "all86 packagedW3C entries",
+  "no_retries": true
+}
