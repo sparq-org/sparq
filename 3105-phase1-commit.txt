@@ -1,0 +1,13 @@
+commit 6e86f1d0ba447aa78a50800337a7a379702fa999
+Author:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+AuthorDate: Thu Sep 10 01:40:48 2026 +0100
+Commit:     Jesse Wright <63333554+jeswr@users.noreply.github.com>
+CommitDate: Thu Sep 10 01:40:48 2026 +0100
+
+    perf(engine): reuse capped RHS scans without armed budgets
+    
+    Reuse a reached non-bind pattern only for the same requested scan order. Borrow existing join kernels without changing per-block planner or smaller-side hash build decisions. Keep original scan lifetime when a query budget is armed.
+    
+    Add actual-query three-block scan witnesses and focused cache, multiset, repeated-variable and budget checks. Scan-count evidence only; latency and retained-memory assessment remain pending.
+    
+    Co-Authored-By: GPT-6 Astra <noreply@openai.com>

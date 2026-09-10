@@ -1,0 +1,32 @@
+{
+  "capped-caller": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 3978,
+    "bytes": 7185
+  },
+  "capped-driver-and-cache": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 4128,
+    "bytes": 9741
+  },
+  "scan-and-borrowed-kernels": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 8476,
+    "bytes": 12709
+  },
+  "cross-kernel": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 9210,
+    "bytes": 800
+  },
+  "planner-state": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 7964,
+    "bytes": 3026
+  },
+  "tests": {
+    "source": "crates/sparq-engine/src/exec.rs",
+    "start_line": 21233,
+    "bytes": 6569
+  }
+}

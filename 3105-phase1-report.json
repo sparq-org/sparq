@@ -1,0 +1,60 @@
+{
+  "decision": "Review-ready partial candidate; NOT performance-admitted",
+  "issue": 3105,
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "files": [
+    "crates/sparq-engine/src/exec.rs"
+  ],
+  "diff": {
+    "insertions": 255,
+    "deletions": 15
+  },
+  "change": "Lazily retain a non-bind RHS keyed by immutable prepared-pattern slot and requested scan order. Borrow its rows through the same merge/hash/cross kernels. Reuse is disabled for any armed budget. Filters are immutable per prepared-pattern slot for the duration of the function.",
+  "actual_callpath": "crate::ask/query -> existing try_capped conjunction arm -> eval_bgp_binary_capped -> scan_to_bindings. The witness asserts entry/three block iterations/zero bind calls, so count pushdown or a different fast path cannot make the scan-count result vacuous.",
+  "evidence": {
+    "default_focused_tests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "no_default_engine_features_focused_tests": {
+      "passed": 3,
+      "failed": 0,
+      "note": "Engine features disabled; dev dependency still enables sparq-core parallel/mmap/dict-spill. This is not a wasm or all-features validation."
+    },
+    "existing_ask_early_exit": {
+      "passed": 21,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_reason": "Existing q12a timing probe, explicitly ignored upstream; no timing result claimed."
+    },
+    "negative_controls": {
+      "calibrated": 3,
+      "killed": 3,
+      "survived": 0,
+      "all_compile_and_execute": true
+    },
+    "clippy": "cargo clippy --locked --offline -p sparq-engine --lib -- -D warnings: PASS",
+    "preflight": "Only failure: system Bash3 does not provide mapfile for scripts/check-privacy-claims.sh; G1/G2/G6/guard-untested otherwise passed. No gate changed/bypassed.",
+    "git_diff_check": "PASS",
+    "clean": true,
+    "exact_head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+    "counts_are_not_latency_measurements": true,
+    "minimum_observed_free_bytes": 6933098496
+  },
+  "scope_remaining": [
+    "No latency, allocation-count, peak-heap, RSS, cold/warm, hit/miss or overlay timing measurement was performed. One fewer scan is work-count evidence, not a speedup claim.",
+    "Cache retains each reached non-bind RHS until this capped call returns. On unbudgeted multi-pattern queries this can increase simultaneous heap and hold larger relations longer. A changed requested sort temporarily needs the replacement scan before dropping the old slot. Measure before admission.",
+    "Every armed QueryBudget disables reuse, preserving the former per-step RHS lifetime/polling. The added per-query cache vector is empty in this mode. The existing max-bytes estimate is not extended.",
+    "Hash table builds remain per block on whichever side the existing algorithm chooses. GOO ordering, bind admission, seed blocks and seed materialization remain unchanged. This is a partial issue3105 implementation; no closure claim.",
+    "No new public API, dependency, storage API, feature, threshold, stream pipeline or join framework was added. Three existing join bodies accept borrowed inputs behind unchanged owned wrappers; all other call sites keep their owned signatures.",
+    "Actual restricted-permutation end-to-end cases, overlay snapshots, concurrent readers, cs-planner/persistent-stats/semijoin-bitmap/zk feature matrices and conformance remain unexecuted here. The focused cache test checks truthful actual sorted_by preservation when it differs from the request; that is not a substitute for those matrices.",
+    "Scoped clippy covers the production library, not every target/all feature. Full workspace clippy/tests/conformance/performance/wasm gates remain root-owned before admission.",
+    "Existing first-block-hit semantics and multiset/repeated-variable cases pass; their latency/heap costs are unmeasured. No eager scan of unreached steps is introduced.",
+    "No deterministic mid-query cancellation was injected. Pre-cancelled/expired calls and an armed-budget work-count guard were checked; existing cooperative joins/polling remain in use.",
+    "Initial budget-fixture failure and its correction are retained explicitly; no failed check is represented as a passing result."
+  ],
+  "next_smallest_step": "Actual independent patch review, then a predeclared local paired measurement protocol on exact main/candidate with the same harness: first-block hit, second-block hit, complete miss and late LIMIT completion; include multi-pattern RHS retention, changed scan order and overlay views, and measure whole-query latency plus requested allocations/peak live heap. Use existing block boundaries, no arbitrary threshold tuning. Do not hoist hash builds or planner state until that evidence warrants a separate bounded step.",
+  "source_and_review_provenance": "Historical source markers/trailers remain intact. All new work is actual GPT-6 Astra xhigh. No independent review was invoked by this lane.",
+  "no_commands_pending": true
+}

@@ -1,0 +1,40 @@
+{
+  "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "exec_sha256": "661d12d64dadcf90bb49b780116f614517cde373bd3bd24ab48194d32da69575",
+  "compiled_candidate_source": "final-candidate-exec.rs",
+  "baseline_source": "baseline-instrumented-exec.rs",
+  "control_derivation": "final-candidate-exec.rs plus each named .diff, with identical final test body",
+  "binaries": {
+    "ask-early-exit": {
+      "bytes": 24557008,
+      "sha256": "296d4d17bfc522fdca12121e03e80c51ceac8e782169e2abfcc6e96ad13cec99"
+    },
+    "baseline": {
+      "bytes": 27730848,
+      "sha256": "101c2c8f6005f56032a834e6eb217ca2d53335bf4b14fc2eee1f0fcb874ad373"
+    },
+    "candidate-unit": {
+      "bytes": 27767856,
+      "sha256": "264088f31b8f350bc86c3acbcadabe662e4596bda7104f73cab0cf8268be0bca"
+    },
+    "ignore-budget": {
+      "bytes": 27767168,
+      "sha256": "c7b063bbc62e273152efd2e538e6edea910bae61160f5c23087fa7265021aaf2"
+    },
+    "ignore-requested-sort": {
+      "bytes": 27767856,
+      "sha256": "a9c471a7f6c1f145d147649cbbd05cd57fd5ec19a2ab71c4e125ddd08f540770"
+    },
+    "invalidate-per-block": {
+      "bytes": 27768400,
+      "sha256": "09f35b92ff443dbefc9a3e25026df6c3c6bd573f8bcc431d6e05dc6415306096"
+    },
+    "unit-no-default": {
+      "bytes": 18257552,
+      "sha256": "a0a7bec480578697c7ee70484eef84c97f6f7d9b1184295a4748365c9c7633e3"
+    }
+  },
+  "test_profile": "unoptimized + debuginfo; Cargo.lock unchanged",
+  "root_base_source": "base-exec.rs"
+}

@@ -1,0 +1,89 @@
+   Compiling libc v0.2.186
+   Compiling cfg-if v1.0.4
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling getrandom v0.3.4
+   Compiling zerocopy v0.8.50
+   Compiling rand_core v0.9.5
+   Compiling syn v2.0.117
+   Compiling ppv-lite86 v0.2.21
+   Compiling crossbeam-utils v0.8.21
+   Compiling rand_chacha v0.9.0
+   Compiling memchr v2.8.2
+   Compiling crossbeam-epoch v0.9.20
+   Compiling thiserror v2.0.18
+   Compiling thiserror-impl v2.0.18
+   Compiling rand v0.9.4
+   Compiling typenum v1.20.1
+   Compiling hybrid-array v0.4.12
+   Compiling oxiri v0.2.11
+   Compiling oxilangtag v0.1.6
+   Compiling rayon-core v1.13.0
+   Compiling getrandom v0.4.2
+   Compiling oxrdf v0.3.3
+   Compiling crossbeam-deque v0.8.6
+   Compiling rustix v1.1.4
+   Compiling serde_core v1.0.228
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling errno v0.3.14
+   Compiling autocfg v1.5.1
+   Compiling either v1.16.0
+   Compiling allocator-api2 v0.2.21
+   Compiling equivalent v1.0.2
+   Compiling const-oid v0.10.2
+   Compiling foldhash v0.2.0
+   Compiling bitflags v2.13.0
+   Compiling zmij v1.0.21
+   Compiling hashbrown v0.17.1
+   Compiling digest v0.11.3
+   Compiling rayon v1.12.0
+   Compiling num-traits v0.2.19
+   Compiling oxttl v0.2.3
+   Compiling memmap2 v0.9.11
+   Compiling regex-syntax v0.8.11
+   Compiling peg-runtime v0.8.6
+   Compiling once_cell v1.21.4
+   Compiling serde_json v1.0.150
+   Compiling rustc-hash v2.1.3
+   Compiling serde v1.0.228
+   Compiling fastrand v2.4.1
+   Compiling tempfile v3.27.0
+   Compiling sparq-core v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-core)
+   Compiling peg-macros v0.8.6
+   Compiling aho-corasick v1.1.4
+   Compiling serde_derive v1.0.228
+   Compiling cpufeatures v0.3.0
+   Compiling wait-timeout v0.2.1
+   Compiling itoa v1.0.18
+   Compiling quick-error v1.2.3
+   Compiling fnv v1.0.7
+   Compiling bit-vec v0.8.0
+   Compiling rusty-fork v0.3.1
+   Compiling bit-set v0.8.0
+   Compiling peg v0.8.6
+   Compiling regex-automata v0.4.14
+   Compiling rand_xorshift v0.4.0
+   Compiling smallvec v1.15.2
+   Compiling unarray v0.1.4
+   Compiling proptest v1.11.0
+   Compiling sparq-substrate v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-substrate)
+   Compiling regex v1.12.4
+   Compiling sparq-introspect v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-introspect)
+   Compiling spargebra v0.4.6 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/vendor/spargebra)
+   Compiling sha2 v0.11.0
+   Compiling sha1 v0.11.0
+   Compiling md-5 v0.11.0
+   Compiling uuid v1.23.4
+   Compiling ryu v1.0.23
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/sparq_engine-a23c250f81b1b746)
+
+running 1 test
+test exec::capped_rhs_tests::capped_rhs_three_block_miss ... ASK and LIMIT miss: entries/blocks/RHS scans/bind calls = [1, 3, 3, 0], [1, 3, 3, 0]
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 318 filtered out; finished in 1.09s
+

@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-10T00:51:28.433721+00:00",
+  "main": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "registry_actions_enabled": false,
+  "registry_sha_pinning_required": false,
+  "active_issue": 3105,
+  "issue_state": "OPEN",
+  "pr6095": {
+    "state": "OPEN",
+    "head": "86b8dfa232ad7d315dd56df28759ac5fca7b365c",
+    "labels": [
+      "review:changes",
+      "area:ci",
+      "trust-surface"
+    ],
+    "merge_queue_entry": null
+  },
+  "actions": {
+    "queued": 1,
+    "in_progress": 1,
+    "evidence": "actions-0050.json",
+    "mutations": 0
+  },
+  "heartbeat": {
+    "id": "monitor-sparq-pr-throughput",
+    "active": true,
+    "interval_minutes": 10
+  },
+  "free_bytes": 6779691008,
+  "full_fleet_reserve_proven": false,
+  "release_authorized": false
+}

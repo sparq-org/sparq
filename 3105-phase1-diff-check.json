@@ -1,0 +1,8 @@
+{
+  "argv": [
+    "git",
+    "diff",
+    "--check"
+  ],
+  "exit": 0
+}

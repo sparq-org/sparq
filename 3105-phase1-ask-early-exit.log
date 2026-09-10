@@ -1,0 +1,30 @@
+   Compiling sparq-engine v0.1.1 (/private/tmp/sparq-pr6049/.throughput-monitor/worktrees/issue3105/crates/sparq-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.80s
+     Running tests/ask_early_exit.rs (/private/tmp/sparq-pr6049/.throughput-monitor/direct-5983/implementation/target/debug/deps/ask_early_exit-8d23c424a01cff6f)
+
+running 22 tests
+test ask_aggregation_and_having ... ok
+test ask_bind_over_capped_inner ... ok
+test ask_distinct_under_offset_is_not_stripped ... ok
+test ask_fail_closed_shapes_match_oracle ... ok
+test ask_filter_eliminates_everything ... ok
+test ask_graph_pattern_matches_oracle ... ok
+test ask_join_early_exit_fires_under_budget ... ok
+test ask_join_with_union_child ... ok
+test ask_late_filter_never_fires_on_partial_solutions ... ok
+test ask_optional_caps_expensive_left ... ok
+test ask_optional_true_and_false ... ok
+test ask_order_by_is_emptiness_neutral ... ok
+test ask_order_by_limit_offset_subselect ... ok
+test ask_q12a_shape_matches_select_oracle ... ok
+test ask_through_joins_true_and_false ... ok
+test ask_union_branch_short_circuit ... ok
+test ask_union_skips_expensive_right_branch ... ok
+test limit_through_join_returns_a_subset_of_the_full_result ... ok
+test limit_with_late_filter_returns_only_filtered_rows ... ok
+test limit_zero_through_capped_shapes ... ok
+test q12a_shape_timing_probe ... ignored, timing probe, not an assertion (run manually with --release --nocapture)
+test union_early_exit_keeps_right_branch_header ... ok
+
+test result: ok. 21 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.83s
+

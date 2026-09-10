@@ -349,6 +349,12 @@ for evidence_name in ['completed-pr-revalidation-0013.json', 'remove-completed-w
 for evidence_name in ['opus-candidate-review.json', 'opus-candidate-review.stderr.log', 'opus-candidate-result.json', 'opus-candidate-completion.json', 'perf3105-readiness.json', 'perf3105-admission.json', 'perf3105-admission-page2.json', 'completed-topk-cache-reclamation.json']:
     FILES['6475-source-admission-' + evidence_name] = ROOT / 'direct-6475/source-admission' / evidence_name
 
+# Issue3105 frozen first phase and completed root receipts only; exclude live review/performance.
+for evidence_name in ['ask-early-exit.json', 'ask-early-exit.log', 'author-preflight.json', 'author-preflight.log', 'base-exec.rs', 'baseline-instrumented-exec.rs', 'baseline.json', 'baseline.log', 'binary/ask-early-exit', 'binary/baseline', 'binary/candidate-unit', 'binary/ignore-budget', 'binary/ignore-requested-sort', 'binary/invalidate-per-block', 'binary/unit-no-default', 'candidate-exec.rs', 'candidate-unit.json', 'candidate-unit.log', 'candidate.diff', 'clippy-lib.json', 'clippy-lib.log', 'commit.txt', 'context-capped-caller.rs', 'context-capped-driver-and-cache.rs', 'context-cross-kernel.rs', 'context-index.json', 'context-planner-state.rs', 'context-scan-and-borrowed-kernels.rs', 'context-tests.rs', 'controls.json', 'diff-check.json', 'final-candidate-exec.rs', 'final-unit-corrected.json', 'final-unit-corrected.log', 'final-unit.json', 'final-unit.log', 'finish.json', 'full.diff', 'ignore-budget.diff', 'ignore-budget.json', 'ignore-budget.log', 'ignore-requested-sort.diff', 'ignore-requested-sort.json', 'ignore-requested-sort.log', 'initial-budget-test-exec.rs', 'invalidate-per-block.diff', 'invalidate-per-block.json', 'invalidate-per-block.log', 'protocol.json', 'report.json', 'review-packet.md', 'run-command.py', 'run-controls.py', 'source-binary-provenance.json', 'start.json', 'summary.json', 'toolchain.txt', 'unit-no-default.json', 'unit-no-default.log', 'manifest.json']:
+    FILES["3105-phase1-" + evidence_name.replace("/", "--")] = ROOT / "direct-3105" / evidence_name
+for evidence_name in ['root-phase1-verification.json', 'opus-input.md', 'opus-input-audit.json', 'actions-0050.json', 'health-summary.json']:
+    FILES["3105-admission-" + evidence_name] = ROOT / "direct-3105/admission" / evidence_name
+
 def git(*args, data=None):
     return subprocess.run(['git', '--git-dir=' + GIT_DIR, *args], input=data,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout

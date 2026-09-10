@@ -1,0 +1,8 @@
+{
+  "utc": "2026-09-10T00:31:29.506534+00:00",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "limit_minutes": 20,
+  "disk_floor_bytes": 6442450944,
+  "build_jobs": 2,
+  "incremental": false
+}

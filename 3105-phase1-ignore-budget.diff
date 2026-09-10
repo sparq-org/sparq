@@ -1,0 +1,11 @@
+--- candidate/exec.rs
++++ ignore-budget/exec.rs
+@@ -4197,7 +4197,7 @@
+     // filters are immutable here; each slot also keys the requested scan order.
+     // Armed budgets retain the old per-step lifetime and polling: their working-set
+     // estimate does not account for multiple retained RHS relations.
+-    let reuse_rhs = !budget::active();
++    let reuse_rhs = true;
+     let mut rhs_cache: Vec<Option<(Option<usize>, Bindings)>> =
+         std::iter::repeat_with(|| None).take(if reuse_rhs { prepared.len() } else { 0 }).collect();
+     let mut acc: Option<Bindings> = None;

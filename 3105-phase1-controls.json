@@ -1,0 +1,17 @@
+[
+  {
+    "name": "invalidate-per-block",
+    "killed_by_executed_assertion": true,
+    "exit": 101
+  },
+  {
+    "name": "ignore-requested-sort",
+    "killed_by_executed_assertion": true,
+    "exit": 101
+  },
+  {
+    "name": "ignore-budget",
+    "killed_by_executed_assertion": true,
+    "exit": 101
+  }
+]

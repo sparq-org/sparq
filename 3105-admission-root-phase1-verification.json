@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-10T00:49:32.507815+00:00",
+  "manifest_files": 59,
+  "manifest_sha256": "188a6cffeb664756aec40923d18da3ea905ca217b76f654fcb42e7a863676f48",
+  "head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "source_byte_verified": true,
+  "controls": "3 compile and execute; each runtime assertion fails as designed",
+  "test_correction": "Initial all-miss max-rows assertion was invalid; corrected nonempty intermediate now errors; failed source/log preserved",
+  "scope": "Performance admission and full required CI still pending"
+}

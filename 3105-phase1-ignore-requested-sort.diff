@@ -1,0 +1,11 @@
+--- candidate/exec.rs
++++ ignore-requested-sort/exec.rs
+@@ -4323,7 +4323,7 @@
+ ) -> &Bindings {
+     if slot
+         .as_ref()
+-        .is_none_or(|(cached_sort, _)| *cached_sort != sort)
++        .is_none_or(|(cached_sort, _)| false)
+     {
+         *slot = Some((sort, scan()));
+     }

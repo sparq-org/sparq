@@ -1,0 +1,65 @@
+{
+  "scope": "Existing issue3105: phase1 actual-main work witness and one lazy RHS-scan reuse candidate",
+  "base": "e53464c73f31f7aca800f3867ac054c36408e346",
+  "candidate": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "author": "GPT-6 Astra, xhigh",
+  "fixture": {
+    "seed_rows": 70000,
+    "rhs_rows": 70000,
+    "pattern": "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)",
+    "data": "For each i in 0..70000: :s{i} :p i ; :q (i+1). Both patterns share s and o, so bind admission is impossible. Arithmetic FILTER remains residual.",
+    "entrypoints": [
+      "public ask",
+      "public query with LIMIT 1"
+    ],
+    "instrumentation": "cfg(test) thread-local counters at actual capped entry, block iteration, scan invocation, bind call; no public test API",
+    "baseline_counts": [
+      1,
+      3,
+      3,
+      0
+    ],
+    "candidate_counts": [
+      1,
+      3,
+      1,
+      0
+    ],
+    "generous_armed_budget_counts": [
+      1,
+      3,
+      3,
+      0
+    ]
+  },
+  "controls": [
+    {
+      "name": "invalidate-per-block",
+      "mutation": "Set each cache slot to None at start of every seed block",
+      "killed_by": "headline actual-query assertion: RHS scans 3 versus expected 1"
+    },
+    {
+      "name": "ignore-requested-sort",
+      "mutation": "Ignore cached_sort != requested_sort",
+      "killed_by": "requested-order-change assertion returns old duplicate rows instead of the new row; compilation succeeds despite an unused-variable warning"
+    },
+    {
+      "name": "ignore-budget",
+      "mutation": "Force reuse_rhs=true",
+      "killed_by": "armed-budget actual-query work assertion: RHS scans 1 versus expected 3"
+    }
+  ],
+  "constraints": {
+    "offline_locked": true,
+    "build_jobs": 2,
+    "incremental": false,
+    "rayon_threads": 1,
+    "per_command_cap_seconds": 600,
+    "stop_free_bytes": 6509559808,
+    "build_cache": "direct-5983/implementation/target (regenerable cache only)",
+    "timing_benchmarks": 0,
+    "new_installs": 0,
+    "remote_calls": 0
+  },
+  "initial_test_correction": "An extra row-budget assertion initially used the all-miss query; it did not trip because no nonempty joined intermediate was produced. Replaced that assertion with a nonempty joined intermediate and checked the max-rows error string. No production correction was made in response. The failed test source and log remain preserved."
+}

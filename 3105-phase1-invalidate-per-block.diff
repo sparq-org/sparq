@@ -1,0 +1,10 @@
+--- candidate/exec.rs
++++ invalidate-per-block/exec.rs
+@@ -4203,6 +4203,7 @@
+     let mut acc: Option<Bindings> = None;
+     let mut start = 0usize;
+     while start < seed_all.rows.len() {
++        for slot in &mut rhs_cache { *slot = None; }
+         #[cfg(test)]
+         capped_rhs_tests::observe(1);
+         let end = if start == 0 {

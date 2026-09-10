@@ -1,0 +1,30 @@
+{
+  "default_focused_tests": {
+    "passed": 3,
+    "failed": 0
+  },
+  "no_default_engine_features_focused_tests": {
+    "passed": 3,
+    "failed": 0,
+    "note": "Engine features disabled; dev dependency still enables sparq-core parallel/mmap/dict-spill. This is not a wasm or all-features validation."
+  },
+  "existing_ask_early_exit": {
+    "passed": 21,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_reason": "Existing q12a timing probe, explicitly ignored upstream; no timing result claimed."
+  },
+  "negative_controls": {
+    "calibrated": 3,
+    "killed": 3,
+    "survived": 0,
+    "all_compile_and_execute": true
+  },
+  "clippy": "cargo clippy --locked --offline -p sparq-engine --lib -- -D warnings: PASS",
+  "preflight": "Only failure: system Bash3 does not provide mapfile for scripts/check-privacy-claims.sh; G1/G2/G6/guard-untested otherwise passed. No gate changed/bypassed.",
+  "git_diff_check": "PASS",
+  "clean": true,
+  "exact_head": "6e86f1d0ba447aa78a50800337a7a379702fa999",
+  "counts_are_not_latency_measurements": true,
+  "minimum_observed_free_bytes": 6933098496
+}
